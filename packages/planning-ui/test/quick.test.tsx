@@ -96,24 +96,12 @@ it("leaves out of Week's line what is in a shown day, a next step above it, or s
       completedTaskIds: ["done-there"],
     },
   ];
-  const plan = (availableLabels: { id: string; label: string }[]) => ({
-    tasks,
-    timezone: "UTC",
-    availableLabels,
-  });
-  expect(ids(quickTray(plan([]), TODAY, days, [tasks[2]!]))).toEqual([
+  const plan = { tasks, timezone: "UTC" };
+  // A parked task is in Review's Parked lane instead.
+  expect(ids(quickTray(plan, TODAY, days, [tasks[2]!]))).toEqual([
     "done-there",
-    "parked",
     "free",
   ]);
-  // A parked task is in Review's Parked lane only while the account has the label.
-  expect(
-    ids(
-      quickTray(plan([{ id: "parked", label: "parked" }]), TODAY, days, [
-        tasks[2]!,
-      ]),
-    ),
-  ).toEqual(["done-there", "free"]);
 });
 
 it("shows Week's quick tasks as a quiet line of one-line cards under Next steps, six before more", async () => {

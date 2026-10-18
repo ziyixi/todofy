@@ -12,7 +12,6 @@ import { isParked, PARKED_LABEL } from "./planning-outcomes";
 import { LeadSelect } from "./TaskEditor";
 import { weekLabel } from "./PlanningCalendar";
 import {
-  inboxToClarify,
   isLastDay,
   oldestUntouched,
   SOMEDAY_LABELS,
@@ -53,8 +52,8 @@ interface Props {
   /** Week at this commitment, the first with nothing planned, with its Add steps input open. */
   onPlanSteps: (commitmentId: string) => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
-  /** Opens Plus's Mailbox, which lists the mail of line 1. */
-  onOpenMailbox?: () => void;
+  /** Opens the host's Mail page, which lists the mail of line 1. */
+  onOpenMail?: () => void;
   onClose: () => void;
 }
 
@@ -78,7 +77,7 @@ export function WeeklyReview({
   onShowWaiting,
   onPlanSteps,
   completeReview,
-  onOpenMailbox,
+  onOpenMail,
   onClose,
 }: Props) {
   const text = words(language);
@@ -96,11 +95,8 @@ export function WeeklyReview({
   const waits = (task: PlanningTask) =>
     busy || (pending?.has(pendingTask(task.id)) ?? false);
 
-  const inboxCount = plan.nativePlanning
-    ? plan.mailboxPendingCount
-    : inboxToClarify(plan).length;
   // As Review's Waiting lane: a task set aside is in Parked.
-  const waiting = waitingTasks(plan).filter((task) => !isParked(task, plan));
+  const waiting = waitingTasks(plan).filter((task) => !isParked(task));
   const oldestWait = waiting[0] && untouchedDays(waiting[0]);
   const noLead = withoutLead(plan.tasks);
   const unscheduled = unscheduledCommitments(plan, days);
@@ -221,18 +217,14 @@ export function WeeklyReview({
         {line(
           1,
           zh ? "邮件待理清" : "Mail to clarify",
-          plan.nativePlanning || plan.inboxProjectId ? (
-            <>
-              <span className="weekly-review-count">{inboxCount ?? "—"}</span>
-              <button className="weekly-review-jump" onClick={onOpenMailbox}>
-                {zh ? "打开" : "Open"}
-              </button>
-            </>
-          ) : (
-            <span className="weekly-review-note">
-              {zh ? "Todofy 没有设置邮件项目" : "Todofy has no mail project"}
+          <>
+            <span className="weekly-review-count">
+              {plan.mailboxPendingCount ?? "—"}
             </span>
-          ),
+            <button className="weekly-review-jump" onClick={onOpenMail}>
+              {zh ? "打开" : "Open"}
+            </button>
+          </>,
         )}
         {line(
           2,

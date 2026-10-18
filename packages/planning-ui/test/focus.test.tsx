@@ -61,14 +61,20 @@ it("shows cleaned parent context and local records with execution controls only"
       name: /Choose tasks|Drag step|Remove from day|Move up|Move down/,
     }),
   ).toBeNull();
-  expect(screen.queryByRole("combobox")).toBeNull();
+  // The only choice is the timer's length.
+  expect(
+    screen
+      .getAllByRole("combobox")
+      .map((select) => select.getAttribute("aria-label")),
+  ).toEqual(["Timer duration"]);
   fireEvent.click(
     screen.getByRole("button", { name: "Start: Synthetic leaf" }),
   );
   expect(
     screen.getByRole("button", { name: "Start: Synthetic leaf" }).textContent,
   ).toBe("Start");
-  expect(onTimer).toHaveBeenCalledWith("start", "copy");
+  // A 25-minute pomodoro unless another length is chosen.
+  expect(onTimer).toHaveBeenCalledWith("start", "copy", 25 * 60);
   expect(complete).not.toHaveBeenCalled();
 });
 

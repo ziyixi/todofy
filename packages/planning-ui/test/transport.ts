@@ -1,5 +1,5 @@
 import type { HttpSend } from "@ziyixi/proto/http-client";
-import { createPlanningActions, type KnownTaskStore } from "../src/api";
+import { createPlanningActions } from "../src/api";
 
 /**
  * The planning actions over one fake fetch, at the paths Tasks' same-origin proxy uses: Plus at
@@ -7,8 +7,6 @@ import { createPlanningActions, type KnownTaskStore } from "../src/api";
  */
 export function fakeActions(
   fetcher: (input: URL, init: RequestInit) => Promise<Response>,
-  provider: "todoist" | "tasks" = "tasks",
-  knownStore?: KnownTaskStore,
 ) {
   const transport =
     (prefix: string): HttpSend =>
@@ -17,9 +15,8 @@ export function fakeActions(
         method: call.httpMethod,
         body: call.body,
       });
-  return createPlanningActions(
-    { plus: transport(""), flowday: transport("/api/plus/flowday") },
-    knownStore,
-    provider,
-  );
+  return createPlanningActions({
+    plus: transport(""),
+    flowday: transport("/api/plus/flowday"),
+  });
 }

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   displayedTitle,
   effectiveArea,
-  planConfig,
   startDate,
   topLevelChoices,
 } from "../src/domain";
@@ -91,33 +90,4 @@ it("keeps a committed child visible below a weekly parent", () => {
     ["parent", "weekly"],
     ["child", "committed"],
   ]);
-});
-it("keeps only replaced filter and planning label IDs and the mail project for the native sidebar cache, a retired bets binding's too", () => {
-  expect(
-    planConfig({
-      configured: true,
-      hiddenFilterIds: ["f1"],
-      managedLabels: [
-        { role: "committed", id: "l1", label: "committed" },
-        { role: "office", id: "l2", label: "office" },
-        { role: "home", id: "l3", label: "home" },
-        { role: "bets", id: "l4", label: "bets" },
-      ],
-      inboxProjectId: "p1",
-    }),
-  ).toEqual({
-    configured: true,
-    hiddenFilterIds: ["f1"],
-    labelIds: ["l1", "l4"],
-    hiddenProjectIds: ["p1"],
-  });
-  // Without a mail project there is no project to hide.
-  expect(
-    planConfig({
-      configured: true,
-      hiddenFilterIds: [],
-      managedLabels: [],
-      inboxProjectId: "",
-    }).hiddenProjectIds,
-  ).toEqual([]);
 });

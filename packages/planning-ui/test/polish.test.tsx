@@ -29,7 +29,6 @@ async function planProps(language: Language): Promise<PlanViewProps> {
     run: vi.fn(),
     editTask: vi.fn(),
     onWeekChange: vi.fn(),
-    onLabels: vi.fn(),
     completeReview: vi.fn(),
   };
 }
@@ -132,7 +131,7 @@ it("names a paused timer as a state, colours checkboxes by priority and keeps Fl
   );
 });
 
-it("gives the labels dialog one name and names Start now and Waiting in both languages, in words only", async () => {
+it("names Start now and Waiting in both languages, in words only", async () => {
   // With one task in its start window.
   const props = async (language: Language) => {
     const result = await planProps(language);
@@ -148,7 +147,6 @@ it("gives the labels dialog one name and names Start now and Waiting in both lan
     return result;
   };
   const { rerender } = render(<PlanView {...await props("en")} />);
-  expect(screen.getByRole("button", { name: "Planning labels" })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Start now" })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Waiting" })).toBeTruthy();
   // No new icons: a card that should start says so in its status, without the old calendar clock.
@@ -156,7 +154,6 @@ it("gives the labels dialog one name and names Start now and Waiting in both lan
     document.querySelector(".review-board svg.lucide-calendar-clock"),
   ).toBe(null);
   rerender(<PlanView {...await props("zh")} />);
-  expect(screen.getByRole("button", { name: "计划标签" })).toBeTruthy();
   expect(screen.getByRole("region", { name: "该开始" })).toBeTruthy();
   expect(screen.getByRole("region", { name: "等待中" })).toBeTruthy();
   expect(

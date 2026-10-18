@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { planningTask, publicError } from "../src/api";
+import { planningTask } from "../src/api";
 import { fakeActions } from "./transport";
 import type { PlanningTask as ApiPlanningTask } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 
@@ -131,7 +131,7 @@ it("says why Todofy did not add a dependency, claiming no cause the refusal does
     const error = await api
       .setDependency("a", "b", true)
       .catch((failure: unknown) => failure);
-    // The background passes on publicError's text, which keeps this one.
-    expect(publicError(error)).toBe(message);
+    // Plan shows a failed write's own message.
+    expect((error as Error).message).toBe(message);
   }
 });

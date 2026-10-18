@@ -14,7 +14,7 @@ import { FocusView } from "../src/FocusView";
 import { PlanView, type PlanViewProps } from "../src/PlanView";
 import { TaskEditor } from "../src/TaskEditor";
 import { addDays } from "../src/domain";
-import { TEST_DESTINATION, createPrototype } from "./fixture";
+import { createPrototype } from "./fixture";
 import type { PlanningTask, PlusActions, PlusData, View } from "../src/model";
 
 // The fixture's today is Tuesday 2026-10-13.
@@ -45,10 +45,12 @@ function deadlineTasks(template: PlanningTask): PlanningTask[] {
     parentId: "",
     stage: "none" as const,
     labels: [],
+    planningFlags: [],
     mustStart: false,
     missingLead: false,
     leadDays: 0,
     ...value,
+    explicitStage: value.stage ?? "none",
   });
   return [
     task("draft", "Quarterly report draft", {
@@ -63,7 +65,6 @@ function deadlineTasks(template: PlanningTask): PlanningTask[] {
     }),
     task("visa", "Prepare the visa documents", {
       stage: "committed",
-      labels: ["committed"],
       deadline: on(5),
       leadDays: 7,
       mustStart: true,
@@ -71,7 +72,7 @@ function deadlineTasks(template: PlanningTask): PlanningTask[] {
     task("move", "Move house", {
       deadline: on(12),
       leadDays: 14,
-      labels: ["active"],
+      planningFlags: ["active"],
     }),
     task("insurance", "Renew the car insurance", {
       deadline: "2026-11-30",
@@ -125,6 +126,7 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
   expect(laneNames()).toEqual([
     "Start now",
     "Waiting",
+    "Parked",
     "Quarter",
     "Month",
     "Week",
@@ -132,7 +134,7 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
   ]);
   expect(
     document.querySelector(".review-lanes")!.getAttribute("data-lanes"),
-  ).toBe("6");
+  ).toBe("7");
   // Start now: title, area and one status, earliest deadline first; screen readers also hear
   // the date the status does not say.
   expect(cards("Start now")).toEqual([
@@ -214,16 +216,20 @@ it("hides Start now and Waiting while they have no cards", async () => {
     );
   });
   render(<PlanView {...props} />);
-  expect(laneNames()).toEqual(["Quarter", "Month", "Week", "Committed"]);
+  expect(laneNames()).toEqual([
+    "Parked",
+    "Quarter",
+    "Month",
+    "Week",
+    "Committed",
+  ]);
   expect(
     document.querySelector(".review-lanes")!.getAttribute("data-lanes"),
-  ).toBe("4");
+  ).toBe("5");
 });
 
-it("puts Parked between Waiting and the stages while the account has the label, and shows it empty too", async () => {
-  const parkable = (data: PlusData) =>
-    data.plan.availableLabels.push({ id: "synthetic-parked", label: "parked" });
-  const { props } = await setup(parkable);
+it("puts Parked between Waiting and the stages, and shows it empty too", async () => {
+  const { props } = await setup();
   render(<PlanView {...props} />);
   expect(laneNames()).toEqual([
     "Start now",
@@ -237,10 +243,6 @@ it("puts Parked between Waiting and the stages while the account has the label, 
   expect(
     document.querySelector(".review-lanes")!.getAttribute("data-lanes"),
   ).toBe("7");
-  // It writes a label, so its header shows it, as a stage lane's does.
-  expect(
-    lane("Parked").querySelector(".review-lane-header small")!.textContent,
-  ).toBe("@parked");
   // A parked card says how long it has been untouched in place of its step counts.
   expect(cards("Parked")).toEqual([
     "Plan a small balcony garden, No priority, No change in 53 days",
@@ -254,7 +256,6 @@ it("puts Parked between Waiting and the stages while the account has the label, 
 
 it("shows Parked's first three cards, then a quiet line for the rest", async () => {
   const { props } = await setup((data) => {
-    data.plan.availableLabels.push({ id: "synthetic-parked", label: "parked" });
     const template = data.plan.tasks.find((task) => task.id === "garden")!;
     for (let index = 1; index <= 4; index++)
       data.plan.tasks.push({
@@ -295,13 +296,14 @@ it("keeps a staged task in its lane with one quiet status, and a date-rule candi
       id: "dated",
       title: "Book the venue",
       stage: "weekly",
-      labels: [],
+      explicitStage: "none",
+      planningFlags: [],
       deadline: on(3),
       leadDays: 7,
       mustStart: true,
     });
     const notes = data.plan.tasks.find((task) => task.id === "notes")!;
-    notes.labels = ["committed", "waiting"];
+    notes.planningFlags = ["waiting"];
     notes.updatedAt = "2026-10-06T09:00:00Z";
   });
   render(<PlanView {...props} />);
@@ -339,12 +341,12 @@ it("keeps a staged task in its lane with one quiet status, and a date-rule candi
 
 it("marks a card in progress from its Start, in one confirmed write, and moves focus to the next Start", async () => {
   const actions = createPrototype();
-  // Todofy's confirmed task: the literal label added, no longer must start.
+  // Todofy's confirmed task: in progress, no longer must start.
   const update = vi
     .spyOn(actions, "updateTask")
     .mockImplementation(async (task) => ({
       ...task,
-      labels: [...task.labels, "active"],
+      planningFlags: [...(task.planningFlags ?? []), "active"],
       mustStart: false,
     }));
   const { props } = await setup(undefined, actions);
@@ -418,17 +420,6 @@ it("marks a card in progress from its Start, in one confirmed write, and moves f
   ).toBeNull();
 });
 
-it("offers no Start while the account has no active label", async () => {
-  const { props } = await setup((data) => {
-    data.plan.availableLabels = data.plan.availableLabels.filter(
-      (label) => label.label !== "active",
-    );
-  });
-  render(<PlanView {...props} />);
-  expect(cards("Start now")).toHaveLength(2);
-  expect(document.querySelector(".review-card-action")).toBeNull();
-});
-
 it("shows Focus's quiet line only for due tasks with nothing planned, and opens Plan's Start now", async () => {
   const actions = createPrototype();
   const { data } = await setup(undefined, actions);
@@ -476,7 +467,9 @@ it("leaves a waiting task past its deadline out of Focus's line, as the board sh
     data.plan.tasks = data.plan.tasks.filter(
       (task) => !["claim", "visa"].includes(task.id),
     );
-    data.plan.tasks.find((task) => task.id === "draft")!.labels = ["waiting"];
+    data.plan.tasks.find((task) => task.id === "draft")!.planningFlags = [
+      "waiting",
+    ];
   });
   const focus = render(
     <FocusView
@@ -515,7 +508,6 @@ it("takes Focus's line to Plan's Review with Start now focused", async () => {
     const [view, setView] = useState<View>("focus");
     return (
       <App
-        destination={TEST_DESTINATION}
         actions={actions}
         view={view}
         language="en"
@@ -561,10 +553,9 @@ it("says where a deadline stands in task details and marks it in progress there"
     await operation();
     return true;
   });
-  const editor = (task: PlanningTask, canMarkActive = true) => (
+  const editor = (task: PlanningTask) => (
     <TaskEditor
-      destination={TEST_DESTINATION}
-      key={task.labels.join()}
+      key={task.planningFlags?.join()}
       task={task}
       tasks={data.plan.tasks}
       dependencies={data.plan.dependencies}
@@ -574,7 +565,6 @@ it("says where a deadline stands in task details and marks it in progress there"
       actions={actions}
       todayTaskIds={[]}
       today={TODAY}
-      canMarkActive={canMarkActive}
       addFocus={vi.fn()}
       onOpenTask={vi.fn()}
     />
@@ -602,15 +592,13 @@ it("says where a deadline stands in task details and marks it in progress there"
       ).textContent,
     ).toBe("Marked in progress: Prepare the visa documents"),
   );
-  rerender(editor({ ...visa, labels: ["active"] }));
+  rerender(editor({ ...visa, planningFlags: ["active"] }));
   expect(screen.getByText("In progress · 5 days left")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Not in progress" }));
   await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
   expect(update.mock.calls[1]![1]).toEqual({ active: false });
-  // No button without the account's label or without a deadline.
-  rerender(editor(visa, false));
-  expect(screen.queryByRole("button", { name: /in progress/iu })).toBeNull();
-  rerender(editor({ ...visa, deadline: "", labels: [] }));
+  // No button without a deadline.
+  rerender(editor({ ...visa, deadline: "", planningFlags: [] }));
   expect(screen.queryByRole("button", { name: /in progress/iu })).toBeNull();
   await act(async () => {});
 });
@@ -629,7 +617,6 @@ it("takes a parked task out of Parked when its details save a stage or mark it i
   });
   const editor = (task: PlanningTask) => (
     <TaskEditor
-      destination={TEST_DESTINATION}
       key={task.id}
       task={task}
       tasks={data.plan.tasks}
@@ -640,7 +627,6 @@ it("takes a parked task out of Parked when its details save a stage or mark it i
       actions={actions}
       todayTaskIds={[]}
       today={TODAY}
-      canMarkActive
       addFocus={vi.fn()}
       onOpenTask={vi.fn()}
     />
@@ -743,6 +729,7 @@ async function refreshedEditor() {
   const task: PlanningTask = {
     ...data.plan.tasks[0]!,
     stage: "monthly",
+    explicitStage: "monthly",
     area: "work",
     deadline: on(10),
     leadDays: 7,
@@ -760,7 +747,6 @@ async function refreshedEditor() {
   };
   const editor = (value: PlanningTask) => (
     <TaskEditor
-      destination={TEST_DESTINATION}
       task={value}
       tasks={data.plan.tasks}
       dependencies={[]}
@@ -770,7 +756,6 @@ async function refreshedEditor() {
       actions={actions}
       todayTaskIds={[]}
       today={TODAY}
-      canMarkActive={true}
       addFocus={vi.fn()}
       onOpenTask={vi.fn()}
     />
@@ -787,6 +772,7 @@ it("refreshes untouched editor fields without creating edits or dropping new-ste
   const latest = {
     ...task,
     stage: "committed" as const,
+    explicitStage: "committed" as const,
     area: "personal" as const,
     deadline: on(20),
     leadDays: 3,
@@ -824,6 +810,7 @@ it("keeps local edits on refresh and requires a choice before saving over change
   const latest = {
     ...task,
     stage: "committed" as const,
+    explicitStage: "committed" as const,
     area: "personal" as const,
     deadline: on(12),
     leadDays: 3,
@@ -877,8 +864,18 @@ it("saves only edited planning fields after unrelated refreshes and forgets an e
     expect(update).toHaveBeenCalledExactlyOnceWith(latest, { stage: "weekly" }),
   );
   // A successful write's re-read shows the chosen value; a later external change should follow.
-  refresh({ ...latest, stage: "weekly", etag: "saved" });
-  refresh({ ...latest, stage: "committed", etag: "later-change" });
+  refresh({
+    ...latest,
+    stage: "weekly",
+    explicitStage: "weekly",
+    etag: "saved",
+  });
+  refresh({
+    ...latest,
+    stage: "committed",
+    explicitStage: "committed",
+    etag: "later-change",
+  });
   expect((screen.getByLabelText("Planning") as HTMLSelectElement).value).toBe(
     "committed",
   );

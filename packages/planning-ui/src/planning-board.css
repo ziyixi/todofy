@@ -42,20 +42,6 @@
 .planning-view > .planning-area-filter {
   margin-bottom: 14px;
 }
-.review-missing-label {
-  font-size: 12px;
-  color: var(--plus-muted);
-  padding: 2px 4px 10px;
-}
-.review-missing-label p {
-  margin: 0 0 7px;
-}
-.plus-root .review-missing-label button {
-  color: var(--plus-accent);
-  padding: 0;
-  text-align: left;
-  font-size: 12px;
-}
 /* The one colour: days past a deadline. */
 .planning-danger-text {
   color: var(--plus-danger);

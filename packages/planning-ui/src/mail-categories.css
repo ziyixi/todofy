@@ -1,0 +1,27 @@
+/* Mail categories: one row a category. */
+.plus-mail-category-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plus-mail-category-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px 28px;
+  gap: 10px;
+  align-items: center;
+}
+.plus-mail-category-list li > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.plus-mail-category-list select {
+  width: 100%;
+}
+.plus-root .plus-mail-category-add {
+  justify-self: start;
+}
+.plus-board-labels > p.plus-muted {
+  margin: 10px 0 0;
+}

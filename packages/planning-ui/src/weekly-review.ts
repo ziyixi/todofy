@@ -15,7 +15,6 @@ export const SOMEDAY_LABELS = [PARKED_LABEL, "onhold"];
 export const ACTIVE_LABEL = "active";
 /** The owner's quick-task label, as the native Quick / Ops filter names it. */
 export const QUICK_LABEL = "quick";
-const CLARIFIED_LABELS = [...WAITING_LABELS, ...SOMEDAY_LABELS, QUICK_LABEL];
 const DAY_MS = 86_400_000;
 
 /** A task explicitly marked waiting or blocked. */
@@ -61,22 +60,6 @@ export function oldestUntouched(
 ): PlanningTask[] {
   return byUntouched(
     tasks.filter((task) => labels.some((flag) => hasPlanningFlag(task, flag))),
-  );
-}
-
-/**
- * Mail tasks still to clarify: top-level tasks in Todofy's mail project with no planning stage,
- * waiting, someday or quick mark. The review task itself is not one of them.
- */
-export function inboxToClarify(plan: PlanState): PlanningTask[] {
-  if (!plan.inboxProjectId) return [];
-  return plan.tasks.filter(
-    (task) =>
-      task.projectId === plan.inboxProjectId &&
-      !task.parentId &&
-      task.stage === "none" &&
-      task.id !== plan.reviewTaskId &&
-      !CLARIFIED_LABELS.some((flag) => hasPlanningFlag(task, flag)),
   );
 }
 
@@ -148,10 +131,7 @@ export function quickTasks(
  * next steps shown above, or set aside (Review's Parked lane has it).
  */
 export function quickTray(
-  plan: Pick<
-    PlanState,
-    "tasks" | "timezone" | "availableLabels" | "nativePlanning"
-  >,
+  plan: Pick<PlanState, "tasks" | "timezone">,
   today: string,
   days: readonly FlowDayPlan[],
   steps: readonly PlanningTask[],
@@ -167,7 +147,7 @@ export function quickTray(
       isSchedulable(task) &&
       !queued.has(task.id) &&
       !shown.has(task.id) &&
-      !isParked(task, plan),
+      !isParked(task),
   );
 }
 

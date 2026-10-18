@@ -53,22 +53,9 @@ export function stepSiblings(
 /** The literal set-aside label, as the native @parked filter names it; never created here. */
 export const PARKED_LABEL = "parked";
 
-/** Native planning always supports Parked; legacy accounts need their existing label. */
-export function canPark(
-  plan: Pick<PlanState, "availableLabels" | "nativePlanning">,
-): boolean {
-  return (
-    Boolean(plan.nativePlanning) ||
-    plan.availableLabels.some((label) => label.label === PARKED_LABEL)
-  );
-}
-
 /** Set aside: in Review's Parked lane, and on no list of commitments or steps. */
-export function isParked(
-  task: PlanningTask,
-  plan: Pick<PlanState, "availableLabels" | "nativePlanning">,
-): boolean {
-  return hasPlanningFlag(task, PARKED_LABEL) && canPark(plan);
+export function isParked(task: PlanningTask): boolean {
+  return hasPlanningFlag(task, PARKED_LABEL);
 }
 
 /** Todofy keeps at most this many tasks of one lane's order (core/plan.py MAX_LANE_TASKS). */
@@ -146,19 +133,12 @@ export function planningOutcomes(
  * Week's overview, the toolbar's counts and the weekly review all use this one list.
  */
 export function committedOutcomes(
-  plan: Pick<
-    PlanState,
-    | "tasks"
-    | "managedLabels"
-    | "availableLabels"
-    | "laneOrders"
-    | "nativePlanning"
-  >,
+  plan: Pick<PlanState, "tasks" | "managedLabels" | "laneOrders">,
 ): PlanningTask[] {
   return inLaneOrder(
     "committed",
     planningOutcomes(plan.tasks, plan.managedLabels).filter(
-      (task) => task.stage === "committed" && !isParked(task, plan),
+      (task) => task.stage === "committed" && !isParked(task),
     ),
     plan.laneOrders.committed,
   );

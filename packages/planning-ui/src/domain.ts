@@ -1,10 +1,4 @@
-import type {
-  Area,
-  FocusState,
-  PlanConfig,
-  PlanMetadata,
-  PlanningTask,
-} from "./model";
+import type { Area, FocusState, PlanningTask } from "./model";
 
 /** Native planning flags never derive from ordinary tags. Legacy hosts still use their labels. */
 export function hasPlanningFlag(task: PlanningTask, flag: string): boolean {
@@ -163,24 +157,6 @@ export function elapsed(focus: FocusState, now = Date.now()): number {
 export function duration(seconds: number): string {
   const value = Math.max(0, Math.floor(seconds));
   return `${Math.floor(value / 3600) ? `${Math.floor(value / 3600)}:` : ""}${String(Math.floor(value / 60) % 60).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
-}
-
-export function planConfig(
-  plan: Pick<
-    PlanMetadata,
-    "configured" | "hiddenFilterIds" | "managedLabels" | "inboxProjectId"
-  >,
-): PlanConfig {
-  return {
-    configured: plan.configured,
-    hiddenFilterIds: plan.hiddenFilterIds,
-    // Work and personal context labels stay visible in native Todoist.
-    labelIds: plan.managedLabels
-      .filter((label) => !["office", "home"].includes(label.role))
-      .map((label) => label.id),
-    // The Mailbox replaces the mail project's favourite while Plus is attached.
-    hiddenProjectIds: plan.inboxProjectId ? [plan.inboxProjectId] : [],
-  };
 }
 
 /** The calendar date `days` after a YYYY-MM-DD date. */

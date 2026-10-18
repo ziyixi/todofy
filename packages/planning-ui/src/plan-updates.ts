@@ -1,6 +1,6 @@
 import { withBets } from "./bets";
 import { taskIndex } from "./domain";
-import { PARKED_LABEL, STAGE_ROLES } from "./planning-outcomes";
+import { PARKED_LABEL } from "./planning-outcomes";
 import { ACTIVE_LABEL, isLastDay } from "./weekly-review";
 import type {
   Area,
@@ -142,20 +142,9 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
         finishedPomodoro: confirmed.finishedPomodoro,
       },
     };
-  if ("deletedTaskIds" in confirmed) {
-    const deleted = new Set(confirmed.deletedTaskIds);
-    return {
-      ...data,
-      plan: {
-        ...data.plan,
-        tasks: data.plan.tasks.filter((task) => !deleted.has(task.id)),
-      },
-    };
-  }
   if ("reordered" in confirmed) return withReorder(data, confirmed);
   if ("id" in confirmed) return withTasks(data, [confirmed]);
-  if (!("managedLabels" in confirmed)) return withDependencies(data, confirmed);
-  return { ...data, plan: { ...confirmed, tasks: data.plan.tasks } };
+  return withDependencies(data, confirmed);
 }
 
 /**
@@ -180,19 +169,9 @@ export function withNextWeek(
   };
 }
 
-/** A new label mapping changes every task's derived stage and etag. */
-export function remapsTasks(confirmed: Confirmed): boolean {
-  return confirmed
-    ? !Array.isArray(confirmed) && "managedLabels" in confirmed
-    : false;
-}
-
-/**
- * Void results (completion, new steps, estimates) are shown only by a re-read, and so is the
- * effect of a new label mapping on the tasks.
- */
+/** Void results (completion, new steps, estimates) are shown only by a re-read. */
 export function rereadsAfter(confirmed: Confirmed): boolean {
-  return !confirmed || remapsTasks(confirmed);
+  return !confirmed;
 }
 
 /** A Review card whose stage write is not yet confirmed. */
@@ -205,10 +184,9 @@ export function pendingStep(date: string, taskId: string): string {
 }
 
 /**
- * The plan as a stage write will leave it, with the labels Todofy writes (core/plus.py plan_labels):
- * the stage's label in place of the other planning labels, and with `active` the in-progress label,
- * after which the task no longer needs to start. `parked` comes last, as there: true sets the task
- * aside, with no planning label and not in progress; false only takes the set-aside label off.
+ * The plan as a stage write will leave it, as Todofy saves native planning state: the saved stage,
+ * and with `active` the in-progress flag, after which the task no longer needs to start. `parked`
+ * comes last: true sets the task aside, with no stage and not in progress; false only clears it.
  */
 export function withStage(
   plan: PlanState,
@@ -217,46 +195,21 @@ export function withStage(
   active = false,
   parked?: boolean,
 ): PlanState {
-  const names = new Map(
-    plan.managedLabels.map((binding) => [binding.role, binding.label]),
-  );
-  const planning = Object.values(STAGE_ROLES).map((role) => names.get(role));
-  const added = parked
-    ? [PARKED_LABEL]
-    : [
-        stage !== "none" && names.get(STAGE_ROLES[stage]),
-        active && ACTIVE_LABEL,
-      ].filter((label): label is string => Boolean(label));
-  const removed = (label: string) =>
-    planning.includes(label) ||
-    added.includes(label) ||
-    (parked !== undefined && label === PARKED_LABEL) ||
-    (parked === true && label === ACTIVE_LABEL);
   const predicted = (task: PlanningTask): PlanningTask => {
     const nextStage = parked ? "none" : stage;
-    const status =
-      active && !parked ? { mustStart: false, missingLead: false } : {};
-    if (task.explicitStage !== undefined) {
-      const flags = new Set(task.planningFlags);
-      if (parked !== undefined) {
-        if (parked) flags.add(PARKED_LABEL);
-        else flags.delete(PARKED_LABEL);
-      }
-      if (parked) flags.delete(ACTIVE_LABEL);
-      else if (active) flags.add(ACTIVE_LABEL);
-      return {
-        ...task,
-        stage: nextStage,
-        explicitStage: nextStage,
-        planningFlags: [...flags],
-        ...status,
-      };
+    const flags = new Set(task.planningFlags);
+    if (parked !== undefined) {
+      if (parked) flags.add(PARKED_LABEL);
+      else flags.delete(PARKED_LABEL);
     }
+    if (parked) flags.delete(ACTIVE_LABEL);
+    else if (active) flags.add(ACTIVE_LABEL);
     return {
       ...task,
       stage: nextStage,
-      labels: [...task.labels.filter((label) => !removed(label)), ...added],
-      ...status,
+      explicitStage: nextStage,
+      planningFlags: [...flags],
+      ...(active && !parked ? { mustStart: false, missingLead: false } : {}),
     };
   };
   return {

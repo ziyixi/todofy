@@ -37,7 +37,6 @@ export interface PlanViewProps {
   actions: PlusActions;
   editTask: (task: PlanningTask) => void;
   onWeekChange: (weekStart: string) => void;
-  onLabels?: () => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
   /** One line per task that no longer waits because what it waited for was deleted or left the list. */
   dependencyNotices?: readonly string[];
@@ -46,8 +45,8 @@ export interface PlanViewProps {
    * that asks Todofy to settle dependencies.
    */
   onReviewShown?: (plan: PlanState) => void;
-  /** The weekly review's mail line opens Plus's Mailbox. */
-  onOpenMailbox?: () => void;
+  /** The weekly review's mail line opens the host's Mail page. */
+  onOpenMail?: () => void;
   /** Opened from the review task's link: start with the weekly review. */
   reviewing?: boolean;
   /** Opened from Focus's quiet line: Review, with Start now focused. */
@@ -80,7 +79,7 @@ function seededView(stored: PlanViewState, week: string): PlanViewState {
     : { ...stored, review: { week, open: false, lines: [], kept: [] } };
 }
 export function PlanView(props: PlanViewProps) {
-  const { plan, language, editTask, onLabels, onPlanView } = props;
+  const { plan, language, editTask, onPlanView } = props;
   // Seeded once from the remembered view; the review link and the jumps below apply after it.
   const [seeded] = useState(() =>
     seededView(props.planView ?? DEFAULT_PLAN_VIEW, plan.week),
@@ -239,11 +238,6 @@ export function PlanView(props: PlanViewProps) {
         >
           {text.weeklyReview}
         </button>
-        {onLabels && (
-          <button className="planning-label-button" onClick={onLabels}>
-            {text.boardLabels}
-          </button>
-        )}
       </div>
       {reviewing && (
         <WeeklyReview
@@ -261,7 +255,7 @@ export function PlanView(props: PlanViewProps) {
           actions={props.actions}
           editTask={editTask}
           completeReview={props.completeReview}
-          onOpenMailbox={props.onOpenMailbox}
+          onOpenMail={props.onOpenMail}
           onShowWaiting={() => showLane("waiting")}
           onPlanSteps={planSteps}
           onClose={() => {

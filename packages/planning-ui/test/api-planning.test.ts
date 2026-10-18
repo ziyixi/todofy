@@ -207,32 +207,10 @@ it("persists same-day sorting, cross-day movement and pool placement only in Flo
   ).toBe(true);
 });
 
-it("reads the FULL plan for the sidebar, which names the mail project to hide", async () => {
-  const urls: URL[] = [];
-  const api = fakeActions(async (input) => {
-    urls.push(new URL(String(input)));
-    return Response.json({
-      plan: {
-        week_start: "2026-10-12",
-        today: "2026-10-13",
-        timezone: "UTC",
-        enabled: true,
-        inbox_project_id: "mail-project",
-      },
-    });
-  });
-  // The mail project's ID comes only with the FULL view, which a request without `view` asks for.
-  expect((await api.readPlan()).inboxProjectId).toBe("mail-project");
-  expect(urls.map((url) => [url.pathname, url.search])).toEqual([
-    ["/api/plus/v1/plan:read", ""],
-  ]);
-});
-
-it("answers the new steps' IDs, and after one FlowDay sync knows every task the latest read listed", async () => {
+it("answers the new steps' IDs and queues them without a FlowDay sync", async () => {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
-  // Todoist lists two new steps; FlowDay has neither yet and throttles a second manual sync.
-  let listed = ["outcome", "step-1", "step-2"];
-  let syncs = 0;
+  // Tasks lists two new steps; FlowDay's mirror has neither yet.
+  const listed = ["outcome", "step-1", "step-2"];
   const api = fakeActions(async (input, init) => {
     const path = new URL(String(input)).pathname;
     const body = init?.body
@@ -258,8 +236,6 @@ it("answers the new steps' IDs, and after one FlowDay sync knows every task the 
           title: `Synthetic ${id}`,
         })),
       });
-    if (path.endsWith("/tasks:sync"))
-      return reply({ state: syncs++ ? "throttled" : "synced" });
     if (path.endsWith("/timerSession"))
       return reply({ name: "timerSession", etag: "0" });
     if (path.endsWith("/api/v1/tasks"))
@@ -272,7 +248,7 @@ it("answers the new steps' IDs, and after one FlowDay sync knows every task the 
       name: `flows/${day}`,
       task_ids: (body.task_ids as string[] | undefined) ?? [],
     });
-  }, "todoist");
+  });
   const outcome = (await api.load()).plan.tasks[0]!;
   expect(
     await api.createSteps(
@@ -289,18 +265,12 @@ it("answers the new steps' IDs, and after one FlowDay sync knows every task the 
       steps: [{ title: "Synthetic step 1" }],
     },
   });
-  await api.load();
-  // The first new step syncs FlowDay, which imports the second one in the same sync.
+  // FlowDay's queues take any task ID: no sync before either write.
   await api.addToDay("step-1", "2026-10-13");
   await api.addToDay("step-2", "2026-10-14");
-  expect(syncs).toBe(1);
-  // A step that only a later read lists may be newer than that sync: it asks again.
-  listed = [...listed, "step-3"];
-  await api.load();
-  await expect(api.addToDay("step-3", "2026-10-15")).rejects.toThrow(
-    "FlowDay just synced",
+  expect(requests.some((request) => request.path.endsWith(":sync"))).toBe(
+    false,
   );
-  expect(syncs).toBe(2);
 });
 
 it("maps Todoist's sibling order and the saved lane orders, and sends a reorder with the moved task", async () => {

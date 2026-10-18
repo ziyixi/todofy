@@ -15,13 +15,12 @@ outside the approved scope.
 | FlowDay | Daily queues, time blocks, timers and time records | Named native Focus binding (task list, day queues and timer only); read-only task mirror |
 | Shared planning UI | Plan, Focus and the optional Mail shortcut editor | Caller-supplied typed transport and navigation callbacks |
 
-Applications do not import each other's source or databases. `packages/planning-ui` compiles into both
-hosts; `packages/task-dates` supplies the date parser used by the Tasks Worker and import tools. FlowDay
+Applications do not import each other's source or databases. `packages/planning-ui` compiles into
+Tasks; `packages/task-dates` supplies the date parser used by the Tasks Worker and import tools. FlowDay
 receives read-only access to Tasks. Todofy receives the provisioned task API; other bindings are rejected.
 
 Source selection is explicit; Tasks is the live task source after the verified import and consumer cutover.
-A native consumer does not fall back to Todoist after an error, and the old extension cannot write after
-the native source is activated. Existing FlowDay task IDs and planning internal IDs must survive cutover.
+A native consumer does not fall back to Todoist after an error. Existing FlowDay task IDs and planning internal IDs must survive cutover.
 
 ## Task interface
 
@@ -60,7 +59,7 @@ from their completion state; there is no independent Blocked checkbox.
 
 The one-time private conversion keeps each imported choice,
 removes its technical label membership and soft-retires the exact replaced labels and filters. Native planning
-does not require label mapping or an extension connection. The retired Todoist adapter keeps its frozen role
+does not require label mapping. The retired Todoist adapter keeps its frozen role
 projection internally; it does not define the native public label catalog.
 Dragging a task into a planning day changes the FlowDay queue, preserving its task date and real deadline.
 Native task edits invalidate the mounted planning snapshot through the existing refresh path.

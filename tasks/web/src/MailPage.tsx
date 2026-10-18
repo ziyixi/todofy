@@ -38,7 +38,6 @@ function Categories({
       }}
     >
       <MailCategoriesDialog
-        taskAppName="Tasks"
         headingId={heading}
         labels={catalog.labels.map((label) => ({
           id: label.id,

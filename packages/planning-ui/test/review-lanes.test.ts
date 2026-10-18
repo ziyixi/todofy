@@ -46,16 +46,13 @@ const task = (id: string, value: Partial<PlanningTask> = {}): PlanningTask => ({
   missingLead: false,
   ...value,
 });
-/** The account's labels with a literal `parked`, which Parked needs. */
-const parkable = [{ id: "parked-id", label: "parked" }];
 /** Each lane's task IDs, in their order. */
 function laneIds(
   tasks: PlanningTask[],
-  availableLabels: typeof parkable = [],
   laneOrders: PlanState["laneOrders"] = {},
 ) {
   const lanes = boardLanes(
-    { tasks, managedLabels, dependencies: [], availableLabels, laneOrders },
+    { tasks, managedLabels, dependencies: [], laneOrders },
     TODAY,
   );
   return Object.fromEntries(
@@ -187,7 +184,7 @@ it("puts a parked task in Parked before every other rule, only while the account
     task("quick", { labels: ["quick", "focus"], stage: "weekly" }),
   ];
   // Longest untouched first, unknown ages last; in no other lane.
-  expect(laneIds(tasks, parkable)).toEqual({
+  expect(laneIds(tasks)).toEqual({
     start: [],
     waiting: [],
     parked: ["staged", "waits", "plain", "step"],
@@ -196,13 +193,6 @@ it("puts a parked task in Parked before every other rule, only while the account
     weekly: ["quick"],
     committed: ["outcome"],
   });
-  // Without a label named exactly `parked` there is no Parked lane: the other rules apply.
-  for (const labels of [[], [{ id: "shared", label: "Parked" }]])
-    expect(laneIds(tasks, labels)).toMatchObject({
-      waiting: ["waits"],
-      parked: [],
-      committed: ["staged", "outcome"],
-    });
 });
 
 it("lists the commitments Review's Committed lane shows, none of them parked", () => {
@@ -212,21 +202,12 @@ it("lists the commitments Review's Committed lane shows, none of them parked", (
     task("waits", { stage: "committed", labels: ["committed", "waiting"] }),
     task("week", { stage: "weekly", labels: ["focus"] }),
   ];
-  for (const availableLabels of [[], parkable]) {
-    const plan = {
-      tasks,
-      managedLabels,
-      dependencies: [],
-      availableLabels,
-      laneOrders: {},
-    };
-    expect(committedOutcomes(plan)).toEqual(boardLanes(plan, TODAY).committed);
-  }
+  const plan = { tasks, managedLabels, dependencies: [], laneOrders: {} };
+  expect(committedOutcomes(plan)).toEqual(boardLanes(plan, TODAY).committed);
   expect(
     committedOutcomes({
       tasks,
       managedLabels,
-      availableLabels: parkable,
       laneOrders: {},
     }).map((item) => item.id),
   ).toEqual(["kept", "waits"]);
@@ -249,7 +230,7 @@ it("lists each lane in the owner's stored order first, the rest after it in the 
     ),
   ];
   expect(
-    laneIds(tasks, parkable, {
+    laneIds(tasks, {
       // A task no longer in the lane is skipped; one never arranged follows the arranged ones.
       committed: ["three", "gone", "one"],
       waiting: ["quote"],
@@ -338,61 +319,57 @@ it("shows every task the API marks for a replaced deadline, waiting or parked fi
     stage: "committed",
     labels: ["committed"],
   });
-  for (const availableLabels of [[], parkable])
-    for (let combination = 0; combination < 1 << marks.length; combination++)
-      for (const deadline of ["", on(-3), TODAY, on(5), on(40)])
-        for (const plan of stages)
-          for (const parentId of ["", outcome.id])
-            for (const mustStart of [false, true])
-              for (const missingLead of [false, true]) {
-                const labels = marks.filter(
-                  (_, bit) => (combination >> bit) & 1,
-                );
-                // Todofy's must_start never comes with a missing deadline or these labels.
-                if (
-                  mustStart &&
-                  (!deadline ||
-                    labels.some((label) =>
-                      ["active", "blocked", "parked"].includes(label),
-                    ))
-                )
-                  continue;
-                const item = task("grid", {
-                  ...plan,
-                  parentId,
-                  labels: [...plan.labels, ...labels],
-                  deadline,
-                  mustStart,
-                  missingLead,
-                });
-                const lanes = boardLanes(
-                  {
-                    tasks: [outcome, item],
-                    managedLabels,
-                    dependencies: [],
-                    availableLabels,
-                    laneOrders: {},
-                  },
-                  TODAY,
-                );
-                const shown = Object.values(lanes).filter((cards) =>
-                  cards.includes(item),
-                ).length;
-                const name = JSON.stringify([item, availableLabels]);
-                expect(shown, name).toBeLessThanOrEqual(1);
-                if (availableLabels.length && labels.includes("parked")) {
-                  expect(lanes.parked, name).toContain(item);
-                  continue;
-                }
-                const waits =
-                  labels.includes("waiting") || labels.includes("blocked");
-                if (waits || mustStart) {
-                  expect(shown, name).toBe(1);
-                  expect(cardState(item, TODAY), name).toBe(
-                    waits ? "waiting" : "start",
-                  );
-                }
+  for (let combination = 0; combination < 1 << marks.length; combination++)
+    for (const deadline of ["", on(-3), TODAY, on(5), on(40)])
+      for (const plan of stages)
+        for (const parentId of ["", outcome.id])
+          for (const mustStart of [false, true])
+            for (const missingLead of [false, true]) {
+              const labels = marks.filter((_, bit) => (combination >> bit) & 1);
+              // Todofy's must_start never comes with a missing deadline or these labels.
+              if (
+                mustStart &&
+                (!deadline ||
+                  labels.some((label) =>
+                    ["active", "blocked", "parked"].includes(label),
+                  ))
+              )
+                continue;
+              const item = task("grid", {
+                ...plan,
+                parentId,
+                labels: [...plan.labels, ...labels],
+                deadline,
+                mustStart,
+                missingLead,
+              });
+              const lanes = boardLanes(
+                {
+                  tasks: [outcome, item],
+                  managedLabels,
+                  dependencies: [],
+                  laneOrders: {},
+                },
+                TODAY,
+              );
+              const shown = Object.values(lanes).filter((cards) =>
+                cards.includes(item),
+              ).length;
+              const name = JSON.stringify(item);
+              expect(shown, name).toBeLessThanOrEqual(1);
+              if (labels.includes("parked")) {
+                expect(lanes.parked, name).toContain(item);
+                continue;
               }
+              const waits =
+                labels.includes("waiting") || labels.includes("blocked");
+              if (waits || mustStart) {
+                expect(shown, name).toBe(1);
+                expect(cardState(item, TODAY), name).toBe(
+                  waits ? "waiting" : "start",
+                );
+              }
+            }
 });
 
 /**

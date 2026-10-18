@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import { TEST_DESTINATION, createPrototype } from "./fixture";
+import { createPrototype } from "./fixture";
 import type { PlusActions, PlusData, PlusSnapshot, View } from "../src/model";
 
 beforeAll(() => {
@@ -30,7 +30,6 @@ function mount(
 ) {
   return render(
     <App
-      destination={TEST_DESTINATION}
       actions={actions}
       view={view}
       language="en"
@@ -211,7 +210,6 @@ it("paints remembered data at once on re-entry and re-reads it in the background
   const { reads, original } = held(actions);
   render(
     <App
-      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"
@@ -261,7 +259,6 @@ it("keeps a remembered other week but follows the server's current week after a 
   ] as const) {
     render(
       <App
-        destination={TEST_DESTINATION}
         actions={actions}
         view="plan"
         language="en"
@@ -352,18 +349,3 @@ it("never lets an older overlapping read replace a newer one", async () => {
   ).toBeTruthy();
 });
 
-it("keeps writes disabled after a label mapping until the re-read brings the new task etags", async () => {
-  const actions = createPrototype();
-  mount(actions);
-  await screen.findByRole("region", { name: "Committed" });
-  const { reads, original } = held(actions);
-  // The header icon and the toolbar both open the one labels dialog.
-  fireEvent.click(
-    screen.getAllByRole("button", { name: "Planning labels" })[0]!,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await waitFor(() => expect(reads).toHaveLength(1));
-  expect(moveButtons().every((button) => button.disabled)).toBe(true);
-  await act(async () => reads[0]!(await original()));
-  expect(moveButtons().some((button) => button.disabled)).toBe(false);
-});

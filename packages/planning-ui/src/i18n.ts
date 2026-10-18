@@ -2,20 +2,18 @@ import type { BetArea, Language } from "./model";
 const en = {
   plan: "Plan",
   focus: "Focus",
-  mailbox: "Mail",
   work: "Work",
   personal: "Personal",
   unassigned: "Unassigned",
   assignArea:
     "Choose Work or Personal in task details to include these in your weekly limits.",
   quarterly: "This quarter",
-  boardLabels: "Planning labels",
   committed: "Committed",
   weekly: "If there’s room this week",
   monthly: "This month",
   none: "No plan",
   reset:
-    "Unfinished commitments return to candidates on Monday; those chosen in Plus on Sunday stay for next week.",
+    "Unfinished commitments return to candidates on Monday; those chosen in Plan on Sunday stay for next week.",
   softLimit: "Above your usual limit. Keep it if this week needs it.",
   candidates: "candidates",
   startNow: "Start now",
@@ -29,7 +27,7 @@ const en = {
   addFocus: "Add to today",
   inToday: "In today",
   chooseStep: "Choose a step",
-  open: "Open in Todoist",
+  open: "Open task",
   details: "Steps & timing",
   steps: "Next steps",
   remaining: "remaining",
@@ -69,21 +67,18 @@ const en = {
   down: "Move down",
   refresh: "Refresh",
   loading: "Loading your plan…",
-  connect: "Connect Todoist Plus",
-  connectHelp: "Connect to Todofy in extension settings.",
-  setup: "Confirm your labels in Todofy before making changes.",
+  setup: "Native planning is not ready. Check Planning settings.",
   retry: "Try again",
   lastError: "Couldn’t save. Your change has not been confirmed.",
   planned: "planned",
-  native: "Keep editing dates, descriptions and projects in Todoist.",
+  native: "Edit dates, descriptions and projects in task details.",
   add: "Add",
   completed: "Completed today",
   noChildren: "Add just the next step. You can work out the rest later.",
   expandToChoose: "Expand Committed to choose an outcome.",
   choose: "Choose tasks",
   emptyCandidate: "No more planned steps or Quick / Ops tasks.",
-  permission: "Connection required",
-  manage: "Connection settings",
+  manage: "Planning settings",
   mode: "Planning",
   local: "FlowDay task",
   missingTask: "Task unavailable",
@@ -111,23 +106,21 @@ const en = {
   removedDoneDependencies: "Removed the done dependencies",
   weeklyReview: "Weekly review",
   sundayRule:
-    "Commitments chosen in Plus on Sunday stay for next week; the rest reset on Monday as usual. Goals are saved for each week and never cleared.",
+    "Commitments chosen in Plan on Sunday stay for next week; the rest reset on Monday as usual. Goals are saved for each week and never cleared.",
 };
 const zh: typeof en = {
   plan: "计划",
   focus: "专注",
-  mailbox: "邮件",
   work: "工作",
   personal: "生活",
   unassigned: "未分类",
   assignArea: "在任务详情中选择工作或生活后，计入对应的每周数量。",
   quarterly: "本季度待选",
-  boardLabels: "计划标签",
   committed: "本周承诺",
   weekly: "本周有余力再做",
   monthly: "本月待选",
   none: "暂不安排",
-  reset: "每周一，未完成的承诺会回到待选；在 Plus 中周日选的承诺会留到下周。",
+  reset: "每周一，未完成的承诺会回到待选；在 Plan 中周日选的承诺会留到下周。",
   softLimit: "超过平常的数量。这周需要的话可以保留。",
   candidates: "待选",
   startNow: "该开始",
@@ -141,7 +134,7 @@ const zh: typeof en = {
   addFocus: "加入今天",
   inToday: "已加入今天",
   chooseStep: "选择步骤",
-  open: "在 Todoist 中打开",
+  open: "打开任务",
   details: "步骤与时间",
   steps: "下一步",
   remaining: "待完成",
@@ -181,21 +174,18 @@ const zh: typeof en = {
   down: "下移",
   refresh: "刷新",
   loading: "正在读取计划…",
-  connect: "连接 Todoist Plus",
-  connectHelp: "在扩展设置中连接 Todofy。",
-  setup: "先在 Todofy 确认标签对应关系，再调整任务。",
+  setup: "原生规划尚未启用，请检查规划设置。",
   retry: "重试",
   lastError: "未确认保存成功，请重试。",
   planned: "已安排",
-  native: "日期、描述和项目继续在 Todoist 中编辑。",
+  native: "在任务详情中编辑日期、描述和项目。",
   add: "添加",
   completed: "今天已完成",
   noChildren: "先写下一步，剩下的可以以后再想。",
   expandToChoose: "展开“本周承诺”，选择一个事项。",
   choose: "选择任务",
   emptyCandidate: "暂时没有其他计划步骤或 Quick / Ops 任务。",
-  permission: "需要连接",
-  manage: "连接设置",
+  manage: "规划设置",
   mode: "计划",
   local: "FlowDay 本地任务",
   missingTask: "任务暂不可用",
@@ -223,24 +213,10 @@ const zh: typeof en = {
   removedDoneDependencies: "已移除已完成的依赖",
   weeklyReview: "周回顾",
   sundayRule:
-    "在 Plus 中周日选的承诺会留到下周，其余的周一照常重置。目标按周保存，不会被清除。",
+    "在 Plan 中周日选的承诺会留到下周，其余的周一照常重置。目标按周保存，不会被清除。",
 };
-export function words(language: Language, taskAppName = "Todoist"): typeof en {
-  const text = language === "zh" ? zh : en;
-  if (taskAppName === "Todoist") return text;
-  return {
-    ...text,
-    open: language === "zh" ? "打开任务" : "Open task",
-    native:
-      language === "zh"
-        ? "在任务详情中编辑日期、描述和项目。"
-        : "Edit dates, descriptions and projects in task details.",
-    manage: language === "zh" ? "规划设置" : "Planning settings",
-    setup:
-      language === "zh"
-        ? "原生规划尚未启用，请检查规划设置。"
-        : "Native planning is not ready. Check Planning settings.",
-  };
+export function words(language: Language): typeof en {
+  return language === "zh" ? zh : en;
 }
 
 /**
@@ -302,41 +278,13 @@ export function betWords(
 /** One Bet line's copy (betWords). */
 export type BetWords = ReturnType<typeof betWords>;
 
-/** The Mailbox's copy: the page, a row's filing buttons, Delete all and the Mail categories dialog. */
-export function mailWords(language: Language, taskAppName = "Todoist") {
+/** The Mail categories dialog's copy. */
+export function mailWords(language: Language) {
   if (language === "zh")
     return {
-      count: (n: number) => `${n} 封`,
-      deleteAll: "全部删除",
       categories: "邮件归类",
-      hint: "按 Tab 归类，回车展开",
-      loading: "正在读取邮件…",
-      empty: "邮件都处理完了",
-      noProject: "Todofy 没有设置邮件项目",
-      failed: "暂时读不到邮件。",
-      others: (n: number) => `邮件项目里还有 ${n} 个其他任务`,
-      inbox: "收件箱",
-      moveInbox: (title: string) => `移到 ${taskAppName} 收件箱：${title}`,
-      fileAs: (name: string, title: string) => `归入「${name}」：${title}`,
-      movedInbox: (title: string) => `已移到 ${taskAppName} 收件箱：${title}`,
-      filed: (name: string, title: string) => `已归入「${name}」：${title}`,
-      received: (time: string) => `${time} 收到`,
-      summaryLoading: "正在读取摘要…",
-      summaryGone: "原始摘要已不可用。",
-      summaryFailed: "暂时读不到摘要。",
-      confirmTitle: (n: number) => `删除 ${n} 封邮件？`,
-      confirmBody: (n: number) =>
-        `${taskAppName} 中这 ${n} 个任务会被永久删除，无法撤销。`,
-      confirmKept: (titles: string[]) =>
-        `有改动或已排进计划的 ${titles.length} 封会保留：${titles.slice(0, 3).join("、")}${titles.length > 3 ? ` 等 ${titles.length} 封` : ""}。`,
-      confirmLimit: "一次最多 200 封：先删最早的 200 封，其余留在列表里。",
-      deleteN: (n: number) => `删除 ${n} 封`,
-      deleting: "正在删除…",
-      deleteFailed: "未确认删除完成。重试会接着删完剩下的，不会重复删除。",
-      deleted: (n: number) => `已删除 ${n} 封邮件`,
-      deletedSome: (deleted: number, kept: number) =>
-        `已删除 ${deleted} 封；${kept} 封有改动，已保留`,
-      settingsHelp: `每个归类是一个现有 ${taskAppName} 标签加一个优先级。归入时任务带上它们，并移到 ${taskAppName} 收件箱。`,
+      settingsHelp:
+        "每个归类是一个现有 Tasks 标签加一个优先级。归入时任务带上它们，并移到 Tasks 收件箱。",
       label: "标签",
       priority: "优先级",
       chooseLabel: "选择标签",
@@ -348,46 +296,11 @@ export function mailWords(language: Language, taskAppName = "Todoist") {
       settingsFailed: "暂时读不到邮件归类。",
       duplicate: "已有相同的归类。",
       labelGone: "这个标签已不存在，请重新选择。",
-      saved: "已保存邮件归类",
     };
-  const emails = (n: number) => `${n} ${n === 1 ? "email" : "emails"}`;
   return {
-    count: emails,
-    deleteAll: "Delete all",
     categories: "Mail categories",
-    hint: "Tab to file, Enter to expand",
-    loading: "Loading your mail…",
-    empty: "All caught up",
-    noProject: "Todofy has no mail project",
-    failed: "Couldn't read your mail.",
-    others: (n: number) =>
-      `${n} other ${n === 1 ? "task" : "tasks"} in the mail project`,
-    inbox: "Inbox",
-    moveInbox: (title: string) => `Move to ${taskAppName} Inbox: ${title}`,
-    fileAs: (name: string, title: string) => `File as “${name}”: ${title}`,
-    movedInbox: (title: string) => `Moved to ${taskAppName} Inbox: ${title}`,
-    filed: (name: string, title: string) => `Filed as “${name}”: ${title}`,
-    received: (time: string) => `Received ${time}`,
-    summaryLoading: "Loading the summary…",
-    summaryGone: "The full summary is no longer available.",
-    summaryFailed: "Couldn't read the summary.",
-    confirmTitle: (n: number) => `Delete ${emails(n)}?`,
-    confirmBody: (n: number) =>
-      n === 1
-        ? `Its task will be permanently deleted from ${taskAppName}. This can't be undone.`
-        : `Their ${n} tasks will be permanently deleted from ${taskAppName}. This can't be undone.`,
-    confirmKept: (titles: string[]) =>
-      `${titles.length} you've changed or planned ${titles.length === 1 ? "is" : "are"} kept: ${titles.slice(0, 3).join(", ")}${titles.length > 3 ? ` and ${titles.length - 3} more` : ""}.`,
-    confirmLimit:
-      "Up to 200 at a time: the oldest 200 go first; the rest stay listed.",
-    deleteN: (n: number) => `Delete ${n}`,
-    deleting: "Deleting…",
-    deleteFailed:
-      "Couldn't confirm the deletion. Trying again finishes the rest and never deletes twice.",
-    deleted: (n: number) => `Deleted ${emails(n)}`,
-    deletedSome: (deleted: number, kept: number) =>
-      `Deleted ${deleted}; ${kept} had changes and ${kept === 1 ? "was" : "were"} kept`,
-    settingsHelp: `Each category is one existing ${taskAppName} label and a priority. Filing adds them and moves the task to the ${taskAppName} Inbox.`,
+    settingsHelp:
+      "Each category is one existing Tasks label and a priority. Filing adds them and moves the task to the Tasks Inbox.",
     label: "Label",
     priority: "Priority",
     chooseLabel: "Choose a label",
@@ -399,8 +312,5 @@ export function mailWords(language: Language, taskAppName = "Todoist") {
     settingsFailed: "Couldn't read the mail categories.",
     duplicate: "That category already exists.",
     labelGone: "That label no longer exists. Choose another.",
-    saved: "Mail categories saved",
   };
 }
-/** The Mailbox's copy (mailWords). */
-export type MailWords = ReturnType<typeof mailWords>;

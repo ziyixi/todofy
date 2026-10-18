@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
-import { TEST_DESTINATION, createPrototype } from "./fixture";
+import { createPrototype } from "./fixture";
 import { App } from "../src/App";
 import type { Language, PlusActions } from "../src/model";
 
@@ -34,7 +34,6 @@ async function week(
 ) {
   render(
     <App
-      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language={language}

@@ -1,39 +1,40 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, Settings, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { mailWords, words } from "./i18n";
 import { categoryName, MAX_CATEGORIES } from "./mail";
-import type {
-  Language,
-  MailCategories,
-  MailCategory,
-  PlusActions,
-} from "./model";
+import type { Language, MailCategories, MailCategory } from "./model";
+
+/** Todofy's ReadMailSettings and UpdateMailCategories, through the host's transport. */
+export interface MailCategoryActions {
+  readMailSettings(): Promise<MailCategories>;
+  /** Replaces the categories saved with `etag`, none included; answers them as saved. */
+  updateMailCategories(
+    categories: Omit<MailCategory, "id">[],
+    etag: string,
+  ): Promise<MailCategories>;
+}
 
 interface Props {
-  taskAppName?: string;
   headingId: string;
-  /** The labels a category may use, with the names shown (mailbox.categoryLabels). */
+  /** The labels a category may use, with the names shown. */
   labels: readonly { id: string; name: string }[];
   language: Language;
   busy: boolean;
-  actions: Pick<PlusActions, "readMailSettings" | "updateMailSettings">;
-  /** The saved set: the Mailbox closes the dialog and says so. */
+  actions: MailCategoryActions;
+  /** The saved set: the host closes the dialog and says so. */
   onSaved: (saved: MailCategories) => void;
   onClose: () => void;
-  onConnection?: () => void;
 }
 
 type Draft = Omit<MailCategory, "id"> & { key: number };
 const PRIORITIES = [1, 2, 3, 4];
 
 /**
- * The Mail categories dialog, laid out as Planning labels: each category is one existing label
- * and a priority (at most four, names generated, none at all is fine). Filing adds them, and the
- * task always moves to the Todoist Inbox. It reads the settings when it opens; a save writes
- * Todofy alone, and the dialog closes, as Planning labels does.
+ * The Mail categories dialog: each category is one existing label and a priority (at most four,
+ * names generated, none at all is fine). Converting a mail with a category adds them to its task.
+ * It reads the settings when it opens; a save writes Todofy alone, and the dialog closes.
  */
 export function MailCategoriesDialog({
-  taskAppName = "Todoist",
   headingId,
   labels,
   language,
@@ -41,10 +42,9 @@ export function MailCategoriesDialog({
   actions,
   onSaved,
   onClose,
-  onConnection,
 }: Props) {
-  const text = words(language, taskAppName);
-  const mail = mailWords(language, taskAppName);
+  const text = words(language);
+  const mail = mailWords(language);
   const [saved, setSaved] = useState<MailCategories>();
   const [failed, setFailed] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -103,7 +103,7 @@ export function MailCategoriesDialog({
     if (found) return setError(found);
     setSaving(true);
     try {
-      const next = await actions.updateMailSettings(
+      const next = await actions.updateMailCategories(
         drafts.map(({ labelId, priority }) => ({ labelId, priority })),
         saved.etag,
       );
@@ -224,16 +224,6 @@ export function MailCategoriesDialog({
             </p>
           )}
           <footer>
-            {onConnection && (
-              <button
-                type="button"
-                className="plus-text-button"
-                onClick={onConnection}
-              >
-                <Settings size={13} />
-                {text.manage}
-              </button>
-            )}
             <button
               className="plus-button plus-primary"
               disabled={busy || saving}

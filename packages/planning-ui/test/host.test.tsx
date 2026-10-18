@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { TaskEditor } from "../src/TaskEditor";
 import { App as PlanningApp } from "../src/App";
-import { mailWords } from "../src/i18n";
 import type { PlanningTask, PlusActions } from "../src/model";
 
 afterEach(cleanup);
@@ -22,15 +21,10 @@ const task: PlanningTask = {
   mustStart: false,
   missingLead: false,
 };
-it("opens the host task editor without requiring an extension or linking to Todoist", () => {
+it("opens the host task editor and names no other task app", () => {
   const open = vi.fn();
   render(
     <TaskEditor
-      destination={{
-        name: "Tasks",
-        taskHref: (id) => `/tasks/${id}`,
-        projectHref: (id) => `/projects/${id}`,
-      }}
       task={task}
       tasks={[task]}
       dependencies={[]}
@@ -40,7 +34,6 @@ it("opens the host task editor without requiring an extension or linking to Todo
       run={vi.fn()}
       today="2026-10-17"
       todayTaskIds={[]}
-      canMarkActive={false}
       addFocus={vi.fn()}
       onOpenTask={open}
     />,
@@ -49,14 +42,6 @@ it("opens the host task editor without requiring an extension or linking to Todo
   expect(open).toHaveBeenCalledWith("synthetic-step");
   expect(document.body.textContent).not.toContain("Todoist");
 });
-it("names the real destination in destructive mail actions and keeps old extension wording", () => {
-  expect(mailWords("en", "Tasks").confirmBody(2)).toContain("from Tasks");
-  expect(mailWords("zh", "Tasks").moveInbox("Synthetic mail")).toBe(
-    "移到 Tasks 收件箱：Synthetic mail",
-  );
-  expect(mailWords("en").confirmBody(1)).toContain("from Todoist");
-});
-
 it("refreshes the mounted native Focus after its host saves a task", async () => {
   const focus = {
     date: "2026-10-17",
@@ -72,13 +57,8 @@ it("refreshes the mounted native Focus after its host saves a task", async () =>
       week: "2026-10-12",
       timezone: "UTC",
       configured: true,
-      hiddenFilterIds: [],
       flowdayUrl: "",
-      managedLabelNames: [],
       managedLabels: [],
-      etag: "plan",
-      availableLabels: [],
-      inboxProjectId: "",
       reviewTaskId: "",
       nextWeekTaskIds: [],
       dependencies: [],
@@ -91,11 +71,6 @@ it("refreshes the mounted native Focus after its host saves a task", async () =>
   const load = vi.fn().mockResolvedValue(data);
   const actions = { load } as unknown as PlusActions;
   const props = {
-    destination: {
-      name: "Tasks",
-      taskHref: (id: string) => `/tasks/${id}`,
-      projectHref: (id: string) => `/projects/${id}`,
-    },
     actions,
     view: "focus" as const,
     language: "en" as const,

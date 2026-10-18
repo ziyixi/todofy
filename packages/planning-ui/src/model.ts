@@ -3,7 +3,7 @@ export type Area = "work" | "personal" | "unassigned";
 /** The two areas a week's Bets are written for. */
 export type BetArea = Exclude<Area, "unassigned">;
 export type Stage = "none" | "quarterly" | "monthly" | "weekly" | "committed";
-export type View = "plan" | "focus" | "mailbox";
+export type View = "plan" | "focus";
 export type Language = "en" | "zh";
 /** The Review board's lanes, left to right: Start now, Waiting, Parked, the four planning stages. */
 export type LaneId = "start" | "waiting" | "parked" | Exclude<Stage, "none">;
@@ -13,10 +13,10 @@ export interface PlanningTask {
   parentId: string;
   projectId: string;
   labels: string[];
-  /** Explicit native content type; absent for retired Todoist hosts. */
+  /** The task's content type in Tasks. */
   kind?: "task" | "step";
   effort?: "" | "deep" | "shallow";
-  /** Saved native stage, before date-based candidates; absent for the legacy source. */
+  /** The saved stage, before date-based candidates. */
   explicitStage?: Stage;
   /** Native planning state, separate from ordinary tags. */
   planningFlags?: string[];
@@ -30,23 +30,23 @@ export interface PlanningTask {
   etag: string;
   mustStart: boolean;
   missingLead: boolean;
-  /** Todoist's last change to the task (ISO time); absent when Todoist does not say. */
+  /** The task's last change (ISO time); absent when Tasks does not say. */
   updatedAt?: string;
   /** Its scheduled date repeats: completing it advances the date and keeps the task. */
   recurring?: boolean;
-  /** Todoist's count of its completions, recurrences included; absent when Todoist does not say. */
+  /** The task's count of completions, recurrences included; absent when Tasks does not say. */
   completedCount?: number;
   /**
-   * Todoist's legacy position among its siblings (same project, section and parent); absent when
-   * Todoist does not say.
+   * An earlier position among its siblings (same project, section and parent); absent when Tasks
+   * does not say.
    */
   childOrder?: number;
-  /** Todoist's order key among the same siblings, compared bytewise; absent until Todoist has one. */
+  /** An order key among the same siblings, compared bytewise; absent when there is none. */
   orderKey?: string;
-  /** Native Tasks numeric sibling position; fractional positions are preserved. */
+  /** Tasks' numeric sibling position; fractional positions are preserved. */
   sortOrder?: number;
 }
-/** One task waits for another; kept only in Todofy, never in Todoist (dependencies.ts). */
+/** One task waits for another; kept only in Todofy's planning store (dependencies.ts). */
 export interface TaskDependency {
   /** The task that waits. */
   taskId: string;
@@ -62,17 +62,10 @@ export interface PlanState {
   week: string;
   timezone: string;
   configured: boolean;
-  nativePlanning?: boolean;
-  /** Pending native Mail entries, supplied by a complete planning read. */
+  /** Pending Mail entries, supplied by a complete planning read. */
   mailboxPendingCount?: number;
-  hiddenFilterIds: string[];
   flowdayUrl: string;
-  managedLabelNames: string[];
   managedLabels: { role: string; id: string; label: string }[];
-  etag: string;
-  availableLabels: { id: string; label: string }[];
-  /** Todofy's mail project, for the weekly review's inbox line; empty when not configured. */
-  inboxProjectId: string;
   /** Newest weekly review task Todofy created; the active task list says whether it is open. */
   reviewTaskId: string;
   /** Commitments chosen on this week's Sunday, which Monday's reset keeps. */
@@ -82,7 +75,7 @@ export interface PlanState {
   /** The Bets saved for last, this and next week; a week and area with none is absent. */
   weeklyBets: WeeklyBet[];
   /**
-   * The Review lanes the owner arranged, each first to last by Todoist ID, kept in Todofy's
+   * The Review lanes the owner arranged, each first to last by task ID, kept in Todofy's
    * planning store; a lane never arranged is absent.
    */
   laneOrders: Partial<Record<LaneId, string[]>>;
@@ -102,20 +95,6 @@ export interface WeeklyBet {
 }
 /** Account planning settings without the task list. */
 export type PlanMetadata = Omit<PlanState, "tasks">;
-/**
- * What Plus replaces in native Todoist, by ID only. The background caches it on disk so the
- * sidebar is arranged as soon as a page mounts; it never holds task content.
- */
-export interface PlanConfig {
-  configured: boolean;
-  hiddenFilterIds: string[];
-  labelIds: string[];
-  /**
-   * Favourite projects Plus replaces while attached: Todofy's mail project, which the Mailbox
-   * lists. A configuration cached by an earlier build has none.
-   */
-  hiddenProjectIds?: string[];
-}
 export interface FlowDayPlan {
   date: string;
   taskIds: string[];
@@ -128,14 +107,14 @@ export interface DependencyResult {
   dependencies: TaskDependency[];
   /** Tasks that stopped waiting because what they waited for was deleted. */
   dropped?: string[];
-  /** Tasks that stopped waiting because what they waited for left the list, Todoist not saying how. */
+  /** Tasks that stopped waiting because what they waited for left the list, Tasks not saying how. */
   released?: string[];
 }
 /** A reorder's confirmed result. */
 export interface ReorderResult {
-  /** The tasks as Todoist lists them now; only their order and update time are new. */
+  /** The tasks as Tasks lists them now; only their order and update time are new. */
   reordered: PlanningTask[];
-  /** The lane's saved order; absent when only Todoist's order changed. */
+  /** The lane's saved order; absent when only the tasks' order changed. */
   lane?: { lane: LaneId; taskIds: string[] };
 }
 /** A write's server-confirmed result; void means only a re-read can show it. */
@@ -144,12 +123,10 @@ export type Confirmed =
   | FlowDayPlan[]
   | PlanningTask
   | PlanningTask[]
-  | PlanMetadata
   | DependencyResult
   | TimerSnapshot
   | WeeklyBet
   | WeeklyBet[]
-  | MailDeletion
   | ReorderResult;
 /**
  * A write shown before it is confirmed. Only the named cards wait, dimmed and fixed in place,
@@ -186,42 +163,17 @@ export interface FocusState extends FlowDayPlan {
     etag: string;
   };
 }
-/**
- * One mail Todofy summarised: a Mail Hero event that created a task. Its title is the task's;
- * the mail text itself stays in Todofy.
- */
-export interface MailItem {
-  /** Mail Hero's event ID, Todofy's own ID of the mail. */
-  id: string;
-  /** The mail's Todoist task. */
-  taskId: string;
-  /** One plain sentence about the mail; empty when it has none. */
-  brief: string;
-  /** When Todofy received the mail (ISO time). */
-  receivedAt: string;
-  /** Whether Todofy still has its full summary. */
-  hasSummary: boolean;
-}
 /** One of the owner's mail categories: an existing label, by ID, and a priority, P1 (1) to P4 (4). */
 export interface MailCategory {
   id: string;
   labelId: string;
-  /** The domain's order, 1 the most urgent; PlanningTask.priority is Todoist's API value instead. */
+  /** The domain's order, 1 the most urgent; PlanningTask.priority is the API value (4 is P1) instead. */
   priority: number;
 }
-/** The categories and their etag, which a filing with a category sends back. */
+/** The categories and their etag, which an edit sends back. */
 export interface MailCategories {
   categories: MailCategory[];
   etag: string;
-}
-/** The mail among some mail project tasks, and the categories to file it by. */
-export interface MailLookup extends MailCategories {
-  items: MailItem[];
-}
-/** DeleteMailItems' answer: the tasks now gone, and the ones Todofy kept on its own check. */
-export interface MailDeletion {
-  deletedTaskIds: string[];
-  keptTaskIds: string[];
 }
 export interface StepDraft {
   title: string;
@@ -232,7 +184,7 @@ export interface PlusData {
   focus: FocusState;
   days: FlowDayPlan[];
 }
-/** The last confirmed data, kept only in content-script memory between visits. */
+/** The last confirmed data, kept only in page memory between visits. */
 export interface PlusSnapshot {
   data: PlusData;
   /** When the complete data was last read; confirmed writes may be merged since. */
@@ -259,18 +211,14 @@ export interface PlusActions {
   load(weekStart?: string): Promise<PlusData>;
   readPlan(): Promise<PlanMetadata>;
   loadDays(weekStart: string): Promise<FlowDayPlan[]>;
-  /** Saves native planning state; legacy hosts update the corresponding existing labels. */
+  /** Saves the task's planning state in Todofy. */
   updateTask(task: PlanningTask, update: PlanUpdate): Promise<PlanningTask>;
   /**
    * Saves a Bet's text over the one with `bet.etag`. Rejects with BetNotSaved when Todofy says it
    * changed elsewhere or its week has ended.
    */
   setWeeklyBet(bet: WeeklyBet): Promise<WeeklyBet>;
-  updateLabels(
-    labels: { role: string; id: string; label: string }[],
-    etag: string,
-  ): Promise<PlanMetadata>;
-  /** Appends sub-tasks under `task`; answers their Todoist IDs, in the entered order. */
+  /** Appends sub-tasks under `task`; answers their IDs, in the entered order. */
   createSteps(
     task: PlanningTask,
     steps: StepDraft[],
@@ -286,7 +234,7 @@ export interface PlusActions {
     requestId: string,
     flowDate: string,
   ): Promise<void>;
-  /** Adds (`waits`) or removes that `taskId` waits for `prerequisiteId`; Todoist is not written. */
+  /** Adds (`waits`) or removes that `taskId` waits for `prerequisiteId`; the tasks are not written. */
   setDependency(
     taskId: string,
     prerequisiteId: string,
@@ -316,36 +264,10 @@ export interface PlusActions {
     focus: FocusState,
     targetSeconds?: number,
   ): Promise<TimerSnapshot>;
-  /** The mail among these mail project tasks, asked about 200 at a time, and the categories. */
-  lookupMail(taskIds: string[]): Promise<MailLookup>;
-  /** One mail's full Todofy summary, as plain text; empty when it is no longer available. */
-  readMailSummary(id: string): Promise<string>;
-  /** The categories (read for the dialog). */
-  readMailSettings(): Promise<MailCategories>;
-  /** Replaces the categories saved with `etag`, none included; answers them as saved. */
-  updateMailSettings(
-    categories: Omit<MailCategory, "id">[],
-    etag: string,
-  ): Promise<MailCategories>;
-  /**
-   * Files a mail task in one Todoist write: a category's label and priority, if one is given, and
-   * always a move to the account's Todoist Inbox. The task as saved, no longer in the mail project.
-   */
-  fileMail(
-    task: PlanningTask,
-    category: MailCategory | undefined,
-    categoriesEtag: string,
-    requestId: string,
-  ): Promise<PlanningTask>;
-  /**
-   * Permanently deletes these mail tasks, at most 200, that Todofy finds untouched on a fresh
-   * read; a repeat with the same request ID finishes the rest and deletes nothing twice.
-   */
-  deleteMail(taskIds: string[], requestId: string): Promise<MailDeletion>;
   /**
    * Puts these tasks in this order, at most 100: `lane`'s order in Todofy's planning store, or
-   * none for "". In Todoist, the siblings of `movedId` among them (same project, section and
-   * parent) swap their positions into this order; Waiting and Parked never change Todoist.
+   * none for "". In Tasks, the siblings of `movedId` among them (same project, section and parent)
+   * swap their positions into this order; Waiting and Parked never change the tasks.
    */
   reorderTasks(
     taskIds: string[],

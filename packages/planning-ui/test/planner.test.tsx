@@ -30,7 +30,6 @@ async function props(): Promise<PlanViewProps> {
     run: vi.fn(),
     editTask: vi.fn(),
     onWeekChange: vi.fn(),
-    onLabels: vi.fn(),
     completeReview: vi.fn(),
   };
 }
@@ -122,20 +121,6 @@ it("expands one commitment into its real recursive leaf steps without absorbing 
       .getByRole("region", { name: "Weekly planning" })
       .querySelectorAll(".planning-commitment-grid [data-outcome-id]"),
   ).toHaveLength(4);
-});
-
-it("shows an actionable Quarter mapping gap and does not mutate labels automatically", async () => {
-  const data = await props();
-  data.plan.managedLabels = data.plan.managedLabels.filter(
-    (label) => label.role !== "quarter",
-  );
-  const update = vi.spyOn(data.actions, "updateTask");
-  render(<PlanView {...data} />);
-  const quarter = within(screen.getByRole("region", { name: "Quarter" }));
-  expect(quarter.getByText("Choose a label for this column")).toBeTruthy();
-  fireEvent.click(quarter.getByRole("button", { name: "Configure labels" }));
-  expect(data.onLabels).toHaveBeenCalledOnce();
-  expect(update).not.toHaveBeenCalled();
 });
 
 it("keeps week navigation usable during a save without changing the current commitment period", async () => {

@@ -64,11 +64,6 @@ it("merges confirmed flows, tasks, Bets, plan settings and timer without a re-re
     "2026-10-30",
   );
 
-  const { tasks: shown, ...metadata } = data.plan;
-  const labels = applyConfirmed(data, { ...metadata, etag: "plan-2" });
-  expect(labels.plan.etag).toBe("plan-2");
-  expect(labels.plan.tasks).toBe(shown);
-
   const timer = applyConfirmed(data, { timerEtag: "timer-2" });
   expect(timer.focus.timerEtag).toBe("timer-2");
   expect(timer.focus.timer).toBeUndefined();
@@ -76,11 +71,10 @@ it("merges confirmed flows, tasks, Bets, plan settings and timer without a re-re
   expect(applyConfirmed(data, [])).toEqual(data);
 });
 
-it("re-reads only after void results and label mapping changes", async () => {
+it("re-reads only after void results", async () => {
   const data = await createPrototype().load();
-  const { tasks, ...metadata } = data.plan;
+  const { tasks } = data.plan;
   expect(rereadsAfter(undefined)).toBe(true);
-  expect(rereadsAfter(metadata)).toBe(true);
   expect(rereadsAfter(tasks[0]!)).toBe(false);
   expect(rereadsAfter([tasks[0]!])).toBe(false);
   expect(rereadsAfter([data.days[0]!])).toBe(false);
@@ -113,21 +107,6 @@ it("mirrors Sunday's next-week choices from confirmed planning writes until the 
   expect(withNextWeek(tuesday, { stage: "committed" }, committed)).toBe(
     tuesday,
   );
-});
-
-it("drops the mail tasks a confirmed deletion removed, and only those, without a re-read", async () => {
-  const data = await createPrototype().load();
-  const deletion = {
-    deletedTaskIds: ["mail-register"],
-    keptTaskIds: ["mail-notes"],
-  };
-  const after = applyConfirmed(data, deletion);
-  const ids = after.plan.tasks.map((task) => task.id);
-  expect(ids).not.toContain("mail-register");
-  expect(ids).toContain("mail-notes");
-  expect(ids).toHaveLength(data.plan.tasks.length - 1);
-  expect(after.plan.weeklyBets).toBe(data.plan.weeklyBets);
-  expect(rereadsAfter(deletion)).toBe(false);
 });
 
 it("merges a confirmed reorder's Todoist positions and the lane's saved order, and nothing else", async () => {
@@ -182,49 +161,6 @@ it("merges a confirmed reorder's Todoist positions and the lane's saved order, a
     applyConfirmed(planned, { forTask: "copy", dependencies: [] }).plan
       .laneOrders,
   ).toBe(planned.plan.laneOrders);
-});
-
-it("predicts setting a task aside, and back, with the labels Todofy's plan_labels writes", async () => {
-  const data = await createPrototype().load();
-  const predicted = (labels: string[], stage: Stage, parked: boolean) => {
-    const plan = {
-      ...data.plan,
-      tasks: [{ ...data.plan.tasks[0]!, labels }],
-    };
-    const [task] = withStage(
-      plan,
-      plan.tasks[0]!.id,
-      stage,
-      false,
-      parked,
-    ).tasks;
-    return { labels: [...task!.labels].sort(), stage: task!.stage };
-  };
-  // The cases of todofy/tests/unit/test_plus.py, with the fixture's names: parked wins over every
-  // planning label, in progress and a stage sent with it, also where Quick makes focus or candiate
-  // no stage at all.
-  const full = ["committed", "quarter", "focus", "active", "office", "deep"];
-  expect(predicted(full, "none", true)).toEqual({
-    labels: ["deep", "office", "parked"],
-    stage: "none",
-  });
-  for (const planning of ["focus", "candiate"])
-    expect(predicted(["quick", planning], "none", true).labels).toEqual([
-      "parked",
-      "quick",
-    ]);
-  expect(predicted(["office"], "committed", true)).toEqual({
-    labels: ["office", "parked"],
-    stage: "none",
-  });
-  // Out of Parked into a stage lane: the stage's label, and parked goes.
-  expect(predicted(["parked", "office"], "monthly", false)).toEqual({
-    labels: ["candiate", "office"],
-    stage: "monthly",
-  });
-  expect(
-    predicted(["parked", "deep", "waiting"], "weekly", false).labels,
-  ).toEqual(["deep", "focus", "waiting"]);
 });
 
 it("moves an item as a sortable list does, and predicts a lane's order as Todofy saves it", async () => {

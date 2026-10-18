@@ -10,7 +10,7 @@ import {
 import type { ReactNode } from "react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import { TEST_DESTINATION, createPrototype } from "./fixture";
+import { createPrototype } from "./fixture";
 import { predictMove, predictStage } from "../src/plan-updates";
 import type { PlanningTask, PlusActions, PlusData } from "../src/model";
 
@@ -107,7 +107,6 @@ function hold<
 async function mountPlan(actions: PlusActions) {
   render(
     <App
-      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"
@@ -293,32 +292,22 @@ it("predicts moves like moveTaskToDay, including today's Focus queue, and stage 
   expect(
     added.days.find((item) => item.date === "2026-10-14")?.taskIds,
   ).toEqual(["cleanup", "measure"]);
-  // A stage drag shows the stage's label in place of the other planning labels, as Todofy writes it;
-  // from Start now also the in-progress label, after which the task no longer needs to start.
+  // A stage drag shows the saved stage at once; from Start now also in progress, after which the
+  // task no longer needs to start. Tags are left alone.
   const tools = data.plan.tasks.find((task) => task.id === "tools")!;
   const changed = (tasks: PlanningTask[]) =>
     tasks.filter((task, index) => task !== data.plan.tasks[index]);
-  const staged = predictStage(
-    "tools",
-    "committed",
-  )({
-    ...data,
-    plan: {
-      ...data.plan,
-      tasks: data.plan.tasks.map((task) =>
-        task === tools ? { ...tools, labels: ["focus", "office"] } : task,
-      ),
-    },
-  });
+  const staged = predictStage("tools", "committed")(data);
   expect(changed(staged.plan.tasks)).toEqual([
-    { ...tools, stage: "committed", labels: ["office", "committed"] },
+    { ...tools, stage: "committed", explicitStage: "committed" },
   ]);
   const started = predictStage("tools", "weekly", true)(data);
   expect(changed(started.plan.tasks)).toEqual([
     {
       ...tools,
       stage: "weekly",
-      labels: ["focus", "active"],
+      explicitStage: "weekly",
+      planningFlags: ["active"],
       mustStart: false,
       missingLead: false,
     },
@@ -510,7 +499,7 @@ it("acknowledges a Start now card by dragging it into a stage lane: its stage an
   );
 });
 
-it("moves a Waiting card into a stage lane with its stage only, keeping its waiting label", async () => {
+it("moves a Waiting card into a stage lane with its stage only, still waiting", async () => {
   const actions = createPrototype();
   const writes = hold(actions, "updateTask");
   await mountPlan(actions);
@@ -525,7 +514,10 @@ it("moves a Waiting card into a stage lane with its stage only, keeping its wait
   const saved = (await actions.load()).plan.tasks.find(
     (task) => task.id === "venue",
   )!;
-  expect(saved.labels).toEqual(["waiting", "office", "focus"]);
+  expect(saved).toMatchObject({
+    explicitStage: "weekly",
+    planningFlags: ["waiting"],
+  });
   // In its stage lane the card still says it waits.
   expect(
     within(screen.getByRole("region", { name: "Week" }))
@@ -534,40 +526,6 @@ it("moves a Waiting card into a stage lane with its stage only, keeping its wait
   ).toMatch(
     /^Hear back about the venue quote, No priority, No change in \d+ days$/u,
   );
-});
-
-it("drags Start now with the stage only without the active label; a drop on Start now or Waiting changes nothing", async () => {
-  const actions = createPrototype(true);
-  const load = actions.load.bind(actions);
-  vi.spyOn(actions, "load").mockImplementation(async (week) => {
-    const data = await load(week);
-    data.plan.availableLabels = data.plan.availableLabels.filter(
-      (label) => label.label !== "active",
-    );
-    return data;
-  });
-  const writes = hold(actions, "updateTask");
-  await mountPlan(actions);
-  const claim = (await load()).plan.tasks.find((task) => task.id === "claim")!;
-  await drop({ task: claim, lane: "start" }, { lane: "committed" });
-  expect(writes.map((write) => write.args[1])).toEqual([
-    { stage: "committed" },
-  ]);
-  // Start now and Waiting catch a card let go over them, with no label: it goes back, unwritten.
-  for (const lane of ["start", "waiting"])
-    expect(drops.targets.get(`review-lane:${lane}`)).toMatchObject({
-      disabled: false,
-      data: { stage: undefined },
-    });
-  const passport = (await load()).plan.tasks.find(
-    (task) => task.id === "passport",
-  )!;
-  await drop({ task: passport, lane: "start" }, { lane: "start" });
-  const venue = (await load()).plan.tasks.find((task) => task.id === "venue")!;
-  await drop({ task: venue, lane: "waiting" }, { lane: "waiting" });
-  expect(writes).toHaveLength(1);
-  expect(laneTitles("Start now")).toEqual(["Renew the passport"]);
-  expect(laneTitles("Waiting")).toContain("Hear back about the venue quote");
 });
 
 /** Two steps of the committed research check-in: one waits, one should start. */
@@ -584,7 +542,7 @@ function withResearchSteps(
         ...outline,
         id: "reply",
         title: "Hear back from the reviewer",
-        labels: ["waiting"],
+        planningFlags: ["waiting"],
       },
       {
         ...outline,
@@ -608,7 +566,7 @@ it("writes nothing for a step dropped into its outcome's lane, where it would co
   const step = async (id: string) =>
     (await actions.load()).plan.tasks.find((task) => task.id === id)!;
   expect(laneTitles("Waiting")).toContain("Hear back from the reviewer");
-  // With Committed's label it would still be a step of the research card, so it would still wait.
+  // Committed, it would still be a step of the research card, so it would still wait.
   await drop(
     { task: await step("reply"), lane: "waiting" },
     { lane: "committed" },
@@ -634,29 +592,11 @@ it("writes nothing for a step dropped into its outcome's lane, where it would co
   expect(laneTitles("Waiting")).not.toContain("Hear back from the reviewer");
 });
 
-it("writes nothing for a step that should start dropped into its outcome's lane without the active label", async () => {
-  const actions = createPrototype();
-  withResearchSteps(actions, (data) => {
-    data.plan.availableLabels = data.plan.availableLabels.filter(
-      (label) => label.label !== "active",
-    );
-  });
-  const writes = hold(actions, "updateTask");
-  await mountPlan(actions);
-  const slides = (await actions.load()).plan.tasks.find(
-    (task) => task.id === "slides",
-  )!;
-  await drop({ task: slides, lane: "start" }, { lane: "committed" });
-  expect(writes).toHaveLength(0);
-  expect(laneTitles("Start now")).toEqual(["Draft the check-in slides"]);
-});
-
-/** The account has a label named parked, so Review has its Parked lane; `change` edits each read. */
+/** `change` edits each read. */
 function withParked(actions: PlusActions, change?: (data: PlusData) => void) {
   const load = actions.load.bind(actions);
   vi.spyOn(actions, "load").mockImplementation(async (week) => {
     const data = await load(week);
-    data.plan.availableLabels.push({ id: "synthetic-parked", label: "parked" });
     change?.(data);
     return data;
   });
@@ -671,7 +611,7 @@ it("sets a card aside by dragging it into Parked, and takes one out into a stage
     (await actions.load()).plan.tasks.find((item) => item.id === id)!;
   expect(laneTitles("Parked")).toEqual(["Plan a small balcony garden"]);
   await drop({ task: await task("tools"), lane: "weekly" }, { lane: "parked" });
-  // The set-aside label alone: Todofy takes the planning labels off with it.
+  // Set aside alone: Todofy takes the stage off with it.
   expect(writes.map((write) => write.args[1])).toEqual([{ parked: true }]);
   const card = within(screen.getByRole("region", { name: "Parked" }))
     .getByText("Try the new charting library")
@@ -683,7 +623,7 @@ it("sets a card aside by dragging it into Parked, and takes one out into a stage
     "Plan a small balcony garden",
     "Try the new charting library",
   ]);
-  // Out of Parked into a stage lane: that stage, and the label goes.
+  // Out of Parked into a stage lane: that stage, and no longer set aside.
   await drop(
     { task: await task("garden"), lane: "parked" },
     { lane: "monthly" },
@@ -691,7 +631,10 @@ it("sets a card aside by dragging it into Parked, and takes one out into a stage
   expect(writes[1]!.args[1]).toEqual({ stage: "monthly", parked: false });
   expect(laneTitles("Month")).toContain("Plan a small balcony garden");
   await act(() => writes[1]!.confirm());
-  expect((await task("garden")).labels).toEqual(["home", "candiate"]);
+  expect(await task("garden")).toMatchObject({
+    explicitStage: "monthly",
+    planningFlags: [],
+  });
   // Waiting takes no drops, from Parked as from anywhere.
   await drop(
     { task: await task("tools"), lane: "parked" },
@@ -704,7 +647,9 @@ it("sets a card aside by dragging it into Parked, and takes one out into a stage
 it("writes nothing for a parked step dropped into its outcome's lane, where it would be a step again", async () => {
   const actions = createPrototype();
   withParked(actions, (data) => {
-    data.plan.tasks.find((task) => task.id === "outline")!.labels = ["parked"];
+    data.plan.tasks.find((task) => task.id === "outline")!.planningFlags = [
+      "parked",
+    ];
   });
   const writes = hold(actions, "updateTask");
   await mountPlan(actions);

@@ -1,4 +1,3 @@
-import type { TaskDestination } from "./destination";
 import { useEffect, useRef, useState } from "react";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
 import {
@@ -101,7 +100,6 @@ export function LeadSelect({
 }
 
 export interface TaskEditorProps {
-  destination: TaskDestination;
   task: PlanningTask;
   tasks: PlanningTask[];
   /** Every dependency, for the "Depends on" section. */
@@ -115,8 +113,6 @@ export interface TaskEditorProps {
   todayTaskIds: readonly string[];
   /** The account's today, for the deadline's status. */
   today: string;
-  /** Whether this source supports marking a task in progress. */
-  canMarkActive: boolean;
   addFocus: (id: string) => void;
   onOpenTask: (id: string) => void;
   /** Opens a task the "Depends on" section names; its Todoist page (onOpenTask) when absent. */
@@ -125,7 +121,6 @@ export interface TaskEditorProps {
 }
 
 export function TaskEditor({
-  destination,
   task,
   tasks,
   dependencies,
@@ -136,13 +131,12 @@ export function TaskEditor({
   actions,
   todayTaskIds,
   today,
-  canMarkActive,
   addFocus,
   onOpenTask,
   onOpenDependency,
   onClose,
 }: TaskEditorProps) {
-  const text = words(language, destination.name);
+  const text = words(language);
   const [lines, setLines] = useState("");
   const [minutes, setMinutes] = useState("");
   // Only edited fields have drafts. Everything else follows the refreshed task.
@@ -607,7 +601,7 @@ export function TaskEditor({
           {text.save}
         </button>
         {/* Each click saves the progress choice through the current source. */}
-        {task.deadline && canMarkActive && (
+        {task.deadline && (
           <button
             className="plus-button"
             disabled={busy}

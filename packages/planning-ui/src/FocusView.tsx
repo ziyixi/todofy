@@ -51,9 +51,7 @@ export function FocusView({
   onTimer,
 }: Props) {
   const text = words(language);
-  const [targetSeconds, setTargetSeconds] = useState(
-    plan.nativePlanning ? 25 * 60 : 0,
-  );
+  const [targetSeconds, setTargetSeconds] = useState(25 * 60);
   const byId = taskIndex(plan.tasks);
   const queue = focus.taskIds.filter(
     (id) => !focus.completedTaskIds.includes(id),
@@ -87,7 +85,7 @@ export function FocusView({
             {unknown} {text.unknown.toLowerCase()}
           </span>
         )}
-        {queue.length > 0 && plan.nativePlanning && (
+        {queue.length > 0 && (
           <label className="plus-focus-duration">
             {language === "zh" ? "计时" : "Timer"}
             <select
@@ -140,7 +138,7 @@ export function FocusView({
                 pending?.has(pendingStep(focus.date, id)),
               )}
               onTimer={(action, taskId) =>
-                action === "start" && plan.nativePlanning
+                action === "start"
                   ? onTimer(action, taskId, targetSeconds)
                   : onTimer(action, taskId)
               }

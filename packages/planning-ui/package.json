@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Shared Plan, Focus and Mail UI for Tasks and Todoist Plus.",
+  "description": "Plan, Focus and Mail categories UI for Tasks.",
   "engines": {
     "node": ">=26"
   },
@@ -13,7 +13,6 @@
     "./dependencies": "./src/dependencies.ts",
     "./App": "./src/App.tsx",
     "./FocusView": "./src/FocusView.tsx",
-    "./mailbox.css": "./src/mailbox.css",
     "./plan-updates": "./src/plan-updates.ts",
     "./PlanningWeek": "./src/PlanningWeek.tsx",
     "./styles.css": "./src/styles.css",
@@ -27,7 +26,6 @@
     "./weekly-review": "./src/weekly-review.ts",
     "./WeeklyReview": "./src/WeeklyReview.tsx",
     "./drag-announcements": "./src/drag-announcements.ts",
-    "./Mailbox": "./src/Mailbox.tsx",
     "./api": "./src/api.ts",
     "./model": "./src/model.ts",
     "./PlanView": "./src/PlanView.tsx",
@@ -41,8 +39,6 @@
     "./TaskBreadcrumb": "./src/TaskBreadcrumb.tsx",
     "./domain": "./src/domain.ts",
     "./plan-view-state": "./src/plan-view-state.ts",
-    "./BoardLabels": "./src/BoardLabels.tsx",
-    "./destination": "./src/destination.ts",
     "./TaskEditor": "./src/TaskEditor.tsx",
     "./planning-board.css": "./src/planning-board.css",
     "./PlanningCalendar": "./src/PlanningCalendar.tsx",

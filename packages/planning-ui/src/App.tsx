@@ -1,4 +1,3 @@
-import type { TaskDestination } from "./destination";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
@@ -6,18 +5,15 @@ import {
   Pause,
   Play,
   RefreshCw,
-  Settings,
   Square,
 } from "lucide-react";
 import { displayedTitle, elapsed, taskIndex } from "./domain";
-import { canMarkActive } from "./deadlines";
 import { droppedText, releasedText, unsettled } from "./dependencies";
 import { words } from "./i18n";
 import { readableDate, weekLabel } from "./PlanningCalendar";
 import {
   applyConfirmed,
   pendingTask,
-  remapsTasks,
   REREAD_AFTER_MS,
   rereadsAfter,
   withNextWeek,
@@ -26,9 +22,7 @@ import { Elapsed } from "./StatusMarks";
 import { PlanView } from "./PlanView";
 import { FocusView } from "./FocusView";
 import { TaskEditor } from "./TaskEditor";
-import { BoardLabels } from "./BoardLabels";
 import { WeeklyGoals } from "./WeeklyGoals";
-import { Mailbox } from "./Mailbox";
 import { localDate } from "./mail";
 import type { PlanViewPatch, PlanViewState } from "./plan-view-state";
 import type {
@@ -44,7 +38,6 @@ import type {
 } from "./model";
 
 export interface PlanningAppProps {
-  destination: TaskDestination;
   actions: PlusActions;
   view: View;
   language: Language;
@@ -55,6 +48,8 @@ export interface PlanningAppProps {
   /** A confirmed task write outside this planning surface requires a fresh snapshot. */
   refreshRevision?: number;
   onViewChange?: (view: View) => void;
+  /** The weekly review's mail line opens the host's Mail page. */
+  onOpenMail?: () => void;
   /** Data from an earlier visit, shown at once while it is read again in the background. */
   snapshot?: PlusSnapshot;
   /** The last confirmed data, or undefined once a remembered board is dropped. */
@@ -66,7 +61,6 @@ export interface PlanningAppProps {
   onPlanView?: (patch: PlanViewPatch) => void;
 }
 export function App({
-  destination,
   actions,
   view,
   language,
@@ -76,6 +70,7 @@ export function App({
   externalTaskId,
   refreshRevision,
   onViewChange,
+  onOpenMail,
   snapshot,
   onSnapshot,
   review,
@@ -113,21 +108,19 @@ export function App({
   // Confirm-first writes queued or running; they disable write controls.
   const [waiting, setWaiting] = useState(0);
   // Shown data that needs a complete read before it is written: a remembered snapshot, which
-  // may predate a completion or midnight, and every task etag after a new label mapping.
+  // may predate a completion or midnight.
   const [stale, setStale] = useState(Boolean(snapshot));
   const remembered = useRef(Boolean(snapshot));
   const busy = waiting > 0 || stale;
   const [weekLoading, setWeekLoading] = useState(false);
   const [reading, setReading] = useState(0);
   // One queue runs every write in order: FlowDay queue updates keep the last write without an
-  // etag, and a later Todoist write needs the etag an earlier one returns. A failure advances
+  // etag, and a later task write needs the etag an earlier one returns. A failure advances
   // the epoch, which drops the writes queued behind it.
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const writes = useRef({ queued: 0, settled: 0, epoch: 0 });
   const rereadAfterWrites = useRef(false);
   const loadedAt = useRef(snapshot?.readAt ?? 0);
-  // The same time as state: the Mailbox asks Todofy about the mail again after each complete read.
-  const [readAt, setReadAt] = useState(loadedAt.current);
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
   // Focus's quiet line opens Plan at Start now.
   const [showStart, setShowStart] = useState(false);
@@ -135,7 +128,7 @@ export function App({
   // Confirmed completions stay visible but disabled until a re-read shows the result.
   const [completing, setCompleting] = useState<ReadonlySet<string>>(new Set());
   const dialog = useRef<HTMLDialogElement>(null);
-  const text = words(language, destination.name);
+  const text = words(language);
   // A confirmed planning write on Sunday also changes next week's choices, which only ReadPlan lists.
   const planActions = useMemo<PlusActions>(
     () => ({
@@ -209,7 +202,6 @@ export function App({
       reads.current.shown = read;
       if (!displayedWeek.current) displayedWeek.current = next.plan.week;
       loadedAt.current = Date.now();
-      setReadAt(loadedAt.current);
       remembered.current = false;
       setConfirmed((current) =>
         current && request !== weekRequest.current
@@ -263,8 +255,6 @@ export function App({
           if (epoch !== writes.current.epoch) return false;
           const result = await operation();
           setConfirmed((current) => current && applyConfirmed(current, result));
-          // Every task etag changed, so writes wait for the re-read that follows.
-          if (remapsTasks(result)) setStale(true);
           reread = rereadsAfter(result);
           return true;
         } catch (failure) {
@@ -459,7 +449,7 @@ export function App({
     const requestId = id;
     return run(async () => {
       await actions.completeTask(task, requestId, flowDate);
-      // Todoist may advance a recurring task, so only the following re-read shows the result.
+      // Tasks may advance a recurring task, so only the following re-read shows the result.
       completionIds.current.delete(task.id);
       setCompleting((current) => new Set(current).add(task.id));
     });
@@ -486,12 +476,8 @@ export function App({
   );
   const timerSettling = Boolean(timerTask && completing.has(timerTask.id));
   function refresh() {
-    if (error.includes("Extension updated. Reload Todoist to continue."))
-      window.location.reload();
-    else {
-      setError("");
-      void revalidate();
-    }
+    setError("");
+    void revalidate();
   }
   // Above every page's content: what failed, and what setup still needs.
   const notices = (
@@ -566,27 +552,6 @@ export function App({
       )}
     </aside>
   );
-  if (view === "mailbox")
-    return (
-      <div className="plus-root plus-root-mailbox">
-        <Mailbox
-          destination={destination}
-          data={data}
-          readAt={readAt}
-          language={language}
-          busy={busy || !data?.plan.configured}
-          pending={pendingCards}
-          run={run}
-          actions={actions}
-          refreshing={Boolean(waiting || reading)}
-          onRefresh={refresh}
-          onSettings={onSettings}
-          notices={notices}
-          failed={Boolean(error)}
-        />
-        {timerBar}
-      </div>
-    );
   return (
     <div className={`plus-root plus-root-${view}`}>
       <header className="plus-page-header">
@@ -614,15 +579,6 @@ export function App({
               className={waiting || weekLoading || reading ? "plus-spin" : ""}
             />
           </button>
-          {data && !data.plan.nativePlanning && (
-            <button
-              className="plus-icon"
-              aria-label={text.boardLabels}
-              onClick={() => setSelectedId("board-labels")}
-            >
-              <Settings size={17} />
-            </button>
-          )}
         </div>
       </header>
       {notices}
@@ -658,15 +614,10 @@ export function App({
                 run={run}
                 actions={planActions}
                 editTask={openTask}
-                onLabels={
-                  data.plan.nativePlanning
-                    ? undefined
-                    : () => setSelectedId("board-labels")
-                }
                 completeReview={(task) => complete(task, "")}
                 dependencyNotices={dependencyNotices}
                 onReviewShown={onReviewShown}
-                onOpenMailbox={() => onViewChange?.("mailbox")}
+                onOpenMail={onOpenMail}
                 reviewing={review}
                 planView={planView}
                 onPlanView={onPlanView}
@@ -711,22 +662,8 @@ export function App({
           }
         }}
       >
-        {selectedId === "board-labels" && data && !data.plan.nativePlanning && (
-          <BoardLabels
-            taskAppName={destination.name}
-            plan={data.plan}
-            language={language}
-            busy={busy}
-            onSave={(labels) =>
-              run(() => actions.updateLabels(labels, data.plan.etag))
-            }
-            onClose={() => dialog.current?.close()}
-            onConnection={onSettings}
-          />
-        )}
         {selected && data && (
           <TaskEditor
-            destination={destination}
             // Once the drag settles, the fields show what the server kept.
             key={`${selected.id}:${selectedPending}`}
             task={selected}
@@ -739,7 +676,6 @@ export function App({
             actions={planActions}
             todayTaskIds={data.focus.taskIds}
             today={data.focus.date}
-            canMarkActive={canMarkActive(data.plan)}
             addFocus={(id) => void addFocus(id, data.focus)}
             onOpenTask={onOpenTask}
             onOpenDependency={setSelectedId}

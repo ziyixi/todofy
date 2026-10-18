@@ -17,14 +17,13 @@ import {
 } from "../src/planning-outcomes";
 import { boardLanes } from "../src/review-lanes";
 import {
-  inboxToClarify,
   oldestUntouched,
   SOMEDAY_LABELS,
   unscheduledCommitments,
   WAITING_LABELS,
   withoutLead,
 } from "../src/weekly-review";
-import { TEST_DESTINATION, createPrototype } from "./fixture";
+import { createPrototype } from "./fixture";
 import type { PlanState, PlanningTask } from "../src/model";
 
 const planViewRenders = vi.hoisted(() => ({ count: 0 }));
@@ -135,13 +134,11 @@ const laneOrders = Object.fromEntries(
  */
 function planRender(tasks: PlanningTask[]) {
   const outcomes = planningOutcomes(tasks, labels);
-  const availableLabels = [{ id: "parked", label: "parked" }];
   boardLanes(
     {
       tasks,
       managedLabels: labels,
       dependencies: [],
-      availableLabels,
       laneOrders,
     },
     "2026-10-13",
@@ -163,14 +160,11 @@ function planRender(tasks: PlanningTask[]) {
   const plan = {
     tasks,
     managedLabels: labels,
-    availableLabels,
     laneOrders,
-    inboxProjectId: "synthetic",
     reviewTaskId: "",
   } as unknown as PlanState;
   oldestUntouched(tasks, WAITING_LABELS);
   oldestUntouched(tasks, SOMEDAY_LABELS);
-  inboxToClarify(plan);
   withoutLead(tasks);
   unscheduledCommitments(plan, []);
 }
@@ -190,7 +184,6 @@ it("ticks a running timer without re-rendering the planning board", async () => 
   const actions = createPrototype();
   const props = {
     actions,
-    destination: TEST_DESTINATION,
     language: "en" as const,
     onOpenTask: () => {},
     onSettings: () => {},

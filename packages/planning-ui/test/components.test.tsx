@@ -10,7 +10,7 @@ import {
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { PlanView } from "../src/PlanView";
-import { TEST_DESTINATION, createPrototype } from "./fixture";
+import { createPrototype } from "./fixture";
 import type { FlowDayPlan, PlusData } from "../src/model";
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () {
@@ -27,7 +27,6 @@ it("commits a candidate in one action and moves it into the committed group", as
   const load = vi.spyOn(actions, "load");
   render(
     <App
-      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"
@@ -98,7 +97,6 @@ it("stopping a session preserves the task and queue; checkbox completes it", asy
   const load = vi.spyOn(actions, "load");
   const props = {
     actions,
-    destination: TEST_DESTINATION,
     language: "en" as const,
     onOpenTask: () => {},
     onSettings: () => {},
@@ -137,7 +135,6 @@ it("retries uncertain completion with the same request identity and keeps failed
   actions.completeTask = complete;
   render(
     <App
-      destination={TEST_DESTINATION}
       actions={actions}
       view="focus"
       language="en"
@@ -177,7 +174,6 @@ it("settles an active task using the timer’s original flow day after midnight"
   actions.completeTask = complete;
   render(
     <App
-      destination={TEST_DESTINATION}
       actions={actions}
       view="focus"
       language="en"
@@ -201,7 +197,6 @@ it("keeps a confirmed refresh when older duplicate week reads finish late", asyn
   );
   render(
     <App
-      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"
@@ -243,7 +238,6 @@ it("keeps the latest week after navigating away and back while an older full ref
   let finishRefresh!: (value: PlusData) => void;
   render(
     <App
-      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"
@@ -288,7 +282,6 @@ it("persists and clears an existing step's estimate through the task editor", as
   const actions = createPrototype();
   render(
     <App
-      destination={TEST_DESTINATION}
       actions={actions}
       view="focus"
       language="en"

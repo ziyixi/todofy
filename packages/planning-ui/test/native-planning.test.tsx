@@ -10,12 +10,11 @@ import { create } from "@ziyixi/proto/protobuf";
 import { PlanningTaskSchema } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 import { createPlanningActions, planningTask } from "../src/api";
 import { hasPlanningFlag } from "../src/domain";
-import { canMarkActive, deadlineState } from "../src/deadlines";
-import { canPark, isDateCandidate } from "../src/planning-outcomes";
+import { deadlineState } from "../src/deadlines";
+import { isDateCandidate } from "../src/planning-outcomes";
 import { withStage } from "../src/plan-updates";
 import { boardLanes } from "../src/review-lanes";
 import { quickTasks, waits } from "../src/weekly-review";
-import { categoryLabels, touched } from "../src/mail";
 import { TaskEditor } from "../src/TaskEditor";
 import { WeeklyReview } from "../src/WeeklyReview";
 import type {
@@ -46,17 +45,11 @@ const task: PlanningTask = {
 };
 const plan: PlanState = {
   tasks: [task],
-  nativePlanning: true,
   week: "2026-10-12",
   timezone: "UTC",
   configured: true,
-  hiddenFilterIds: [],
   flowdayUrl: "",
-  managedLabelNames: [],
   managedLabels: [],
-  etag: "plan",
-  availableLabels: [],
-  inboxProjectId: "inbox",
   reviewTaskId: "",
   nextWeekTaskIds: [],
   dependencies: [],
@@ -79,8 +72,6 @@ it("keeps ordinary tags separate from native planning flags, including an empty 
     true,
   );
   expect(deadlineState(task, "2026-10-17")?.kind).toBe("window");
-  expect(canMarkActive(plan)).toBe(true);
-  expect(canPark(plan)).toBe(true);
 });
 
 it("puts native states in the existing lanes and keeps tags unchanged on a stage drag", () => {
@@ -128,37 +119,6 @@ it("puts native states in the existing lanes and keeps tags unchanged on a stage
   ).toBe(false);
 });
 
-it("keeps mail tasks with native planning choices out of bulk deletion", () => {
-  const context = {
-    tasks: [task],
-    days: [],
-    dependencies: [],
-    pending: new Set<string>(),
-    focus: {
-      date: "2026-10-17",
-      taskIds: [],
-      completedTaskIds: [],
-      timerEtag: "0",
-      estimates: {},
-      flowTasks: {},
-    },
-  };
-  const untouched = {
-    ...task,
-    labels: [],
-    deadline: "",
-    mustStart: false,
-    leadDays: 0,
-  };
-  expect(touched(untouched, context)).toBe(false);
-  expect(touched({ ...untouched, explicitStage: "weekly" }, context)).toBe(
-    true,
-  );
-  expect(touched({ ...untouched, planningFlags: ["waiting"] }, context)).toBe(
-    true,
-  );
-});
-
 it("edits native flags directly and shows saved stage rather than a date-derived stage", async () => {
   const updateTask = vi
     .fn()
@@ -169,11 +129,6 @@ it("edits native flags directly and shows saved stage rather than a date-derived
   };
   render(
     <TaskEditor
-      destination={{
-        name: "Tasks",
-        taskHref: (id) => `/tasks/${id}`,
-        projectHref: (id) => `/projects/${id}`,
-      }}
       task={{ ...task, stage: "weekly" }}
       tasks={[task]}
       dependencies={[]}
@@ -183,7 +138,6 @@ it("edits native flags directly and shows saved stage rather than a date-derived
       run={run}
       today="2026-10-17"
       todayTaskIds={[]}
-      canMarkActive
       addFocus={vi.fn()}
       onOpenTask={vi.fn()}
     />,
@@ -215,11 +169,7 @@ it("sends native flag writes in the existing update contract", async () => {
       },
     });
   };
-  const actions = createPlanningActions(
-    { plus: send, flowday: send },
-    undefined,
-    "tasks",
-  );
+  const actions = createPlanningActions({ plus: send, flowday: send });
   const updated = await actions.updateTask(task, { quick: true, onHold: true });
   expect(JSON.parse(calls[0]!.body!)).toMatchObject({
     quick: true,
@@ -229,25 +179,12 @@ it("sends native flag writes in the existing update contract", async () => {
   expect(updated.labels).toEqual([]);
 });
 
-it("offers ordinary native tags for optional mail shortcuts without interpreting their names as flags", () => {
-  const ordinary = { id: "ordinary-active", label: "active" };
-  expect(
-    categoryLabels(
-      { ...plan, availableLabels: [ordinary] },
-      { work: "Work", personal: "Personal" },
-    ),
-  ).toEqual([{ id: ordinary.id, name: "active" }]);
-  expect(hasPlanningFlag({ ...task, labels: ["active"] }, "active")).toBe(
-    false,
-  );
-});
-
 it("shows uncreated native Mail in weekly review and opens Mail without a task identity", () => {
   const openMail = vi.fn();
   const updateTask = vi.fn();
   render(
     <WeeklyReview
-      plan={{ ...plan, tasks: [], inboxProjectId: "", mailboxPendingCount: 3 }}
+      plan={{ ...plan, tasks: [], mailboxPendingCount: 3 }}
       days={[]}
       today="2026-10-17"
       language="en"
@@ -260,7 +197,7 @@ it("shows uncreated native Mail in weekly review and opens Mail without a task i
       onShowWaiting={vi.fn()}
       onPlanSteps={vi.fn()}
       completeReview={vi.fn()}
-      onOpenMailbox={openMail}
+      onOpenMail={openMail}
       onClose={vi.fn()}
     />,
   );
@@ -316,11 +253,6 @@ it("exposes native options without an independent blocked checkbox and accepts a
   cleanup();
   render(
     <TaskEditor
-      destination={{
-        name: "Tasks",
-        taskHref: (id) => `/tasks/${id}`,
-        projectHref: (id) => `/projects/${id}`,
-      }}
       task={{ ...task, kind: "task" }}
       tasks={[task]}
       dependencies={[]}
@@ -330,7 +262,6 @@ it("exposes native options without an independent blocked checkbox and accepts a
       run={vi.fn()}
       today="2026-10-17"
       todayTaskIds={[]}
-      canMarkActive={false}
       addFocus={vi.fn()}
       onOpenTask={vi.fn()}
     />,
@@ -362,11 +293,6 @@ it("exposes native options without an independent blocked checkbox and accepts a
 
 it("keeps grouped native flags checked and disabled without local draft state", () => {
   const props = {
-    destination: {
-      name: "Tasks",
-      taskHref: (id: string) => `/tasks/${id}`,
-      projectHref: (id: string) => `/projects/${id}`,
-    },
     task: {
       ...task,
       kind: "step" as const,
@@ -380,7 +306,6 @@ it("keeps grouped native flags checked and disabled without local draft state", 
     run: vi.fn(),
     today: "2026-10-17",
     todayTaskIds: [],
-    canMarkActive: false,
     addFocus: vi.fn(),
     onOpenTask: vi.fn(),
   };

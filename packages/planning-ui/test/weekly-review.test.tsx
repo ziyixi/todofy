@@ -12,7 +12,6 @@ import { App } from "../src/App";
 import { fakeActions } from "./transport";
 import { PlanView, type PlanViewProps } from "../src/PlanView";
 import {
-  inboxToClarify,
   isoWeek,
   oldestUntouched,
   unscheduledCommitments,
@@ -25,7 +24,7 @@ import {
   type PlanViewPatch,
   type PlanViewState,
 } from "../src/plan-view-state";
-import { TEST_DESTINATION, createPrototype } from "./fixture";
+import { createPrototype } from "./fixture";
 import type { PlanningTask, PlusActions } from "../src/model";
 
 // The fixture's week is 2026-10-12 (ISO 2026-W42); "now" is its Tuesday.
@@ -79,7 +78,6 @@ function renderApp(
 ) {
   render(
     <App
-      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"
@@ -116,18 +114,6 @@ it("derives the review lines from loaded data only", async () => {
     ),
   ).toEqual(["venue", "access", "unknown"]);
   expect(untouchedDays(unknown)).toBeUndefined();
-  // Top-level mail tasks without a stage; the review task and planned or waiting tasks are not.
-  const mail = plan.tasks.find((task) => task.id === "mail-notes")!;
-  plan.tasks.push(
-    { ...mail, id: "mail-step", parentId: "mail-notes" },
-    { ...mail, id: "mail-weekly", stage: "weekly" },
-    { ...mail, id: "mail-waiting", labels: ["waiting"] },
-  );
-  expect(inboxToClarify(plan).map((task) => task.id)).toEqual([
-    "mail-register",
-    "mail-notes",
-  ]);
-  expect(inboxToClarify({ ...plan, inboxProjectId: "" })).toEqual([]);
   // Notes has no step and Desk's step is not in any of the seven days.
   expect(unscheduledCommitments(plan, days).map((task) => task.id)).toEqual([
     "notes",
@@ -143,6 +129,7 @@ it("draws waiting tasks as cards in the lane left of the stage lanes, oldest unt
   );
   expect(lanes.slice(lanes.indexOf("Waiting"))).toEqual([
     "Waiting",
+    "Parked",
     "Quarter",
     "Month",
     "Week",
@@ -171,10 +158,6 @@ it("draws waiting tasks as cards in the lane left of the stage lanes, oldest unt
 it("keeps unclarified mail as the first line only, never as cards on the board", async () => {
   const data = await props();
   render(<PlanView {...data} />);
-  expect(inboxToClarify(data.plan).map((task) => task.id)).toEqual([
-    "mail-register",
-    "mail-notes",
-  ]);
   for (const title of [
     "Fwd: Conference registration opens",
     "Re: Shared notes for Friday",
@@ -295,24 +278,24 @@ it("counts the five review lines and keeps ticks through Plan's view, for this a
     stored = mergePlanView(stored, patch);
   });
   const data = await props();
-  const onOpenMailbox = vi.fn();
+  const onOpenMail = vi.fn();
   const view = render(
     <PlanView
       {...data}
       planView={stored}
       onPlanView={onPlanView}
-      onOpenMailbox={onOpenMailbox}
+      onOpenMail={onOpenMail}
     />,
   );
   let review = openReview();
   expect(line(review, "Mail to clarify").textContent).toContain("2");
-  // Open shows Plus's Mailbox, which lists this line's mail, rather than the native project.
+  // Open shows the host's Mail page, which lists this line's mail.
   fireEvent.click(
     within(line(review, "Mail to clarify")).getByRole("button", {
       name: "Open",
     }),
   );
-  expect(onOpenMailbox).toHaveBeenCalledOnce();
+  expect(onOpenMail).toHaveBeenCalledOnce();
   expect(
     within(line(review, "Mail to clarify")).queryByRole("link"),
   ).toBeNull();
@@ -431,43 +414,27 @@ it("moves an on-hold task into this month with its stage alone", async () => {
   expect(update.mock.calls[0]![1]).toEqual({ stage: "monthly" });
 });
 
-it("counts neither a parked task as waiting nor a parked commitment as unplanned, while Parked exists", async () => {
+it("counts neither a parked task as waiting nor a parked commitment as unplanned", async () => {
   const data = await props();
   const task = (id: string) => data.plan.tasks.find((item) => item.id === id)!;
   // A waiting task and a commitment set aside as well.
-  task("venue").labels = [...task("venue").labels, "parked"];
-  task("notes").labels = ["committed", "parked"];
-  const counts = () => {
-    const review = openReview();
-    const result = [
-      line(review, "Waiting").textContent,
-      line(review, "Commitments not planned").textContent,
-    ];
-    fireEvent.click(screen.getByRole("button", { name: "Weekly review" }));
-    return result;
-  };
-  const view = render(<PlanView {...data} />);
-  // Without an account label named parked, the label sets nothing aside.
-  expect(counts()).toEqual([
-    "Waiting2oldest untouched 11 daysShow",
-    "Commitments not planned2Plan steps",
-  ]);
-  view.unmount();
-  const parkable = {
-    ...data.plan,
-    availableLabels: [
-      ...data.plan.availableLabels,
-      { id: "synthetic-parked", label: "parked" },
-    ],
-  };
-  render(<PlanView {...data} plan={parkable} />);
-  expect(counts()).toEqual([
+  task("venue").planningFlags = [
+    ...(task("venue").planningFlags ?? []),
+    "parked",
+  ];
+  task("notes").planningFlags = ["parked"];
+  render(<PlanView {...data} />);
+  const review = openReview();
+  expect([
+    line(review, "Waiting").textContent,
+    line(review, "Commitments not planned").textContent,
+  ]).toEqual([
     "Waiting1oldest untouched 3 daysShow",
     "Commitments not planned1Plan steps",
   ]);
-  expect(unscheduledCommitments(parkable, data.days).map((t) => t.id)).toEqual([
-    "desk",
-  ]);
+  expect(unscheduledCommitments(data.plan, data.days).map((t) => t.id)).toEqual(
+    ["desk"],
+  );
 });
 
 it("jumps to the Waiting lane, and to the Add steps input of Week's first unplanned commitment", async () => {
@@ -586,7 +553,7 @@ it("keeps this week's commitments for next week only on Sunday, when clicked", a
   fireEvent.click(editor.getByRole("button", { name: "Close" }));
   const review = openReview();
   const next = within(line(review, "Next week's commitments and goals"));
-  expect(next.getByText(/chosen in Plus on Sunday/u)).toBeTruthy();
+  expect(next.getByText(/chosen in Plan on Sunday/u)).toBeTruthy();
   // Release, research, notes and desk are this week's; the charting library is kept.
   fireEvent.click(
     next.getByRole("button", { name: "Choose commitments to keep (4)" }),
@@ -681,7 +648,6 @@ it("completes the review task only when Finish review is clicked, outside Focus"
   const complete = vi.spyOn(actions, "completeTask");
   render(
     <App
-      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"
@@ -714,7 +680,7 @@ it("completes the review task only when Finish review is clicked, outside Focus"
   );
 });
 
-it("maps Todoist's last change and the review IDs from the API", async () => {
+it("maps a task's last change and the review IDs from the API", async () => {
   const api = fakeActions(async (input) => {
     const path = new URL(String(input)).pathname;
     if (path === "/api/plus/v1/plan:read")
@@ -724,7 +690,6 @@ it("maps Todoist's last change and the review IDs from the API", async () => {
           today: "2026-10-13",
           timezone: "UTC",
           enabled: true,
-          inbox_project_id: "mail",
           review_task_id: "review",
           next_week_task_ids: ["kept"],
         },
@@ -746,11 +711,10 @@ it("maps Todoist's last change and the review IDs from the API", async () => {
     return Response.json({ name: path.slice(path.indexOf("flows/")) });
   });
   const { plan } = await api.load();
-  expect([
-    plan.inboxProjectId,
-    plan.reviewTaskId,
-    plan.nextWeekTaskIds,
-  ]).toEqual(["mail", "review", ["kept"]]);
+  expect([plan.reviewTaskId, plan.nextWeekTaskIds]).toEqual([
+    "review",
+    ["kept"],
+  ]);
   expect(plan.tasks.map((task: PlanningTask) => task.updatedAt)).toEqual([
     "2026-10-01T16:00:00.000Z",
     undefined,

@@ -1,24 +1,19 @@
 import {
   createHttpClient,
   type HttpSend,
-  HttpResponseError,
   RpcStatusError,
 } from "@ziyixi/proto/http-client";
 import {
   PlusService,
   type LaneOrder as ApiLaneOrder,
-  type MailCategory as ApiMailCategory,
   type Plan as ApiPlan,
   type PlanningTask as ApiPlanningTask,
   type TaskDependency as ApiTaskDependency,
-  type Priority,
   type WeeklyBet as ApiWeeklyBet,
 } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 import {
   CommandTimerRequest_Action,
   FlowDayUiService,
-  SyncTasksResponse_State,
-  SyncTasksRequest_Mode,
 } from "@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb";
 import {
   TimerSession_State,
@@ -27,15 +22,11 @@ import {
 } from "@ziyixi/proto/flowday/ui/v1/time_entry_pb";
 import type { Flow } from "@ziyixi/proto/flowday/ui/v1/flow_pb";
 import { BET_AREAS, BetNotSaved } from "./bets";
-import { MAIL_BATCH } from "./mail";
 import type {
   BetArea,
   FlowDayPlan,
   FocusState,
   LaneId,
-  MailCategories,
-  MailCategory,
-  MailLookup,
   PlanMetadata,
   PlanningTask,
   PlusActions,
@@ -45,31 +36,9 @@ import type {
   WeeklyBet,
 } from "./model";
 
-/** Keeps FlowDay task IDs (never titles) beyond one background worker's lifetime. */
-export interface KnownTaskStore {
-  read(): Promise<string[]>;
-  write(ids: string[]): Promise<void>;
-}
-class FlowdaySyncPendingError extends Error {}
 /** Todofy did not add a dependency; the message says why. */
 class DependencyNotAddedError extends Error {}
 
-export function publicError(error: unknown): string {
-  if (
-    error instanceof FlowdaySyncPendingError ||
-    error instanceof DependencyNotAddedError
-  )
-    return error.message;
-  // The gateway refuses an unknown or revoked extension token with a 401 Status body.
-  if (
-    (error instanceof RpcStatusError && error.status.httpStatus === 401) ||
-    (error instanceof HttpResponseError && error.httpStatus === 401)
-  )
-    return "Connection expired or revoked. Open connection settings.";
-  if (error instanceof RpcStatusError)
-    return error.status.localizedMessage?.message ?? error.status.message;
-  return "Could not confirm this operation. Refresh and try again.";
-}
 export function planningTask(task: ApiPlanningTask): PlanningTask {
   return {
     id: task.id,
@@ -122,9 +91,9 @@ function taskDependency(dependency: ApiTaskDependency): TaskDependency {
   };
 }
 /**
- * Todofy refuses a dependency the extension had allowed when another tab changed them meanwhile (a
- * cycle or the limit), and for reasons the same refusal also carries (Plus or Todoist paused or
- * blocked): the message names none of them. A task that is no longer active is said so.
+ * Todofy refuses a dependency the page had allowed when another tab changed them meanwhile (a cycle
+ * or the limit), and for reasons the same refusal also carries (planning or task writes paused): the
+ * message names none of them. A task that is no longer active is said so.
  */
 function dependencyError(error: unknown): unknown {
   if (!(error instanceof RpcStatusError)) return error;
@@ -145,37 +114,6 @@ function weeklyBet(bet: ApiWeeklyBet): WeeklyBet | undefined {
     area: bet.area as BetArea,
     text: bet.text,
     etag: bet.etag,
-  };
-}
-/** Reject references from another task store; the backend owns migration aliases. */
-function externalId(
-  ref: { provider: string; externalId: string } | undefined,
-  provider: string,
-) {
-  return ref?.provider === provider ? ref.externalId : "";
-}
-/** REQUIRED on the wire and ignored since protocol 6: filed mail always goes to the Inbox. */
-const IGNORED_DESTINATION = "inbox";
-function mailCategory(
-  category: ApiMailCategory,
-  provider: string,
-): MailCategory | undefined {
-  const labelId = externalId(category.label, provider);
-  // Priority's numbers are the domain's P1 (1) to P4 (4).
-  if (!labelId || category.priority < 1 || category.priority > 4)
-    return undefined;
-  return { id: category.id, labelId, priority: category.priority };
-}
-function mailCategories(
-  answer: {
-    categories: ApiMailCategory[];
-  },
-  provider: string,
-): Omit<MailCategories, "etag"> {
-  return {
-    categories: answer.categories.flatMap(
-      (category) => mailCategory(category, provider) ?? [],
-    ),
   };
 }
 /** The lanes Todofy keeps an order for (core/plan.py LANES). */
@@ -199,24 +137,15 @@ function planMetadata(plan: ApiPlan): PlanMetadata {
     week: plan.weekStart,
     timezone: plan.timezone,
     configured: plan.enabled,
-    ...(plan.nativePlanning ? { nativePlanning: true } : {}),
     ...(plan.mailboxPendingCount !== undefined
       ? { mailboxPendingCount: plan.mailboxPendingCount }
       : {}),
-    hiddenFilterIds: plan.hiddenFilterIds,
     flowdayUrl: plan.flowdayUrl,
-    managedLabelNames: plan.labels.map((label) => label.label),
     managedLabels: plan.labels.map((label) => ({
       role: label.role,
       id: label.id,
       label: label.label,
     })),
-    etag: plan.etag,
-    availableLabels: plan.availableLabels.map((label) => ({
-      id: label.id,
-      label: label.label,
-    })),
-    inboxProjectId: plan.inboxProjectId,
     reviewTaskId: plan.reviewTaskId,
     nextWeekTaskIds: plan.nextWeekTaskIds,
     dependencies: plan.dependencies.map(taskDependency),
@@ -286,70 +215,17 @@ function flowPlan(flow: Flow): FlowDayPlan {
   };
 }
 /**
- * Adapts the two existing owner APIs. The host supplies authentication and URL routing, and
- * `updateEstimate`: an estimate is the task's duration in the host's task store, never FlowDay's.
+ * Adapts Todofy's planning API and FlowDay's focus API for Tasks. The host supplies authentication
+ * and URL routing, and `updateEstimate`: an estimate is the task's duration in Tasks, never FlowDay's.
+ * FlowDay's queues hold any task ID; FlowDay's own page syncs its mirror of the tasks.
  */
-export function createPlanningActions(
-  transports: { plus: HttpSend; flowday: HttpSend },
-  knownStore?: KnownTaskStore,
-  provider: "todoist" | "tasks" = "todoist",
-): Omit<PlusActions, "updateEstimate"> {
+export function createPlanningActions(transports: {
+  plus: HttpSend;
+  flowday: HttpSend;
+}): Omit<PlusActions, "updateEstimate"> {
   const timerRequests = new Map<string, string>();
-  // Tasks FlowDay already has, so queue writes skip its manual Todoist sync, which FlowDay
-  // throttles to one every 30 seconds.
-  let knownFlowTasks = new Set<string>();
-  // Every task the latest complete planning read listed: Todoist had them all, so FlowDay's next
-  // manual sync imports them too, such as a second step added just before it.
-  let plannedIds: string[] = [];
-  const restored = (knownStore?.read() ?? Promise.resolve([]))
-    .then((ids) => {
-      for (const id of ids) knownFlowTasks.add(id);
-    })
-    .catch(() => {});
-  async function remember(ids: Iterable<string>, replace = false) {
-    await restored;
-    knownFlowTasks = new Set([...(replace ? [] : knownFlowTasks), ...ids]);
-    // A lost copy only costs one extra sync, so the write never delays the action.
-    void knownStore?.write([...knownFlowTasks]).catch(() => {});
-  }
   const plus = createHttpClient(PlusService, transports.plus);
   const flowday = createHttpClient(FlowDayUiService, transports.flowday);
-  async function ensureSynced(ids: string[]) {
-    // FlowDay's queue holds any task ID and needs no mirror row for it; FlowDay's own page syncs the mirror.
-    if (provider === "tasks") return;
-    await restored;
-    if (
-      ids.every(
-        (id) =>
-          knownFlowTasks.has(id) ||
-          id.startsWith("local-") ||
-          id.startsWith("__flowday_"),
-      )
-    )
-      return;
-    // Read before the sync starts: a task listed only by a later read may be newer than it.
-    const planned = plannedIds;
-    for (let page = 0; page < 10; page++) {
-      const result = await flowday.syncTasks({
-        mode: SyncTasksRequest_Mode.MANUAL,
-      });
-      if (result.state === SyncTasksResponse_State.SYNCED) {
-        await remember([...ids, ...planned]);
-        return;
-      }
-      if (result.state === SyncTasksResponse_State.THROTTLED)
-        throw new FlowdaySyncPendingError(
-          "FlowDay just synced. Wait briefly and try adding this task again.",
-        );
-      if (result.state !== SyncTasksResponse_State.PARTIAL)
-        throw new FlowdaySyncPendingError(
-          "FlowDay could not confirm this sync. Refresh and try again.",
-        );
-    }
-    throw new FlowdaySyncPendingError(
-      "FlowDay is still importing tasks. Refresh and try again.",
-    );
-  }
   async function loadPlanningTasks(): Promise<PlanningTask[]> {
     const tasks: PlanningTask[] = [];
     let pageToken = "";
@@ -357,26 +233,26 @@ export function createPlanningActions(
       const result = await plus.listPlanningTasks({ pageSize: 200, pageToken });
       tasks.push(...result.planningTasks.map(planningTask));
       pageToken = result.nextPageToken;
-      if (!pageToken) {
-        plannedIds = tasks.map((task) => task.id);
-        return tasks;
-      }
+      if (!pageToken) return tasks;
     }
     throw new Error("Task list is incomplete. Counts have not been shown.");
   }
   async function loadFlowTasks() {
     const flowTasks: FocusState["flowTasks"] = {};
     let pageToken = "";
-    // The gateway caps a FlowDay page at 100 tasks; FlowDay syncs at most 1,000 Todoist tasks plus local ones.
+    // The gateway caps a FlowDay page at 100 tasks.
     for (let page = 0; page < 20; page++) {
       const result = await flowday.listTasks({ pageSize: 100, pageToken });
       for (const task of result.tasks) {
         const id = task.name.slice("tasks/".length);
-        flowTasks[id] = {
-          title: task.title,
-          local: !task.todoistId,
-          estimatedMinutes: task.estimatedMinutes,
-        };
+        // A Tasks task's estimate is its duration (load); only FlowDay's own tasks have one here.
+        flowTasks[id] = task.todoistId
+          ? { title: task.title, local: false }
+          : {
+              title: task.title,
+              local: true,
+              estimatedMinutes: task.estimatedMinutes,
+            };
       }
       pageToken = result.nextPageToken;
       if (!pageToken) return flowTasks;
@@ -427,18 +303,9 @@ export function createPlanningActions(
         days.find((day) => day.date === plan.today) ??
         (todayFlow && flowPlan(todayFlow));
       if (!today) throw new Error("Today's planning day is missing.");
-      await remember(Object.keys(flowTasks), true);
       // A task's duration is its only estimate; FlowDay's mirror may still be catching up.
-      // Only FlowDay's local tasks keep their own estimate (flowTasks).
       const estimates: Record<string, number> = {};
-      for (const task of tasks) {
-        estimates[task.id] = task.estimatedMinutes ?? 0;
-        if (flowTasks[task.id])
-          flowTasks[task.id] = {
-            ...flowTasks[task.id]!,
-            estimatedMinutes: task.estimatedMinutes,
-          };
-      }
+      for (const task of tasks) estimates[task.id] = task.estimatedMinutes ?? 0;
       const focus: FocusState = {
         ...today,
         ...timerSnapshot(timer),
@@ -484,15 +351,6 @@ export function createPlanningActions(
       const saved = result.weeklyBet && weeklyBet(result.weeklyBet);
       if (!saved) throw new Error("The saved goal could not be read.");
       return saved;
-    },
-    async updateLabels(labels, etag) {
-      const result = await plus.updatePlanLabels({
-        labels,
-        etag,
-        requestId: crypto.randomUUID(),
-      });
-      if (!result.plan) throw new Error("The saved labels could not be read.");
-      return planMetadata(result.plan);
     },
     async createSteps(task, steps, requestId) {
       const result = await plus.appendTaskSteps({
@@ -547,7 +405,6 @@ export function createPlanningActions(
       };
     },
     async addToDay(taskId, date) {
-      await ensureSynced([taskId]);
       return editDay(date, (taskIds) =>
         taskIds.includes(taskId) ? taskIds : [...taskIds, taskId],
       );
@@ -557,7 +414,6 @@ export function createPlanningActions(
     },
     async moveTaskToDay(taskId, source, target, beforeId) {
       if (source?.date === target.date && beforeId === taskId) return [];
-      await ensureSynced([taskId]);
       let confirmedSource: FlowDayPlan | undefined;
       let destination: Flow;
       if (source && source.date !== target.date) {
@@ -622,80 +478,6 @@ export function createPlanningActions(
       });
       timerRequests.delete(key);
       return timerSnapshot(confirmed);
-    },
-    async lookupMail(taskIds) {
-      const lookup: MailLookup = { items: [], categories: [], etag: "" };
-      const batches: string[][] = [];
-      for (let start = 0; start < taskIds.length; start += MAIL_BATCH)
-        batches.push(taskIds.slice(start, start + MAIL_BATCH));
-      // At least one request: with no task to ask about, it still answers the categories.
-      for (const batch of batches.length ? batches : [[]]) {
-        const result = await plus.lookupMailItems({ taskIds: batch });
-        lookup.items.push(
-          ...result.items.flatMap((item) => {
-            const taskId = externalId(item.task, provider);
-            return taskId && item.receiveTime
-              ? [
-                  {
-                    id: item.id,
-                    taskId,
-                    brief: item.brief,
-                    receivedAt: new Date(
-                      Number(item.receiveTime.seconds) * 1000,
-                    ).toISOString(),
-                    hasSummary: item.hasSummary,
-                  },
-                ]
-              : [];
-          }),
-        );
-        // The last answer's categories: the newest, should they change between requests.
-        Object.assign(lookup, mailCategories(result, provider), {
-          etag: result.categoriesEtag,
-        });
-      }
-      return lookup;
-    },
-    async readMailSummary(id) {
-      return (await plus.readMailSummary({ id })).summary;
-    },
-    async readMailSettings() {
-      const result = await plus.readMailSettings({});
-      return { ...mailCategories(result, provider), etag: result.etag };
-    },
-    async updateMailSettings(categories, etag) {
-      const result = await plus.updateMailSettings({
-        categories: categories.map((category) => ({
-          label: { provider, externalId: category.labelId },
-          priority: category.priority as Priority,
-        })),
-        destination: { provider, externalId: IGNORED_DESTINATION },
-        etag,
-      });
-      return { ...mailCategories(result, provider), etag: result.etag };
-    },
-    async fileMail(task, category, categoriesEtag, requestId) {
-      // Without a category, Todofy only moves the task to the Inbox and ignores the categories'
-      // etag, so none is sent: a later categories edit leaves the request as it was.
-      const result = await plus.fileMailItem({
-        taskId: task.id,
-        etag: task.etag,
-        requestId,
-        categoryId: category?.id ?? "",
-        categoriesEtag: category ? categoriesEtag : "",
-      });
-      if (!result.task) throw new Error("The filed task could not be read.");
-      return {
-        ...planningTask(result.task),
-        estimatedMinutes: task.estimatedMinutes,
-      };
-    },
-    async deleteMail(taskIds, requestId) {
-      const result = await plus.deleteMailItems({ taskIds, requestId });
-      return {
-        deletedTaskIds: result.deletedTaskIds,
-        keptTaskIds: result.keptTaskIds,
-      };
     },
     async reorderTasks(taskIds, movedId, lane, requestId) {
       const result = await plus.reorderTasks({

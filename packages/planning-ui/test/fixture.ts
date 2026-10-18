@@ -1,26 +1,17 @@
 import { holds } from "../src/dependencies";
-import type { TaskDestination } from "../src/destination";
 import { BetNotSaved, betText, weeklyBet, withBets } from "../src/bets";
 import { addDays } from "../src/domain";
-import { apiPriority } from "../src/mail";
-import { STAGE_ROLES } from "../src/planning-outcomes";
 import { withLaneOrder } from "../src/plan-updates";
 import type {
   FocusState,
   FlowDayPlan,
-  MailCategories,
-  MailItem,
   PlanMetadata,
   PlanState,
+  PlanUpdate,
   PlanningTask,
   PlusActions,
 } from "../src/model";
-/** Where the components link a task or project; each host supplies its own. */
-export const TEST_DESTINATION: TaskDestination = {
-  name: "Tasks",
-  taskHref: (id) => `/?task=${encodeURIComponent(id)}`,
-  projectHref: (id) => `#/project/${encodeURIComponent(id)}`,
-};
+/** A task as Todofy lists it from Tasks: its saved stage and planning flags, no planning labels. */
 const task = (
   id: string,
   title: string,
@@ -31,6 +22,7 @@ const task = (
   parentId: "",
   projectId: "synthetic",
   labels: [],
+  planningFlags: [],
   area: "work",
   stage: "none",
   priority: 1,
@@ -41,43 +33,28 @@ const task = (
   mustStart: false,
   missingLead: false,
   ...value,
+  explicitStage: value.explicitStage ?? value.stage ?? "none",
 });
+/** The planning flags SetTaskPlan's switches set (core/native_plan.py). */
+const FLAGS: Partial<Record<keyof PlanUpdate, string>> = {
+  quick: "quick",
+  waiting: "waiting",
+  routine: "routine",
+  onHold: "onhold",
+  blocked: "blocked",
+  singleAction: "task",
+};
 export function createPrototype(
   fullBoard = false,
   today = "2026-10-13",
 ): PlusActions {
-  const roles = [
-    "office",
-    "home",
-    "committed",
-    "focus",
-    "candiate",
-    "quarter",
-    "lead_1d",
-    "lead_3d",
-    "lead_1w",
-    "lead_2w",
-    "lead_1m",
-  ];
   let plan: PlanState = {
     week: "2026-10-12",
     timezone: "America/Los_Angeles",
     configured: true,
-    hiddenFilterIds: [],
     flowdayUrl: "https://flowday.example.test",
-    managedLabelNames: [...roles],
-    managedLabels: roles.map((role) => ({
-      role,
-      id: `synthetic-${role}`,
-      label: role,
-    })),
-    etag: "synthetic-plan-1",
-    // The account's labels: the planning roles and the literal in-progress label.
-    availableLabels: [...roles, "active"].map((role) => ({
-      id: `synthetic-${role}`,
-      label: role,
-    })),
-    inboxProjectId: "synthetic-mail",
+    managedLabels: [],
+    mailboxPendingCount: 2,
     reviewTaskId: "weekly-review",
     nextWeekTaskIds: [],
     dependencies: [],
@@ -143,25 +120,25 @@ export function createPrototype(
         area: "personal",
       }),
       task("receipt", "Download this month’s receipt", {
-        labels: ["quick"],
+        planningFlags: ["quick"],
         estimatedMinutes: 15,
       }),
       // Weekly review data: waiting, someday and unclarified mail tasks, and the review task.
       task("venue", "Hear back about the venue quote", {
-        labels: ["waiting", "office"],
+        planningFlags: ["waiting"],
         updatedAt: "2026-10-01T16:00:00Z",
       }),
       task("access", "Lab access approval", {
-        labels: ["blocked", "office"],
+        planningFlags: ["blocked"],
         updatedAt: "2026-10-09T16:00:00Z",
       }),
       task("garden", "Plan a small balcony garden", {
-        labels: ["parked", "home"],
+        planningFlags: ["parked"],
         area: "personal",
         updatedAt: "2026-08-20T16:00:00Z",
       }),
       task("course", "Look into an evening course", {
-        labels: ["onhold", "home"],
+        planningFlags: ["onhold"],
         area: "personal",
         updatedAt: "2026-09-12T16:00:00Z",
       }),
@@ -236,14 +213,12 @@ export function createPrototype(
       }),
       // Start now: in the start window, and past the deadline.
       task("claim", "Submit the travel expense claim", {
-        labels: ["lead_3d"],
         deadline: "2026-10-14",
         leadDays: 3,
         mustStart: true,
       }),
       task("passport", "Renew the passport", {
         area: "personal",
-        labels: ["lead_1w"],
         deadline: "2026-10-11",
         leadDays: 7,
         mustStart: true,
@@ -264,34 +239,6 @@ export function createPrototype(
     siblings.set(group, childOrder);
     return { ...item, childOrder };
   });
-  // Todofy's mail: each mail task Mail Hero created, by task ID, and its summary by mail ID
-  // (synthetic text only).
-  const mail = new Map<string, MailItem>(
-    [
-      {
-        id: "event-register",
-        taskId: "mail-register",
-        brief: "Registration is open; the early price ends Oct 20.",
-        receivedAt: "2026-10-13T16:20:00Z",
-        hasSummary: true,
-      },
-      {
-        id: "event-notes",
-        taskId: "mail-notes",
-        brief: "Friday's shared notes were updated; add your part.",
-        receivedAt: "2026-10-12T09:05:00Z",
-        hasSummary: true,
-      },
-    ].map((item) => [item.taskId, item]),
-  );
-  const summaries: Record<string, string> = {
-    "event-register":
-      "Registration is open; the early price ends Oct 20.\n\n**Details**\n- The early price is 30% lower\n- Add dietary needs on the form",
-    "event-notes": "Friday's shared notes were updated; add your part.",
-  };
-  let mailSettings: MailCategories = { categories: [], etag: "mail-0" };
-  // The account's Todoist Inbox, where filed mail goes.
-  const inboxProject = "synthetic-inbox";
   let focus: FocusState = {
     date: today,
     timerEtag: "fixture",
@@ -337,57 +284,43 @@ export function createPrototype(
       delete metadata.tasks;
       return metadata as PlanMetadata;
     },
-    async updateTask(item, { active, parked, ...update }) {
-      // As Todofy writes them: a stage's label replaces the other planning labels (the fixture's
-      // label names are its roles), and in progress is the literal label, after which Todofy
-      // lists the task neither as must start nor as missing a lead. Set aside comes last: the
-      // literal label, with no planning label and not in progress.
-      const planning: string[] = Object.values(STAGE_ROLES);
-      const staged = (task: PlanningTask): PlanningTask =>
-        update.stage === undefined
-          ? task
-          : {
-              ...task,
-              labels: [
-                ...task.labels.filter((label) => !planning.includes(label)),
-                ...(update.stage === "none" ? [] : [STAGE_ROLES[update.stage]]),
-              ],
-            };
-      const marked = (task: PlanningTask): PlanningTask =>
-        active === undefined
-          ? task
-          : {
-              ...task,
-              labels: [
-                ...task.labels.filter((label) => label !== "active"),
-                ...(active ? ["active"] : []),
-              ],
-              ...(active ? { mustStart: false, missingLead: false } : {}),
-            };
-      const setAside = (task: PlanningTask): PlanningTask =>
-        parked === undefined
-          ? task
-          : {
-              ...task,
-              labels: [
-                ...task.labels.filter(
-                  (label) =>
-                    label !== "parked" &&
-                    !(
-                      parked &&
-                      (planning.includes(label) || label === "active")
-                    ),
-                ),
-                ...(parked ? ["parked"] : []),
-              ],
-              ...(parked ? { stage: "none" as const } : {}),
-            };
+    async updateTask(item, { stage, area, active, parked, ...switches }) {
+      // As Todofy saves native planning state: the stage is the saved stage, and each switch sets
+      // or clears its flag. In progress clears must start and missing lead; setting aside comes
+      // last, with no stage and not in progress.
+      const saved = (task: PlanningTask): PlanningTask => {
+        const flags = new Set(task.planningFlags);
+        for (const [field, flag] of Object.entries(FLAGS)) {
+          const on = switches[field as keyof typeof switches];
+          if (on !== undefined && flag) {
+            if (on) flags.add(flag);
+            else flags.delete(flag);
+          }
+        }
+        if (active !== undefined) {
+          if (active) flags.add("active");
+          else flags.delete("active");
+        }
+        if (parked !== undefined) {
+          if (parked) {
+            flags.add("parked");
+            flags.delete("active");
+          } else flags.delete("parked");
+        }
+        const next = parked ? "none" : (stage ?? task.explicitStage ?? "none");
+        return {
+          ...task,
+          ...(area ? { area } : {}),
+          stage: stage === undefined && !parked ? task.stage : next,
+          explicitStage: next,
+          planningFlags: [...flags],
+          ...(active ? { mustStart: false, missingLead: false } : {}),
+        };
+      };
       plan = {
         ...plan,
         tasks: plan.tasks.map((task) =>
-          task.id === item.id
-            ? setAside(marked(staged({ ...task, ...update })))
-            : task,
+          task.id === item.id ? saved(task) : task,
         ),
       };
       return structuredClone(plan.tasks.find((task) => task.id === item.id)!);
@@ -404,27 +337,6 @@ export function createPrototype(
       const bet = { ...saved, text, etag: String(Number(saved.etag || 0) + 1) };
       plan = { ...plan, weeklyBets: withBets(plan.weeklyBets, [bet]) };
       return structuredClone(bet);
-    },
-    async updateLabels(labels, etag) {
-      if (etag !== plan.etag) throw new Error("Synthetic mapping changed");
-      const managedLabels = [
-        ...plan.managedLabels.filter(
-          (binding) =>
-            !["quarter", "candiate", "focus", "committed"].includes(
-              binding.role,
-            ),
-        ),
-        ...labels,
-      ];
-      plan = {
-        ...plan,
-        managedLabels,
-        managedLabelNames: managedLabels.map((binding) => binding.label),
-        etag: crypto.randomUUID(),
-      };
-      const metadata: Partial<PlanState> = structuredClone(plan);
-      delete metadata.tasks;
-      return metadata as PlanMetadata;
     },
     async createSteps(item, drafts) {
       // As Todoist appends sub-tasks: after the parent's other children.
@@ -591,101 +503,6 @@ export function createPrototype(
               },
       };
       return { timerEtag: focus.timerEtag, timer: focus.timer };
-    },
-    async lookupMail(taskIds) {
-      const items = taskIds.flatMap((id) => mail.get(id) ?? []);
-      return structuredClone({ items, ...mailSettings });
-    },
-    async readMailSummary(id) {
-      return summaries[id] ?? "";
-    },
-    async readMailSettings() {
-      return structuredClone(mailSettings);
-    },
-    async updateMailSettings(categories, etag) {
-      // As Todofy answers: the saved categories are a replay; a category keeps its ID by its pair.
-      const same =
-        JSON.stringify(categories) ===
-        JSON.stringify(
-          mailSettings.categories.map(({ labelId, priority }) => ({
-            labelId,
-            priority,
-          })),
-        );
-      if (same) return structuredClone(mailSettings);
-      if (etag !== mailSettings.etag)
-        throw new Error("Synthetic categories changed");
-      mailSettings = {
-        categories: categories.map((category) => ({
-          ...category,
-          id:
-            mailSettings.categories.find(
-              (saved) =>
-                saved.labelId === category.labelId &&
-                saved.priority === category.priority,
-            )?.id ?? crypto.randomUUID(),
-        })),
-        etag: crypto.randomUUID(),
-      };
-      return structuredClone(mailSettings);
-    },
-    async fileMail(item, category, etag) {
-      // As Todofy files: a category's label and priority, if one is given, and always the move
-      // to the Inbox.
-      let filed = (task: PlanningTask) => ({
-        ...task,
-        projectId: inboxProject,
-      });
-      if (category) {
-        if (etag !== mailSettings.etag)
-          throw new Error("Synthetic categories changed");
-        const label = plan.availableLabels.find(
-          (choice) => choice.id === category.labelId,
-        )?.label;
-        if (!label) throw new Error("Synthetic label gone");
-        // The category's label; an area label replaces the other area label.
-        const areas = { office: "work", home: "personal" } as const;
-        const area = areas[label as keyof typeof areas];
-        filed = (task) => ({
-          ...task,
-          labels: [
-            ...task.labels.filter(
-              (name) => !(area && name in areas) && name !== label,
-            ),
-            label,
-          ],
-          area: area ?? task.area,
-          priority: apiPriority(category.priority),
-          projectId: inboxProject,
-        });
-      }
-      plan = {
-        ...plan,
-        tasks: plan.tasks.map((task) =>
-          task.id === item.id ? filed(task) : task,
-        ),
-      };
-      return structuredClone(plan.tasks.find((task) => task.id === item.id)!);
-    },
-    async deleteMail(taskIds) {
-      // Todofy's own check on its fresh read: only untouched mail tasks go.
-      const deletable = (task: PlanningTask) =>
-        mail.has(task.id) &&
-        !task.labels.length &&
-        task.priority === 1 &&
-        !task.due &&
-        !task.deadline;
-      const deleted = plan.tasks
-        .filter((task) => taskIds.includes(task.id) && deletable(task))
-        .map((task) => task.id);
-      plan = {
-        ...plan,
-        tasks: plan.tasks.filter((task) => !deleted.includes(task.id)),
-      };
-      return {
-        deletedTaskIds: deleted,
-        keptTaskIds: taskIds.filter((id) => !deleted.includes(id)),
-      };
     },
     async reorderTasks(taskIds, movedId, lane) {
       // As Todofy reorders: the moved task's siblings among these take their existing positions in

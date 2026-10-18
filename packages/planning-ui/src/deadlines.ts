@@ -6,7 +6,6 @@ import { ACTIVE_LABEL } from "./weekly-review";
 import type {
   FlowDayPlan,
   Language,
-  PlanState,
   PlanningTask,
   TaskDependency,
 } from "./model";
@@ -52,16 +51,6 @@ export function deadlineState(
 /** Something that should have started: past its deadline or in its start window. */
 export function isDue(state: DeadlineState): boolean {
   return state.kind === "past" || state.kind === "window";
-}
-
-/** Native planning supports progress directly; legacy accounts need their existing label. */
-export function canMarkActive(
-  plan: Pick<PlanState, "availableLabels" | "nativePlanning">,
-) {
-  return (
-    Boolean(plan.nativePlanning) ||
-    plan.availableLabels.some((label) => label.label === ACTIVE_LABEL)
-  );
 }
 
 /**

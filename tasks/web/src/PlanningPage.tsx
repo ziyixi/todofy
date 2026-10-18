@@ -27,8 +27,6 @@ export default function PlanningPage({
         flowday: (call) =>
           send({ ...call, url: `/api/plus/flowday${call.url}` }),
       },
-      undefined,
-      "tasks",
     );
     return {
       ...actions,
@@ -61,13 +59,10 @@ export default function PlanningPage({
         onOpenTask={onOpenTask}
         onSettings={onSettings}
         onViewChange={(view) => {
-          window.location.hash = `/${view === "mailbox" ? "mail" : view}`;
+          window.location.hash = `/${view}`;
         }}
-        destination={{
-          name: "Tasks",
-          taskHref: (id) =>
-            `${window.location.origin}/?task=${encodeURIComponent(id)}`,
-          projectHref: (id) => `#/project/${encodeURIComponent(id)}`,
+        onOpenMail={() => {
+          window.location.hash = "/mail";
         }}
         snapshot={snapshot}
         onSnapshot={setSnapshot}

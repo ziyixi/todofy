@@ -54,12 +54,7 @@ export function cardState(
 export function boardLanes(
   plan: Pick<
     PlanState,
-    | "tasks"
-    | "managedLabels"
-    | "dependencies"
-    | "availableLabels"
-    | "laneOrders"
-    | "nativePlanning"
+    "tasks" | "managedLabels" | "dependencies" | "laneOrders"
   >,
   today: string,
 ): BoardLanes {
@@ -72,7 +67,7 @@ export function boardLanes(
     weekly: [],
     committed: [],
   };
-  const parked = (task: PlanningTask) => isParked(task, plan);
+  const parked = (task: PlanningTask) => isParked(task);
   lanes.parked = byUntouched(plan.tasks.filter(parked));
   const outcomes = planningOutcomes(plan.tasks, plan.managedLabels).filter(
     (task) => !parked(task),

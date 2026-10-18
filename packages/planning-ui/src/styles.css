@@ -3,19 +3,16 @@
 @import "./planning-board.css";
 @import "./weekly-goals.css";
 @import "./dependencies.css";
-@import "./mailbox.css";
+@import "./mail-categories.css";
 
 .plus-root.plus-root-plan {
   max-width: 1900px;
 }
 
 /*
- * The one colour bridge. Todoist's theme tokens inherit from <html> into every shadow root, so
- * each colour reads the token with the role Todoist gives it; the fallbacks keep the earlier
- * light look on a page without tokens. There is no dark mode of its own.
+ * The one colour bridge: each colour reads a product token if the host defines one, and otherwise
+ * its light fallback. There is no dark mode of its own.
  */
-:host,
-.plus-prototype,
 .planning-ui {
   --plus-bg: var(--product-library-background-base-primary, #fff);
   /* Lanes, day columns and the tab track. */
@@ -83,20 +80,14 @@
   font-size: 14px;
   color: var(--plus-text);
 }
-/* The options page has no Todoist theme and uses the light fallbacks. */
-body.planning-ui {
-  background: var(--plus-bg);
-}
-:host *,
-.planning-ui *,
-.plus-prototype * {
+.planning-ui * {
   box-sizing: border-box;
 }
 /* One line weight for every icon, at any size, near Todoist's thin icons. */
-:is(.plus-root, .plus-extension-nav, .plus-prototype) svg.lucide {
+.plus-root svg.lucide {
   stroke-width: 1.5px;
 }
-:is(.plus-root, .plus-extension-nav, .plus-prototype) svg.lucide > * {
+.plus-root svg.lucide > * {
   vector-effect: non-scaling-stroke;
 }
 .plus-root {
@@ -111,13 +102,11 @@ body.planning-ui {
 .plus-root button,
 .plus-root input,
 .plus-root textarea,
-.plus-root select,
-.plus-prototype button {
+.plus-root select {
   font: inherit;
   color: inherit;
 }
-.plus-root button,
-.plus-prototype button {
+.plus-root button {
   cursor: pointer;
   background: none;
   border: 0;
@@ -269,11 +258,6 @@ body.planning-ui {
 /* Accent text would be too faint on the lane surface in some themes; the underline marks it. */
 .plus-error button {
   color: var(--plus-text);
-  text-decoration: underline;
-}
-/* The one line a render failure leaves: back to Todoist, or reload. */
-.plus-crash button {
-  padding: 0;
   text-decoration: underline;
 }
 .plus-dialog {
@@ -598,81 +582,6 @@ body.planning-ui {
   .plus-task-editor {
     padding: 20px;
   }
-}
-.plus-extension-nav {
-  display: grid;
-  margin: 0;
-  width: var(--plus-nav-width, 100%);
-  font-family: inherit;
-  font-size: 13px;
-  color: inherit;
-}
-.plus-extension-nav button {
-  border: 0;
-  border-radius: 5px;
-  min-height: 34px;
-  padding: 5px;
-  display: flex;
-  align-items: center;
-  gap: 0;
-  background: none;
-  color: inherit;
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-}
-.plus-extension-nav svg {
-  flex: 0 0 24px;
-}
-.plus-nav-icon {
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-}
-.plus-extension-nav .plus-nav-icon svg {
-  flex: none;
-  width: 18px;
-  height: 18px;
-}
-.plus-extension-nav button:hover {
-  background: var(--plus-hover);
-}
-.plus-extension-nav button[aria-current="page"] {
-  background: var(--plus-selected);
-  color: var(--plus-nav-selected-text);
-}
-.plus-other-views button {
-  width: 100%;
-  color: var(--plus-muted);
-}
-.plus-other-count {
-  margin-left: auto;
-  padding-right: 5px;
-  font-size: 12px;
-  color: var(--plus-muted);
-}
-/* Inside Todoist's task modal the panel shows the modal's own surface. */
-.plus-native-tools.plus-root,
-.plus-native-tools input,
-.plus-native-tools select,
-.plus-native-tools textarea {
-  background: transparent;
-}
-.plus-native-tools.plus-root {
-  padding: 15px 0;
-  max-width: none;
-  min-height: 0;
-  border-top: 1px solid var(--plus-line);
-  margin-top: 16px;
-}
-.plus-native-tools .plus-task-editor {
-  padding: 15px 0;
-}
-.plus-native-tools .plus-editor-header,
-.plus-native-tools .plus-native-note {
-  display: none;
 }
 
 .plus-task-options h3 {

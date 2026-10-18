@@ -1,6 +1,4 @@
 import { expect, it, vi } from "vitest";
-import { publicError } from "../src/api";
-import { Code, RpcError, statusBody } from "@ziyixi/proto/rpc-status";
 import { fakeActions } from "./transport";
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -207,45 +205,6 @@ it("does not present partial task pages as a complete plan", async () => {
   );
   await expect(api.load()).rejects.toThrow("incomplete");
 });
-it("manually finishes a partial sync before queueing new Todoist children", async () => {
-  let syncCount = 0;
-  const calls: {
-    path: string;
-    mask: string | null;
-    body: Record<string, unknown>;
-  }[] = [];
-  const api = fakeActions(
-    vi.fn<typeof fetch>(async (input, init) => {
-      const url = new URL(String(input));
-      calls.push({
-        path: url.pathname,
-        mask: url.searchParams.get("update_mask"),
-        body: init?.body
-          ? (JSON.parse(String(init.body)) as Record<string, unknown>)
-          : {},
-      });
-      if (url.pathname.endsWith("/tasks:sync")) {
-        syncCount++;
-        return json({ state: syncCount === 1 ? "partial" : "synced" });
-      }
-      if (url.pathname.includes("/flows/"))
-        return json({
-          name: "flows/2026-10-13",
-          task_ids: init?.method === "PATCH" ? ["new-child"] : [],
-        });
-      return json({ name: "tasks/new-child", title: "New synthetic child" });
-    }),
-    "todoist",
-  );
-  await api.addToDay("new-child", "2026-10-13");
-  expect(calls[0]?.path).toBe("/api/plus/flowday/api/v1/tasks:sync");
-  expect(calls[0]?.body).toEqual({ mode: "manual" });
-  expect(calls[1]?.body).toEqual({ mode: "manual" });
-  expect(calls[3]).toMatchObject({
-    mask: "task_ids",
-    body: { task_ids: ["new-child"] },
-  });
-});
 it("replays an uncertain timer command with the same UUID until acknowledged", async () => {
   const ids: string[] = [];
   const api = fakeActions(
@@ -322,47 +281,7 @@ it("takes the estimate from the task list over FlowDay's and resumes a timer on 
   expect(command.flow_date).toBe("2026-10-12");
 });
 
-it("shows an actionable throttled sync and does not attempt the following write", async () => {
-  const paths: string[] = [];
-  const api = fakeActions(
-    vi.fn<typeof fetch>(async (input) => {
-      paths.push(new URL(String(input)).pathname);
-      return json({ state: "throttled" });
-    }),
-    "todoist",
-  );
-  let failure: unknown;
-  try {
-    await api.addToDay("new-child", "2026-10-13");
-  } catch (error) {
-    failure = error;
-  }
-  expect(publicError(failure)).toBe(
-    "FlowDay just synced. Wait briefly and try adding this task again.",
-  );
-  expect(paths).toEqual(["/api/plus/flowday/api/v1/tasks:sync"]);
-});
-
-it("names a token the gateway refuses as an expired connection, so the cached sidebar is dropped", async () => {
-  // What the gateway's plusExtension answers for an unknown or revoked token.
-  const body = statusBody(
-    new RpcError(
-      Code.UNAUTHENTICATED,
-      "UNAUTHORIZED",
-      "no valid Cloudflare Access login for the owner",
-    ),
-    { domain: "todofy.ziyixi.science" },
-  );
-  const api = fakeActions(
-    vi.fn<typeof fetch>(async () => Response.json(body, { status: 401 })),
-  );
-  const failure = await api.readPlan().catch((error: unknown) => error);
-  expect(publicError(failure)).toBe(
-    "Connection expired or revoked. Open connection settings.",
-  );
-});
-
-it("returns the confirmed lead task and label plan instead of requiring a full reload", async () => {
+it("returns the confirmed lead task instead of requiring a full reload", async () => {
   const paths: string[] = [];
   const api = fakeActions(
     vi.fn<typeof fetch>(async (input) => {
@@ -378,18 +297,6 @@ it("returns the confirmed lead task and label plan instead of requiring a full r
             lead_days: 7,
             etag: "child-2",
             estimated_minutes: 480,
-          },
-        });
-      if (path.endsWith("/plan:updatePlanLabels"))
-        return json({
-          plan: {
-            timezone: "UTC",
-            week_start: "2026-10-12",
-            today: "2026-10-13",
-            enabled: true,
-            etag: "plan-2",
-            labels: [{ role: "committed", id: "l9", label: "now" }],
-            hidden_filter_ids: ["f1"],
           },
         });
       throw new Error("Unexpected request " + path);
@@ -421,102 +328,8 @@ it("returns the confirmed lead task and label plan instead of requiring a full r
     deadline: "2026-10-30",
     leadDays: 7,
     etag: "child-2",
-    // FlowDay's manual estimate stays authoritative over Todoist's duration.
+    // The shown estimate stays until the next complete read.
     estimatedMinutes: 30,
   });
-  const plan = await api.updateLabels(
-    [{ role: "committed", id: "l9", label: "now" }],
-    "plan-1",
-  );
-  expect(plan).toMatchObject({
-    etag: "plan-2",
-    configured: true,
-    hiddenFilterIds: ["f1"],
-    managedLabels: [{ role: "committed", id: "l9", label: "now" }],
-  });
-  expect(plan).not.toHaveProperty("tasks");
-  expect(paths).toEqual([
-    "/api/plus/v1/tasks:setTaskLead",
-    "/api/plus/v1/plan:updatePlanLabels",
-  ]);
-});
-
-it("remembers synced FlowDay tasks across writes and worker restarts, storing IDs only", async () => {
-  const requests: string[] = [];
-  let synced = false;
-  // FlowDay allows one manual sync per 30 seconds; a second one is throttled.
-  const fetcher = vi.fn<typeof fetch>(async (input, init) => {
-    const url = new URL(String(input));
-    requests.push(`${init?.method ?? "GET"} ${url.pathname}`);
-    if (url.pathname.endsWith("/tasks:sync")) {
-      const state = synced ? "throttled" : "synced";
-      synced = true;
-      return json({ state });
-    }
-    if (url.pathname.includes("/flows/"))
-      return json({ name: "flows/2026-10-13", task_ids: ["new-child"] });
-    return json({ name: "tasks/new-child", title: "New synthetic child" });
-  });
-  let saved: string[] = [];
-  const store = {
-    read: vi.fn(async () => saved),
-    write: vi.fn(async (ids: string[]) => {
-      saved = ids;
-    }),
-  };
-  const focus = {
-    date: "2026-10-13",
-    timerEtag: "0",
-    taskIds: [],
-    completedTaskIds: [],
-    estimates: {},
-    flowTasks: {},
-  };
-  const api = fakeActions(fetcher, "todoist", store);
-  await api.addToDay("new-child", focus.date);
-  await api.moveTaskToDay("new-child", undefined, focus);
-  expect(requests.filter((request) => request.endsWith(":sync"))).toHaveLength(
-    1,
-  );
-  expect(saved).toEqual(["new-child"]);
-
-  // A restarted worker creates a new client; the session copy still skips the sync.
-  const restarted = fakeActions(fetcher, "todoist", store);
-  const start = requests.length;
-  await restarted.addToDay("new-child", focus.date);
-  expect(requests.slice(start)).toEqual([
-    "GET /api/plus/flowday/api/v1/flows/2026-10-13",
-  ]);
-});
-
-it("replaces the remembered tasks with the complete FlowDay list on each load", async () => {
-  let saved = ["deleted-task"];
-  const api = fakeActions(
-    vi.fn<typeof fetch>(async (input) => {
-      const path = new URL(String(input)).pathname;
-      if (path.endsWith("/plan:read"))
-        return json({
-          plan: { week_start: "2026-10-12", today: "2026-10-13" },
-        });
-      if (path === "/api/plus/v1/tasks") return json({});
-      if (path.endsWith("/api/v1/tasks"))
-        return json({
-          tasks: [
-            { name: "tasks/child", todoist_id: "child", title: "Synthetic" },
-          ],
-        });
-      if (path.endsWith("/timerSession"))
-        return json({ name: "timerSession", etag: "1" });
-      return json({ name: `flows/${path.split("/").at(-1)}` });
-    }),
-    "todoist",
-    {
-      read: async () => saved,
-      write: async (ids) => {
-        saved = ids;
-      },
-    },
-  );
-  await api.load();
-  expect(saved).toEqual(["child"]);
+  expect(paths).toEqual(["/api/plus/v1/tasks:setTaskLead"]);
 });

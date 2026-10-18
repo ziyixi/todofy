@@ -17,7 +17,7 @@ import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { pointerIntersection } from "@dnd-kit/collision";
 import { Flag, GripVertical } from "lucide-react";
 import { displayedTitle, effectiveArea } from "./domain";
-import { canMarkActive, deadlineTitle, spokenDeadline } from "./deadlines";
+import { deadlineTitle, spokenDeadline } from "./deadlines";
 import { dependencyIndex } from "./dependencies";
 import {
   dragHandle,
@@ -25,7 +25,6 @@ import {
   spokenDrags,
 } from "./drag-announcements";
 import {
-  canPark,
   MAX_LANE_TASKS,
   outcomeArea,
   outcomeColor,
@@ -212,7 +211,6 @@ interface Props {
   actions: PlusActions;
   run: RunOperation;
   editTask: (task: PlanningTask) => void;
-  onLabels?: () => void;
   /**
    * One quiet line each, under the lanes so that nothing above them moves: a task that no longer waits
    * because what it waited for was deleted or left the list, told once.
@@ -229,10 +227,10 @@ const PARKED_SHOWN = 3;
  * Start now, Waiting, Parked and the four stage lanes, with the same lanes and cards. Start now
  * and Waiting show only when they have cards and take no drops: a card dragged from Start now into
  * a stage lane takes that stage and is marked in progress in one write; one from Waiting takes only
- * the stage. Parked, while the account has the label, always shows and takes any card: it sets the
- * card aside, and a card dragged out of it into a stage lane takes that stage without the label.
- * Inside every lane a card dropped on another card takes its place: the lane keeps that order in
- * Todofy, and Todoist's order of the moved card's siblings follows (not for Waiting and Parked).
+ * the stage. Parked always shows and takes any card: it sets the card aside, and a card dragged out
+ * of it into a stage lane takes that stage and is no longer set aside. Inside every lane a card
+ * dropped on another card takes its place: the lane keeps that order in Todofy, and Tasks' order of
+ * the moved card's siblings follows (not for Waiting and Parked).
  */
 export function ReviewBoard({
   plan,
@@ -246,7 +244,6 @@ export function ReviewBoard({
   actions,
   run,
   editTask,
-  onLabels,
   dependencyNotices = [],
 }: Props) {
   const text = words(language);
@@ -286,13 +283,12 @@ export function ReviewBoard({
       day.taskIds.filter((id) => !day.completedTaskIds.includes(id)),
     ),
   );
-  const marks = canMarkActive(plan);
   const shown = (id: LaneId) =>
     lanes[id].filter(
       (task) => area === "all" || effectiveArea(task, plan.tasks) === area,
     );
-  // Stage and Parked lanes accept a planning change; legacy hosts need a bound label.
-  // Start now and Waiting take no stage changes and show only with cards.
+  // Stage and Parked lanes accept a planning change. Start now and Waiting take no stage changes
+  // and show only with cards.
   const columns: {
     id: LaneId;
     title: string;
@@ -301,9 +297,7 @@ export function ReviewBoard({
   }[] = [
     { id: "start" as const, title: text.startNow },
     { id: "waiting" as const, title: text.waiting },
-    ...(canPark(plan)
-      ? [{ id: "parked" as const, title: text.parked, label: PARKED_LABEL }]
-      : []),
+    { id: "parked" as const, title: text.parked, label: PARKED_LABEL },
     ...reviewLanes(language).map((lane) => ({
       id: lane.stage,
       title: lane.title,
@@ -421,16 +415,11 @@ export function ReviewBoard({
           return;
         }
         const column = columns.find((item) => item.id === to);
-        if (
-          !column ||
-          (!column.stage && to !== "parked") ||
-          (!plan.nativePlanning && !column.label)
-        )
-          return;
+        if (!column || (!column.stage && to !== "parked")) return;
         const parking = to === "parked";
         const stage: Stage = column.stage ?? "none";
         // Start now is acknowledged by the drag: the stage and the in-progress label in one write.
-        const active = from === "start" && marks && !parking;
+        const active = from === "start" && !parking;
         // Parked's label goes with any move out of it; into it, the label alone does it all.
         const parked = parking ? true : from === "parked" ? false : undefined;
         const update = parking
@@ -482,8 +471,7 @@ export function ReviewBoard({
               pending={pending}
               dragHint={hintId}
               editTask={editTask}
-              onStart={marks ? (task) => void start(task) : undefined}
-              onLabels={onLabels}
+              onStart={(task) => void start(task)}
             />
           ))}
         </div>
@@ -539,7 +527,6 @@ function ReviewLane({
   dragHint,
   editTask,
   onStart,
-  onLabels,
 }: {
   lane: LaneId;
   /** A stage lane's stage. */
@@ -561,14 +548,13 @@ function ReviewLane({
   dragHint: string;
   editTask: Props["editTask"];
   onStart?: (task: PlanningTask) => void;
-  onLabels?: () => void;
 }) {
   const { ref } = useDroppable({
     id: `review-lane:${lane}`,
     accept: "review-outcome",
     // Start now and Waiting catch a drop without a label, which changes nothing, so that a card
     // let go over them goes back instead of into the lane its preview overlaps.
-    disabled: busy || Boolean(stage && !label && !plan.nativePlanning),
+    disabled: busy,
     // Below its cards, which are the targets wherever the pointer is on one.
     collisionPriority: 1,
     data: { stage, lane },
@@ -578,10 +564,7 @@ function ReviewLane({
   const { source, target } = useDragOperation();
   const over = target?.data?.lane === lane;
   const ownCard = source?.data?.lane === lane;
-  const lit =
-    over &&
-    !ownCard &&
-    Boolean(label || (plan.nativePlanning && (stage || lane === "parked")));
+  const lit = over && !ownCard && Boolean(stage || lane === "parked");
   const from = source?.data?.position as number | undefined;
   const to = target?.data?.position as number | undefined;
   const insert = (task: PlanningTask) =>
@@ -610,28 +593,7 @@ function ReviewLane({
       <header className="review-lane-header">
         <h2>{title}</h2>
         <span>{tasks.length}</span>
-        {label && !plan.nativePlanning && (
-          <small
-            title={`${language === "zh" ? "Todoist 标签" : "Todoist label"}: ${label}`}
-          >
-            @{label}
-          </small>
-        )}
       </header>
-      {stage && !label && !plan.nativePlanning && (
-        <div className="review-missing-label">
-          <p>
-            {language === "zh"
-              ? "先选择这列对应的标签"
-              : "Choose a label for this column"}
-          </p>
-          {onLabels && (
-            <button onClick={onLabels}>
-              {language === "zh" ? "配置标签" : "Configure labels"}
-            </button>
-          )}
-        </div>
-      )}
       <div className="review-lane-cards">
         {cards.map((task, index) => (
           <DraggableOutcome
@@ -734,7 +696,7 @@ function DraggableOutcome({
   const title = displayedTitle(task.title);
   const waitsFor = dependencyIndex(plan).waitingFor.get(task.id);
   const state = cardState(task, today, waitsFor);
-  // Start marks the task in progress, which only an account with the literal label can.
+  // Start marks the task in progress.
   const startable = state === "start" && onStart;
   return (
     <div

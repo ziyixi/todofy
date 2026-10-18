@@ -138,7 +138,7 @@ export function PlanningWeek(props: Props) {
   // A step set aside is in Review's Parked lane, not among the next steps.
   const steps = selected
     ? outcomeSteps(selected, plan.tasks, plan.managedLabels).filter(
-        (task) => !isParked(task, plan),
+        (task) => !isParked(task),
       )
     : [];
   const scheduledIds = new Set(
