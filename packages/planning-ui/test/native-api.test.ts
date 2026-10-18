@@ -69,7 +69,10 @@ it("sends category edits through the host transport with the selected store", as
     ],
     etag: "1",
   });
-  expect(JSON.parse(calls[0]!.body!).destination ?? undefined).toBeUndefined();
+  expect(JSON.parse(calls[0]!.body!).destination).toEqual({
+    provider: "tasks",
+    external_id: "inbox",
+  });
   expect(result.categories[0]?.labelId).toBe("work");
 });
 

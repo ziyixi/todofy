@@ -14,7 +14,7 @@ import {
   Timer,
 } from "lucide-react";
 import { type Catalog, type Task, describeError } from "../api";
-import { dateLabel, todayDate } from "../dates";
+import { dateLabel } from "../dates";
 import { Dialog } from "./Dialog";
 import {
   TaskMenuChooser,
@@ -26,6 +26,7 @@ import {
 export function TaskRow({
   task,
   catalog,
+  today,
   parentTitle,
   busyIds,
   selected,
@@ -41,6 +42,7 @@ export function TaskRow({
 }: {
   task: Task;
   catalog: Catalog;
+  today: string;
   parentTitle?: string;
   busyIds: ReadonlySet<string>;
   selected: ReadonlySet<string>;
@@ -156,10 +158,10 @@ export function TaskRow({
         <span className="task-meta">
           {due && (
             <span
-              className={due < todayDate() && !task.completed ? "overdue" : ""}
+              className={due < today && !task.completed ? "overdue" : ""}
             >
               <CalendarDays size={12} />
-              {dateLabel(due)}
+              {dateLabel(due, today)}
               {task.dueDatetime &&
                 ` ${new Date(task.dueDatetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: task.dueTimezone || catalog.timeZone || undefined })}`}
             </span>
@@ -173,7 +175,7 @@ export function TaskRow({
           {task.deadline && (
             <span className="deadline">
               <Flag size={12} />
-              {dateLabel(task.deadline)}
+              {dateLabel(task.deadline, today)}
             </span>
           )}
           {task.childCount > 0 && (

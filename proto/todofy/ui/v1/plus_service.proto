@@ -1,5 +1,5 @@
-// Todoist Plus planning API. Owner setup uses Access, same-origin and CSRF. The
-// extension calls only this API on the hooks host with its own revocable token.
+// Personal planning and Mail API. Tasks uses owner Access, same-origin and CSRF.
+// Retired Todoist clients retain their existing connection-token contract.
 syntax = "proto3";
 package todofy.ui.v1;
 
@@ -13,10 +13,10 @@ option java_multiple_files = true;
 option java_outer_classname = "PlusServiceProto";
 option java_package = "science.ziyixi.todofy.ui.v1";
 
-// Personal planning, backed by Todoist tasks and the owner's existing labels.
+// Personal planning backed by the configured task source and Todofy's planning facts.
 service PlusService {
   option (google.api.default_host) = "todofy.ziyixi.science";
-  // Account week and the discovered label/filter mapping, without task content.
+  // Account week and planning metadata, without task content.
   // (-- api-linter: core::0131::synonyms=disabled
   //     aip.dev/not-precedent: returns a live external-account projection, not a resource in this service. --)
   rpc ReadPlan(ReadPlanRequest) returns (ReadPlanResponse) {
@@ -135,6 +135,31 @@ service PlusService {
   // Native Mail inbox, independent of task creation. Full summary text is read on demand.
   rpc ListMailItems(ListMailItemsRequest) returns (ListMailItemsResponse) {
     option (google.api.http) = {get: "/api/plus/v1/mailItems"};
+  }
+  // Converts a pending native mail entry to a generic Inbox task on explicit owner action.
+  rpc ConvertMailItem(ConvertMailItemRequest) returns (ConvertMailItemResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/mailItems:convertMailItem"
+      body: "*"
+    };
+  }
+  // Permanently deletes pending mail summaries, preserving event deduplication and every linked task.
+  // (-- api-linter: core::0135=disabled
+  //     aip.dev/not-precedent: a bounded batch action on summaries, not the Delete of one resource. --)
+  rpc DeleteMailSummaries(DeleteMailSummariesRequest) returns (DeleteMailSummariesResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/mailItems:deleteSummaries"
+      body: "*"
+    };
+  }
+  // Replaces the optional native label/priority shortcuts; no legacy destination is needed.
+  // (-- api-linter: core::0134=disabled
+  //     aip.dev/not-precedent: replaces a complete bounded set by etag, without a resource update mask. --)
+  rpc UpdateMailCategories(UpdateMailCategoriesRequest) returns (UpdateMailCategoriesResponse) {
+    option (google.api.http) = {
+      post: "/api/plus/v1/mailSettings:updateCategories"
+      body: "*"
+    };
   }
   // The Mailbox rows among up to 200 of the mail project's tasks: those a Mail Hero event created, each
   // with its brief and receive time, and the owner's mail categories. No summary text but the brief.
@@ -387,7 +412,7 @@ message ListPlanningTasksResponse {
 }
 // A deliberate planning change. Omitted optional fields remain unchanged.
 message SetTaskPlanRequest {
-  // Todoist task ID.
+  // Task ID from the configured source.
   string task_id = 1 [(google.api.field_behavior) = REQUIRED];
   // Fingerprint of the task shown to the user.
   string etag = 2 [(google.api.field_behavior) = REQUIRED];
@@ -403,12 +428,11 @@ message SetTaskPlanRequest {
   // Deprecated: the weekly Bets are text (SetWeeklyBet). A request that sets it is refused
   // (BAD_REQUEST) and writes nothing.
   optional bool bet = 6 [deprecated = true];
-  // Adds or removes the literal `active` label (in progress). It is never created: adding
-  // it fails while the account has no label of that exact name.
+  // Native planning's in-progress flag. The retired Todoist adapter changes the existing
+  // literal `active` label and refuses to add it if that label is missing.
   optional bool active = 7;
-  // Adds the literal `parked` label (set aside), removing every planning label and `active`;
-  // false removes `parked`. It is never created: adding it fails while the account has no label
-  // of that exact name.
+  // Native planning's set-aside flag. The retired Todoist adapter adds the existing `parked`
+  // label and removes its other planning labels; false removes `parked`.
   optional bool parked = 8;
   // Native Tasks: a short, independent action shown in the Quick row.
   optional bool quick = 9;
@@ -437,7 +461,7 @@ message TaskStep {
 }
 // Creates only explicitly submitted child tasks, with at most 20 per action.
 message AppendTaskStepsRequest {
-  // Existing Todoist parent task.
+  // Existing parent task from the configured source.
   string parent_id = 1 [(google.api.field_behavior) = REQUIRED];
   // Stable action UUID.
   string request_id = 2 [
@@ -447,14 +471,14 @@ message AppendTaskStepsRequest {
   // In entered order.
   repeated TaskStep steps = 3 [(google.api.field_behavior) = REQUIRED];
 }
-// IDs returned by Todoist for this action, in entered order.
+// IDs returned by the task source for this action, in entered order.
 message AppendTaskStepsResponse {
   // Created child IDs in entered order.
   repeated string task_ids = 1;
 }
 // Sets lead and deadline together; an empty deadline explicitly clears it.
 message SetTaskLeadRequest {
-  // Existing Todoist task.
+  // Existing task from the configured source.
   string task_id = 1 [(google.api.field_behavior) = REQUIRED];
   // Fingerprint of the task shown to the user.
   string etag = 2 [(google.api.field_behavior) = REQUIRED];
@@ -468,12 +492,12 @@ message SetTaskLeadRequest {
   // 0 clears; allowed windows are 1, 3, 7, 14 and 30 days.
   int32 lead_days = 5 [(google.api.field_behavior) = OPTIONAL];
 }
-// Updated deadline and label values.
+// Updated deadline and planning values.
 message SetTaskLeadResponse {
   // Current task values.
   PlanningTask task = 1;
 }
-// Completes one task, using Todoist's recurring-task semantics.
+// Completes one task using the configured source's recurrence behavior.
 message CompleteTaskRequest {
   // Task ID, never a parent automatically chosen by the server.
   string task_id = 1 [(google.api.field_behavior) = REQUIRED];
@@ -482,12 +506,12 @@ message CompleteTaskRequest {
     (google.api.field_behavior) = OPTIONAL,
     (google.api.field_info).format = UUID4
   ];
-  // Focus day to settle after Todoist confirms completion; empty outside Focus.
+  // Focus day to settle after the task source confirms completion; empty outside Focus.
   // (-- api-linter: core::0142::time-field-type=disabled
   //     aip.dev/not-precedent: account-local calendar day, not an instant; same field as FlowDay. --)
   string flow_date = 3 [(google.api.field_behavior) = OPTIONAL];
 }
-// Acknowledges the actual Todoist command, not a local optimistic completion.
+// Acknowledges the confirmed task-source command.
 message CompleteTaskResponse {
   // The task whose close command succeeded.
   string task_id = 1;
@@ -771,8 +795,8 @@ message ReadMailSummaryResponse {
 // Files one mail.
 message FileMailItemRequest {
   // The mail's Todoist task, still in the mail project.
-  string task_id = 1 [(google.api.field_behavior) = OPTIONAL];
-  // Native MailItem.etag when event_id is supplied; otherwise the legacy PlanningTask.etag.
+  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Fingerprint of the task shown to the user (PlanningTask.etag).
   string etag = 2 [(google.api.field_behavior) = REQUIRED];
   // UUID reused when repeating this action.
   string request_id = 3 [
@@ -780,11 +804,9 @@ message FileMailItemRequest {
     (google.api.field_info).format = UUID4
   ];
   // MailCategory.id, or empty to move to the Inbox only.
-  string category_id = 4 [(google.api.field_behavior) = OPTIONAL];
+  string category_id = 4 [(google.api.field_behavior) = REQUIRED];
   // The categories_etag the category was shown with; ignored when category_id is empty.
-  string categories_etag = 5 [(google.api.field_behavior) = OPTIONAL];
-  // Native MailItem.id. Creates a generic Inbox task only when the owner files this entry.
-  string event_id = 6 [(google.api.field_behavior) = OPTIONAL];
+  string categories_etag = 5 [(google.api.field_behavior) = REQUIRED];
 }
 // The task after it was filed.
 message FileMailItemResponse {
@@ -802,9 +824,7 @@ message DeleteMailItemsRequest {
     (google.api.field_info).format = UUID4
   ];
   // 1 to 200 Todoist task IDs.
-  repeated string task_ids = 2 [(google.api.field_behavior) = OPTIONAL];
-  // Native MailItem IDs, at most 200. Deletes their summaries without deleting any linked tasks.
-  repeated string event_ids = 3 [(google.api.field_behavior) = OPTIONAL];
+  repeated string task_ids = 2 [(google.api.field_behavior) = REQUIRED];
 }
 // What happened to each task asked for.
 message DeleteMailItemsResponse {
@@ -812,10 +832,62 @@ message DeleteMailItemsResponse {
   repeated string deleted_task_ids = 1;
   // Kept: changed or planned, not mail, or no longer in the mail project.
   repeated string kept_task_ids = 2;
-  // Native mail summaries deleted or already absent.
-  repeated string deleted_event_ids = 3;
-  // Native entries retained because their state changed.
-  repeated string kept_event_ids = 4;
+}
+// Converts one native MailItem to a generic task, without a preexisting task reference.
+message ConvertMailItemRequest {
+  // MailItem.id of the pending summary.
+  string event_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // The MailItem.etag shown to the owner.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // UUID reused when repeating this action.
+  string request_id = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+  // Optional MailCategory.id to apply to the task.
+  string category_id = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Categories version, required by the handler only when a shortcut is chosen.
+  string categories_etag = 5 [(google.api.field_behavior) = OPTIONAL];
+}
+// The converted task; the full source summary remains available through ReadMailSummary.
+message ConvertMailItemResponse {
+  // The confirmed generic Inbox task.
+  PlanningTask task = 1;
+}
+// Deletes a bounded set of pending native summaries only.
+// (-- api-linter: core::0135=disabled
+//     aip.dev/not-precedent: a batch action on summaries, not the Delete of one resource. --)
+message DeleteMailSummariesRequest {
+  // UUID reused when repeating this action.
+  string request_id = 1 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+  // 1 to 200 MailItem IDs; linked tasks are retained.
+  repeated string event_ids = 2 [(google.api.field_behavior) = REQUIRED];
+}
+// The outcome for each requested summary.
+message DeleteMailSummariesResponse {
+  // Deleted or already absent summaries.
+  repeated string deleted_event_ids = 1;
+  // Entries retained because they are no longer pending.
+  repeated string kept_event_ids = 2;
+}
+// Replaces the optional native label/priority shortcuts.
+// (-- api-linter: core::0134=disabled
+//     aip.dev/not-precedent: replaces a complete bounded set by etag, without a resource update mask. --)
+message UpdateMailCategoriesRequest {
+  // At most four existing label/priority combinations; an empty list clears the shortcuts.
+  repeated MailCategory categories = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Version of the displayed categories.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+}
+// The native shortcuts after the replacement.
+message UpdateMailCategoriesResponse {
+  // Saved shortcuts in display order.
+  repeated MailCategory categories = 1;
+  // Version for the next replacement or conversion.
+  string etag = 2;
 }
 // Reads the mail settings.
 message ReadMailSettingsRequest {}
@@ -839,9 +911,9 @@ message UpdateMailSettingsRequest {
   // At most four, each a current label (not a planning, lead or in-progress one) and a priority,
   // no two the same.
   repeated MailCategory categories = 1 [(google.api.field_behavior) = OPTIONAL];
-  // Deprecated and ignored: filed mail always moves to the Inbox. Native Tasks omits this field;
-  // the retired Todoist adapter still requires a well-formed reference for its frozen contract.
-  ExternalRef destination = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Deprecated and ignored: filed mail always moves to the Inbox. Still REQUIRED on the wire;
+  // native callers use UpdateMailCategories instead.
+  ExternalRef destination = 2 [(google.api.field_behavior) = REQUIRED];
   // The etag of the settings shown.
   string etag = 3 [(google.api.field_behavior) = REQUIRED];
 }

@@ -38,6 +38,10 @@ This refinement has not yet been published. All local task content, mail and cre
   colors/property menus, right-click operations, complete/reopen inside a parent, dates across daylight saving,
   Markdown, chronological Upcoming, real drag persistence, search refresh without blank rows, responsive
   360–1440px editing/Plan and sidebar width persistence. The PWA case uses its own disposable profile.
+- The first branch CI caught the account/browser timezone boundary after UTC midnight. Quick Add, Upcoming
+  and date labels now use the account calendar. A new UTC-browser/Pacific-account case verifies the stored
+  task date and Upcoming request, alongside the existing persisted CRUD scenario. The six final Mail/native
+  host/calendar cases pass locally; the new combined branch suite contains 30 browser cases.
 - Shared planning UI: 14 cases pass; the legacy host's 308 units pass. Native host browser coverage uses
   same-origin synthetic planning replies: fixed-stage dragging with no label mapping, explicit Quick state,
   Settings, Focus timer and Mail summary. It proves UI/transport usage, not production writes.
@@ -87,6 +91,12 @@ Also pending after migration 0002: copy source colors into the imported filters 
 empty. Do not re-import the snapshot after native owner writes.
 
 ## Earlier release corrections
+
+Refinement branch [39085010635](https://github.com/ziyixi/todofy/actions/runs/39085010635) was held before
+production. Its protocol guard rejected relaxing old required inputs; three additive native Mail RPCs now
+reuse the existing handlers and receipts while retaining those contracts. It also found an old FlowDay binding
+assertion, two retired-host Mail fixtures affected by omitted empty fields, temporary macOS screenshot paths,
+and the calendar mismatch above. These have focused regressions; a new full branch gate is required.
 
 The first branch `4895d4a5` failed integration enrollment, fixtures and a FlowDay cold codec path. Later checks
 fixed those issues without reducing the existing CPU workload. The full `7eae7465` branch gate passed.

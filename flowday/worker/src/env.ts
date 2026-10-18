@@ -4,7 +4,7 @@
 export interface Env {
   readonly DB: D1Database;
   readonly ASSETS: Fetcher;
-  /** Optional native task store. Named TasksApi entrypoint, props consumer=flowday (read only). */
+  /** Optional native task store. Named TasksApi entrypoint, props access=read. */
   readonly TASKS?: Fetcher;
 
   // vars (committed in ../../wrangler.toml; BUILD_SHA added at deploy by deploy/deploy-vars.mjs)

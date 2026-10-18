@@ -527,3 +527,38 @@ test("Upcoming keeps dates chronological while preserving each day's custom task
     "Synthetic later day first in custom order",
   ]);
 });
+
+test.describe("account calendar", () => {
+  test.use({ timezoneId: "UTC" });
+
+  test("Today and new task dates follow the account calendar across UTC midnight", async ({
+    page,
+    request,
+  }) => {
+    await page.clock.setFixedTime(new Date("2026-10-18T01:00:00Z"));
+    await page.goto("/#/today");
+    await expect(page.locator(".view-subtitle")).toHaveText("Saturday, October 17");
+    await page.keyboard.press("q");
+    const dialog = page.getByRole("dialog", { name: "Add task", exact: true });
+    await dialog
+      .getByLabel("Task name", { exact: true })
+      .fill("Synthetic account calendar task");
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/tasks/v1/tasks",
+    );
+    await dialog.getByRole("button", { name: "Add task", exact: true }).click();
+    const task = await (await saved).json();
+    expect(task.due_date).toBe("2026-10-17");
+    const stored = await request.get(`/api/tasks/v1/${task.name}`);
+    expect((await stored.json()).due_date).toBe("2026-10-17");
+    const upcoming = page.waitForRequest((request) =>
+      new URL(request.url()).searchParams.get("view") === "upcoming",
+    );
+    await page.getByRole("link", { name: "Upcoming", exact: true }).click();
+    expect(new URL((await upcoming).url()).searchParams.get("date")).toBe(
+      "2026-10-17",
+    );
+  });
+});

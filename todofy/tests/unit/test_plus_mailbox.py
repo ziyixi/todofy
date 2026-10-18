@@ -230,9 +230,9 @@ def test_native_mail_summary_deletion_keeps_existing_tasks_and_event_dedup(stack
     stack.mail(E2, "filed", received=AT, summary="Already triaged")
     stack.d1.db.execute("UPDATE summaries SET triaged_at=1 WHERE event_id=?", (E2,))
     request = {"event_ids": [E1, E2, E3], "request_id": str(uuid.uuid4())}
-    answer = stack.call("DeleteMailItems", **request)
+    answer = stack.call("DeleteMailSummaries", **request)
     assert answer == {"deleted_event_ids": [E1, E3], "kept_event_ids": [E2]}
-    assert stack.call("DeleteMailItems", **request) == answer
+    assert stack.call("DeleteMailSummaries", **request) == answer
     assert set(stack.todoist.tasks) == {"linked", "filed"}
     assert {row[0] for row in stack.d1.db.execute("SELECT event_id FROM mail_events")} == {E1, E2}
     assert [row[0] for row in stack.d1.db.execute("SELECT event_id FROM summaries")] == [E2]
@@ -246,8 +246,8 @@ def test_native_mail_delete_receipt_handles_200_retained_entries(stack):
         stack.mail(event_id, "", received=AT)
     stack.d1.db.execute("UPDATE summaries SET triaged_at=1")
     request = {"event_ids": ids, "request_id": str(uuid.uuid4())}
-    assert stack.call("DeleteMailItems", **request) == {"kept_event_ids": ids}
-    assert stack.call("DeleteMailItems", **request) == {"kept_event_ids": ids}
+    assert stack.call("DeleteMailSummaries", **request) == {"kept_event_ids": ids}
+    assert stack.call("DeleteMailSummaries", **request) == {"kept_event_ids": ids}
     result = stack.sql.db.execute("SELECT result FROM plus_receipts").fetchone()[0]
     assert len(result) < 4096
 
@@ -635,24 +635,34 @@ def test_native_delete_protects_native_dependencies_without_adopting_legacy_same
 
 
 def test_native_categories_accept_an_ordinary_active_tag_without_a_destination(stack):
-    from todofy.runtime import plus_mail
-
     stack.core.env.TASK_SOURCE = "tasks"
-    current = asyncio.run(stack.runtime.plus_api.plan(stack.core))
-    original = asyncio.run(plus_mail.read_settings(stack.core))
-    saved = asyncio.run(
-        plus_mail.update_settings(
-            stack.core,
-            {
-                "categories": [{"label": {"provider": "tasks", "external_id": "id-active"}, "priority": "p2"}],
-                "etag": original["etag"],
-            },
-            current,
-        )
+    assert stack.call("ReadPlan")["plan"].get("enabled", False) is False
+    original = stack.call("ReadMailSettings")
+    saved = stack.call(
+        "UpdateMailCategories",
+        categories=[{"label": {"provider": "tasks", "external_id": "id-active"}, "priority": "p2"}],
+        etag=original["etag"],
     )
     assert saved["categories"][0]["label"] == {"provider": "tasks", "external_id": "id-active"}
     assert "destination" not in saved
-    assert "destination" not in asyncio.run(plus_mail.read_settings(stack.core))
+    assert "destination" not in stack.call("ReadMailSettings")
+
+
+def test_legacy_mail_requests_retain_their_published_required_fields(stack):
+    filing = {
+        "task_id": "synthetic",
+        "etag": "shown",
+        "category_id": "",
+        "categories_etag": "",
+        "request_id": str(uuid.uuid4()),
+    }
+    for field in ("task_id", "category_id", "categories_etag"):
+        assert stack.call("FileMailItem", **{key: value for key, value in filing.items() if key != field}) == {
+            "error": "BAD_REQUEST"
+        }
+    assert stack.call("DeleteMailItems", request_id=str(uuid.uuid4())) == {"error": "BAD_REQUEST"}
+    assert stack.call("UpdateMailSettings", categories=[], etag="shown") == {"error": "BAD_REQUEST"}
+    assert stack.todoist.calls == []
 
 
 def test_native_mail_with_a_frozen_direct_filing_is_not_deletable(stack):

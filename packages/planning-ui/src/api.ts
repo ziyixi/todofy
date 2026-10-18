@@ -641,11 +641,7 @@ export function createPlanningActions(
           label: { provider, externalId: category.labelId },
           priority: category.priority as Priority,
         })),
-        ...(provider === "tasks"
-          ? {}
-          : {
-              destination: { provider, externalId: IGNORED_DESTINATION },
-            }),
+        destination: { provider, externalId: IGNORED_DESTINATION },
         etag,
       });
       return { ...mailCategories(result, provider), etag: result.etag };

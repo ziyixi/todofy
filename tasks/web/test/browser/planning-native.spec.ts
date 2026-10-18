@@ -124,7 +124,7 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
         categories: [],
         categories_etag: "1",
       };
-    else if (url.pathname === "/api/plus/v1/mailItems:fileMailItem") {
+    else if (url.pathname === "/api/plus/v1/mailItems:convertMailItem") {
       const body = request.postDataJSON();
       mailWrites.push(body);
       expect(body).toMatchObject({
@@ -245,7 +245,7 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
   expect(requests.slice(mailStart).map((request) => request.path)).toEqual([
     "/api/plus/v1/mailItems",
     "/api/plus/v1/mailItems:readMailSummary",
-    "/api/plus/v1/mailItems:fileMailItem",
+    "/api/plus/v1/mailItems:convertMailItem",
   ]);
   expect(requests.every((request) => request.authorization === null)).toBe(
     true,

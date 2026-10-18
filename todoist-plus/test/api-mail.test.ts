@@ -204,7 +204,7 @@ it("saves categories, files by a category or into the Inbox alone, and deletes, 
     estimatedMinutes: 15,
     etag: "task-2",
   });
-  // Without a category: no category identity or categories etag; Todofy moves the task alone.
+  // The legacy RPC requires explicit empty category fields for an Inbox-only move.
   const moved = await api.fileMail(
     { ...task, id: "mail-2", etag: "task-1b" },
     undefined,
@@ -217,10 +217,10 @@ it("saves categories, files by a category or into the Inbox alone, and deletes, 
       task_id: "mail-2",
       etag: "task-1b",
       request_id: "33333333-3333-4333-8333-333333333333",
+      category_id: "",
+      categories_etag: "",
     },
   });
-  expect(calls[2]!.body).not.toHaveProperty("category_id");
-  expect(calls[2]!.body).not.toHaveProperty("categories_etag");
   expect(moved).toMatchObject({ id: "mail-2", projectId: "account-inbox" });
   expect(
     await api.deleteMail(

@@ -74,6 +74,7 @@ export function TaskWorkspace({
           {route.page === "today" && (
             <p className="view-subtitle">
               {new Date().toLocaleDateString(undefined, {
+                timeZone: catalog.timeZone || undefined,
                 weekday: "long",
                 month: "long",
                 day: "numeric",
@@ -160,17 +161,22 @@ export function TaskWorkspace({
           <button
             className="icon-button"
             aria-label="Previous week"
-            onClick={() => setDate((current) => shiftDate(current, -7))}
+            onClick={() => setDate((current) => shiftDate(current || date, -7))}
           >
             <ChevronLeft size={17} />
           </button>
-          <button className="text-button" onClick={() => setDate(todayDate())}>
+          <button
+            className="text-button"
+            onClick={() =>
+              setDate(todayDate(new Date(), catalog.timeZone || undefined))
+            }
+          >
             Today
           </button>
           <button
             className="icon-button"
             aria-label="Next week"
-            onClick={() => setDate((current) => shiftDate(current, 7))}
+            onClick={() => setDate((current) => shiftDate(current || date, 7))}
           >
             <ChevronRight size={17} />
           </button>

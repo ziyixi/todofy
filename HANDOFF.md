@@ -47,6 +47,11 @@ clean at `ca5c309e` when last checked.
 The staged-release declaration failure was the missing Tasks wrapper enrollment, specifically BUILD_SHA:
 release inputs already merge the secret fields. The corrected independent live comparison had zero differences.
 
+Refinement `cd3c6eab` was pushed; full branch [39085010635](https://github.com/ziyixi/todofy/actions/runs/39085010635)
+was held before production. Follow-up preserves the old required Mail inputs through three additive native
+methods, updates the FlowDay binding assertion and fixes UTC-browser/account-calendar dates. Local final
+Mail/native/calendar interaction checks pass; await the follow-up's complete green gate before release.
+
 The owner requested stopping both old acceptance reminders. The app confirmed deletion of heartbeat IDs
 `automation` (website cron evidence) and `todofy` (email-model scheduler evidence) on 2026-10-17. Their missing
 historical log evidence is not treated as a successful verification.

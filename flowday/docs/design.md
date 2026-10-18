@@ -550,7 +550,7 @@ rows cause verification and reset without `--confirm-database flowday` to stop.
 
 ## Native Tasks source
 
-An optional `TASKS` service binding to Tasks' named `TasksApi` entrypoint, with `props.consumer = "flowday"`,
+An optional `TASKS` service binding to Tasks' named `TasksApi` entrypoint, with `props.access = "read"`,
 selects native Tasks. Without it, the existing Todoist path is unchanged. This implementation does not add that
 binding to production; source cutover follows the complete Tasks import and identity checks.
 

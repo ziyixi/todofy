@@ -76,7 +76,7 @@ test("native mail creates no task until requested, replays a lost reply and dele
             "The full synthetic email summary.\nNo task has been created yet.",
         },
       });
-    if (path.endsWith(":fileMailItem")) {
+    if (path.endsWith(":convertMailItem")) {
       const body = route.request().postDataJSON() as Record<string, unknown>;
       fileBodies.push(body);
       expect(body.event_id).toBe(eventId);
@@ -87,7 +87,7 @@ test("native mail creates no task until requested, replays a lost reply and dele
         json: { task: { id: task.id, title: task.title } },
       });
     }
-    if (path.endsWith(":deleteMailItems")) {
+    if (path.endsWith(":deleteSummaries")) {
       const body = route.request().postDataJSON() as Record<string, unknown>;
       expect(body.event_ids).toEqual([oldEvent]);
       expect(body.task_ids).toBeUndefined();
@@ -120,14 +120,12 @@ test("native mail creates no task until requested, replays a lost reply and dele
   await expect(
     page.getByRole("button", { name: "Refresh mail" }),
   ).toBeEnabled();
-  await page.screenshot({ path: "/private/tmp/tasks-native-mail-desktop.png" });
   await page.setViewportSize({ width: 360, height: 740 });
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await page.screenshot({ path: "/private/tmp/tasks-native-mail-narrow.png" });
   await first.getByRole("button", { name: "Create task", exact: true }).click();
   await expect(page.getByRole("alert")).toBeVisible();
   await first.getByRole("button", { name: "Retry", exact: true }).click();
@@ -199,7 +197,7 @@ test("a definite mail conflict permits a fresh request after refresh", async ({
       });
     if (path.endsWith("mailSettings:read"))
       return route.fulfill({ json: { categories, etag: "1" } });
-    if (path.endsWith("mailSettings:updateMailSettings")) {
+    if (path.endsWith("mailSettings:updateCategories")) {
       const body = route.request().postDataJSON();
       expect(body.destination).toBeUndefined();
       expect(body.categories[0]).toMatchObject({
@@ -209,7 +207,7 @@ test("a definite mail conflict permits a fresh request after refresh", async ({
       categories = [{ id: "shortcut", ...body.categories[0] }];
       return route.fulfill({ json: { categories, etag: "2" } });
     }
-    if (path.endsWith(":fileMailItem")) {
+    if (path.endsWith(":convertMailItem")) {
       const body = route.request().postDataJSON() as Record<string, unknown>;
       bodies.push(body);
       if (bodies.length === 1) {

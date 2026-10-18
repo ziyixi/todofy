@@ -59,20 +59,29 @@ PLAN_METHODS = frozenset({"ReadPlan", "ConfirmPlanMapping", "UpdatePlanLabels"})
 # Writes of Todofy's planning store only, by value: no receipt, no Todoist write (set_dependency, resolve).
 DEPENDENCY_METHODS = frozenset({"SetTaskDependency", "ResolveDependencies"})
 # Writes of D1 alone, by compare-and-set: resending one is safe by its value, so it carries no request ID.
-VALUE_WRITES = frozenset({"SetWeeklyBet", "UpdateMailSettings"})
+VALUE_WRITES = frozenset({"SetWeeklyBet", "UpdateMailSettings", "UpdateMailCategories"})
 METHODS = (
     READ_METHODS
     | OWNER_METHODS
     | DEPENDENCY_METHODS
     | VALUE_WRITES
     | {"SetTaskPlan", "SetTaskLead", "AppendTaskSteps", "CompleteTask", "UpdatePlanLabels", "ReorderTasks"}
-    | {"FileMailItem", "DeleteMailItems"}
+    | {"FileMailItem", "DeleteMailItems", "ConvertMailItem", "DeleteMailSummaries"}
 )
 # Methods that write labels or bind them sync Todoist's labels first, so a label renamed in Todoist is never
 # written back under its old name; every other call reads the metadata the object synced in the last five
 # minutes (plus_todoist.metadata). FileMailItem syncs only when it files by a category (handle).
 LABEL_WRITES = frozenset(
-    {"SetTaskPlan", "SetTaskLead", "UpdatePlanLabels", "ConfirmPlanMapping", "FileMailItem", "UpdateMailSettings"}
+    {
+        "SetTaskPlan",
+        "SetTaskLead",
+        "UpdatePlanLabels",
+        "ConfirmPlanMapping",
+        "FileMailItem",
+        "UpdateMailSettings",
+        "ConvertMailItem",
+        "UpdateMailCategories",
+    }
 )
 # SetTaskPlan's fields that add one of the owner's literal labels when true (core/plus.plan_labels).
 LITERAL_LABELS = {"active": plus.ACTIVE, "parked": plus.PARKED}
@@ -681,16 +690,24 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
             elif method == "UpdateMailSettings":
                 current = await require_ready(coordinator, await plan(coordinator, fresh=True), synced=True)
                 response = await plus_mail.update_settings(coordinator, request, current)
+            elif method == "UpdateMailCategories":
+                if not native_tasks.enabled(env):
+                    raise todoist.PlusError("ACTION_NOT_ALLOWED")
+                response = await plus_mail.update_settings(coordinator, request, await plan(coordinator, fresh=True))
+            elif method == "ConvertMailItem":
+                if not native_tasks.enabled(env):
+                    raise todoist.PlusError("ACTION_NOT_ALLOWED")
+                current = await plan(coordinator, fresh=bool(request.get("category_id")))
+                response = await plus_mail.file(coordinator, request, current)
+            elif method == "DeleteMailSummaries":
+                response = await plus_mail.delete(coordinator, request)
             elif method == "FileMailItem":
                 # Only a category writes a label: a move to the Inbox alone uses the cached metadata.
                 fresh = bool(request.get("category_id"))
-                current = await plan(coordinator, fresh=fresh)
-                if not (native_tasks.enabled(env) and request.get("event_id")):
-                    current = await require_ready(coordinator, current, synced=fresh)
+                current = await require_ready(coordinator, await plan(coordinator, fresh=fresh), synced=fresh)
                 response = await plus_mail.file(coordinator, request, current)
             elif method == "DeleteMailItems":
-                if not (native_tasks.enabled(env) and request.get("event_ids")):
-                    await require_ready(coordinator)
+                await require_ready(coordinator)
                 response = await plus_mail.delete(coordinator, request)
             elif method == "ReorderTasks":
                 # The order writes no label: the cached metadata.

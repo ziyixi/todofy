@@ -58,6 +58,27 @@ describe('Native Tasks planning transport', () => {
     expect(response.status).toBe(200);
     expect(core.map(call => call.method)).toEqual(['plus_native_ui']);
   });
+  it('routes native mail actions without legacy task or destination placeholders', async () => {
+    const { env, core } = fakes({ TASK_SOURCE: 'tasks' }, () => uiOk({}));
+    const actions = [
+      ['mailItems:convertMailItem', 'ConvertMailItem', { event_id: 'event-one', etag: 'shown' }],
+      ['mailItems:deleteSummaries', 'DeleteMailSummaries', { event_ids: ['event-one'] }],
+      ['mailSettings:updateCategories', 'UpdateMailCategories', { categories: [], etag: 'shown' }],
+    ] as const;
+    for (const [path, method, body] of actions) {
+      const response = await nativePlanning(new Request(`https://planning.internal/api/plus/v1/${path}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      }), env);
+      expect(response.status).toBe(200);
+      const sent = core.at(-1);
+      expect(sent?.method).toBe('plus_native_ui');
+      expect(sent?.args[0]).toBe(method);
+      const parsed = JSON.parse(String(sent?.args[1])) as Record<string, unknown>;
+      expect(parsed).not.toHaveProperty('task_id');
+      expect(parsed).not.toHaveProperty('destination');
+      if (method !== 'UpdateMailCategories') expect(parsed['request_id']).toMatch(/^[0-9a-f-]{36}$/);
+    }
+  });
   it('does not fall back to the legacy FlowDay binding during a partial cutover', async () => {
     let calls = 0;
     const { env } = fakes();

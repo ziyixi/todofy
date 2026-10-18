@@ -81,7 +81,7 @@ export default function MailPage({
     requestId: string;
   }>();
   const fileRequests = useRef(
-    new Map<string, Parameters<typeof mailApi.fileMailItem>[0]>(),
+    new Map<string, Parameters<typeof mailApi.convertMailItem>[0]>(),
   );
   const readGeneration = useRef(0);
   const read = useCallback(async (pageToken = "") => {
@@ -161,7 +161,7 @@ export default function MailPage({
     setBusy(item.id);
     setError("");
     try {
-      const result = await mailApi.fileMailItem(request);
+      const result = await mailApi.convertMailItem(request);
       if (!result.task?.id) throw new Error("Unconfirmed task creation");
       setItems((current) => current.filter((value) => value.id !== item.id));
       fileRequests.current.delete(item.id);
@@ -188,7 +188,7 @@ export default function MailPage({
     setBusy("delete");
     setError("");
     try {
-      const result = await mailApi.deleteMailItems({
+      const result = await mailApi.deleteMailSummaries({
         eventIds: deletion.ids,
         requestId: deletion.requestId,
       });

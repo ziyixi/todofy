@@ -33,7 +33,7 @@ export const categoryActions = {
     items: Omit<MailCategories["categories"][number], "id">[],
     etag: string,
   ) {
-    const response = await mailApi.updateMailSettings({
+    const response = await mailApi.updateMailCategories({
       categories: items.map((item) => ({
         label: { provider: "tasks", externalId: item.labelId },
         priority: item.priority as Priority,

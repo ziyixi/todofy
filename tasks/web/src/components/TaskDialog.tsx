@@ -42,6 +42,7 @@ export function TaskDialog({
   onComplete: (task: Task) => Promise<string | undefined>;
   onChildAdded: () => void;
 }) {
+  const today = todayDate(new Date(), catalog.timeZone || undefined);
   const [draft, setDraft] = useState<TaskDraft>(() => ({
     title: task?.title ?? "",
     description: task?.description ?? "",
@@ -350,13 +351,13 @@ export function TaskDialog({
                             {due && (
                               <span
                                 className={
-                                  due < todayDate() && !child.completed
+                                  due < today && !child.completed
                                     ? "subtask-overdue"
                                     : ""
                                 }
                               >
                                 <CalendarDays size={11} />
-                                {dateLabel(due)}
+                                {dateLabel(due, today)}
                               </span>
                             )}
                             {child.recurrence && (
@@ -368,7 +369,7 @@ export function TaskDialog({
                             {child.deadline && (
                               <span className="subtask-deadline">
                                 <Flag size={11} />
-                                {dateLabel(child.deadline)}
+                                {dateLabel(child.deadline, today)}
                               </span>
                             )}
                           </span>

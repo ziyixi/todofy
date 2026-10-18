@@ -55,6 +55,7 @@ export function TaskList({
     }
     return groups;
   }, [tasks, groupBy]);
+  const today = todayDate(new Date(), catalog.timeZone || undefined);
   function heading(key: string): string {
     if (groupBy === "section")
       return (
@@ -62,9 +63,9 @@ export function TaskList({
       );
     if (key === "No date") return key;
     const date = new Date(`${key}T12:00:00`);
-    return key < todayDate()
-      ? `Overdue · ${dateLabel(key)}`
-      : `${dateLabel(key)} · ${date.toLocaleDateString(undefined, { weekday: "long" })}`;
+    return key < today
+      ? `Overdue · ${dateLabel(key, today)}`
+      : `${dateLabel(key, today)} · ${date.toLocaleDateString(undefined, { weekday: "long" })}`;
   }
   return (
     <div className="task-groups">
@@ -82,6 +83,7 @@ export function TaskList({
                 key={task.id}
                 task={task}
                 catalog={catalog}
+                today={today}
                 parentTitle={
                   task.parentTitle || taskIndex.get(task.parentId)?.title
                 }

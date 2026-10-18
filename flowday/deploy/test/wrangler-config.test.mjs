@@ -53,7 +53,7 @@ test('entry, static assets (the Next.js export) and the D1 binding with the real
 })
 
 test('native Tasks is the read-only service source for the existing mirror', () => {
-  assert.deepEqual(config.services, [{ binding: 'TASKS', service: 'tasks', entrypoint: 'TasksApi', props: { consumer: 'flowday' } }])
+  assert.deepEqual(config.services, [{ binding: 'TASKS', service: 'tasks', entrypoint: 'TasksApi', props: { access: 'read' } }])
 })
 
 test('vars: the production host, the public Access issuer and the real AUD; nothing injected, secret or for development', () => {

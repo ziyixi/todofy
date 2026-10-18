@@ -150,7 +150,7 @@ def test_native_mail_conversion_needs_no_inbox_project_or_planning_setup(native)
         f" VALUES('{event_id}',100,'Synthetic fresh Mail','Synthetic fresh summary','synthetic')"
     )
     [mail] = planning(native, "ListMailItems")["mail_items"]
-    filed = planning(native, "FileMailItem", event_id=event_id, etag=mail["etag"], request_id=str(uuid.uuid4()))
+    filed = planning(native, "ConvertMailItem", event_id=event_id, etag=mail["etag"], request_id=str(uuid.uuid4()))
     assert "task" in filed, filed
     task = rpc(native, "GetTask", {"name": f"tasks/{filed['task']['id']}"})
     assert task.get("project_id", "") == ""
@@ -526,7 +526,7 @@ def test_native_mail_category_is_an_ordinary_tag_and_files_with_one_generic_upda
     assert "destination" not in settings
     saved = planning(
         native,
-        "UpdateMailSettings",
+        "UpdateMailCategories",
         categories=[
             {
                 "label": {"provider": "tasks", "external_id": label["id"]},
@@ -575,10 +575,10 @@ def test_native_mail_exists_before_task_and_explicit_conversion_creates_only_one
     plan = planning(native, "ReadPlan")["plan"]
     assert plan["mailbox_pending_count"] == len(listed["mail_items"])
     request = {"event_id": event_id, "etag": mail["etag"], "request_id": str(uuid.uuid4())}
-    assert planning(native, "FileMailItem", **{**request, "etag": "stale"}) == {"error": "ETAG_MISMATCH"}
-    filed = planning(native, "FileMailItem", **request)
+    assert planning(native, "ConvertMailItem", **{**request, "etag": "stale"}) == {"error": "ETAG_MISMATCH"}
+    filed = planning(native, "ConvertMailItem", **request)
     assert "task" in filed, filed
-    assert planning(native, "FileMailItem", **request) == filed
+    assert planning(native, "ConvertMailItem", **request) == filed
     task = rpc(native, "GetTask", {"name": f"tasks/{filed['task']['id']}"})
     assert task.get("project_id", "") == ""
     assert task["title"].startswith("Synthetic deferred mail") and title.startswith(task["title"])
@@ -593,7 +593,7 @@ def test_native_mail_exists_before_task_and_explicit_conversion_creates_only_one
     assert event_id not in {item["id"] for item in planning(native, "ListMailItems").get("mail_items", [])}
     # Recreate the one possible interrupted boundary: Tasks committed but the D1 triage link did not.
     native.d1(f"UPDATE summaries SET task_id='',triaged_at=NULL WHERE event_id='{event_id}'")
-    repeated = planning(native, "FileMailItem", **{**request, "request_id": str(uuid.uuid4())})
+    repeated = planning(native, "ConvertMailItem", **{**request, "request_id": str(uuid.uuid4())})
     assert repeated == filed
     assert rpc(native, "ListTasks", {"view": "all", "page_size": 100})["tasks"] == after
     assert planning(native, "ReadMailSummary", id=event_id) == {"summary": summary}
@@ -611,8 +611,8 @@ def test_native_mail_summary_delete_never_deletes_a_linked_task(native, ready_pl
         f" VALUES('{event_id}',101,'Synthetic old mail','Synthetic old summary','synthetic','{task['id']}')"
     )
     request = {"event_ids": [event_id], "request_id": str(uuid.uuid4())}
-    assert planning(native, "DeleteMailItems", **request) == {"deleted_event_ids": [event_id]}
-    assert planning(native, "DeleteMailItems", **request) == {"deleted_event_ids": [event_id]}
+    assert planning(native, "DeleteMailSummaries", **request) == {"deleted_event_ids": [event_id]}
+    assert planning(native, "DeleteMailSummaries", **request) == {"deleted_event_ids": [event_id]}
     assert rpc(native, "GetTask", {"name": task["name"]}) == task
     assert planning(native, "ReadMailSummary", id=event_id) == {}
 

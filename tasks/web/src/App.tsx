@@ -45,7 +45,9 @@ export function App() {
   const [catalogError, setCatalogError] = useState("");
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [date, setDate] = useState(todayDate);
+  const [date, setDate] = useState("");
+  const accountToday = todayDate(new Date(), catalog.timeZone || undefined);
+  const upcomingDate = date || accountToday;
   const [orderBy, setOrderBy] = useState("sort_order");
   const [includeCompleted, setIncludeCompleted] = useState(false);
   const [editor, setEditor] = useState<{
@@ -63,7 +65,7 @@ export function App() {
   const list = useTaskView(
     route,
     route.page === "search" ? search : "",
-    route.page === "upcoming" ? date : "",
+    route.page === "upcoming" ? upcomingDate : "",
     orderBy,
     includeCompleted,
   );
@@ -98,10 +100,13 @@ export function App() {
     setEditor({
       defaults: {
         projectId: current.page === "project" ? current.id : "",
-        dueDate: current.page === "today" ? todayDate() : "",
+        dueDate:
+          current.page === "today"
+            ? todayDate(new Date(), catalog.timeZone || undefined)
+            : "",
       },
     });
-  }, []);
+  }, [catalog.timeZone]);
   const openTask = useCallback(async (id: string) => {
     try {
       setEditor({ task: await api.getTask({ name: `tasks/${id}` }) });
@@ -261,7 +266,7 @@ export function App() {
             search={search}
             setSearch={setSearch}
             searchRef={searchRef}
-            date={date}
+            date={upcomingDate}
             setDate={setDate}
             includeCompleted={includeCompleted}
             setIncludeCompleted={setIncludeCompleted}
