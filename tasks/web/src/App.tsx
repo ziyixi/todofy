@@ -75,13 +75,18 @@ export function App() {
   const loadCatalog = useCallback(async () => {
     setCatalogError("");
     try {
-      setCatalog(await api.getCatalog({ name: "catalog" }));
+      const loaded = await api.getCatalog({ name: "catalog" });
+      setCatalog(loaded);
+      return loaded;
     } catch (reason) {
       setCatalogError(describeError(reason));
     } finally {
       setCatalogLoading(false);
     }
   }, []);
+  const refreshCatalog = useCallback(async () => {
+    await loadCatalog();
+  }, [loadCatalog]);
   useEffect(() => {
     void loadCatalog();
   }, [loadCatalog]);
@@ -95,18 +100,20 @@ export function App() {
     window.addEventListener("hashchange", change);
     return () => window.removeEventListener("hashchange", change);
   }, []);
-  const addTask = useCallback(() => {
+  const addTask = useCallback(async () => {
     const current = currentRoute.current;
+    const settings = catalog.timeZone ? catalog : await loadCatalog();
+    if (!settings) return;
     setEditor({
       defaults: {
         projectId: current.page === "project" ? current.id : "",
         dueDate:
           current.page === "today"
-            ? todayDate(new Date(), catalog.timeZone || undefined)
+            ? todayDate(new Date(), settings.timeZone || undefined)
             : "",
       },
     });
-  }, [catalog.timeZone]);
+  }, [catalog, loadCatalog]);
   const openTask = useCallback(async (id: string) => {
     try {
       setEditor({ task: await api.getTask({ name: `tasks/${id}` }) });
@@ -175,7 +182,7 @@ export function App() {
         onAddTask={addTask}
         onAddProject={() => editCatalog("project")}
         onEditCatalog={editCatalog}
-        onCatalogSaved={loadCatalog}
+        onCatalogSaved={refreshCatalog}
         onError={actions.setNotice}
       />
       <SidebarResize />
@@ -252,7 +259,7 @@ export function App() {
           <CatalogView
             catalog={catalog}
             onEdit={editCatalog}
-            onSaved={loadCatalog}
+            onSaved={refreshCatalog}
             onError={actions.setNotice}
           />
         ) : (
@@ -314,7 +321,7 @@ export function App() {
             catalog={catalog}
             projectId={route.page === "project" ? route.id : ""}
             onClose={() => setCatalogEditor(undefined)}
-            onSaved={loadCatalog}
+            onSaved={refreshCatalog}
           />
         </Suspense>
       )}

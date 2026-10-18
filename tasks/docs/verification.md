@@ -33,15 +33,16 @@ This refinement has not yet been published. All local task content, mail and cre
   active descendants, excludes completed descendants, sits below the original and replays one copy after a
   lost response. Atomic reordering verifies all supplied etags before changing any position; a stale or missing
   row leaves the whole batch unchanged. The 100-task/full-description CPU case remains within the existing budget.
-- Tasks web: lint/types/build, 19 units and the final combined 29-case Chromium run pass.
+- Tasks web: lint/types/build, 19 units and the final combined 30-case Chromium run pass in a UTC browser.
   Coverage includes persisted CRUD,
   colors/property menus, right-click operations, complete/reopen inside a parent, dates across daylight saving,
   Markdown, chronological Upcoming, real drag persistence, search refresh without blank rows, responsive
   360–1440px editing/Plan and sidebar width persistence. The PWA case uses its own disposable profile.
 - The first branch CI caught the account/browser timezone boundary after UTC midnight. Quick Add, Upcoming
   and date labels now use the account calendar. A new UTC-browser/Pacific-account case verifies the stored
-  task date and Upcoming request, alongside the existing persisted CRUD scenario. The six final Mail/native
-  host/calendar cases pass locally; the new combined branch suite contains 30 browser cases.
+  task date and Upcoming request, alongside the existing persisted CRUD scenario. It releases the real catalog
+  response only after Quick Add starts, so the editor cannot freeze a browser-local date during startup.
+  The combined 30-case run passes in 36 seconds.
 - Shared planning UI: 14 cases pass; the legacy host's 308 units pass. Native host browser coverage uses
   same-origin synthetic planning replies: fixed-stage dragging with no label mapping, explicit Quick state,
   Settings, Focus timer and Mail summary. It proves UI/transport usage, not production writes.
@@ -96,7 +97,10 @@ Refinement branch [39085010635](https://github.com/ziyixi/todofy/actions/runs/39
 production. Its protocol guard rejected relaxing old required inputs; three additive native Mail RPCs now
 reuse the existing handlers and receipts while retaining those contracts. It also found an old FlowDay binding
 assertion, two retired-host Mail fixtures affected by omitted empty fields, temporary macOS screenshot paths,
-and the calendar mismatch above. These have focused regressions; a new full branch gate is required.
+and the calendar mismatch above. Follow-up [39085815272](https://github.com/ziyixi/todofy/actions/runs/39085815272)
+confirmed the old contracts and Mail cases, then exposed the still-early Quick Add and the gateway's 86 KiB
+review budget. Quick Add now awaits missing account settings; the native Mail schema measures 86.2 KiB gzip,
+so the reviewed budget is 87 KiB, with no platform-limit change. A new full branch gate is required.
 
 The first branch `4895d4a5` failed integration enrollment, fixtures and a FlowDay cold codec path. Later checks
 fixed those issues without reducing the existing CPU workload. The full `7eae7465` branch gate passed.

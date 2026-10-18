@@ -536,10 +536,21 @@ test.describe("account calendar", () => {
     request,
   }) => {
     await page.clock.setFixedTime(new Date("2026-10-18T01:00:00Z"));
+    let releaseCatalog!: () => void;
+    const catalogReady = new Promise<void>((resolve) => {
+      releaseCatalog = resolve;
+    });
+    await page.route("**/api/tasks/v1/catalog", async (route) => {
+      await catalogReady;
+      await route.continue();
+    });
     await page.goto("/#/today");
-    await expect(page.locator(".view-subtitle")).toHaveText("Saturday, October 17");
+    await expect(page.getByRole("heading", { name: "Today", exact: true })).toBeVisible();
     await page.keyboard.press("q");
+    releaseCatalog();
     const dialog = page.getByRole("dialog", { name: "Add task", exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(page.locator(".view-subtitle")).toHaveText("Saturday, October 17");
     await dialog
       .getByLabel("Task name", { exact: true })
       .fill("Synthetic account calendar task");

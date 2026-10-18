@@ -744,10 +744,13 @@ characters, and JSON.parse and stringify of a legacy text's 1.9 million characte
 the 10 (the ASCII rows were measured on 2026-10-02 in nine runs of the test, three isolates each). `src/warm.ts` runs the codec once over synthetic messages at global scope (startup, outside every
 request's limit), which took the isolate's first API request from 7.4-8.2 to 4.2-5.2 ms. The DO's own CPU (30 s
 per invocation) is not measured here: it builds the same dicts as before and maps them to the generated
-dataclasses; todofy-core's upload grew 554.1 → 633.4 KiB (gzip 153.6 → 168.4 KiB). The gateway's bundle, `deploy/bundle-size.mjs` (budget 86 KiB gzip): 39.7 → 291.4 KiB raw, 11.8 →
+dataclasses; todofy-core's upload grew 554.1 → 633.4 KiB (gzip 153.6 → 168.4 KiB). The gateway's bundle, `deploy/bundle-size.mjs`: 39.7 → 291.4 KiB raw, 11.8 →
 72.0 KiB gzip (the protobuf-es runtime, the codec, the transcoder and the descriptors of `todofy.ui.v1`,
 `todofy.report.v1`, `google/api` and `common/errors`); the UI's JavaScript, `web/scripts/js-budget.mjs` (budget
 208 KiB gzip): 131.9 → 172.4 KiB gzip.
+
+On 2026-10-17, the three native Mail actions retained the old required-field contracts and brought the gateway
+to 86.2 KiB gzip. Its review budget is now 87 KiB, up from 86 KiB; the Workers Free limit remains 3 MiB.
 
 Run in `scratchpad/tmp/contract/repo` with a minimal TS gateway and a minimal Python DO:
 

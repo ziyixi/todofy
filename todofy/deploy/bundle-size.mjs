@@ -12,6 +12,7 @@
 //   node deploy/bundle-size.mjs "$RUNNER_TEMP/todofy-gateway-bundle"     (from todofy/, after the dry run's --outdir)
 import { checkWorkerBundle, isMain } from '../../tools/bundle-size/bundle-size.mjs'
 
-export const BUDGET_GZIP_BYTES = 86 * 1024
+// 2026-10-17: the three additive native Mail RPCs retain old input contracts; measured 86.2 KiB gzip.
+export const BUDGET_GZIP_BYTES = 87 * 1024
 
 if (isMain(import.meta.url)) process.exitCode = checkWorkerBundle("Todofy's gateway", process.argv[2], BUDGET_GZIP_BYTES)

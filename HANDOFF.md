@@ -49,8 +49,10 @@ release inputs already merge the secret fields. The corrected independent live c
 
 Refinement `cd3c6eab` was pushed; full branch [39085010635](https://github.com/ziyixi/todofy/actions/runs/39085010635)
 was held before production. Follow-up preserves the old required Mail inputs through three additive native
-methods, updates the FlowDay binding assertion and fixes UTC-browser/account-calendar dates. Local final
-Mail/native/calendar interaction checks pass; await the follow-up's complete green gate before release.
+methods and updates the FlowDay binding assertion. Follow-up `533da462` passed the native contract/Mail checks
+but exposed Quick Add before account settings finish and a 0.2 KiB gateway review-budget excess. The next
+revision waits for those settings, pins browser regression tests to UTC and reviews the bundle budget at
+87 KiB. Final local Tasks browser checks pass all 30 cases; await the complete green gate before release.
 
 The owner requested stopping both old acceptance reminders. The app confirmed deletion of heartbeat IDs
 `automation` (website cron evidence) and `todofy` (email-model scheduler evidence) on 2026-10-17. Their missing
