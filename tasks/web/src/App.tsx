@@ -18,6 +18,11 @@ import {
   type TaskDraft,
 } from "./api";
 import { todayDate } from "./dates";
+import {
+  clearDetailReadCache,
+  peekDetailRead,
+  readDetail,
+} from "./detail-read-cache";
 import { isPlanning, readRoute, type Route } from "./routes";
 import { useTaskView } from "./useTaskView";
 import { useTaskActions } from "./useTaskActions";
@@ -58,6 +63,7 @@ export function App() {
     item?: CatalogItem;
   }>();
   const [showSidebar, setShowSidebar] = useState(false);
+  const taskOpenSequence = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const currentRoute = useRef(route);
   currentRoute.current = route;
@@ -90,10 +96,21 @@ export function App() {
     void loadCatalog();
   }, [loadCatalog]);
   useEffect(() => {
+    window.addEventListener("focus", clearDetailReadCache);
+    document.addEventListener("visibilitychange", clearDetailReadCache);
+    return () => {
+      window.removeEventListener("focus", clearDetailReadCache);
+      document.removeEventListener("visibilitychange", clearDetailReadCache);
+      taskOpenSequence.current++;
+      clearDetailReadCache();
+    };
+  }, []);
+  useEffect(() => {
     if (actions.mutationRevision > 0) void loadCatalog();
   }, [actions.mutationRevision, loadCatalog]);
   useEffect(() => {
     const change = () => {
+      taskOpenSequence.current++;
       setRoute(readRoute());
       setSelected(new Set());
       setShowSidebar(false);
@@ -103,9 +120,10 @@ export function App() {
     return () => window.removeEventListener("hashchange", change);
   }, []);
   const addTask = useCallback(async () => {
+    const request = ++taskOpenSequence.current;
     const current = currentRoute.current;
     const settings = catalog.timeZone ? catalog : await loadCatalog();
-    if (!settings) return;
+    if (!settings || request !== taskOpenSequence.current) return;
     setEditor({
       defaults: {
         projectId: current.page === "project" ? current.id : "",
@@ -117,10 +135,22 @@ export function App() {
     });
   }, [catalog, loadCatalog]);
   const openTask = useCallback(async (id: string) => {
+    const request = ++taskOpenSequence.current;
+    const key = `task:${id}` as const;
+    const cached = peekDetailRead<Task>(key);
+    if (cached) {
+      setEditor({ task: cached });
+      return;
+    }
     try {
-      setEditor({ task: await api.getTask({ name: `tasks/${id}` }) });
+      // ListTasks omits full descriptions; only the dedicated GetTask reply may seed a detail.
+      const task = await readDetail(key, () =>
+        api.getTask({ name: `tasks/${id}` }),
+      );
+      if (request === taskOpenSequence.current) setEditor({ task });
     } catch (reason) {
-      setNotice(describeError(reason));
+      if (request === taskOpenSequence.current)
+        setNotice(describeError(reason));
     }
   }, []);
   useEffect(() => {
@@ -298,7 +328,10 @@ export function App() {
             task={editor.task}
             defaults={editor.defaults}
             catalog={catalog}
-            onClose={() => setEditor(undefined)}
+            onClose={() => {
+              taskOpenSequence.current++;
+              setEditor(undefined);
+            }}
             onSave={saveTask}
             onDelete={deleteTask}
             onComplete={complete}

@@ -34,7 +34,12 @@ const schemas = {
   labels: LabelSchema,
   filters: SavedFilterSchema,
 } as const;
-export async function getCatalog(db: D1Database, zone: string, now = Date.now()) {
+export async function getCatalog(
+  db: D1Database,
+  zone: string,
+  now = Date.now(),
+  includeTaskCounts = true,
+) {
   const tables = Object.keys(schemas) as CatalogTable[];
   const results = await storage(() =>
     db.batch(
@@ -61,7 +66,9 @@ export async function getCatalog(db: D1Database, zone: string, now = Date.now())
     labels: labels.map((r) => catalogMessage("labels", r)),
     filters: filters.map((r) => catalogMessage("filters", r)),
     timeZone: zone,
-    taskCounts: await catalogCounts(db, { projects, labels, filters }, zone, now),
+    taskCounts: includeTaskCounts
+      ? await catalogCounts(db, { projects, labels, filters }, zone, now)
+      : [],
   });
 }
 export function validateCatalogFields(
@@ -129,9 +136,15 @@ export async function saveCatalog<S extends DescMessage>(
 ): Promise<MessageShape<S>> {
   const resource = input.resource as unknown as Record<string, unknown>;
   // Preserve existing request receipts: old filter messages did not contain the default color field.
-  const hashInput = table === "filters" && resource.color === ""
-    ? { ...input, resource: Object.fromEntries(Object.entries(resource).filter(([key]) => key !== "color")) }
-    : input;
+  const hashInput =
+    table === "filters" && resource.color === ""
+      ? {
+          ...input,
+          resource: Object.fromEntries(
+            Object.entries(resource).filter(([key]) => key !== "color"),
+          ),
+        }
+      : input;
   const hash = await fingerprint(
     `${createNew ? "create" : "update"}:${table}`,
     hashInput,
@@ -181,10 +194,17 @@ export async function saveCatalog<S extends DescMessage>(
   row.revision++;
   row.updated_at = now;
   await validate(db, table, row);
-  const sectionMove = table === "sections" && existing !== null && row.project_id !== existing.project_id;
-  const movedTasks = sectionMove ? await moveSectionTasks(db, id, row.project_id ?? "", now) : [];
+  const sectionMove =
+    table === "sections" &&
+    existing !== null &&
+    row.project_id !== existing.project_id;
+  const movedTasks = sectionMove
+    ? await moveSectionTasks(db, id, row.project_id ?? "", now)
+    : [];
   // Apply archive visibility after moving tasks to their section's new project.
-  const writtenFields = sectionMove ? fields.filter((field) => field !== "archived") : fields;
+  const writtenFields = sectionMove
+    ? fields.filter((field) => field !== "archived")
+    : fields;
   const columns = ["id", ...fields, "revision", "created_at", "updated_at"];
   const data = row as unknown as Record<string, string | number>;
   const write = createNew
@@ -200,7 +220,11 @@ export async function saveCatalog<S extends DescMessage>(
         .bind(...writtenFields.map((c) => data[c]), now, id);
   const writes = [write, ...movedTasks];
   if (sectionMove && row.archived !== existing.archived)
-    writes.push(db.prepare("UPDATE sections SET archived=? WHERE id=?").bind(row.archived ?? 0, id));
+    writes.push(
+      db
+        .prepare("UPDATE sections SET archived=? WHERE id=?")
+        .bind(row.archived ?? 0, id),
+    );
   const body = JSON.stringify(
     toWire(schema, catalogMessage(table, row) as unknown as MessageShape<S>),
   );

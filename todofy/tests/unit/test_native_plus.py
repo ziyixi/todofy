@@ -273,6 +273,6 @@ def test_native_completion_page_counts_only_the_window_and_preserves_project_and
         assert tally.total == 2 and tally.inbox == 1 and tally.added_recent_total == tally.added_recent_inbox == 1
         assert state.phase == gtd.AGGREGATE and not state.cursor
         assert seen == [
-            ("GetCatalog", {"name": "catalog"}),
+            ("GetCatalog", {"name": "catalog", "include_task_counts": False}),
             ("ListCompletions", {"page_token": "", "page_size": 100}),
         ]

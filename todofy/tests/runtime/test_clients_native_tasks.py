@@ -802,3 +802,11 @@ def test_completion_focus_target_must_be_a_completed_descendant(native, ready_pl
         native, "CompleteTask", **{**proof, "request_id": str(uuid.uuid4()), "flow_task_id": unrelated["id"]}
     ) == {"error": "ACTION_NOT_ALLOWED"}
     assert rpc(native, "GetTask", {"name": parent["name"]})["completed_count"] == 1
+
+
+def test_catalog_metadata_selector_keeps_legacy_default_and_cross_language_false(native):
+    full = rpc(native, "GetCatalog", {"name": "catalog"})
+    explicit = rpc(native, "GetCatalog", {"name": "catalog", "include_task_counts": True})
+    metadata = rpc(native, "GetCatalog", {"name": "catalog", "include_task_counts": False})
+    assert explicit == full and full["task_counts"]
+    assert metadata == {key: value for key, value in full.items() if key != "task_counts"}

@@ -87,10 +87,12 @@ export function TaskDialog({
         currentTask,
         saveRequestId.current,
       );
+      const genericChanged = saved !== currentTask;
       setCurrentTask(saved);
       saveRequestId.current = crypto.randomUUID();
-      if (!saved.completed) await planning.save(saved.id, draft.deadline);
-      onChildAdded();
+      const planningChanged =
+        !saved.completed && (await planning.save(saved.id, draft.deadline));
+      if (genericChanged || planningChanged) onChildAdded();
       onClose();
     } catch (reason) {
       const message =

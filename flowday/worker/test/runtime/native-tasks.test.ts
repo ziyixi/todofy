@@ -42,7 +42,10 @@ function respond(request: Request): Response {
   requests.push(url.pathname);
   expect(request.method).toBe('GET');
   if (status !== 200) return new Response(null, { status });
-  if (url.pathname.endsWith('/catalog')) return Response.json(toWire(CatalogSchema, catalog));
+  if (url.pathname.endsWith('/catalog')) {
+    expect(url.searchParams.get('include_task_counts')).toBe('false');
+    return Response.json(toWire(CatalogSchema, catalog));
+  }
   expect(url.pathname).toBe('/api/tasks/v1/changes');
   expect(url.searchParams.get('page_size')).toBe('100');
   const cursor = Number(url.searchParams.get('page_token') ?? '0');

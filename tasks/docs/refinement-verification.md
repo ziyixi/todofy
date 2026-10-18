@@ -1,6 +1,6 @@
 # Tasks workflow refinement
 
-The owner's 26 requested changes are the acceptance scope. The implementation separates generic Tasks
+The owner's 28 requested changes are the acceptance scope. The implementation separates generic Tasks
 content, Todofy planning facts and FlowDay queues/timing. No VPS, Newsletter or Recall changes are included.
 
 ## Acceptance
@@ -9,7 +9,11 @@ Implementation `2dbd6aad31d7876a2a609ac3e172612f5d9f5616` passed the complete
 [branch gate](https://github.com/ziyixi/todofy/actions/runs/39102347298) and the
 [same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/39102825081).
 The owner confirmed the full production cleanup scope on 2026-10-18; it has been applied and verified.
-Private cleanup inputs remain outside this public repository. The four subsequent UI requests are implemented; their final release and production check are pending.
+Private cleanup inputs remain outside this public repository. Items 23–26 passed branch CI
+[39110446990](https://github.com/ziyixi/todofy/actions/runs/39110446990) and the same-SHA main release
+[39110769544](https://github.com/ziyixi/todofy/actions/runs/39110769544) at
+`f5745def60865a832781727bb71919754ee23b0e`; owner Chrome confirmed the deployed controls.
+The current release receipt for items 27–28 is maintained in [HANDOFF](../../HANDOFF.md#tasks-workflow-refinement-2026-10-18-utc).
 
 | Item | Required result | Evidence |
 | --- | --- | --- |
@@ -37,8 +41,10 @@ Private cleanup inputs remain outside this public repository. The four subsequen
 | 22 | Focus uses FlowDay timer | Shared count-up/25/50-minute mode, server settlement and wall-clock rendering; completion replay, parent-cascade and unrelated-timer checks pass against existing APIs. |
 | 23 | Stable task-detail loading | Real browser regression holds planning and child reads separately: the frame stays 860×780, with no guessed unchecked flags. |
 | 24 | Deliberate action/status placement | Action/Status groups align across both editors; wide/narrow layout checks preserve 14px controls. |
-| 25 | Date/Deadline format guidance | Shared picker now shows supported ISO/tomorrow examples; local parser and both entry-point browser checks pass. Release pending. |
+| 25 | Date/Deadline format guidance | Shared picker shows supported ISO/tomorrow examples; local parser, both entry-point browser checks and deployed Chrome checks pass. |
 | 26 | Floating label picker | Existing Base UI popup floats outside the body; dimensions stay unchanged, multiple selections persist, Escape/outside clicks keep the editor open. |
+| 27 | Faster repeated detail reads | A bounded 30-second page-memory cache reuses full task/planning replies. Real browser tests cover full descriptions, reopen reads, invalidation, edited drafts, stale writes and opening races. |
+| 28 | Reduce unnecessary D1 work | Metadata-only Catalog, indexed counts, one Catalog per planning request and no-op saves. Real D1 row metrics and unchanged count semantics are checked below. |
 
 ## Synthetic Chrome evidence
 
@@ -130,5 +136,55 @@ Escape dismissed only the popup. The following screenshots contain synthetic con
 
 ![Visible date input format](images/details-date-format.png)
 
-Branch gate, same-SHA Actions release and production UI confirmation remain pending for these four
-follow-ups. They do not change credentials, schemas, budgets or infrastructure.
+The branch gate and same-SHA release listed above completed. Read-only production Chrome inspection
+confirmed an unchanged 860×780 detail frame, deliberate option groups, both date hints and a label popup
+that left the 664-pixel body unchanged. These four changes added no credentials, schemas or infrastructure.
+
+## Detail reads and D1 budget (items 27–28)
+
+Detail reads use one page-memory map, at most 20 entries for 30 seconds. It holds only full GetTask and
+single-task planning replies, never the reduced ListTasks projection. Concurrent opens share a pending
+read; an expired pending read can be replaced on the next user action. A late reply cannot repopulate a
+cleared entry or replace a more recently opened task. Nothing is persisted in cookies or local storage.
+
+Writes, authentication failures, conflicts, window focus and visibility changes clear these entries.
+They do not replace a draft already being edited. Planning mutations still read current state, preserve
+unmodified remote fields and reject a conflicting deadline before applying start-ahead changes.
+Saving an entirely unchanged task and planning draft performs no mutation or category-count reload.
+
+Catalog retains task counts by default, including for old clients. Core and FlowDay explicitly omit them
+when they only need organization metadata. A planning request reuses that metadata within the request;
+the next request reads it again. Project and Inbox counts use existing indexes; there is no new index,
+server cache, dependency, scheduler or quota service. Deployment order remains Tasks → FlowDay → Todofy,
+so new consumers cannot send the optional field to an old strict decoder.
+
+Measured with real Miniflare/D1 result metadata, using 40 active tasks and 2,000 completed tasks:
+
+| Catalog read | SQL statements | Rows read | Rows written |
+| --- | ---: | ---: | ---: |
+| Before | 7 | 4,254 | 0 |
+| Full counts after | 7 | 179 | 0 |
+| Metadata only | 4 | 10 | 0 |
+
+With label memberships present, increasing completed history from 2,000 to 4,000 leaves the counts
+identical and reads unchanged at 298. These are synthetic query measurements, not production daily usage.
+The tests assert the metadata-only budget and bounded history growth; ordinary writes still retain their
+existing request receipts, etags and changefeed behavior.
+
+Cloudflare documents account-shared Free allowances of 5 million read rows and 100,000 written rows per
+UTC day, plus 5 GB total storage. Scanned rows count even when a query returns fewer results; indexed writes
+also contribute. The Free per-database limit is 500 MB and the per-invocation query limit is 50. See
+[D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/) and
+[D1 limits](https://developers.cloudflare.com/d1/platform/limits/). These local reductions do not guarantee
+that every application in the account stays below its combined quota.
+
+The final local suite includes 55 Tasks web unit/hook checks and 47 Chromium/local-D1 journeys, Tasks
+Worker's 2 unit and 40 runtime checks, FlowDay's 21 unit and 6 native runtime checks, Core's 50 host and
+19 real cross-language runtime checks, and proto format/lint/type/schema/breaking checks. Browser coverage
+includes zero-write unchanged saves, full-description reuse, expired reads, focus/visibility invalidation,
+real etag conflicts and a late task-A reply after task B opens.
+
+During this work the owner reported an approximately 20-second refresh stall. Public HTTP reached Access
+in about 0.1 seconds; authenticated Chrome inspection also stalled, then the same tab recovered without
+cookie clearing or an application restart. The cause was not established. These read optimizations are
+not evidence that the separate stall has been fixed.

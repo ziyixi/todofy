@@ -22,6 +22,12 @@ export async function catalogCounts(
   now: number,
 ): Promise<Omit<TaskCount, "$typeName">[]> {
   const today = localDate(now, zone);
+  const inboxProjects = [
+    "",
+    ...catalog.projects
+      .filter((project) => project.inbox)
+      .map((project) => project.id),
+  ];
   const active = "t.deleted_at IS NULL AND t.completed=0";
   const visible = `${active} AND t.project_archived=0`;
   const results = await storage(() =>
@@ -29,16 +35,16 @@ export async function catalogCounts(
       db
         .prepare(
           `SELECT 'inbox' AS view,'' AS id,COUNT(*) AS count FROM tasks t
-      WHERE ${visible} AND t.parent_id='' AND (t.project_id='' OR t.project_id IN
-        (SELECT id FROM projects WHERE inbox=1 AND deleted_at IS NULL))
+      WHERE ${visible} AND t.parent_id='' AND t.project_id IN (SELECT value FROM json_each(?))
       UNION ALL SELECT 'today','',COUNT(*) FROM tasks t
       WHERE ${visible} AND t.due_date<>'' AND t.due_date<=?
       UNION ALL SELECT 'upcoming','',COUNT(*) FROM tasks t
       WHERE ${visible} AND t.due_date>=? AND t.due_date<?`,
         )
-        .bind(today, today, addDays(today, 7)),
-      db.prepare(`SELECT 'project' AS view,t.project_id AS id,COUNT(*) AS count FROM tasks t
-      WHERE ${active} AND t.parent_id='' GROUP BY t.project_id`),
+        .bind(JSON.stringify(inboxProjects), today, today, addDays(today, 7)),
+      db.prepare(`SELECT 'project' AS view,p.id,COUNT(t.id) AS count FROM projects p
+      LEFT JOIN tasks t ON t.project_id=p.id AND t.parent_id='' AND ${active}
+      WHERE p.deleted_at IS NULL GROUP BY p.id`),
       db.prepare(`SELECT 'label' AS view,tl.label_id AS id,COUNT(*) AS count FROM task_labels tl
       JOIN tasks t ON t.id=tl.task_id WHERE ${visible} GROUP BY tl.label_id`),
     ]),

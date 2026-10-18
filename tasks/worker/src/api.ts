@@ -21,7 +21,7 @@ export interface ApiContext {
   internal: boolean;
 }
 export const handlers: ServiceHandlers<ShapeOf<typeof TasksUiService>, ApiContext> = {
-  getCatalog: (_, { env, now }) => getCatalog(env.DB, accountZone(env), now),
+  getCatalog: (input, { env, now }) => getCatalog(env.DB, accountZone(env), now, input.includeTaskCounts !== false),
   listTasks: (input, { env, now }) => listTasks(env.DB, input, accountZone(env), now),
   getTask: async (input, { env }) => taskMessage(await getTask(env.DB, resourceId(input.name, 'tasks'))),
   createTask: (input, { env, now }) => createTask(env.DB, input, now),

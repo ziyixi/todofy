@@ -11,8 +11,8 @@ from pyodide.ffi import JsException
 from ziyixi_proto.todofy.ui.v1 import plus_service_pb as pb
 from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
 
+from todofy.core import native_task_view, plus
 from todofy.core import plan as planning
-from todofy.core import plus
 from todofy.core.sql import gtd as gtd_sql
 from todofy.core.sql import mailbox as mailbox_sql
 from todofy.core.sql import plus as sql
@@ -715,7 +715,8 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
                 # The order writes no label: the cached metadata.
                 response = await plus_order.reorder(coordinator, request, await require_ready(coordinator))
             elif method == "ListPlanningTasks":
-                current = await plan(coordinator)
+                catalog = await todoist._native(native_tasks.catalog(env)) if native_tasks.enabled(env) else None
+                current = await plan(coordinator, native_task_view.metadata(catalog) if catalog is not None else None)
                 size = request.get("page_size", 0) or 100
                 cursor = request.get("page_token", "")
                 ids = request.get("task_ids", [])
@@ -723,8 +724,10 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
                     raise todoist.PlusError("BAD_REQUEST")
                 for task_id in ids:
                     plus.check_id(task_id)
-                tasks, following = await todoist.tasks(
-                    coordinator, size, cursor, **({"ids": ",".join(ids)} if ids else {})
+                tasks, following = (
+                    await todoist._native(native_tasks.page(env, cursor=cursor, limit=size, ids=ids, metadata=catalog))
+                    if catalog is not None
+                    else await todoist.tasks(coordinator, size, cursor, **({"ids": ",".join(ids)} if ids else {}))
                 )
                 if current["enabled"] and not backup.holds_ledger(env, coordinator.sql, now_s()):
                     await plus_week.remember_page(env, tasks, current["week_start"], current["labels"])

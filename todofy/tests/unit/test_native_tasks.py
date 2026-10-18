@@ -169,7 +169,7 @@ def test_footer_search_reads_complete_descriptions_and_verifies_original_predica
     ]
     env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service, TODOIST_DEFAULT_PROJECT_ID="project-one", DB=D1())
     assert asyncio.run(runtime.todoist.find_footer_tasks(env, EVENT)) == ["match"]
-    assert service.calls[0] == ("GetCatalog", {"name": "catalog"})
+    assert service.calls[0] == ("GetCatalog", {"name": "catalog", "include_task_counts": False})
     method, request = service.calls[1]
     assert method == "ListTasks"
     assert request["query"] == f"{FOOTER_PREFIX}{EVENT}"
@@ -206,3 +206,26 @@ def test_projection_keeps_planning_semantics_and_native_concurrency():
     assert task["sort_order"] == 2.5
     assert task["due"]["is_recurring"]
     assert native_task_view.metadata(CATALOG)["timezone"] == "America/Los_Angeles"
+
+
+def test_planning_page_reuses_one_metadata_read_and_refreshes_it_for_the_next_request(runtime, monkeypatch):
+    from todofy.runtime import plus_api
+
+    service = Service()
+    service.pages = [{"tasks": [native_row("first")]}, {"tasks": [native_row("second")]}]
+    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service, DB=D1())
+    core = types.SimpleNamespace(env=env, plus_lock=asyncio.Lock())
+    monkeypatch.setattr(plus_api, "account_day", lambda _timezone: "2026-10-17")
+    for task_id in ("first", "second"):
+        answer = asyncio.run(
+            plus_api.handle(core, "ListPlanningTasks", json.dumps({"task_ids": [task_id], "page_size": 1}), owner=True)
+        )
+        assert "error" not in answer
+        [task] = json.loads(answer["ok"])["planning_tasks"]
+        assert task["id"] == task_id and task["title"] == "Synthetic task"
+    assert [method for method, _request in service.calls] == ["GetCatalog", "ListTasks"] * 2
+    assert all(
+        request == {"name": "catalog", "include_task_counts": False}
+        for method, request in service.calls
+        if method == "GetCatalog"
+    )

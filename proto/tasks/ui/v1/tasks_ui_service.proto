@@ -238,12 +238,16 @@ service TasksUiService {
 }
 
 // Catalog request.
+// (-- api-linter: core::0131::request-unknown-fields=disabled
+//     aip.dev/not-precedent: this bounded aggregate lets metadata readers omit expensive sidebar counts while retaining the legacy default. --)
 message GetCatalogRequest {
   // Always catalog.
   string name = 1 [
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "tasks.ziyixi.science/Catalog"
   ];
+  // Include sidebar task counts. Omission preserves true; metadata-only readers may explicitly request false.
+  optional bool include_task_counts = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 // All project organization, with a hard bound rather than a silently truncated result.
 // (-- api-linter: core::0122::embedded-resource=disabled

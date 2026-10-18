@@ -64,7 +64,7 @@ async def call(env: Any, method: str, body: dict[str, Any]) -> dict[str, Any]:
 
 
 async def catalog(env: Any) -> dict[str, Any]:
-    return await call(env, "GetCatalog", {"name": "catalog"})
+    return await call(env, "GetCatalog", {"name": "catalog", "include_task_counts": False})
 
 
 async def task(env: Any, task_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -1,7 +1,13 @@
 import { createHttpClient } from "@ziyixi/proto/http-client";
 import { PlusService } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 import type { PlanningTask } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
-import { send } from "./api";
+import { send, type Task } from "./api";
+import {
+  peekDetailRead,
+  readDetail,
+  clearDetailReadCache,
+  type DetailReadKey,
+} from "./detail-read-cache";
 
 export const planningApi = createHttpClient(PlusService, send);
 export const TASK_OPTIONS = [
@@ -30,6 +36,19 @@ export function planningDraft(task?: PlanningTask): PlanningDraft {
     ) as Record<TaskOption, boolean>),
   };
 }
+function planningReadKey(task: Pick<Task, "id" | "etag">): DetailReadKey {
+  return `planning:${task.id}:${task.etag}`;
+}
+export function peekTaskPlanning(
+  task: Pick<Task, "id" | "etag">,
+): PlanningTask | undefined {
+  return peekDetailRead<PlanningTask>(planningReadKey(task));
+}
+/** Only opening details uses this short-lived page-memory read. Mutation preflights stay fresh. */
+export function readCachedTaskPlanning(task: Pick<Task, "id" | "etag">) {
+  return readDetail(planningReadKey(task), () => readTaskPlanning(task.id));
+}
+/** Deliberately uncached: saves and deadline cleanup compare against the current server state. */
 export async function readTaskPlanning(id: string) {
   const result = await planningApi.listPlanningTasks({
     taskIds: [id],
@@ -55,9 +74,15 @@ export async function saveTaskPlanning(
   const leadChanged = desired.leadDays !== initial.leadDays;
   if (!changed.length && !leadChanged) return;
   let current = await readTaskPlanning(id);
+  // A write preflight can prove an opened snapshot stale even before the server rejects a mutation.
+  clearDetailReadCache();
   if (!current)
     throw new Error("This task is no longer available for planning.");
   const fresh = planningDraft(current);
+  if (leadChanged && current.deadline !== deadline)
+    throw new Error(
+      "The deadline changed elsewhere. Reopen this task before changing start-ahead.",
+    );
   if (
     base &&
     [...changed, ...(leadChanged ? ["leadDays" as const] : [])].some(

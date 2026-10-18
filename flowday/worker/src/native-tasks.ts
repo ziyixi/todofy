@@ -133,7 +133,7 @@ export async function runNativeSync({
     page = await api.listChanges({ pageToken: cursor, pageSize: NATIVE_SYNC_PAGE });
     if (page.changes.length > NATIVE_SYNC_PAGE || !page.nextPageToken || (page.hasMore && page.nextPageToken === cursor))
       throw new TasksReadError('native_tasks_invalid_page');
-    if (!catalog || page.catalogChanged) catalog = await api.getCatalog({ name: 'catalog' });
+    if (!catalog || page.catalogChanged) catalog = await api.getCatalog({ name: 'catalog', includeTaskCounts: false });
   } catch (error) {
     if (error instanceof TasksReadError || error instanceof RpcStatusError || error instanceof HttpResponseError) return { kind: 'tasks' };
     throw error;

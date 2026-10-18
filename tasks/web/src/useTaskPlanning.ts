@@ -1,16 +1,23 @@
 import { useEffect, useState } from "react";
 import {
   planningDraft,
-  readTaskPlanning,
+  peekTaskPlanning,
+  readCachedTaskPlanning,
   saveTaskPlanning,
   type PlanningDraft,
 } from "./task-planning";
 import { describeError, type Task } from "./api";
+import { clearDetailReadCache } from "./detail-read-cache";
 
 export function useTaskPlanning(task?: Task) {
-  const [draft, setDraft] = useState<PlanningDraft>(planningDraft);
-  const [base, setBase] = useState<PlanningDraft>();
-  const [loading, setLoading] = useState(Boolean(task && !task.completed));
+  const known = task && !task.completed ? peekTaskPlanning(task) : undefined;
+  const [draft, setDraft] = useState<PlanningDraft>(() => planningDraft(known));
+  const [base, setBase] = useState<PlanningDraft | undefined>(() =>
+    known ? planningDraft(known) : undefined,
+  );
+  const [loading, setLoading] = useState(
+    Boolean(task && !task.completed && !known),
+  );
   const [error, setError] = useState("");
   const [readAttempt, setReadAttempt] = useState(0);
   useEffect(() => {
@@ -19,9 +26,16 @@ export function useTaskPlanning(task?: Task) {
       return;
     }
     let active = true;
-    setLoading(true);
+    const cached = peekTaskPlanning(task);
+    setLoading(!cached);
     setError("");
-    void readTaskPlanning(task.id)
+    if (cached) {
+      const next = planningDraft(cached);
+      setDraft(next);
+      setBase(next);
+      return;
+    }
+    void readCachedTaskPlanning(task)
       .then((value) => {
         if (!active) return;
         if (!value) throw new Error("This task is not available in planning.");
@@ -38,7 +52,7 @@ export function useTaskPlanning(task?: Task) {
     return () => {
       active = false;
     };
-  }, [task?.id, task?.completed, readAttempt]);
+  }, [task?.id, task?.etag, task?.completed, readAttempt]);
   function patch<K extends keyof PlanningDraft>(
     field: K,
     value: PlanningDraft[K],
@@ -57,16 +71,17 @@ export function useTaskPlanning(task?: Task) {
   }
   async function save(id: string, deadline: string) {
     if (loading) throw new Error("Planning is still loading.");
+    const dirty =
+      JSON.stringify(draft) !== JSON.stringify(base || planningDraft());
     if (error) {
-      const unchanged =
-        JSON.stringify(draft) === JSON.stringify(planningDraft());
-      if (unchanged) return;
+      if (!dirty) return false;
       throw new Error(
         "Planning is unavailable. Your task was saved; retry planning when the connection is restored.",
       );
     }
     await saveTaskPlanning(id, deadline, draft, base);
     setBase(draft);
+    return dirty;
   }
   return {
     draft,
@@ -74,6 +89,9 @@ export function useTaskPlanning(task?: Task) {
     loading,
     error,
     save,
-    retry: () => setReadAttempt((value) => value + 1),
+    retry: () => {
+      clearDetailReadCache();
+      setReadAttempt((value) => value + 1);
+    },
   };
 }

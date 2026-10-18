@@ -11,7 +11,8 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ### Tasks workflow refinement (2026-10-18 UTC)
 
-Branch `codex/tasks-workflow-refinement` implements the owner's 22-item Tasks acceptance list.
+The owner's acceptance list now contains 28 items. The original implementation was
+`codex/tasks-workflow-refinement`; current work is on `codex/tasks-read-efficiency`.
 The scope is native counts/navigation, ordinary task editing with planning/dependencies/start windows,
 separate Task/Subtask and schedulable Step semantics, structured recurrence, native effort, legacy
 tag/title cleanup and Focus timing against FlowDay's existing timer. Production cleanup must preserve
@@ -41,12 +42,30 @@ Production Chrome confirms the obsolete Favorites section and old labels/filters
 Branch `codex/tasks-details-polish` now covers the owner's added items 23–26: stable task-detail loading
 without a false unchecked phase or changing modal height, deliberate Action/Status option placement,
 visible supported Date/Deadline input formats, and a floating label picker that does not expand the editor.
-The existing synthetic preview/tests are being used; no new infrastructure or settings are needed.
-The combined local checks pass: 37 web units, 44 real Chromium/local-D1 journeys, 22 shared planning units,
+No new infrastructure or settings were needed. The combined local checks passed: 37 web units,
+44 real Chromium/local-D1 journeys, 22 shared planning units,
 308 retired-consumer regressions and type/lint/build. Actual Chrome's synthetic fixture keeps its 860×780
 frame and body height unchanged with the label popup; date format guidance is visible. No schema, API,
-credential, cost or infrastructure changes. Branch gate, same-SHA Actions release and production Chrome
-verification remain. Do not complete the 26-item goal before that evidence is recorded.
+credential, cost or infrastructure changes. SHA `f5745def60865a832781727bb71919754ee23b0e` passed complete
+branch [39110446990](https://github.com/ziyixi/todofy/actions/runs/39110446990) and same-SHA main
+[39110769544](https://github.com/ziyixi/todofy/actions/runs/39110769544). Read-only production Chrome
+confirmed the stable frame, loaded option groups, both input hints and floating label picker; no real task
+was edited for this follow-up.
+
+Items 27–28 add one bounded 30-second page-memory detail cache, fresh mutation preflights, no-op saves,
+metadata-only Catalog reads for internal consumers and existing-index count queries. No cookies,
+persistent private cache, new database index, service or dependency was added. Core reuses Catalog only
+within one planning request; Tasks deploys before the new Core/FlowDay consumers. Real synthetic D1
+measurements fell from 4,254 to 179 read rows for a full Catalog and 10 for metadata only, all zero writes.
+Growing completed label history from 2,000 to 4,000 keeps count results and 298 read rows unchanged.
+Backend, cross-language and proto checks pass. Final combined web checks also pass: lint/type/build,
+55 unit/hook checks and 47 real Chromium/local-D1 journeys. Branch CI and the same-SHA Actions release
+remain. Do not complete the 28-item goal before production is checked.
+
+The owner also reported a transient approximately 20-second Tasks refresh stall. Public HTTP redirected
+to Access in about 0.1 seconds, while authenticated Chrome inspection stalled and later recovered in the
+same tab. No root cause was established; no cookies were cleared, browser restarted or auth config changed.
+The read optimization must not be described as a verified fix for that separate incident.
 
 ### VPS release recovery (2026-10-18 UTC)
 

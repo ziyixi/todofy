@@ -5,7 +5,7 @@ import { TaskSchema } from "@ziyixi/proto/tasks/ui/v1/task_pb";
 import { ListTasksResponseSchema } from "@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb";
 import { RpcStatusError } from "@ziyixi/proto/http-client";
 import { parseStatus } from "@ziyixi/proto/rpc-status";
-import { api, type Task, type TaskDraft } from "./api";
+import { api, type Task } from "./api";
 import type { Route } from "./routes";
 import { useTaskActions } from "./useTaskActions";
 import * as focus from "./task-completion-focus";
@@ -165,7 +165,12 @@ it("invalidates planning only after confirmed native task changes", async () => 
     return useTaskActions(route, "sort_order", list);
   });
   expect(result.current.mutationRevision).toBe(0);
-  await act(() => result.current.saveTask(task as TaskDraft, task));
+  await act(() =>
+    result.current.saveTask(
+      { ...task, title: "Synthetic confirmed change" },
+      task,
+    ),
+  );
   expect(result.current.mutationRevision).toBe(1);
   await act(() => result.current.complete(task));
   expect(result.current.mutationRevision).toBe(2);
@@ -174,7 +179,10 @@ it("invalidates planning only after confirmed native task changes", async () => 
   update.mockRejectedValueOnce(new Error("Synthetic failed write"));
   await act(async () => {
     await expect(
-      result.current.saveTask(task as TaskDraft, task),
+      result.current.saveTask(
+        { ...task, title: "Synthetic rejected change" },
+        task,
+      ),
     ).rejects.toThrow("Synthetic failed write");
   });
   expect(result.current.mutationRevision).toBe(3);
@@ -345,4 +353,44 @@ it("keeps a confirmed batch completion successful when its final refresh fails",
   expect(result.current.notice).toMatch(
     /^Selected tasks completed.*could not refresh/,
   );
+});
+
+it("does not write generic task data for an unchanged draft while planning can save separately", async () => {
+  const task = create(TaskSchema, {
+    id: "unchanged-full-task",
+    name: "tasks/unchanged-full-task",
+    etag: "8",
+    title: "Synthetic unchanged task",
+    description: "Keep the complete description.",
+    labelIds: ["synthetic-label"],
+    kind: "task",
+    effort: "deep",
+  });
+  const update = vi.spyOn(api, "updateTask");
+  const listRead = vi
+    .spyOn(api, "listTasks")
+    .mockResolvedValue(create(ListTasksResponseSchema, { tasks: [task] }));
+  const { result } = renderHook(() => {
+    const list = useTaskView(
+      { page: "inbox", id: "" },
+      "",
+      "",
+      "sort_order",
+      false,
+    );
+    return useTaskActions({ page: "inbox", id: "" }, "sort_order", list);
+  });
+  await waitFor(() => expect(listRead).toHaveBeenCalledTimes(1));
+  let saved: Task | undefined;
+  await act(async () => {
+    saved = await result.current.saveTask(
+      { ...task, labelIds: [...task.labelIds] },
+      task,
+    );
+  });
+  expect(saved).toBe(task);
+  expect(saved?.description).toBe("Keep the complete description.");
+  expect(update).not.toHaveBeenCalled();
+  expect(listRead).toHaveBeenCalledTimes(1);
+  expect(result.current.mutationRevision).toBe(0);
 });

@@ -195,3 +195,22 @@ test("saved-filter counts bind punctuation and batch across filter and parameter
   expect(matches).toHaveLength(25);
   expect(matches.every((row) => row.count === 1)).toBe(true);
 });
+
+test("catalog metadata-only reads preserve organization while legacy and explicit full reads retain badges", async () => {
+  const legacy = await harness.fetch("/api/tasks/v1/catalog");
+  const explicit = await harness.fetch(
+    "/api/tasks/v1/catalog?include_task_counts=true",
+  );
+  const metadata = await harness.fetch(
+    "/api/tasks/v1/catalog?include_task_counts=false",
+  );
+  expect([legacy.status, explicit.status, metadata.status]).toEqual([
+    200, 200, 200,
+  ]);
+  const full = (await legacy.json()) as Record<string, unknown>;
+  expect(full.task_counts).toBeInstanceOf(Array);
+  expect(await explicit.json()).toEqual(full);
+  const { task_counts, ...organization } = full;
+  expect((task_counts as unknown[]).length).toBeGreaterThan(0);
+  expect(await metadata.json()).toEqual(organization);
+});

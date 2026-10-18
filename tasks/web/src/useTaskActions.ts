@@ -38,6 +38,20 @@ export function useTaskActions(
     original?: Task,
     requestId: string = crypto.randomUUID(),
   ) {
+    if (
+      original &&
+      Object.entries(draft).every(([field, value]) => {
+        const current = original[field as keyof TaskDraft];
+        return Array.isArray(value)
+          ? Array.isArray(current) &&
+              value.length === current.length &&
+              value.every((id, index) => id === current[index])
+          : value === current;
+      })
+    ) {
+      setNotice("Task saved");
+      return original;
+    }
     const task = original
       ? await api.updateTask({
           requestId,
