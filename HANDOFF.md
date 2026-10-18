@@ -51,8 +51,10 @@ and an armed future Alarm. The owner VerifyPlanStore API reports 310 state rows 
 authenticated `/plus` bookmark redirects to Tasks settings. No post-resume natural Mail summary had completed
 at the metadata observation; do not describe the synthetic pipeline check as a real incoming-mail check.
 
-Remaining closure is documentation CI/main and safe synchronization of the original checkout, last checked
-clean at `ca5c309e`. Application behavior is complete. Current evidence: [Tasks verification](tasks/docs/verification.md).
+No application cutover remains. This closing documentation follows the normal branch gate and same-SHA main
+flow. Before editing the original checkout, check for owner changes and fast-forward it if clean; its last
+pre-closure observation was clean at `ca5c309e`. Do not repeat the initialized one-time conversion. Current
+evidence: [Tasks verification](tasks/docs/verification.md).
 
 The staged-release declaration failure was the missing Tasks wrapper enrollment, specifically BUILD_SHA:
 release inputs already merge the secret fields. The corrected independent live comparison had zero differences.
