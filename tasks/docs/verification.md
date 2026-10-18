@@ -1,8 +1,56 @@
 # Tasks verification
 
-## Live native source, October 17
+## Native refinement and conversion, October 18
 
-Native Tasks, FlowDay, Todofy and Home are running `86bb978621c81ce09b1355c4fd931b4f7e8e028e`.
+Implementation `77edb46915f6939675fa98e011dd21516738fdff` passed the complete
+[branch CI 39086347716](https://github.com/ziyixi/todofy/actions/runs/39086347716). The
+[same-SHA main 39086983750](https://github.com/ziyixi/todofy/actions/runs/39086983750) verified the Cloudflare
+releases, including Tasks → FlowDay → Todofy → Home. The whole main run failed its separate VPS job at
+`RELEASE_HELD`, following the earlier `UNAVAILABLE`; the held server release was not resumed.
+
+The [old-version maintenance release 39085839713](https://github.com/ziyixi/todofy/actions/runs/39085839713)
+completed before final metadata capture. All three live pause switches were true, and the in-flight Mail
+write count was zero. Actual Tasks, FlowDay, Core and gateway build identities and migrations were checked
+before applying the private conversion files.
+
+- All 310 planning-state rows match the frozen original choices, field by field. There are no orphan state rows.
+- Exactly 19 technical labels and 11 replaced filters were soft-retired. Their task memberships were removed;
+  8 ordinary labels and 1 ordinary filter remain. Task resources stayed at 2,653 across conversion.
+- All 12 imported filter colors were filled only where empty, including the retained historical filter rows.
+- 188 matched, still-pending legacy Mail entries remain visible. Already handled legacy summaries were marked
+  triaged; existing task IDs were retained. New native processing saves a taskless summary; conversion is an
+  explicit owner action. No real Mail was converted or deleted for acceptance.
+- In actual owner Chrome, FlowDay showed **Tasks connected**, **no API key needed** and **Sync complete**.
+  The native pending-feed marker was absent and its cursor present. All 103 queue rows, 15 completed-queue
+  rows and 80 time references match the private pre-conversion baseline, including ordering and timestamps.
+- Actual Tasks settings show an enabled native plan with no connection inputs or mapping confirmation. Plan
+  and Focus load without errors. Mail loads its first 50 rows, offers pagination and has no task checkboxes.
+  These checks did not edit real tasks, move cards, start timers or open real mail summaries.
+
+[Todofy-only restoration 39087810767](https://github.com/ziyixi/todofy/actions/runs/39087810767) passed in full,
+Deployment `7148606156`. The three actual switches are back to their recorded false values. Independent
+provider comparison verified the declarations and persistent resources of all five Workers. Owner
+`serviceStatus` returned build `77edb469`, zero active jobs and an armed future Alarm; `VerifyPlanStore` returned
+310 state rows and zero orphans. The authenticated old `/plus` bookmark redirects to Tasks settings.
+
+| Worker | Verified version after restoration |
+| --- | --- |
+| Tasks | `2e13fcad-76f2-49a7-8272-56a40fee77df` |
+| FlowDay | `d64d3066-3014-47f2-83dd-060f597634b0` |
+| Todofy Core | `7b24c25b-c43d-40cd-9757-2059a510d98a` |
+| Todofy gateway | `e0b7e560-45ef-47ec-9366-7fcd44958956` |
+| Home | `884554ee-e99a-4561-977f-2b987ee50588` |
+
+No post-resume natural taskless summary had completed at this metadata observation. The taskless pipeline
+has actual isolated Worker/D1 coverage; it is not reported as real incoming-mail acceptance. No mail was
+manually injected, recomputed or converted to create that evidence.
+
+The local evidence below uses synthetic data. Desktop installation of the PWA remains the owner's browser
+action; browser installability and reconnect/offline behavior passed in an isolated profile.
+
+## Initial native source, October 17
+
+The initial native Tasks, FlowDay, Todofy and Home release ran `86bb978621c81ce09b1355c4fd931b4f7e8e028e`.
 The original Todoist account was read for migration and UI comparison, without modifying its tasks.
 
 - [Full branch CI 39076491784](https://github.com/ziyixi/todofy/actions/runs/39076491784) passed.
@@ -25,9 +73,9 @@ The original Todoist account was read for migration and UI comparison, without m
 Source import count checks precede subsequent ordinary native mail creation. They describe that frozen
 migration, not a permanently fixed task count. Private snapshots, SQL and API outputs remain outside GitHub.
 
-## Current refinement, local evidence
+## Refinement local evidence
 
-This refinement has not yet been published. All local task content, mail and credentials are synthetic.
+These are the local checks behind the October 18 release. All local task content, mail and credentials are synthetic.
 
 - Tasks Worker: lint/types, 2 units and 29 real workerd/D1 cases pass. Atomic duplication copies full text and
   active descendants, excludes completed descendants, sits below the original and replays one copy after a
@@ -74,22 +122,22 @@ Priority had opened, dismissing the new menu. Normal property menus now use Base
 explicit context-menu anchors retain their return target. The original failing keyboard/project/priority
 sequence passes without added delays or diagnostic code.
 
-## Native planning and Mail conversion to complete
+## Native planning and Mail conversion method
 
 The owner requires GTD status to be native planning facts, not hidden technical tags. `0009_native_plan.sql`
 adds explicit state in Todofy. Public planning replies use stage/area/lead and fixed status fields; ordinary
 Tasks labels stay separate. The native settings UI no longer offers label mappings or extension credentials.
 
-Before release: prepare private metadata and conversion SQL; pause existing writers; publish the same green
+The operator sequence was: pause existing writers; capture final private metadata and conversion SQL; publish the same green
 SHA; seed planning state, retire only exact replaced native label/filter IDs, then mark initialization and
-restore the recorded switches. A read-only preview finds 310 saved planning states, 19 technical labels and
+restore the recorded switches after verification. The read-only preview found 310 saved planning states, 19 technical labels and
 11 replaced filters. The remaining filter does not reference those labels. Of the legacy Mail candidates,
 186 have matching summaries and can stay visible for owner triage; unrelated or previously handled items are
-not reopened. Existing tasks are retained. These preview counts must be rechecked in the final paused window.
-New mail remains taskless until the owner converts it. Old Todoist is unchanged.
+not reopened. Final capture found 188 matched entries; the verified result is recorded above. Existing tasks
+are retained. New mail remains taskless until the owner converts it. Old Todoist is unchanged.
 
-Also pending after migration 0002: copy source colors into the imported filters only where the new color is
-empty. Do not re-import the snapshot after native owner writes.
+After migration 0002, source colors were copied into imported filters only where the new color was empty.
+The source snapshot was not re-imported over native owner writes.
 
 ## Earlier release corrections
 

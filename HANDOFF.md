@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-17. Keep this file focused on active work, open acceptance and dated compatibility constraints.
+Updated 2026-10-18 UTC. Keep this file focused on active work, open acceptance and dated compatibility constraints.
 Move completed rollout detail to a dated record and link it here. Repository rules are in [AGENTS](AGENTS.md);
 service entry points are in [README](README.md). Never put private content, credentials or raw production output here.
 
@@ -9,15 +9,15 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-### Native Tasks replacement (2026-10-17)
+### Native Tasks replacement (2026-10-18)
 
-Branch `codex/tasks-native`, working checkout `/private/tmp/todofy-tasks-impl`. Native task ownership is live
-at `86bb978621c81ce09b1355c4fd931b4f7e8e028e`. The full branch gate
-[39076491784](https://github.com/ziyixi/todofy/actions/runs/39076491784) passed. Main
-[39077273261](https://github.com/ziyixi/todofy/actions/runs/39077273261) successfully released Tasks → FlowDay →
-Todofy → Home; only the unrelated VPS job failed `UNAVAILABLE`. The subsequent Todofy-only
-[39078766543](https://github.com/ziyixi/todofy/actions/runs/39078766543) passed in full and restored all three
-original processing/maintenance/source-write switches to false. Do not disable VPS deployment to hide its failure.
+Branch `codex/tasks-native`, working checkout `/private/tmp/todofy-tasks-impl`. Native Tasks refinement is live
+at `77edb46915f6939675fa98e011dd21516738fdff`. Complete branch gate
+[39086347716](https://github.com/ziyixi/todofy/actions/runs/39086347716) passed. The
+[same-SHA main 39086983750](https://github.com/ziyixi/todofy/actions/runs/39086983750) verified Tasks → FlowDay →
+Todofy → Home, with Deployments `7148421922`, `7148434459`, `7148449126`, `7148465493`. Its separate VPS job
+stopped at `RELEASE_HELD` after the earlier `UNAVAILABLE`; it did not update the server. Do not disable or resume
+that held release to hide the failure.
 
 The final private, read-only source snapshot and empty post-export Sync delta were verified. Tasks contains
 22 projects, 3 sections, 27 labels, 12 filters, 2,644 task resources and 2,824 completion occurrences with exact
@@ -26,33 +26,41 @@ identity preflight matched zero rows; no provider SQL was executed. FlowDay comp
 all existing queue/time reference multisets stayed unchanged, including preexisting historical cache gaps.
 The authorized synthetic owner task was created, edited, reloaded and immediately soft-deleted in Tasks.
 
-The current uncommitted refinement pass adds native color/property/context menus, sidebar resizing, responsive
-editing, atomic family duplication and search refreshes without blanking rows. The owner explicitly expanded
-the goal: GTD workaround labels must become planning facts, not merely hidden labels. Work is now replacing
-those memberships with Todofy's explicit `plan_task_state`, keeping task content in Tasks and queues/timers in
-FlowDay. The native UI will have no label mapping or extension key; legacy Plus ZIP publication is removed,
-with its shared synthetic browser regressions retained. Mail now saves a taskless summary; the owner explicitly
+The refinement adds native color/property/context menus, sidebar resizing, responsive editing, atomic family
+duplication and search refreshes without blanking rows. GTD choices now live in Todofy's `plan_task_state`,
+with task content in Tasks and queues/timers in FlowDay. The private conversion matched 310 planning states,
+retired 19 exact technical labels and 11 replaced filters, and kept 8 ordinary labels and 1 filter. Task count
+stayed at 2,653 through conversion. Imported filter colors are filled; no source snapshot was re-imported.
+The native UI has no label mapping or extension key; legacy Plus ZIP publication is removed,
+with its shared synthetic browser regressions retained. Mail saves a taskless summary; the owner explicitly
 creates an Inbox task from the independent Mail page. Historical linked tasks are retained, and deleting Mail
 does not delete Tasks. New native writes use generic protobuf Tasks requests, including atomic reorder, rather
 than Todoist Sync commands. See [planning parity](tasks/docs/planning-parity.md).
 
-Next: finish native-state integration and the private one-time cutover preparation; run affected checks and
-full branch CI; release the same green SHA. Pause existing writers for the state conversion, capture only IDs
-and memberships, seed planning facts, retire only exact replaced native labels/filters, adopt the matched
-pending legacy Mail summaries, activate native state, then restore the recorded switches and verify live
-Plan/Focus/Mail. Backfill the 12 imported filter colors only after migration 0002, without overwriting nonempty
-colors. New code has not yet been published. Sync the original checkout safely after final release; it was
-clean at `ca5c309e` when last checked.
+The maintenance release [39085839713](https://github.com/ziyixi/todofy/actions/runs/39085839713) drained the old
+writers before final metadata capture. Native state, exact retirement and 188 matching pending legacy Mail
+entries are verified. The activation marker is set. Owner Chrome loaded Plan/Focus/Mail and native settings;
+FlowDay shows Tasks connected and Sync complete, with no pending cursor page. All 103 queue, 15 completed
+queue and 80 time references remain exactly unchanged. No real Mail conversion/deletion or task move was used
+for acceptance. The one production synthetic task earlier remains soft-deleted.
+
+Processing restoration [39087810767](https://github.com/ziyixi/todofy/actions/runs/39087810767) passed in full,
+Deployment `7148606156`. Independent provider comparison verified all five Workers and persistent identities
+against their declarations; all three actual switches are false. Owner serviceStatus reports no active jobs
+and an armed future Alarm. The owner VerifyPlanStore API reports 310 state rows and zero orphans. The old
+authenticated `/plus` bookmark redirects to Tasks settings. No post-resume natural Mail summary had completed
+at the metadata observation; do not describe the synthetic pipeline check as a real incoming-mail check.
+
+Remaining closure is documentation CI/main and safe synchronization of the original checkout, last checked
+clean at `ca5c309e`. Application behavior is complete. Current evidence: [Tasks verification](tasks/docs/verification.md).
 
 The staged-release declaration failure was the missing Tasks wrapper enrollment, specifically BUILD_SHA:
 release inputs already merge the secret fields. The corrected independent live comparison had zero differences.
 
-Refinement `cd3c6eab` was pushed; full branch [39085010635](https://github.com/ziyixi/todofy/actions/runs/39085010635)
-was held before production. Follow-up preserves the old required Mail inputs through three additive native
-methods and updates the FlowDay binding assertion. Follow-up `533da462` passed the native contract/Mail checks
-but exposed Quick Add before account settings finish and a 0.2 KiB gateway review-budget excess. The next
-revision waits for those settings, pins browser regression tests to UTC and reviews the bundle budget at
-87 KiB. Final local Tasks browser checks pass all 30 cases; await the complete green gate before release.
+Early refinement `cd3c6eab` was held by full branch CI before production. Three additive native Mail methods
+retain old required-field contracts and the FlowDay assertion now uses generic read access. `533da462` exposed
+Quick Add before account settings finish and a 0.2 KiB gateway review-budget excess. Released `77edb469` waits
+for those settings, pins browser regression tests to UTC and reviews the bundle budget at 87 KiB.
 
 The owner requested stopping both old acceptance reminders. The app confirmed deletion of heartbeat IDs
 `automation` (website cron evidence) and `todofy` (email-model scheduler evidence) on 2026-10-17. Their missing
@@ -156,13 +164,11 @@ still awaiting that check are listed under remaining observations below.
 
 ## Open acceptance
 
-### Waiting for an existing permission request
+### Archived scheduler observations
 
-Both follow-ups below are blocked on an owner permission request, which is already pending. Stay quiet while it
-is unchanged: do not repeat denied queries, switch credentials or channels, recompute real content or substitute
-manual triggers. Once permission is confirmed, read only the specified invocation/log metadata; if the old window
-expired, observe the next natural task.
-Update each verification document through the normal branch CI and same-SHA release, then stop its own follow-up.
+The owner stopped both scheduled follow-ups on October 17. Their source evidence remains incomplete; do not
+restart polling, reminders or permission requests. The records below are available for a later explicit request,
+and do not imply natural scheduler provenance was established.
 
 - **Todofy email models:** release `26c9662` keeps email/Canary on Lite 3.5, Flash 3.8, Flash 3.7; reports use
   Flash 3.8, Flash 3.7, Lite 3.5. A real synthetic Canary used Lite. October 5's Top 10 at `13:40:00Z` and summary

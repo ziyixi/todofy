@@ -4,7 +4,7 @@ Personal task management for the Todofy cloud. Tasks owns tasks, projects, secti
 
 ## Development status
 
-Native Tasks, Todofy and FlowDay are live at `86bb9786`; the private task/history import, identity checks and bounded FlowDay sync are complete. The original Todoist account is unchanged. A refinement pass is in progress for closer native menus/editing, fast refreshes and explicit planning state in place of technical labels. See the [verification record](docs/verification.md) for completed checks and remaining acceptance.
+Native Tasks, Todofy and FlowDay are live at `77edb469`, with normal processing restored. Task/history import and native planning conversion are complete; the original Todoist account is unchanged. Plan and Focus need no extension connection. Mail holds summaries until you explicitly create a task. See the [verification record](docs/verification.md) for production evidence.
 
 ## First release
 

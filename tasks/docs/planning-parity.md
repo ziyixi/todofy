@@ -6,6 +6,8 @@ Tasks 内置 Plan、Focus 和邮件。Tasks 保存任务，Todofy 保存规划�
 
 共享组件位于 `packages/planning-ui`；Tasks 分别用 `PlanningPage` 和 `MailPage` 承载规划与邮件。
 下表列出已有的合成覆盖。真实发布、状态转换和只读生产核对另见 [verification.md](verification.md)。
+2026-10-18 已在真实 Tasks 中核对原生设置、Plan、Focus、Mail，并确认 FlowDay 完整同步及队列／计时引用不变。
+生产核对保持只读；写入动作使用隔离 Worker/D1 和浏览器场景验证。
 
 | 功能 | 原生行为 | 覆盖 |
 | --- | --- | --- |
