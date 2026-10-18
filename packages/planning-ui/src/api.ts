@@ -285,15 +285,18 @@ function flowPlan(flow: Flow): FlowDayPlan {
     completedTaskIds: flow.completedTaskIds,
   };
 }
-/** Adapts the two existing owner APIs. The host supplies authentication and URL routing. */
+/**
+ * Adapts the two existing owner APIs. The host supplies authentication and URL routing, and
+ * `updateEstimate`: an estimate is the task's duration in the host's task store, never FlowDay's.
+ */
 export function createPlanningActions(
   transports: { plus: HttpSend; flowday: HttpSend },
   knownStore?: KnownTaskStore,
   provider: "todoist" | "tasks" = "todoist",
-): PlusActions {
+): Omit<PlusActions, "updateEstimate"> {
   const timerRequests = new Map<string, string>();
-  // Tasks FlowDay already has, so queue and estimate writes skip its manual Todoist sync,
-  // which FlowDay throttles to one every 30 seconds.
+  // Tasks FlowDay already has, so queue writes skip its manual Todoist sync, which FlowDay
+  // throttles to one every 30 seconds.
   let knownFlowTasks = new Set<string>();
   // Every task the latest complete planning read listed: Todoist had them all, so FlowDay's next
   // manual sync imports them too, such as a second step added just before it.
@@ -334,7 +337,7 @@ export function createPlanningActions(
       }
       if (result.state === SyncTasksResponse_State.THROTTLED)
         throw new FlowdaySyncPendingError(
-          "FlowDay just synced. Wait briefly and try adding or estimating this task again.",
+          "FlowDay just synced. Wait briefly and try adding this task again.",
         );
       if (result.state !== SyncTasksResponse_State.PARTIAL)
         throw new FlowdaySyncPendingError(
@@ -360,7 +363,6 @@ export function createPlanningActions(
     throw new Error("Task list is incomplete. Counts have not been shown.");
   }
   async function loadFlowTasks() {
-    const estimates: Record<string, number> = {};
     const flowTasks: FocusState["flowTasks"] = {};
     let pageToken = "";
     // The gateway caps a FlowDay page at 100 tasks; FlowDay syncs at most 1,000 Todoist tasks plus local ones.
@@ -373,11 +375,9 @@ export function createPlanningActions(
           local: !task.todoistId,
           estimatedMinutes: task.estimatedMinutes,
         };
-        if (task.estimatedMinutes !== undefined)
-          estimates[task.todoistId || id] = task.estimatedMinutes;
       }
       pageToken = result.nextPageToken;
-      if (!pageToken) return { estimates, flowTasks };
+      if (!pageToken) return flowTasks;
     }
     throw new Error(
       "FlowDay task list is incomplete. Refresh before planning.",
@@ -405,7 +405,7 @@ export function createPlanningActions(
   return {
     loadDays,
     async load(weekStart) {
-      const [metadata, tasks, { estimates, flowTasks }] = await Promise.all([
+      const [metadata, tasks, flowTasks] = await Promise.all([
         plus.readPlan({}),
         loadPlanningTasks(),
         loadFlowTasks(),
@@ -426,16 +426,16 @@ export function createPlanningActions(
         (todayFlow && flowPlan(todayFlow));
       if (!today) throw new Error("Today's planning day is missing.");
       await remember(Object.keys(flowTasks), true);
-      if (provider === "tasks") {
-        // Task duration is canonical; FlowDay's change feed may still be catching up.
-        for (const task of tasks) {
-          estimates[task.id] = task.estimatedMinutes ?? 0;
-          if (flowTasks[task.id])
-            flowTasks[task.id] = {
-              ...flowTasks[task.id]!,
-              estimatedMinutes: task.estimatedMinutes,
-            };
-        }
+      // A task's duration is its only estimate; FlowDay's mirror may still be catching up.
+      // Only FlowDay's local tasks keep their own estimate (flowTasks).
+      const estimates: Record<string, number> = {};
+      for (const task of tasks) {
+        estimates[task.id] = task.estimatedMinutes ?? 0;
+        if (flowTasks[task.id])
+          flowTasks[task.id] = {
+            ...flowTasks[task.id]!,
+            estimatedMinutes: task.estimatedMinutes,
+          };
       }
       const focus: FocusState = {
         ...today,
@@ -444,15 +444,7 @@ export function createPlanningActions(
         flowTasks,
       };
       return {
-        plan: {
-          ...planMetadata(plan),
-          tasks: tasks.map((task) => {
-            const synced = flowTasks[task.id];
-            return synced && provider !== "tasks"
-              ? { ...task, estimatedMinutes: synced.estimatedMinutes }
-              : task;
-          }),
-        },
+        plan: { ...planMetadata(plan), tasks },
         focus,
         days,
       };
@@ -597,16 +589,6 @@ export function createPlanningActions(
       return confirmedSource
         ? [confirmedSource, confirmedTarget]
         : [confirmedTarget];
-    },
-    async updateEstimate(taskId, minutes) {
-      await ensureSynced([taskId]);
-      await flowday.updateTask({
-        task: {
-          name: `tasks/${taskId}`,
-          ...(minutes > 0 ? { estimatedMinutes: minutes } : {}),
-        },
-        updateMask: { paths: ["estimated_minutes"] },
-      });
     },
     async readTimer() {
       return timerSnapshot(

@@ -17,10 +17,6 @@ const focusApi = new HttpTranscoder<ShapeOf<typeof FlowDayUiService>, ApiContext
   commandTimer: handlers.commandTimer,
   syncTasks: handlers.syncTasks,
   listTimeEntries: handlers.listTimeEntries,
-  async updateTask(request, context) {
-    if (request.updateMask?.paths.join(',') !== 'estimated_minutes') throw flowdayError('BAD_REQUEST');
-    return handlers.updateTask(request, context);
-  },
   async updateFlow(request, context) {
     if (request.updateMask?.paths.join(',') !== 'task_ids') throw flowdayError('BAD_REQUEST');
     return handlers.updateFlow(request, context);
@@ -30,7 +26,7 @@ const focusApi = new HttpTranscoder<ShapeOf<typeof FlowDayUiService>, ApiContext
   maxBodyBytes: MAX_BODY_BYTES,
   localize,
   authorize(_request, route) {
-    if (!new Set(['GetTask', 'ListTasks', 'GetFlow', 'GetTimerSession', 'CommandTimer', 'SyncTasks', 'ListTimeEntries', 'UpdateTask', 'UpdateFlow', 'RolloverFlow']).has(route.method.name)) throw flowdayError('NOT_FOUND');
+    if (!new Set(['GetTask', 'ListTasks', 'GetFlow', 'GetTimerSession', 'CommandTimer', 'SyncTasks', 'ListTimeEntries', 'UpdateFlow', 'RolloverFlow']).has(route.method.name)) throw flowdayError('NOT_FOUND');
   },
   onUnexpected: (error) => flowdayError(isStorageError(error) ? 'UNAVAILABLE' : 'INTERNAL'),
 });

@@ -3,6 +3,7 @@ import {
   type KnownTaskStore,
 } from "@ziyixi/planning-ui/api";
 import type { HttpSend } from "@ziyixi/proto/http-client";
+import type { PlusActions } from "./model";
 export { planningTask, publicError } from "@ziyixi/planning-ui/api";
 export type { KnownTaskStore } from "@ziyixi/planning-ui/api";
 
@@ -28,7 +29,7 @@ export function createApi(
   connection: Connection,
   fetcher: typeof fetch = fetch,
   knownStore?: KnownTaskStore,
-) {
+): PlusActions {
   const transport =
     (prefix: string): HttpSend =>
     async (call) => {
@@ -46,8 +47,14 @@ export function createApi(
         },
       });
     };
-  return createPlanningActions(
-    { plus: transport(""), flowday: transport("/api/plus/flowday") },
-    knownStore,
-  );
+  return {
+    ...createPlanningActions(
+      { plus: transport(""), flowday: transport("/api/plus/flowday") },
+      knownStore,
+    ),
+    // An estimate is the task's duration in Tasks; FlowDay no longer stores one of its own.
+    updateEstimate(): Promise<void> {
+      return Promise.reject(new Error("Edit estimates in Tasks."));
+    },
+  };
 }

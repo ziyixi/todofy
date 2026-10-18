@@ -51,4 +51,7 @@ enum ErrorReason {
   ERROR_REASON_RELOAD_REQUIRED = 7;
   // UNAVAILABLE (503): the native Tasks binding failed or returned an invalid bounded page.
   ERROR_REASON_TASKS_UNAVAILABLE = 8;
+  // FAILED_PRECONDITION (400): UpdateTask would change the estimate of a task mirrored from Tasks. Its estimate is
+  // the Tasks duration, edited in Tasks.
+  ERROR_REASON_ESTIMATE_IN_TASKS = 9;
 }

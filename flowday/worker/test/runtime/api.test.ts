@@ -155,6 +155,21 @@ describe('tasks', () => {
     expect((await h.call((api) => api.updateTask({ task: { name: 'tasks/none', title: 'x' }, updateMask: { paths: ['title'] } }))).status?.reason).toBe('NOT_FOUND');
   });
 
+  it("UpdateTask leaves a mirrored task's estimate to Tasks: a different value is FAILED_PRECONDITION", async () => {
+    await seedTasks({ id: 'mirrored', todoistId: 'mirrored', estimatedMins: 30 }, { id: 'local-one', estimatedMins: 30 });
+    const changed = await h.call((api) => api.updateTask({ task: { name: 'tasks/mirrored', estimatedMinutes: 60 }, updateMask: { paths: ['estimated_minutes'] } }));
+    expect(changed.status).toMatchObject({ httpStatus: 400, reason: 'ESTIMATE_IN_TASKS', localizedMessage: { locale: 'en', message: "This task's estimate comes from Tasks. Edit it there." } });
+    expect(changed.rowsWritten).toBe(0);
+    // Clearing is a change too.
+    expect((await h.call((api) => api.updateTask({ task: { name: 'tasks/mirrored' }, updateMask: { paths: ['estimated_minutes'] } }))).status?.reason).toBe('ESTIMATE_IN_TASKS');
+    // The whole task with its stored estimate still renames it.
+    expect(await h.api.updateTask({ task: { name: 'tasks/mirrored', title: 'Renamed', estimatedMinutes: 30 } })).toMatchObject({ title: 'Renamed', estimatedMinutes: 30 });
+    const local = await h.call((api) => api.updateTask({ task: { name: 'tasks/local-one', estimatedMinutes: 60 }, updateMask: { paths: ['estimated_minutes'] } }));
+    expect(local.value?.estimatedMinutes).toBe(60);
+    expect(local.rowsWritten).toBe(1);
+    expect((await h.api.getTask({ name: 'tasks/mirrored' })).estimatedMinutes).toBe(30);
+  });
+
   it('UpdateTask keeps the IMMUTABLE fields (AIP-203): the same value passes, a different one is INVALID_ARGUMENT', async () => {
     await seedTasks({ id: 't1', priority: 2, labels: ['a'], dueDate: '2026-04-20', description: 'About it' });
     // The whole task (no mask), as GetTask answered it: the immutable values are the stored ones.

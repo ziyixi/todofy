@@ -52,7 +52,7 @@ Solo knowledge workers (developers, designers, writers, consultants) who already
 - Tasks can be soft-deleted (hidden) locally via a trash icon on each sidebar card; deleted tasks are never removed from DB and never sync back to Todoist
 - Deleted tasks are browsable via a calendar-based trash dialog (trash icon in sidebar header), grouped by deletion date, with search and restore functionality
 - Todoist sync never resurrects soft-deleted tasks
-- Estimated duration is locally editable (click the estimate on any task card to change it; persisted to SQLite)
+- Estimated duration is editable on a local task's card (click the estimate to change it; persisted to D1); a task from Tasks shows its Tasks duration read-only
 - Task description synced from Todoist; rendered as Markdown tooltip on hover in sidebar (via `react-markdown`)
 - "Refresh" button (sidebar header) + auto-sync every 60 seconds
 - Search/filter within the sidebar
@@ -67,7 +67,7 @@ Solo knowledge workers (developers, designers, writers, consultants) who already
 - Fetches task `content` (title) and `description` from Todoist API
 - API key stored in SQLite `settings` table, entered via Settings dialog in top bar
 - Tasks persisted in SQLite `tasks` table — survive page refresh
-- `estimated_mins` editable locally via `PATCH /api/tasks` — Todoist sync preserves local edits only when Todoist has no duration set
+- A local task's `estimated_mins` is editable via `PATCH /api/tasks`; a synced task's estimate is the source's duration
 - `POST /api/tasks` creates local tasks; `PATCH /api/tasks` supports both `estimatedMins` and `title` updates
 - Zustand store (`todoist-store`) acts as reactive cache, hydrated from SQLite on load; `addLocalTask` and `updateTitle` actions for local task management
 - Color mapping: Todoist color names (e.g., `berry_red`) → hex values (20 colors supported)

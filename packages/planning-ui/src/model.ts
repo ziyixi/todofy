@@ -306,6 +306,7 @@ export interface PlusActions {
     target: FlowDayPlan,
     beforeId?: string,
   ): Promise<FlowDayPlan[]>;
+  /** Sets the task's duration in the host's task store; FlowDay mirrors it. */
   updateEstimate(taskId: string, minutes: number): Promise<void>;
   /** The existing authoritative FlowDay timer, without rereading task lists. */
   readTimer?(): Promise<TimerSnapshot>;

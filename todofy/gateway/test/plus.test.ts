@@ -102,6 +102,17 @@ describe('Native Tasks planning transport', () => {
     expect(JSON.parse(String(sent?.args[1]))).toMatchObject({ task_id: 'parent', task_etag: 'original-task-etag', request_id: ID, flow_task_id: 'child' });
     expect(settlements).toEqual([expect.objectContaining({ action: 'settle', task_id: 'child', flow_date: '2026-10-12' })]);
   });
+  it('never forwards an estimate write to FlowDay: an estimate is the Tasks duration', async () => {
+    let calls = 0;
+    const { env } = fakes();
+    const native: Env = { ...env, FLOWDAY_NATIVE_FOCUS: { fetch: () => { calls++; return Promise.resolve(Response.json({})); } } as unknown as Fetcher };
+    const response = await nativePlanning(new Request('https://planning.internal/api/plus/flowday/api/v1/tasks/step?update_mask=estimated_minutes', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ estimated_minutes: 45 }),
+    }), native);
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('ACTION_NOT_ALLOWED');
+    expect(calls).toBe(0);
+  });
   it('does not fall back to the legacy FlowDay binding during a partial cutover', async () => {
     let calls = 0;
     const { env } = fakes();

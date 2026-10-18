@@ -42,4 +42,5 @@ Focus uses FlowDay's existing server session and command receipts for count-up a
 Reloads hydrate the same session; pause/resume keeps its original flow date. Visible pages read only the timer
 once per minute and refresh the task view at account midnight. Finishing a pomodoro uses the existing atomic
 FlowDay finish command, which caps recorded time even if the browser was closed when the countdown ended.
-Native estimates come from Tasks while FlowDay's cached task feed catches up.
+A task's estimate is its Tasks duration: the host supplies `updateEstimate`, which writes Tasks, and FlowDay's
+cached copy never replaces one. Only FlowDay's local tasks keep an estimate of their own.

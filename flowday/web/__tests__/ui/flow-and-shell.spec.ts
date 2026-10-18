@@ -195,6 +195,19 @@ test("[UI-016] Tasks deleted in Todoist disappear from the sidebar after sync", 
   await expect(page.getByText("Deleted in Todoist")).toHaveCount(0);
 });
 
+test("[UI-053] Mirrored task estimates are read-only: they are the Tasks duration", async ({
+  page,
+  request,
+}) => {
+  await seedAppState(request, "todoist-overdue");
+  await openApp(page);
+
+  const card = taskPoolCard(page, "Survives sync");
+  await expect(card.getByText("25m", { exact: true })).toBeVisible();
+  await expect(card.getByText("25m", { exact: true })).toHaveAttribute("title", "Estimate from Tasks");
+  await expect(card.getByRole("button", { name: "25m" })).toHaveCount(0);
+});
+
 test("[UI-011] Settings, export, and analytics dialogs smoke test", async ({
   page,
   request,

@@ -128,11 +128,12 @@ export async function restoreTask(db: Db, taskId: string): Promise<boolean> {
   return result.meta.changes > 0;
 }
 
+/** Sets a local task's estimate; a mirrored task's estimate comes from Tasks alone, so it is left as it is. */
 export async function updateTaskEstimate(db: Db, taskId: string, estimatedMins: number | null): Promise<void> {
   await db
     .update(tasks)
-    .set({ estimatedMins, estimateOverride: 1 })
-    .where(and(eq(tasks.id, taskId), sql`(${tasks.estimatedMins} IS NOT ${estimatedMins} OR ${tasks.estimateOverride} = 0)`));
+    .set({ estimatedMins })
+    .where(and(eq(tasks.id, taskId), isNull(tasks.todoistId), sql`${tasks.estimatedMins} IS NOT ${estimatedMins}`));
 }
 
 export async function updateTaskTitle(db: Db, taskId: string, title: string): Promise<void> {
@@ -230,7 +231,6 @@ export interface TaskUpsertRow {
   priority: number;
   /** JSON text of the label list, exactly as stored. */
   labels: string;
-  /** null keeps the local estimate (Todoist has no duration); a number replaces it. */
   estimated_mins: number | null;
   is_completed: 0 | 1;
   completed_at: string | null;
@@ -271,6 +271,7 @@ const PLAIN_COLUMNS = [
   'project_color',
   'priority',
   'labels',
+  'estimated_mins',
   'is_completed',
   'completed_at',
   'due_date',
@@ -286,18 +287,13 @@ const PLAIN_COLUMNS = [
  * 1. INSERT … SELECT FROM json_each(rows) ON CONFLICT DO UPDATE SET <the plain columns> WHERE <one of them differs>
  *    (chunks of UPSERT_CHUNK rows). New rows are inserted whole.
  * 2. Restores the rows a sync had hidden (deleted_source 'sync'); a task deleted in FlowDay ('local') stays deleted.
- * A row with no difference is not written at all (0 rows); a changed row costs 1. A Todoist task without a duration
- * (estimated_mins null) keeps the estimate set in FlowDay. synced_at records when statement 1 last changed the row.
+ * A row with no difference is not written at all (0 rows); a changed row costs 1. The source's estimate always
+ * replaces the stored one, null included. synced_at records when statement 1 last changed the row.
  */
 export function upsertStatements(rows: readonly TaskUpsertRow[], syncedAt: string): SQL[] {
   if (rows.length === 0) return [];
   const pick = (column: string) => sql.raw(`json_extract(value, '$.${column}')`);
-  const differs = sql.raw(
-    [
-      ...PLAIN_COLUMNS.map((column) => `tasks.${column} IS NOT excluded.${column}`),
-      '(tasks.estimate_override = 0 AND excluded.estimated_mins IS NOT NULL AND tasks.estimated_mins IS NOT excluded.estimated_mins)',
-    ].join(' OR '),
-  );
+  const differs = sql.raw(PLAIN_COLUMNS.map((column) => `tasks.${column} IS NOT excluded.${column}`).join(' OR '));
   const assign = sql.raw(PLAIN_COLUMNS.map((column) => `${column} = excluded.${column}`).join(', '));
   const out: SQL[] = [];
   for (let start = 0; start < rows.length; start += UPSERT_CHUNK) {
@@ -309,8 +305,7 @@ export function upsertStatements(rows: readonly TaskUpsertRow[], syncedAt: strin
         ${pick('is_completed')}, ${pick('completed_at')}, ${pick('due_date')}, ${pick('created_at')}, ${syncedAt},
         ${pick('todoist_project_id')}, ${pick('parent_id')}, ${pick('deadline_date')}
       FROM json_each(${json}) WHERE true
-      ON CONFLICT(id) DO UPDATE SET ${assign},
-        estimated_mins = CASE WHEN tasks.estimate_override = 1 THEN tasks.estimated_mins ELSE COALESCE(excluded.estimated_mins, tasks.estimated_mins) END, synced_at = excluded.synced_at
+      ON CONFLICT(id) DO UPDATE SET ${assign}, synced_at = excluded.synced_at
       WHERE ${differs}`);
   }
   out.push(sql`UPDATE tasks SET deleted_at = NULL, deleted_source = NULL

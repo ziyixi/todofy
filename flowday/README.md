@@ -4,9 +4,9 @@ FlowDay is a daily execution board for solo work: it shows tasks from your confi
 belongs in today, order it as a queue, run a timer on one task at a time (time blocks, Pomodoro,
 misc time), and review what actually happened.
 
-Task sources are read-only for FlowDay. Native Tasks uses the private service binding; Todoist remains the
-default while that binding is absent. Local tasks, queues, estimates and time records belong to FlowDay.
-The native adapter is implemented but this change does not switch the production source.
+Task sources are read-only for FlowDay. Production reads native Tasks through the private `TASKS` service binding;
+Todoist remains the source only where that binding is absent. A mirrored task's estimate is its Tasks duration,
+shown read-only and edited in Tasks. Local tasks with their estimates, queues and time records belong to FlowDay.
 
 ![FlowDay showing a planned day with arranged tasks, a task pool, and completed work](docs/readme/flowday-main.png)
 
@@ -194,4 +194,4 @@ Review the day or the week:
 Todoist Plus uses the same daily queue and server-owned timer through Todofy's private service binding. Timer
 changes are checked against the current version so another window cannot overwrite a newer session. Reload any
 FlowDay tab that was open before this update. FlowDay still never writes Todoist; task completion from the extension
-is performed by Todofy. Estimates deliberately entered here survive later Todoist duration updates.
+is performed by Todofy. A mirrored task's estimate is its Tasks duration; only a local task's is edited here.

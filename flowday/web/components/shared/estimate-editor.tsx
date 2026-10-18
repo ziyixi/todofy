@@ -77,16 +77,27 @@ export function EstimateEditor({ task, variant }: EstimateEditorProps) {
         ? "— est"
         : "—";
 
+  const textClass = cn(
+    "rounded-sm px-1 py-0.5 tabular-nums",
+    variant === "inline" && "mt-0.5 shrink-0 text-xs text-muted-foreground",
+    variant === "flow" && "text-muted-foreground"
+  );
+
+  // A mirrored task's estimate is its Tasks duration: shown here, edited in Tasks.
+  if (task.todoistId) {
+    return (
+      <span className={textClass} title="Estimate from Tasks">
+        {displayText}
+      </span>
+    );
+  }
+
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         render={<button />}
         onClick={(e) => e.stopPropagation()}
-        className={cn(
-          "cursor-pointer rounded-sm px-1 py-0.5 tabular-nums transition-colors hover:bg-accent/55 hover:text-foreground",
-          variant === "inline" && "mt-0.5 shrink-0 text-xs text-muted-foreground",
-          variant === "flow" && "text-muted-foreground"
-        )}
+        className={cn(textClass, "cursor-pointer transition-colors hover:bg-accent/55 hover:text-foreground")}
         title="Click to edit estimate"
       >
         {displayText}

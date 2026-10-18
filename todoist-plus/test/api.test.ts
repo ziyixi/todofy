@@ -36,6 +36,7 @@ it("loads complete pages and uses the authoritative timer etag for subsequent ac
                 parent_id: "parent",
                 stage: "none",
                 area: "work",
+                estimated_minutes: 45,
               },
             ],
           })
@@ -63,7 +64,7 @@ it("loads complete pages and uses the authoritative timer etag for subsequent ac
             name: "tasks/child",
             todoist_id: "child",
             title: "A small step",
-            estimated_minutes: 45,
+            estimated_minutes: 30,
           },
         ],
       });
@@ -227,7 +228,7 @@ it("does not present partial task pages as a complete plan", async () => {
   );
   await expect(api.load()).rejects.toThrow("incomplete");
 });
-it("manually finishes a partial sync before queueing or estimating new Todoist children", async () => {
+it("manually finishes a partial sync before queueing new Todoist children", async () => {
   let syncCount = 0;
   const calls: {
     path: string;
@@ -265,11 +266,12 @@ it("manually finishes a partial sync before queueing or estimating new Todoist c
     mask: "task_ids",
     body: { task_ids: ["new-child"] },
   });
-  await api.updateEstimate("new-child", 45);
-  expect(calls.at(-1)).toMatchObject({
-    mask: "estimated_minutes",
-    body: { estimated_minutes: 45 },
-  });
+  // An estimate is the task's duration in Tasks, so this host has none to write.
+  const writes = calls.length;
+  await expect(api.updateEstimate("new-child", 45)).rejects.toThrow(
+    "Edit estimates in Tasks.",
+  );
+  expect(calls).toHaveLength(writes);
 });
 it("replays an uncertain timer command with the same UUID until acknowledged", async () => {
   const ids: string[] = [];
@@ -295,7 +297,7 @@ it("replays an uncertain timer command with the same UUID until acknowledged", a
   await api.timer("start", "child", focus);
   expect(ids[0]).toBe(ids[1]);
 });
-it("keeps a cleared FlowDay estimate unknown and resumes a timer on its original day", async () => {
+it("takes the estimate from the task list over FlowDay's and resumes a timer on its original day", async () => {
   let command: Record<string, unknown> = {};
   const api = createApi(
     { apiOrigin: "https://api.example.test", token: "synthetic" },
@@ -343,7 +345,7 @@ it("keeps a cleared FlowDay estimate unknown and resumes a timer on its original
     }),
   );
   const { plan, focus } = await api.load();
-  expect(plan.tasks[0]?.estimatedMinutes).toBeUndefined();
+  expect(plan.tasks[0]?.estimatedMinutes).toBe(60);
   expect(focus.timer?.flowDate).toBe("2026-10-12");
   await api.timer("resume", "child", focus);
   expect(command.flow_date).toBe("2026-10-12");
@@ -360,12 +362,12 @@ it("shows an actionable throttled sync and does not attempt the following write"
   );
   let failure: unknown;
   try {
-    await api.updateEstimate("new-child", 30);
+    await api.addToDay("new-child", "2026-10-13");
   } catch (error) {
     failure = error;
   }
   expect(publicError(failure)).toBe(
-    "FlowDay just synced. Wait briefly and try adding or estimating this task again.",
+    "FlowDay just synced. Wait briefly and try adding this task again.",
   );
   expect(paths).toEqual(["/api/plus/flowday/api/v1/tasks:sync"]);
 });
@@ -507,7 +509,6 @@ it("remembers synced FlowDay tasks across writes and worker restarts, storing ID
   };
   const api = createApi(connection, fetcher, store);
   await api.addToDay("new-child", focus.date);
-  await api.updateEstimate("new-child", 30);
   await api.moveTaskToDay("new-child", undefined, focus);
   expect(requests.filter((request) => request.endsWith(":sync"))).toHaveLength(
     1,
@@ -517,9 +518,9 @@ it("remembers synced FlowDay tasks across writes and worker restarts, storing ID
   // A restarted worker creates a new client; the session copy still skips the sync.
   const restarted = createApi(connection, fetcher, store);
   const start = requests.length;
-  await restarted.updateEstimate("new-child", 45);
+  await restarted.addToDay("new-child", focus.date);
   expect(requests.slice(start)).toEqual([
-    "PATCH /api/plus/flowday/api/v1/tasks/new-child",
+    "GET /api/plus/flowday/api/v1/flows/2026-10-13",
   ]);
 });
 

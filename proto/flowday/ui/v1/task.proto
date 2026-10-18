@@ -50,8 +50,8 @@ message Task {
   int32 priority = 7 [(google.api.field_behavior) = IMMUTABLE];
   // The labels, at most 50 (CreateTask keeps the first 50).
   repeated string labels = 8 [(google.api.field_behavior) = IMMUTABLE];
-  // FlowDay's estimate in minutes, 0 to 100,000; unset when there is none. The sync sets it from a Todoist duration
-  // (a day counts 480 minutes) unless the owner has deliberately set or cleared a FlowDay estimate.
+  // The estimate in minutes, 0 to 100,000; unset when there is none. A mirrored task's estimate is its Tasks
+  // duration, which the sync copies (a cleared duration clears it); only a local task's is set in FlowDay.
   optional int32 estimated_minutes = 9 [(google.api.field_behavior) = OPTIONAL];
   // Whether the task is marked completed (rows of the container era; the sync hides a task Todoist completed
   // instead, so it leaves the lists).

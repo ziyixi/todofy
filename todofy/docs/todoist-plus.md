@@ -2,7 +2,8 @@
 
 The Chrome extension lives in `todoist-plus/`; it calls the separate `PlusService` in
 `proto/todofy/ui/v1/plus_service.proto`. Todofy owns every Todoist write. FlowDay owns
-its local queue, estimates, timer and time entries. Neither service imports the other's code.
+its local queue, timer and time entries; a task's estimate is its source's duration. Neither service imports
+the other's code.
 
 ## Setup
 
@@ -83,8 +84,8 @@ same input. Successful receipts are replayed; a lost upstream response resends t
 When completion names a Focus date, Todofy confirms the actual Todoist close first, then freezes a
 FlowDay timer-settlement command. Repeating a failed settlement retains the close identity and cannot
 advance the recurring task again. A stale timer etag is refreshed once with a new settlement UUID.
-The extension cannot call settlement itself. Its other FlowDay writes are queue order, estimates
-and normal timer actions. Local/pseudo tasks retain their FlowDay identity and owner link.
+The extension cannot call settlement itself. Its other FlowDay writes are queue order and normal timer
+actions. Local/pseudo tasks retain their FlowDay identity and owner link.
 
 ### Reordering
 

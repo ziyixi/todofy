@@ -53,7 +53,7 @@ owner's English copy as its `LocalizedMessage`. A failed D1 call is `UNAVAILABLE
 
 | Resource | Routes (under `/api/v1`) | Notes |
 | --- | --- | --- |
-| `tasks/{task}` | `GET tasks`, `GET`, `POST tasks`, `PATCH`, `DELETE`, `POST :undelete`, `POST tasks:sync` | The task list (pages; `show_deleted` adds the trash); a local task (its `request_id` names it, `local-<request_id>`); title or estimate (`update_mask`); soft delete (also out of every flow, in one batch) and restore; the sync (section 4) |
+| `tasks/{task}` | `GET tasks`, `GET`, `POST tasks`, `PATCH`, `DELETE`, `POST :undelete`, `POST tasks:sync` | The task list (pages; `show_deleted` adds the trash); a local task (its `request_id` names it, `local-<request_id>`); title, or a local task's estimate (`update_mask`); soft delete (also out of every flow, in one batch) and restore; the sync (section 4) |
 | `flows/{day}` | `GET flows`, `GET`, `PATCH`, `POST :completeTask`, `POST :reopenTask`, `POST :rollover` | Every day with a flow (pages), its planned tasks in order, its done tasks and its planning flag; `task_ids` or `planning_completed` (`update_mask`); done marks; rollover of the listed tasks, or of every unfinished one only with `all_unfinished` (an empty list moves nothing) |
 | `flows/{day}/notes/{task}` | `GET {parent}/notes`, `GET`, `PATCH` | One markdown note per task and day; one never written reads as empty |
 | `timeEntries/{entry}` | `GET timeEntries?task_id&flow_date`, `GET`, `POST timeEntries`, `PATCH`, `DELETE` | Time entries by task, day or both (pages); a new one (its `request_id` is its ID); start and end (the duration follows) |
@@ -151,9 +151,9 @@ Todoist may not list as changed) is followed by a full pass right away (`partial
 differs: for 200 unchanged tasks, a few settings rows.
 
 **Kept from the container era** (each has a test): a task hidden by a sync comes back by itself when Todoist
-lists it again; a task deleted in FlowDay (`'local'`, or the legacy `NULL` source) stays deleted; a Todoist task
-without a duration keeps the estimate set in FlowDay, and a Todoist duration replaces it (a day counts as 480
-minutes); due dates are cut to the day; local tasks are never touched by the sync.
+lists it again; a task deleted in FlowDay (`'local'`, or the legacy `NULL` source) stays deleted; a synced task's
+estimate is the source's duration (a day counts as 480 minutes), and a missing duration clears it; due dates are
+cut to the day; local tasks are never touched by the sync.
 
 **Failures and backoff.** Todoist 401/403 answers `502 todoist_unauthorized`; anything else answers
 `502 todoist_unavailable`. Either way only the claim was written, so `last_sync_at` still means "last successful
@@ -517,7 +517,7 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
 ## Todoist Plus integration
 
 `FocusEntrypoint` is a same-account service binding used by Todofy after its extension authentication. It permits
-paged tasks/time entries, daily flow reads and order changes, estimate edits, read-only sync and timer commands.
+paged tasks/time entries, daily flow reads and order changes, read-only sync and timer commands.
 It does not expose settings, credentials, local-task creation/deletion or the public owner authentication bypass.
 The normal Worker fetch still checks Access, Origin and CSRF.
 
@@ -526,9 +526,11 @@ FlowDay records local completion and saves a matching timer segment; an unrelate
 A failed settlement does not authorize another Todoist completion. Todofy keeps that success and retries settlement.
 `STOP` and `PAUSE` never complete tasks. Ordinary FlowDay completion remains local to its day flow.
 
-Migration `0004` adds Todoist parent and actual deadline fields, distinct from due/scheduled dates. Explicitly setting
-or clearing a FlowDay estimate marks it as an override, so a later Todoist duration cannot replace it. Existing
-nonempty estimates are preserved on migration because their historical source is not available.
+Migration `0004` adds Todoist parent and actual deadline fields, distinct from due/scheduled dates. It also added
+the `estimate_override` marker (set on existing nonempty estimates), which kept a FlowDay estimate over the source's
+duration. Since 2026-10-18 nothing reads or sets it: the source's duration is a mirrored task's only estimate. The
+column stays for the one-time copy of those estimates into Tasks
+([backup](../../tasks/docs/backup.md#one-time-flowday-estimate-backfill)).
 Existing Todoist sync state also gets a one-shot hierarchy refresh marker. The new Worker starts a full pass
 through the existing bounded sync pipeline, ignoring old pending cursors, resumes its own partial pass, and clears
 the marker with the final batch. Fresh accounts already start with a full sync; estimates, queues and timers remain.
@@ -550,9 +552,8 @@ rows cause verification and reset without `--confirm-database flowday` to stop.
 
 ## Native Tasks source
 
-An optional `TASKS` service binding to Tasks' named `TasksApi` entrypoint, with `props.access = "read"`,
-selects native Tasks. Without it, the existing Todoist path is unchanged. This implementation does not add that
-binding to production; source cutover follows the complete Tasks import and identity checks.
+A `TASKS` service binding to Tasks' named `TasksApi` entrypoint, with `props.access = "read"`, selects native
+Tasks; production binds it (`flowday/wrangler.toml`). Without it, the Todoist path is unchanged.
 
 The native adapter uses generated `TasksUiService` GET requests, at most 100 changes per invocation, and a
 catalog refresh only on first use or a catalog-change notification. The service entrypoint separately denies
@@ -564,8 +565,8 @@ Imported IDs keep their existing FlowDay primary keys and legacy `todoist_id`/`t
 these columns remain compatibility storage, not evidence that the external API is still used. Queues, estimates,
 timers and past time entries keep their references. Completed, deleted or archived source tasks are concealed
 by the existing sync-deletion marker; they are not physically deleted. Reopening or restoring a task makes it
-visible again. Explicit FlowDay estimates remain authoritative. Source durations that are absent retain the
-previous estimate, matching the existing source adapter.
+visible again. A mirrored task's estimate is its Tasks duration: every changed row takes it, a cleared duration
+clears it, the editor shows it read-only and UpdateTask refuses another value (`ESTIMATE_IN_TASKS`).
 
 Tasks emits task changes for project archive/restore and label updates. That allows this mirror to update only
 changed rows, without a second snapshot state machine. A project rename or recolour emits only a catalog change,
@@ -581,5 +582,5 @@ key; an older response without that field remains Todoist. A native deployment r
 Todoist-key setting, while keeping ordinary capacity settings editable.
 
 The synthetic native runtime tests cover ID preservation, unchanged-page write counts, paging, source failures,
-archive/restore and existing queue/timer/estimate retention. The dedicated CPU test measures the real owner
+archive/restore, queue and timer retention, and Tasks-only estimates. The dedicated CPU test measures the real owner
 handler with a 100-task synthetic page; it does not claim every possible 2 MiB payload has the same CPU cost.

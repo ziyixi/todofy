@@ -58,6 +58,7 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
           stage: "none",
           due: "2026-11-15",
           deadline: "2026-12-01",
+          estimated_minutes: 30,
           etag: "child-1",
         },
         {
@@ -66,6 +67,7 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
           parent_id: "parent",
           area: "unassigned",
           stage: "none",
+          estimated_minutes: 60,
           etag: "second-1",
         },
 

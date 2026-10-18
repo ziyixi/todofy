@@ -37,10 +37,11 @@ const ROWS_BEFORE_UI_V1: Readonly<Record<string, number>> = {
   'quick task': 3,
 };
 
+/** The day's 8 planned tasks are local, as FlowDay sets only a local task's estimate; the rest are mirrored. */
 function task(n: number): TaskRecord {
   return {
     id: `td-${String(n)}`,
-    todoistId: `td-${String(n)}`,
+    todoistId: n < 8 ? null : `td-${String(n)}`,
     title: `Synthetic task ${String(n)}`,
     description: null,
     projectName: 'Work',

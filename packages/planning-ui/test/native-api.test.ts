@@ -193,3 +193,60 @@ it("keeps native step estimates canonical while the FlowDay cache is catching up
   expect(result.focus.estimates.step).toBe(90);
   expect(result.focus.flowTasks.step?.estimatedMinutes).toBe(90);
 });
+
+it("takes every estimate from the task list: FlowDay's copy never replaces or fills one", async () => {
+  const flowdayCalls: string[] = [];
+  const send: HttpSend = async ({ url, httpMethod }) => {
+    const path = url.split("?")[0]!;
+    if (path === "/api/plus/v1/plan:read")
+      return Response.json({
+        plan: {
+          enabled: true,
+          native_planning: true,
+          timezone: "UTC",
+          today: "2026-10-17",
+          week_start: "2026-10-12",
+        },
+      });
+    if (path === "/api/plus/v1/tasks")
+      return Response.json({
+        planning_tasks: [{ id: "cleared", kind: "step" }],
+      });
+    flowdayCalls.push(`${httpMethod} ${path}`);
+    if (path === "/api/v1/tasks")
+      return Response.json({
+        tasks: [
+          {
+            name: "tasks/cleared",
+            title: "Synthetic cleared step",
+            todoist_id: "cleared",
+            estimated_minutes: 45,
+          },
+          {
+            name: "tasks/local-one",
+            title: "Synthetic local task",
+            estimated_minutes: 20,
+          },
+        ],
+      });
+    if (path.startsWith("/api/v1/flows/"))
+      return Response.json({
+        name: `flows/${path.split("/").at(-1)}`,
+        task_ids: ["cleared", "local-one"],
+      });
+    return Response.json({ name: "timerSession", state: "idle", etag: "0" });
+  };
+  const api = createPlanningActions(
+    { plus: send, flowday: send },
+    undefined,
+    "tasks",
+  );
+  expect("updateEstimate" in api).toBe(false);
+  const result = await api.load();
+  expect(result.plan.tasks[0]?.estimatedMinutes).toBeUndefined();
+  expect(result.focus.estimates).toEqual({ cleared: 0 });
+  expect(result.focus.flowTasks.cleared?.estimatedMinutes).toBeUndefined();
+  // A local FlowDay task is FlowDay's own, estimate included.
+  expect(result.focus.flowTasks["local-one"]?.estimatedMinutes).toBe(20);
+  expect(flowdayCalls.every((call) => call.startsWith("GET "))).toBe(true);
+});

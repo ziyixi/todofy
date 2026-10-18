@@ -18,7 +18,10 @@ describe('private Focus entrypoint', () => {
     expect((await h.focusFetch('/api/v1/settings')).status).toBe(404);
     expect((await h.focusFetch('/api/v1/tasks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(404);
     const mutation = { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Unrelated edit' }) };
-    expect((await h.focusFetch('/api/v1/tasks/synthetic?update_mask=title', mutation)).status).toBe(400);
+    expect((await h.focusFetch('/api/v1/tasks/synthetic?update_mask=title', mutation)).status).toBe(404);
+    // Estimates are Tasks' durations; this path never writes one.
+    const estimate = { ...mutation, body: JSON.stringify({ estimated_minutes: 45 }) };
+    expect((await h.focusFetch('/api/v1/tasks/synthetic?update_mask=estimated_minutes', estimate)).status).toBe(404);
   });
 
   it('moves only the dragged step between days while preserving local queue entries', async () => {

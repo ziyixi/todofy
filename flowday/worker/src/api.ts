@@ -409,6 +409,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
     keepImmutable(mask, 'priority', input.priority !== 0, input.priority === task.priority);
     keepImmutable(mask, 'labels', input.labels.length > 0, input.labels.length === task.labels.length && input.labels.every((label, index) => label === task.labels[index]));
     keepImmutable(mask, 'due_date', input.dueDate !== '', input.dueDate === (task.dueDate ?? ''));
+    // A mirrored task's estimate is its Tasks duration, which only Tasks changes.
+    if (newEstimate !== undefined && task.todoistId !== null && newEstimate !== task.estimatedMins) throw flowdayError('ESTIMATE_IN_TASKS');
     // Each write changes only a value that differs (none for a repeat).
     if (newTitle !== null) await updateTaskTitle(db, taskId, newTitle);
     if (newEstimate !== undefined) await updateTaskEstimate(db, taskId, newEstimate);

@@ -158,7 +158,7 @@ async function settleCompleted(env: Env, input: { request_id: string; task_id: s
 // The proxy decodes and re-encodes each FlowDay page within the Free 10 ms CPU limit; a 200-task page of long titles
 // and descriptions reached 10.2 ms cold in CI, so a page is capped at 100 tasks and clients follow next_page_token.
 const FOCUS_PAGE_MAX = 100;
-const FOCUS_METHODS = new Set(['getTask', 'listTasks', 'getFlow', 'getTimerSession', 'commandTimer', 'syncTasks', 'listTimeEntries', 'updateTask', 'updateFlow', 'rolloverFlow']);
+const FOCUS_METHODS = new Set(['getTask', 'listTasks', 'getFlow', 'getTimerSession', 'commandTimer', 'syncTasks', 'listTimeEntries', 'updateFlow', 'rolloverFlow']);
 function focusHandlers(): ServiceHandlers<ShapeOf<typeof FlowDayUiService>, PlusContext> {
   const handlers: Record<string, unknown> = {};
   for (const method of FlowDayUiService.methods) {
@@ -168,10 +168,6 @@ function focusHandlers(): ServiceHandlers<ShapeOf<typeof FlowDayUiService>, Plus
       if (method.localName === 'listTasks') {
         const request = input as { pageSize?: number };
         request.pageSize = Math.min(request.pageSize || FOCUS_PAGE_MAX, FOCUS_PAGE_MAX);
-      }
-      if (method.localName === 'updateTask') {
-        const paths = (input as { updateMask?: { paths: string[] } }).updateMask?.paths;
-        if (paths?.length !== 1 || paths[0] !== 'estimated_minutes') throw uiError('ACTION_NOT_ALLOWED');
       }
       const client = focusClient(ctx.env, ctx.internal);
       // The two services use the same generated descriptor; no hand-written DTO or raw body forwarding.

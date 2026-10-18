@@ -109,24 +109,30 @@ it('imports native IDs without a Todoist key and an unchanged page writes no tas
   expect(requests.filter((path) => path.endsWith('/catalog'))).toHaveLength(1);
   expect(h.todoist.requests).toHaveLength(0);
 });
-it('preserves local estimates, queues and timer history while completed/deleted tasks hide and reopened tasks return', async () => {
+it('takes estimates from Tasks only and keeps queues and timer history while completed/deleted tasks hide and reopened tasks return', async () => {
   changes = [task('a'), task('b')];
   await sync();
+  // A mirrored task's estimate is not FlowDay's to set, and an override left by an older release is ignored.
   await updateTaskEstimate(h.db(), 'a', 45);
+  expect((await getAllTasks(h.db())).find((row) => row.id === 'a')?.estimatedMins).toBe(30);
+  await h.sql("UPDATE tasks SET estimated_mins=45, estimate_override=1 WHERE id='a'");
   await h.sql("INSERT INTO flow_tasks(id,flow_date,task_id,sort_order) VALUES ('planned','2026-10-17','a',0)");
   await h.sql("INSERT INTO active_timer_session(id,task_id,status,session_saved_s) VALUES ('main','a','paused',120)");
   changes.push(task('a', { title: 'Updated', durationMinutes: 60 }), { name: 'tasks/b', deleted: true });
   await sync(at + AUTO_SYNC_MIN_INTERVAL_MS);
-  expect(await getAllTasks(h.db())).toEqual([expect.objectContaining({ id: 'a', title: 'Updated', estimatedMins: 45 })]);
-  changes.push(task('a', { completed: true }));
+  expect(await getAllTasks(h.db())).toEqual([expect.objectContaining({ id: 'a', title: 'Updated', estimatedMins: 60 })]);
+  changes.push(task('a', { title: 'Updated', durationMinutes: 0 }));
   await sync(at + 2 * AUTO_SYNC_MIN_INTERVAL_MS);
+  expect(await getAllTasks(h.db())).toEqual([expect.objectContaining({ id: 'a', estimatedMins: null })]);
+  changes.push(task('a', { completed: true }));
+  await sync(at + 3 * AUTO_SYNC_MIN_INTERVAL_MS);
   expect(await getAllTasks(h.db())).toEqual([]);
   expect(await getDeletedTasks(h.db())).toEqual([]);
   expect(await h.sql('SELECT task_id FROM flow_tasks')).toEqual([{ task_id: 'a' }]);
   expect(await h.sql('SELECT task_id,session_saved_s FROM active_timer_session')).toEqual([{ task_id: 'a', session_saved_s: 120 }]);
   changes.push(task('a'));
-  await sync(at + 3 * AUTO_SYNC_MIN_INTERVAL_MS);
-  expect(await getAllTasks(h.db())).toEqual([expect.objectContaining({ id: 'a', estimatedMins: 45 })]);
+  await sync(at + 4 * AUTO_SYNC_MIN_INTERVAL_MS);
+  expect(await getAllTasks(h.db())).toEqual([expect.objectContaining({ id: 'a', estimatedMins: 30 })]);
 });
 it('applies at most 100 changes and resumes the next page immediately with a separate cursor', async () => {
   changes = Array.from({ length: 101 }, (_, i) => task(`t${String(i)}`));

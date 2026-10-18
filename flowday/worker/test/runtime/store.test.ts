@@ -163,7 +163,7 @@ describe('tasks', () => {
     expect(found.find((task) => task.id === 't-3')?.deletedAt).not.toBeNull();
   });
 
-  it('updates and clears the estimate; the same estimate again writes nothing', async () => {
+  it("updates and clears a local task's estimate; the same estimate again writes nothing", async () => {
     const db = h.db();
     await upsertTasks(db, [makeTask({ id: 't1', estimatedMins: 45 })]);
     await updateTaskEstimate(db, 't1', 30);
@@ -175,18 +175,18 @@ describe('tasks', () => {
     expect((await getAllTasks(db))[0]?.estimatedMins).toBeNull();
   });
 
-  it('upsert rules: rescheduled, cleared due day, manual estimate kept over Todoist duration, completion', async () => {
+  it("upsert rules: rescheduled, cleared due day, the source's estimate only, completion", async () => {
     const db = h.db();
     await upsertTasks(db, [makeTask({ id: 't1', todoistId: 'todoist-1', dueDate: '2026-04-16' })]);
     await upsertTasks(db, [makeTask({ id: 't1', todoistId: 'todoist-1', dueDate: '2026-04-23' })]);
     expect((await getAllTasks(db))[0]?.dueDate).toBe('2026-04-23');
     await upsertTasks(db, [makeTask({ id: 't1', todoistId: 'todoist-1', dueDate: null })]);
     expect((await getAllTasks(db))[0]?.dueDate).toBeNull();
-    await updateTaskEstimate(db, 't1', 45);
-    await upsertTasks(db, [makeTask({ id: 't1', todoistId: 'todoist-1', estimatedMins: null })]);
-    expect((await getAllTasks(db))[0]?.estimatedMins).toBe(45);
     await upsertTasks(db, [makeTask({ id: 't1', todoistId: 'todoist-1', estimatedMins: 20 })]);
-    expect((await getAllTasks(db))[0]?.estimatedMins).toBe(45);
+    await updateTaskEstimate(db, 't1', 45);
+    expect((await getAllTasks(db))[0]?.estimatedMins).toBe(20);
+    await upsertTasks(db, [makeTask({ id: 't1', todoistId: 'todoist-1', estimatedMins: null })]);
+    expect((await getAllTasks(db))[0]?.estimatedMins).toBeNull();
     await upsertTasks(db, [makeTask({ id: 't1', todoistId: 'todoist-1', isCompleted: true, completedAt: '2026-04-13T10:00:00Z' })]);
     expect((await getAllTasks(db))[0]).toMatchObject({ isCompleted: true, completedAt: '2026-04-13T10:00:00Z' });
   });

@@ -89,8 +89,8 @@ export function withLaneOrder(
 }
 
 /**
- * A confirmed reorder: only Todoist's new positions and update times are merged (estimates come
- * from FlowDay), and the lane's saved order.
+ * A confirmed reorder: only the new positions and update times are merged, and the lane's saved
+ * order.
  */
 function withReorder(data: PlusData, result: ReorderResult): PlusData {
   const saved = new Map(result.reordered.map((task) => [task.id, task]));

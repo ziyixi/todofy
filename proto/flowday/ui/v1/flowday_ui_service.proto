@@ -94,10 +94,11 @@ service FlowDayUiService {
     option (google.api.method_signature) = "task";
   }
 
-  // Replaces the title or the estimate (AIP-134): the fields `update_mask` names, or both without one. Any task,
-  // a Todoist task too (FlowDay keeps the change; Todoist never sees it, and the sync replaces the title when the
-  // task changes there). The IMMUTABLE fields cannot change (AIP-203, see UpdateTaskRequest). Replaces PATCH
-  // /api/tasks.
+  // Replaces the title or the estimate (AIP-134): the fields `update_mask` names, or both without one. The title of
+  // any task, a mirrored one too (FlowDay keeps the change; the source never sees it, and the sync replaces the
+  // title when the task changes there). The estimate of a local task only: a mirrored task's estimate is its Tasks
+  // duration, and a different value is FAILED_PRECONDITION (ESTIMATE_IN_TASKS). The IMMUTABLE fields cannot change
+  // (AIP-203, see UpdateTaskRequest). Replaces PATCH /api/tasks.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc UpdateTask(UpdateTaskRequest) returns (Task) {

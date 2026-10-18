@@ -112,8 +112,8 @@ The PWA provides an offline notice and uses task data online.
 
 Plan, Focus and Mail reuse `packages/planning-ui`. Their same-origin requests cross the private `Planning`
 binding to Todofy; Todofy writes task changes through Tasks' provisioned `TasksApi`. FlowDay reads the
-native change feed through a separate read-only binding and keeps its own queues, estimate overrides,
-timers and work records. Todofy reaches FlowDay's existing `NativeFocusEntrypoint` through a service binding. A day
+native change feed through a separate read-only binding and keeps its own queues, timers and work records.
+A task's estimate is its Tasks duration, which FlowDay mirrors read-only. Todofy reaches FlowDay's existing `NativeFocusEntrypoint` through a service binding. A day
 drag changes only FlowDay's queue; a confirmed task completion precedes timer settlement.
 
 Todofy retains weekly rollover, text Work/Personal Bets, dependencies, Review lane order and mail receipts.
