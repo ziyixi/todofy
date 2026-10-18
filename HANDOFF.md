@@ -11,16 +11,25 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ### Tasks workflow refinement (2026-10-18 UTC)
 
-Follow-up `codex/tasks-dependency-layout` is in progress after the owner reported a warm-open inward flash.
+Follow-up `codex/tasks-dependency-layout` is released after the owner reported a warm-open inward flash.
 Real Chromium/local-D1 reproduction identified two independent shifts: the dependency loading paragraph
 removed about 17px above its heading, and empty child placeholders removed another 27px. Same-height
 dependency status and stable empty child instructions now keep that heading still across both replies.
 The owner also requested optional Time/Repeat panels and a quieter sidebar resize affordance. Browser
-regressions now cover warm inner geometry and the common property popups; release evidence remains pending.
+regressions now cover warm inner geometry and the common property popups.
 The combined local suite passes lint/type/build, 55 unit checks and 50 real Chromium/local-D1 journeys.
 Actual owner Chrome with the synthetic preview confirms cached reopening and the default collapsed Date
-panel; its screenshot is in the refinement record. No real task was edited. Full branch gate and same-SHA
-main release remain before production acceptance.
+panel; its screenshot is in the refinement record. No real task was edited.
+SHA `857bf1283fe9b9930b328fdfa7ebcb8a59cb52d1` passed full branch
+[39117050187](https://github.com/ziyixi/todofy/actions/runs/39117050187) and same-SHA main
+[39117391432](https://github.com/ziyixi/todofy/actions/runs/39117391432). Only Tasks released.
+Deployment `7152959808` records version `cd6a3621-817b-40f9-8059-ac3b8995908c`; an independent provider
+read verified that SHA, persistent resource identity and declared public configuration with zero differences.
+Production owner Chrome loaded `index-DdNq1sIy.js`, an unchanged 860×780 detail frame and 19 badges;
+the dependency heading is 20px with no old loading paragraph/child placeholders, Time/Repeat panels are
+collapsed, and sidebar feedback is 44px. The real dialog was closed without saving. Cold/warm/response
+boundary movement is established by synthetic real-browser tests; private task content was not emitted.
+Closing branch `codex/tasks-layout-verification` records these receipts only, with no new app changes.
 
 All 28 items in the owner's acceptance list are implemented and released. The original branch was
 `codex/tasks-workflow-refinement`; `codex/tasks-read-efficiency` completes the read/DB work.
