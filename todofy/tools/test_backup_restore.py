@@ -411,3 +411,56 @@ def test_restore_config_stays_outside_the_repository_and_never_overwrites(tmp_pa
     with pytest.raises(RestoreError, match="exists"):
         write_restore_config(out, "todofy-restore", RESTORE_ID)
     assert out.read_text() == "keep"
+
+
+class BucketWrangler:
+    """`Wrangler.get` from an in-memory bucket."""
+
+    def __init__(self, objects: dict[str, bytes]) -> None:
+        self.objects = objects
+
+    def get(self, _bucket: str, key: str, path: Path) -> None:
+        if key not in self.objects:
+            raise RestoreError(f"wrangler r2 object get failed: {key}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(self.objects[key])
+
+
+def with_tasks(source: sqlite3.Connection, root: Path) -> dict[str, bytes]:
+    """A backup of ``source`` with a Tasks section (two synthetic Tasks tables), as the bucket holds it."""
+    backup_of(source, root)
+    objects = {part.relative_to(root / PARTS).as_posix(): part.read_bytes() for part in (root / PARTS).rglob("*.gz")}
+    tables = []
+    for name, rows in (("projects", [["p1", "Inbox"]]), ("tasks", [["t1", "Synthetic 任务", 1.5], ["t2", "x", 2]])):
+        part = layout.Part()
+        for row in rows:
+            part.add(row)
+        data, digest = part.finish()
+        key = layout.part_key(PREFIX + layout.TASKS_DIR, name, 1)
+        objects[key] = data
+        columns = ["id", "title"] if name == "projects" else ["id", "title", "sort_order"]
+        parts = [{"key": key, "rows": len(rows), "bytes": len(data), "sha256": digest}]
+        tables.append(layout.table_entry(name, columns, ["id"], len(rows), parts))
+    manifest = json.loads((root / MANIFEST).read_text())
+    tasks = layout.tasks_section("0004_read_paths.sql", 3, 3, tables)
+    objects[PREFIX + MANIFEST] = layout.manifest(
+        started_at=0, finished_at=60, schema_version=LATEST, tables=manifest["tables"], tasks=tasks
+    )
+    return objects
+
+
+def test_download_fetches_and_checks_the_tasks_parts(source, tmp_path):
+    objects = with_tasks(source, tmp_path / "made")
+    out = tmp_path / "restore"
+    lines = backup_restore.download(BucketWrangler(objects), "bucket", PREFIX, out, legacy_text=True)
+    assert lines[-2:] == ["PASS tasks/projects rows=1 parts=1", "PASS tasks/tasks rows=2 parts=1"]
+    assert (out / PARTS / PREFIX / "tasks" / "tasks" / "00001.ndjson.gz").is_file()
+    # sql stays Todofy's: the Tasks rows are tasks/tools/backup-restore.ts's to restore.
+    write_sql(out, out / "restore.sql", legacy_text=True)
+    assert "INSERT INTO projects" not in (out / "restore.sql").read_text()
+
+    damaged = tmp_path / "damaged"
+    key = PREFIX + "tasks/tasks/00001.ndjson.gz"
+    objects[key] = objects[key][:-1] + bytes([objects[key][-1] ^ 1])
+    with pytest.raises(RestoreError, match=r"tasks/tasks/00001\.ndjson\.gz: missing or SHA-256 differs"):
+        backup_restore.download(BucketWrangler(objects), "bucket", PREFIX, damaged, legacy_text=True)

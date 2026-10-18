@@ -118,8 +118,9 @@ message TodoistBudget {
   int32 window_call_limit = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// The weekly D1 backup to the private R2 bucket (Sunday 10:00 UTC), every table in each one. While a backup
-// runs (a few minutes, never over 30) the ledger waits and owner writes are UNAVAILABLE.
+// The weekly D1 backup to the private R2 bucket (Sunday 10:00 UTC), every table of Todofy's and of the Tasks
+// app's D1 in each one. While a backup runs (a few minutes, never over 30) the ledger waits and owner writes are
+// UNAVAILABLE.
 message BackupStatus {
   // The running job or the last outcome.
   enum State {
@@ -145,6 +146,8 @@ message BackupStatus {
     ERROR_CODE_STORAGE_ERROR = 1;
     // The job outlived its lease.
     ERROR_CODE_LEASE_EXPIRED = 2;
+    // The Worker has no TASKS binding, so the Tasks app's D1 could not be read.
+    ERROR_CODE_TASKS_UNAVAILABLE = 3;
   }
 
   // The state.

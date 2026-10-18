@@ -213,6 +213,7 @@ const BACKUP_RETRY = '6 小时后自动重试；连续三次失败后等到下�
 export const BACKUP_ERRORS: Record<BackupErrorName, string> = {
   storage_error: `D1 或 R2 连续三次读写失败，这次备份已放弃。${BACKUP_RETRY}`,
   lease_expired: `30 分钟内没有完成，这次备份已放弃。${BACKUP_RETRY}`,
+  tasks_unavailable: `没有 Tasks 绑定，读不到 Tasks 的数据，这次备份已放弃。${BACKUP_RETRY}`,
 }
 
 export const RECOMMENDATION_STATUS: Record<ReportStatusName, Label> = {

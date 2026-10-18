@@ -2,7 +2,9 @@
 """Restore a weekly Todofy D1 backup (worker/todofy/runtime/backup.py) into an empty D1 database.
 
   download  fetch a backup's manifest and parts from R2 with `wrangler r2 object get`; check every
-            part's SHA-256 and row count
+            part's SHA-256 and row count. That includes the Tasks app's parts (the manifest's `tasks`
+            section), which tasks/tools/backup-restore.ts restores (tasks/docs/backup.md); sql and
+            verify below are Todofy's alone
   sql       write one SQL file that loads the downloaded rows into a D1 database with the
             migrations applied and no rows (checked again against the manifest first)
   verify    compare the restored database's row counts with the manifest and check that the
@@ -255,16 +257,27 @@ def load_tables(root: Path, *, legacy_text: bool) -> tuple[dict[str, Any], list[
     return manifest, tables
 
 
+def tasks_tables(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """The Tasks app's tables of a backup (none in one made before Tasks was included)."""
+    return list(manifest.get("tasks", {}).get("tables", []))
+
+
 def download(wrangler: Wrangler, bucket: str, backup: str, root: Path, *, legacy_text: bool) -> list[str]:
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     wrangler.get(bucket, f"{backup.rstrip('/')}/{MANIFEST}", root / MANIFEST)
-    for table in _tables(_read_manifest(root / MANIFEST), legacy_text=legacy_text):
+    first = _read_manifest(root / MANIFEST)
+    for table in _tables(first, legacy_text=legacy_text) + tasks_tables(first):
         for part in table["parts"]:
             wrangler.get(bucket, part["key"], _part_path(root, part["key"]))
     manifest, tables = load_tables(root, legacy_text=legacy_text)
-    return _skipped(manifest) + [
-        f"PASS {table['name']} rows={table['rows']} parts={len(table['parts'])}" for table in tables
-    ]
+    tasks = tasks_tables(manifest)
+    for table in tasks:
+        check_table(root, table)
+    return (
+        _skipped(manifest)
+        + [f"PASS {table['name']} rows={table['rows']} parts={len(table['parts'])}" for table in tables]
+        + [f"PASS tasks/{table['name']} rows={table['rows']} parts={len(table['parts'])}" for table in tasks]
+    )
 
 
 # ---------------------------------------------------------------- SQL output

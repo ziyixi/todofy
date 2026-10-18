@@ -2,14 +2,17 @@
 
 Layout in the private bucket (tools/backup_restore.py reads it back):
 
-    backups/<job start>/manifest.json                written last: a prefix without it is incomplete
-    backups/<job start>/<table>/<seq:05d>.ndjson.gz  one gzip part per table and alarm invocation
+    backups/<job start>/manifest.json                      written last: a prefix without it is incomplete
+    backups/<job start>/<table>/<seq:05d>.ndjson.gz        one gzip part per table and alarm invocation
+    backups/<job start>/tasks/<table>/<seq:05d>.ndjson.gz  the same for each table of the Tasks app's D1
 
 ``<job start>`` is the UTC second the job started (``2026-10-04T100000Z``), so every
 job has its own prefix and never touches an earlier backup; only retention deletes
 old ones. A part holds one JSON array per row, values in the manifest's column
 order. The manifest lists every table (all of them, every time) and every part
-with its row count, byte size and SHA-256.
+with its row count, byte size and SHA-256. Its ``tasks`` section lists Tasks'
+tables the same way, with Tasks' applied migration and its change sequence when
+the job planned and when it ended (tasks/docs/backup.md restores them).
 """
 
 import hashlib
@@ -22,6 +25,7 @@ from typing import Any
 WEEKLY_FORMAT = "todofy-d1-backup-v1"
 WEEKLY_ROOT = "backups/"
 MANIFEST = "manifest.json"
+TASKS_DIR = "tasks/"
 KEEP_WEEKLY = 6
 RUN_WEEKDAY = 6  # Sunday (datetime.weekday)
 RUN_HOUR = 10  # UTC
@@ -110,7 +114,19 @@ def table_entry(name: str, columns: Sequence[str], key: Sequence[str], max_rowid
     }
 
 
-def manifest(*, started_at: int, finished_at: int, schema_version: str, tables: list[dict]) -> bytes:
+def tasks_section(schema_version: str, change_start: int, change_end: int, tables: list[dict]) -> dict:
+    """The manifest's ``tasks``: Tasks' tables, read while Tasks kept taking writes. Its change sequence at the
+    plan and at the end differ when an edit landed during the job."""
+    return {
+        "schema_version": schema_version,
+        "change_sequence": {"start": change_start, "end": change_end},
+        "tables": tables,
+    }
+
+
+def manifest(
+    *, started_at: int, finished_at: int, schema_version: str, tables: list[dict], tasks: dict | None = None
+) -> bytes:
     document = {
         "format": WEEKLY_FORMAT,
         "started_at": timestamp(started_at),
@@ -119,4 +135,6 @@ def manifest(*, started_at: int, finished_at: int, schema_version: str, tables: 
         # Rows with rowid <= max_rowid when the job started; nothing newer.
         "tables": tables,
     }
+    if tasks is not None:
+        document["tasks"] = tasks
     return json.dumps(document, ensure_ascii=False, indent=1).encode()

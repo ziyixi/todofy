@@ -2,7 +2,9 @@
 
 The shared runtime-test config has no BACKUPS binding (a backup would pause the ledger
 under other scenarios), so this module starts its own server with the bucket and a
-one-statement query budget: the job then spans many alarm invocations and parts.
+one-statement query budget: the job then spans many alarm invocations and parts. The
+server also runs the real Tasks Worker (tasks/worker, its own local D1 with
+tasks/migrations), bound read-write as TASKS, whose D1 each backup copies too.
 """
 
 import json
@@ -28,6 +30,7 @@ from tests.runtime.harness import (
     WRANGLER,
     Worker,
     _run,
+    _wrangler,
     reason,
     wait_until,
 )
@@ -36,28 +39,77 @@ from todofy.core.sql import backup as sql
 BUCKET = "todofy-backups"
 TOOL = ROOT / "tools" / "backup_restore.py"
 EVENTS, TRANSITIONS, LEGACY_TEXTS = 30, 1100, 4
+TASKS = ROOT.parent / "tasks"
+# Seeded Tasks rows (seed_tasks): 3 projects, a section, a label, a filter, 252 tasks, 2 completions, a receipt.
+TASK_ROWS, TASKS_ROWS = 252, 3 + 1 + 1 + 1 + 252 + 2 + 1
 # Seeded prefixes: six complete ones and an incomplete one, all older than the jobs' own.
 OLD_COMPLETE = [f"backups/2020-0{month}-05/" for month in range(1, 7)]
 OLD_INCOMPLETE = "backups/2020-01-12/"
 
 
+def tasks_config(path: Path, database_id: str) -> Path:
+    """The Tasks Worker on its own local D1 (a Worker config, so `d1 execute` also reads it)."""
+    path.write_text(
+        json.dumps(
+            {
+                "name": "backup-tasks",
+                "main": str(TASKS / "worker/src/index.ts"),
+                "compatibility_date": "2026-09-08",
+                "workers_dev": False,
+                "preview_urls": False,
+                "d1_databases": [
+                    {
+                        "binding": "DB",
+                        "database_name": "backup-tasks-test",
+                        "database_id": database_id,
+                        "migrations_dir": str(TASKS / "migrations"),
+                    }
+                ],
+                "vars": {"TIME_ZONE": "America/Los_Angeles", "PUBLIC_HOST": "tasks.localhost"},
+            }
+        )
+    )
+    return path
+
+
 @pytest.fixture(scope="module")
 def backup_worker(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Worker]:
+    state = tmp_path_factory.mktemp("backup-worker")
+    tasks = tasks_config(state / "tasks.json", "00000000-0000-4000-8000-000000000003")
     config = tomllib.loads(CORE_CONFIG.read_text())
     config["r2_buckets"] = [{"binding": "BACKUPS", "bucket_name": BUCKET}]
+    config["services"] = [
+        {"binding": "TASKS", "service": "backup-tasks", "entrypoint": "TasksApi", "props": {"access": "read-write"}}
+    ]
     config["vars"]["BACKUP_QUERY_BUDGET"] = "1"
     generated = ROOT / f"wrangler.test-run-{uuid.uuid4().hex}.json"
     generated.write_text(json.dumps(config))
+    _wrangler("d1", "migrations", "apply", "DB", "--local", "--persist-to", str(state), "--config", str(tasks))
+    # The Tasks config is the server's last (tasks_d1 reads it).
     worker = Worker(
-        [GATEWAY_CONFIG, generated.name],
-        generated.name,
-        tmp_path_factory.mktemp("backup-worker"),
-        {"CSRF_SIGNING_KEY": CSRF_SIGNING_KEY},
+        [GATEWAY_CONFIG, generated.name, str(tasks)], generated.name, state, {"CSRF_SIGNING_KEY": CSRF_SIGNING_KEY}
     )
     try:
         yield from _run(worker)
     finally:
         generated.unlink(missing_ok=True)
+
+
+def tasks_d1(worker: Worker, statement: str, persist_to: Path | None = None, config: str = "") -> list[Any]:
+    """Every result of ``statement`` (one or more statements) on a Tasks D1 (by default the server's)."""
+    result = wrangler(
+        "d1",
+        "execute",
+        "DB",
+        *local(worker, persist_to),
+        "--config",
+        config or worker.configs[-1],
+        "--json",
+        "--command",
+        statement,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    return json.loads(result.stdout)
 
 
 def wrangler(*args: str) -> subprocess.CompletedProcess[str]:
@@ -120,6 +172,33 @@ def seed(worker: Worker, now: int) -> None:
         "INSERT INTO legacy_mail_text (event_id, created_at, text) VALUES"
         " ('legacy:big', 1, replace(hex(zeroblob(50000)), '00', '旧文' || char(0) || 'x')),"
         " ('legacy:a', 2, 'a'), ('legacy:b', 3, 'b'), ('legacy:c', 4, 'c')"
+    )
+
+
+def seed_tasks(worker: Worker) -> None:
+    """Synthetic Tasks rows that the triggers accept, with a child stored before its parent (lower rowid), a
+    deleted task, a fractional sort order and quotes, CJK and a newline in the text."""
+    tasks_d1(
+        worker,
+        "INSERT INTO projects (id, title, parent_id, inbox, created_at, updated_at) VALUES"
+        " ('inbox', 'Inbox', '', 1, 1, 1), ('work', 'Synthetic work', '', 0, 1, 2),"
+        " ('nested', 'Synthetic nested', 'work', 0, 1, 3);"
+        "INSERT INTO sections (id, title, project_id, created_at, updated_at) VALUES ('s1', '段落', 'work', 1, 1);"
+        "INSERT INTO labels (id, title, created_at, updated_at) VALUES ('l1', 'synthetic', 1, 1);"
+        "INSERT INTO filters (id, title, query, color, created_at, updated_at)"
+        " VALUES ('f1', 'Synthetic', 'today & #Inbox', '#db4035', 1, 1);"
+        "INSERT INTO tasks (id, title, description, project_id, section_id, label_ids, sort_order, created_at,"
+        " updated_at) VALUES ('t-child', 'Stored first', 'it''s “quoted”' || char(10) || '第二行', 'work', 's1',"
+        " '[\"l1\"]', 1.25, 1, 1), ('t-parent', 'Stored second', '', 'work', '', '[]', 2, 1, 1);"
+        "UPDATE tasks SET parent_id = 't-parent', kind = 'step' WHERE id = 't-child';"
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 250)"
+        " INSERT INTO tasks (id, title, sort_order, completed, completed_at, deleted_at, created_at, updated_at)"
+        " SELECT printf('t%03d', i), 'Synthetic task ' || i, i, i % 7 = 0, CASE WHEN i % 7 = 0 THEN i END,"
+        " CASE WHEN i = 250 THEN 9 END, i, i FROM n;"
+        "INSERT INTO completions (sequence, id, task_id, title, completed_at, imported)"
+        " VALUES (5, 'c5', 't007', 'Synthetic task 7', 7, 1), (9, 'c9', 't014', 'Synthetic task 14', 14, 0);"
+        "INSERT INTO requests (id, fingerprint, response, created_at, revision_guard)"
+        " VALUES ('00000000-0000-4000-8000-000000000009', 'f', '{\"title\":\"Stored first\"}', 1, 1)",
     )
 
 
@@ -189,6 +268,7 @@ def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tm
     today = datetime.now(UTC)
     # The object has not run yet (the harness waits on the gateway's /health only).
     seed(worker, now)
+    seed_tasks(worker)
     seed_old_backups(worker, tmp_path)
 
     # The first alarm finds the backup due (new object storage) and holds owner writes while it runs.
@@ -200,7 +280,7 @@ def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tm
     status = wait_for_backup(worker)
     prefix = status["last_backup_key"]
     assert re.fullmatch(rf"backups/{today:%Y-%m-%d}T\d{{6}}Z/", prefix), prefix  # the job's start second
-    rows = EVENTS + TRANSITIONS + 1 + 1 + 1 + 1 + 1 + 1 + LEGACY_TEXTS
+    rows = EVENTS + TRANSITIONS + 1 + 1 + 1 + 1 + 1 + 1 + LEGACY_TEXTS + TASKS_ROWS
     assert status | {"last_backup_time": None, "last_backup_size_bytes": 0} == {
         "state": "ok",
         "last_backup_time": None,
@@ -224,6 +304,10 @@ def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tm
     downloaded = download(worker, prefix, out)
     assert "PASS event_transitions rows=1100 parts=" in downloaded
     assert f"PASS legacy_mail_text rows={LEGACY_TEXTS} parts=" in downloaded
+    assert f"PASS tasks/tasks rows={TASK_ROWS} parts=3" in downloaded  # one 100-row page per invocation
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert manifest["tasks"]["schema_version"] == sorted(path.name for path in (TASKS / "migrations").glob("*.sql"))[-1]
+    assert manifest["tasks"]["change_sequence"]["start"] == manifest["tasks"]["change_sequence"]["end"] > 0
     parts = json.loads((out / "manifest.json").read_text())["tables"][1]["parts"]
     assert len(parts) >= 3  # one page (one statement) per invocation
     written = restore_tool("sql", "--in", str(out), "--out", str(out / "restore.sql"))
