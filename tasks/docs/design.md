@@ -11,8 +11,8 @@ outside the approved scope.
 | --- | --- | --- |
 | Tasks web | Navigation, draft forms, selection and rendered views | Generated `TasksUiService` client, same-origin owner requests |
 | Tasks Worker and D1 | Task/Subtask and Step content, effort, catalog, dates and completion history | Root `proto/tasks/ui/v1`, named `TasksApi`, read-only `Ops` |
-| Todofy | Mail, weekly choices, Bets, task dependencies and operation receipts | Named `Planning` binding, explicitly selected task source |
-| FlowDay | Daily queues, time blocks, timers and time records | Named native Focus binding; read-only task mirror |
+| Todofy | Mail, weekly choices, Bets, task dependencies and operation receipts | Named `Planning` binding, limited to the planning and Mail methods Tasks calls |
+| FlowDay | Daily queues, time blocks, timers and time records | Named native Focus binding (task list, day queues and timer only); read-only task mirror |
 | Shared planning UI | Plan, Focus and the optional Mail shortcut editor | Caller-supplied typed transport and navigation callbacks |
 
 Applications do not import each other's source or databases. `packages/planning-ui` compiles into both

@@ -517,7 +517,9 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
 ## Todoist Plus integration
 
 `FocusEntrypoint` is a same-account service binding used by Todofy after its extension authentication. It permits
-paged tasks/time entries, daily flow reads and order changes, read-only sync and timer commands.
+paged task reads, daily flow reads, queue order changes, day moves and timer commands (ListTasks, GetFlow,
+UpdateFlow, RolloverFlow, GetTimerSession, CommandTimer: what Tasks' Plan and Focus call through Todofy). Every
+other method is NOT_FOUND there; estimates are Tasks durations, and FlowDay's own page runs the sync.
 It does not expose settings, credentials, local-task creation/deletion or the public owner authentication bypass.
 The normal Worker fetch still checks Access, Origin and CSRF.
 

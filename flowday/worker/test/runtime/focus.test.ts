@@ -24,6 +24,17 @@ describe('private Focus entrypoint', () => {
     expect((await h.focusFetch('/api/v1/tasks/synthetic?update_mask=estimated_minutes', estimate)).status).toBe(404);
   });
 
+  it('answers only the reads and queue and timer commands that Plan and Focus use', async () => {
+    const json = { headers: { 'content-type': 'application/json' } };
+    for (const [path, init] of [
+      ['/api/v1/tasks:sync', { ...json, method: 'POST', body: JSON.stringify({ mode: 'manual' }) }],
+      ['/api/v1/tasks/synthetic', {}],
+      ['/api/v1/timeEntries', {}],
+    ] as const) expect((await h.focusFetch(path, init)).status, path).toBe(404);
+    for (const path of ['/api/v1/tasks', '/api/v1/flows/2026-10-13', '/api/v1/timerSession'])
+      expect((await h.focusFetch(path)).status, path).toBe(200);
+  });
+
   it('moves only the dragged step between days while preserving local queue entries', async () => {
     await setFlowTaskIds(h.db(), '2026-10-13', ['local-one', 'step']);
     await setFlowTaskIds(h.db(), '2026-10-14', ['local-two', 'other-step']);

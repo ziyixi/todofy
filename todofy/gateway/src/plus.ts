@@ -21,6 +21,15 @@ import { API_DOMAIN, isReason, uiError } from './ui.ts';
 /** The Access owner, or null for the extension, whose token's SHA-256 is `digest`. */
 interface PlusContext { env: Env; owner: string | null; digest: string | null; internal?: boolean }
 const OWNER_METHODS = new Set(['ConfirmPlanMapping', 'IssueExtensionConnection', 'ReadExtensionConnections', 'RevokeExtensionConnection', 'VerifyPlanStore']);
+/**
+ * What Tasks calls on its private Planning channel (packages/planning-ui/src/api.ts, tasks/web/src); that path
+ * refuses every other PlusService method. VerifyPlanStore is the restore runbook's check.
+ */
+const NATIVE_METHODS = new Set([
+  'ReadPlan', 'ListPlanningTasks', 'SetTaskPlan', 'SetTaskLead', 'AppendTaskSteps', 'CompleteTask', 'SetWeeklyBet',
+  'SetTaskDependency', 'ResolveDependencies', 'ReorderTasks', 'ListMailItems', 'ReadMailSummary', 'ConvertMailItem',
+  'DeleteMailSummaries', 'ReadMailSettings', 'UpdateMailCategories', 'VerifyPlanStore',
+]);
 /** Reads sent as POST for their body of task IDs: like the GET reads, they go on in maintenance (core READ_METHODS). */
 const POST_READS = new Set(['LookupMailItems']);
 const PREFIX = '/api/plus/v1/';
@@ -70,6 +79,7 @@ const api = new HttpTranscoder(PlusService, handlers(), {
   domain: DOMAIN,
   maxBodyBytes: 32 * 1024,
   authorize: async (request, route, ctx) => {
+    if (ctx.internal && !NATIVE_METHODS.has(route.method.name)) throw uiError('ACTION_NOT_ALLOWED');
     if (!route.safe) {
       if (ctx.owner !== null && !ctx.internal) await verifyCsrf(request, ctx.env, ctx.owner);
       if (flag(ctx.env, 'MAINTENANCE_MODE') && !POST_READS.has(route.method.name)) throw uiError('MAINTENANCE');
@@ -158,7 +168,8 @@ async function settleCompleted(env: Env, input: { request_id: string; task_id: s
 // The proxy decodes and re-encodes each FlowDay page within the Free 10 ms CPU limit; a 200-task page of long titles
 // and descriptions reached 10.2 ms cold in CI, so a page is capped at 100 tasks and clients follow next_page_token.
 const FOCUS_PAGE_MAX = 100;
-const FOCUS_METHODS = new Set(['getTask', 'listTasks', 'getFlow', 'getTimerSession', 'commandTimer', 'syncTasks', 'listTimeEntries', 'updateFlow', 'rolloverFlow']);
+/** What Plan and Focus call on FlowDay; FlowDay's focus entrypoint allows the same (flowday/worker/src/focus.ts). */
+const FOCUS_METHODS = new Set(['listTasks', 'getFlow', 'updateFlow', 'rolloverFlow', 'getTimerSession', 'commandTimer']);
 function focusHandlers(): ServiceHandlers<ShapeOf<typeof FlowDayUiService>, PlusContext> {
   const handlers: Record<string, unknown> = {};
   for (const method of FlowDayUiService.methods) {

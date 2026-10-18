@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CommandTimerRequest_Action } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
+import { createHttpClient, RpcStatusError } from '@ziyixi/proto/http-client';
+import { PlusService } from '@ziyixi/proto/todofy/ui/v1/plus_service_pb';
 import { fakes, hooks, owner, uiOk, uiRefusal } from './helpers.ts';
 import type { Env } from '../src/env.ts';
 import { nativePlanning } from '../src/plus.ts';
@@ -8,6 +10,33 @@ const TOKEN = `todofy_plus_${'a'.repeat(43)}`;
 const HEADERS = { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
 const ID = '80a84747-6794-442a-8fb0-82c2910b54ab';
 const COMPLETE = { task_id: 'task-one', request_id: ID, flow_date: '2026-10-13' };
+/** A minimal valid request for each method Tasks calls on its Planning channel. */
+const NATIVE_CALLS: Record<string, object> = {
+  readPlan: {},
+  listPlanningTasks: {},
+  setTaskPlan: { taskId: 'task-one', etag: 'shown' },
+  setTaskLead: { taskId: 'task-one', etag: 'shown' },
+  appendTaskSteps: { parentId: 'task-one', steps: [{ title: 'Synthetic step' }] },
+  completeTask: { taskId: 'task-one' },
+  setWeeklyBet: { weekStart: '2026-10-12', area: 'work' },
+  setTaskDependency: { taskId: 'task-one', prerequisiteId: 'task-two' },
+  resolveDependencies: { taskIds: ['task-one'] },
+  reorderTasks: { taskIds: ['task-one'], taskId: 'task-one' },
+  listMailItems: {},
+  readMailSummary: { id: 'event-one' },
+  convertMailItem: { eventId: 'event-one', etag: 'shown' },
+  deleteMailSummaries: { eventIds: ['event-one'] },
+  readMailSettings: {},
+  updateMailCategories: { etag: 'shown' },
+  verifyPlanStore: {},
+};
+
+/** The generated PlusService client over the private Planning channel. */
+function planningClient(env: Env) {
+  return createHttpClient(PlusService, call => nativePlanning(new Request(`https://planning.internal${call.url}`, {
+    method: call.httpMethod, headers: { 'content-type': 'application/json' }, ...(call.body === undefined ? {} : { body: call.body }),
+  }), env));
+}
 
 describe('Native Tasks planning transport', () => {
   it('redirects old owner setup to native planning settings without loading token setup', async () => {
@@ -50,6 +79,28 @@ describe('Native Tasks planning transport', () => {
     const response = await hooks(env, '/api/plus/v1/plan:read', { headers: HEADERS });
     expect(response.status).toBe(400);
     expect(await response.text()).toContain('https://tasks.example.test');
+    expect(core).toHaveLength(0);
+  });
+  it('reaches the core for exactly the methods Tasks calls and refuses every other PlusService method', async () => {
+    const { env, core } = fakes({ TASK_SOURCE: 'tasks' }, call => uiOk(call.args[0] === 'ReadPlan' ? { plan: {} } : {}));
+    const client = planningClient(env) as unknown as Record<string, (input: object) => Promise<unknown>>;
+    const native = PlusService.methods.filter(method => method.localName in NATIVE_CALLS);
+    expect(native).toHaveLength(Object.keys(NATIVE_CALLS).length);
+    for (const method of native) await client[method.localName]?.(NATIVE_CALLS[method.localName] ?? {});
+    expect(core.map(call => [call.method, call.args[0]])).toEqual(native.map(method => ['plus_native_ui', method.name]));
+    for (const method of PlusService.methods.filter(method => !(method.localName in NATIVE_CALLS))) {
+      const refused = await client[method.localName]?.({}).catch((error: unknown) => error);
+      expect(refused instanceof RpcStatusError ? refused.status.reason : refused, method.name).toBe('ACTION_NOT_ALLOWED');
+    }
+    expect(core).toHaveLength(native.length);
+  });
+  it('refuses a mail deletion on the Planning channel before reading its body', async () => {
+    const { env, core } = fakes({ TASK_SOURCE: 'tasks' }, () => uiOk({}));
+    const response = await nativePlanning(new Request('https://planning.internal/api/plus/v1/mailItems:deleteMailItems', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: 'not json',
+    }), env);
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('ACTION_NOT_ALLOWED');
     expect(core).toHaveLength(0);
   });
   it('uses the core entrypoint that verifies the native source itself', async () => {
@@ -112,6 +163,29 @@ describe('Native Tasks planning transport', () => {
     expect(response.status).toBe(400);
     expect(await response.text()).toContain('ACTION_NOT_ALLOWED');
     expect(calls).toBe(0);
+  });
+  it('forwards to FlowDay only the reads and queue and timer commands Plan and Focus use', async () => {
+    const forwarded: string[] = [];
+    const { env } = fakes();
+    const native: Env = { ...env, FLOWDAY_NATIVE_FOCUS: { fetch: (request: Request) => {
+      forwarded.push(`${request.method} ${new URL(request.url).pathname}`);
+      return Promise.resolve(Response.json({}));
+    } } as unknown as Fetcher };
+    const focus = (path: string, init: RequestInit = {}) => nativePlanning(new Request(`https://planning.internal/api/plus/flowday/api/v1/${path}`,
+      { headers: { 'content-type': 'application/json' }, ...init }), native);
+    for (const [path, init] of [
+      ['tasks:sync', { method: 'POST', body: JSON.stringify({ mode: 'manual' }) }],
+      ['tasks/step', {}],
+      ['timeEntries', {}],
+      ['tasks', { method: 'POST', body: JSON.stringify({ title: 'Synthetic' }) }],
+    ] as const) {
+      const response = await focus(path, init);
+      expect(response.status, path).toBe(400);
+      expect(await response.text(), path).toContain('ACTION_NOT_ALLOWED');
+    }
+    expect(forwarded).toEqual([]);
+    for (const path of ['tasks', 'flows/2026-10-13', 'timerSession']) expect((await focus(path)).status, path).toBe(200);
+    expect(forwarded).toEqual(['GET /api/v1/tasks', 'GET /api/v1/flows/2026-10-13', 'GET /api/v1/timerSession']);
   });
   it('does not fall back to the legacy FlowDay binding during a partial cutover', async () => {
     let calls = 0;

@@ -8,15 +8,11 @@ import type { Env } from './env.ts';
 import { API_DOMAIN, flowdayError, localize } from './errors.ts';
 import { MAX_BODY_BYTES } from './limits.ts';
 
+/** What Tasks' Plan and Focus call through Todofy; the gateway allows the same (todofy/gateway/src/plus.ts). */
+const FOCUS_METHODS = new Set(['ListTasks', 'GetFlow', 'UpdateFlow', 'RolloverFlow', 'GetTimerSession', 'CommandTimer']);
+
 const focusApi = new HttpTranscoder<ShapeOf<typeof FlowDayUiService>, ApiContext>(FlowDayUiService, {
   ...handlers,
-  getTask: handlers.getTask,
-  listTasks: handlers.listTasks,
-  getFlow: handlers.getFlow,
-  getTimerSession: handlers.getTimerSession,
-  commandTimer: handlers.commandTimer,
-  syncTasks: handlers.syncTasks,
-  listTimeEntries: handlers.listTimeEntries,
   async updateFlow(request, context) {
     if (request.updateMask?.paths.join(',') !== 'task_ids') throw flowdayError('BAD_REQUEST');
     return handlers.updateFlow(request, context);
@@ -26,7 +22,7 @@ const focusApi = new HttpTranscoder<ShapeOf<typeof FlowDayUiService>, ApiContext
   maxBodyBytes: MAX_BODY_BYTES,
   localize,
   authorize(_request, route) {
-    if (!new Set(['GetTask', 'ListTasks', 'GetFlow', 'GetTimerSession', 'CommandTimer', 'SyncTasks', 'ListTimeEntries', 'UpdateFlow', 'RolloverFlow']).has(route.method.name)) throw flowdayError('NOT_FOUND');
+    if (!FOCUS_METHODS.has(route.method.name)) throw flowdayError('NOT_FOUND');
   },
   onUnexpected: (error) => flowdayError(isStorageError(error) ? 'UNAVAILABLE' : 'INTERNAL'),
 });

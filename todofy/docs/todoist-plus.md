@@ -606,8 +606,14 @@ Cloudflare production timings or a guarantee for arbitrarily large remote descri
 
 `TASK_SOURCE=tasks` selects the private `TASKS` binding; the default remains Todoist until the account import
 and coordinated cutover. `plus_native_ui` independently checks the core's source and binding before accepting
-the Tasks application's owner requests. A gateway deployed ahead of its core cannot send those requests to
-Todoist. In the opposite partial deployment, a native core refuses legacy extension calls before dispatch.
+the Tasks application's owner requests. That private channel (`nativePlanning` in `gateway/src/plus.ts`)
+serves only the methods Tasks calls: ReadPlan, ListPlanningTasks, SetTaskPlan, SetTaskLead, AppendTaskSteps,
+CompleteTask, SetWeeklyBet, SetTaskDependency, ResolveDependencies, ReorderTasks, the native Mail methods
+(ListMailItems, ReadMailSummary, ConvertMailItem, DeleteMailSummaries, ReadMailSettings, UpdateMailCategories)
+and VerifyPlanStore. Any other PlusService method answers `ACTION_NOT_ALLOWED` before its body is read. Its
+FlowDay half forwards only ListTasks, GetFlow, UpdateFlow, RolloverFlow, GetTimerSession and CommandTimer
+(SETTLE only from Todofy itself), and FlowDay's focus entrypoint allows the same. A gateway deployed ahead of
+its core cannot send those requests to Todoist. In the opposite partial deployment, a native core refuses legacy extension calls before dispatch.
 Disable the old Plus extension after cutover; the native application is its replacement. Native source failures
 never fall back to the old account.
 
