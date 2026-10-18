@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from tests.unit.plus_support import D1, Storage, stubbed_pyodide
+from tests.unit.plus_support import D1, Storage, confirm_plan, stubbed_pyodide
 
 LABELS = ("office", "home", "committed", "focus", "candiate", "quarter")
 LABELS += ("lead_1d", "lead_3d", "lead_1w", "lead_2w", "lead_1m")
@@ -70,7 +70,7 @@ class Stack:
         )
 
     def call(self, method: str, **request: Any) -> dict[str, Any]:
-        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request), owner=True))
+        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request)))
         return {"error": result["error"]} if "error" in result else json.loads(result["ok"])
 
     def reorder(self, *task_ids: str, lane: str = "weekly") -> dict[str, Any]:
@@ -89,8 +89,7 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stack]:
         runtime.clock = stubs["clock"]
         stubs["clock"]["ms"] = 1_760_000_000_000
         stack = Stack(runtime, monkeypatch)
-        etag = stack.call("ReadPlan")["plan"]["etag"]
-        assert "plan" in stack.call("ConfirmPlanMapping", etag=etag, request_id=str(uuid.uuid4()))
+        asyncio.run(confirm_plan(stack.core))
         stack.todoist.calls.clear()
         yield stack
 

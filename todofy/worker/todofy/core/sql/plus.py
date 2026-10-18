@@ -7,14 +7,6 @@ SAVE_SETTINGS = (
     "week_start=excluded.week_start,enabled=1"
 )
 ADVANCE_WEEK = "UPDATE plus_settings SET week_start=? WHERE id=1"
-CONNECTION = "SELECT id FROM plus_connections WHERE token_sha256=? AND revoked=0"
-# Every non-revoked digest: IssueExtensionConnection keeps the table at 30 rows, revoked ones included.
-ACTIVE_DIGESTS = "SELECT token_sha256 FROM plus_connections WHERE revoked=0 LIMIT 30"
-CONNECTIONS = "SELECT id,display_name,revoked FROM plus_connections ORDER BY created_at DESC LIMIT 30"
-CREATE_CONNECTION = (
-    "INSERT INTO plus_connections(id,display_name,token_sha256,created_at) VALUES(?,?,?,?) ON CONFLICT DO NOTHING"
-)
-REVOKE_CONNECTION = "UPDATE plus_connections SET revoked=1 WHERE id=?"
 # The receipts the releases before runtime/plus_receipts.py wrote, read-only and by primary key, for request IDs
 # of its window (created_at >= ?). Nothing writes plus_actions any more.
 LEGACY_ACTION = "SELECT request_hash,commands,response FROM plus_actions WHERE request_id=? AND created_at>=?"

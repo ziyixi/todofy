@@ -521,11 +521,8 @@ def test_a_new_setup_needs_no_bets_label_and_a_saved_bets_binding_is_kept_as_sav
         assert after["etag"] == before["etag"] and not after["missing_labels"]
 
 
-def test_column_bindings_keep_the_retired_bets_binding_and_its_filter_stays_hidden():
+def test_the_retired_bets_binding_is_kept_and_its_filter_stays_hidden():
     current = mapping()
-    available = [{"id": label["id"], "label": label["label"]} for label in current]
-    selected = [label for label in current if label["role"] in plus.PLANNING_ROLES]
-    assert plus.replace_planning_labels(current, selected, available) == current
     assert {"role": "bets", "id": "id-bets", "label": "custom-bets"} in current
     # @bets was checked against the bets binding's name; with the role retired it is always replaced.
     bets = [{"id": "bets-filter", "query": "@bets"}]
@@ -599,26 +596,6 @@ def test_configured_week_reset_keeps_quarter_and_uses_the_bound_commitment_names
         {"committed": 1, "bet": 1},
         bindings,
     ) == ["custom-focus", "deep"]
-
-
-def test_column_binding_updates_keep_other_roles_and_reject_reused_or_unknown_id():
-    current = mapping()
-    available = [{"id": label["id"], "label": label["label"]} for label in current]
-    selected = [label for label in current if label["role"] in plus.PLANNING_ROLES]
-    updated = plus.replace_planning_labels(current, selected, available)
-    assert updated == current
-    assert (
-        plus.replace_planning_labels(current, [label for label in selected if label["role"] != "quarter"], available)
-        == current[:-1]
-    )
-    for replacement in (
-        {"id": "id-office", "label": "custom-office"},
-        {"id": "unknown", "label": "custom-quarter"},
-        {"id": "id-quarter", "label": "wrong-name"},
-    ):
-        invalid = [{**label, **replacement} if label["role"] == "quarter" else label for label in selected]
-        with pytest.raises(ValueError, match="BAD_REQUEST"):
-            plus.replace_planning_labels(current, invalid, available)
 
 
 def test_bets_do_not_enter_the_date_candidate_fallback_without_an_explicit_stage():

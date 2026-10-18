@@ -1,13 +1,12 @@
 """Todoist Plus's caches in the object's SQLite (runtime/plus_cache.py) on host CPython with a controlled clock:
-the incremental metadata Sync (plus_todoist.metadata), the full-Sync guard, the connection check folded into
-plus_ui (plus_api.connected and handle) and the rollback switch PLUS_METADATA=full.
+the incremental metadata Sync (plus_todoist.metadata), the full-Sync guard and the rollback switch
+PLUS_METADATA=full.
 
 Todoist is a synthetic Sync server that answers each token with what changed since it; D1 and the object's
-SQLite are host SQLite (plus_support.py). The real path in workerd is tests/runtime/test_plus_cache.py.
+SQLite are host SQLite (plus_support.py).
 """
 
 import asyncio
-import hashlib
 import json
 import types
 from collections.abc import Iterator
@@ -15,13 +14,10 @@ from typing import Any
 
 import pytest
 
-from tests.unit.plus_support import D1, ObjectSql, Statement, stubbed_pyodide
+from tests.unit.plus_support import D1, ObjectSql, stubbed_pyodide
 from todofy.core import plus
 
-TOKEN_DIGEST = hashlib.sha256(b"todofy_plus_synthetic").hexdigest()
-OTHER_DIGEST = hashlib.sha256(b"todofy_plus_other").hexdigest()
 PRIVATE_QUERY = "#Private project & p1"
-ACTIVE_DIGESTS = "SELECT token_sha256 FROM plus_connections WHERE revoked=0 LIMIT 30"
 
 
 class SyncServer:
@@ -63,36 +59,12 @@ class SyncServer:
         return answer
 
 
-class HeldStatement(Statement):
-    """Reads D1 at once, but an answer of the non-revoked digests reaches the object only once ``HeldD1.release``
-    is set: a token check whose D1 read is in flight."""
-
-    def bind(self, *args: Any) -> "HeldStatement":
-        return HeldStatement(self.db, self.sql, args)
-
-    async def all(self) -> Any:
-        rows = self.rows()
-        if self.sql == ACTIVE_DIGESTS and self.db.release is not None:
-            release, self.db.release = self.db.release, None
-            await release.wait()
-        return types.SimpleNamespace(results=rows)
-
-
-class HeldD1(D1):
-    def __init__(self) -> None:
-        super().__init__()
-        self.release: asyncio.Event | None = None
-
-    def prepare(self, sql: str) -> Statement:
-        return HeldStatement(self, sql)
-
-
 class Stack:
     def __init__(self, runtime: Any, monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -> None:
         self.runtime, self.clock = runtime, runtime.clock
         self.server = SyncServer(runtime.todoist.PlusError)
         monkeypatch.setattr(runtime.todoist, "call", self.server.call)
-        self.d1 = HeldD1()
+        self.d1 = D1()
         self.sql = ObjectSql()
         for statement in runtime.plus_cache.DO_SCHEMA:
             self.sql.exec(statement)
@@ -100,7 +72,6 @@ class Stack:
             env=types.SimpleNamespace(DB=self.d1, **env),
             sql=self.sql,
             plus_lock=asyncio.Lock(),
-            plus_connection_changes=0,
         )
         self.at(1_760_000_000)
 
@@ -117,18 +88,8 @@ class Stack:
         found = self.runtime.plus_cache.get(self.sql, key)
         return None if found is None else found.value
 
-    def connect(self, digest: str, revoked: bool = False) -> None:
-        self.d1.db.execute(
-            "INSERT INTO plus_connections (id, display_name, token_sha256, revoked, created_at) VALUES (?, ?, ?, ?, 1)",
-            (digest[:8], "Synthetic", digest, int(revoked)),
-        )
-        self.d1.db.commit()
-
-    def connected(self, digest: str) -> bool:
-        return asyncio.run(self.runtime.plus_api.connected(self.core, digest))
-
-    def handle(self, method: str, request: dict[str, Any], **who: Any) -> dict[str, Any]:
-        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request), **who))
+    def handle(self, method: str, request: dict[str, Any]) -> dict[str, Any]:
+        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request)))
         return {"error": result["error"]} if "error" in result else json.loads(result["ok"])
 
 
@@ -277,119 +238,11 @@ def test_merge_keeps_an_unchanged_resource_and_refuses_a_partial_full_answer():
             plus.merge_metadata(None, broken)
 
 
-# ---- the connection check ---------------------------------------------------------------------------
-
-
-def test_the_connection_copy_is_read_from_d1_at_most_every_ten_minutes(stack):
-    stack.connect(TOKEN_DIGEST)
-    assert stack.connected(TOKEN_DIGEST) and not stack.connected(OTHER_DIGEST)
-    stack.connect(OTHER_DIGEST)  # issued elsewhere than this object (a restore, say): seen within 10 minutes
-    stack.later(600)
-    reads = len(stack.d1.statements)
-    assert not stack.connected(OTHER_DIGEST) and len(stack.d1.statements) == reads
-    stack.later(1)
-    assert stack.connected(OTHER_DIGEST) and len(stack.d1.statements) == reads + 1
-
-
-def test_issue_and_revoke_take_effect_at_the_next_call(stack):
-    stack.connect(TOKEN_DIGEST)
-    assert stack.connected(TOKEN_DIGEST)
-    [connection] = stack.handle("ReadExtensionConnections", {}, owner=True)["connections"]
-    revoked = stack.handle(
-        "RevokeExtensionConnection",
-        {"connection_id": connection["id"], "request_id": "8f3b1c2e-5d4a-4b6c-9e7f-0a1b2c3d4e5f"},
-        owner=True,
-    )
-    assert revoked == {}
-    assert not stack.connected(TOKEN_DIGEST)
-    issued = stack.handle(
-        "IssueExtensionConnection",
-        {"display_name": "Synthetic Chrome", "request_id": "6c2f4e1a-3b5d-4a7c-8e9f-1a2b3c4d5e6f"},
-        owner=True,
-    )
-    assert stack.connected(hashlib.sha256(issued["token"].encode()).hexdigest())
-
-
-REVOKE = {"connection_id": TOKEN_DIGEST[:8], "request_id": "8f3b1c2e-5d4a-4b6c-9e7f-0a1b2c3d4e5f"}
-ISSUE = {"display_name": "Synthetic Chrome", "request_id": "6c2f4e1a-3b5d-4a7c-8e9f-1a2b3c4d5e6f"}
-
-
-def test_native_source_refuses_new_extension_keys_without_changing_existing_connections(stack):
-    stack.connect(TOKEN_DIGEST)
-    before = stack.handle("ReadExtensionConnections", {}, owner=True)
-    stack.core.env.TASK_SOURCE = "tasks"
-    assert stack.handle("IssueExtensionConnection", ISSUE, owner=True) == {"error": "ACTION_NOT_ALLOWED"}
-    assert stack.handle("ReadExtensionConnections", {}, owner=True) == before
-
-
-async def during_a_token_check(stack: Stack, digest: str, method: str, request: dict[str, Any]) -> dict[str, Any]:
-    """Run ``method`` while a token check's D1 read of the digests is in flight (it has read, not yet answered)."""
-    stack.d1.release = release = asyncio.Event()
-    check = asyncio.create_task(stack.runtime.plus_api.connected(stack.core, digest))
-    await asyncio.sleep(0)
-    result = await stack.runtime.plus_api.handle(stack.core, method, json.dumps(request), owner=True)
-    release.set()
-    await check  # this one call answers what it read, as it would have before the cache
-    return json.loads(result["ok"])
-
-
-def test_a_revocation_during_a_token_check_is_not_undone_by_its_read(stack):
-    stack.connect(TOKEN_DIGEST)
-    assert asyncio.run(during_a_token_check(stack, TOKEN_DIGEST, "RevokeExtensionConnection", REVOKE)) == {}
-    assert stack.cached("connections") is None
-    stack.later(5 * 60)
-    assert not stack.connected(TOKEN_DIGEST)
-
-
-def test_a_token_issued_during_a_token_check_is_accepted_at_once(stack):
-    issued = asyncio.run(during_a_token_check(stack, OTHER_DIGEST, "IssueExtensionConnection", ISSUE))
-    stack.later(60)
-    assert stack.connected(hashlib.sha256(issued["token"].encode()).hexdigest())
-
-
-def test_a_revocation_whose_answer_is_lost_leaves_no_copy(stack):
-    stack.connect(TOKEN_DIGEST)
-    assert stack.connected(TOKEN_DIGEST)
-    stack.d1.failing = stack.runtime.stubs["JsException"]
-    assert stack.handle("RevokeExtensionConnection", REVOKE, owner=True) == {"error": "UNAVAILABLE"}
-    assert stack.cached("connections") is None  # the next check reads D1, whatever the write did
-
-
-def test_a_stale_copy_is_never_trusted_when_d1_fails(stack):
-    stack.connect(TOKEN_DIGEST)
-    assert stack.connected(TOKEN_DIGEST)
-    stack.later(601)
-    stack.d1.failing = stack.runtime.stubs["JsException"]
-    with pytest.raises(stack.runtime.stubs["JsException"]):
-        stack.connected(TOKEN_DIGEST)
-    assert stack.handle("ReadPlan", {"view": "basic"}, owner=False, digest=TOKEN_DIGEST) == {"error": "UNAVAILABLE"}
-
-
-def test_an_extension_call_needs_a_known_digest_and_the_previous_gateway_waits(stack):
-    stack.connect(TOKEN_DIGEST)
-    stack.connect(OTHER_DIGEST, revoked=True)
-    assert stack.handle("ReadPlan", {}, owner=False) == {"error": "UNAVAILABLE"}  # the 3-argument call
-    assert stack.handle("ReadPlan", {}, owner=False, digest=OTHER_DIGEST) == {"error": "UNAUTHORIZED"}
-    assert stack.handle("ReadPlan", {}, owner=False, digest="0" * 63) == {"error": "UNAUTHORIZED"}
-    assert stack.server.requests == []  # nothing ran before the check
-    plan = stack.handle("ReadPlan", {"view": "basic"}, owner=False, digest=TOKEN_DIGEST)["plan"]
-    assert plan["timezone"] == "America/Los_Angeles" and "inbox_project_id" not in plan
-    assert stack.handle("VerifyPlanStore", {}, owner=False, digest=TOKEN_DIGEST) == {"error": "UNAUTHORIZED"}
-
-
 def test_the_basic_view_skips_the_weekly_review_read(stack):
     reads = len(stack.d1.statements)
-    stack.handle("ReadPlan", {"view": "basic"}, owner=True)
+    stack.handle("ReadPlan", {"view": "basic"})
     basic = len(stack.d1.statements) - reads
-    stack.handle("ReadPlan", {}, owner=True)
+    stack.handle("ReadPlan", {})
     # The review batch: two weeks' review tasks, next week's choices, the dependencies, the Bets of three weeks and
     # the Review lanes' order.
     assert len(stack.d1.statements) - reads - basic == basic + 6
-
-
-def test_the_rollback_switch_checks_every_extension_call_in_d1(rollback):
-    rollback.connect(TOKEN_DIGEST)
-    for _ in range(2):
-        assert rollback.connected(TOKEN_DIGEST)
-    assert rollback.d1.statements.count("SELECT id FROM plus_connections WHERE token_sha256=? AND revoked=0") == 2
-    assert rollback.cached("connections") is None

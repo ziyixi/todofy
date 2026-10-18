@@ -13,8 +13,7 @@ ETAG_MISMATCH instead of attaching a label by a stale name.
 
 A lookup reads only the receipts of the last MAX_AGE, and an older request ID starts over. Nothing deletes a
 receipt (the owner's rule: no automatic time-based deletion), so one that never finished keeps its commands,
-step titles included, in the object's SQLite. ``writing`` names the tasks such an unfinished write of the last
-MAX_AGE changes, which DeleteMailItems keeps (runtime/plus_mail.py).
+step titles included, in the object's SQLite.
 
 D1 plus_actions holds the receipts of the releases before this one. They are read, never written: a request
 ID of the last MAX_AGE that the object has no receipt for finds its D1 receipt.
@@ -38,8 +37,8 @@ DO_SCHEMA = (
     " plan_etag TEXT, result TEXT CHECK (result IS NULL OR length(result) <= 4096), created_at INTEGER NOT NULL,"
     " finished_at INTEGER, CHECK ((state = 'done') = (finished_at IS NOT NULL)),"
     " CHECK (state = 'started' OR commands IS NULL))",
-    # The unfinished writes, for WRITING: few, since a write finishes or is retried within a visit.
-    "CREATE INDEX IF NOT EXISTS plus_receipts_started ON plus_receipts (created_at) WHERE state = 'started'",
+    # Only the retired DeleteMailItems check read the unfinished writes by this index.
+    "DROP INDEX IF EXISTS plus_receipts_started",
 )
 FIND = (
     "SELECT request_hash, state, commands, plan_etag, result FROM plus_receipts"
@@ -56,19 +55,6 @@ START = (
 FINISH = (
     "UPDATE plus_receipts SET state = 'done', commands = NULL, result = ?, finished_at = ?"
     " WHERE request_id = ? AND state = 'started'"
-)
-# Of the tasks bound (a JSON array), those a started receipt of the last MAX_AGE changes: an item_update,
-# item_move or item_close names its task, an item_add (a step) its parent. A started deletion changes nothing a
-# later deletion must keep, so it is not counted.
-_WRITING_TASK = (
-    "coalesce(nullif(c.value ->> '$.body.task.parent_id',''),substr(c.value ->> '$.body.task.name',7),"
-    "substr(c.value ->> '$.body.name',7),c.value ->> '$.args.parent_id',c.value ->> '$.args.id')"
-)
-WRITING = (
-    f"SELECT DISTINCT {_WRITING_TASK} AS task_id"
-    " FROM plus_receipts AS r, json_each(r.commands) AS c"
-    " WHERE r.state = 'started' AND r.created_at >= ? AND r.method <> 'DeleteMailItems'"
-    f" AND {_WRITING_TASK} IN (SELECT value FROM json_each(?))"
 )
 # A CompleteTask receipt from D1, done there, with the settlement the release before froze (if any).
 IMPORT = (
@@ -137,13 +123,6 @@ async def start(
     now = now_s()
     core.sql.exec(START, request_id, method, request_hash, _json(commands), plan_etag, now, now - MAX_AGE)
     await core.ctx.storage.sync()
-
-
-def writing(store: Any, task_ids: list[str]) -> set[str]:
-    """Which of ``task_ids`` an unfinished Plus write (a started receipt of the last MAX_AGE) changes: its labels,
-    step, move or completion may not be in Todoist yet."""
-    rows = store.exec(WRITING, now_s() - MAX_AGE, json.dumps(task_ids)).toArray()
-    return {str(row.task_id) for row in rows}
 
 
 def finish(store: Any, request_id: str, result: dict[str, Any]) -> None:

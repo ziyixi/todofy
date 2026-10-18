@@ -3,6 +3,7 @@ storage, and the Pyodide modules runtime/ imports (test_plus_rollover.py, test_p
 test_plus_receipts.py, test_backup_job.py). Synthetic data only.
 """
 
+import json
 import sqlite3
 import sys
 import types
@@ -117,3 +118,23 @@ def stubbed_pyodide(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]
         for name in set(sys.modules) - before:
             if name.startswith("todofy.runtime"):
                 del sys.modules[name]
+
+
+async def confirm_plan(core: Any) -> None:
+    """The setup the owner confirmed in Todoist mode, as the retired ConfirmPlanMapping saved it: the week's
+    membership of every listed task, then the discovered mapping, enabled. Call inside stubbed_pyodide."""
+    from todofy.core.sql import plus as sql
+    from todofy.runtime import plus_api, plus_store
+    from todofy.runtime import plus_todoist as todoist
+
+    current = await plus_api.plan(core, fresh=True)
+    tasks: list[dict[str, Any]] = []
+    cursor = ""
+    while True:
+        page, cursor = await todoist.tasks(core, cursor=cursor)
+        tasks.extend(page)
+        if not cursor:
+            break
+    await plus_store.remember(core.env.DB, tasks, current["week_start"], current["labels"])
+    mapping = json.dumps({"etag": current["etag"], "labels": current["labels"]})
+    await plus_store.run(core.env.DB, sql.SAVE_SETTINGS, mapping, current["timezone"], current["week_start"])

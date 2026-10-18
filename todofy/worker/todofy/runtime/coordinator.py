@@ -189,9 +189,6 @@ class TodofyCore(DurableObject):
             self.sql.exec(statement)
         self.running = False
         self.plus_lock = asyncio.Lock()
-        # Issue and Revoke of an extension connection, counted so a token check whose D1 read one of them
-        # overlapped keeps no copy of what it read (plus_api.connected).
-        self.plus_connection_changes = 0
         # A wake-up that arrived while the alarm loop was busy; honoured when it finishes.
         self.woken = False
         # Whether a due task intent goes before due mail at the next step (they take turns).
@@ -217,7 +214,7 @@ class TodofyCore(DurableObject):
         deployed source switch."""
         if not native_tasks.enabled(self.env) or getattr(self.env, "TASKS", None) is None:
             return {"error": "UNAVAILABLE"}
-        return await plus_api.handle(self, method, request, owner=True)
+        return await plus_api.handle(self, method, request)
 
     async def plus_focus_claim(self, action_id: str, value: str | None, replace_etag: str | None) -> str | None:
         """Freeze one FlowDay settlement request in its Todoist completion's receipt (plus_receipts.settle)."""

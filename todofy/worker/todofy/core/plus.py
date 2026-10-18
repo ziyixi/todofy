@@ -249,33 +249,6 @@ def role_labels(mapping: list[dict[str, Any]] | None = None) -> dict[str, str]:
     )
 
 
-def replace_planning_labels(
-    current: list[dict[str, Any]], bindings: list[dict[str, Any]], available: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """Only column bindings change; other role identities cannot be reused."""
-    roles = {binding["role"] for binding in bindings}
-    if (
-        len(bindings) not in (3, 4)
-        or len(roles) != len(bindings)
-        or roles - set(PLANNING_ROLES)
-        or not {"candiate", "focus", "committed"}.issubset(roles)
-    ):
-        raise ValueError("BAD_REQUEST")
-    retained = {binding["role"]: binding for binding in current if binding["role"] not in PLANNING_ROLES}
-    for binding in bindings:
-        check_id(binding["id"])
-        matches = [label for label in available if label["id"] == binding["id"]]
-        if len(matches) != 1 or matches[0]["label"] != binding["label"]:
-            raise ValueError("BAD_REQUEST")
-        retained[binding["role"]] = {"role": binding["role"], "id": binding["id"], "label": binding["label"]}
-    values = list(retained.values())
-    if len({binding["id"] for binding in values}) != len(values) or len(
-        {binding["label"] for binding in values}
-    ) != len(values):
-        raise ValueError("BAD_REQUEST")
-    return [retained[role] for role in (*ROLES, *LEGACY_ROLES, "quarter") if role in retained]
-
-
 def task_etag(task: dict[str, Any], mapping: list[dict[str, Any]] | None = None) -> str:
     values = {key: task.get(key) for key in ("id", "labels", "deadline", "parent_id", "content", "duration")}
     if task.get("_native_planning"):
@@ -531,11 +504,6 @@ def reset_labels(
 # ---- Mailbox (core/mailbox.py has the domain rules) -------------------------------------------------------------
 
 
-def api_priority(priority: int) -> int:
-    """Todoist's API priority of a domain priority: P1 (1) is 4, P4 is 1."""
-    return 5 - priority
-
-
 def in_mailbox(view: dict[str, Any], inbox_project_id: str) -> bool:
     """Whether a task_view is still to clarify in the mail project, as the extension's inboxToClarify says: a
     top-level task with no planning stage and none of CLARIFIED_LABELS. Whether it is mail is the ledger's to say."""
@@ -553,30 +521,3 @@ def mail_label(label: dict[str, str], mapping: list[dict[str, Any]] | None) -> b
     Bets', a lead window's and the in-progress label. The two area labels may."""
     reserved = {row["id"] for row in mapping or [] if row["role"] in NOT_MAIL_ROLES}
     return label["id"] not in reserved and label["label"] != ACTIVE
-
-
-def filed_labels(task: dict[str, Any], label: str, mapping: list[dict[str, Any]] | None) -> list[str]:
-    """The labels a mail task keeps when it is filed by a category of ``label``: every one it has and the category's;
-    an area label replaces the other area label, so the two stay exclusive."""
-    names = role_labels(mapping)
-    labels = set(task.get("labels") or []) | {label}
-    areas = {names[role] for role in ("office", "home") if role in names}
-    if label in areas:
-        labels -= areas - {label}
-    return sorted(labels)
-
-
-def untouched(task: dict[str, Any], parents: set[str]) -> bool:
-    """Whether the owner left a mail task as Todofy created it, by Todoist's own fields: no label, priority P4, no
-    date, deadline or estimate, no sub-task (``parents`` holds the parent IDs of the project's tasks) and no
-    comment. A task whose comment count Todoist does not give is not untouched."""
-    return (
-        not task.get("labels")
-        and not task.get("_native_content_labels")
-        and int(task.get("priority") or 1) == 1
-        and not task.get("due")
-        and not task.get("deadline")
-        and not task.get("duration")
-        and str(task["id"]) not in parents
-        and task.get("note_count") == 0
-    )

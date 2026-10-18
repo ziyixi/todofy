@@ -1,10 +1,10 @@
 """Plus replay receipts in the object's SQLite (runtime/plus_receipts.py) on host CPython with a controlled clock:
 the started/done lifecycle around the Todoist Sync, IDs-only results, a label write's binding check on resend, the
-read-only fallback to D1 plus_actions, the FlowDay settlement's compare-and-set, the 30-day lookup window (nothing
-deletes a receipt) and UpdatePlanLabels' replay by value.
+read-only fallback to D1 plus_actions, the FlowDay settlement's compare-and-set and the 30-day lookup window
+(nothing deletes a receipt).
 
 D1 and the object's SQLite are host SQLite (plus_support.py); Todoist is a fake that runs each command UUID
-once and journals its calls next to storage.sync(). The real path in workerd is tests/runtime/test_plus_receipts.py.
+once and journals its calls next to storage.sync().
 """
 
 import asyncio
@@ -18,7 +18,7 @@ import pytest
 from ziyixi_proto.todofy.ui.v1 import plus_service_pb as pb
 from ziyixi_proto.wire_json import from_wire, to_wire
 
-from tests.unit.plus_support import D1, Storage, stubbed_pyodide
+from tests.unit.plus_support import D1, Storage, confirm_plan, stubbed_pyodide
 
 NOW = 1_760_000_000
 DAY = 86_400
@@ -118,7 +118,7 @@ class Stack:
         self.clock["ms"] = seconds * 1000
 
     def call(self, method: str, **request: Any) -> dict[str, Any]:
-        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request), owner=True))
+        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request)))
         return {"error": result["error"]} if "error" in result else json.loads(result["ok"])
 
     def etag(self, task_id: str) -> str:
@@ -165,8 +165,7 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stack]:
         stack.todoist.add("other", ["home"])
         stack.todoist.add("step-a", [], parent_id="parent", child_order=1)
         stack.todoist.add("step-b", [], parent_id="parent", child_order=2)
-        plan = stack.call("ReadPlan")["plan"]
-        assert "plan" in stack.call("ConfirmPlanMapping", etag=plan["etag"], request_id=str(uuid.uuid4()))
+        asyncio.run(confirm_plan(stack.core))
         stack.journal.clear()
         yield stack
 
@@ -240,15 +239,6 @@ def test_a_started_receipt_resends_its_frozen_commands(stack):
     assert len(answer["task_ids"]) == 2 and stack.receipts()[request["request_id"]]["commands"] is None
 
 
-def rebind_candiate(stack: Stack, label_id: str, name: str) -> None:
-    """UpdatePlanLabels: the role 'candiate' moves to a new Todoist label."""
-    stack.todoist.labels.append({"id": label_id, "name": name})
-    plan = stack.call("ReadPlan")["plan"]
-    columns = [row for row in plan["labels"] if row["role"] in {"candiate", "focus", "committed"}]
-    moved = [{**row, "id": label_id, "label": name} if row["role"] == "candiate" else row for row in columns]
-    assert "plan" in stack.call("UpdatePlanLabels", labels=moved, etag=plan["etag"], request_id=str(uuid.uuid4()))
-
-
 def test_a_started_label_write_resends_its_labels_under_the_same_binding(stack):
     request = {"task_id": "other", "etag": stack.etag("other"), "stage": "monthly", "request_id": str(uuid.uuid4())}
     stack.todoist.fail_sync = 1
@@ -256,24 +246,6 @@ def test_a_started_label_write_resends_its_labels_under_the_same_binding(stack):
     assert stack.receipts()[request["request_id"]]["plan_etag"] == stack.call("ReadPlan")["plan"]["etag"]
     assert stack.call("SetTaskPlan", **request)["task"]["stage"] == "monthly"
     assert stack.todoist.sent[0] == stack.todoist.sent[1]
-
-
-def test_a_started_label_write_is_not_resent_once_its_binding_changed(stack):
-    """Its frozen labels name the roles' labels when it started: after a rebinding, resending them would attach
-    a label that no longer has its role, so the retry answers ETAG_MISMATCH and the extension reads the task."""
-    request = {"task_id": "other", "etag": stack.etag("other"), "stage": "monthly", "request_id": str(uuid.uuid4())}
-    stack.todoist.fail_sync = 1
-    assert stack.call("SetTaskPlan", **request) == {"error": "UNAVAILABLE"}
-    rebind_candiate(stack, "id-month", "Next month")
-    assert stack.call("SetTaskPlan", **request) == {"error": "ETAG_MISMATCH"}
-    assert len(stack.todoist.sent) == 1 and stack.todoist.tasks["other"]["labels"] == ["home"]
-    # A completion's commands name no label: it is resent whatever the binding.
-    complete = {"task_id": "other", "request_id": str(uuid.uuid4())}
-    stack.todoist.fail_sync = 1
-    assert stack.call("CompleteTask", **complete) == {"error": "UNAVAILABLE"}
-    assert stack.receipts()[complete["request_id"]]["plan_etag"] is None
-    rebind_candiate(stack, "id-later", "Later")
-    assert stack.call("CompleteTask", **complete) == {"task_id": "other"}
 
 
 def test_another_request_under_the_same_id_is_refused(stack):
@@ -394,37 +366,7 @@ def test_a_receipt_older_than_thirty_days_is_not_read_and_nothing_deletes_one(st
     assert statements and not any("DELETE" in statement for statement in statements)
 
 
-def test_writing_names_the_tasks_of_unfinished_writes_of_the_window(stack):
-    """DeleteMailItems keeps these (runtime/plus_mail.py): an item_update, item_move or item_close names its task,
-    an item_add its parent; a done write, a started deletion and one older than the window do not count."""
-    sql, receipts = stack.sql, stack.runtime.plus_receipts
-
-    def started(method: str, *commands: dict[str, Any], at: int = NOW) -> str:
-        request_id = str(uuid.uuid4())
-        sql.exec(
-            "INSERT INTO plus_receipts (request_id, method, request_hash, state, commands, created_at)"
-            " VALUES (?, ?, 'h', 'started', ?, ?)",
-            request_id,
-            method,
-            json.dumps(list(commands)),
-            at,
-        )
-        return request_id
-
-    started("SetTaskPlan", {"type": "item_update", "args": {"id": "a", "labels": []}})
-    started("FileMailItem", {"type": "item_update", "args": {"id": "b"}}, {"type": "item_move", "args": {"id": "b"}})
-    started("AppendTaskSteps", {"type": "item_add", "args": {"content": "s", "parent_id": "c", "project_id": "p"}})
-    started("CompleteTask", {"type": "item_close", "args": {"id": "d"}})
-    started("DeleteMailItems", {"type": "item_delete", "args": {"id": "e"}})
-    started("SetTaskLead", {"type": "item_update", "args": {"id": "f"}}, at=NOW - 30 * DAY - 1)
-    receipts.finish(sql, started("SetTaskPlan", {"type": "item_update", "args": {"id": "g"}}), {"task_id": "g"})
-    assert receipts.writing(sql, list("abcdefgh")) == {"a", "b", "c", "d"}
-    assert receipts.writing(sql, ["b", "z"]) == {"b"} and receipts.writing(sql, []) == set()
-    plan = [row[3] for row in sql.db.execute(f"EXPLAIN QUERY PLAN {receipts.WRITING}", (NOW, "[]"))]
-    assert any("INDEX plus_receipts_started" in step for step in plan), plan
-
-
-# ---- the Monday reset and UpdatePlanLabels --------------------------------------------------------------
+# ---- the Monday reset ------------------------------------------------------------------------------------
 
 
 def test_the_monday_reset_keeps_its_receipts_in_the_object(stack):
@@ -439,20 +381,3 @@ def test_the_monday_reset_keeps_its_receipts_in_the_object(stack):
     [receipt] = [row for key, row in stack.receipts().items() if key.startswith("week:")]
     assert receipt["state"] == "done" and receipt["result"] == "{}" and receipt["method"] == "WeekReset"
     assert stack.legacy_rows() == 0
-
-
-def test_update_plan_labels_replays_by_value(stack):
-    stack.todoist.labels.append({"id": "id-month", "name": "Next month"})
-    plan = stack.call("ReadPlan")["plan"]
-    columns = [row for row in plan["labels"] if row["role"] in {"candiate", "focus", "committed"}]
-    month = [{**row, "id": "id-month", "label": "Next month"} if row["role"] == "candiate" else row for row in columns]
-    request = {"labels": month, "etag": plan["etag"], "request_id": str(uuid.uuid4())}
-    updated = stack.call("UpdatePlanLabels", **request)["plan"]
-    assert updated["etag"] != plan["etag"]
-    # Its lost answer asked again: the binding is the saved one, so it is a replay and answers the saved plan.
-    assert stack.call("UpdatePlanLabels", **request)["plan"]["etag"] == updated["etag"]
-    # The binding before it, with the etag before it, is outdated and never written back.
-    stale = {"labels": columns, "etag": plan["etag"], "request_id": str(uuid.uuid4())}
-    assert stack.call("UpdatePlanLabels", **stale) == {"error": "ETAG_MISMATCH"}
-    assert stack.call("ReadPlan")["plan"]["etag"] == updated["etag"]
-    assert stack.receipts() == {} and stack.legacy_rows() == 0

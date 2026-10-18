@@ -218,7 +218,7 @@ def test_planning_page_reuses_one_metadata_read_and_refreshes_it_for_the_next_re
     monkeypatch.setattr(plus_api, "account_day", lambda _timezone: "2026-10-17")
     for task_id in ("first", "second"):
         answer = asyncio.run(
-            plus_api.handle(core, "ListPlanningTasks", json.dumps({"task_ids": [task_id], "page_size": 1}), owner=True)
+            plus_api.handle(core, "ListPlanningTasks", json.dumps({"task_ids": [task_id], "page_size": 1}))
         )
         assert "error" not in answer
         [task] = json.loads(answer["ok"])["planning_tasks"]
@@ -241,7 +241,7 @@ def test_a_planning_page_of_two_hundred_reads_two_task_pages_with_one_catalog(ru
     env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service, DB=D1())
     core = types.SimpleNamespace(env=env, plus_lock=asyncio.Lock())
     monkeypatch.setattr(plus_api, "account_day", lambda _timezone: "2026-10-17")
-    answer = asyncio.run(plus_api.handle(core, "ListPlanningTasks", json.dumps({"page_size": 200}), owner=True))
+    answer = asyncio.run(plus_api.handle(core, "ListPlanningTasks", json.dumps({"page_size": 200})))
     assert "error" not in answer
     page = json.loads(answer["ok"])
     assert len(page["planning_tasks"]) == 160 and not page.get("next_page_token")

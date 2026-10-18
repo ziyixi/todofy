@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from tests.unit.plus_support import D1, Storage, stubbed_pyodide
+from tests.unit.plus_support import D1, Storage, confirm_plan, stubbed_pyodide
 
 TIMEZONE = "America/Los_Angeles"
 WEEK, NEXT = "2026-10-12", "2026-10-19"
@@ -108,7 +108,7 @@ class Stack:
         return datetime.fromtimestamp(self.clock["ms"] / 1000, ZoneInfo(timezone)).date().isoformat()
 
     def call(self, method: str, **request: Any) -> dict[str, Any]:
-        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request), owner=True))
+        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request)))
         return {"error": result["error"]} if "error" in result else json.loads(result["ok"])
 
     def plan(self) -> dict[str, Any]:
@@ -155,8 +155,7 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stack]:
         stack.todoist.add("weekday", ["office", "candiate"])
         stack.todoist.add("fresh", ["home", "focus"])
         stack.todoist.add("goal", ["home"])
-        plan = stack.plan()
-        assert "plan" in stack.call("ConfirmPlanMapping", etag=plan["etag"], request_id=str(uuid.uuid4()))
+        asyncio.run(confirm_plan(stack.core))
         assert stack.set_plan("weekday", stage="committed")["task"]["stage"] == "committed"
         yield stack
 
@@ -289,7 +288,7 @@ def test_a_task_deleted_while_its_monday_reset_waits_does_not_block_the_rollover
 
 
 @pytest.mark.parametrize("switch", ["cache", "full"])
-@pytest.mark.parametrize("method", ["SetTaskPlan", "CompleteTask", "ConfirmPlanMapping"])
+@pytest.mark.parametrize("method", ["SetTaskPlan", "CompleteTask"])
 def test_a_monday_write_syncs_todoist_metadata_once(stack: Stack, method: str, switch: str) -> None:
     """The Monday reset that goes first writes labels, so it needs labels synced in this call: a label write's
     own Sync serves it, and every metadata read is a full Sync under the rollback PLUS_METADATA=full."""
@@ -297,10 +296,8 @@ def test_a_monday_write_syncs_todoist_metadata_once(stack: Stack, method: str, s
     stack.at("2026-10-19T00:01:00")
     if method == "SetTaskPlan":
         request = {"task_id": "fresh", "etag": stack.scan()["fresh"]["etag"], "stage": "committed"}
-    elif method == "CompleteTask":
-        request = {"task_id": "goal"}
     else:
-        request = {"etag": stack.plan()["etag"]}
+        request = {"task_id": "goal"}
     stack.todoist.metadata_reads.clear()
     assert "error" not in stack.call(method, request_id=str(uuid.uuid4()), **request)
     assert stack.todoist.labels_of("weekday") == ["focus", "office"]  # the reset ran first

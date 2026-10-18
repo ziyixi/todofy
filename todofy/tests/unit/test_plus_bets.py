@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from tests.unit.plus_support import D1, Storage, stubbed_pyodide
+from tests.unit.plus_support import D1, Storage, confirm_plan, stubbed_pyodide
 from todofy.core import plan
 
 TIMEZONE = "America/Los_Angeles"
@@ -119,7 +119,7 @@ class Stack:
         return datetime.fromtimestamp(self.clock["ms"] / 1000, ZoneInfo(timezone)).date().isoformat()
 
     def call(self, method: str, **request: Any) -> dict[str, Any]:
-        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request), owner=True))
+        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request)))
         return {"error": result["error"]} if "error" in result else json.loads(result["ok"])
 
     def bet(self, week: str, area: str, text: str, etag: str = "") -> dict[str, Any]:
@@ -147,8 +147,7 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stack]:
         )
         stack = Stack(runtime, monkeypatch)
         stack.at("2026-10-14T09:00:00")  # Wednesday of WEEK
-        etag = stack.call("ReadPlan")["plan"]["etag"]
-        assert "plan" in stack.call("ConfirmPlanMapping", etag=etag, request_id=str(uuid.uuid4()))
+        asyncio.run(confirm_plan(stack.core))
         stack.todoist.calls.clear()
         yield stack
 

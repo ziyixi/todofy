@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from tests.unit.plus_support import D1, Storage, stubbed_pyodide
+from tests.unit.plus_support import D1, Storage, confirm_plan, stubbed_pyodide
 from todofy.core import plan
 
 NOW = 1_760_000_000
@@ -161,7 +161,7 @@ class Stack:
     def call(self, method: str, **request: Any) -> dict[str, Any]:
         if method not in ("ReadPlan", "ListPlanningTasks"):
             request.setdefault("request_id", str(uuid.uuid4()))
-        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request), owner=True))
+        result = asyncio.run(self.runtime.plus_api.handle(self.core, method, json.dumps(request)))
         return {"error": result["error"]} if "error" in result else json.loads(result["ok"])
 
     def wait(self, task_id: str, prerequisite_id: str, *, waits: bool = True) -> dict[str, Any]:
@@ -197,8 +197,7 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stack]:
         )
         for task_id in ("invite", "venue", "budget", "plan"):
             stack.todoist.add(task_id)
-        etag = stack.call("ReadPlan")["plan"]["etag"]
-        assert "plan" in stack.call("ConfirmPlanMapping", etag=etag)
+        asyncio.run(confirm_plan(stack.core))
         stack.todoist.reads.clear()
         stack.d1.statements.clear()
         yield stack

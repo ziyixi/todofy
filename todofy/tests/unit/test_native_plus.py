@@ -206,8 +206,8 @@ def test_native_owner_entrypoint_refuses_partial_source_deploy_before_dispatch(m
 
         calls = []
 
-        async def handled(core, method, text, *, owner):
-            calls.append((method, text, owner))
+        async def handled(core, method, text):
+            calls.append((method, text))
             return {"ok": "{}"}
 
         monkeypatch.setattr(plus_api, "handle", handled)
@@ -220,7 +220,7 @@ def test_native_owner_entrypoint_refuses_partial_source_deploy_before_dispatch(m
         assert not calls
         core = types.SimpleNamespace(env=types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=object()))
         assert asyncio.run(TodofyCore.plus_native_ui(core, "ReadPlan", "{}")) == {"ok": "{}"}
-        assert calls == [("ReadPlan", "{}", True)]
+        assert calls == [("ReadPlan", "{}")]
 
 
 def test_native_completion_page_counts_only_the_window_and_preserves_project_and_created_time(monkeypatch):

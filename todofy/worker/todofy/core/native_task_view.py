@@ -67,7 +67,7 @@ def task(row: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
         "is_archived": row.get("archived", False),
         "archived": row.get("archived", False),
         "completed_count": row.get("completed_count", 0),
-        "note_count": 0,  # Tasks has no comments; keep the existing untouched-mail rule explicit.
+        "note_count": 0,  # Tasks has no comments.
         "added_at": row.get("create_time"),
         "updated_at": row.get("update_time"),
     }

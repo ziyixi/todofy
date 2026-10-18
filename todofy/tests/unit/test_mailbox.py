@@ -1,5 +1,5 @@
 """The Mailbox's pure rules: core/mailbox.py (the brief, the categories) and the Todoist adapter's part of it in
-core/plus.py (priorities, membership, labels, untouched). Synthetic text only."""
+core/plus.py (membership and labels). Synthetic text only."""
 
 import sqlite3
 from pathlib import Path
@@ -136,10 +136,6 @@ def test_the_settings_etag_follows_ids_labels_priorities_order_and_destination_o
 # ---- the Todoist adapter --------------------------------------------------------------------------------------
 
 
-def test_domain_priorities_are_written_in_todoist_s_order():
-    assert [plus.api_priority(priority) for priority in (1, 2, 3, 4)] == [4, 3, 2, 1]
-
-
 def view(**fields):
     task = {"id": "t", "content": "Synthetic mail", "project_id": "mail", "labels": [], **fields}
     return plus.task_view(task, "2026-10-16", MAPPING)
@@ -170,37 +166,6 @@ def test_a_category_label_is_any_but_the_ones_plus_writes_by_other_means():
         assert plus.mail_label({"id": label_id, "label": "x"}, MAPPING) is expected, label_id
     assert plus.mail_label({"id": "20", "label": "deep"}, MAPPING)
     assert not plus.mail_label({"id": "21", "label": "active"}, MAPPING)
-
-
-def test_filing_adds_the_label_and_keeps_the_areas_exclusive():
-    task = {"labels": ["home", "context"]}
-    assert plus.filed_labels(task, "office", MAPPING) == ["context", "office"]
-    assert plus.filed_labels(task, "deep", MAPPING) == ["context", "deep", "home"]
-    assert plus.filed_labels({"labels": None}, "home", MAPPING) == ["home"]
-    renamed = [{**row, "label": "工作"} if row["role"] == "office" else row for row in MAPPING]
-    assert plus.filed_labels({"labels": ["工作"]}, "home", renamed) == ["home"]
-
-
-UNTOUCHED = {"id": "t", "labels": [], "priority": 1, "due": None, "deadline": None, "duration": None, "note_count": 0}
-
-
-@pytest.mark.parametrize(
-    "change",
-    [
-        pytest.param({"labels": ["context"]}, id="label"),
-        pytest.param({"_native_content_labels": ["active"]}, id="ordinary_native_label"),
-        pytest.param({"priority": 2}, id="priority"),
-        pytest.param({"due": {"date": "2026-10-20"}}, id="date"),
-        pytest.param({"deadline": {"date": "2026-10-20"}}, id="deadline"),
-        pytest.param({"duration": {"amount": 15, "unit": "minute"}}, id="estimate"),
-        pytest.param({"note_count": 1}, id="comment"),
-        pytest.param({"note_count": None}, id="comment_count_unknown"),
-    ],
-)
-def test_any_owner_change_keeps_a_mail(change):
-    assert plus.untouched(UNTOUCHED, set())
-    assert not plus.untouched({**UNTOUCHED, **change}, set())
-    assert not plus.untouched(UNTOUCHED, {"t"})  # it has a sub-task
 
 
 def test_task_text_limit_preserves_whole_non_bmp_characters():

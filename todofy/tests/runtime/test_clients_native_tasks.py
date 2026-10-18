@@ -404,127 +404,17 @@ def test_native_week_reset_changes_planning_only_and_keeps_next_week_choices(nat
     ]
 
 
-@pytest.fixture
-def mail_project(native, ready_plan):
-    project = rpc(
-        native,
-        "CreateProject",
-        {
-            "project": {"title": "Synthetic mail project " + str(uuid.uuid4())},
-            "request_id": str(uuid.uuid4()),
-        },
-    )
-    previous_vars = dict(native.variables)
-    native.stop()
-    native.variables["TODOIST_DEFAULT_PROJECT_ID"] = project["id"]
-    native.start()
-    try:
-        yield project
-    finally:
-        native.stop()
-        native.variables.clear()
-        native.variables.update(previous_vars)
-        native.start()
-
-
 @pytest.fixture(scope="module")
 def active_label(native):
     return rpc(native, "CreateLabel", {"label": {"title": "active"}, "request_id": str(uuid.uuid4())})
 
 
-def test_native_mail_delete_preserves_dependencies_and_gtd_state_with_real_tasks(native, mail_project, active_label):
-    project = mail_project
-    tasks = [
-        rpc(
-            native,
-            "CreateTask",
-            {
-                "task": {
-                    "title": f"Synthetic native mail {name}",
-                    "project_id": project["id"],
-                    "label_ids": [active_label["id"]] if name == "tagged" else [],
-                },
-                "request_id": str(uuid.uuid4()),
-            },
-        )
-        for name in ("plain", "waiter", "prerequisite", "planned", "tagged")
-    ]
-    plain, waiter, prerequisite, planned, tagged = tasks
-    for task in tasks:
-        native.d1(
-            "INSERT INTO summaries(event_id,created_at,subject,summary,model,task_id)"
-            f" VALUES('{uuid.uuid4()}',1,'Synthetic mail','Synthetic summary','synthetic','{task['id']}')"
-        )
-    assert "dependencies" in planning(
-        native,
-        "SetTaskDependency",
-        task_id=waiter["id"],
-        prerequisite_id=prerequisite["id"],
-        waits=True,
-        request_id=str(uuid.uuid4()),
-    )
-    shown = planning_task(native, planned["id"])
-    assert "task" in planning(
-        native,
-        "SetTaskPlan",
-        task_id=planned["id"],
-        stage="committed",
-        etag=shown["etag"],
-        request_id=str(uuid.uuid4()),
-    )
-    # A legacy dependency with the same external ID belongs to a different source.
-    native.d1(
-        "INSERT INTO plan_tasks(provider,external_id,created_at) VALUES"
-        f" ('todoist','{plain['id']}',1),('todoist','synthetic-legacy-waiter',1);"
-        "INSERT INTO plan_edges(task_id,prerequisite_id,created_at)"
-        " SELECT t.id,p.id,1 FROM plan_tasks t,plan_tasks p"
-        " WHERE t.provider='todoist' AND t.external_id='synthetic-legacy-waiter'"
-        f" AND p.provider='todoist' AND p.external_id='{plain['id']}'"
-    )
-    request = {"task_ids": [task["id"] for task in tasks], "request_id": str(uuid.uuid4())}
-    answer = planning(native, "DeleteMailItems", **request)
-    assert answer == {
-        "deleted_task_ids": [plain["id"]],
-        "kept_task_ids": [waiter["id"], prerequisite["id"], planned["id"], tagged["id"]],
-    }
-    assert planning(native, "DeleteMailItems", **request) == answer
-    active = rpc(native, "ListTasks", {"view": "project", "project_id": project["id"]})["tasks"]
-    assert {task["id"] for task in active} == {waiter["id"], prerequisite["id"], planned["id"], tagged["id"]}
-    assert native.d1(f"SELECT count(*) AS n FROM summaries WHERE task_id='{plain['id']}'") == [{"n": 0}]
-    for task in tasks[1:]:
-        assert native.d1(f"SELECT count(*) AS n FROM summaries WHERE task_id='{task['id']}'") == [{"n": 1}]
-    assert rpc(native, "GetTask", {"name": planned["name"]}) == planned
-
-
-def test_native_mail_category_is_an_ordinary_tag_and_files_with_one_generic_update(native, mail_project, active_label):
-    inbox = rpc(
-        native,
-        "CreateProject",
-        {
-            "project": {"title": "Synthetic everyday intake"},
-            "request_id": str(uuid.uuid4()),
-        },
-    )
-    _wrangler(
-        "d1",
-        "execute",
-        "DB",
-        "--local",
-        "--persist-to",
-        str(native.persist_to),
-        "--config",
-        native.configs[1],
-        "--command",
-        f"UPDATE projects SET inbox=1 WHERE id='{inbox['id']}'",
-    )
+def test_native_mail_category_is_an_ordinary_tag_on_the_converted_inbox_task(native, ready_plan, active_label):
     label = active_label
-    task = rpc(
-        native,
-        "CreateTask",
-        {
-            "task": {"title": "Synthetic mail with ordinary active category", "project_id": mail_project["id"]},
-            "request_id": str(uuid.uuid4()),
-        },
+    event_id = str(uuid.uuid4())
+    native.d1(
+        "INSERT INTO summaries(event_id,created_at,subject,summary,model)"
+        f" VALUES('{event_id}',103,'Synthetic mail with a category','Synthetic summary','synthetic')"
     )
     settings = planning(native, "ReadMailSettings")
     assert "destination" not in settings
@@ -541,25 +431,25 @@ def test_native_mail_category_is_an_ordinary_tag_and_files_with_one_generic_upda
     )
     assert "error" not in saved, saved
     assert "destination" not in saved and len(saved["categories"]) == 1
-    shown = planning_task(native, task["id"])
+    listed = planning(native, "ListMailItems", page_size=50)
+    mail = next(item for item in listed["mail_items"] if item["id"] == event_id)
     request = {
-        "task_id": task["id"],
-        "etag": shown["etag"],
+        "event_id": event_id,
+        "etag": mail["etag"],
         "category_id": saved["categories"][0]["id"],
-        "categories_etag": saved["etag"],
+        "categories_etag": listed["categories_etag"],
         "request_id": str(uuid.uuid4()),
     }
-    filed = planning(native, "FileMailItem", **request)
-    assert "task" in filed, filed
-    physical = rpc(native, "GetTask", {"name": task["name"]})
-    assert physical["project_id"] == inbox["id"]
+    converted = planning(native, "ConvertMailItem", **request)
+    assert "task" in converted, converted
+    physical = rpc(native, "GetTask", {"name": f"tasks/{converted['task']['id']}"})
+    assert physical.get("project_id", "") == ""
     assert physical["label_ids"] == [label["id"]] and physical["priority"] == 2
-    assert physical["etag"] == str(int(task["etag"]) + 1)
-    projected = planning_task(native, task["id"])
+    projected = planning_task(native, physical["id"])
     assert projected["labels"] == ["active"]
     assert "active" not in projected.get("planning_flags", []) and projected["stage"] == "none"
-    assert planning(native, "FileMailItem", **request) == filed
-    assert rpc(native, "GetTask", {"name": task["name"]}) == physical
+    assert planning(native, "ConvertMailItem", **request) == converted
+    assert rpc(native, "GetTask", {"name": physical["name"]}) == physical
 
 
 def test_native_mail_exists_before_task_and_explicit_conversion_creates_only_one_inbox_task(native, ready_plan):

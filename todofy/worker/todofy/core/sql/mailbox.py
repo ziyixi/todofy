@@ -2,7 +2,7 @@
 
 Native entries are pending summaries, indexed by created_at and event_id. A task link is optional until explicit
 conversion. List pages return only the brief and its 600-character fallback; full text is read for one chosen
-entry's detail or conversion. Older task-ID lookups use the existing summaries_task partial index.
+entry's detail or conversion.
 """
 
 from ..mailbox import BRIEF_SOURCE_CHARS
@@ -38,34 +38,7 @@ EXISTING_EVENTS = Query(
     "sqlite_autoindex_summaries_1",
 )
 
-# Bind the task IDs (JSON), then the source ID: the received time is the ledger row's, and the completed summary's
-# own while that row is out of reach (a restore of summaries alone, say).
-ITEMS = Query(
-    "SELECT s.event_id, s.task_id, coalesce(e.created_at, s.created_at) AS received_at, s.brief,"
-    f" substr(s.summary, 1, {BRIEF_SOURCE_CHARS}) AS head, s.summary <> '' AS has_summary"
-    f" FROM json_each(?) AS j JOIN summaries AS s ON {_MAIL}"
-    " LEFT JOIN mail_events AS e ON e.source_id = ? AND e.event_id = s.event_id",
-    "summaries_task",
-)
-# The tasks among those bound that are mail, IDs only (DeleteMailItems' check).
-MAIL_TASKS = Query(f"SELECT s.task_id FROM json_each(?) AS j JOIN summaries AS s ON {_MAIL}", "summaries_task")
-# The tasks among those bound that wait for another task or that another waits for: a dependency the owner made.
-# Bind task IDs (JSON), then the current provider. CROSS JOIN keeps the bound IDs driving, so plan_tasks is
-# searched by its unique key and never walked.
-LINKED_TASKS = Query(
-    "SELECT j.value AS task_id FROM json_each(?) AS j CROSS JOIN plan_tasks AS t"
-    " ON t.provider = ? AND t.external_id = j.value"
-    " WHERE EXISTS (SELECT 1 FROM plan_edges AS e WHERE e.task_id = t.id)"
-    " OR EXISTS (SELECT 1 FROM plan_edges AS e WHERE e.prerequisite_id = t.id)",
-    "sqlite_autoindex_plan_tasks_1",
-)
 SUMMARY = Query("SELECT summary FROM summaries WHERE event_id = ?", "sqlite_autoindex_summaries_1")
-# Delete all's last step: the summaries of the mail it deleted (subject, summary and brief); mail_events, the
-# ledger of IDs and states, stays.
-FORGET = Query(
-    "DELETE FROM summaries WHERE task_id IN (SELECT j.value FROM json_each(?) AS j) AND task_id <> '' AND imported = 0",
-    "summaries_task",
-)
 
 # The one-time brief backfill: the mail among the bound tasks whose brief was never derived.
 UNBRIEFED = Query(
