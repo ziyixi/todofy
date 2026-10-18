@@ -136,7 +136,6 @@ PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
 CHECK_ONLY: set[str] = set()
-BROWSER_APPS = {"todoist-plus"}  # Retired extension: regression checks only; no deployment or publication.
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
 HOME_BOUND = {"fleet", "mailsort", "recall", "brief", "tasks"}
@@ -154,7 +153,6 @@ KEYS = (
     "mailsort_check",
     "recall_check",
     "brief_check",
-    "todoist_plus_check",
     "tasks_check",
     "contracts",
     "packages",
@@ -176,7 +174,6 @@ KEYS = (
     "recall_deploy",
     "recall_extension_publish",
     "brief_deploy",
-    "todoist_plus_publish",  # Retired output stays false; it must have no publishing consumer.
     "tasks_deploy",
 )
 DISPATCH = {
@@ -195,7 +192,6 @@ DISPATCH = {
     "mailsort": ("mailsort",),
     "recall": ("recall",),
     "brief": ("brief",),
-    "todoist-plus": ("todoist-plus",),
     "tasks": ("tasks",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
@@ -204,7 +200,7 @@ RELAY = "website/relay/"
 # Release (recall_extension_publish).
 EXTENSION = ("recall/extension/", "recall/shared/")
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"flowday", "links", "newsletter", "todoist-plus"}
+NO_CONTRACTS = {"flowday", "links", "newsletter"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")
@@ -234,7 +230,7 @@ APP_TEST_DIRECTORIES = (
     "tasks/tools/test/",
 )
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks"), "planning-ui": ("todoist-plus", "tasks"), "task-dates": ("tasks",)}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
@@ -252,7 +248,6 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "mailsort": ("ts",),
     "recall": ("ts",),
     "brief": ("ts",),
-    "todoist-plus": ("ts",),
     "tasks": ("ts",),
 }
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
@@ -276,8 +271,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
     # shared transcoder and Todofy's UI calls it through the shared client.
-    "proto/todofy/ui/": ("todofy", "todoist-plus", "tasks"),
-    "proto/flowday/ui/": ("flowday", "todofy", "todoist-plus", "tasks"),
+    "proto/todofy/ui/": ("todofy", "tasks"),
+    "proto/flowday/ui/": ("flowday", "todofy", "tasks"),
     "proto/tasks/ui/": ("tasks", "todofy", "flowday"),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
@@ -376,7 +371,6 @@ CHECK_JOBS = {
     "mailsort_check": ("Mailsort checks",),
     "recall_check": ("Recall checks",),
     "brief_check": ("Brief checks",),
-    "todoist_plus_check": ("Todoist Plus checks",),
     "tasks_check": ("Tasks checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
@@ -418,13 +412,12 @@ def outputs(
         "proto": proto,
         "website_relay_deploy": relay,
         "recall_extension_publish": extension,
-        "todoist_plus_publish": False,
     }
     for app in APPS:
         result[f"{PREFIX[app]}_check"] = app in checked
         # Home binds Fleet's, mailsort's and recall's entrypoints. Until such an app's resources are ready (CHECK_ONLY),
         # neither its Worker nor Home can be published by full fallback, dispatch, a path diff or reused branch checks.
-        blocked = app in BROWSER_APPS or app in CHECK_ONLY or (app == "dashboard" and bool(HOME_BOUND & CHECK_ONLY))
+        blocked = app in CHECK_ONLY or (app == "dashboard" and bool(HOME_BOUND & CHECK_ONLY))
         result[f"{PREFIX[app]}_deploy"] = app in deployed and not blocked
     result["platform_publish"] = result.get("platform_deploy", False)
     return {key: result[key] for key in KEYS}

@@ -14,7 +14,6 @@ Home is the daily starting point. Services run and release independently, sharin
 | Mail Hero | 收件箱与可靠 webhook / Inbox and reliable webhooks | Cloudflare Worker + D1 + R2 + DO | [mail-hero/](mail-hero/README.md) |
 | Todofy | 邮件转任务、摘要与规划 / Mail to tasks, summaries and planning | Cloudflare TS gateway + Python core + D1/DO | [todofy/](todofy/README.md) |
 | Tasks | 主任务库、子任务与 Plan/Focus / Primary task store, subtasks and Plan/Focus | Cloudflare Worker + D1, desktop PWA | [tasks/](tasks/README.md) |
-| Todoist Plus | 历史插件，功能已内置 Tasks / Legacy extension; its features are built into Tasks | Chrome extension | [todoist-plus/](todoist-plus/README.md) |
 | FlowDay | 时间块、计时与回顾 / Time blocks, timers and reviews | Cloudflare Worker + D1 | [flowday/](flowday/README.md) |
 | Links | 私人短链接 / Personal short links | Cloudflare Worker + D1 | [links/](links/README.md) |
 | Watch | 网页变化收件箱 / Web change inbox | Cloudflare Worker + DO | [watch/](watch/README.md) |
@@ -48,7 +47,7 @@ Release progress, business health and observation freshness stay separate. See [
    Work in the application's directory; follow its commands and use local bindings and synthetic data.
 
 ```sh
-cd mail-hero    # 或 / or todofy, tasks, dashboard, flowday, todoist-plus, links, watch, mailsort, recall, brief, website, newsletter, fleet, platform
+cd mail-hero    # 或 / or todofy, tasks, dashboard, flowday, links, watch, mailsort, recall, brief, website, newsletter, fleet, platform
 ```
 
 仓库没有“一条命令启动所有服务”的要求。Cloudflare TypeScript 应用安装时生成 proto；Todofy 的 Python 代码由 `uv` 构建时生成。

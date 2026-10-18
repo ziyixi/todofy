@@ -132,7 +132,7 @@ private tasks, credentials or writes. The installed PWA needs a connection to us
 ## Synthetic interface references
 
 These images contain only local synthetic data. The shared planning interface is documented in
-[planning-interface.md](../../todoist-plus/docs/planning-interface.md).
+[the planning UI interface guide](../../packages/planning-ui/docs/interface.md).
 
 ![Today with synthetic tasks](images/tasks-today-synthetic.png)
 ![Task details with synthetic subtasks](images/tasks-detail-synthetic.png)

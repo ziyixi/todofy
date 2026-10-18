@@ -183,8 +183,3 @@ tested images of the same SHA; changing a catalog row alone does not start that 
 Special policies remain explicit: FlowDay's keys and policy attachment differ from owner applications;
 the backup application is frozen; Email Routing and the root mailbox are outside this catalog. Keep
 those exceptions in their owning contracts rather than adding general-purpose escape hatches here.
-
-Browser extensions use `target = "browser"`, with `entries = []` and no Workers, Access rules or image.
-Todoist Plus is retired; its source remains a synthetic regression host for the planning components now
-built into Tasks. Actions no longer publishes its ZIP. Planning resources belong to Todofy and FlowDay;
-the old extension has no Home health tile.

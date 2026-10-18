@@ -22,7 +22,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, flowday, links, watch, newsletter, fleet, platform, mailsort, recall, brief, todoist-plus, tasks]
+        options: [both, all, todofy, mail-hero, dashboard, website, flowday, links, watch, newsletter, fleet, platform, mailsort, recall, brief, tasks]
         default: both
       resume_vps_release:
         description: Explicitly resume a held VPS release after investigating its safe error
@@ -69,7 +69,6 @@ jobs:
       brief_check: ${{ steps.decide.outputs.brief_check }}
       tasks_check: ${{ steps.decide.outputs.tasks_check }}
       tasks_deploy: ${{ steps.decide.outputs.tasks_deploy }}
-      todoist_plus_check: ${{ steps.decide.outputs.todoist_plus_check }}
       contracts: ${{ steps.decide.outputs.contracts }}
       packages: ${{ steps.decide.outputs.packages }}
       infra: ${{ steps.decide.outputs.infra }}
@@ -90,7 +89,6 @@ jobs:
       recall_deploy: ${{ steps.decide.outputs.recall_deploy }}
       recall_extension_publish: ${{ steps.decide.outputs.recall_extension_publish }}
       brief_deploy: ${{ steps.decide.outputs.brief_deploy }}
-      todoist_plus_publish: ${{ steps.decide.outputs.todoist_plus_publish }}
       # A push to main that reuses a green branch run of the same commit (all check outputs above are false).
       checks_reused: ${{ steps.decide.outputs.checks_reused }}
       reused_run_url: ${{ steps.decide.outputs.reused_run_url }}
@@ -310,19 +308,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-tasks
-
-  todoist-plus-checks:
-    name: Todoist Plus checks
-    needs: changes
-    if: needs.changes.outputs.todoist_plus_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Preserve shared planning regressions
-        uses: ./.github/actions/check-todoist-plus
 
   links-checks:
     name: Links checks
@@ -622,7 +607,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, flowday-checks, tasks-checks, todoist-plus-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, flowday-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -639,7 +624,6 @@ jobs:
           WEBSITE: ${{ needs.website-checks.result }}
           FLOWDAY: ${{ needs.flowday-checks.result }}
           TASKS: ${{ needs.tasks-checks.result }}
-          TODOIST_PLUS: ${{ needs.todoist-plus-checks.result }}
           LINKS: ${{ needs.links-checks.result }}
           WATCH: ${{ needs.watch-checks.result }}
           FLEET: ${{ needs.fleet-checks.result }}
@@ -667,7 +651,7 @@ jobs:
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
             "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "FlowDay checks=$FLOWDAY" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" "Mailsort checks=$MAILSORT" \
-            "Tasks checks=$TASKS" "Recall checks=$RECALL" "Brief checks=$BRIEF" "Todoist Plus checks=$TODOIST_PLUS" \
+            "Tasks checks=$TASKS" "Recall checks=$RECALL" "Brief checks=$BRIEF" \
             "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
