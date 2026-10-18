@@ -573,7 +573,9 @@ so whenever a sync reads the catalog it also writes each project's current name 
 rows, hidden ones included, that still show another; an unchanged catalog writes none. A task with an empty
 project ID is in the Inbox, so the mirror names the catalog's inbox project for it. The `_v2` catalog key made
 the first sync after this change read the catalog once and heal existing rows. A change cursor ahead of Tasks,
-after a Tasks restore, fails the sync with `TASKS_UNAVAILABLE` instead of reporting it synced. Native source failures report `TASKS_UNAVAILABLE` and
+after a Tasks restore, fails the sync with `TASKS_UNAVAILABLE` instead of reporting it synced; after any Tasks
+restore, `deploy/reset-tasks-mirror.sql` hides the mirrored rows and forgets the cursor and catalog, so the next
+sync replays the restored feed from the start ([Tasks backup](../../tasks/docs/backup.md)). Native source failures report `TASKS_UNAVAILABLE` and
 never trigger a Todoist fallback. Settings returns `task_source` so native sync works without asking for an API
 key; an older response without that field remains Todoist. A native deployment rejects writes to the obsolete
 Todoist-key setting, while keeping ordinary capacity settings editable.

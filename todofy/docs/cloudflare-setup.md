@@ -289,6 +289,14 @@ ones are kept and older complete ones and every older incomplete prefix are dele
 finished early on a Sunday is not repeated at 10:00 the same day. While a backup runs (a few minutes,
 30 at most) mail processing waits and owner writes answer 503; webhooks are still accepted.
 
+Each backup also holds the Tasks app's D1, read through the `TASKS` binding (Tasks' machine-only
+`exportBackup`; one call counts as one statement of the query budget):
+`backups/<job start>/tasks/<table>/<n>.ndjson.gz` and the manifest's `tasks` section (Tasks' migration, its
+change sequence when the job planned and ended, and its tables). Without the binding a job fails with
+`tasks_unavailable`. The first job after the release that added Tasks starts at the object's next alarm, not on
+Sunday. `download` below fetches and checks the Tasks parts too; `sql` and `verify` are Todofy's alone, and
+Tasks restores with its own tool: [tasks/docs/backup.md](../../tasks/docs/backup.md).
+
 Rows that D1 retention deletes (legacy text by `expires_at` or `TODOFY_LEGACY_TEXT_RETENTION_DAYS`,
 reports after 90 days, owner actions after 180; since 2026-10 no summary, which only the owner deletes) stay in the backups made before the deletion until those
 rotate out: about 6 weeks while backups succeed, longer while they fail. A restore brings such rows back;
@@ -304,9 +312,10 @@ and a later migration may drop it.
 
 Cost, estimated rather than measured: a backup reads every row of every table once (about 250k D1 rows
 after a year of mail, out of the account's 5M a day shared with Mail Hero, plus one read per legacy text
-row), writes a few dozen R2 objects (Class A) and stores a few MB per week plus the compressed legacy
-text (the imported text was estimated at about 76 MB before compression) in each of the 6 kept backups,
-far below R2's free 10 GB and 1M Class A operations a month. D1 Time Travel (7 days on Free) stays the
+row, and each Tasks row about three times by its page query), writes a few dozen R2 objects (Class A) and
+stores a few MB per week plus the compressed legacy text (the imported text was estimated at about 76 MB
+before compression) in each of the 6 kept backups, far below R2's free 10 GB and 1M Class A operations a
+month. D1 Time Travel (7 days on Free) stays the
 first choice for a recent mistake; these backups cover older points and a lost database. They do not
 hold the Durable Object's state or any secret. Budgets and schedule times default safely. The metrics
 cursor does not simply default: it would point past the ids of a restored database, so the object

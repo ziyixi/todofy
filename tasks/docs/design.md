@@ -114,6 +114,10 @@ rename or recolour touches no task and leaves list etags valid. A label rename w
 before its task changes, so a paged change reader refreshes the catalog first. `read-budget.test.ts` holds
 these row counts.
 
+Todofy's weekly backup reads every table through the machine-only `TasksApi.exportBackup` (read-write
+bindings only, no HTTP route): rowid pages below each table's max rowid at plan time, bounded to half a MiB of
+row JSON so a page stays within Workers Free's CPU. [backup.md](backup.md) has the restore.
+
 D1 batches atomically store each write with its request receipt; updates carry masks and current etags.
 Resource references are checked again by database triggers. A task family is limited to 32 hierarchy levels;
 moves batch by depth to stay below Workers Free's D1 query limit. No new queue, DO or cron is needed.

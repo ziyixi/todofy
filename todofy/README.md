@@ -141,10 +141,11 @@ The [backend contract](docs/todoist-plus.md) covers setup, pause controls and re
 
 Every Sunday at 10:00 UTC (and once right after the first deploy) the Durable Object copies every D1
 table into its own prefix in the private bucket `todofy-backups` (`backups/<job start>/`) and keeps the
-newest 6 complete backups; the UI's health page shows the last one. While a backup runs (a few minutes)
+newest 6 complete backups; the UI's health page shows the last one. Each backup also copies the Tasks app's
+D1 through the `TASKS` binding (`backups/<job start>/tasks/`). While a backup runs (a few minutes)
 processing and owner writes wait; webhooks are still accepted. `tools/backup_restore.py` restores one into
-a new, empty D1 database ([docs/cloudflare-setup.md](docs/cloudflare-setup.md) §7). The bucket holds mail
-content: keep it private.
+a new, empty D1 database ([docs/cloudflare-setup.md](docs/cloudflare-setup.md) §7); Tasks' section restores
+with [tasks/docs/backup.md](../tasks/docs/backup.md). The bucket holds mail and task content: keep it private.
 
 ## Metrics
 

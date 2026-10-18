@@ -661,8 +661,16 @@ the columns the job was planned with, and its parts and manifest entry hold exac
 adds a column while a job runs cannot mix two row widths; a state another version wrote (a job saved without
 its columns, say) does not load, and the next backup is due now. Only
 `tests/runtime/test_backup.py` binds the bucket (the shared test config has none, so no other scenario
-pauses for a backup). `tools/backup_restore.py` downloads, checks, and turns a backup into SQL
+pauses for a backup), with a real Tasks Worker as `TASKS`. `tools/backup_restore.py` downloads, checks, and turns a backup into SQL
 (docs/cloudflare-setup.md §7).
+
+After Todofy's tables the job copies the Tasks app's D1: the plan step also asks `TASKS.exportBackup` for
+Tasks' plan (its migration, change sequence and tables with their columns, key and max rowid), and those
+cursors (`source = "tasks"`) page through the same method, one call per unit of `BACKUP_QUERY_BUDGET`, into
+`backups/<job start>/tasks/<table>/`. An invocation that read a Todofy page does not start on Tasks. The
+lease does not hold Tasks' owner writes, so the manifest's `tasks` section records the change sequence at the
+plan and at the end. A missing binding fails the job at once (`tasks_unavailable`). `State.tasks_included`
+makes the next job due at once until a complete backup holds Tasks (unless a job failed since the last success).
 
 ### ops-v1 (lead; `core/ops.py`, `runtime/ops.py`, `gateway/src/ops.ts`)
 The operations surface a dashboard Worker in the same account reaches through a service binding to the
@@ -818,8 +826,8 @@ Point layouts (one dataset; `blob1` tells them apart):
 | core, per upstream step | step | step: `summary`, `canary` (a canary's summary call), `task`, `lookup`, `reminder`, `report`, `backup`, `gtd` (one read-only snapshot page), `review` (the Sunday review's create) | outcome: `ok`/`failed` (Gemini), `TaskResult` (task, reminder), ledger state (lookup) | error code or empty | Gemini model or empty | upstream wall ms | tokens in (prompt) | tokens out (total − prompt) | requests sent (models tried, POSTs; 0 for lookups) |
 
 Never written: paths, query strings, event IDs, subjects, addresses, the owner's identity, upstream bodies.
-`backup` is one point per job, written when it ends: outcome `ok`/`failed`, code `storage_error` or
-`lease_expired`, `double1` the job's wall ms from start to end.
+`backup` is one point per job, written when it ends: outcome `ok`/`failed`, code `storage_error`,
+`lease_expired` or `tasks_unavailable`, `double1` the job's wall ms from start to end.
 
 `daily_metrics` keys per finished UTC day: `mails_received` (always, 0 included: it marks the day as
 recorded), `mails_completed`, `mails_failed` (moves to `failed_summary`), `latency_p50_s`/`latency_p90_s`
@@ -863,7 +871,7 @@ content; keep it that way (the repository and its logs are public).
 | Last backup, its key, rows, size, next run, last failure | owner UI → 健康 → 备份 (ServiceStatus `backup`, todofy.ui.v1 `BackupStatus`) |
 | What the bucket holds | `npx wrangler r2 bucket info todofy-backups` (object count and size; wrangler 4.142.0 has no `r2 object list`, the dashboard's R2 browser lists keys) |
 | One backup's tables, row counts and part hashes | `npx wrangler r2 object get todofy-backups/<key>manifest.json --file manifest.json --remote` (names, counts and SHA-256 only) |
-| Backup job progress or errors | Workers Logs of `todofy-core`, filter on the `backup` field: `planned`, `done` (rows, bytes), `deleted`, `error` (exception type, step), `failed` (`storage_error`, `lease_expired`), `retention_error` |
+| Backup job progress or errors | Workers Logs of `todofy-core`, filter on the `backup` field: `planned`, `done` (rows, bytes), `deleted`, `error` (exception type, step), `failed` (`storage_error`, `lease_expired`, `tasks_unavailable`), `retention_error` |
 | Legacy text size (drives backup size and time) | `SELECT count(*) AS n, sum(length(CAST(text AS BLOB))) AS bytes FROM legacy_mail_text` via `npx wrangler d1 execute <database> --remote --command "..."` (reads each legacy row once) |
 | Account-wide D1 rows read/written today (shared with Mail Hero) | Cloudflare dashboard → D1 → metrics, or Workers & Pages → usage; a backup reads each row of every table once |
 | GTD ledger: the day's snapshot and aggregates (counts only, no task text) | owner UI → 更多 → GTD, or `SELECT day, status, task_count, pages, error_code FROM gtd_snapshots WHERE day >= '<YYYY-MM-DD>'` and `SELECT * FROM gtd_daily WHERE day >= '<YYYY-MM-DD>'` via `npx wrangler d1 execute <database> --remote --command "..."`; Workers Logs field `gtd` (`collect`, `review`: states, codes, counts) |

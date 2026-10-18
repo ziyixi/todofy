@@ -248,5 +248,5 @@ sudo /usr/bin/python3 -E -s <新 bundle>/installer/recover.py \
 
 空环境 bootstrap 创建空业务状态。恢复历史时先停旧写入，保留原事件、密钥、SQL/R2/DO、Newsletter 登录/状态和 daemon 账本，
 按各应用恢复说明核对后激活。Mail Hero 每日副本在私有 R2，见 [原生备份](../mail-hero/docs/native-backup.md)。
-Tasks 先恢复自己的 D1，或从保留的 Todoist 来源按 [导入说明](../tasks/docs/import.md)迁移；核对任务 ID、完成次数以及 Todofy 规划和 FlowDay 引用后，再恢复任务写入。
+Tasks 用每周备份（随 Todofy 的备份存在 `todofy-backups`）或 7 天内的 Time Travel 恢复自己的 D1，然后重置 FlowDay 的任务镜像，见 [Tasks 备份与恢复](../tasks/docs/backup.md)；核对任务 ID、完成次数以及 Todofy 规划和 FlowDay 引用后，再恢复任务写入。从 Todoist 重新导入只能重建 10-17 切换时的状态，不是恢复路径。
 Watch/Home 等 DO 完整跨账户数据恢复、真实空账户与干净 VPS 演练留待后续。PVC Retain 和镜像 artifact 都不能替代业务备份。

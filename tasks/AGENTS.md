@@ -12,6 +12,9 @@ Read the root rules, [README](README.md), [design](docs/design.md) and [verifica
   must be checked before switching writers. Never fall back to Todoist after a native operation fails.
 - Preserve imported IDs, archived state, history and source completion counts. API access and a green build
   do not prove complete migration. Keep private snapshots outside the public repository.
+- Todofy's weekly backup copies every table through `TasksApi.exportBackup`; a migration that adds a table or
+  column updates `worker/src/backup.ts` (its runtime test compares the schema) and `tools/backup-restore.ts`.
+  Restore only as [docs/backup.md](docs/backup.md) describes, and reset FlowDay's mirror after any restore.
 - Use synthetic tasks for tests/screenshots. The local preview has ephemeral D1; do not use `--remote` for development.
 - Dialog/popover changes need browser checks for first open, cached reopen and asynchronous data arrival.
   Check internal control positions, parent geometry and scroll position, not only the outer dialog height.
