@@ -64,7 +64,7 @@ it('keeps a 100-task native page within Workers Free CPU without a Todoist key',
       await h.api.updateFlow({ flow: { name: 'flows/2026-10-17', taskIds: [] }, updateMask: { paths: ['task_ids'] } });
       return [
         await meter.measure('Native Tasks sync (100 tasks)', async () => {
-          await h.sql("DELETE FROM settings WHERE key IN ('sync_claimed_at','tasks_sync_cursor','tasks_sync_catalog')");
+          await h.sql("DELETE FROM settings WHERE key IN ('sync_claimed_at','tasks_sync_cursor','tasks_sync_catalog_v2')");
           await h.api.syncTasks({ mode: SyncTasksRequest_Mode.MANUAL });
         }),
       ];

@@ -18,10 +18,11 @@ import {
   type SyncMode,
 } from './sync-control.ts';
 import { getSettings, setSettingSql } from './store/settings.ts';
-import { hideStatement, upsertStatements, type TaskUpsertRow } from './store/tasks.ts';
+import { hideStatement, projectRefreshStatement, upsertStatements, type TaskUpsertRow } from './store/tasks.ts';
 
 export const KEY_TASKS_CURSOR = 'tasks_sync_cursor';
-export const KEY_TASKS_CATALOG = 'tasks_sync_catalog';
+// v2: the first sync after the project refresh reads the catalog once, which heals every mirrored row.
+export const KEY_TASKS_CATALOG = 'tasks_sync_catalog_v2';
 export const KEY_TASKS_PENDING = 'tasks_sync_pending';
 export const NATIVE_SYNC_PAGE = 100;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -44,9 +45,12 @@ function isoTime(time: Task['createTime']): string | null {
 function nativeTaskRow(
   task: Task,
   projects: ReadonlyMap<string, { title: string; color: string }>,
+  inboxId: string,
   labels: ReadonlyMap<string, string>,
 ): TaskUpsertRow {
-  const project = projects.get(task.projectId);
+  // An empty project ID is the Inbox, the same as the project marked inbox.
+  const projectId = task.projectId || inboxId;
+  const project = projects.get(projectId);
   return {
     id: task.id,
     todoist_id: task.id,
@@ -63,7 +67,7 @@ function nativeTaskRow(
     parent_id: task.parentId || null,
     deadline_date: task.deadline || null,
     created_at: isoTime(task.createTime),
-    todoist_project_id: task.projectId || null,
+    todoist_project_id: projectId || null,
   };
 }
 
@@ -129,27 +133,40 @@ export async function runNativeSync({
   const api = nativeClient(source);
   let catalog = cachedCatalog(stored.get(KEY_TASKS_CATALOG));
   let page;
+  let catalogRead = false;
   try {
     page = await api.listChanges({ pageToken: cursor, pageSize: NATIVE_SYNC_PAGE });
     if (page.changes.length > NATIVE_SYNC_PAGE || !page.nextPageToken || (page.hasMore && page.nextPageToken === cursor))
       throw new TasksReadError('native_tasks_invalid_page');
-    if (!catalog || page.catalogChanged) catalog = await api.getCatalog({ name: 'catalog', includeTaskCounts: false });
+    if (!catalog || page.catalogChanged) {
+      catalog = await api.getCatalog({ name: 'catalog', includeTaskCounts: false });
+      catalogRead = true;
+    }
   } catch (error) {
     if (error instanceof TasksReadError || error instanceof RpcStatusError || error instanceof HttpResponseError) return { kind: 'tasks' };
     throw error;
   }
   const latest = new Map(page.changes.filter((change) => change.name.startsWith('tasks/')).map((change) => [change.name.slice(6), change]));
   const projects = new Map(catalog.projects.map((project) => [project.id, project]));
+  const inboxId = catalog.projects.find((project) => project.inbox)?.id ?? '';
   const labels = new Map(catalog.labels.map((label) => [label.id, label.title]));
   const rows: TaskUpsertRow[] = [];
   const hidden: string[] = [];
   for (const [id, change] of latest) {
     if (change.deleted || change.task?.completed || change.task?.archived) hidden.push(id);
-    else if (change.task && change.task.id === id) rows.push(nativeTaskRow(change.task, projects, labels));
+    else if (change.task && change.task.id === id) rows.push(nativeTaskRow(change.task, projects, inboxId, labels));
     else return { kind: 'tasks' };
   }
   const stamp = now.toISOString();
-  const writes = upsertStatements(rows, stamp);
+  // A changed catalog may rename or recolour a project: its tasks change in place, not only this page's.
+  const writes = catalogRead
+    ? [
+        projectRefreshStatement(
+          catalog.projects.map(({ id, title, color, inbox }) => ({ id, title, color, inbox })),
+        ),
+      ]
+    : [];
+  writes.push(...upsertStatements(rows, stamp));
   if (hidden.length) writes.push(hideStatement(hidden, stamp));
   const settings = [
     setSettingSql(KEY_TASKS_CURSOR, page.nextPageToken),

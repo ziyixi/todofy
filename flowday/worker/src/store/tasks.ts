@@ -318,6 +318,30 @@ export function upsertStatements(rows: readonly TaskUpsertRow[], syncedAt: strin
   return out;
 }
 
+/** A Tasks project as the mirror names it: the Inbox is the project marked `inbox`. */
+export interface MirrorProject {
+  id: string;
+  title: string;
+  color: string;
+  inbox: boolean;
+}
+
+/**
+ * Gives every mirrored task its project's current name and colour, after a rename or recolour in Tasks, and
+ * gives a task without a project the Inbox. Only rows that differ are written, hidden ones included, so
+ * analytics of past work show the current name.
+ */
+export function projectRefreshStatement(projects: readonly MirrorProject[]): SQL {
+  const json = JSON.stringify(projects.map((project) => ({ ...project, color: project.color || null })));
+  return sql`UPDATE tasks SET project_name = p.title, project_color = p.color, todoist_project_id = p.id
+    FROM (SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.title') AS title,
+      json_extract(value, '$.color') AS color, json_extract(value, '$.inbox') AS inbox FROM json_each(${json})) AS p
+    WHERE tasks.todoist_id IS NOT NULL
+      AND (tasks.todoist_project_id = p.id OR (tasks.todoist_project_id IS NULL AND p.inbox))
+      AND (tasks.project_name IS NOT p.title OR tasks.project_color IS NOT p.color
+        OR tasks.todoist_project_id IS NOT p.id)`;
+}
+
 /**
  * Hides (deleted_source 'sync') the visible Todoist tasks with these ids: completed or deleted in Todoist. A
  * Todoist task's id is its Todoist id, so the primary key finds it.

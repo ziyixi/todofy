@@ -17,10 +17,16 @@ const requests: string[] = [];
 type Change = Pick<TaskChange, 'name'> & Partial<Pick<TaskChange, 'task' | 'deleted'>>;
 let changes: Change[] = [];
 let status = 200;
-const catalog = create(CatalogSchema, {
-  projects: [{ id: 'work', name: 'projects/work', title: 'Work', color: '#246fe0' }],
-  labels: [{ id: 'deep', name: 'labels/deep', title: 'deep' }],
-});
+function syntheticCatalog(work = { title: 'Work', color: '#246fe0' }, label = 'deep') {
+  return create(CatalogSchema, {
+    projects: [
+      { id: 'work', name: 'projects/work', ...work },
+      { id: 'inbox', name: 'projects/inbox', title: 'Inbox', inbox: true },
+    ],
+    labels: [{ id: 'deep', name: 'labels/deep', title: label }],
+  });
+}
+let catalog = syntheticCatalog();
 function task(id: string, fields: Partial<ReturnType<typeof makeTask>> = {}) {
   return { name: `tasks/${id}`, task: makeTask(id, fields) };
 }
@@ -57,6 +63,7 @@ function respond(request: Request): Response {
         changes: page.map((item, index) => ({ ...item, cursor: String(cursor + index + 1) })),
         nextPageToken: String(cursor + page.length),
         hasMore: cursor + page.length < changes.length,
+        catalogChanged: page.some((item) => !item.name.startsWith('tasks/')),
       }),
     ),
   );
@@ -73,6 +80,7 @@ beforeEach(async () => {
   requests.length = 0;
   changes = [];
   status = 200;
+  catalog = syntheticCatalog();
 });
 async function sync(time = at) {
   const meter = new Meter();
@@ -147,4 +155,33 @@ it('reports the native source without claiming a stored key and starts through t
   const result = await h.api.syncTasks({});
   expect(result.changedTaskCount).toBe(1);
   expect(h.todoist.requests).toHaveLength(0);
+});
+
+it('a project rename or recolour reaches every mirrored task once, and other catalog changes write none', async () => {
+  changes = [task('a'), task('b'), task('elsewhere', { projectId: 'inbox' })];
+  await sync();
+  catalog = syntheticCatalog({ title: 'Office', color: '#db4035' });
+  changes.push({ name: 'projects/work' });
+  expect((await sync(at + AUTO_SYNC_MIN_INTERVAL_MS)).result).toMatchObject({ kind: 'ok', response: { changed: 2 } });
+  const rows = await h.sql('SELECT id,project_name,project_color FROM tasks ORDER BY id');
+  expect(rows).toEqual([
+    { id: 'a', project_name: 'Office', project_color: '#db4035' },
+    { id: 'b', project_name: 'Office', project_color: '#db4035' },
+    { id: 'elsewhere', project_name: 'Inbox', project_color: null },
+  ]);
+  catalog = syntheticCatalog({ title: 'Office', color: '#db4035' }, 'focus');
+  changes.push({ name: 'labels/deep' });
+  expect((await sync(at + 2 * AUTO_SYNC_MIN_INTERVAL_MS)).result).toMatchObject({ kind: 'ok', response: { changed: 0 } });
+  expect(await h.sql('SELECT id,project_name,project_color FROM tasks ORDER BY id')).toEqual(rows);
+});
+it('a task without a project is in the Inbox, and rows mirrored before are healed by the first catalog read', async () => {
+  await h.sql(
+    "INSERT INTO tasks(id,todoist_id,title,labels,priority,is_completed) VALUES ('mirrored-before','mirrored-before','Synthetic earlier mirror','[]',1,0)",
+  );
+  changes = [task('quick-add', { projectId: '' })];
+  await sync();
+  expect(await h.sql('SELECT id,project_name,todoist_project_id FROM tasks ORDER BY id')).toEqual([
+    { id: 'mirrored-before', project_name: 'Inbox', todoist_project_id: 'inbox' },
+    { id: 'quick-add', project_name: 'Inbox', todoist_project_id: 'inbox' },
+  ]);
 });

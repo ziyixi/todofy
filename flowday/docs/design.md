@@ -556,7 +556,7 @@ binding to production; source cutover follows the complete Tasks import and iden
 
 The native adapter uses generated `TasksUiService` GET requests, at most 100 changes per invocation, and a
 catalog refresh only on first use or a catalog-change notification. The service entrypoint separately denies
-writes. `tasks_sync_cursor`, `tasks_sync_catalog` and `tasks_sync_pending` are separate from Todoist's cursor;
+writes. `tasks_sync_cursor`, `tasks_sync_catalog_v2` and `tasks_sync_pending` are separate from Todoist's cursor;
 existing atomic throttling and failure backoff are shared. A page and its cursor commit in one D1 batch.
 An empty page updates only the claim and last successful check time. Responses are bounded to 2 MiB. The mirror reads the bounded description preview; full task text stays in Tasks.
 
@@ -568,7 +568,12 @@ visible again. Explicit FlowDay estimates remain authoritative. Source durations
 previous estimate, matching the existing source adapter.
 
 Tasks emits task changes for project archive/restore and label updates. That allows this mirror to update only
-changed rows, without a second snapshot state machine. Native source failures report `TASKS_UNAVAILABLE` and
+changed rows, without a second snapshot state machine. A project rename or recolour emits only a catalog change,
+so whenever a sync reads the catalog it also writes each project's current name and colour into the mirrored
+rows, hidden ones included, that still show another; an unchanged catalog writes none. A task with an empty
+project ID is in the Inbox, so the mirror names the catalog's inbox project for it. The `_v2` catalog key made
+the first sync after this change read the catalog once and heal existing rows. A change cursor ahead of Tasks,
+after a Tasks restore, fails the sync with `TASKS_UNAVAILABLE` instead of reporting it synced. Native source failures report `TASKS_UNAVAILABLE` and
 never trigger a Todoist fallback. Settings returns `task_source` so native sync works without asking for an API
 key; an older response without that field remains Todoist. A native deployment rejects writes to the obsolete
 Todoist-key setting, while keeping ordinary capacity settings editable.
