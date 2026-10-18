@@ -16,7 +16,7 @@ The owner's acceptance list now contains 28 items. The original implementation w
 The scope is native counts/navigation, ordinary task editing with planning/dependencies/start windows,
 separate Task/Subtask and schedulable Step semantics, structured recurrence, native effort, legacy
 tag/title cleanup and Focus timing against FlowDay's existing timer. Production cleanup must preserve
-task IDs, dependencies, completed history and time/queue references. No VPS, Newsletter or Recall changes.
+task IDs, dependencies, completed history and time/queue references. No VPS, Newsletter or Recall product changes.
 Current status and item-by-item evidence are tracked in [the refinement record](tasks/docs/refinement-verification.md).
 Implementation SHA `2dbd6aad31d7876a2a609ac3e172612f5d9f5616` passed complete branch
 [39102347298](https://github.com/ziyixi/todofy/actions/runs/39102347298), then the same-SHA main
@@ -61,6 +61,14 @@ Growing completed label history from 2,000 to 4,000 keeps count results and 298 
 Backend, cross-language and proto checks pass. Final combined web checks also pass: lint/type/build,
 55 unit/hook checks and 47 real Chromium/local-D1 journeys. Branch CI and the same-SHA Actions release
 remain. Do not complete the 28-item goal before production is checked.
+
+Initial branch run [39113526896](https://github.com/ziyixi/todofy/actions/runs/39113526896) was cancelled
+after the unchanged Recall WebKit fixture failed its focused-page assertion. Its fake tab activation had
+not brought the real test page to the front; the test also anchored dwell time before navigation.
+A test-only correction now waits for navigation/foreground and advances from the recorded focus start.
+A fresh current-source extension build passes all 16 existing WebKit cases, with capture/upload/dedup
+assertions retained. An earlier local failure used stale ignored build output and is excluded as evidence.
+No Recall product code or installed extension was changed. The corrected SHA must pass the full gate.
 
 The owner also reported a transient approximately 20-second Tasks refresh stall. Public HTTP redirected
 to Access in about 0.1 seconds, while authenticated Chrome inspection stalled and later recovered in the

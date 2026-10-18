@@ -1,7 +1,7 @@
 # Tasks workflow refinement
 
 The owner's 28 requested changes are the acceptance scope. The implementation separates generic Tasks
-content, Todofy planning facts and FlowDay queues/timing. No VPS, Newsletter or Recall changes are included.
+content, Todofy planning facts and FlowDay queues/timing. No VPS, Newsletter or Recall product changes are included.
 
 ## Acceptance
 
@@ -181,8 +181,14 @@ that every application in the account stays below its combined quota.
 The final local suite includes 55 Tasks web unit/hook checks and 47 Chromium/local-D1 journeys, Tasks
 Worker's 2 unit and 40 runtime checks, FlowDay's 21 unit and 6 native runtime checks, Core's 50 host and
 19 real cross-language runtime checks, and proto format/lint/type/schema/breaking checks. Browser coverage
-includes zero-write unchanged saves, full-description reuse, expired reads, focus/visibility invalidation,
-real etag conflicts and a late task-A reply after task B opens.
+includes zero-write unchanged saves, full-description reuse, focus/visibility invalidation, real etag
+conflicts and a late task-A reply after task B opens. Unit/hook checks cover cache expiration.
+
+The initial branch run stopped at an unchanged Recall WebKit fixture's foreground assertion. Its setup
+now brings the diagnostic page forward, awaits navigation and advances from the actual focus start.
+All 16 existing WebKit cases pass against a freshly built current-source extension; product code and
+capture/upload/dedup assertions are unchanged. Earlier local failures against stale ignored output are
+excluded from current-version evidence.
 
 During this work the owner reported an approximately 20-second refresh stall. Public HTTP reached Access
 in about 0.1 seconds; authenticated Chrome inspection also stalled, then the same tab recovered without

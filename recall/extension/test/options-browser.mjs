@@ -205,6 +205,7 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
     await page.exposeFunction('openDiagnosticPage', async (url) => {
       if (url !== diagnosticUrl) throw Error('unexpected_diagnostic_page');
       await article.goto(url);
+      await article.bringToFront();
     });
     await page.evaluate(() => {
       window.__test.executeFile = window.executePublishedFile;
@@ -529,9 +530,9 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
         window.__test.withholdInjectionCallback = true;
         window.__test.injectionReturnsPromise = false;
       });
-      const startedAt = await h.page.evaluate(() => Date.now());
       await h.options.locator('#diagnostic-start').click();
       await expect.poll(() => h.page.evaluate(() => window.__test.createdUrl)).toBe(diagnosticUrl);
+      await h.article.waitForURL(diagnosticUrl);
       await h.page.evaluate(() => {
         // Opening the diagnostic emits activation and completion; a finite loading burst adds eleven updates.
         for (let i = 0; i < 11; i++) window.__test.emit('updated', 1, { status: 'complete' });
@@ -540,8 +541,9 @@ export async function checkOrionOptions({ webkit, expect, folder }) {
       // Only the first installation can wait for its unanswered native completion.
       await h.page.clock.fastForward(5100);
       await expect.poll(() => getStatus(h)).toMatchObject({ focused: true });
-      const untilCapture = startedAt + 10100 - await h.page.evaluate(() => Date.now());
-      if (untilCapture > 0) await h.page.clock.fastForward(untilCapture);
+      const focusStart = await h.page.evaluate(() => window.__test.local.mirror.open.start);
+      const untilCapture = focusStart + 10100 - await h.page.evaluate(() => Date.now());
+      if (untilCapture > 0) await h.page.clock.runFor(untilCapture);
       await expect.poll(() => h.batches.flatMap((batch) => batch.items).filter((item) => item.kind === 'document').length).toBe(1);
       const snapshot = h.batches.flatMap((batch) => batch.items).find((item) => item.kind === 'document').document;
       expect(snapshot.text).toContain('Synthetic public page for capture diagnostics.');
