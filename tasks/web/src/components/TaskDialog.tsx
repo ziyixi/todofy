@@ -10,6 +10,7 @@ import { TaskDependencyFields } from "./TaskDependencyFields";
 import { useTaskPlanning } from "../useTaskPlanning";
 import { scheduledDate, scheduledTime } from "../task-schedule";
 import "./color-detail.css";
+import "./task-dialog.css";
 
 export function TaskDialog({
   task,
@@ -37,6 +38,8 @@ export function TaskDialog({
   onChildAdded: () => void;
 }) {
   const [currentTask, setCurrentTask] = useState(task);
+  // A create can save content before its planning write finishes; keep its form compact until it closes.
+  const displayTask = task ? currentTask : undefined;
   const [draft, setDraft] = useState<TaskDraft>(() => ({
     title: task?.title ?? "",
     description: task?.description ?? "",
@@ -71,8 +74,9 @@ export function TaskDialog({
     if (!draft.title.trim() || busy) return;
     setBusy(true);
     setError("");
+    let saved: Task | undefined;
     try {
-      const saved = await onSave(
+      saved = await onSave(
         {
           ...draft,
           title: draft.title.trim(),
@@ -89,11 +93,11 @@ export function TaskDialog({
       onChildAdded();
       onClose();
     } catch (reason) {
-      setError(
+      const message =
         reason instanceof Error && !("status" in reason)
           ? reason.message
-          : describeError(reason),
-      );
+          : describeError(reason);
+      setError(saved ? `Task saved. ${message}` : message);
     } finally {
       setBusy(false);
     }
@@ -189,10 +193,14 @@ export function TaskDialog({
   return (
     <Dialog
       title={
-        currentTask ? (isStep ? "Step details" : "Task details") : "Add task"
+        displayTask ? (isStep ? "Step details" : "Task details") : "Add task"
       }
       onClose={onClose}
-      className={currentTask ? "task-dialog" : "task-dialog quick-add-dialog"}
+      className={
+        displayTask
+          ? "task-dialog task-detail-dialog"
+          : "task-dialog quick-add-dialog"
+      }
     >
       {error && (
         <p className="error-message" role="alert">
@@ -213,7 +221,7 @@ export function TaskDialog({
         }}
       >
         <TaskFields
-          task={currentTask}
+          task={displayTask}
           draft={draft}
           catalog={catalog}
           busy={busy}
@@ -238,6 +246,7 @@ export function TaskDialog({
               <TaskPlanningFields
                 value={planning.draft}
                 onChange={planning.patch}
+                loading={planning.loading || Boolean(planning.error)}
                 disabled={
                   busy ||
                   planning.loading ||
@@ -245,11 +254,6 @@ export function TaskDialog({
                   Boolean(currentTask?.completed)
                 }
               />
-              {planning.loading && (
-                <p className="muted" role="status">
-                  Reading planning values…
-                </p>
-              )}
               {planning.error && (
                 <p className="error-message" role="alert">
                   Planning unavailable. Other task fields can still be saved.
@@ -264,11 +268,11 @@ export function TaskDialog({
               )}
             </>
           )}
-          {currentTask && (
+          {displayTask && (
             <>
               {!isStep && (
                 <TaskChildren
-                  task={currentTask}
+                  task={displayTask}
                   timeZone={catalog.timeZone}
                   busy={busy}
                   onBusy={setBusy}
@@ -280,7 +284,7 @@ export function TaskDialog({
                 />
               )}
               <TaskDependencyFields
-                task={currentTask}
+                task={displayTask}
                 busy={busy}
                 onOpen={onOpen}
                 onChanged={onChildAdded}
@@ -289,7 +293,7 @@ export function TaskDialog({
           )}
         </TaskFields>
         <footer className="dialog-footer">
-          {currentTask && (
+          {displayTask && (
             <button
               type="button"
               className="text-button danger"

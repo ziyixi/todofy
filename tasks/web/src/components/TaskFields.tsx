@@ -61,6 +61,9 @@ export function TaskFields({
       labels={catalog.labels}
       selectedIds={draft.labelIds}
       onChange={(ids) => patch("labelIds", ids)}
+      disabled={busy}
+      open={openProperty === "labels"}
+      onOpenChange={propertyOpenChange("labels")}
     />
   );
   return (

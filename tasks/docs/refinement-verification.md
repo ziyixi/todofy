@@ -1,6 +1,6 @@
 # Tasks workflow refinement
 
-The owner's 22 requested changes are the acceptance scope. The implementation separates generic Tasks
+The owner's 26 requested changes are the acceptance scope. The implementation separates generic Tasks
 content, Todofy planning facts and FlowDay queues/timing. No VPS, Newsletter or Recall changes are included.
 
 ## Acceptance
@@ -8,33 +8,37 @@ content, Todofy planning facts and FlowDay queues/timing. No VPS, Newsletter or 
 Implementation `2dbd6aad31d7876a2a609ac3e172612f5d9f5616` passed the complete
 [branch gate](https://github.com/ziyixi/todofy/actions/runs/39102347298) and the
 [same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/39102825081).
-Private cleanup inputs remain outside this public repository. **The planned production cleanup has not
-run:** automatic action review requires explicit confirmation of its entire batch scope.
+The owner confirmed the full production cleanup scope on 2026-10-18; it has been applied and verified.
+Private cleanup inputs remain outside this public repository. The four subsequent UI requests are implemented; their final release and production check are pending.
 
-| Item | Result | Evidence before release |
+| Item | Required result | Evidence |
 | --- | --- | --- |
 | 1 | Counts beside Inbox, Today, Upcoming, projects, labels and filters | Real D1 aggregation tests cover open/archived tasks and filter/date scope. |
-| 2 | Redundant Mail favorite and separator removed | Exact private identities checked; production cleanup pending. |
+| 2 | Redundant Mail favorite and separator removed | Exact Mail favorite unfavorited and separator filter retired; production UI shows no obsolete Favorites section. |
 | 3 | Empty Planning settings removed | Destination/component removed; old settings bookmark opens Plan. |
 | 4 | Projects managed from sidebar | Catalog contains Labels & filters; archived projects remain accessible. |
-| 5 | Dependencies are native; obsolete DAG status tags removed | Existing metadata contains no dependency declarations or native edges; no edges will be invented. Named dependencies and completion/unblocking pass browser checks. |
-| 6 | Obsolete reminder/test labels removed | Membership checked; production cleanup pending. |
-| 7 | Native Deep/Shallow effort | Additive Tasks schema, copy/write/read and real D1 checks. One conflicting task will be unset per owner decision. |
+| 5 | Dependencies are native; obsolete DAG status tags removed | Empty derived-status tags retired. Existing metadata contained no dependency declarations; no edges were invented. Named native dependencies and completion/unblocking pass browser checks. |
+| 6 | Obsolete reminder/test labels removed | Memberships removed and exact obsolete labels retired. |
+| 7 | Native Deep/Shallow effort | Additive Tasks schema, copy/write/read and real D1 checks. 163 Deep, 119 Shallow and the one conflict left unspecified are verified in production. |
 | 8 | My projects collapse works | Browser/UI checks include persisted collapse and restored projects. |
 | 9 | Empty search has no API error | Empty requests are skipped; clearing a pending query prevents stale results. |
-| 10 | Stored legacy key suffixes removed | 222 valid unique keys checked, without dependency declarations; cleanup pending. Completion history hides legacy syntax without rewriting snapshots. |
+| 10 | Stored legacy key suffixes removed | 222 task titles cleaned, including the embedded key in the same target set; zero markers remain. Completion snapshots are unchanged. |
 | 11 | Structured Repeat controls | Real D1/browser save/reload covers weekly intervals, weekdays, completion-relative and monthly rules; unit checks include yearly month/day. |
 | 12 | Clock belongs to Steps or explicitly standalone actions | Ordinary editor hides Time; Step local time persists with the account zone. Context-menu browser checks also save only the date for ordinary Tasks. |
 | 13 | Deadline minus selected days/weeks controls Start now | Native custom 0–365-day window, real Core/Tasks D1 test; ordinary dialog save/reopen retains it. |
-| 14 | Standalone action makes a Task schedulable | Native flag mapping fixed; only explicit action/Step eligibility is used. Existing queues remain unchanged. |
+| 14 | Standalone action makes a Task schedulable | Native flag mapping fixed; only explicit action/Step eligibility is used. The two existing queued ordinary tasks now have explicit Standalone facts; all queues are unchanged. |
 | 15 | Blocked names prerequisites | Editor shows named dependencies and current completion state. |
 | 16 | Compact visible Plan options | No collapsed Task options section; native controls share existing planning actions. |
 | 17 | Ordinary task editor exposes options, children and Deadline | Synthetic Chrome check and real D1 browser journeys. |
 | 18 | Delete child from parent | Inline confirmation removes only the selected child; parent/sibling survive reload. |
-| 19 | Separate Subtasks and Steps | New kind is explicit; only verified old AppendSteps receipts qualify for backfill. Plain descendants are not inferred to be Steps. |
+| 19 | Separate Subtasks and Steps | New kind is explicit; only verified old AppendSteps receipts qualify for backfill. Four receipt-proven children were backfilled; plain descendants were not inferred to be Steps. |
 | 20 | Start ahead always visible | In the normal properties rail, beside Deadline; no More details click. |
 | 21 | Dependencies drive Blocked | Separate Blocked checkbox removed. Unknown/deleted and reopened prerequisites are distinguished. |
 | 22 | Focus uses FlowDay timer | Shared count-up/25/50-minute mode, server settlement and wall-clock rendering; completion replay, parent-cascade and unrelated-timer checks pass against existing APIs. |
+| 23 | Stable task-detail loading | Real browser regression holds planning and child reads separately: the frame stays 860×780, with no guessed unchecked flags. |
+| 24 | Deliberate action/status placement | Action/Status groups align across both editors; wide/narrow layout checks preserve 14px controls. |
+| 25 | Date/Deadline format guidance | Shared picker now shows supported ISO/tomorrow examples; local parser and both entry-point browser checks pass. Release pending. |
+| 26 | Floating label picker | Existing Base UI popup floats outside the body; dimensions stay unchanged, multiple selections persist, Escape/outside clicks keep the editor open. |
 
 ## Synthetic Chrome evidence
 
@@ -83,16 +87,48 @@ The complete local UI suite passed 39 browser journeys, and the final web unit s
 Native timer behavior was verified against real local FlowDay/D1, including expiry/reload and exact
 completion replay through Core. No production timer mutation is claimed.
 
-## Production cleanup awaiting confirmation
+## Production cleanup (2026-10-18)
 
-The private read-only plan, refreshed after schema deployment, targets 312 task rows: 222 title markers,
-163 Deep and 119 Shallow facts, one conflict set to unspecified per the owner, and four proven Steps.
-It also removes eight obsolete labels, unfavorites the exact redundant Mail project, retires its
-separator filter and marks two already-queued ordinary tasks as Standalone actions. These operations
-remain unexecuted. Automatic review rejected the batch because it recognized only the single-conflict
-confirmation; the owner has been asked to confirm the concrete full scope.
+The owner confirmed the concrete full scope. A fresh private plan matched 312 task rows: 222 task titles,
+163 Deep and 119 Shallow facts, one conflict set to unspecified, and four receipt-proven Steps. Eight
+obsolete labels were retired, the exact redundant Mail project was unfavorited, the separator filter
+was retired, and two already-queued ordinary tasks gained Standalone action. Remaining legacy labels
+and key markers are zero; no source Todoist data was changed.
 
-The cleanup must retain task IDs, parent/project identities, completion occurrences, dates, estimates,
-FlowDay queues and time history. Only the four children proven by existing AppendSteps receipts may
-change kind. Already queued ordinary tasks may receive the native Standalone action fact without
-moving their queues or converting their task kind. No original Todoist data is changed.
+The final comparison preserves every task ID, parent/project identity, business date, estimate and all
+2,824 completion occurrences. Owner API reads of 25 FlowDay flows, 103 queue references, 15 completed
+queue references and 80 time entries are identical before and after cleanup. The native dependency
+set is unchanged. Production Chrome shows no obsolete Favorites section, label or filter.
+
+The operator initially wrote Tasks update/delete metadata in Core's seconds. The exact frozen target
+rows were corrected to Tasks milliseconds and checked, without changing business dates or completion
+history. Its UPDATE triggers appended valid current events; existing changefeed events, sequence and
+consumer cursors were retained. The title verifier also found an embedded key after removing the trailing
+suffix on one approved task; that key is now gone. The final metadata and content checks pass.
+
+## Detail UI follow-up (items 23–26)
+
+Implemented on `codex/tasks-details-polish`, using the existing React/Base UI components and services.
+The detail frame is viewport-bounded and its body scrolls. Planning placeholders have the same height
+as loaded controls and expose no guessed checkbox values. The compact Add task form keeps its original
+layout while a saved generic task waits for the separate planning write.
+
+Options are organized as Action and Status; the standalone choice has a deliberate first row. Both the
+ordinary editor and shared Plan editor use the same visual grouping. Date and Deadline inputs show
+`YYYY-MM-DD or tomorrow`, a concrete example and an accessible description. Calendar shortcuts remain.
+
+Labels use a positioned popup in the native dialog's top layer. Opening it changes neither the frame
+nor the body scroll height. Search, multiple selection, Escape, outside-click dismissal and existing
+save behavior remain. Tests cover the detail and compact form, plus a short and narrow viewport.
+
+Final local checks pass: 37 Tasks web units, 44 Chromium/local-D1 journeys, web lint/type/build,
+22 shared planning units and 308 retired-consumer regressions. Actual owner Chrome with a synthetic
+local fixture measured an unchanged 860×780 frame and body scroll height 677 with Labels open;
+Escape dismissed only the popup. The following screenshots contain synthetic content only.
+
+![Grouped options and floating labels](images/details-floating-labels.png)
+
+![Visible date input format](images/details-date-format.png)
+
+Branch gate, same-SHA Actions release and production UI confirmation remain pending for these four
+follow-ups. They do not change credentials, schemas, budgets or infrastructure.

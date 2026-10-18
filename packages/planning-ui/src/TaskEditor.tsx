@@ -23,6 +23,26 @@ import type {
   TaskDependency,
 } from "./model";
 
+const NATIVE_OPTION_GROUPS = [
+  {
+    en: "Action",
+    zh: "行动",
+    options: [
+      ["singleAction", "task", "Schedule as a step", "可作为步骤安排"],
+      ["quick", "quick", "Quick action", "快速行动"],
+      ["routine", "routine", "Routine", "日常事务"],
+    ],
+  },
+  {
+    en: "Status",
+    zh: "状态",
+    options: [
+      ["waiting", "waiting", "Waiting", "等待中"],
+      ["onHold", "onhold", "On hold", "暂缓"],
+    ],
+  },
+] as const;
+
 /** Native start-ahead accepts a calendar-day count; legacy hosts retain their saved presets. */
 export function LeadSelect({
   value,
@@ -410,40 +430,42 @@ export function TaskEditor({
           aria-label={language === "zh" ? "任务选项" : "Task options"}
         >
           <h3>{language === "zh" ? "任务选项" : "Task options"}</h3>
-          <div>
-            {(
-              [
-                ["quick", "quick", "Quick action", "快速行动"],
-                ["waiting", "waiting", "Waiting", "等待中"],
-                ["routine", "routine", "Routine", "日常事务"],
-                ["onHold", "onhold", "On hold", "暂缓"],
-                [
-                  "singleAction",
-                  "task",
-                  "Schedule as a step",
-                  "可作为步骤安排",
-                ],
-              ] as const
-            )
-              .filter(
-                ([field]) => field !== "singleAction" || task.kind !== "step",
-              )
-              .map(([field, flag, en, zh]) => (
-                <label key={field}>
-                  <input
-                    type="checkbox"
-                    checked={hasPlanningFlag(task, flag)}
-                    disabled={busy}
-                    onChange={(event) => {
-                      const update: PlanUpdate = {
-                        [field]: event.target.checked,
-                      };
-                      void run(() => actions.updateTask(task, update));
-                    }}
-                  />
-                  {language === "zh" ? zh : en}
-                </label>
-              ))}
+          <div className="plus-task-option-groups">
+            {NATIVE_OPTION_GROUPS.map((group) => (
+              <fieldset className="plus-task-option-group" key={group.en}>
+                <legend>{language === "zh" ? group.zh : group.en}</legend>
+                <div>
+                  {group.options
+                    .filter(
+                      ([field]) =>
+                        field !== "singleAction" || task.kind !== "step",
+                    )
+                    .map(([field, flag, en, zh]) => (
+                      <label
+                        key={field}
+                        className={
+                          field === "singleAction"
+                            ? "plus-task-option-standalone"
+                            : undefined
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          checked={hasPlanningFlag(task, flag)}
+                          disabled={busy}
+                          onChange={(event) => {
+                            const update: PlanUpdate = {
+                              [field]: event.target.checked,
+                            };
+                            void run(() => actions.updateTask(task, update));
+                          }}
+                        />
+                        <span>{language === "zh" ? zh : en}</span>
+                      </label>
+                    ))}
+                </div>
+              </fieldset>
+            ))}
           </div>
         </section>
       )}

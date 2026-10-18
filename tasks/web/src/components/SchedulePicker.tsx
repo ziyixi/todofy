@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Popover } from "@base-ui/react/popover";
 import {
   CalendarDays,
@@ -60,6 +60,7 @@ export function SchedulePicker({
   const [error, setError] = useState("");
   const portal = useRef<HTMLElement | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const inputHelpId = useId();
   const today = todayDate(new Date(), timeZone || undefined);
   const weekday = new Date(`${today}T12:00:00`).getDay();
   const isDeadline = label === "Deadline";
@@ -178,11 +179,8 @@ export function SchedulePicker({
                 <input
                   ref={input}
                   aria-label={isDeadline ? "Deadline text" : "Schedule"}
-                  placeholder={
-                    isDeadline
-                      ? "Type a deadline"
-                      : "Type a date"
-                  }
+                  placeholder="YYYY-MM-DD or tomorrow"
+                  aria-describedby={inputHelpId}
                   value={inputText}
                   disabled={busy}
                   onChange={(event) => {
@@ -212,6 +210,9 @@ export function SchedulePicker({
                   </button>
                 )}
               </div>
+              <p className="schedule-input-help" id={inputHelpId}>
+                YYYY-MM-DD, e.g. 2030-04-15, or tomorrow.
+              </p>
               {preview && (
                 <p className="schedule-preview" role="status">
                   {preview}

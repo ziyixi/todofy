@@ -147,9 +147,9 @@ export function TaskChildren({
   return (
     <section className="task-children" aria-label="Subtasks and steps">
       {loading && (
-        <p className="muted" role="status">
+        <span className="visually-hidden" role="status">
           Reading subtasks and steps…
-        </p>
+        </span>
       )}
       {(["task", "step"] as const).map((kind) => {
         const rows = children.filter(
@@ -164,10 +164,15 @@ export function TaskChildren({
             <h3>
               {kind === "step" ? "Steps" : "Subtasks"}
               <span>
-                {rows.filter((child) => child.completed).length}/{rows.length}
+                {loading
+                  ? "…"
+                  : `${rows.filter((child) => child.completed).length}/${rows.length}`}
               </span>
             </h3>
-            {!rows.length && (
+            {loading && (
+              <div className="child-loading-placeholder" aria-hidden />
+            )}
+            {!loading && !rows.length && (
               <p className="muted child-empty">
                 {kind === "step"
                   ? "Add a small action to arrange in your week."

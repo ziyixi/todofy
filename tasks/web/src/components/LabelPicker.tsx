@@ -1,17 +1,27 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Popover } from "@base-ui/react/popover";
 import { ChevronDown, Tag } from "lucide-react";
 import type { Catalog } from "../api";
+import "./label-picker.css";
 
 export function LabelPicker({
   labels,
   selectedIds,
   onChange,
+  disabled = false,
+  open,
+  onOpenChange,
 }: {
   labels: Catalog["labels"];
   selectedIds: string[];
   onChange: (ids: string[]) => void;
+  disabled?: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const [search, setSearch] = useState("");
+  const portal = useRef<HTMLElement | null>(null);
+  const input = useRef<HTMLInputElement>(null);
   const selected = labels.filter((label) => selectedIds.includes(label.id));
   const matches = labels.filter((label) =>
     label.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
@@ -36,50 +46,85 @@ export function LabelPicker({
           ))}
         </div>
       )}
-      <details className="label-picker">
-        <summary>
+      <Popover.Root
+        open={open}
+        onOpenChange={(value) => {
+          if (value) setSearch("");
+          onOpenChange(value);
+        }}
+      >
+        <Popover.Trigger
+          className="property-trigger label-picker-trigger"
+          disabled={disabled}
+          ref={(element: HTMLButtonElement | null) => {
+            portal.current = element?.closest("dialog") ?? null;
+          }}
+        >
           <Tag size={15} />
           {selected.length ? "Edit labels" : "Add labels"}
-          <ChevronDown size={13} />
-        </summary>
-        <div className="label-picker-panel">
-          <input
-            aria-label="Search labels"
-            placeholder="Search labels"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.metaKey && !event.ctrlKey)
-                event.preventDefault();
-            }}
-          />
-          <div className="label-picker-options">
-            {matches.map((label) => (
-              <label key={label.id}>
+          <ChevronDown size={13} className="property-chevron" />
+        </Popover.Trigger>
+        <Popover.Portal container={portal}>
+          <Popover.Positioner
+            align="start"
+            sideOffset={5}
+            positionMethod="fixed"
+            className="label-picker-positioner"
+          >
+            <Popover.Popup
+              className="label-picker-popup"
+              aria-label="Label picker"
+              initialFocus={input}
+            >
+              <div className="label-picker-search">
                 <input
-                  type="checkbox"
-                  style={{ accentColor: label.color || undefined }}
-                  checked={selectedIds.includes(label.id)}
-                  onChange={(event) =>
-                    onChange(
-                      event.target.checked
-                        ? [...selectedIds, label.id]
-                        : selectedIds.filter((id) => id !== label.id),
+                  ref={input}
+                  aria-label="Search labels"
+                  placeholder="Search labels"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === "Enter" &&
+                      !event.metaKey &&
+                      !event.ctrlKey
                     )
-                  }
+                      event.preventDefault();
+                  }}
                 />
-                <Tag size={13} style={{ color: label.color || undefined }} />
-                {label.title}
-              </label>
-            ))}
-            {matches.length === 0 && (
-              <p className="field-hint">
-                {labels.length ? "No matching labels" : "No labels yet"}
-              </p>
-            )}
-          </div>
-        </div>
-      </details>
+              </div>
+              <div className="label-picker-options">
+                {matches.map((label) => (
+                  <label key={label.id}>
+                    <input
+                      type="checkbox"
+                      style={{ accentColor: label.color || undefined }}
+                      checked={selectedIds.includes(label.id)}
+                      onChange={(event) =>
+                        onChange(
+                          event.target.checked
+                            ? [...selectedIds, label.id]
+                            : selectedIds.filter((id) => id !== label.id),
+                        )
+                      }
+                    />
+                    <Tag
+                      size={13}
+                      style={{ color: label.color || undefined }}
+                    />
+                    {label.title}
+                  </label>
+                ))}
+                {matches.length === 0 && (
+                  <p className="field-hint">
+                    {labels.length ? "No matching labels" : "No labels yet"}
+                  </p>
+                )}
+              </div>
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </Popover.Root>
     </div>
   );
 }

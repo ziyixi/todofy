@@ -26,14 +26,27 @@ task saved/reopened its real native planning/effort/deadline/lead values, then w
 never scheduled/completed/timed. Final checks include 37 web units, 39 real Chromium/D1 journeys,
 36 Worker runtime checks and 18 real Core/Tasks integration checks; current source remains unchanged.
 
-Production cleanup is **not done**. A private fresh plan targets 312 task rows (222 key suffixes,
-163 Deep, 119 Shallow, one overlapping effort unset as requested, four proven old Steps), eight obsolete
-labels, one exact Mail favorite, one separator filter and two already-queued Standalone facts.
-Automatic approval review refused the batch: it recognized only the owner's single-conflict consent.
-A concise full-scope confirmation is pending; do not work around that rejection or apply the batch
-before the owner answers. The private operator and inputs remain outside GitHub. Protected task/date/
-history snapshots and FlowDay queue/time comparisons still need to be collected for the actual cleanup.
-Do not mark the persistent 22-item goal complete while these data changes and acceptance remain pending.
+The owner explicitly authorized the complete cleanup on 2026-10-18. The exact frozen 312-task scope was
+revalidated, then applied: eight retired labels, 222 cleaned task titles, 163 Deep and 119 Shallow effort
+facts, the one overlapping effort left unspecified, four receipt-proven Steps, two already-queued
+Standalone facts, the exact redundant Mail favorite and separator filter. Remaining legacy labels and
+key markers are both zero. Task IDs, relationships, business dates, estimates and all 2,824 completion
+occurrences compare exactly with the pre-cleanup snapshot. All 25 FlowDay flows (103 planned and 15 done
+references) and 80 time entries are byte-for-byte unchanged after owner-API reads. No source Todoist data changed.
+The one-time operator's Tasks metadata initially used Core's seconds; those exact target timestamps were
+corrected to milliseconds and verified. The existing changefeed received new events; its old entries,
+sequence and consumer cursors were retained. One embedded key in the same frozen task set was also removed.
+Production Chrome confirms the obsolete Favorites section and old labels/filters are absent.
+
+Branch `codex/tasks-details-polish` now covers the owner's added items 23–26: stable task-detail loading
+without a false unchecked phase or changing modal height, deliberate Action/Status option placement,
+visible supported Date/Deadline input formats, and a floating label picker that does not expand the editor.
+The existing synthetic preview/tests are being used; no new infrastructure or settings are needed.
+The combined local checks pass: 37 web units, 44 real Chromium/local-D1 journeys, 22 shared planning units,
+308 retired-consumer regressions and type/lint/build. Actual Chrome's synthetic fixture keeps its 860×780
+frame and body height unchanged with the label popup; date format guidance is visible. No schema, API,
+credential, cost or infrastructure changes. Branch gate, same-SHA Actions release and production Chrome
+verification remain. Do not complete the 26-item goal before that evidence is recorded.
 
 ### VPS release recovery (2026-10-18 UTC)
 

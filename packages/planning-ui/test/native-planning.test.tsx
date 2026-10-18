@@ -342,4 +342,72 @@ it("exposes native options without an independent blocked checkbox and accepts a
   expect(
     screen.getByRole("checkbox", { name: "Schedule as a step" }),
   ).toBeTruthy();
+  const options = screen.getByRole("region", { name: "Task options" });
+  expect(
+    within(options)
+      .getAllByRole("group")
+      .map((group) => group.querySelector("legend")?.textContent),
+  ).toEqual(["Action", "Status"]);
+  expect(
+    within(screen.getByRole("group", { name: "Action" }))
+      .getAllByRole("checkbox")
+      .map((input) => input.closest("label")?.textContent),
+  ).toEqual(["Schedule as a step", "Quick action", "Routine"]);
+  expect(
+    within(screen.getByRole("group", { name: "Status" }))
+      .getAllByRole("checkbox")
+      .map((input) => input.closest("label")?.textContent),
+  ).toEqual(["Waiting", "On hold"]);
+});
+
+it("keeps grouped native flags checked and disabled without local draft state", () => {
+  const props = {
+    destination: {
+      name: "Tasks",
+      taskHref: (id: string) => `/tasks/${id}`,
+      projectHref: (id: string) => `/projects/${id}`,
+    },
+    task: {
+      ...task,
+      kind: "step" as const,
+      planningFlags: ["quick", "waiting"],
+    },
+    tasks: [task],
+    dependencies: [],
+    language: "en" as const,
+    busy: true,
+    actions: {} as PlusActions,
+    run: vi.fn(),
+    today: "2026-10-17",
+    todayTaskIds: [],
+    canMarkActive: false,
+    addFocus: vi.fn(),
+    onOpenTask: vi.fn(),
+  };
+  const { rerender } = render(<TaskEditor {...props} />);
+  expect(
+    screen.queryByRole("checkbox", { name: "Schedule as a step" }),
+  ).toBeNull();
+  const quick = screen.getByRole("checkbox", {
+    name: "Quick action",
+  }) as HTMLInputElement;
+  expect(quick.checked).toBe(true);
+  expect(quick.disabled).toBe(true);
+  expect(
+    (screen.getByRole("checkbox", { name: "Waiting" }) as HTMLInputElement)
+      .checked,
+  ).toBe(true);
+  rerender(
+    <TaskEditor
+      {...props}
+      busy={false}
+      task={{ ...props.task, planningFlags: ["routine"] }}
+    />,
+  );
+  expect(quick.checked).toBe(false);
+  expect(quick.disabled).toBe(false);
+  expect(
+    (screen.getByRole("checkbox", { name: "Routine" }) as HTMLInputElement)
+      .checked,
+  ).toBe(true);
 });

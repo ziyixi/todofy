@@ -161,6 +161,13 @@
   font-size: 12px;
   cursor: pointer;
 }
+.schedule-input-help {
+  margin: 0;
+  padding: 7px 13px 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
 .schedule-preview,
 .schedule-error {
   margin: 0;

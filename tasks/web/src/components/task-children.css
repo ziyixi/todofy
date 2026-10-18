@@ -20,6 +20,13 @@
   margin: 5px 0 8px;
   font-size: 12px;
 }
+.child-loading-placeholder {
+  height: 31px;
+  margin: 5px 0 8px;
+  border-radius: 4px;
+  background: var(--line);
+  opacity: 0.5;
+}
 .task-child-row {
   position: relative;
   display: flex;

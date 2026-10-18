@@ -1,0 +1,38 @@
+.task-detail-dialog {
+  height: min(780px, calc(100dvh - 56px));
+  overflow: hidden;
+}
+.task-detail-dialog .dialog-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.task-detail-dialog .dialog-header,
+.task-detail-dialog .dialog-footer {
+  flex-shrink: 0;
+}
+.task-detail-dialog form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.task-detail-dialog .task-edit-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.task-detail-dialog .task-edit-main {
+  min-width: 0;
+}
+.task-detail-dialog .task-planning-fields,
+.task-detail-dialog .task-children,
+.task-detail-dialog .task-dependencies {
+  margin-left: 32px;
+}
+@media (max-width: 650px) {
+  .task-detail-dialog {
+    height: calc(100dvh - 24px);
+  }
+}
