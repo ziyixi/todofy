@@ -26,7 +26,7 @@ from todofy.core.vocab import EventState
 from todofy.runtime.config import source_id
 from todofy.runtime.gemini import GeminiResult
 from todofy.runtime.interop import to_js
-from todofy.runtime.todoist import CreateResult
+from todofy.runtime.native_tasks import CreateResult
 
 DO_SCHEMA = (
     # Counters of days not yet written to D1, by UTC day of the event.

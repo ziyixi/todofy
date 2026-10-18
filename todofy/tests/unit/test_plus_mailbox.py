@@ -1,8 +1,8 @@
 """Mail's RPCs through runtime/plus_api.handle on host CPython: ListMailItems, ReadMailSummary, ReadMailSettings,
 UpdateMailCategories and DeleteMailSummaries.
 
-D1 is host SQLite with every migration and the object's SQLite another (plus_support.py); Todoist is a fake that
-keeps tasks and journals every call. Synthetic mail and tasks only.
+D1 is host SQLite with every migration and the object's SQLite another, and Tasks the fake of plus_support.py,
+which journals every call. Planning is not set up: Mail needs none. Synthetic mail and tasks only.
 """
 
 import asyncio
@@ -10,52 +10,16 @@ import json
 import types
 import uuid
 from collections.abc import Iterator
-from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
-from tests.unit.plus_support import D1, Storage, confirm_plan, stubbed_pyodide
+from tests.unit.plus_support import D1, NativeTasks, Storage, stubbed_pyodide
 
 LABELS = ("office", "home", "committed", "focus", "candiate", "quarter", "lead_1d", "lead_3d", "lead_1w", "lead_2w")
 LABELS += ("lead_1m", "quick", "deep", "active")
-INBOX = "mail"
 NOW = datetime(2026, 10, 16, 16, 0, tzinfo=UTC)
-
-
-class Todoist:
-    """Tasks and labels: what the plan and the planning reads ask for."""
-
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-        self.labels = [{"id": "id-" + name, "name": name} for name in LABELS]
-        self.tasks: dict[str, dict[str, Any]] = {}
-
-    def add(self, task_id: str, **fields: Any) -> None:
-        self.tasks[task_id] = {
-            "id": task_id,
-            "content": "Synthetic mail " + task_id,
-            "project_id": INBOX,
-            "labels": [],
-            "priority": 1,
-            "parent_id": None,
-            "due": None,
-            "deadline": None,
-            "duration": None,
-            "note_count": 0,
-            **fields,
-        }
-
-    async def metadata(self, _core: Any, *, fresh: bool = False) -> dict[str, Any]:
-        self.calls.append("metadata:fresh" if fresh else "metadata")
-        return {"timezone": "UTC", "labels": deepcopy(self.labels), "filters": []}
-
-    async def list_tasks(self, _core: Any, limit: int = 200, cursor: str = "", **filters: str):
-        self.calls.append("tasks:" + ",".join(sorted(filters)))
-        found = list(self.tasks.values())
-        start = int(cursor or 0)
-        return deepcopy(found[start : start + limit]), str(start + limit) if start + limit < len(found) else ""
 
 
 class Stack:
@@ -63,9 +27,7 @@ class Stack:
         self.runtime = runtime
         runtime.clock["ms"] = int(NOW.timestamp() * 1000)
         self.d1 = D1()
-        self.todoist = Todoist()
-        monkeypatch.setattr(runtime.todoist, "metadata", self.todoist.metadata)
-        monkeypatch.setattr(runtime.todoist, "tasks", self.todoist.list_tasks)
+        self.tasks = NativeTasks(labels=LABELS)
         monkeypatch.setattr(runtime.plus_api, "account_day", lambda _tz: NOW.date().isoformat())
         monkeypatch.setattr(runtime.plus_api.backup, "holds_ledger", lambda *_: False)
         self.journal: list[str] = []
@@ -74,9 +36,8 @@ class Stack:
             storage.sql.exec(statement)
         self.sql = storage.sql
         self.core = types.SimpleNamespace(
-            env=types.SimpleNamespace(DB=self.d1, TODOIST_DEFAULT_PROJECT_ID=INBOX),
+            env=types.SimpleNamespace(DB=self.d1, TASKS=self.tasks),
             plus_lock=asyncio.Lock(),
-            todoist_wait=lambda _now: None,
             sql=storage.sql,
             ctx=types.SimpleNamespace(storage=storage),
         )
@@ -96,7 +57,8 @@ class Stack:
             " VALUES (?, ?, 'Synthetic subject', ?, 'm', ?, ?)",
             (event_id, received + 30, summary, task_id, brief),
         )
-        self.todoist.add(task_id)
+        if task_id:
+            self.tasks.add(task_id)
 
     def receipts(self) -> list[tuple[Any, ...]]:
         return [tuple(row) for row in self.sql.db.execute("SELECT method, state, commands, result FROM plus_receipts")]
@@ -106,17 +68,10 @@ class Stack:
 def stack(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stack]:
     with stubbed_pyodide(monkeypatch) as stubs:
         from todofy.runtime import plus_api, plus_receipts
-        from todofy.runtime import plus_todoist as todoist
 
-        stack = Stack(
-            types.SimpleNamespace(
-                plus_api=plus_api, plus_receipts=plus_receipts, todoist=todoist, clock=stubs["clock"]
-            ),
-            monkeypatch,
+        yield Stack(
+            types.SimpleNamespace(plus_api=plus_api, plus_receipts=plus_receipts, clock=stubs["clock"]), monkeypatch
         )
-        asyncio.run(confirm_plan(stack.core))
-        stack.todoist.calls.clear()
-        yield stack
 
 
 AT = int(NOW.timestamp())
@@ -126,14 +81,13 @@ E1, E2, E3 = (str(uuid.UUID(int=index)) for index in (1, 2, 3))
 # ---- reads ----------------------------------------------------------------------------------------------------
 
 
-def test_native_mail_list_pages_pending_summaries_without_tasks_or_full_text(stack):
-    stack.core.env.TASK_SOURCE = "tasks"
+def test_mail_list_pages_pending_summaries_without_tasks_or_full_text(stack):
     ids = [str(uuid.UUID(int=index + 100)) for index in range(53)]
     for event_id in ids:
         stack.mail(event_id, "", received=AT, summary="Synthetic brief.\n" + "private synthetic detail " * 100)
     stack.d1.db.execute("UPDATE summaries SET triaged_at=1 WHERE event_id=?", (ids[0],))
     stack.d1.db.execute("UPDATE summaries SET imported=1 WHERE event_id=?", (ids[1],))
-    stack.todoist.calls.clear()
+    stack.tasks.calls.clear()
     first = stack.call("ListMailItems", page_size=50)
     assert len(first["mail_items"]) == 50 and first["next_page_token"]
     second = stack.call("ListMailItems", page_size=50, page_token=first["next_page_token"])
@@ -143,13 +97,12 @@ def test_native_mail_list_pages_pending_summaries_without_tasks_or_full_text(sta
     assert all(item["title"] == "Synthetic subject" and item["etag"] for item in items)
     assert all("task" not in item and "summary" not in item for item in items)
     assert items[0]["brief"] == "Synthetic brief."
-    assert stack.todoist.calls == []
+    assert stack.tasks.calls == []
     for request in ({"page_size": 51}, {"page_token": "garbage"}):
         assert stack.call("ListMailItems", **request) == {"error": "BAD_REQUEST"}
 
 
-def test_native_mail_summary_deletion_keeps_existing_tasks_and_event_dedup(stack):
-    stack.core.env.TASK_SOURCE = "tasks"
+def test_mail_summary_deletion_keeps_existing_tasks_and_event_dedup(stack):
     stack.mail(E1, "linked", received=AT, summary="Synthetic summary")
     stack.mail(E2, "filed", received=AT, summary="Already triaged")
     stack.d1.db.execute("UPDATE summaries SET triaged_at=1 WHERE event_id=?", (E2,))
@@ -157,14 +110,13 @@ def test_native_mail_summary_deletion_keeps_existing_tasks_and_event_dedup(stack
     answer = stack.call("DeleteMailSummaries", **request)
     assert answer == {"deleted_event_ids": [E1, E3], "kept_event_ids": [E2]}
     assert stack.call("DeleteMailSummaries", **request) == answer
-    assert set(stack.todoist.tasks) == {"linked", "filed"}
+    assert set(stack.tasks.tasks) == {"linked", "filed"}
     assert {row[0] for row in stack.d1.db.execute("SELECT event_id FROM mail_events")} == {E1, E2}
     assert [row[0] for row in stack.d1.db.execute("SELECT event_id FROM summaries")] == [E2]
-    assert stack.todoist.calls == []
+    assert stack.tasks.calls == []
 
 
-def test_native_mail_delete_receipt_handles_200_retained_entries(stack):
-    stack.core.env.TASK_SOURCE = "tasks"
+def test_mail_delete_receipt_handles_200_retained_entries(stack):
     ids = [str(uuid.UUID(int=index + 100)) for index in range(200)]
     for event_id in ids:
         stack.mail(event_id, "", received=AT)
@@ -180,11 +132,10 @@ def test_read_summary_answers_the_full_text_or_nothing(stack):
     stack.mail(E1, "t1", received=AT, summary="第一句。\n\n**要点**\n- a\n- b")
     assert stack.call("ReadMailSummary", id=E1) == {"summary": "第一句。\n\n**要点**\n- a\n- b"}
     assert stack.call("ReadMailSummary", id=E2) == {}
-    assert stack.todoist.calls == []
+    assert stack.tasks.calls == []
 
 
-def test_native_categories_accept_an_ordinary_active_tag_without_a_destination(stack):
-    stack.core.env.TASK_SOURCE = "tasks"
+def test_categories_accept_an_ordinary_active_tag_without_a_destination(stack):
     assert stack.call("ReadPlan")["plan"].get("enabled", False) is False
     original = stack.call("ReadMailSettings")
     saved = stack.call(
@@ -198,7 +149,6 @@ def test_native_categories_accept_an_ordinary_active_tag_without_a_destination(s
 
 
 def test_mail_writes_stop_in_maintenance_while_reads_go_on(stack):
-    stack.core.env.TASK_SOURCE = "tasks"
     stack.mail(E1, "", received=AT, summary="Synthetic summary")
     stack.core.env.MAINTENANCE_MODE = "true"
     request = {"event_ids": [E1], "request_id": str(uuid.uuid4())}
@@ -210,7 +160,6 @@ def test_mail_writes_stop_in_maintenance_while_reads_go_on(stack):
 
 
 def test_no_mail_text_reaches_the_logs_or_the_receipts(stack, capsys):
-    stack.core.env.TASK_SOURCE = "tasks"
     stack.mail(E1, "", received=AT, summary="合成机密简介不应出现在日志里。\n\n合成机密正文。")
     stack.mail(E2, "", received=AT - 1, summary="另一封合成邮件。", brief="合成机密模型简介。")
     assert stack.call("ListMailItems")["mail_items"]

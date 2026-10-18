@@ -1,10 +1,7 @@
 """Personal planning behavior, using synthetic tasks only."""
 
-import re
 import sqlite3
-from datetime import date, datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -12,10 +9,7 @@ from todofy.core import plus
 from todofy.core.sql import plus as sql
 
 TODAY = "2026-10-13"
-# The account timezone the gate reads fixed-timezone due dates in (UTC-7 on TODAY).
-TIMEZONE = "America/Los_Angeles"
 REQUEST = "f4438dda-dc8d-4732-aa59-bdb1a4dc21fa"
-QUICK = "@quick&(nodate|3days)"
 
 
 def task(**values):
@@ -28,27 +22,7 @@ def task(**values):
     }
 
 
-def test_stage_change_retains_unrelated_labels_and_the_retired_bet_is_refused():
-    source = task(labels=["committed", "focus", "office", "deep", "lead_2w", "bets"])
-    assert plus.plan_labels(source, {"stage": "monthly"}) == ["bets", "candiate", "deep", "lead_2w", "office"]
-    assert plus.plan_labels(source, {"area": "personal"}) == ["bets", "committed", "deep", "focus", "home", "lead_2w"]
-    # The weekly Bets are text: Plus never adds or removes the Bets label again, with or without a binding.
-    for request in ({"bet": True}, {"bet": False}, {"stage": "committed", "bet": True}):
-        with pytest.raises(ValueError, match="BAD_REQUEST"):
-            plus.plan_labels(source, request)
-        with pytest.raises(ValueError, match="BAD_REQUEST"):
-            plus.plan_labels(source, request, mapping())
-
-
-def test_in_progress_adds_or_removes_only_the_literal_active_label():
-    source = task(labels=["committed", "office", "lead_1w", "bets"], deadline={"date": TODAY})
-    assert plus.plan_labels(source, {"active": True}) == ["active", "bets", "committed", "lead_1w", "office"]
-    assert plus.plan_labels(task(labels=["active", "office"]), {"active": False}) == ["office"]
-    # Configured names never rename it, and it is no planning mark.
-    assert plus.plan_labels(task(labels=["custom-committed"]), {"active": True}, mapping()) == [
-        "active",
-        "custom-committed",
-    ]
+def test_an_in_progress_task_need_not_start_and_misses_no_lead():
     view = plus.task_view(task(labels=["active", "lead_1w"], deadline={"date": TODAY}), TODAY)
     assert not view["must_start"] and not view["missing_lead"]
 
@@ -64,52 +38,9 @@ def test_in_progress_never_moves_a_kept_sunday_choice():
     assert db.execute("SELECT week_start FROM plus_weeks WHERE task_id='task1'").fetchone() == ("2026-10-19",)
 
 
-def test_parking_sets_a_task_aside_whatever_its_stage_and_unparking_removes_only_the_label():
-    source = task(labels=["committed", "quarter", "focus", "active", "office", "deep", "lead_1w"])
-    assert plus.plan_labels(source, {"parked": True}) == ["deep", "lead_1w", "office", "parked"]
-    # A Quick task's focus or candiate gives no stage (label_stage), and parking still removes it.
+def test_a_quick_tasks_focus_or_candiate_gives_no_stage():
     for planning in ("focus", "candiate"):
         assert plus.label_stage({"quick", planning}, plus.role_labels()) == "none"
-        assert plus.plan_labels(task(labels=["quick", planning]), {"parked": True}) == ["parked", "quick"]
-    # Parked wins over a stage sent with it, and goes by the configured names.
-    assert plus.plan_labels(task(labels=["office"]), {"stage": "committed", "parked": True}) == ["office", "parked"]
-    custom = task(labels=["custom-committed", "custom-candiate", "custom-office", "custom-bets"])
-    assert plus.plan_labels(custom, {"parked": True}, mapping()) == ["custom-bets", "custom-office", "parked"]
-    # Out of Parked into a stage lane: the stage, and parked goes; alone, only parked goes.
-    assert plus.plan_labels(task(labels=["parked", "office"]), {"stage": "monthly", "parked": False}) == [
-        "candiate",
-        "office",
-    ]
-    assert plus.plan_labels(task(labels=["parked", "deep", "waiting"]), {"parked": False}) == ["deep", "waiting"]
-    assert plus.plan_labels(task(labels=["deep"]), {"parked": False}) == ["deep"]
-
-
-def test_a_start_now_drag_writes_the_stage_and_in_progress_in_one_request():
-    """The Review board's drag from Start now into Committed sends {stage, active} together."""
-    source = task(labels=["lead_1w", "office", "focus"], deadline={"date": TODAY})
-    assert plus.task_view(source, TODAY)["must_start"]
-    labels = plus.plan_labels(source, {"stage": "committed", "active": True})
-    assert labels == ["active", "committed", "lead_1w", "office"]
-    view = plus.task_view({**source, "labels": labels}, TODAY)
-    assert view["stage"] == "committed" and not view["must_start"]
-    # On the week's last day it is a commitment for the next week, as without `active`.
-    request = {"stage": "committed", "active": True}
-    assert plus.membership_week("2026-10-18", "2026-10-12", request) == "2026-10-19"
-    assert plus.membership_week("2026-10-15", "2026-10-12", request) == "2026-10-12"
-
-
-def test_choosing_the_stage_a_task_already_shows_removes_no_label():
-    """A Sunday keep resends the commitment; the owner's other horizon labels stay (no implicit removal)."""
-    source = task(labels=["committed", "quarter", "candiate", "office", "waiting"])
-    assert plus.plan_labels(source, {"stage": "committed"}) == ["candiate", "committed", "office", "quarter", "waiting"]
-    assert plus.membership_week("2026-10-18", "2026-10-12", {"stage": "committed"}) == "2026-10-19"
-    assert plus.plan_labels(task(labels=["quarter", "focus"]), {"stage": "quarterly"}) == ["focus", "quarter"]
-    # A stage the labels do not already give still replaces every planning label.
-    assert plus.plan_labels(task(labels=["committed", "quarter"]), {"stage": "weekly"}) == ["focus"]
-    assert plus.plan_labels(task(labels=["quarter", "focus"]), {"stage": "weekly"}) == ["focus"]
-    assert plus.plan_labels(task(labels=["focus", "quick"]), {"stage": "weekly"}) == ["focus", "quick"]
-    # A date-driven weekly candidate has no planning label: choosing weekly pins it with one.
-    assert plus.plan_labels(task(labels=[], due={"date": TODAY}), {"stage": "weekly"}) == ["focus"]
 
 
 def test_display_preserves_candidate_date_rule_and_deduplicates_commitments():
@@ -132,95 +63,22 @@ def test_deadline_is_not_scheduled_date_and_preserves_filter_boundaries():
     assert not plus.task_view(task(deadline={"date": TODAY}, labels=["lead_2w", "waiting"]), TODAY)["must_start"]
     assert plus.task_view(task(deadline={"date": "2026-10-12"}, labels=["waiting"]), TODAY)["must_start"]
     assert plus.task_view(task(deadline={"date": TODAY}), TODAY)["missing_lead"]
-    assert plus.lead_args(task(labels=["lead_1m", "deep"]), TODAY, 7) == {
-        "labels": ["deep", "lead_1w"],
-        "deadline": {"date": TODAY},
-    }
 
 
-def test_todoist_order_fields_are_answered_within_bounds_and_left_out_of_the_etag():
-    view = plus.task_view(task(child_order=3, order_key="a0V"), TODAY)
-    assert (view["child_order"], view["order_key"]) == (3, "a0V")
+def test_the_position_is_answered_within_bounds_and_left_out_of_the_etag():
     for value in (-(2**31), 0, 2**31 - 1):
         assert plus.task_view(task(child_order=value), TODAY)["child_order"] == value
     for value in (None, True, 2**31, -(2**31) - 1, "3", 1.5):
         assert "child_order" not in plus.task_view(task(child_order=value), TODAY)
-    for value in (None, "", "a" * 101, "a-b", "a b", "ключ", 7):
-        assert "order_key" not in plus.task_view(task(order_key=value), TODAY)
-    assert plus.task_view(task(order_key="Z" * 100), TODAY)["order_key"] == "Z" * 100
-    assert plus.task_etag(task(child_order=1, order_key="a")) == plus.task_etag(task(child_order=2, order_key="b"))
-
-
-def step(task_id, order, parent="parent", project="project1", section=None):
-    return {"id": task_id, "child_order": order, "parent_id": parent, "project_id": project, "section_id": section}
-
-
-def test_a_reorder_permutes_the_moved_tasks_siblings_and_never_another_group():
-    a, b, c = step("a", 1), step("b", 4), step("c", 7)
-    other = [step("x", 5, parent="other"), step("y", 2, parent="other")]
-    # c moved first, in a lane that also holds another parent's steps in an order Todoist does not have: only c's
-    # siblings take their own values, smallest first, and the other group keeps its values.
-    assert plus.reorder_items([c, *other, a, b], "c") == [
-        {"id": "c", "child_order": 1},
-        {"id": "a", "child_order": 4},
-        {"id": "b", "child_order": 7},
-    ]
-    assert plus.reorder_items([b, *other, a, c], "b") == [{"id": "b", "child_order": 1}, {"id": "a", "child_order": 4}]
-    assert plus.reorder_items([a, b, c, *other], "x") == [{"id": "x", "child_order": 2}, {"id": "y", "child_order": 5}]
-    # Another section, project or parent is another group, and top-level tasks group by project and section.
-    apart = [step("s", 0, section="section1"), step("p", 0, project="project2"), step("t", 0, parent=None)]
-    assert plus.reorder_items([*apart, c, a, b], "c") == plus.reorder_items([c, a, b], "c")
-    assert plus.reorder_items([*apart, step("u", 9, parent=None)], "u") == []
-    tops = [step("t2", 6, parent=None), step("t1", 3, parent=None)]
-    assert plus.reorder_items(tops, "t2") == [{"id": "t2", "child_order": 3}, {"id": "t1", "child_order": 6}]
-
-
-@pytest.mark.parametrize(
-    ("tasks", "moved"),
-    [
-        pytest.param([step("a", 1), step("b", 2)], "a", id="todoists_order"),
-        pytest.param([step("a", 1)], "a", id="alone"),
-        pytest.param([step("b", 1), step("a", None)], "a", id="missing"),
-        pytest.param([step("b", 1), step("a", 2**31)], "a", id="not_int32"),
-        pytest.param([step("b", 0), step("a", True)], "a", id="a_bool"),
-        pytest.param([step("b", 3), step("a", 3)], "a", id="repeated"),
-        pytest.param([step("b", 2), step("a", 1)], "z", id="not_the_moved_task"),
-    ],
-)
-def test_a_reorder_writes_nothing_when_no_value_can_change(tasks, moved):
-    assert plus.reorder_items(tasks, moved) == []
-
-
-def test_the_order_is_one_item_reorder_command_under_the_request_identity():
-    items = [{"id": "a", "child_order": 1}]
-    assert plus.reorder_command(REQUEST, items) == {
-        "type": "item_reorder",
-        "uuid": plus.command_id(REQUEST),
-        "args": {"items": items},
-    }
-    assert plus.UNTOUCHED_LANES == ("waiting", "parked")
+    assert plus.task_etag(task(child_order=1)) == plus.task_etag(task(child_order=2))
 
 
 def test_estimates_are_optional_and_two_hours_is_not_rejected():
     assert "estimated_minutes" not in plus.task_view(task(), TODAY)
     assert plus.task_view(task(duration={"amount": 180, "unit": "minute"}), TODAY)["estimated_minutes"] == 180
-    assert plus.task_view(task(duration={"amount": 1, "unit": "day"}), TODAY)["estimated_minutes"] == 480
 
 
-def test_mapping_never_fuzzy_matches_or_adopts_duplicate_labels():
-    labels = [{"id": f"id-{role}", "name": role} for role in plus.ROLES]
-    assert not plus.discover(labels, "UTC")["missing_labels"]
-    assert plus.discover([*labels, {"id": "other", "name": "home"}], "UTC")["missing_labels"] == ["home"]
-    assert plus.discover(labels, "UTC")["etag"] != plus.discover(labels, "America/Los_Angeles")["etag"]
-
-
-def test_reset_clears_only_ended_week_marks_and_moves_only_commitments():
-    assert plus.reset_labels(task(labels=["bets", "committed", "office", "lead_1w"]), {"committed": 1, "bet": 1}) == [
-        "focus",
-        "lead_1w",
-        "office",
-    ]
-    assert plus.reset_labels(task(labels=["bets", "candiate"]), {"committed": 0, "bet": 1}) == ["candiate"]
+def test_the_week_starts_on_monday_and_a_row_kept_for_it_has_not_ended():
     assert plus.week_start("2026-10-18") == "2026-10-12"
     assert plus.week_start("2026-10-19") == "2026-10-19"
     db = sqlite3.connect(":memory:")
@@ -237,6 +95,8 @@ def test_only_a_commitment_chosen_on_the_last_day_waits_for_the_next_week():
     # Other stages, an area or a deadline change on Sunday stay in the ending week.
     for request in ({"stage": "weekly"}, {"area": "work"}, {"deadline": sunday, "lead_days": 7}):
         assert plus.membership_week(sunday, week, request) == week
+    # In progress as well, it is still a commitment for the next week.
+    assert plus.membership_week(sunday, week, {"stage": "committed", "active": True}) == "2026-10-19"
     # A commitment made on any other day of the week ends with it.
     for today in ("2026-10-12", "2026-10-14", "2026-10-17"):
         assert plus.membership_week(today, week, {"stage": "committed"}) == week
@@ -331,194 +191,12 @@ def test_only_replaced_filter_queries_are_hidden():
     assert plus.replaced_filters([quick, parked], label_names={"quick", "parked"}) == ["quick", "parked"]
     assert plus.replaced_filters([quick, parked], label_names={"quick", "Parked"}) == ["quick"]
     assert plus.replaced_filters([{"id": "quick-4", "query": "@quick & (no date | 4 days)"}]) == []
-    # The cache's name for this list changes with it (plus_todoist.metadata starts over in full).
-    assert plus.fingerprint(sorted(plus.REPLACED_FILTER_QUERIES)) == plus.REPLACED_QUERIES_VERSION
-
-
-def due_day(due: str, timezone: str) -> str:
-    """The account-local day of a Todoist due date: a fixed-timezone date-time (ending in Z) in the account timezone,
-    a date or a floating date-time as written."""
-    if due.endswith("Z"):
-        return datetime.fromisoformat(due).astimezone(ZoneInfo(timezone)).date().isoformat()
-    return due[:10]
-
-
-def todoist_filter(query: str, task: dict, today: str, timezone: str = TIMEZONE) -> bool:
-    """The subset of Todoist's filter syntax the replaced deadline, waiting, quick and parked views use; `,` lists
-    views. `N days` is read as inclusively as Todoist may mean it: a due day or a deadline on or before the N-th day
-    from today, overdue included."""
-    day = date.fromisoformat(today)
-    deadline = (task.get("deadline") or {}).get("date")
-    due = (task.get("due") or {}).get("date")
-    labels = set(task.get("labels") or [])
-
-    def term(word: str) -> bool:
-        if word.startswith("@"):
-            return word[1:] in labels
-        if word == "nodeadline":
-            return not deadline
-        if word == "nodate":
-            return not due
-        if days := re.fullmatch(r"(\d+)days", word):
-            last = (day + timedelta(days=int(days[1]) - 1)).isoformat()
-            return (bool(due) and due_day(due, timezone) <= last) or (bool(deadline) and deadline <= last)
-        before = re.fullmatch(r"deadlinebefore:(today|in(\d+)days?)", word)
-        if before:
-            bound = day + timedelta(days=int(before[2] or 0))
-            return bool(deadline) and date.fromisoformat(deadline) < bound
-        if word == "deadlineafter:yesterday":
-            return bool(deadline) and date.fromisoformat(deadline) > day - timedelta(days=1)
-        raise AssertionError("unsupported filter term " + word)
-
-    tokens = re.findall(r"[()&|!]|[^()&|!]+", query)
-
-    def either() -> bool:
-        value = both()
-        while tokens and tokens[0] == "|":
-            tokens.pop(0)
-            value = both() | value
-        return value
-
-    def both() -> bool:
-        value = negated()
-        while tokens and tokens[0] == "&":
-            tokens.pop(0)
-            value = negated() & value
-        return value
-
-    def negated() -> bool:
-        token = tokens.pop(0)
-        if token == "!":
-            return not negated()
-        if token == "(":
-            value = either()
-            assert tokens.pop(0) == ")"
-            return value
-        return term(token)
-
-    results = []
-    for view in query.split(","):
-        tokens = re.findall(r"[()&|!]|[^()&|!]+", view)
-        results.append(either())
-        assert not tokens
-    return any(results)
-
-
-def on_review_board(view: dict) -> bool:
-    """Where the extension's Review board shows a task (todoist-plus src/review-lanes.ts), from the API's fields.
-
-    A `parked` task is in Parked while the account has that label (rule 0), else in its lane by the rules below. A
-    `waiting` or `blocked` task is in Waiting and one that must start in Start now, or either in its own stage
-    lane, saying so; the extension's test/review-lanes.test.ts checks those lanes from the same fields. An
-    in-progress task (`active` without `blocked`) was acknowledged and may leave the board.
-    """
-    labels = set(view["labels"])
-    in_progress = "active" in labels and "blocked" not in labels
-    return bool(labels & {"waiting", "blocked", "parked"}) or view["must_start"] or in_progress
-
-
-def in_parked_lane(view: dict) -> bool:
-    """Review's Parked lane, which exists while the account has the label, the only time @parked is hidden."""
-    return "parked" in view["labels"]
-
-
-def quick_visible(view: dict, today: str, timezone: str) -> bool:
-    """Week's Quick tasks (the extension's weekly-review.ts quickTasks), from the API's fields: the literal label
-    `quick`, and no due date, or a due day or a deadline at most two days ahead, overdue included. The extension's
-    test checks quickTasks over the same grid."""
-    last = (date.fromisoformat(today) + timedelta(days=2)).isoformat()
-    due, deadline = view["due"], view["deadline"]
-    return "quick" in view["labels"] and (
-        not due or due_day(due, timezone) <= last or (bool(deadline) and deadline <= last)
-    )
-
-
-def in_weekly_review(view: dict) -> bool:
-    """A deadline without a lead is only the weekly review's start-ahead line (src/weekly-review.ts withoutLead)."""
-    return view["missing_lead"]
-
-
-def day_of(offset: int) -> str:
-    return (date.fromisoformat(TODAY) + timedelta(days=offset)).isoformat()
-
-
-def due_forms(offset: int) -> list[str]:
-    """A due date ``offset`` days from TODAY as Todoist writes it: a date, a floating date-time, and fixed-timezone
-    date-times half an hour after the day's local midnight and half an hour before the next one."""
-    local = datetime.fromisoformat(day_of(offset)).replace(tzinfo=ZoneInfo(TIMEZONE))
-    fixed = [local + timedelta(minutes=30), local + timedelta(hours=23, minutes=30)]
-    return [day_of(offset), day_of(offset) + "T09:00:00"] + [
-        moment.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ") for moment in fixed
-    ]
-
-
-def test_every_task_a_hidden_deadline_waiting_quick_or_parked_filter_shows_is_visible_in_plus():
-    """Consistency gate: a replaced filter is hidden only while Plus shows every task the filter would."""
-    queries = [
-        query
-        for query in plus.REPLACED_FILTER_QUERIES
-        if "deadline" in query or "blocked" in query or query in ("@parked", QUICK)
-    ]
-    # Must start, missing lead, waiting with a deadline (two spellings), all waiting, in progress with a deadline,
-    # parked and quick.
-    assert len(queries) == 8
-    missing_lead = next(query for query in queries if query.startswith("!nodeadline&!@lead_1d"))
-    visible = {
-        missing_lead: in_weekly_review,
-        "@parked": in_parked_lane,
-        QUICK: lambda view: quick_visible(view, TODAY, TIMEZONE),
-    }
-    marks = ["waiting", "blocked", "active", "parked", "quick"]
-
-    def labelled(combination):
-        return [mark for bit, mark in enumerate(marks) if combination >> bit & 1]
-
-    def deadline(offset):
-        return None if offset is None else {"date": day_of(offset)}
-
-    tasks = [
-        task(labels=labelled(combination) + leads, deadline=deadline(offset))
-        for combination in range(1 << len(marks))
-        for leads in ([], *[[role] for role in plus.LEADS], ["lead_1d", "lead_1m"])
-        for offset in (None, -9, -1, 0, 1, 2, 3, 6, 7, 13, 14, 29, 30, 45)
-    ]
-    tasks += [
-        task(labels=labelled(combination), due=due and {"date": due}, deadline=deadline(offset))
-        for combination in range(1 << len(marks))
-        for due in (None, *(form for days in (-2, 0, 2, 3, 8) for form in due_forms(days)))
-        for offset in (None, 0)
-    ]
-    # Half an hour before the local midnight after the window's last day is still in it, though its UTC day is not.
-    assert quick_visible({"labels": ["quick"], "due": due_forms(2)[3], "deadline": ""}, TODAY, TIMEZONE)
-    assert due_forms(2)[3][:10] == day_of(3)
-    assert not quick_visible({"labels": ["quick"], "due": due_forms(3)[2], "deadline": ""}, TODAY, TIMEZONE)
-    for query in queries:
-        shown = [source for source in tasks if todoist_filter(query, source, TODAY)]
-        assert shown, query
-        check = visible.get(query, on_review_board)
-        missing = [source for source in shown if not check(plus.task_view(source, TODAY))]
-        assert missing == [], query
 
 
 def mapping():
     """A setup confirmed before the Bets became text: it still binds the retired bets role."""
     roles = (*plus.ROLES, *plus.LEGACY_ROLES, "quarter")
     return [{"role": role, "id": "id-" + role, "label": "custom-" + role} for role in roles]
-
-
-def test_a_new_setup_needs_no_bets_label_and_a_saved_bets_binding_is_kept_as_saved():
-    labels = [{"id": "id-" + role, "name": role} for role in plus.ROLES]
-    fresh = plus.discover(labels, "UTC")
-    assert not fresh["missing_labels"] and "bets" not in {binding["role"] for binding in fresh["labels"]}
-    # A label named bets is not adopted by a new setup.
-    assert plus.discover([*labels, {"id": "id-bets", "name": "bets"}], "UTC")["labels"] == fresh["labels"]
-    saved = [*fresh["labels"], {"role": "bets", "id": "id-bets", "label": "bets"}]
-    before = plus.discover([*labels, {"id": "id-bets", "name": "bets"}], "UTC", saved)
-    # Renaming or deleting the retired label in Todoist changes neither the binding nor the etag.
-    for current in ([*labels, {"id": "id-bets", "name": "old goals"}], labels):
-        after = plus.discover(current, "UTC", saved)
-        assert after["labels"] == before["labels"] == saved
-        assert after["etag"] == before["etag"] and not after["missing_labels"]
 
 
 def test_the_retired_bets_binding_is_kept_and_its_filter_stays_hidden():
@@ -530,32 +208,7 @@ def test_the_retired_bets_binding_is_kept_and_its_filter_stays_hidden():
     assert plus.replaced_filters(bets, current[:2]) == ["bets-filter"]
 
 
-def test_saved_legacy_mapping_keeps_its_identity_when_optional_quarter_appears():
-    labels = [{"id": "id-" + role, "name": role} for role in plus.ROLES]
-    old = plus.discover(labels, "UTC")
-    actual = plus.discover([*labels, {"id": "quarter-id", "name": "quarter"}], "UTC", old["labels"])
-    assert actual["etag"] == old["etag"]
-    assert actual["labels"] == old["labels"]
-    assert not actual["missing_labels"]
-    assert {"id": "quarter-id", "label": "quarter"} in actual["available_labels"]
-
-
-def test_saved_ids_detect_rename_and_do_not_adopt_a_new_same_name_label():
-    labels = [{"id": "id-" + role, "name": role} for role in plus.ROLES]
-    saved = plus.discover(labels, "UTC")
-    renamed = [{**label, "name": "new-commit"} if label["name"] == "committed" else label for label in labels]
-    actual = plus.discover([*renamed, {"id": "other-id", "name": "committed"}], "UTC", saved["labels"])
-    assert actual["etag"] != saved["etag"]
-    assert next(label for label in actual["labels"] if label["role"] == "committed") == {
-        "role": "committed",
-        "id": "id-committed",
-        "label": "new-commit",
-    }
-    missing = plus.discover([label for label in renamed if label["id"] != "id-committed"], "UTC", saved["labels"])
-    assert missing["missing_labels"] == ["committed"]
-
-
-def test_configured_names_drive_stages_areas_bets_leads_and_preserve_other_labels():
+def test_configured_names_drive_stages_areas_bets_and_leads():
     bindings = mapping()
     source = task(
         labels=["custom-quarter", "custom-office", "custom-bets", "custom-lead_1w", "deep"],
@@ -565,37 +218,8 @@ def test_configured_names_drive_stages_areas_bets_leads_and_preserve_other_label
     view = plus.task_view(source, TODAY, bindings)
     assert view["stage"] == "quarterly" and view["area"] == "work" and view["bet"]
     assert view["lead_days"] == 7 and view["must_start"]
-    assert plus.plan_labels(source, {"stage": "weekly"}, bindings) == [
-        "custom-bets",
-        "custom-focus",
-        "custom-lead_1w",
-        "custom-office",
-        "deep",
-    ]
-    assert plus.lead_args(source, TODAY, 14, bindings)["labels"] == [
-        "custom-bets",
-        "custom-lead_2w",
-        "custom-office",
-        "custom-quarter",
-        "deep",
-    ]
     assert source["due"] == {"date": TODAY}
     assert source["labels"] == ["custom-quarter", "custom-office", "custom-bets", "custom-lead_1w", "deep"]
-
-
-def test_configured_week_reset_keeps_quarter_and_uses_the_bound_commitment_names():
-    bindings = mapping()
-    assert plus.reset_labels(
-        task(labels=["custom-quarter", "custom-bets", "deep"]), {"committed": 0, "bet": 1}, bindings
-    ) == [
-        "custom-quarter",
-        "deep",
-    ]
-    assert plus.reset_labels(
-        task(labels=["custom-committed", "custom-candiate", "custom-bets", "deep"]),
-        {"committed": 1, "bet": 1},
-        bindings,
-    ) == ["custom-focus", "deep"]
 
 
 def test_bets_do_not_enter_the_date_candidate_fallback_without_an_explicit_stage():

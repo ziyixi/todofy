@@ -1,25 +1,12 @@
-"""The Mailbox's pure rules: core/mailbox.py (the brief, the categories) and the Todoist adapter's part of it in
-core/plus.py (membership and labels). Synthetic text only."""
+"""Mail's pure rules: core/mailbox.py (the brief, the categories). Synthetic text only."""
 
 import sqlite3
 from pathlib import Path
 
 import pytest
 
-from todofy.core import mailbox, plus
+from todofy.core import mailbox
 from todofy.core.mailbox import Category, MailSettings, brief_of, replace_categories
-
-MAPPING = [
-    {"role": "office", "id": "1", "label": "office"},
-    {"role": "home", "id": "2", "label": "home"},
-    {"role": "committed", "id": "3", "label": "committed"},
-    {"role": "focus", "id": "4", "label": "focus"},
-    {"role": "candiate", "id": "5", "label": "candiate"},
-    {"role": "quarter", "id": "6", "label": "quarter"},
-    {"role": "lead_1w", "id": "7", "label": "lead_1w"},
-    {"role": "bets", "id": "8", "label": "bets"},
-]
-
 
 # ---- the brief ------------------------------------------------------------------------------------------------
 
@@ -131,41 +118,6 @@ def test_the_settings_etag_follows_ids_labels_priorities_order_and_destination_o
         MailSettings(),
     ]
     assert len({base.etag, *(settings.etag for settings in changed)}) == 6
-
-
-# ---- the Todoist adapter --------------------------------------------------------------------------------------
-
-
-def view(**fields):
-    task = {"id": "t", "content": "Synthetic mail", "project_id": "mail", "labels": [], **fields}
-    return plus.task_view(task, "2026-10-16", MAPPING)
-
-
-@pytest.mark.parametrize(
-    ("fields", "member"),
-    [
-        pytest.param({}, True, id="plain"),
-        pytest.param({"labels": ["office", "context"]}, True, id="area_and_other_labels"),
-        pytest.param({"project_id": "other"}, False, id="another_project"),
-        pytest.param({"parent_id": "p"}, False, id="sub_task"),
-        pytest.param({"labels": ["focus"]}, False, id="planned"),
-        pytest.param({"due": {"date": "2026-10-17"}}, False, id="date_driven_candidate"),
-        pytest.param({"labels": ["quick"]}, False, id="quick"),
-        pytest.param({"labels": ["waiting"]}, False, id="waiting"),
-        pytest.param({"labels": ["onhold"]}, False, id="someday"),
-    ],
-)
-def test_a_task_is_in_the_mailbox_as_the_extension_lists_it(fields, member):
-    assert plus.in_mailbox(view(**fields), "mail") is member
-    assert not plus.in_mailbox(view(), "")
-
-
-def test_a_category_label_is_any_but_the_ones_plus_writes_by_other_means():
-    allowed = {"1": True, "2": True, "3": False, "4": False, "5": False, "6": False, "7": False, "8": False}
-    for label_id, expected in allowed.items():
-        assert plus.mail_label({"id": label_id, "label": "x"}, MAPPING) is expected, label_id
-    assert plus.mail_label({"id": "20", "label": "deep"}, MAPPING)
-    assert not plus.mail_label({"id": "21", "label": "active"}, MAPPING)
 
 
 def test_task_text_limit_preserves_whole_non_bmp_characters():

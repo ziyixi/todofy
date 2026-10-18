@@ -31,16 +31,6 @@ SUMMARY_EMAIL = (
     "\tThe email content you are to summarize is as follows:"
 )
 
-# The one-time brief backfill (runtime/mail_briefs.py): one sentence for a mail summarised before SUMMARY_EMAIL
-# asked for it, from its stored subject and summary (fenced as untrusted, like every model input).
-BRIEF_EMAIL = (
-    "Below is the subject and the summary of an email I received. Write one plain sentence of at most 40 Chinese "
-    "characters, saying what this email is and what it asks of me, if anything.\n"
-    "\n"
-    "IMPORTANT: Reply with that one sentence only: no markdown, greeting, quotes or line breaks.\n"
-    "IMPORTANT: Please use chinese as response language.\n"
-)
-
 SUMMARY_RANGE = (
     "Below is all of emails I received today and summarized "
     "by previous gemini API call. Please rank them in order (ranked by importance you think), summary "

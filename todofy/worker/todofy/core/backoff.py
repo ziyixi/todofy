@@ -1,7 +1,6 @@
-"""Retry timing: durable row backoff, in-call Todoist retries, Retry-After and time budgets.
+"""Retry timing: durable row backoff, Retry-After and time budgets.
 
-Durable backoff and the summary give-up rule come from mail_inbox_worker.go:75-105;
-the in-call Todoist policy from todo/internal/todoist/client.go and utils/retry.go
+Durable backoff and the summary give-up rule come from mail_inbox_worker.go:75-105
 (@ 6c46ed4); the budgets from the v2 plan §5.3-§5.4. All values are seconds.
 """
 
@@ -25,15 +24,11 @@ WATCHDOG = 2 * MINUTE
 REMINDER_CHECK_INTERVAL = 10 * MINUTE
 REMINDER_RETRY_DELAY = HOUR
 REMINDER_MAX_ATTEMPTS = 5
-TODOIST_AUTH_BLOCK = 6 * HOUR
 
 GEMINI_MODEL_TIMEOUT = 60
 GEMINI_STEP_BUDGET = 90
-TODOIST_ATTEMPT_TIMEOUT = 14
-TODOIST_MAX_ATTEMPTS = 3
-TODOIST_STEP_BUDGET = 45
-TODOIST_INLINE_BASE = 0.25
-TODOIST_INLINE_MAX = 2.0
+# One Tasks create (runtime/native_tasks.create_task) may take this long.
+TASK_STEP_BUDGET = 45
 LOOKUP_PAGE_TIMEOUT = 20
 LOOKUP_MAX_PAGES = 10
 REPORT_ON_DEMAND_BUDGET = 40
@@ -64,12 +59,6 @@ def summary_gives_up(attempts: int, code: str, age: float) -> bool:
     if code == Code.LLM_BUDGET_EXHAUSTED or attempts < SUMMARY_GIVE_UP_ATTEMPTS:
         return False
     return code not in _TRANSIENT_SUMMARY_CODES or age >= SUMMARY_RETRY_WINDOW
-
-
-def inline_delay(attempt: int, retry_after: float = 0.0) -> float:
-    """Pause before in-call Todoist attempt ``attempt + 1`` (``attempt`` is 1-based)."""
-    delay = retry_after if retry_after > 0 else TODOIST_INLINE_BASE * 2 ** (attempt - 1)
-    return min(delay, TODOIST_INLINE_MAX)
 
 
 def parse_retry_after(value: str | None, now: datetime) -> float:

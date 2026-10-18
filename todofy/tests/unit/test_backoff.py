@@ -5,7 +5,6 @@ import pytest
 from todofy.core import backoff
 from todofy.core.backoff import (
     DAY,
-    inline_delay,
     parse_retry_after,
     postpone_delay,
     retry_delay,
@@ -58,15 +57,6 @@ def test_postpone_honours_retry_after_within_a_day():
 
 
 @pytest.mark.parametrize(
-    ("attempt", "retry_after", "delay"),
-    [(1, 0, 0.25), (2, 0, 0.5), (3, 0, 1.0), (5, 0, 2.0), (1, 1.5, 1.5), (1, 30, 2.0)],
-)
-def test_inline_todoist_retry_delay(attempt, retry_after, delay):
-    """Go: utils.Retry with the Todoist client's RetryConfig (250 ms base, 2 s cap)."""
-    assert inline_delay(attempt, retry_after) == delay
-
-
-@pytest.mark.parametrize(
     ("header", "seconds"),
     [
         (None, 0),
@@ -92,6 +82,6 @@ def test_retry_after_seconds_and_http_dates(header, seconds):
 
 def test_budgets_are_the_v2_values():
     assert (backoff.GEMINI_MODEL_TIMEOUT, backoff.GEMINI_STEP_BUDGET) == (60, 90)
-    assert (backoff.TODOIST_ATTEMPT_TIMEOUT, backoff.TODOIST_MAX_ATTEMPTS, backoff.TODOIST_STEP_BUDGET) == (14, 3, 45)
+    assert backoff.TASK_STEP_BUDGET == 45
     assert (backoff.REMINDER_RETRY_DELAY, backoff.REMINDER_MAX_ATTEMPTS) == (3600, 5)
     assert backoff.SUMMARY_RETRY_WINDOW == 7 * DAY

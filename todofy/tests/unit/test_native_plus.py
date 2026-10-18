@@ -63,7 +63,7 @@ def stack(monkeypatch):
         storage.sql.exec(native_plus.SCHEMA)
         source = NativeStore(journal)
         core = types.SimpleNamespace(
-            env=types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=source),
+            env=types.SimpleNamespace(TASKS=source),
             sql=storage.sql,
             ctx=types.SimpleNamespace(storage=storage),
         )
@@ -71,7 +71,16 @@ def stack(monkeypatch):
 
 
 def update(**fields):
-    return {"type": "item_update", "uuid": str(uuid.uuid4()), "args": {"id": "a", **fields}, "_native_etag": "1"}
+    """A frozen UpdateTask of task a from etag 1."""
+    return {
+        "method": "UpdateTask",
+        "body": {
+            "task": {"name": "tasks/a", **fields},
+            "etag": "1",
+            "update_mask": ",".join(fields),
+            "request_id": str(uuid.uuid4()),
+        },
+    }
 
 
 def test_direct_native_request_replays_frozen_body_after_a_lost_response(stack):
@@ -117,13 +126,13 @@ def test_stale_pending_state_stops_before_its_task_content_write(stack):
 
 def test_lost_response_replays_exact_frozen_etag_after_another_edit(stack):
     native, errors, core, store, journal = stack
-    command = update(labels=["work"])
+    command = update(title="Synthetic work")
     store.lost = True
     with pytest.raises(errors.NativeTasksError):
-        asyncio.run(native.resume(core, [command]))
+        asyncio.run(native.commands(core, [command]))
     assert journal.index("storage.sync") < journal.index("native.call", journal.index("storage.sync"))
     store.revision = "3"  # an unrelated task edit after the first write landed
-    asyncio.run(native.resume(core, [command]))
+    asyncio.run(native.commands(core, [command]))
     assert store.applied == 1
     assert store.sent[0] == store.sent[1]
     saved = core.sql.exec("SELECT body,finished FROM native_task_requests").toArray()[0]
@@ -134,68 +143,42 @@ def test_concurrent_edit_is_rejected_without_freshening_the_original_etag(stack)
     native, errors, core, store, _ = stack
     store.revision = "2"
     with pytest.raises(errors.NativeTasksError) as failure:
-        asyncio.run(native.resume(core, [update(deadline={"date": "2026-11-01"})]))
+        asyncio.run(native.commands(core, [update(deadline="2026-11-01")]))
     assert failure.value.status == 409
     assert store.applied == 0
     assert store.sent[0][1]["etag"] == "1"
 
 
-def test_mail_filing_updates_labels_priority_and_project_in_one_native_request(stack):
-    native, _, core, store, _ = stack
-    command = update(labels=["work"], priority=3)
-    move = {
-        "type": "item_move",
-        "uuid": str(uuid.uuid4()),
-        "args": {"id": "a", "project_id": "inbox"},
-        "_native_etag": "1",
-    }
-    asyncio.run(native.resume(core, [command, move]))
-    assert store.applied == 1
-    method, body = store.sent[0]
-    assert method == "UpdateTask"
-    assert body["etag"] == "1"
-    assert body["task"] == {
-        "name": "tasks/a",
-        "label_ids": ["work-label"],
-        "priority": 2,
-        "project_id": "inbox",
-    }
-    assert body["task"].get("parent_id", "") == ""
-    assert body["task"].get("section_id", "") == ""
-    assert set(body["update_mask"].split(",")) == {"label_ids", "priority", "project_id", "parent_id", "section_id"}
-
-
-def test_step_replay_keeps_new_identity_and_skips_a_confirmed_native_call(stack):
+def test_step_replay_keeps_its_identity_and_skips_a_confirmed_native_call(stack):
     native, _, core, store, _ = stack
     task_id = str(uuid.uuid4())
     command = {
-        "type": "item_add",
-        "uuid": str(uuid.uuid4()),
-        "temp_id": task_id,
-        "args": {
-            "content": "Synthetic small step",
-            "project_id": "inbox",
-            "parent_id": "parent",
-            "duration": {"amount": 45, "unit": "minute"},
+        "method": "CreateTask",
+        "body": {
+            "task": {"title": "Synthetic small step", "parent_id": "parent", "kind": "step", "duration_minutes": 45},
+            "task_id": task_id,
+            "request_id": str(uuid.uuid4()),
         },
     }
-    assert asyncio.run(native.resume(core, [command])) == {"temp_id_mapping": {task_id: task_id}}
-    assert asyncio.run(native.resume(core, [command])) == {"temp_id_mapping": {task_id: task_id}}
+    assert asyncio.run(native.commands(core, [command])) == {"task_ids": [task_id]}
+    assert asyncio.run(native.commands(core, [command])) == {"task_ids": [task_id]}
     assert store.applied == 1 and len(store.sent) == 1
 
 
-def test_oversized_operation_and_old_receipt_stop_before_any_write(stack):
+def test_oversized_batches_and_sync_envelopes_stop_before_any_write(stack):
     native, errors, core, store, _ = stack
-    with pytest.raises(errors.NativeTasksError):
-        asyncio.run(native.resume(core, [update(deadline=None) for _ in range(201)]))
-    old = update(deadline=None)
-    del old["_native_etag"]
-    with pytest.raises(errors.NativeTasksError):
-        asyncio.run(native.resume(core, [old]))
+    with pytest.raises(errors.NativeTasksError) as oversized:
+        asyncio.run(native.commands(core, [update(deadline="") for _ in range(201)]))
+    # A receipt started while Todoist was still a store holds Sync commands: refused, never converted.
+    envelope = {"type": "item_update", "uuid": str(uuid.uuid4()), "args": {"id": "a"}, "_native_etag": "1"}
+    with pytest.raises(errors.NativeTasksError) as legacy:
+        asyncio.run(native.commands(core, [update(deadline=""), envelope]))
+    assert oversized.value.status == legacy.value.status == 400
     assert not store.sent
+    assert core.sql.exec("SELECT count(*) AS n FROM native_task_requests").toArray()[0].n == 0
 
 
-def test_native_owner_entrypoint_refuses_partial_source_deploy_before_dispatch(monkeypatch):
+def test_the_planning_entrypoint_needs_the_tasks_binding_before_dispatch(monkeypatch):
     import sys
 
     with stubbed_pyodide(monkeypatch):
@@ -211,14 +194,10 @@ def test_native_owner_entrypoint_refuses_partial_source_deploy_before_dispatch(m
             return {"ok": "{}"}
 
         monkeypatch.setattr(plus_api, "handle", handled)
-        for env in (
-            types.SimpleNamespace(TASK_SOURCE="todoist", TASKS=object()),
-            types.SimpleNamespace(TASK_SOURCE="tasks"),
-        ):
-            core = types.SimpleNamespace(env=env)
-            assert asyncio.run(TodofyCore.plus_native_ui(core, "CompleteTask", "{}")) == {"error": "UNAVAILABLE"}
+        core = types.SimpleNamespace(env=types.SimpleNamespace())
+        assert asyncio.run(TodofyCore.plus_native_ui(core, "CompleteTask", "{}")) == {"error": "UNAVAILABLE"}
         assert not calls
-        core = types.SimpleNamespace(env=types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=object()))
+        core = types.SimpleNamespace(env=types.SimpleNamespace(TASKS=object()))
         assert asyncio.run(TodofyCore.plus_native_ui(core, "ReadPlan", "{}")) == {"ok": "{}"}
         assert calls == [("ReadPlan", "{}")]
 
@@ -258,7 +237,7 @@ def test_native_completion_page_counts_only_the_window_and_preserves_project_and
             }
 
         monkeypatch.setattr(native_tasks, "call", completions)
-        env = types.SimpleNamespace(TASK_SOURCE="tasks", TODOIST_DEFAULT_PROJECT_ID="retired-mail-project", DB=D1())
+        env = types.SimpleNamespace(DB=D1())
         state = gtd.State()
         state.started = now
         state.tally = rules.CompletedTally().dumps()

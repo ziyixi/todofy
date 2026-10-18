@@ -368,9 +368,8 @@ def after_create(
     *,
     backoff_base: float,
     lookup_at: int,
-    blocked_until: int,
 ) -> tuple[Task, bool]:
-    """The task after one create call (classify.final_task_verdict), and whether the step stops.
+    """The task after one create call (classify.classify_task_create), and whether the step stops.
 
     A call that may have created the task is never resent from here: it goes to the lookup.
     """
@@ -386,9 +385,6 @@ def after_create(
             return replace(done, attempts=task.attempts + 1), False
         case TaskResult.UNKNOWN:
             return interrupted(task, lookup_at), False
-        case TaskResult.BLOCKED:
-            # 401/403: the existing 6 h Todoist block holds every Todoist call, this one included.
-            return replace(task, state=TaskState.PENDING, next_attempt_at=blocked_until, error_code=NO_CODE), True
     if code == Code.TODOIST_REJECTED:
         return failed(task, ErrorCode.TODOIST_REJECTED), False
     attempts = task.attempts + 1
@@ -578,9 +574,7 @@ def result(
 Pause = tuple[ErrorCode, int]
 
 
-def pause(
-    *, maintenance: bool, processing_paused: bool, force_pause: bool, blocked_until: int, backup_active: bool, now: int
-) -> Pause | None:
+def pause(*, maintenance: bool, processing_paused: bool, force_pause: bool, backup_active: bool) -> Pause | None:
     """Why Todofy holds intents now, first reason first, with when to ask again; None when it does not."""
     if maintenance:
         return ErrorCode.MAINTENANCE, PAUSE_RETRY[ErrorCode.MAINTENANCE]
@@ -588,8 +582,6 @@ def pause(
         return ErrorCode.PROCESSING_PAUSED, PAUSE_RETRY[ErrorCode.PROCESSING_PAUSED]
     if force_pause:
         return ErrorCode.TODOIST_PAUSED, PAUSE_RETRY[ErrorCode.TODOIST_PAUSED]
-    if blocked_until > now:
-        return ErrorCode.TODOIST_BLOCKED, blocked_until - now
     if backup_active:
         return ErrorCode.BACKUP_ACTIVE, PAUSE_RETRY[ErrorCode.BACKUP_ACTIVE]
     return None

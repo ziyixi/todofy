@@ -5,7 +5,7 @@ stored row only when it was computed since the latest precompute time and is
 usable (``ok`` or ``empty_window``); otherwise the coordinator computes one
 within 40 s, under its hourly computation cap, and answers 503 when that
 fails. The recommendation's input is the 24 h window plus the carryover: older
-mail tasks the day's Todoist snapshot still lists as open (docs/gtd-features.md
+mail tasks the day's Tasks snapshot still lists as open (docs/gtd-features.md
 §3); without that snapshot, after a failed attempt that day, or when the token
 budget cannot take the carried lines, it is exactly the 24 h report. The newsletter
 reads only the HTTP status, so an old or unusable report is never sent as a 200.
@@ -100,7 +100,7 @@ async def compute(env: Any, coordinator: Any, kind: str, top_n: int, now: int, b
     window = await env.DB.prepare(sql.REPORT_WINDOW.sql).bind(start, now, MAX_WINDOW_SUMMARIES).all()
     new = [row.summary for row in window.results]
     stamps = {"computed_at": _stamp(now), "window_start": _stamp(start), "window_end": _stamp(now)}
-    # The recommendation also sees older mail tasks still open in Todoist (never the summary report).
+    # The recommendation also sees older mail tasks still open in Tasks (never the summary report).
     # After a failed attempt today (Gemini error or unusable answer), every later attempt is exactly
     # the 24 h report, so the carryover can cost the brief at most one attempt.
     carried: list[str] = []
@@ -260,7 +260,7 @@ async def latest(db: Any) -> dict:
 
 async def carryover(env: Any, window_start: int, now: int) -> list[str]:
     """Mail tasks from the REPORT_CARRYOVER_DAYS before the 24 h window that the latest scheduled
-    Todoist snapshot still lists as open: at most CARRYOVER_MAX_ROWS, spread over the days they
+    Tasks snapshot still lists as open: at most CARRYOVER_MAX_ROWS, spread over the days they
     arrived (core.gtd.pick_carried), each ``[N 天前] summary`` cut to CARRYOVER_LINE_BYTES, newest first.
 
     Empty (and the recommendation exactly the 24 h report) unless the snapshot of the latest

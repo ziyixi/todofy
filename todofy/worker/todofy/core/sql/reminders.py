@@ -28,8 +28,8 @@ OPS_CARRIED = Query(
     "SELECT count(*) AS n FROM mail_reminders WHERE day >= ? AND day < ? AND ops_generated_at = ?",
     "sqlite_autoindex_mail_reminders_1",
 )
-# Claims the day before Todoist is called; ops_count is the number of ops items the body lists,
-# ops_generated_at the listed report's generated_at (epoch ms, 0 for none) and project_id the Todoist
+# Claims the day before Tasks is called; ops_count is the number of ops items the body lists,
+# ops_generated_at the listed report's generated_at (epoch ms, 0 for none) and project_id the Tasks
 # project the task goes to (frozen, like the text, for every retry of the day).
 CLAIM_DAY = Query(
     "INSERT INTO mail_reminders"

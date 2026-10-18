@@ -1,4 +1,4 @@
-"""D1 statements of the Mailbox (runtime/plus_mail.py, runtime/mail_briefs.py; docs/planning-api.md, "Mail").
+"""D1 statements of Mail (runtime/plus_mail.py; docs/planning-api.md, "Mail").
 
 Native entries are pending summaries, indexed by created_at and event_id. A task link is optional until explicit
 conversion. List pages return only the brief and its 600-character fallback; full text is read for one chosen
@@ -8,7 +8,6 @@ entry's detail or conversion.
 from ..mailbox import BRIEF_SOURCE_CHARS
 from . import Query
 
-_MAIL = "s.task_id = j.value AND s.task_id <> '' AND s.imported = 0"
 NATIVE_PENDING = "imported = 0 AND triaged_at IS NULL"
 
 NATIVE_ITEMS = Query(
@@ -39,19 +38,3 @@ EXISTING_EVENTS = Query(
 )
 
 SUMMARY = Query("SELECT summary FROM summaries WHERE event_id = ?", "sqlite_autoindex_summaries_1")
-
-# The one-time brief backfill: the mail among the bound tasks whose brief was never derived.
-UNBRIEFED = Query(
-    f"SELECT s.event_id FROM json_each(?) AS j JOIN summaries AS s ON {_MAIL}"
-    " WHERE s.brief IS NULL AND s.summary <> ''",
-    "summaries_task",
-)
-# What the model reads for one brief: the subject and the summary's first 4,000 characters.
-BRIEF_INPUT = Query(
-    "SELECT subject, substr(summary, 1, 4000) AS summary, brief FROM summaries WHERE event_id = ?",
-    "sqlite_autoindex_summaries_1",
-)
-# Never over a brief already there: the backfill's answer loses to one stored meanwhile.
-SAVE_BRIEF = Query(
-    "UPDATE summaries SET brief = ? WHERE event_id = ? AND brief IS NULL", "sqlite_autoindex_summaries_1"
-)

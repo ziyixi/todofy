@@ -1,17 +1,17 @@
 """task-intent-v1 inside TodofyCore (contracts/task-intent-v1; core/intents.py has the rules).
 
-Another app in the account (today the watch app) proposes Todoist tasks through the gateway's ``Intents``
-entrypoint; Todofy stays the only Todoist writer. A source the contract no longer knows (its enum value is reserved)
+Another app in the account (today the watch app) proposes tasks through the gateway's ``Intents``
+entrypoint; Todofy writes them to Tasks. A source the contract no longer knows (its enum value is reserved)
 is refused like any unknown one; a pending ledger row of such a source no longer reads as an intent, so its next
 step marks it failed (``todoist_rejected``) and nothing more is sent; retention removes it like any other row.
 
 - ``propose``: replay an intent already recorded (same hash; a failed one is re-queued), else
   refuse it (source, URL, a pause, the daily limit) or record it with its task rows in one D1
-  batch and wake the alarm. Never calls Gemini or Todoist.
+  batch and wake the alarm. Never calls Gemini or Tasks.
 - ``status``: one primary-key read.
 - ``step``: one unit of alarm work on the oldest due intent: at most one read-only footer lookup
-  and ``STEP_CREATES`` creates through the existing Todoist client, each gated like mail by
-  ``_todoist_wait`` (force pause, auth block, the 15-minute window) and counted in that window.
+  and ``STEP_CREATES`` creates through runtime/native_tasks.py, each gated like mail by the force pause
+  (``task_writes_wait``).
 
 D1 budget of a step: two reads, two writes per create (``sending``, then the outcome), one per
 lookup and one for the intent: at most 17 statements, under the 50 a Workers Free invocation may
@@ -25,16 +25,15 @@ from dataclasses import replace
 from typing import Any
 
 from todofy.core import intents as rules
-from todofy.core.backoff import LOOKUP_MAX_PAGES, TODOIST_AUTH_BLOCK, TODOIST_MAX_ATTEMPTS, TODOIST_STEP_BUDGET
-from todofy.core.classify import TaskResult
+from todofy.core.backoff import TASK_STEP_BUDGET
 from todofy.core.intents import ErrorCode, IntentState, Task, TaskState, code_name
 from todofy.core.metrics import Step, StepPoint
 from todofy.core.ops import InvalidInput
 from todofy.core.sql import intents as sql
 from todofy.core.todoist_request import RequestTooLarge, build_task_request
 from todofy.deployment import WATCH_HOST
-from todofy.runtime import metrics, native_tasks, todoist
-from todofy.runtime.config import csv, var
+from todofy.runtime import metrics, native_tasks
+from todofy.runtime.config import csv
 from todofy.runtime.interop import now_ms, now_s
 
 
@@ -154,7 +153,7 @@ async def next_wake_at(db: Any) -> int | None:
 
 
 class _Step:
-    """One step on one intent; ``core`` is the TodofyCore (budgets, watchdog, Todoist gate)."""
+    """One step on one intent; ``core`` is the TodofyCore (budgets, watchdog, task-write gate)."""
 
     def __init__(self, env: Any, core: Any, row: Any) -> None:
         self.env, self.core, self.db = env, core, env.DB
@@ -206,7 +205,7 @@ class _Step:
             action = rules.next_action(
                 value.mode, ordered, now_s(), lookups_left=lookups, creates_left=creates, acted=acted
             )
-            if action is None or self.core.todoist_wait(now_s()) is not None:
+            if action is None or self.core.task_writes_wait(now_s()) is not None:
                 break
             kind, n = action
             if kind == "lookup":
@@ -226,14 +225,8 @@ class _Step:
         parent = tasks[0].todoist_id if value.mode == "subtasks" and task.n > 0 else None
         try:
             # A child's body exists only once its parent's ID is known; it is the same on every attempt.
-            request = build_task_request(
-                content,
-                description,
-                "" if native_tasks.enabled(env) else var(env, "TODOIST_DEFAULT_PROJECT_ID"),
-                task.request_id,
-                var(env, "TODOIST_API_KEY"),
-                parent_id=parent or "",
-            )
+            # The Tasks Inbox, or the parent's project for a subtask.
+            request = build_task_request(content, description, "", task.request_id, parent_id=parent or "")
         except RequestTooLarge:
             after = rules.failed(task, ErrorCode.TODOIST_REJECTED)
             await self._write(task, after)
@@ -247,14 +240,10 @@ class _Step:
             return task, True  # changed underneath: leave it to the next step
         sending = replace(task, state=TaskState.SENDING)
         await core.arm_watchdog()
-        core.count_todoist_calls(TODOIST_MAX_ATTEMPTS, now_s())
         started = now_ms()
-        result = await todoist.create_task(env, request, budget_ms=TODOIST_STEP_BUDGET * 1000)
+        result = await native_tasks.create_task(env, request, budget_ms=TASK_STEP_BUDGET * 1000)
         point = metrics.task_point(Step.INTENT, result, now_ms() - started)
         verdict, done = result.verdict, now_s()
-        blocked_until = done + TODOIST_AUTH_BLOCK
-        if verdict.result is TaskResult.BLOCKED:
-            core.block_todoist(done)  # sets done + TODOIST_AUTH_BLOCK, as blocked_until
         after, stop = rules.after_create(
             sending,
             verdict.result,
@@ -264,7 +253,6 @@ class _Step:
             done,
             backoff_base=core.backoff_base(),
             lookup_at=self._lookup_at(),
-            blocked_until=blocked_until,
         )
         await self._write(sending, after)
         # After the commit: the task already exists, and only the ledger may say so first.
@@ -282,9 +270,8 @@ class _Step:
     async def _lookup(self, task: Task) -> Task:
         footer = rules.footer(self.row.source, self.row.intent_id, task.n)
         await self.core.arm_watchdog()
-        self.core.count_todoist_calls(LOOKUP_MAX_PAGES, now_s())
         started = now_ms()
-        found = await todoist.find_tasks(
+        found = await native_tasks.find_tasks(
             self.env, lambda description: rules.has_footer(description, footer), query=footer
         )
         after = rules.after_lookup(task, found, now_s(), backoff_base=self.core.backoff_base())
@@ -329,5 +316,5 @@ class _Step:
 
 
 async def step(env: Any, core: Any, row: Any) -> None:
-    """One unit of work on ``row`` (from ``next_due``); Todoist was open when it was picked."""
+    """One unit of work on ``row`` (from ``next_due``); task writes were open when it was picked."""
     await _Step(env, core, row).run()

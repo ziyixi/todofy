@@ -173,8 +173,6 @@ def test_carryover_candidates_are_older_open_mail_and_the_picks_are_read_by_id(d
     assert set(picked) == set(order) and len(picked["long"]) == gtd.CARRYOVER_READ_CHARS
     # Unused places are bound to '' and match nothing.
     assert list(db.execute(report_sql.CARRYOVER_SUMMARIES.sql, (10, "edge", *[""] * 29))) != []
-    count = db.execute(sql.MAIL_OPEN.sql, (NOW - 14 * DAY, NOW - DAY, TODAY)).fetchone()[0]
-    assert count == 1 + 37 + 1  # the edge, e3..e39 and long; not today's, closed, taskless or too old
 
 
 def test_only_the_latest_scheduled_snapshot_serves_the_carryover(db):

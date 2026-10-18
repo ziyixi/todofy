@@ -28,8 +28,6 @@
       "gemini_reserved_tokens": 0,
       "gemini_token_budget": 3000000,
       "gemini_calls": 64,
-      "todoist_window_calls": 3,
-      "todoist_window_limit": 1000,
       "intents_pending": 0,
       "intents_failed_7d": 0,
       "backup_age_seconds": 363600,
@@ -153,8 +151,6 @@
       "gemini_reserved_tokens": 12000,
       "gemini_token_budget": 3000000,
       "gemini_calls": 64,
-      "todoist_window_calls": 3,
-      "todoist_window_limit": 1000,
       "intents_pending": 1,
       "intents_failed_7d": 2,
       "backup_age_seconds": 792000,
@@ -209,13 +205,6 @@
         "metrics": {}
       },
       {
-        "code": "todoist_blocked",
-        "severity": "critical",
-        "metrics": {
-          "seconds_left": 600
-        }
-      },
-      {
         "code": "processing_paused",
         "severity": "warning",
         "metrics": {}
@@ -245,8 +234,6 @@
       "gemini_reserved_tokens": 0,
       "gemini_token_budget": 3000000,
       "gemini_calls": 64,
-      "todoist_window_calls": 3,
-      "todoist_window_limit": 1000,
       "intents_pending": 0,
       "intents_failed_7d": 0
     },
@@ -305,8 +292,6 @@
       "gemini_reserved_tokens": 0,
       "gemini_token_budget": 0,
       "gemini_calls": 64,
-      "todoist_window_calls": 3,
-      "todoist_window_limit": 1000,
       "intents_pending": 0,
       "intents_failed_7d": 0,
       "inbox_open": 23,

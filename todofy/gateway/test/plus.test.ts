@@ -48,7 +48,7 @@ function withFocus(env: Env, fetch: (request: Request) => Response | Promise<Res
 
 describe('Native Tasks planning transport', () => {
   it('reaches the core for exactly the methods Tasks calls and refuses every other PlusService method', async () => {
-    const { env, core } = fakes({ TASK_SOURCE: 'tasks' }, call => uiOk(call.args[0] === 'ReadPlan' ? { plan: {} } : {}));
+    const { env, core } = fakes({}, call => uiOk(call.args[0] === 'ReadPlan' ? { plan: {} } : {}));
     const client = planningClient(env) as unknown as Record<string, (input: object) => Promise<unknown>>;
     const native = PlusService.methods.filter(method => method.localName in NATIVE_CALLS);
     expect(native).toHaveLength(Object.keys(NATIVE_CALLS).length);
@@ -61,7 +61,7 @@ describe('Native Tasks planning transport', () => {
     expect(core).toHaveLength(native.length);
   });
   it('answers a retired method path with NOT_FOUND before reading its body', async () => {
-    const { env, core } = fakes({ TASK_SOURCE: 'tasks' }, () => uiOk({}));
+    const { env, core } = fakes({}, () => uiOk({}));
     const response = await nativePlanning(new Request('https://planning.internal/api/plus/v1/mailItems:deleteMailItems', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: 'not json',
     }), env);
@@ -76,7 +76,7 @@ describe('Native Tasks planning transport', () => {
     expect(core.map(call => call.method)).toEqual(['plus_native_ui']);
   });
   it('routes native mail actions without legacy task or destination placeholders', async () => {
-    const { env, core } = fakes({ TASK_SOURCE: 'tasks' }, () => uiOk({}));
+    const { env, core } = fakes({}, () => uiOk({}));
     const actions = [
       ['mailItems:convertMailItem', 'ConvertMailItem', { event_id: 'event-one', etag: 'shown' }],
       ['mailItems:deleteSummaries', 'DeleteMailSummaries', { event_ids: ['event-one'] }],
@@ -99,7 +99,7 @@ describe('Native Tasks planning transport', () => {
   it('settles only the descendant proven by a successful native completion replay', async () => {
     let frozen: string | null = null;
     const settlements: Record<string, unknown>[] = [];
-    const { env, core } = fakes({ TASK_SOURCE: 'tasks' }, call => {
+    const { env, core } = fakes({}, call => {
       if (call.method === 'plus_native_ui') return uiOk({ task_id: 'parent' });
       if (call.method === 'plus_focus_claim') { frozen ??= call.args[1] as string | null; return frozen; }
       throw Error('unexpected core operation');

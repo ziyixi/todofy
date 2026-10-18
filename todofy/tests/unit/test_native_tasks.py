@@ -1,4 +1,4 @@
-"""Native task adapters preserve existing event identities without any Todoist request."""
+"""The Tasks adapters keep the existing event identities; synthetic tasks only."""
 
 import asyncio
 import json
@@ -62,27 +62,19 @@ class Service:
 @pytest.fixture
 def runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     with stubbed_pyodide(monkeypatch):
-        from todofy.runtime import native_tasks, todoist
+        from todofy.runtime import native_tasks
 
-        async def forbid_fetch(*_args: Any, **_kwargs: Any) -> None:
-            pytest.fail("Native Tasks must not contact Todoist")
-
-        monkeypatch.setattr(todoist, "fetch_with_timeout", forbid_fetch)
-        yield types.SimpleNamespace(native=native_tasks, todoist=todoist)
+        yield types.SimpleNamespace(native=native_tasks)
 
 
 def test_create_keeps_frozen_body_and_reuses_one_native_request_identity(runtime):
     service = Service()
-    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service)
+    env = types.SimpleNamespace(TASKS=service)
     original = build_task_request(
-        "Synthetic title",
-        f"Synthetic body\n{FOOTER_PREFIX}{EVENT}",
-        "project-one",
-        "todofy-frozen-mail-key",
-        "old-token",
+        "Synthetic title", f"Synthetic body\n{FOOTER_PREFIX}{EVENT}", "project-one", "todofy-frozen-mail-key"
     )
-    first = asyncio.run(runtime.todoist.create_task(env, original, budget_ms=1000))
-    second = asyncio.run(runtime.todoist.create_task(env, original, budget_ms=1000))
+    first = asyncio.run(runtime.native.create_task(env, original, budget_ms=1000))
+    second = asyncio.run(runtime.native.create_task(env, original, budget_ms=1000))
     assert first.verdict.result == second.verdict.result == TaskResult.CREATED
     assert first.task_id == second.task_id == "native-one"
     assert first.attempts == second.attempts == 1
@@ -97,17 +89,14 @@ def test_create_keeps_frozen_body_and_reuses_one_native_request_identity(runtime
     assert uuid.UUID(sent["request_id"]).version == 5
     assert original.headers["X-Request-Id"] == "todofy-frozen-mail-key"
     assert json.loads(original.body)["content"] == "Synthetic title"
-    assert "old-token" not in json.dumps(service.calls)
 
 
 def test_existing_uuid_and_parent_identity_are_not_replaced(runtime):
     service = Service()
-    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service)
+    env = types.SimpleNamespace(TASKS=service)
     identity = str(uuid.uuid5(uuid.NAMESPACE_URL, "synthetic-intent"))
-    request = build_task_request(
-        "Child", "Synthetic", "ignored-project", identity, "old-token", parent_id="native-parent"
-    )
-    asyncio.run(runtime.todoist.create_task(env, request, budget_ms=1000))
+    request = build_task_request("Child", "Synthetic", "ignored-project", identity, parent_id="native-parent")
+    asyncio.run(runtime.native.create_task(env, request, budget_ms=1000))
     _, sent = service.calls[0]
     assert sent["request_id"] == identity
     assert sent["task"]["parent_id"] == "native-parent"
@@ -117,7 +106,7 @@ def test_existing_uuid_and_parent_identity_are_not_replaced(runtime):
 def test_native_delete_acknowledges_generated_empty_response_without_repeating_the_write(runtime):
     service = Service()
     service.body = "{}"
-    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service)
+    env = types.SimpleNamespace(TASKS=service)
     body = {"name": "tasks/native-one", "etag": "3", "request_id": str(uuid.uuid4())}
     assert asyncio.run(runtime.native.call(env, "DeleteTask", body)) == {}
     assert len(service.calls) == 1
@@ -140,21 +129,29 @@ def test_uncertain_native_writes_never_fall_back_or_become_safe_retries(runtime,
             await asyncio.sleep(1)
 
         service.call = slow_call
-    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service)
-    request = build_task_request("Synthetic", "Synthetic", "", "todofy-stable", "unused")
-    result = asyncio.run(runtime.todoist.create_task(env, request, budget_ms=10))
+    env = types.SimpleNamespace(TASKS=service)
+    request = build_task_request("Synthetic", "Synthetic", "", "todofy-stable")
+    result = asyncio.run(runtime.native.create_task(env, request, budget_ms=10))
     assert result.verdict.result == TaskResult.UNKNOWN
     assert result.task_id == ""
     assert result.attempts == 1
 
 
-def test_absent_binding_does_not_attempt_todoist(runtime):
-    request = build_task_request("Synthetic", "Synthetic", "", "todofy-stable", "unused")
-    result = asyncio.run(
-        runtime.todoist.create_task(types.SimpleNamespace(TASK_SOURCE="tasks"), request, budget_ms=1000)
-    )
+def test_an_absent_binding_sends_nothing_and_retries_later(runtime):
+    request = build_task_request("Synthetic", "Synthetic", "", "todofy-stable")
+    result = asyncio.run(runtime.native.create_task(types.SimpleNamespace(), request, budget_ms=1000))
     assert result.verdict.result == TaskResult.RETRY_LATER
     assert result.attempts == 0
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_refused_binding_is_an_outage_retried_later(runtime, status):
+    service = Service()
+    service.status, service.body = status, "{}"
+    request = build_task_request("Synthetic", "Synthetic", "", "todofy-stable")
+    result = asyncio.run(runtime.native.create_task(types.SimpleNamespace(TASKS=service), request, budget_ms=1000))
+    assert (result.verdict.result, result.verdict.code) == (TaskResult.RETRY_LATER, "todoist_unavailable")
+    assert result.attempts == 1
 
 
 def test_footer_search_reads_complete_descriptions_and_verifies_original_predicate(runtime):
@@ -167,8 +164,8 @@ def test_footer_search_reads_complete_descriptions_and_verifies_original_predica
             ]
         }
     ]
-    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service, TODOIST_DEFAULT_PROJECT_ID="project-one", DB=D1())
-    assert asyncio.run(runtime.todoist.find_footer_tasks(env, EVENT)) == ["match"]
+    env = types.SimpleNamespace(TASKS=service, TODOIST_DEFAULT_PROJECT_ID="project-one", DB=D1())
+    assert asyncio.run(runtime.native.find_footer_tasks(env, EVENT)) == ["match"]
     assert service.calls[0] == ("GetCatalog", {"name": "catalog", "include_task_counts": False})
     method, request = service.calls[1]
     assert method == "ListTasks"
@@ -180,8 +177,8 @@ def test_footer_search_reads_complete_descriptions_and_verifies_original_predica
 def test_incomplete_native_scan_cannot_claim_no_matching_task(runtime):
     service = Service()
     service.pages = [{"next_page_token": str(i)} for i in range(1, 11)]
-    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service)
-    assert asyncio.run(runtime.todoist.find_tasks(env, lambda _description: False)) is None
+    env = types.SimpleNamespace(TASKS=service)
+    assert asyncio.run(runtime.native.find_tasks(env, lambda _description: False)) is None
     assert len(service.calls) == 11
 
 
@@ -213,7 +210,7 @@ def test_planning_page_reuses_one_metadata_read_and_refreshes_it_for_the_next_re
 
     service = Service()
     service.pages = [{"tasks": [native_row("first")]}, {"tasks": [native_row("second")]}]
-    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service, DB=D1())
+    env = types.SimpleNamespace(TASKS=service, DB=D1())
     core = types.SimpleNamespace(env=env, plus_lock=asyncio.Lock())
     monkeypatch.setattr(plus_api, "account_day", lambda _timezone: "2026-10-17")
     for task_id in ("first", "second"):
@@ -238,7 +235,7 @@ def test_a_planning_page_of_two_hundred_reads_two_task_pages_with_one_catalog(ru
     first = [native_row(f"first-{index}") for index in range(100)]
     second = [native_row(f"second-{index}") for index in range(60)]
     service.pages = [{"tasks": first, "next_page_token": "after-first"}, {"tasks": second}]
-    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service, DB=D1())
+    env = types.SimpleNamespace(TASKS=service, DB=D1())
     core = types.SimpleNamespace(env=env, plus_lock=asyncio.Lock())
     monkeypatch.setattr(plus_api, "account_day", lambda _timezone: "2026-10-17")
     answer = asyncio.run(plus_api.handle(core, "ListPlanningTasks", json.dumps({"page_size": 200})))
@@ -256,7 +253,7 @@ def test_a_planning_write_reads_the_tasks_catalog_once(runtime, monkeypatch):
     from todofy.runtime import plus_api, plus_receipts
 
     service = Service()
-    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service, DB=D1())
+    env = types.SimpleNamespace(TASKS=service, DB=D1())
     storage = Storage([])
     for statement in plus_receipts.DO_SCHEMA:
         storage.sql.exec(statement)
@@ -293,16 +290,16 @@ def test_a_planning_write_reads_the_tasks_catalog_once(runtime, monkeypatch):
     ],
 )
 def test_tasks_error_reasons_reach_plan_and_mail(runtime, status, tasks_reason, plus_reason):
-    from todofy.runtime import plus_todoist
+    from todofy.runtime import plus_tasks
 
     service = Service()
     service.status = status
     details = [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": tasks_reason}] if tasks_reason else []
     service.body = json.dumps({"error": {"code": status, "message": "Synthetic", "details": details}})
-    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service)
+    env = types.SimpleNamespace(TASKS=service)
     with pytest.raises(runtime.native.NativeTasksError) as failure:
         asyncio.run(runtime.native.call(env, "GetTask", {"name": "tasks/native-one"}))
     assert failure.value.reason == tasks_reason
-    with pytest.raises(plus_todoist.PlusError) as mapped:
-        asyncio.run(plus_todoist._native(runtime.native.call(env, "GetTask", {"name": "tasks/native-one"})))
+    with pytest.raises(plus_tasks.PlusError) as mapped:
+        asyncio.run(plus_tasks.native(runtime.native.call(env, "GetTask", {"name": "tasks/native-one"})))
     assert mapped.value.reason == plus_reason

@@ -16,9 +16,8 @@ from todofy.core.gtd import rfc3339
 from todofy.core.mailbox import MailSettings
 from todofy.core.render import FOOTER_PREFIX, NO_SUBJECT
 from todofy.core.sql import mailbox as sql
-from todofy.runtime import native_plus, native_tasks, plan_store
+from todofy.runtime import plan_store, plus_tasks
 from todofy.runtime import plus_receipts as receipts
-from todofy.runtime import plus_todoist as todoist
 from todofy.runtime.config import source_id, var
 from todofy.runtime.interop import now_s
 
@@ -27,50 +26,41 @@ PRIORITIES = {"p1": 1, "p2": 2, "p3": 3, "p4": 4}
 WIRE_PRIORITIES = {value: name for name, value in PRIORITIES.items()}
 
 
-def _ref(external_id: str, provider: str = "todoist") -> dict[str, str]:
-    return {"provider": provider, "external_id": external_id}
+def _ref(external_id: str) -> dict[str, str]:
+    return {"provider": plus_tasks.PROVIDER, "external_id": external_id}
 
 
-def _todoist_id(ref: dict[str, Any] | None, provider: str = "todoist") -> str:
-    if not ref or ref.get("provider") != provider:
-        raise todoist.PlusError("BAD_REQUEST")
+def _task_id(ref: dict[str, Any] | None) -> str:
+    if not ref or ref.get("provider") != plus_tasks.PROVIDER:
+        raise plus_tasks.PlusError("BAD_REQUEST")
     return plus.check_id(ref.get("external_id", ""))
 
 
-def _task_ids(request: dict[str, Any], *, least: int = 0) -> list[str]:
-    ids = request.get("task_ids", [])
-    if not least <= len(ids) <= MAX_TASKS or len(set(ids)) != len(ids):
-        raise todoist.PlusError("BAD_REQUEST")
-    return [plus.check_id(task_id) for task_id in ids]
+def _event_ids(request: dict[str, Any]) -> list[str]:
+    ids = request.get("event_ids", [])
+    if not 1 <= len(ids) <= MAX_TASKS or len(set(ids)) != len(ids):
+        raise plus_tasks.PlusError("BAD_REQUEST")
+    return [plus.check_id(event_id) for event_id in ids]
 
 
-def _settings_answer(settings: MailSettings, provider: str = "todoist") -> dict[str, Any]:
-    answer: dict[str, Any] = {
+def _settings_answer(settings: MailSettings) -> dict[str, Any]:
+    return {
         "categories": [
-            {
-                "id": str(category.id),
-                "label": _ref(category.label_id, provider),
-                "priority": WIRE_PRIORITIES[category.priority],
-            }
+            {"id": str(category.id), "label": _ref(category.label_id), "priority": WIRE_PRIORITIES[category.priority]}
             for category in settings.categories
         ],
         "etag": settings.etag,
     }
-    if settings.destination and provider != "tasks":
-        answer["destination"] = _ref(settings.destination, provider)
-    return answer
 
 
 # ---- reads ----------------------------------------------------------------------------------------------------
 
 
 async def list_items(core: Any, request: dict[str, Any]) -> dict[str, Any]:
-    """Native Mail is a bounded summary page; reading it never requires a Tasks snapshot."""
-    if not native_tasks.enabled(core.env):
-        raise todoist.PlusError("ACTION_NOT_ALLOWED")
+    """Mail is a bounded summary page; reading it never requires a Tasks snapshot."""
     size = request.get("page_size", 0) or 25
     if not 1 <= size <= 50:
-        raise todoist.PlusError("BAD_REQUEST")
+        raise plus_tasks.PlusError("BAD_REQUEST")
     at, last = mailbox.page_cursor(request.get("page_token", ""))
     db = core.env.DB
     page, *saved = await db.batch(
@@ -91,9 +81,9 @@ async def list_items(core: Any, request: dict[str, Any]) -> dict[str, Any]:
             "has_summary": bool(row["has_summary"]),
         }
         if row["task_id"]:
-            item["task"] = _ref(row["task_id"], "tasks")
+            item["task"] = _ref(row["task_id"])
         items.append(item)
-    settings = _settings_answer(plan_store.mail_settings_of(*saved), "tasks")
+    settings = _settings_answer(plan_store.mail_settings_of(*saved))
     return {
         "mail_items": items,
         "categories": settings["categories"],
@@ -110,71 +100,64 @@ async def read_summary(core: Any, request: dict[str, Any]) -> dict[str, Any]:
 
 async def read_settings(core: Any) -> dict[str, Any]:
     """ReadMailSettings: the categories and their etag, from D1 alone."""
-    return _settings_answer(await plan_store.mail_settings(core.env.DB), todoist.provider(core))
+    return _settings_answer(await plan_store.mail_settings(core.env.DB))
 
 
 # ---- writes ---------------------------------------------------------------------------------------------------
 
 
-async def update_settings(core: Any, request: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+async def update_categories(core: Any, request: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
     """UpdateMailCategories: the whole set in one D1 batch, by etag; the saved categories sent again are a replay.
 
-    Each label must still exist. Native categories may use every ordinary label; the legacy adapter excludes its
-    planning-label workarounds. The legacy destination is stored but ignored; native clients need not send it."""
+    Each label must still exist; every ordinary label may be a category. The destination saved before Tasks was the
+    only store stays as it is: nothing reads it, and a request need not send one."""
     db = core.env.DB
     requested = []
     for category in request.get("categories", []):
         priority = PRIORITIES.get(category.get("priority", ""))
         if priority is None:
-            raise todoist.PlusError("BAD_REQUEST")
-        requested.append((_todoist_id(category.get("label"), todoist.provider(core)), priority))
+            raise plus_tasks.PlusError("BAD_REQUEST")
+        requested.append((_task_id(category.get("label")), priority))
+    if request.get("destination"):
+        _task_id(request["destination"])
     settings = await plan_store.mail_settings(db)
-    native = native_tasks.enabled(core.env)
-    destination = settings.destination if native else _todoist_id(request.get("destination"), todoist.provider(core))
-    if native and request.get("destination"):
-        _todoist_id(request["destination"], "tasks")
     if [(c.label_id, c.priority) for c in settings.categories] == requested:
-        return _settings_answer(settings, todoist.provider(core))
+        return _settings_answer(settings)
     if request.get("etag") != settings.etag:
-        raise todoist.PlusError("ETAG_MISMATCH")
+        raise plus_tasks.PlusError("ETAG_MISMATCH")
     labels = {label["id"]: label for label in current["available_labels"]}
-    if any(
-        label_id not in labels or (not native and not plus.mail_label(labels[label_id], current["labels"]))
-        for label_id, _ in requested
-    ):
-        raise todoist.PlusError("ACTION_NOT_ALLOWED")
+    if any(label_id not in labels for label_id, _ in requested):
+        raise plus_tasks.PlusError("ACTION_NOT_ALLOWED")
     saved, archived = mailbox.replace_categories(
         list(settings.categories),
         [(label_id, labels[label_id]["label"], priority) for label_id, priority in requested],
         await plan_store.next_category_id(db),
     )
-    updated = MailSettings(tuple(saved), destination)
+    updated = MailSettings(tuple(saved), settings.destination)
     await plan_store.save_mail_settings(db, settings, updated, archived, now_s())
-    return _settings_answer(updated, todoist.provider(core))
+    return _settings_answer(updated)
 
 
 async def _category(core: Any, request: dict[str, Any], current: dict[str, Any]) -> tuple[str, int] | None:
-    native = native_tasks.enabled(core.env)
-    if request.get("category_id"):
-        settings = await plan_store.mail_settings(core.env.DB)
-        if request.get("categories_etag") != settings.etag:
-            raise todoist.PlusError("ETAG_MISMATCH")
-        category = next((c for c in settings.categories if str(c.id) == request["category_id"]), None)
-        if category is None:
-            raise todoist.PlusError("BAD_REQUEST")
-        label = next((label for label in current["available_labels"] if label["id"] == category.label_id), None)
-        if label is None or (not native and not plus.mail_label(label, current["labels"])):
-            # Todoist would create a label for a name it does not know; Plus never creates one.
-            raise todoist.PlusError("ACTION_NOT_ALLOWED")
-        return category.label_id if native else label["label"], category.priority
-    return None
+    """The label ID and priority of the category a conversion files with, if any."""
+    if not request.get("category_id"):
+        return None
+    settings = await plan_store.mail_settings(core.env.DB)
+    if request.get("categories_etag") != settings.etag:
+        raise plus_tasks.PlusError("ETAG_MISMATCH")
+    category = next((c for c in settings.categories if str(c.id) == request["category_id"]), None)
+    if category is None:
+        raise plus_tasks.PlusError("BAD_REQUEST")
+    if not any(label["id"] == category.label_id for label in current["available_labels"]):
+        raise plus_tasks.PlusError("ACTION_NOT_ALLOWED")
+    return category.label_id, category.priority
 
 
 async def _open_linked_task(core: Any, task_id: str) -> dict[str, Any] | None:
     """The task an older Mail row links to while it is still open; None once it was deleted or completed."""
     try:
-        task = await todoist.task(core, task_id)
-    except todoist.PlusError as error:
+        task = await plus_tasks.task(core, task_id)
+    except plus_tasks.PlusError as error:
         if error.reason == "NOT_FOUND":
             return None
         raise
@@ -183,29 +166,27 @@ async def _open_linked_task(core: Any, task_id: str) -> dict[str, Any] | None:
 
 async def convert(core: Any, request: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
     """ConvertMailItem: create the first generic Inbox task on owner action; then consume the Mail entry."""
-    if not native_tasks.enabled(core.env):
-        raise todoist.PlusError("BAD_REQUEST")
     event_id, request_id = plus.check_id(request["event_id"]), request["request_id"]
     digest = plus.fingerprint(["ConvertMailItem", request])
     previous = await receipts.find(core, request_id)
     if previous is not None and previous.request_hash != digest:
-        raise todoist.PlusError("BAD_REQUEST")
+        raise plus_tasks.PlusError("BAD_REQUEST")
     if previous is not None and previous.result is not None:
-        task = await todoist.task(core, previous.result["task_id"])
+        task = await plus_tasks.task(core, previous.result["task_id"])
         return {"task": plus.task_view(task, current["today"], current["labels"])}
     if previous is None:
         saved = await core.env.DB.prepare(sql.NATIVE_ITEM.sql).bind(event_id).first()
         if saved is None:
-            raise todoist.PlusError("NOT_FOUND")
+            raise plus_tasks.PlusError("NOT_FOUND")
         row = dict(saved)
         if request.get("etag") != mailbox.item_etag(row):
-            raise todoist.PlusError("ETAG_MISMATCH")
+            raise plus_tasks.PlusError("ETAG_MISMATCH")
         filed = await _category(core, request, current)
         # A linked task the owner deleted or completed is not moved back: the mail becomes a new Inbox task.
         task = await _open_linked_task(core, row["task_id"]) if row["task_id"] else None
         if task is not None:
             if task.get("parent_id"):
-                raise todoist.PlusError("ACTION_NOT_ALLOWED")
+                raise plus_tasks.PlusError("ACTION_NOT_ALLOWED")
             fields: dict[str, Any] = {"project_id": "", "section_id": "", "parent_id": ""}
             if filed:
                 fields.update(label_ids=list(dict.fromkeys([*task["_native_label_ids"], filed[0]])), priority=filed[1])
@@ -242,7 +223,7 @@ async def convert(core: Any, request: dict[str, Any], current: dict[str, Any]) -
         await receipts.start(core, request_id, "ConvertMailItem", digest, commands)
     else:
         commands = previous.commands
-    result = await todoist._native(native_plus.commands(core, commands))
+    result = await plus_tasks.commands(core, commands)
     task_id = result["task_ids"][0]
     await (
         core.env.DB.prepare(sql.TRIAGE.sql)
@@ -250,20 +231,18 @@ async def convert(core: Any, request: dict[str, Any], current: dict[str, Any]) -
         .run()
     )
     receipts.finish(core.sql, request_id, {"task_id": task_id})
-    task = await todoist.task(core, task_id)
+    task = await plus_tasks.task(core, task_id)
     return {"task": plus.task_view(task, current["today"], current["labels"])}
 
 
 async def delete_summaries(core: Any, request: dict[str, Any]) -> dict[str, Any]:
     """DeleteMailSummaries: delete pending summaries, preserving the event ledger and every generic Tasks resource."""
-    if not native_tasks.enabled(core.env):
-        raise todoist.PlusError("BAD_REQUEST")
-    ids = _task_ids({"task_ids": request["event_ids"]}, least=1)
+    ids = _event_ids(request)
     request_id = request["request_id"]
     digest = plus.fingerprint(["DeleteMailSummaries", request])
     previous = await receipts.find(core, request_id)
     if previous is not None and previous.request_hash != digest:
-        raise todoist.PlusError("BAD_REQUEST")
+        raise plus_tasks.PlusError("BAD_REQUEST")
     if previous is not None and previous.result is not None:
         kept = {ids[index] for index in previous.result["kept_events"]}
     else:

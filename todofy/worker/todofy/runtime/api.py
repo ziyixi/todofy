@@ -199,7 +199,7 @@ async def overview_data(env: Any, coordinator: Any) -> dict[str, Any]:
             db.prepare(views.OLDEST_DUE.sql).bind(now),
         ]
     )
-    # next_alarm_at and the Gemini/Todoist budgets live in the coordinator's storage, in API shape.
+    # next_alarm_at and the Gemini budget live in the coordinator's storage, in API shape.
     budgets = await coordinator.budgets()
     latest_reminders, _ = await reminder.page(db, None, 1)
     per_state = {row["state"]: row["n"] for row in counts.results}
@@ -220,7 +220,6 @@ async def overview_data(env: Any, coordinator: Any) -> dict[str, Any]:
         "next_alarm_at": budgets["next_alarm_at"],
         "oldest_due_at": None if oldest_due is None else timestamp(oldest_due),
         "gemini": budgets["gemini"],
-        "todoist": budgets["todoist"],
         "backup": backup.overview(env, coordinator.sql, now),
     }
 
@@ -368,7 +367,6 @@ def setup(env: Any) -> dict[str, Any]:
         "mail_source_id": source_id(env),
         "configured": {
             "gemini_api_key": bool(var(env, "GEMINI_API_KEY")),
-            "todoist_api_key": bool(var(env, "TODOIST_API_KEY")),
             "todoist_project": bool(var(env, "TODOIST_DEFAULT_PROJECT_ID")),
         },
     }

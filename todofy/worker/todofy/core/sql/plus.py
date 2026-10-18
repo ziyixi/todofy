@@ -1,20 +1,7 @@
-"""Bounded Todoist Plus state, never a second copy of Todoist tasks."""
+"""The planning settings and the weekly membership in D1, never a copy of the tasks."""
 
 SETTINGS = "SELECT * FROM plus_settings WHERE id = 1"
-SAVE_SETTINGS = (
-    "INSERT INTO plus_settings(id,mapping,timezone,week_start,enabled) VALUES(1,?,?,?,1) "
-    "ON CONFLICT(id) DO UPDATE SET mapping=excluded.mapping,timezone=excluded.timezone,"
-    "week_start=excluded.week_start,enabled=1"
-)
 ADVANCE_WEEK = "UPDATE plus_settings SET week_start=? WHERE id=1"
-# The receipts the releases before runtime/plus_receipts.py wrote, read-only and by primary key, for request IDs
-# of its window (created_at >= ?). Nothing writes plus_actions any more.
-LEGACY_ACTION = "SELECT request_hash,commands,response FROM plus_actions WHERE request_id=? AND created_at>=?"
-# A CompleteTask receipt and the FlowDay settlement frozen for it ('focus:' + its request ID).
-LEGACY_COMPLETION = (
-    "SELECT request_id,request_hash,commands,response,created_at FROM plus_actions "
-    "WHERE request_id IN (?,?) AND created_at>=?"
-)
 # Only tasks with a mark are remembered. The marks follow the latest page scan or write, but a row never moves
 # back to an older week, so a choice recorded for the next week on Sunday survives that day's scans and later
 # writes, which remember the task under the ending week.

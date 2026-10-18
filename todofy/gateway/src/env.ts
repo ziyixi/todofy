@@ -12,8 +12,6 @@ export interface Env {
   readonly TODOFY_HOOKS_HOSTS?: string;
   readonly BUILD_SHA?: string;
   readonly MAINTENANCE_MODE?: string;
-  /** Explicit coordinated task-store cutover; absent keeps Todoist. */
-  readonly TASK_SOURCE?: string;
   readonly TASKS_PUBLIC_URL?: string;
   readonly ACCESS_ISSUER?: string;
   readonly ACCESS_AUDIENCE?: string;

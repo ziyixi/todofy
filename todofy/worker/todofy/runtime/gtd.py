@@ -2,13 +2,13 @@
 
 Two jobs run from the coordinator's alarm loop, each on its own time in the object's storage:
 
-- ``collect``: once a UTC day at GTD_COLLECT_UTC (13:00), a read-only snapshot of the active Todoist
-  tasks (``GET /api/v1/tasks``, at most 10 pages of 200), the 7-day completed list
-  (``GET /api/v1/tasks/completed/by_completion_date``, at most 5 pages) and the day's aggregates. At
-  most CALLS_PER_ALARM Todoist GETs per invocation; a longer run continues a second later from the
-  cursor kept here. A failed attempt is retried in 10 minutes, at most three times a day.
-- ``review``: on Sunday from 17:00 UTC, one Todoist task per ISO week that holds counts, trends and
-  links only. Claimed in D1 before the POST with its text and project frozen, exactly like the daily
+- ``collect``: once a UTC day at GTD_COLLECT_UTC (13:00), a read-only snapshot of the open tasks in
+  Tasks (ListTasks, at most 20 pages of 100), the 7-day completions (ListCompletions, at most 10 pages)
+  and the day's aggregates. At most CALLS_PER_ALARM Tasks reads per invocation; a longer run continues
+  a second later from the cursor kept here. A failed attempt is retried in 10 minutes, at most three
+  times a day.
+- ``review``: on Sunday from 17:00 UTC, one Tasks task per ISO week that holds counts, trends and
+  links only. Claimed in D1 before the create with its text and project frozen, exactly like the daily
   reminder: ``unknown`` is never resent, ``failed`` is retried hourly up to five times that week.
 
 Task text never outlives a page: core.gtd keeps a metadata whitelist and a keyed hash (the key is
@@ -22,27 +22,25 @@ import secrets
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from typing import Any
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlsplit
 
 from todofy.core import gtd as rules
 from todofy.core import ops as ops_rules
-from todofy.core.backoff import DAY, REMINDER_CHECK_INTERVAL, TODOIST_MAX_ATTEMPTS, TODOIST_STEP_BUDGET
-from todofy.core.classify import HttpOutcome, TaskResult, TaskVerdict
+from todofy.core.backoff import DAY, REMINDER_CHECK_INTERVAL, TASK_STEP_BUDGET
+from todofy.core.classify import TaskResult, TaskVerdict
 from todofy.core.gtd import GtdCode, Scope, SnapshotStatus
 from todofy.core.metrics import Step, StepPoint
 from todofy.core.request_id import todoist_request_id
 from todofy.core.sql import gtd as sql
 from todofy.core.sql import plus as plus_sql
 from todofy.core.sql import reminders as reminder_sql
-from todofy.core.todoist_request import TASKS_PATH, build_task_request, parse_task_page
+from todofy.core.todoist_request import build_task_request
 from todofy.core.vocab import ATTENTION_AGE_SECONDS, ReminderState
-from todofy.runtime import metrics, native_tasks, ops, todoist
-from todofy.runtime.config import flag, integer, source_id, var
-from todofy.runtime.interop import fetch_with_timeout, now_ms
+from todofy.runtime import metrics, native_tasks, ops
+from todofy.runtime.config import flag, source_id, var
+from todofy.runtime.interop import now_ms
 
 DO_SCHEMA = ("CREATE TABLE IF NOT EXISTS gtd_state (id INTEGER PRIMARY KEY CHECK (id = 1), doc TEXT NOT NULL)",)
-COMPLETED_PATH = "/api/v1/tasks/completed/by_completion_date"
-PAGE_TIMEOUT_MS = 20_000
 CONTINUE = 1
 IDLE, TASKS, COMPLETED, AGGREGATE = "idle", "tasks", "completed", "aggregate"
 # Created reviews this many weeks back are watched for their completion.
@@ -120,7 +118,7 @@ def release(store: Any, now: int) -> None:
 
 
 def _log(**fields: Any) -> None:
-    # States, codes and counts only: never task text or Todoist bodies.
+    # States, codes and counts only: never task text or Tasks answers.
     print(json.dumps({"gtd": fields}))
 
 
@@ -128,7 +126,7 @@ def _collect_offset(env: Any) -> int | None:
     return rules.utc_offset(var(env, "GTD_COLLECT_UTC", rules.DEFAULT_COLLECT_UTC))
 
 
-def _todoist_paused(env: Any) -> bool:
+def _paused(env: Any) -> bool:
     return flag(env, "PROCESSING_PAUSED") or flag(env, "FORCE_PAUSE_TODOIST")
 
 
@@ -136,7 +134,7 @@ def facts(env: Any, store: Any) -> rules.GtdFacts:
     """What ops status() needs, from the object's storage only."""
     state = load(store)
     return rules.GtdFacts(
-        collect_enabled=_collect_offset(env) is not None and not _todoist_paused(env),
+        collect_enabled=_collect_offset(env) is not None and not _paused(env),
         review_enabled=flag(env, "GTD_REVIEW_ENABLED"),
         last_ok_at=state.last_ok_at,
         first_attempt_at=state.first_attempt_at,
@@ -167,32 +165,9 @@ def _key(state: State) -> bytes:
     return bytes.fromhex(state.hmac_key)
 
 
-def _base(env: Any) -> str:
-    return var(env, "TODOIST_API_BASE", todoist.DEFAULT_API_BASE).rstrip("/")
-
-
-async def _get(env: Any, coordinator: Any, path: str, query: dict[str, Any], now: int) -> Any:
-    coordinator.count_todoist_calls(1, now)
-    return await fetch_with_timeout(
-        f"{_base(env)}{path}?{urlencode(query)}",
-        # Test configs shorten it (like the other *_MS knobs); production uses the constant.
-        timeout_ms=integer(env, "GTD_PAGE_TIMEOUT_MS", PAGE_TIMEOUT_MS),
-        method="GET",
-        headers={"Authorization": f"Bearer {var(env, 'TODOIST_API_KEY')}"},
-    )
-
-
 def _point(code: str, started_ms: int) -> StepPoint:
     """One Analytics Engine point per snapshot page: outcome, code and latency only."""
     return StepPoint(Step.GTD, "failed" if code else "ok", code=code, upstream_ms=now_ms() - started_ms)
-
-
-def _failure(status: int | None) -> GtdCode:
-    if status in (401, 403):
-        return GtdCode.TODOIST_AUTH_BLOCKED
-    if status == 429:
-        return GtdCode.TODOIST_RATE_LIMITED
-    return GtdCode.TODOIST_UNAVAILABLE
 
 
 async def _collect(env: Any, coordinator: Any, state: State, now: int) -> State:
@@ -205,7 +180,7 @@ async def _collect(env: Any, coordinator: Any, state: State, now: int) -> State:
         # A collection that did not finish on its own day is given up; today's starts fresh.
         await _finish_failed(env, state, GtdCode.INTERRUPTED, now, rules.next_collect(now, offset))
     if state.phase == IDLE:
-        if _todoist_paused(env):
+        if _paused(env):
             state.next_collect = now + rules.COLLECT_RETRY
             return state
         attempts = state.attempts if state.day == today else 0
@@ -216,9 +191,6 @@ async def _collect(env: Any, coordinator: Any, state: State, now: int) -> State:
             state.next_collect, state.held = held, True
             return state
         state.held = False
-        if (wait := coordinator.todoist_wait(now)) is not None:
-            state.next_collect = wait or now + rules.COLLECT_RETRY
-            return state
         db = env.DB
         await db.batch(
             [
@@ -239,10 +211,9 @@ async def _collect(env: Any, coordinator: Any, state: State, now: int) -> State:
             if calls >= rules.CALLS_PER_ALARM:
                 state.next_collect = now + CONTINUE
                 return state
-            wait = coordinator.todoist_wait(now)
-            if wait is not None or _todoist_paused(env):
-                # Paused or blocked mid-way: pick up from the cursor later the same day.
-                state.next_collect = wait or now + rules.COLLECT_RETRY
+            if _paused(env):
+                # Paused mid-way: pick up from the cursor later the same day.
+                state.next_collect = now + rules.COLLECT_RETRY
                 return state
             calls += 1
         if state.phase == TASKS:
@@ -255,40 +226,20 @@ async def _collect(env: Any, coordinator: Any, state: State, now: int) -> State:
 
 
 async def _inbox_project(env: Any) -> str:
-    if not native_tasks.enabled(env):
-        return var(env, "TODOIST_DEFAULT_PROJECT_ID")
     catalog = await native_tasks.catalog(env)
     return next((project["id"] for project in catalog.get("projects", []) if project.get("inbox")), "")
 
 
 async def _task_page(env: Any, coordinator: Any, state: State, now: int, offset: int) -> None:
-    query: dict[str, Any] = {"limit": rules.PAGE_SIZE}
-    if state.cursor:
-        query["cursor"] = state.cursor
     started = now_ms()
-    code = ""
-    if native_tasks.enabled(env):
-        try:
-            tasks, cursor = await native_tasks.page(env, cursor=state.cursor, limit=100)
-            outcome = HttpOutcome(status=200)
-        except native_tasks.NativeTasksError as error:
-            outcome = HttpOutcome(status=error.status)
-            code = _failure(error.status)
-    else:
-        upstream = await _get(env, coordinator, TASKS_PATH, query, now)
-        outcome = upstream.outcome()
-        if not outcome.ok:
-            code = _failure(outcome.status)
-        else:
-            try:
-                tasks, cursor = parse_task_page(upstream.body)
-            except ValueError:
-                code = GtdCode.MALFORMED_PAGE
+    try:
+        tasks, cursor = await native_tasks.page(env, cursor=state.cursor, limit=rules.PAGE_SIZE)
+        code = ""
+    except native_tasks.NativeTasksError:
+        code = GtdCode.TODOIST_UNAVAILABLE
     coordinator.record_step(_point(code, started), now)
     if code:
-        retry = now + max(rules.COLLECT_RETRY, int(outcome.retry_after))
-        if code == GtdCode.TODOIST_AUTH_BLOCKED:
-            retry = coordinator.block_todoist(now)
+        retry = now + rules.COLLECT_RETRY
         next_time = retry if state.attempts < rules.COLLECT_ATTEMPTS else rules.next_collect(now, offset)
         await _finish_failed(env, state, code, now, next_time)
         return
@@ -297,7 +248,7 @@ async def _task_page(env: Any, coordinator: Any, state: State, now: int, offset:
         await env.DB.prepare(sql.WRITE_PAGE.sql).bind(state.day, json.dumps(rows, ensure_ascii=False)).run()
     state.pages += 1
     state.skipped += skipped
-    if cursor and state.pages >= rules.MAX_TASK_PAGES * (2 if native_tasks.enabled(env) else 1):
+    if cursor and state.pages >= rules.MAX_TASK_PAGES:
         state.partial = True
     if not cursor or state.partial:
         state.phase, state.cursor = COMPLETED, ""
@@ -315,60 +266,45 @@ async def _completed_page(env: Any, coordinator: Any, state: State, now: int) ->
         rows = (await db.prepare(sql.OPEN_REVIEWS.sql).bind(first).all()).results
         state.watched = [[str(row["week"]), str(row["task_id"])] for row in rows]
     since = state.started - rules.COMPLETED_WINDOW
-    query: dict[str, Any] = {"since": rules.rfc3339(since), "until": rules.rfc3339(state.started), "limit": 200}
-    if state.cursor:
-        query["cursor"] = state.cursor
     started = now_ms()
     items: list[dict[str, Any]] = []
-    cursor, code = "", ""
-    inbox = var(env, "TODOIST_DEFAULT_PROJECT_ID") or None
-    if native_tasks.enabled(env):
-        try:
-            inbox = await _inbox_project(env)
-            page = await native_tasks.call(env, "ListCompletions", {"page_token": state.cursor, "page_size": 100})
-            older = False
-            for item in page.get("completions", []):
-                completed = rules.parse_instant(item.get("complete_time"))
-                if completed is None:
-                    raise ValueError("completion time missing")
-                if completed < since:
-                    older = True
-                elif completed <= state.started:
-                    items.append(
-                        {
-                            "task_id": item["task_id"],
-                            "project_id": item.get("project_id") or inbox,
-                            "completed_at": item["complete_time"],
-                            "added_at": item.get("task_create_time"),
-                        }
-                    )
-            cursor = "" if older else page.get("next_page_token", "")
-        except native_tasks.NativeTasksError as error:
-            code = _failure(error.status)
-        except ValueError:
-            code = GtdCode.MALFORMED_PAGE
-    else:
-        upstream = await _get(env, coordinator, COMPLETED_PATH, query, now)
-        outcome = upstream.outcome()
-        code = "" if outcome.ok else _failure(outcome.status)
-        if not code:
-            try:
-                items, cursor = rules.parse_completed_page(upstream.body)
-            except ValueError:
-                code = GtdCode.MALFORMED_PAGE
+    cursor, code, inbox = "", "", ""
+    try:
+        inbox = await _inbox_project(env)
+        page = await native_tasks.call(
+            env, "ListCompletions", {"page_token": state.cursor, "page_size": rules.PAGE_SIZE}
+        )
+        older = False
+        for item in page.get("completions", []):
+            completed = rules.parse_instant(item.get("complete_time"))
+            if completed is None:
+                raise ValueError("completion time missing")
+            if completed < since:
+                older = True
+            elif completed <= state.started:
+                items.append(
+                    {
+                        "task_id": item["task_id"],
+                        "project_id": item.get("project_id") or inbox,
+                        "completed_at": item["complete_time"],
+                        "added_at": item.get("task_create_time"),
+                    }
+                )
+        cursor = "" if older else page.get("next_page_token", "")
+    except native_tasks.NativeTasksError:
+        code = GtdCode.TODOIST_UNAVAILABLE
+    except ValueError:
+        code = GtdCode.MALFORMED_PAGE
     coordinator.record_step(_point(code, started), now)
     if code:
-        # Completions are then unknown (completed_source 'none'); the snapshot itself still counts. Even
-        # a 401/403 here never blocks Todoist: this optional read may be refused (plan, workspace or
-        # permission) while the token is valid, and a block would stop mail-task creation for 6 hours
-        # every day. A revoked token is caught by the task list and by mail-task creation.
+        # Completions are then unknown (completed_source 'none'); the snapshot itself still counts.
         state.tally, state.phase, state.cursor = None, AGGREGATE, ""
         _log(collect="completed_failed", day=state.day, code=code)
         return
     review_ids = [task_id for _, task_id in state.watched]
     tally = rules.tally_completed(tally, items, since=since, inbox=inbox, review_ids=review_ids)
     state.completed_pages += 1
-    if cursor and state.completed_pages < rules.MAX_COMPLETED_PAGES * (2 if native_tasks.enabled(env) else 1):
+    if cursor and state.completed_pages < rules.MAX_COMPLETED_PAGES:
         state.tally, state.cursor = tally.dumps(), cursor
         return
     # More than MAX_COMPLETED_PAGES pages of completions: a count cut short would read as fact.
@@ -381,18 +317,13 @@ async def _aggregate(env: Any, coordinator: Any, state: State, now: int, offset:
     yesterday = rules.shift(day, -1)
     first_week = rules.week_shift(rules.iso_week(now), -HISTORY_WEEKS)
     mail_window = (now - rules.MAX_CARRYOVER_DAYS * DAY, now - DAY)
-    open_mail = (
-        db.prepare(sql.NATIVE_MAIL_OPEN.sql).bind(*mail_window)
-        if native_tasks.enabled(env)
-        else db.prepare(sql.MAIL_OPEN.sql).bind(*mail_window, day)
-    )
     rows, before, closed, mail, history = await db.batch(
         [
             db.prepare(sql.SNAPSHOT_ROWS.sql).bind(day, rules.MAX_SNAPSHOT_ROWS),
             db.prepare(sql.SNAPSHOT_DAY.sql).bind(yesterday),
             db.prepare(sql.CLOSED_SINCE.sql).bind(yesterday, day),
-            # The brief's carryover pool, uncapped: mail of the 14 days before the last 24 h.
-            open_mail,
+            # The brief's carryover pool, uncapped: Mail entries of the 14 days before the last 24 h.
+            db.prepare(sql.NATIVE_MAIL_OPEN.sql).bind(*mail_window),
             db.prepare(sql.REVIEW_HISTORY.sql).bind(first_week, HISTORY_WEEKS + 1),
         ]
     )
@@ -412,13 +343,12 @@ async def _aggregate(env: Any, coordinator: Any, state: State, now: int, offset:
         mail_open=mail_open,
     )
     inbox_project = await _inbox_project(env)
-    inbox = None
-    if native_tasks.enabled(env) or inbox_project:
-        inbox = rules.aggregate(snapshot, now=now, scope_project=inbox_project, completed=tally, complete=complete)
+    inbox = rules.aggregate(snapshot, now=now, scope_project=inbox_project, completed=tally, complete=complete)
     status = SnapshotStatus.OK if complete else SnapshotStatus.PARTIAL
-    statements = [db.prepare(sql.WRITE_DAILY.sql).bind(*_daily_values(day, Scope.ALL, every, now))]
-    if inbox is not None:
-        statements.append(db.prepare(sql.WRITE_DAILY.sql).bind(*_daily_values(day, Scope.INBOX, inbox, now)))
+    statements = [
+        db.prepare(sql.WRITE_DAILY.sql).bind(*_daily_values(day, Scope.ALL, every, now)),
+        db.prepare(sql.WRITE_DAILY.sql).bind(*_daily_values(day, Scope.INBOX, inbox, now)),
+    ]
     code = "" if complete else GtdCode.PAGE_CAP
     statements.append(
         db.prepare(sql.SNAPSHOT_FINISH.sql).bind(status, len(snapshot), state.skipped, state.pages, code, now, day)
@@ -509,13 +439,11 @@ async def _review(env: Any, coordinator: Any, state: State, now: int) -> int:
 
     # Checked again every 10 minutes of the window, so switching the review on (or a pause ending) on
     # a Sunday evening still makes that week's task.
-    if not flag(env, "GTD_REVIEW_ENABLED") or _todoist_paused(env):
+    if not flag(env, "GTD_REVIEW_ENABLED") or _paused(env):
         return later(now + REMINDER_CHECK_INTERVAL)
     # Only this job writes reviews and it runs in the alarm loop, so a week still 'sending' here was
     # interrupted mid-call: it becomes 'unknown' and is never resent.
     await db.prepare(sql.RECOVER_REVIEW.sql).bind(GtdCode.INTERRUPTED_REVIEW_CALL, now).run()
-    if (wait := coordinator.todoist_wait(now)) is not None:
-        return later(wait or now + REMINDER_CHECK_INTERVAL)
     week = rules.iso_week(now)
     row = await db.prepare(sql.REVIEW_WEEK.sql).bind(week).first()
     if row is not None:
@@ -528,22 +456,14 @@ async def _review(env: Any, coordinator: Any, state: State, now: int) -> int:
     else:
         attempts, subject = 0, rules.review_title(week)
         body = await _review_body(env, coordinator, state, week, now)
-        project = var(env, "TODOIST_REVIEW_PROJECT_ID") or (
-            "" if native_tasks.enabled(env) else var(env, "TODOIST_DEFAULT_PROJECT_ID")
-        )
+        # The Tasks Inbox unless TODOIST_REVIEW_PROJECT_ID names a project.
+        project = var(env, "TODOIST_REVIEW_PROJECT_ID")
         claim = await db.prepare(sql.CLAIM_REVIEW.sql).bind(week, project, subject, body, now, now).run()
     if claim.meta.changes != 1:
         return later(now + REMINDER_CHECK_INTERVAL)
-    request = build_task_request(
-        subject,
-        body,
-        project,
-        todoist_request_id(subject, body, rules.REVIEW_SENDER + week),
-        var(env, "TODOIST_API_KEY"),
-    )
-    coordinator.count_todoist_calls(TODOIST_MAX_ATTEMPTS, now)
+    request = build_task_request(subject, body, project, todoist_request_id(subject, body, rules.REVIEW_SENDER + week))
     started = now_ms()
-    result = await todoist.create_task(env, request, budget_ms=TODOIST_STEP_BUDGET * 1000)
+    result = await native_tasks.create_task(env, request, budget_ms=TASK_STEP_BUDGET * 1000)
     point = metrics.task_point(Step.REVIEW, result, now_ms() - started)
     review_state, code = _outcome(result.verdict)
     retry_at = now + rules.REVIEW_RETRY
@@ -583,29 +503,26 @@ async def _review_body(env: Any, coordinator: Any, state: State, week: str, now:
     _refresh_reviews(state, [dict(row) for row in history.results], {})
     picked = rules.pick_days([dict(row) for row in days.results], today)
     oldest: tuple[str, ...] = ()
-    inbox_project = await _inbox_project(env)
-    if picked["day"] is not None and (native_tasks.enabled(env) or inbox_project):
+    if picked["day"] is not None:
+        inbox_project = await _inbox_project(env)
         found = await (
             db.prepare(sql.OLDEST_TASKS.sql).bind(picked["day"], inbox_project, rules.REVIEW_OLDEST_LINKS).all()
         )
         oldest = tuple(str(row["task_id"]) for row in found.results)
     report = coordinator.latest_ops_report()
     digest = ops_rules.digest(report, now)
-    task_url = review_url = None
-    if native_tasks.enabled(env):
-        origin = var(env, "TASKS_PUBLIC_URL").rstrip("/")
-        parsed = urlsplit(origin)
-        if (
-            parsed.scheme != "https"
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-            or parsed.path
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise ValueError("TASKS_PUBLIC_URL must be an HTTPS origin in native mode")
-        task_url, review_url = origin + "/?task=", origin + "/?review=1#/plan"
+    origin = var(env, "TASKS_PUBLIC_URL").rstrip("/")
+    parsed = urlsplit(origin)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("TASKS_PUBLIC_URL must be an HTTPS origin")
     facts = rules.ReviewFacts(
         week=week,
         snapshot_day=picked["day"],
@@ -620,8 +537,8 @@ async def _review_body(env: Any, coordinator: Any, state: State, week: str, now:
         dashboard_url=None if report is None else report.dashboard_url,
         oldest_inbox=oldest,
         plus_review=any(dict(row)["enabled"] for row in plus.results),
-        task_url=task_url,
-        plus_review_url=review_url,
+        task_url=origin + "/?task=",
+        plus_review_url=origin + "/?review=1#/plan",
     )
     return rules.review_body(facts, now)
 

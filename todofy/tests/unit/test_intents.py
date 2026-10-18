@@ -223,9 +223,7 @@ def task(n: int = 1, state: str = TaskState.PENDING, **fields: Any) -> Task:
 
 
 def create(t: Task, result: TaskResult, code: str | None = None, retry_after: float = 0.0, task_id: str = ""):
-    return intents.after_create(
-        t, result, code, retry_after, task_id, NOW, backoff_base=BASE, lookup_at=NOW + 120, blocked_until=NOW + 21600
-    )
+    return intents.after_create(t, result, code, retry_after, task_id, NOW, backoff_base=BASE, lookup_at=NOW + 120)
 
 
 def test_created():
@@ -242,11 +240,6 @@ def test_created():
 def test_unknown_goes_to_the_lookup_and_is_never_resent_from_here():
     after, stop = create(task(attempts=3), TaskResult.UNKNOWN, Code.TODO_RESULT_UNKNOWN)
     assert (after.state, after.attempts, after.next_attempt_at, stop) == ("unknown", 0, NOW + 120, False)
-
-
-def test_auth_block_holds_the_task_and_ends_the_step():
-    after, stop = create(task(attempts=2), TaskResult.BLOCKED, Code.TODOIST_AUTH_BLOCKED)
-    assert (after.state, after.attempts, after.next_attempt_at, stop) == ("pending", 2, NOW + 21600, True)
 
 
 def test_a_4xx_refusal_fails_the_task_at_once():
@@ -387,15 +380,13 @@ def test_the_intent_summary():
 
 def test_pause_precedence_and_retry_hints():
     def held(**switches: Any) -> intents.Pause | None:
-        flags = {"maintenance": False, "processing_paused": False, "force_pause": False, "blocked_until": 0}
-        return intents.pause(**(flags | {"backup_active": False} | switches), now=NOW)
+        flags = {"maintenance": False, "processing_paused": False, "force_pause": False}
+        return intents.pause(**(flags | {"backup_active": False} | switches))
 
     assert held() is None
     assert held(maintenance=True, force_pause=True) == (ErrorCode.MAINTENANCE, 3600)
     assert held(processing_paused=True, force_pause=True) == (ErrorCode.PROCESSING_PAUSED, 3600)
-    assert held(force_pause=True, blocked_until=NOW + 50) == (ErrorCode.TODOIST_PAUSED, 3600)
-    assert held(blocked_until=NOW + 50, backup_active=True) == (ErrorCode.TODOIST_BLOCKED, 50)
-    assert held(blocked_until=NOW) is None
+    assert held(force_pause=True, backup_active=True) == (ErrorCode.TODOIST_PAUSED, 3600)
     assert held(backup_active=True) == (ErrorCode.BACKUP_ACTIVE, 120)
 
 

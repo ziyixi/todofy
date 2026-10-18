@@ -1,4 +1,4 @@
-"""D1 storage for connection revocation and weekly membership (receipts: runtime/plus_receipts.py)."""
+"""D1 storage for the planning settings and the weekly membership (receipts: runtime/plus_receipts.py)."""
 
 from typing import Any
 

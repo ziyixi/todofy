@@ -125,7 +125,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
           compatibilityDate: '2026-09-08',
           durableObjects: { COORDINATOR: { className: 'TodofyCore', scriptName: 'todofy-core' } },
           serviceBindings: { ASSETS: () => assets(), FLOWDAY_NATIVE_FOCUS: () => Response.json(options.focusTasks ?? {}) },
-          bindings: { ...SYNTHETIC_BINDINGS, TASK_SOURCE: 'tasks', ...options.bindings },
+          bindings: { ...SYNTHETIC_BINDINGS, ...options.bindings },
           outboundService: (request: Request) => outbound(request),
         },
         {

@@ -71,7 +71,7 @@ class Job(StrEnum):
     WEEKLY_BACKUP = "weekly_backup"
     RETENTION = "retention"
     METRICS_ROLLUP = "metrics_rollup"
-    # The GTD ledger's daily Todoist snapshot (docs/gtd-features.md): a few hundred D1 rows written.
+    # The GTD ledger's daily Tasks snapshot (docs/gtd-features.md): a few hundred D1 rows written.
     GTD_SNAPSHOT = "gtd_snapshot"
 
 
@@ -359,9 +359,6 @@ class Facts:
     gemini_reserved: int
     gemini_budget: int
     gemini_calls: int
-    todoist_blocked_until: int
-    todoist_window_calls: int
-    todoist_window_limit: int
     backup_bound: bool  # the BACKUPS binding exists
     backup_active: bool
     backup_status: str  # never | ok | failed | running | disabled
@@ -402,8 +399,6 @@ def status(facts: Facts) -> dict[str, Any]:
     oldest_age = max(now - facts.oldest_due_at, 0) if facts.oldest_due_at is not None else 0
     if oldest_age >= DUE_BACKLOG:
         signals.append(signal("due_backlog", Severity.WARNING, oldest_age_seconds=oldest_age))
-    if facts.todoist_blocked_until > now:
-        signals.append(signal("todoist_blocked", Severity.CRITICAL, seconds_left=facts.todoist_blocked_until - now))
     spent = facts.gemini_used + facts.gemini_reserved
     share = percent(spent, facts.gemini_budget)
     if share >= 80:
@@ -450,8 +445,6 @@ def status(facts: Facts) -> dict[str, Any]:
         "gemini_reserved_tokens": facts.gemini_reserved,
         "gemini_token_budget": facts.gemini_budget,
         "gemini_calls": facts.gemini_calls,
-        "todoist_window_calls": facts.todoist_window_calls,
-        "todoist_window_limit": facts.todoist_window_limit,
         "intents_pending": facts.intents_pending,
         "intents_failed_7d": facts.intents_failed_7d,
     }

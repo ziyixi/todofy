@@ -11,7 +11,7 @@ would still match the row that another writer has just moved to that version.
 from ..vocab import EventState
 from . import DUE, Query, sql_list
 
-# Due states that need no Todoist call (used while the Todoist stage is paused).
+# Due states that write no task (used while task writes are paused).
 DUE_WITHOUT_TODOIST = f"state IN ({sql_list([EventState.PENDING, EventState.TODO_CREATED])})"
 
 EVENT = Query("SELECT * FROM mail_events WHERE source_id = ? AND event_id = ?", "sqlite_autoindex_mail_events_1")

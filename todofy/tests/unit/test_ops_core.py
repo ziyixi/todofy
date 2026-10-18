@@ -300,9 +300,6 @@ FACTS = ops.Facts(
     gemini_reserved=0,
     gemini_budget=3_000_000,
     gemini_calls=64,
-    todoist_blocked_until=0,
-    todoist_window_calls=3,
-    todoist_window_limit=1000,
     backup_bound=True,
     backup_active=False,
     backup_status="ok",
@@ -323,8 +320,10 @@ def test_a_healthy_status_matches_the_contract_fixture_shape():
     status = ops.status(FACTS)
     assert errors("OpsStatus", status) == []
     expected = fixture("OpsStatus/todofy-ok.json")
-    # task-intent-v1 added two counters after the fixture was written (counters are an open map).
-    counters = expected["counters"] | {"intents_pending": 0, "intents_failed_7d": 0}
+    # Counters are an open map: task-intent-v1 added two after the fixture was written, and Todofy no longer
+    # reports the Todoist call window since Tasks is its only task store.
+    counters = {name: value for name, value in expected["counters"].items() if not name.startswith("todoist_")}
+    counters |= {"intents_pending": 0, "intents_failed_7d": 0}
     assert status == expected | {
         "generated_at": "2026-09-29T15:00:00Z",
         "last_backup_at": "2026-09-25T10:00:00Z",
@@ -348,7 +347,6 @@ def test_signals_health_and_order():
         gemini_reserved=12_000,
         last_backup_at=NOW - 792_000,
         guard=ops.Guard("shed", "d1_reads_high", NOW_MS + 32_400_000, NOW_MS - 3_300_000),
-        todoist_blocked_until=NOW + 600,
         reminder_state="failed",
         reminder_attempts=5,
     )
@@ -357,7 +355,6 @@ def test_signals_health_and_order():
     assert status["health"] == "degraded"
     assert codes(status) == [
         ("backup_stale", "critical"),
-        ("todoist_blocked", "critical"),
         ("attention", "warning"),
         ("due_backlog", "warning"),
         ("gemini_budget_80", "warning"),

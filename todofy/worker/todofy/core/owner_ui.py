@@ -143,7 +143,7 @@ def event_filter(text: str) -> tuple[str | None, bool]:
 
 
 def reconcile_task_id(action: mail_event_pb.ReconcileAction, task_id: str) -> str | None:
-    """TASK_CREATED needs a Todoist task ID; every other action takes none."""
+    """TASK_CREATED needs a Tasks task ID; every other action takes none."""
     if action == mail_event_pb.ReconcileAction.TASK_CREATED:
         if not TASK_ID.fullmatch(task_id):
             raise UiError(Reason.BAD_REQUEST)
@@ -297,13 +297,7 @@ def daily_reminder(row: Mapping[str, Any]) -> status_pb.DailyReminder:
 
 def service_status(overview: Mapping[str, Any]) -> status_pb.ServiceStatus:
     """The ServiceStatus from the Overview dict (runtime/api.py overview_data)."""
-    flags, counts, gemini, todoist, backup = (
-        overview["flags"],
-        overview["counts"],
-        overview["gemini"],
-        overview["todoist"],
-        overview["backup"],
-    )
+    flags, counts, gemini, backup = overview["flags"], overview["counts"], overview["gemini"], overview["backup"]
     latest = overview["latest_reminder"]
     return status_pb.ServiceStatus(
         name="serviceStatus",
@@ -329,12 +323,6 @@ def service_status(overview: Mapping[str, Any]) -> status_pb.ServiceStatus:
             call_count=gemini["calls"],
             models=tuple(gemini["models"]),
             email_models=tuple(gemini.get("email_models", ())),
-        ),
-        todoist=status_pb.TodoistBudget(
-            block_expire_time=todoist["blocked_until"],
-            window_seconds=todoist["window_seconds"],
-            window_call_count=todoist["window_calls"],
-            window_call_limit=todoist["window_limit"],
         ),
         backup=status_pb.BackupStatus(
             state=_enum(status_pb.BackupStatus_State, backup["status"]),

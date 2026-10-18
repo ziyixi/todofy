@@ -5,7 +5,7 @@ from typing import Any
 
 from todofy.core import native_plan, plus
 from todofy.runtime import native_tasks
-from todofy.runtime.plus_todoist import PlusError, _native
+from todofy.runtime.plus_tasks import PlusError, native
 
 
 async def build(
@@ -13,7 +13,7 @@ async def build(
 ) -> list[dict[str, Any]]:
     """``catalog``: the Tasks catalog the caller already read for this request, if any."""
     task_id = plus.check_id(request.get("task_id") or request.get("parent_id", ""))
-    task = await _native(native_tasks.task(core.env, task_id, catalog))
+    task = await native(native_tasks.task(core.env, task_id, catalog))
     request_id = request["request_id"]
     if method == "CompleteTask":
         if (flow_date := request.get("flow_date")) and date.fromisoformat(flow_date).isoformat() != flow_date:
@@ -22,7 +22,7 @@ async def build(
         if target != task_id:
             if not request.get("task_etag"):
                 raise PlusError("BAD_REQUEST")
-            child = await _native(native_tasks.call(core.env, "GetTask", {"name": f"tasks/{plus.check_id(target)}"}))
+            child = await native(native_tasks.call(core.env, "GetTask", {"name": f"tasks/{plus.check_id(target)}"}))
             if not child.get("completed"):
                 raise PlusError("ACTION_NOT_ALLOWED")
             seen = {target}
@@ -33,7 +33,7 @@ async def build(
                 if not parent_id or parent_id in seen:
                     raise PlusError("ACTION_NOT_ALLOWED")
                 seen.add(parent_id)
-                child = await _native(native_tasks.call(core.env, "GetTask", {"name": f"tasks/{parent_id}"}))
+                child = await native(native_tasks.call(core.env, "GetTask", {"name": f"tasks/{parent_id}"}))
             else:
                 raise PlusError("ACTION_NOT_ALLOWED")
         return [

@@ -1,4 +1,5 @@
-"""Personal planning rules; Todoist owns task data and the existing label identities."""
+"""Personal planning rules over Tasks' tasks (core/native_task_view.py) and their local role projection
+(core/native_plan.py)."""
 
 import hashlib
 import json
@@ -22,19 +23,15 @@ ROLES = (
     "lead_2w",
     "lead_1m",
 )
-# Roles a setup confirmed before their retirement may still bind. The binding is kept exactly as saved and never
-# checked against Todoist, so renaming or deleting the label changes no etag and never disables Plus; a new setup
-# binds none. The weekly Bets are text now (core/plan.py); a task still labelled Bets loses it at Monday's reset.
+# The retired Bets role: the weekly Bets are text now (core/plan.py), and no task gets this role again.
 LEGACY_ROLES = ("bets",)
 NATIVE_FLAGS = ("quick", "waiting", "blocked", "parked", "active", "onhold", "routine", "task")
 NATIVE_ROLES = frozenset((*ROLES, *LEGACY_ROLES, "quarter", *NATIVE_FLAGS))
 LEADS = {"lead_1d": 1, "lead_3d": 3, "lead_1w": 7, "lead_2w": 14, "lead_1m": 30}
-PLANNING_ROLES = ("quarter", "candiate", "focus", "committed")
 STAGES = {"none": None, "quarterly": "quarter", "monthly": "candiate", "weekly": "focus", "committed": "committed"}
 AREAS = {"unassigned": None, "work": "office", "personal": "home"}
 ID = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
-# Todoist's fractional order key among siblings (PlanningTask.order_key).
-ORDER_KEY = re.compile(r"^[0-9A-Za-z]{1,100}$")
+# The Todoist filters Plan replaced, read only by the one-time cutover (tools/prepare_native_plan.py).
 REPLACED_FILTER_QUERIES = {
     "@bets",
     "@committed",
@@ -58,23 +55,11 @@ REPLACED_FILTER_QUERIES = {
     "@quick&(nodate|3days)",
     "@parked",
 }
-# The owner's literal in-progress label, as the in-progress deadline query names it. Plus never creates it.
-ACTIVE = "active"
-# The owner's literal set-aside label, which Review's Parked lane shows. Plus never creates it either.
+# The set-aside role, which Review's Parked lane shows.
 PARKED = "parked"
-# Review lanes that show and sort by Todoist's update time ("N days untouched"): their order stays in Todofy only,
-# since a Todoist order write may count as an edit of each task it moves.
+# Review lanes that show and sort by update time ("N days untouched"): their order stays in Todofy only,
+# since an order write may count as an edit of each task it moves.
 UNTOUCHED_LANES = ("waiting", "parked")
-# plan_tasks.provider of a Todoist task ID (core/plan.py PROVIDERS).
-PROVIDER = "todoist"
-# The literal labels that clarify a mail task in place (waiting, someday or quick), as the extension's
-# weekly-review.ts lists them: such a task has left the Mailbox, as one with a planning stage has.
-CLARIFIED_LABELS = frozenset({"waiting", "blocked", "parked", "onhold", "quick"})
-# Roles whose labels a mail category never uses: Plus writes them by other means (stages, the retired Bets, leads).
-NOT_MAIL_ROLES = frozenset({*PLANNING_ROLES, *LEGACY_ROLES, *LEADS})
-
-
-MAX_METADATA_ITEMS = 500
 
 
 def replaced_query(query: Any) -> str | None:
@@ -101,69 +86,8 @@ def replaced_filters(
     return result
 
 
-def merge_metadata(previous: dict[str, Any] | None, answer: dict[str, Any]) -> dict[str, Any]:
-    """The metadata cache after one Sync answer for user, labels and filters (runtime/plus_todoist.py).
-
-    ``previous`` is None for a full answer, which replaces the cache; an incremental answer lists only what
-    changed since its token, merged by ID: an item with ``is_deleted`` leaves. The user object is reduced to its
-    timezone, and only filters whose query REPLACED_FILTER_QUERIES lists are kept, normalised, so no private
-    filter text is stored; a kept filter whose query changes to any other leaves. ``queries`` names that list
-    (REPLACED_QUERIES_VERSION): a cache kept under another list starts over in full. Raises ValueError on an answer
-    that does not have this shape.
-    """
-    token = answer.get("sync_token")
-    if not isinstance(token, str) or not 1 <= len(token) <= 1024:
-        raise ValueError("sync_token")
-    # A full answer lists every label and filter; an incremental one leaves out a resource with no change.
-    unchanged = [] if previous is not None else None
-    labels, filters = answer.get("labels", unchanged), answer.get("filters", unchanged)
-    if not isinstance(labels, list) or not isinstance(filters, list):
-        raise ValueError("resources")
-    named = dict(previous["labels"]) if previous else {}
-    for label in labels:
-        key, name = str(label.get("id") or ""), label.get("name")
-        if label.get("is_deleted") or not isinstance(name, str) or not name:
-            named.pop(key, None)
-        elif key:
-            named[key] = name
-    queries = dict(previous["filters"]) if previous else {}
-    for row in filters:
-        key, query = str(row.get("id") or ""), replaced_query(row.get("query"))
-        if row.get("is_deleted") or query is None:
-            queries.pop(key, None)
-        elif key:
-            queries[key] = query
-    # The user object includes credentials and personal information: only its timezone is kept.
-    timezone = ((answer.get("user") or {}).get("tz_info") or {}).get("timezone")
-    if timezone is None and previous is not None:
-        timezone = previous["timezone"]
-    if not isinstance(timezone, str) or not timezone or len(named) > MAX_METADATA_ITEMS:
-        raise ValueError("user")
-    return {
-        "sync_token": token,
-        "timezone": timezone,
-        "labels": list(named.items()),
-        "filters": list(queries.items()),
-        "queries": REPLACED_QUERIES_VERSION,
-    }
-
-
-def metadata_view(cached: dict[str, Any]) -> dict[str, Any]:
-    """The cache as the Plus handlers read Todoist's metadata: the timezone, labels and the kept filters."""
-    return {
-        "timezone": cached["timezone"],
-        "labels": [{"id": key, "name": name} for key, name in cached["labels"]],
-        "filters": [{"id": key, "query": query} for key, query in cached["filters"]],
-    }
-
-
 def fingerprint(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-
-
-# The metadata cache keeps only the filters this list replaces: an incremental Sync lists a filter only when it
-# changes, so a cache kept under another list would never learn of an existing filter the list now names.
-REPLACED_QUERIES_VERSION = fingerprint(sorted(REPLACED_FILTER_QUERIES))
 
 
 def check_id(value: str) -> str:
@@ -204,43 +128,6 @@ def membership_week(today: str, week: str, request: dict[str, Any]) -> str:
     return week
 
 
-def discover(
-    labels: list[dict[str, Any]], timezone: str, mapping: list[dict[str, Any]] | None = None
-) -> dict[str, Any]:
-    """Saved IDs stay authoritative. New optional labels never alter a confirmed mapping."""
-    mapped = []
-    missing = []
-    if mapping is None:
-        for role in (*ROLES, "quarter"):
-            matches = [label for label in labels if label.get("name") == role and label.get("id")]
-            if len(matches) == 1:
-                mapped.append({"role": role, "id": str(matches[0]["id"]), "label": role})
-            elif role != "quarter":
-                missing.append(role)
-    else:
-        for binding in mapping:
-            if binding["role"] in LEGACY_ROLES:
-                mapped.append(binding)
-                continue
-            matches = [label for label in labels if str(label.get("id", "")) == binding["id"]]
-            if len(matches) == 1 and matches[0].get("name"):
-                mapped.append({**binding, "label": matches[0]["name"]})
-            else:
-                missing.append(binding["role"])
-        missing.extend(role for role in ROLES if not any(row["role"] == role for row in mapping))
-    available = [
-        {"id": str(label["id"]), "label": label["name"]}
-        for label in labels
-        if label.get("id") and isinstance(label.get("name"), str) and label["name"]
-    ]
-    return {
-        "labels": mapped,
-        "missing_labels": missing,
-        "etag": fingerprint([mapped, timezone]),
-        "available_labels": available,
-    }
-
-
 def role_labels(mapping: list[dict[str, Any]] | None = None) -> dict[str, str]:
     return (
         {role: role for role in (*ROLES, *LEGACY_ROLES, "quarter")}
@@ -260,7 +147,7 @@ def task_etag(task: dict[str, Any], mapping: list[dict[str, Any]] | None = None)
 
 
 def child_order(task: dict[str, Any]) -> int | None:
-    """Todoist's legacy position among the task's siblings, or None when it does not give an int32 one."""
+    """The task's whole-number position among its siblings, or None when it does not give an int32 one."""
     order = task.get("child_order")
     return order if isinstance(order, int) and not isinstance(order, bool) and -(2**31) <= order < 2**31 else None
 
@@ -270,15 +157,15 @@ def recurring(task: dict[str, Any]) -> bool:
 
 
 def completed_count(task: dict[str, Any]) -> int | None:
-    """Todoist's completion counter (completed_count), which counts every completed recurrence and goes down when
+    """The task's completion counter (completed_count), which counts every completed recurrence and goes down when
     one is undone; None when the task does not carry it."""
     count = task.get("completed_count")
     return count if isinstance(count, int) and not isinstance(count, bool) and 0 <= count < 2**31 else None
 
 
 def holds(baseline: int, prerequisite: dict[str, Any]) -> bool:
-    """Whether a dependency on an active task still holds back the task that waits (the extension's
-    dependencies.ts holds): a recurring prerequisite never leaves the active list, so its next completion, a
+    """Whether a dependency on an open task still holds back the task that waits (planning-ui's
+    dependencies.ts holds): a recurring prerequisite never leaves the open list, so its next completion, a
     completed_count above the baseline, ends it."""
     count = completed_count(prerequisite)
     return not recurring(prerequisite) or count is None or count <= baseline
@@ -373,151 +260,10 @@ def task_view(task: dict[str, Any], today: str, mapping: list[dict[str, Any]] | 
         result["sort_order"] = order
     if (order := child_order(task)) is not None:
         result["child_order"] = order
-    if isinstance(key := task.get("order_key"), str) and ORDER_KEY.fullmatch(key):
-        result["order_key"] = key
     duration = task.get("duration")
     if duration and duration.get("amount"):
-        result["estimated_minutes"] = int(duration["amount"]) * (480 if duration.get("unit") == "day" else 1)
+        result["estimated_minutes"] = int(duration["amount"])
     updated = parse_instant(task.get("updated_at"))
     if updated is not None:
         result["update_time"] = rfc3339(updated)
     return result
-
-
-def plan_labels(
-    task: dict[str, Any], request: dict[str, Any], mapping: list[dict[str, Any]] | None = None
-) -> list[str]:
-    names = role_labels(mapping)
-    labels = set(task.get("labels") or [])
-    if "stage" in request:
-        stage = request["stage"]
-        if stage not in STAGES:
-            raise ValueError("BAD_REQUEST")
-        # Only a change of stage replaces the planning labels. Choosing the stage the task already shows
-        # (a Sunday keep, a details save) leaves its other horizon labels, such as quarter, in place.
-        if label_stage(labels, names) != stage:
-            labels -= {names[role] for role in PLANNING_ROLES if role in names}
-            if STAGES[stage]:
-                label = names.get(STAGES[stage])
-                if label is None:
-                    raise ValueError("BAD_REQUEST")
-                labels.add(label)
-    if "area" in request:
-        area = request["area"]
-        if area not in AREAS:
-            raise ValueError("BAD_REQUEST")
-        labels -= {names[role] for role in ("office", "home") if role in names}
-        if AREAS[area]:
-            labels.add(names[AREAS[area]])
-    for field, name in (
-        ("quick", "quick"),
-        ("waiting", "waiting"),
-        ("routine", "routine"),
-        ("on_hold", "onhold"),
-        ("blocked", "blocked"),
-        ("single_action", "task"),
-    ):
-        if field in request:
-            if not task.get("_native_planning"):
-                raise ValueError("BAD_REQUEST")
-            labels.discard(name)
-            if request[field]:
-                labels.add(name)
-    if "bet" in request:
-        # Retired: the weekly Bets are text (SetWeeklyBet), and Plus never writes the Bets label again.
-        raise ValueError("BAD_REQUEST")
-    if "active" in request:
-        labels.discard(ACTIVE)
-        if request["active"]:
-            labels.add(ACTIVE)
-    if "parked" in request:
-        # Last, so it wins: a parked task has no planning stage (whatever label_stage says, so a Quick task's focus
-        # goes too) and is not in progress.
-        labels.discard(PARKED)
-        if request["parked"]:
-            labels -= {names[role] for role in PLANNING_ROLES if role in names}
-            labels.discard(ACTIVE)
-            labels.add(PARKED)
-    return sorted(labels)
-
-
-def _siblings(task: dict[str, Any]) -> tuple[str, str, str]:
-    """The group Todoist orders a task in: its project, section and parent."""
-    return str(task.get("project_id") or ""), str(task.get("section_id") or ""), str(task.get("parent_id") or "")
-
-
-def reorder_items(tasks: list[dict[str, Any]], moved: str) -> list[dict[str, Any]]:
-    """item_reorder's items for ``tasks`` in their new order: the group of Todoist siblings of ``moved`` among them
-    (same project, section and parent) gets its own child_order values, smallest first, in the given order; only the
-    items whose value changes. [] when that group has one task, or a value that is missing, not an int32, or
-    repeated (a permutation of equal values changes nothing). Other groups are never touched."""
-    task = next((task for task in tasks if str(task["id"]) == moved), None)
-    if task is None:
-        return []
-    group = [sibling for sibling in tasks if _siblings(sibling) == _siblings(task)]
-    orders = [child_order(sibling) for sibling in group]
-    if len(group) < 2 or None in orders or len(set(orders)) != len(orders):
-        return []
-    return [
-        {"id": str(sibling["id"]), "child_order": order}
-        for sibling, order in zip(group, sorted(orders), strict=True)
-        if sibling["child_order"] != order
-    ]
-
-
-def reorder_command(request_id: str, items: list[dict[str, Any]]) -> dict[str, Any]:
-    """The one Sync command that writes an order. item_reorder is deprecated by Todoist with no removal date; its
-    replacement (item_update with order_key) changes here alone."""
-    return {"type": "item_reorder", "uuid": command_id(request_id), "args": {"items": items}}
-
-
-def lead_args(
-    task: dict[str, Any], deadline: str, days: int, mapping: list[dict[str, Any]] | None = None
-) -> dict[str, Any]:
-    names = role_labels(mapping)
-    if deadline:
-        try:
-            if datetime.strptime(deadline, "%Y-%m-%d").date().isoformat() != deadline:
-                raise ValueError
-        except ValueError as error:
-            raise ValueError("BAD_REQUEST") from error
-    if days not in (0, *LEADS.values()) or (days and not deadline):
-        raise ValueError("BAD_REQUEST")
-    labels = set(task.get("labels") or []) - {names[role] for role in LEADS if role in names}
-    labels.update(names[role] for role, value in LEADS.items() if value == days)
-    return {"labels": sorted(labels), "deadline": {"date": deadline} if deadline else None}
-
-
-def reset_labels(
-    task: dict[str, Any], record: dict[str, Any], mapping: list[dict[str, Any]] | None = None
-) -> list[str]:
-    names = role_labels(mapping)
-    labels = set(task.get("labels") or [])
-    if record["committed"] and names.get("committed") in labels:
-        labels -= {names["committed"], names["candiate"]}
-        labels.add(names["focus"])
-    if record["bet"] and names.get("bets") in labels:
-        labels.discard(names["bets"])
-    return sorted(labels)
-
-
-# ---- Mailbox (core/mailbox.py has the domain rules) -------------------------------------------------------------
-
-
-def in_mailbox(view: dict[str, Any], inbox_project_id: str) -> bool:
-    """Whether a task_view is still to clarify in the mail project, as the extension's inboxToClarify says: a
-    top-level task with no planning stage and none of CLARIFIED_LABELS. Whether it is mail is the ledger's to say."""
-    return (
-        bool(inbox_project_id)
-        and view["project_id"] == inbox_project_id
-        and not view["parent_id"]
-        and view["stage"] == "none"
-        and not CLARIFIED_LABELS.intersection(view["labels"])
-    )
-
-
-def mail_label(label: dict[str, str], mapping: list[dict[str, Any]] | None) -> bool:
-    """Whether a current label ({"id", "label"}) may be a mail category's: any but a planning stage's, the retired
-    Bets', a lead window's and the in-progress label. The two area labels may."""
-    reserved = {row["id"] for row in mapping or [] if row["role"] in NOT_MAIL_ROLES}
-    return label["id"] not in reserved and label["label"] != ACTIVE

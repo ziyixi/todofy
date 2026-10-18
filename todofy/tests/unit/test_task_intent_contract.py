@@ -357,27 +357,13 @@ def _row(state: str, **fields: Any) -> IntentRow:
 
 
 PAUSES = [
-    intents.pause(
-        maintenance=True, processing_paused=False, force_pause=False, blocked_until=0, backup_active=False, now=NOW
-    ),
-    intents.pause(
-        maintenance=False, processing_paused=True, force_pause=False, blocked_until=0, backup_active=False, now=NOW
-    ),
-    intents.pause(
-        maintenance=False, processing_paused=False, force_pause=True, blocked_until=0, backup_active=False, now=NOW
-    ),
-    intents.pause(
-        maintenance=False,
-        processing_paused=False,
-        force_pause=False,
-        blocked_until=NOW + 21600,
-        backup_active=False,
-        now=NOW,
-    ),
-    intents.pause(
-        maintenance=False, processing_paused=False, force_pause=False, blocked_until=0, backup_active=True, now=NOW
-    ),
+    intents.pause(maintenance=True, processing_paused=False, force_pause=False, backup_active=False),
+    intents.pause(maintenance=False, processing_paused=True, force_pause=False, backup_active=False),
+    intents.pause(maintenance=False, processing_paused=False, force_pause=True, backup_active=False),
+    intents.pause(maintenance=False, processing_paused=False, force_pause=False, backup_active=True),
 ]
+# The contract's held example (paused-held.json): a code no pause of this build gives any more, answered the same way.
+HELD = (ErrorCode.TODOIST_BLOCKED, 21600)
 
 
 def _results() -> list[dict[str, Any]]:
@@ -390,7 +376,7 @@ def _results() -> list[dict[str, Any]]:
         intents.rejected_new("watch", "x", ErrorCode.URL_NOT_ALLOWED, NOW),
         intents.rejected_new("watch", "x", ErrorCode.SOURCE_NOT_ALLOWED, NOW),
     ]
-    for held in [None, *PAUSES]:
+    for held in [None, *PAUSES, HELD]:
         built.append(intents.describe(_row(IntentState.PENDING), held, NOW, proposing=False))
         built.append(intents.describe(_row(IntentState.PENDING, error_code="rate_limited"), held, NOW, proposing=True))
         built.append(
@@ -438,7 +424,7 @@ def test_results_match_the_fixture_shapes():
     """Same answers as the fixtures for the same situations (timestamps aside)."""
     pending = intents.describe(_row(IntentState.PENDING, tasks_created=0), None, NOW, proposing=False)
     assert pending["retry_after_seconds"] == 30
-    held = intents.describe(_row(IntentState.PENDING), PAUSES[3], NOW, proposing=False)
+    held = intents.describe(_row(IntentState.PENDING), HELD, NOW, proposing=False)
     expected = fixture("TaskIntentResult/paused-held.json")
     assert {k: v for k, v in held.items() if k != "updated_at"} == {
         k: v for k, v in expected.items() if k != "updated_at"

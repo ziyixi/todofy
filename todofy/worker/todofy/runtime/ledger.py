@@ -51,7 +51,7 @@ class EventRow:
     imported: bool
     created_at: int
     updated_at: int
-    # Set for a canary event (contracts/ops-v1): processed, never sent to Todoist.
+    # Set for a canary event (contracts/ops-v1): processed, never sent to Tasks.
     canary_run_id: str | None = None
 
     @property
@@ -146,9 +146,9 @@ async def get(db: Any, source_id: str, event_id: str) -> EventRow | None:
     return EventRow.from_d1(row) if row else None
 
 
-async def next_due(db: Any, now: int, *, todoist: bool = True) -> EventRow | None:
-    """The oldest due pending/summarized/todo_created row; no summarized rows without Todoist."""
-    query = sql.NEXT_DUE if todoist else sql.NEXT_DUE_WITHOUT_TODOIST
+async def next_due(db: Any, now: int, *, writes: bool = True) -> EventRow | None:
+    """The oldest due pending/summarized/todo_created row; no summarized rows while task writes are paused."""
+    query = sql.NEXT_DUE if writes else sql.NEXT_DUE_WITHOUT_TODOIST
     row = await db.prepare(query.sql).bind(now).first()
     return EventRow.from_d1(row) if row else None
 
@@ -158,11 +158,11 @@ async def next_lookup(db: Any, now: int) -> EventRow | None:
     return EventRow.from_d1(row) if row else None
 
 
-async def next_wake_at(db: Any, *, todoist: bool = True) -> int | None:
-    """Earliest scheduled ledger work (lookups only when Todoist may be called)."""
-    due = sql.NEXT_WAKE if todoist else sql.NEXT_WAKE_WITHOUT_TODOIST
+async def next_wake_at(db: Any, *, writes: bool = True) -> int | None:
+    """Earliest scheduled ledger work (lookups only while task writes are open)."""
+    due = sql.NEXT_WAKE if writes else sql.NEXT_WAKE_WITHOUT_TODOIST
     statements = [db.prepare(due.sql)]
-    if todoist:
+    if writes:
         statements.append(db.prepare(sql.NEXT_LOOKUP.sql))
     results = await db.batch(statements)
     times = [result.results[0]["at"] for result in results]
@@ -183,13 +183,13 @@ async def recover_interrupted(db: Any, now: int, *, lookup_at: int) -> None:
     """Settle rows a previous run left mid-call (it was evicted or timed out).
 
     An interrupted summary is simply repeated, up to the crash limit; an
-    interrupted Todoist call may have created the task, so it is never resent.
+    interrupted task create may have created the task, so it is never resent.
     A canary ends ``ignored`` where real mail would need the owner.
     """
     rows = (await db.prepare(sql.INTERRUPTED.sql).all()).results
     for row in map(EventRow.from_d1, rows):
         if row.canary and row.state == EventState.TODO_SENDING:
-            # Only a release without canary handling sends a canary to Todoist; never look it up.
+            # Only a release without canary handling sends a canary to the task store; never look it up.
             await transition(
                 db,
                 row,

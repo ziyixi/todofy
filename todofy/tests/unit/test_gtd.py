@@ -132,29 +132,6 @@ def test_a_task_listed_twice_in_a_page_is_kept_once():
     assert [(row["task_id"], row["priority"]) for row in rows] == [("6Xtask0001", 4)] and skipped == 0
 
 
-# ---- page parsers --------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("body", "expected"),
-    [
-        (b'{"items": [{"id": "a"}], "next_cursor": "c.1"}', ([{"id": "a"}], "c.1")),
-        (b'{"items": [{"id": "a"}]}', ([{"id": "a"}], "")),  # omitted on the last page
-        (b'{"items": [], "next_cursor": null}', ([], "")),
-    ],
-)
-def test_completed_pages(body, expected):
-    assert gtd.parse_completed_page(body) == expected
-
-
-@pytest.mark.parametrize(
-    "body", [b"[]", b'{"results": []}', b'{"items": [1]}', b'{"items": [], "next_cursor": 3}', b"x"]
-)
-def test_unexpected_completed_pages_are_refused(body):
-    with pytest.raises(ValueError):
-        gtd.parse_completed_page(body)
-
-
 def test_the_completed_tally_counts_scopes_recent_additions_and_reviews():
     since = NOW - 7 * DAY
     items = [
@@ -403,10 +380,12 @@ def test_the_review_body_is_counts_trends_and_links():
         last_review_at=NOW - 7 * DAY,
         public_host="todofy.example",
         dashboard_url="https://home.ziyixi.science/",
+        task_url="https://tasks.example/?task=",
+        plus_review_url="https://tasks.example/?review=1#/plan",
     )
     body = gtd.review_body(facts, NOW + 4 * 3600)
     assert body == (
-        "快照 2026-10-04（Todoist 元数据，只含计数）\n"
+        "快照 2026-10-04（Tasks 元数据，只含计数）\n"
         "收件箱：开放 23（上周 31，-8）；最老 41 天（上周 41，持平）；"
         "0–7 天 12 · 8–14 天 5 · 15–30 天 4 · >30 天 2\n"
         "全部项目：开放 57（上周 57，持平） · 逾期 3（上周 3，持平） · 无日期 40（上周 40，持平）\n"
@@ -433,34 +412,21 @@ def test_the_review_body_is_counts_trends_and_links():
     assert "完成 30（上周 42，-12）" in text
     assert "本周重点：逾期比上周多 4 项：重排日期，或删掉不再做的\n本周重点：收件箱比上周多 4 项：先清空到 0\n" in text
     assert (
-        "收件箱最老的任务：https://app.todoist.com/app/task/6XR4GqQQCW6Gv9h4"
-        "  https://app.todoist.com/app/task/abc_123-Z\n"
-    ) in text
+        "收件箱最老的任务：https://tasks.example/?task=6XR4GqQQCW6Gv9h4  https://tasks.example/?task=abc_123-Z\n"
+        in text
+    )
     assert "bad id" not in text
     assert gtd.review_title("2026-W40") == "每周回顾 2026-W40"
-    # With Todoist Plus set up, the links end with its review checklist.
+    # With planning set up, the links end with Plan's review checklist.
     assert gtd.review_body(replace(facts, plus_review=True), NOW + 4 * 3600).endswith(
-        "Todofy GTD：https://todofy.example/gtd   Plus 周回顾：https://app.todoist.com/app/today?todoist-plus=review\n"
+        "Todofy GTD：https://todofy.example/gtd   周回顾：https://tasks.example/?review=1#/plan\n"
     )
-
-    native = gtd.review_body(
-        replace(
-            moved,
-            plus_review=True,
-            task_url="https://tasks.example/?task=",
-            plus_review_url="https://tasks.example/?review=1#/plan",
-        ),
-        NOW,
-    )
-    assert "https://tasks.example/?task=abc_123-Z" in native
-    assert "周回顾：https://tasks.example/?review=1#/plan" in native
-    assert "Todoist" not in native and "app.todoist.com" not in native
 
 
 def test_a_review_without_a_snapshot_or_completions_says_so():
     facts = gtd.ReviewFacts("2026-W40", None, None, None, None, None, None, None, None, "", None)
     body = gtd.review_body(facts, NOW)
-    assert body.startswith("快照：本周没有可用的 Todoist 快照")
+    assert body.startswith("快照：本周没有可用的 Tasks 快照")
     assert "需处理事件 不可用；运维：无" in body and "上次回顾：尚无完成记录" in body
     assert "http" not in body
     unknown = gtd.ReviewFacts(

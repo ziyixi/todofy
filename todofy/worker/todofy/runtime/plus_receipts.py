@@ -1,31 +1,26 @@
 """Replay receipts of the Plus writes that change the task store, in TodofyCore's own SQLite (docs/planning-api.md,
 "Receipts").
 
-SetTaskPlan, SetTaskLead, CompleteTask, AppendTaskSteps and each label update of the Monday reset record a
-receipt ``started`` with their frozen Sync commands, wait until the object's storage holds it, and only then
-send them. ``done`` drops the commands and keeps the answer's IDs, never a title; CompleteTask's also keeps the
-FlowDay settlement it froze, at ``$.focus``, and ReorderTasks' keeps nothing (runtime/plus_order.py). A replay
-of a done request answers from those IDs, a started one resends the same commands, whose UUIDs (uuid5 of the
-request ID) Todoist runs at most once. So a lost receipt only turns a replay into a re-run that Todoist
-deduplicates: receipts may live in the object's SQLite, which no backup holds. A label write's started receipt
-also keeps the plan etag its labels were chosen under: once the binding has changed, its retry answers
-ETAG_MISMATCH instead of attaching a label by a stale name.
+SetTaskPlan, SetTaskLead, CompleteTask, AppendTaskSteps, ReorderTasks, ConvertMailItem and each planning update of
+the Monday reset record a receipt ``started`` with their frozen Tasks operations, wait until the object's storage
+holds it, and only then send them. ``done`` drops the operations and keeps the answer's IDs, never a title;
+CompleteTask's also keeps the FlowDay settlement it froze, at ``$.focus``, and ReorderTasks' keeps nothing
+(runtime/plus_order.py). A replay of a done request answers from those IDs, a started one resends the same
+operations, whose request IDs (uuid5 of the request ID) Tasks runs at most once (runtime/native_plus.py). So a lost
+receipt only turns a replay into a re-run that Tasks deduplicates: receipts may live in the object's SQLite, which no
+backup holds. A planning write's started receipt also keeps the plan etag it was chosen under: once that has
+changed, its retry answers ETAG_MISMATCH.
 
 A lookup reads only the receipts of the last MAX_AGE, and an older request ID starts over. Nothing deletes a
-receipt (the owner's rule: no automatic time-based deletion), so one that never finished keeps its commands,
+receipt (the owner's rule: no automatic time-based deletion), so one that never finished keeps its operations,
 step titles included, in the object's SQLite.
-
-D1 plus_actions holds the receipts of the releases before this one. They are read, never written: a request
-ID of the last MAX_AGE that the object has no receipt for finds its D1 receipt.
 """
 
 import json
 from typing import Any, NamedTuple
 
 from todofy.core.backoff import DAY
-from todofy.core.sql import plus as sql
 from todofy.runtime import native_plus
-from todofy.runtime import plus_store as store
 from todofy.runtime.interop import now_s
 
 MAX_AGE = 30 * DAY
@@ -56,11 +51,6 @@ FINISH = (
     "UPDATE plus_receipts SET state = 'done', commands = NULL, result = ?, finished_at = ?"
     " WHERE request_id = ? AND state = 'started'"
 )
-# A CompleteTask receipt from D1, done there, with the settlement the release before froze (if any).
-IMPORT = (
-    "INSERT INTO plus_receipts (request_id, method, request_hash, state, result, created_at, finished_at)"
-    " VALUES (?, 'CompleteTask', ?, 'done', ?, ?, ?) ON CONFLICT (request_id) DO NOTHING"
-)
 FOCUS = (
     "SELECT result ->> '$.focus' AS focus FROM plus_receipts"
     " WHERE request_id = ? AND method = 'CompleteTask' AND state = 'done' AND created_at >= ?"
@@ -76,10 +66,9 @@ SETTLE = (
 
 class Receipt(NamedTuple):
     request_hash: str
-    commands: list[dict[str, Any]] | None  # the frozen Sync commands, until done
-    plan_etag: str | None  # a label write's: the plan etag its commands' labels were chosen under
-    result: dict[str, Any] | None  # once done: the answer's IDs, or a D1 receipt's whole stored answer
-    legacy: bool  # a D1 plus_actions receipt of the release before
+    commands: list[dict[str, Any]] | None  # the frozen Tasks operations, until done
+    plan_etag: str | None  # a planning write's: the plan etag its operations were chosen under
+    result: dict[str, Any] | None  # once done: the answer's IDs
 
 
 def _json(value: dict[str, Any] | list[dict[str, Any]]) -> str:
@@ -87,26 +76,15 @@ def _json(value: dict[str, Any] | list[dict[str, Any]]) -> str:
 
 
 async def find(core: Any, request_id: str) -> Receipt | None:
-    """The object's receipt for ``request_id``, else the D1 one, of the last MAX_AGE."""
-    since = now_s() - MAX_AGE
-    rows = core.sql.exec(FIND, request_id, since).toArray()
-    if rows:
-        row = rows[0]
-        if row.state == "done":
-            return Receipt(str(row.request_hash), None, None, json.loads(row.result), legacy=False)
-        etag = None if row.plan_etag is None else str(row.plan_etag)
-        return Receipt(str(row.request_hash), json.loads(row.commands), etag, None, legacy=False)
-    previous = await store.first(core.env.DB, sql.LEGACY_ACTION, request_id, since)
-    if previous is None:
+    """The object's receipt for ``request_id`` of the last MAX_AGE."""
+    rows = core.sql.exec(FIND, request_id, now_s() - MAX_AGE).toArray()
+    if not rows:
         return None
-    response = previous["response"]
-    return Receipt(
-        previous["request_hash"],
-        json.loads(previous["commands"]),
-        None,  # the release before kept no etag: its started label write resends as it did there
-        None if response is None else json.loads(response),
-        legacy=True,
-    )
+    row = rows[0]
+    if row.state == "done":
+        return Receipt(str(row.request_hash), None, None, json.loads(row.result))
+    etag = None if row.plan_etag is None else str(row.plan_etag)
+    return Receipt(str(row.request_hash), json.loads(row.commands), etag, None)
 
 
 async def start(
@@ -134,13 +112,9 @@ async def settle(core: Any, request_id: str, value: str | None, replace_etag: st
     """The FlowDay settlement CompleteTask ``request_id`` freezes, or None when it has no done receipt.
 
     ``value`` freezes a settlement when none is frozen, or replaces the frozen one whose etag is
-    ``replace_etag``; otherwise the frozen one is answered unchanged. A CompleteTask finished by the release
-    before is first copied from D1, with the settlement it froze there.
+    ``replace_etag``; otherwise the frozen one is answered unchanged.
     """
-    now = now_s()
-    rows = core.sql.exec(FOCUS, request_id, now - MAX_AGE).toArray()
-    if not rows and await _copy_completion(core, request_id, now):
-        rows = core.sql.exec(FOCUS, request_id, now - MAX_AGE).toArray()
+    rows = core.sql.exec(FOCUS, request_id, now_s() - MAX_AGE).toArray()
     if not rows:
         return None
     frozen = rows[0].focus
@@ -151,19 +125,3 @@ async def settle(core: Any, request_id: str, value: str | None, replace_etag: st
     # The gateway sends what this answers to FlowDay.
     await core.ctx.storage.sync()
     return value
-
-
-async def _copy_completion(core: Any, request_id: str, now: int) -> bool:
-    """Copy a done CompleteTask receipt and its frozen settlement from D1 plus_actions, if there is one."""
-    rows = await store.rows(core.env.DB, sql.LEGACY_COMPLETION, request_id, "focus:" + request_id, now - MAX_AGE)
-    found = {row["request_id"]: row for row in rows}
-    completed = found.get(request_id)
-    answer = json.loads(completed["response"]) if completed and completed["response"] is not None else None
-    # Only CompleteTask answered with its task ID alone.
-    if not isinstance(answer, dict) or set(answer) != {"task_id"}:
-        return False
-    result: dict[str, Any] = {"task_id": answer["task_id"]}
-    if (focus := found.get("focus:" + request_id)) is not None:
-        result["focus"] = json.loads(focus["commands"])
-    core.sql.exec(IMPORT, request_id, completed["request_hash"], _json(result), int(completed["created_at"]), now)
-    return True

@@ -1,6 +1,6 @@
 """The GTD ledger (runtime/gtd.py): the daily snapshot, its aggregates and the weekly review.
 
-A day's snapshot holds at most MAX_SNAPSHOT_ROWS rows (10 pages of 200), so every read of one day is
+A day's snapshot holds at most MAX_SNAPSHOT_ROWS rows (20 pages of 100), so every read of one day is
 bounded by the primary key's ``day`` prefix. Nothing here selects task text: the tables have none.
 """
 
@@ -25,7 +25,7 @@ CLEAR_DAY = Query(
     TASKS_INDEX,
 )
 # One page (at most 200 rows) in one statement: bind the day, then a JSON array of core.gtd.snapshot_row
-# objects. A task Todoist lists twice across pages keeps its later row.
+# objects. A task Tasks lists twice across pages keeps its later row.
 WRITE_PAGE = Query(
     "INSERT INTO gtd_snapshot_tasks (day, task_id, project_id, parent_id, labels, priority, due_date, due_at,"
     " due_recurring, deadline_date, added_at, checked, content_hmac)"
@@ -58,15 +58,8 @@ CLOSED_SINCE = Query(
     " AND NOT EXISTS (SELECT 1 FROM gtd_snapshot_tasks t WHERE t.day = ? AND t.task_id = y.task_id)",
     TASKS_INDEX,
 )
-# Mail tasks of a window (bind its start and end: the 14 days before the last 24 h, the morning brief's
-# carryover pool without its cap of 30) still open in the day's snapshot (bind the day): walks
-# summaries_created (about 100 rows a day) plus one primary-key probe each.
-MAIL_OPEN = Query(
-    "SELECT count(*) AS n FROM summaries WHERE created_at > ? AND created_at <= ? AND task_id <> ''"
-    " AND EXISTS (SELECT 1 FROM gtd_snapshot_tasks g WHERE g.day = ? AND g.task_id = summaries.task_id)",
-    "summaries_created",
-)
-# Native Mail remains content until conversion; it does not need a task snapshot to remain open.
+# Mail entries of a window (bind its start and end: the 14 days before the last 24 h, the morning brief's
+# carryover pool without its cap of 30) still pending: Mail is content until conversion, so no snapshot is read.
 NATIVE_MAIL_OPEN = Query(
     f"SELECT count(*) AS n FROM summaries INDEXED BY summaries_pending"
     f" WHERE created_at > ? AND created_at <= ? AND {NATIVE_PENDING}",
@@ -126,7 +119,7 @@ REVIEW_PAGE = Query(
     " LIMIT ?",
     REVIEWS_INDEX,
 )
-# Claims the week before Todoist is called, with the frozen title, body and project.
+# Claims the week before Tasks is called, with the frozen title, body and project.
 CLAIM_REVIEW = Query(
     "INSERT INTO gtd_reviews (week, state, project_id, subject, body, created_at, updated_at)"
     " VALUES (?, 'sending', ?, ?, ?, ?, ?) ON CONFLICT (week) DO NOTHING",

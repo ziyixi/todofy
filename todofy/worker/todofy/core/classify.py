@@ -66,7 +66,6 @@ def classify_gemini(outcome: HttpOutcome, text: str | None) -> GeminiVerdict:
 class TaskResult(StrEnum):
     CREATED = "created"  # -> complete
     RETRY_LATER = "retry_later"  # stay summarized, durable backoff
-    BLOCKED = "blocked"  # stay summarized, pause the whole Todoist stage
     UNKNOWN = "unknown"  # -> todo_unknown, never resent automatically
 
 
@@ -86,10 +85,8 @@ class TaskVerdict:
 
 
 def classify_task_create(outcome: HttpOutcome, task_id: str) -> TaskVerdict:
-    """``task_id`` is the ``id`` of a 2xx response body, or ``""``.
-
-    This classifies one attempt; ``final_task_verdict`` combines the attempts of one call.
-    """
+    """``task_id`` is the ``id`` of a 2xx response body, or ``""``. A call that may have reached the store is
+    UNKNOWN: it is never resent automatically, only looked up."""
     if outcome.ok:
         if task_id:
             return TaskVerdict(TaskResult.CREATED)
@@ -110,23 +107,7 @@ def classify_task_create(outcome: HttpOutcome, task_id: str) -> TaskVerdict:
         return TaskVerdict(TaskResult.RETRY_LATER, Code.TODOIST_UNAVAILABLE, retry_inline=True)
     if status >= 500:
         return TaskVerdict(TaskResult.UNKNOWN, Code.TODO_RESULT_UNKNOWN)
-    if status in (401, 403):
-        return TaskVerdict(TaskResult.BLOCKED, Code.TODOIST_AUTH_BLOCKED)
     return TaskVerdict(TaskResult.RETRY_LATER, Code.TODOIST_REJECTED)
-
-
-def final_task_verdict(last: TaskVerdict, possibly_delivered: bool) -> TaskVerdict:
-    """The verdict of a whole create call, given its last attempt.
-
-    ``possibly_delivered`` is whether any attempt of the call was UNKNOWN (a
-    timeout, a lost connection, a 500, or a 2xx without an id). Once one may have
-    created the task, the call ends as CREATED or UNKNOWN only: a later 429, 5xx,
-    401/403 or 4xx must not turn it into an automatic resend, because nothing
-    relies on Todoist deduplicating ``X-Request-Id``.
-    """
-    if possibly_delivered and last.result not in (TaskResult.CREATED, TaskResult.UNKNOWN):
-        return TaskVerdict(TaskResult.UNKNOWN, Code.TODO_RESULT_UNKNOWN)
-    return last
 
 
 @dataclass(frozen=True, slots=True)

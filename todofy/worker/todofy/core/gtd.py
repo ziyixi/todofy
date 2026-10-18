@@ -1,6 +1,6 @@
 """GTD ledger rules (docs/gtd-features.md): snapshot rows, daily aggregates, the Sunday review.
 
-Pure stdlib, host-tested. Todoist task text never gets past this module: ``snapshot_row`` keeps a
+Pure stdlib, host-tested. Task text never gets past this module: ``snapshot_row`` keeps a
 whitelist of metadata and folds ``content`` and ``description`` into a keyed hash, the completed-task
 tally keeps counts only, and every text built here (the review body, the carryover lines) is made of
 numbers, dates, codes and links, or of summaries Todofy already stores.
@@ -22,11 +22,11 @@ MINUTE = 60
 HOUR = 60 * MINUTE
 DAY = 24 * HOUR
 
-# Todoist's page size maximum (GET /api/v1/tasks and the completed list): 10 pages cover 2,000 tasks.
-PAGE_SIZE = 200
-MAX_TASK_PAGES = 10
-MAX_COMPLETED_PAGES = 5
-# Todoist GETs one alarm invocation may make; a longer collection continues a second later.
+# Tasks' largest page (ListTasks and ListCompletions): 20 pages cover 2,000 open tasks.
+PAGE_SIZE = 100
+MAX_TASK_PAGES = 20
+MAX_COMPLETED_PAGES = 10
+# Tasks reads one alarm invocation may make; a longer collection continues a second later.
 CALLS_PER_ALARM = 5
 # Rows a day's snapshot can hold (the page cap), and so the bound of every read of one day.
 MAX_SNAPSHOT_ROWS = MAX_TASK_PAGES * PAGE_SIZE
@@ -193,7 +193,7 @@ def _date(value: Any) -> str:
 
 
 def parse_due(due: Any) -> tuple[str | None, int | None, bool]:
-    """(due_date, due_at, recurring) of a Todoist ``due`` object.
+    """(due_date, due_at, recurring) of a task's ``due`` object (core/native_task_view.py).
 
     ``date`` is ``YYYY-MM-DD`` (all day), ``YYYY-MM-DDTHH:MM:SS`` (floating: the owner's local time,
     kept as its date only) or with ``Z`` (a fixed time: also ``due_at``); a ``datetime`` field, as the
@@ -308,20 +308,6 @@ def snapshot_rows(tasks: Iterable[Mapping[str, Any]], key: bytes) -> tuple[list[
             continue
         rows[row["task_id"]] = row
     return list(rows.values()), skipped
-
-
-def parse_completed_page(body: bytes) -> tuple[list[dict[str, Any]], str]:
-    """Items and next cursor (``""`` on the last page) of ``GET /api/v1/tasks/completed/by_completion_date``.
-
-    Its envelope is ``{"items", "next_cursor"}`` with ``next_cursor`` omitted (or null) on the last page;
-    raises ValueError for anything else."""
-    page = json.loads(body)
-    if not isinstance(page, dict) or not isinstance(page.get("items"), list):
-        raise ValueError("unexpected completed page")
-    cursor = page.get("next_cursor") or ""
-    if not isinstance(cursor, str) or not all(isinstance(item, dict) for item in page["items"]):
-        raise ValueError("unexpected completed page")
-    return page["items"], cursor
 
 
 @dataclass(frozen=True, slots=True)
@@ -478,7 +464,7 @@ class GtdFacts:
     """What the ops status reads from the object's storage (no D1): the latest complete aggregate's
     counters, the snapshot and review times, and the switches that decide the two signals."""
 
-    collect_enabled: bool  # GTD_COLLECT_UTC is not off and nothing pauses Todoist
+    collect_enabled: bool  # GTD_COLLECT_UTC is not off and nothing pauses task writes
     review_enabled: bool
     last_ok_at: int | None = None
     first_attempt_at: int | None = None
@@ -609,17 +595,14 @@ class ReviewFacts:
     dashboard_url: str | None
     # Up to REVIEW_OLDEST_LINKS IDs of the snapshot day's oldest inbox tasks, oldest first (links only).
     oldest_inbox: tuple[str, ...] = ()
-    # Todoist Plus is set up (plus_settings): link its weekly review checklist.
+    # Planning is set up (plus_settings): link Plan's weekly review checklist.
     plus_review: bool = False
-    # Native Tasks supplies its configured origin; None keeps legacy Todoist links.
-    task_url: str | None = None
-    plus_review_url: str | None = None
+    # Links on the Tasks origin (TASKS_PUBLIC_URL): a task by ID, and Plan's review checklist.
+    task_url: str = ""
+    plus_review_url: str = ""
 
 
 REVIEW_OLDEST_LINKS = 3
-TASK_URL = "https://app.todoist.com/app/task/"
-# Opens Plan with the review checklist in Todoist, where the Plus extension is installed.
-PLUS_REVIEW_URL = "https://app.todoist.com/app/today?todoist-plus=review"
 TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,64}", re.ASCII)
 
 
@@ -659,12 +642,11 @@ def review_body(facts: ReviewFacts, now: int) -> str:
     links (the oldest inbox tasks by ID only), never a task title."""
     lines: list[str] = []
     focus: list[str] = []
-    source = "Tasks" if facts.task_url else "Todoist"
     if facts.all is None or facts.snapshot_day is None:
-        lines.append(f"快照：本周没有可用的 {source} 快照（只含计数，稍后可在 Todofy 查看）。")
+        lines.append("快照：本周没有可用的 Tasks 快照（只含计数，稍后可在 Todofy 查看）。")
     else:
         partial = "" if facts.all.complete else "；任务过多，快照不完整"
-        lines.append(f"快照 {facts.snapshot_day}（{source} 元数据，只含计数{partial}）")
+        lines.append(f"快照 {facts.snapshot_day}（Tasks 元数据，只含计数{partial}）")
         inbox, inbox_before = facts.inbox, facts.inbox_week_ago
         if inbox is not None:
             oldest = _trend(inbox.oldest_days, _value(inbox_before, "oldest_days"))
@@ -688,9 +670,7 @@ def review_body(facts: ReviewFacts, now: int) -> str:
         if every.mail_open is not None:
             lines.append(f"邮件任务：1–14 天前收到、仍开着 {every.mail_open}（晨报最多带入 {CARRYOVER_MAX_ROWS} 条）")
         focus = _focus(every, inbox, before, inbox_before)
-        oldest_links = [
-            f"{facts.task_url or TASK_URL}{task_id}" for task_id in facts.oldest_inbox if TASK_ID.fullmatch(task_id)
-        ]
+        oldest_links = [f"{facts.task_url}{task_id}" for task_id in facts.oldest_inbox if TASK_ID.fullmatch(task_id)]
         if oldest_links:
             lines.append("收件箱最老的任务：" + "  ".join(oldest_links[:REVIEW_OLDEST_LINKS]))
     todofy = "不可用" if facts.attention_events is None else str(facts.attention_events)
@@ -717,9 +697,7 @@ def review_body(facts: ReviewFacts, now: int) -> str:
     if facts.public_host:
         links.append(f"Todofy GTD：https://{facts.public_host}/gtd")
     if facts.plus_review:
-        links.append(
-            f"{'周回顾' if facts.plus_review_url else 'Plus 周回顾'}：{facts.plus_review_url or PLUS_REVIEW_URL}"
-        )
+        links.append(f"周回顾：{facts.plus_review_url}")
     if links:
         lines.append("   ".join(links))
     body = "\n".join(lines) + "\n"

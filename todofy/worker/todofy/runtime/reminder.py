@@ -1,8 +1,8 @@
-"""The owner's daily attention reminder: at most one Todoist task per UTC day (v2 plan §5.3).
+"""The owner's daily attention reminder: at most one Tasks task per UTC day (v2 plan §5.3).
 
-The day is claimed in D1 before Todoist is called and its title, body and project
-(TODOIST_OPS_PROJECT_ID when set, else the default project) are frozen, so a retry
-sends the same bytes and X-Request-Id
+The day is claimed in D1 before Tasks is called and its title, body and project
+(TODOIST_OPS_PROJECT_ID when set, else the Tasks Inbox) are frozen, so a retry
+sends the same bytes and request ID
 (mail_inbox_worker.go:559-666 @ 6c46ed4). Only a failure that cannot have
 created a task (``failed``) is retried, hourly and at most REMINDER_MAX_ATTEMPTS
 times; ``unknown`` is never resent that day.
@@ -25,7 +25,7 @@ from todofy.core.backoff import (
     REMINDER_CHECK_INTERVAL,
     REMINDER_MAX_ATTEMPTS,
     REMINDER_RETRY_DELAY,
-    TODOIST_STEP_BUDGET,
+    TASK_STEP_BUDGET,
 )
 from todofy.core.classify import TaskResult, TaskVerdict
 from todofy.core.metrics import Step
@@ -34,9 +34,9 @@ from todofy.core.reminder_text import LIST_LIMIT, SENDER, AttentionRow, reminder
 from todofy.core.render import rfc3339
 from todofy.core.request_id import todoist_request_id
 from todofy.core.sql import reminders as sql
-from todofy.core.todoist_request import TaskRequest, build_task_request
+from todofy.core.todoist_request import build_task_request
 from todofy.core.vocab import ATTENTION_AGE_SECONDS, Code, ReminderState
-from todofy.runtime import metrics, native_tasks, todoist
+from todofy.runtime import metrics, native_tasks
 from todofy.runtime.config import flag, source_id, var
 from todofy.runtime.interop import now_ms
 
@@ -52,8 +52,8 @@ async def tick(env: Any, coordinator: Any, now: int) -> int:
     """
     db = env.DB
     await db.prepare(sql.RECOVER_SENDING.sql).bind(Code.INTERRUPTED_REMINDER_CALL, now).run()
-    # PROCESSING_PAUSED parks the whole Todoist side, including this reminder (a parked
-    # stack after a rollback must not post its own daily task).
+    # PROCESSING_PAUSED parks every task write, including this reminder (a parked
+    # stack must not post its own daily task).
     if not flag(env, "REMINDER_ENABLED") or flag(env, "FORCE_PAUSE_TODOIST") or flag(env, "PROCESSING_PAUSED"):
         return now + REMINDER_CHECK_INTERVAL
     day = _day(now)
@@ -93,14 +93,15 @@ async def tick(env: Any, coordinator: Any, now: int) -> int:
         if attention == 0 and row.ops_count == 0:
             return now + REMINDER_CHECK_INTERVAL
         attempts, subject, body = row.attempts, row.subject, row.body
-        # A row claimed before migration 0004 has no project: it went to the default project.
-        project = row.project_id or ("" if native_tasks.enabled(env) else var(env, "TODOIST_DEFAULT_PROJECT_ID"))
+        # A row claimed before migration 0004 has no project: it goes to the Inbox.
+        project = row.project_id
         claim = await db.prepare(sql.CLAIM_RETRY.sql).bind(now, day, attempts, now).run()
     if claim.meta.changes != 1:
         return now + REMINDER_CHECK_INTERVAL
 
     started = now_ms()
-    result = await todoist.create_task(env, _request(env, subject, body, project), budget_ms=TODOIST_STEP_BUDGET * 1000)
+    request = build_task_request(subject, body, project, todoist_request_id(subject, body, SENDER))
+    result = await native_tasks.create_task(env, request, budget_ms=TASK_STEP_BUDGET * 1000)
     point = metrics.task_point(Step.REMINDER, result, now_ms() - started)
     state, code = _outcome(result.verdict)
     retry_at = now + REMINDER_RETRY_DELAY
@@ -135,20 +136,8 @@ async def _ops_due(db: Any, report: Report, day: str, now: int, attention: bool)
 
 
 def reminder_project(env: Any) -> str:
-    """The project of a new day's reminder: TODOIST_OPS_PROJECT_ID when set, else the default project."""
-    return var(env, "TODOIST_OPS_PROJECT_ID") or (
-        "" if native_tasks.enabled(env) else var(env, "TODOIST_DEFAULT_PROJECT_ID")
-    )
-
-
-def _request(env: Any, subject: str, body: str, project: str) -> TaskRequest:
-    return build_task_request(
-        subject,
-        body,
-        project,
-        todoist_request_id(subject, body, SENDER),
-        var(env, "TODOIST_API_KEY"),
-    )
+    """The project of a new day's reminder: TODOIST_OPS_PROJECT_ID when set, else the Tasks Inbox ("")."""
+    return var(env, "TODOIST_OPS_PROJECT_ID")
 
 
 def _outcome(verdict: TaskVerdict) -> tuple[ReminderState, str]:

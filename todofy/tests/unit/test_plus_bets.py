@@ -1,8 +1,9 @@
 """The weekly Work and Personal Bets: core/plan.py's rules, and SetWeeklyBet and Plan.weekly_bets through
 runtime/plus_api.handle on host CPython with an account clock in US/Pacific.
 
-D1 is host SQLite with every migration (plus_support.py); Todoist is a fake that journals every call, so a test
-can show that a Bet never reaches it. The real path in workerd is tests/runtime/test_plus.py. Synthetic text only.
+D1 is host SQLite with every migration and Tasks a fake that journals every call (plus_support.py), so a test can
+show that a Bet never reaches it. The workerd path is tests/runtime/test_clients_native_tasks.py. Synthetic text
+only.
 """
 
 import asyncio
@@ -16,13 +17,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from tests.unit.plus_support import D1, Storage, confirm_plan, stubbed_pyodide
+from tests.unit.plus_support import D1, NativeTasks, Storage, plan_ready, stubbed_pyodide
 from todofy.core import plan
 
 TIMEZONE = "America/Los_Angeles"
 LAST, WEEK, NEXT = "2026-10-05", "2026-10-12", "2026-10-19"
-LABELS = ("office", "home", "committed", "focus", "candiate", "quarter")
-LABELS += ("lead_1d", "lead_3d", "lead_1w", "lead_2w", "lead_1m")
 
 
 # ---- core/plan.py ------------------------------------------------------------------------------------------
@@ -67,36 +66,11 @@ def test_only_this_week_and_the_next_take_a_bet():
 # ---- SetWeeklyBet and Plan.weekly_bets ------------------------------------------------------------------------
 
 
-class Todoist:
-    """Only what ReadPlan and setup read; every call is journalled."""
-
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    async def metadata(self, _core: Any, *, fresh: bool = False) -> dict[str, Any]:
-        self.calls.append("metadata")
-        return {"timezone": TIMEZONE, "labels": [{"id": "id-" + role, "name": role} for role in LABELS], "filters": []}
-
-    async def tasks(self, _core: Any, limit: int = 200, cursor: str = "") -> tuple[list[dict[str, Any]], str]:
-        self.calls.append("list")
-        return [], ""
-
-    async def task(self, _core: Any, task_id: str) -> dict[str, Any]:
-        self.calls.append("task")
-        raise AssertionError("no task read")
-
-    async def commands(self, _core: Any, commands: list[dict[str, Any]]) -> dict[str, Any]:
-        self.calls.append("sync")
-        raise AssertionError("no Sync write")
-
-
 class Stack:
     def __init__(self, runtime: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         self.runtime, self.clock = runtime, runtime.clock
         self.d1 = D1()
-        self.todoist = Todoist()
-        for name in ("metadata", "tasks", "task", "commands"):
-            monkeypatch.setattr(runtime.todoist, name, getattr(self.todoist, name))
+        self.tasks = NativeTasks(TIMEZONE)
         monkeypatch.setattr(runtime.plus_api, "account_day", self.account_day)
         self.lease = False
         monkeypatch.setattr(runtime.plus_api.backup, "holds_ledger", lambda *_: self.lease)
@@ -105,9 +79,8 @@ class Stack:
             storage.sql.exec(statement)
         self.sql = storage.sql
         self.core = types.SimpleNamespace(
-            env=types.SimpleNamespace(DB=self.d1, TODOIST_DEFAULT_PROJECT_ID="mail"),
+            env=types.SimpleNamespace(DB=self.d1, TASKS=self.tasks),
             plus_lock=asyncio.Lock(),
-            todoist_wait=lambda _now: None,
             sql=storage.sql,
             ctx=types.SimpleNamespace(storage=storage),
         )
@@ -140,19 +113,15 @@ class Stack:
 def stack(monkeypatch: pytest.MonkeyPatch) -> Iterator[Stack]:
     with stubbed_pyodide(monkeypatch) as stubs:
         from todofy.runtime import plus_api, plus_receipts
-        from todofy.runtime import plus_todoist as todoist
 
-        runtime = types.SimpleNamespace(
-            plus_api=plus_api, plus_receipts=plus_receipts, todoist=todoist, clock=stubs["clock"]
-        )
+        runtime = types.SimpleNamespace(plus_api=plus_api, plus_receipts=plus_receipts, clock=stubs["clock"])
         stack = Stack(runtime, monkeypatch)
         stack.at("2026-10-14T09:00:00")  # Wednesday of WEEK
-        asyncio.run(confirm_plan(stack.core))
-        stack.todoist.calls.clear()
+        plan_ready(stack.d1, timezone=TIMEZONE, week=WEEK)
         yield stack
 
 
-def test_a_bet_is_created_changed_and_cleared_by_compare_and_set_without_todoist(stack):
+def test_a_bet_is_created_changed_and_cleared_by_compare_and_set_without_tasks(stack):
     created = stack.bet(WEEK, "work", "  Ship the\nquarterly draft ")
     assert created == {
         "week_start": WEEK,
@@ -169,7 +138,7 @@ def test_a_bet_is_created_changed_and_cleared_by_compare_and_set_without_todoist
     assert stack.rows() == [(WEEK, "work", "bets", "", 3)]
     assert stack.bet(WEEK, "work", "Back from an old tab", created["etag"]) == {"error": "ETAG_MISMATCH"}
     assert stack.rows() == [(WEEK, "work", "bets", "", 3)]
-    assert stack.todoist.calls == []
+    assert stack.tasks.calls == []
     assert stack.sql.db.execute("SELECT count(*) FROM plus_receipts").fetchone()[0] == 0
 
 
@@ -255,7 +224,6 @@ def test_the_plan_carries_last_this_and_next_weeks_bets_in_order(stack):
         " ('2026-10-26', 'work', 'bets', 'Later', 1), ('2026-10-12', '', 'review', '[]', 1)"
     )
     stack.d1.db.commit()
-    stack.todoist.calls.clear()
     bets = stack.call("ReadPlan")["plan"]["weekly_bets"]
     assert [(bet["week_start"], bet["area"], bet.get("text", "")) for bet in bets] == [
         (LAST, "work", "Last week work"),
@@ -265,6 +233,6 @@ def test_the_plan_carries_last_this_and_next_weeks_bets_in_order(stack):
         (NEXT, "work", "Next week work"),
     ]
     assert all(bet["etag"] and bet["update_time"].endswith("Z") for bet in bets)
-    assert stack.todoist.calls == ["metadata"]  # the plan's own metadata read; the Bets are D1 only
+    assert stack.tasks.methods() == ["GetCatalog"]  # the plan's own catalog read; the Bets are D1 only
     # A native page's BASIC view carries none.
     assert "weekly_bets" not in stack.call("ReadPlan", view="basic")["plan"]

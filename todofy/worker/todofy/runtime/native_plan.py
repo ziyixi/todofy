@@ -50,11 +50,6 @@ async def read_overlay(env: Any, tasks: list[dict[str, Any]]) -> list[dict[str, 
     return overlaid
 
 
-async def save_state(env: Any, task_id: str, labels: list[str], expected_rev: int, request_id: str) -> int:
-    """Compatibility for an unfinished pre-native-state journal or the one-time import."""
-    return await save_fields(env, task_id, state_from_labels(labels), expected_rev, request_id)
-
-
 async def check_revision(env: Any, task_id: str, expected_rev: int, request_id: str) -> None:
     from todofy.runtime.native_tasks import NativeTasksError
 
