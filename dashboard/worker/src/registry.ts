@@ -61,7 +61,7 @@ const ENTRIES: readonly EntryDef[] = [
   {
     id: 'todofy',
     name: 'Todofy',
-    description: '邮件摘要、Todoist 任务与每日提醒',
+    description: '邮件摘要、规划与每日提醒',
     group: 'apps',
     icon: 'list-checks',
     accent: 'green',
@@ -75,7 +75,7 @@ const ENTRIES: readonly EntryDef[] = [
   {
     id: 'flowday',
     name: 'FlowDay',
-    description: 'Todoist 时间块、计时与回顾',
+    description: 'Tasks 时间块、计时与回顾',
     group: 'apps',
     icon: 'calendar-clock',
     accent: 'teal',
@@ -348,7 +348,7 @@ const FLOWS: readonly FlowDef[] = [
     id: 'mail-to-task',
     name: '邮件 → 任务',
     group: 'mail',
-    description: '来源邮箱转发的邮件经 Mail Hero 保存、解析、投递给 Todofy，生成摘要与 Todoist 任务。',
+    description: '来源邮箱转发的邮件经 Mail Hero 保存、解析、投递给 Todofy，生成摘要，出现在 Tasks 的 Mail 页。',
     order: 1,
     stages: [
       { id: 'forward', name: '来源转发', entry: null, signals: [], note: '来源邮箱的转发在面板之外' },
@@ -387,12 +387,12 @@ const FLOWS: readonly FlowDef[] = [
       },
       {
         id: 'tasks',
-        name: 'Todoist 与提醒',
+        name: '任务与提醒',
         entry: 'todofy',
         workers: ['todofy-core'],
-        signals: ['todoist_paused', 'todoist_blocked', 'attention', 'reminder_failed', 'reminder_disabled'],
+        signals: ['todoist_paused', 'attention', 'reminder_failed', 'reminder_disabled'],
         hold_signals: ['todoist_paused', 'reminder_disabled'],
-        counters: ['attention_events', 'todoist_window_calls'],
+        counters: ['attention_events'],
       },
     ],
     canary: {

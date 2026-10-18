@@ -91,7 +91,7 @@ class DesiredState(unittest.TestCase):
         switches = {
             "todofy-core": (
                 "BUILD_SHA", "MAINTENANCE_MODE", "REMINDER_ENABLED", "PROCESSING_PAUSED", "FORCE_PAUSE_TODOIST",
-                "GTD_REVIEW_ENABLED", "PLUS_METADATA",
+                "GTD_REVIEW_ENABLED",
             ),
             "todofy": ("BUILD_SHA", "MAINTENANCE_MODE"),
         }
@@ -120,12 +120,12 @@ class DesiredState(unittest.TestCase):
         self.assertEqual(worker["personal"], [])
 
     def test_flowday_secrets_all_come_from_its_deploy(self):
-        """FlowDay's wrapper writes the owner addresses, the CSRF key and the credential key (it seals the Todoist key in
-        D1) with --secrets-file and adds BUILD_SHA as a var; no secret is set by hand. Its one hostname is the Custom
-        Domain flowday.ziyixi.science (since the F4 cutover)."""
+        """FlowDay's wrapper writes the owner addresses and the CSRF key with --secrets-file and adds BUILD_SHA as a
+        var; no secret is set by hand. Its one hostname is the Custom Domain flowday.ziyixi.science (since the F4
+        cutover)."""
         worker = self.state["workers"]["flowday"]
         bindings = {b["name"]: b for b in worker["bindings"]}
-        secrets = ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY", "CREDENTIAL_KEY")
+        secrets = ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY")
         for name in secrets:
             with self.subTest(name=name):
                 self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy"})

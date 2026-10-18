@@ -34,7 +34,6 @@ VALID = {
     "TODOFY_PROCESSING_PAUSED": "false",
     "TODOFY_FORCE_PAUSE_TODOIST": "false",
     "TODOFY_GTD_REVIEW_ENABLED": "false",
-    "TODOFY_PLUS_METADATA": "cache",
     "TODOFY_TODOIST_OPS_PROJECT_ID": "",
     "TODOFY_TODOIST_REVIEW_PROJECT_ID": "",
     "TODOFY_ACCESS_OWNER": "owner@example.com",
@@ -62,7 +61,6 @@ def test_each_worker_gets_the_build_and_its_switches_as_vars() -> None:
         "PROCESSING_PAUSED": "false",
         "FORCE_PAUSE_TODOIST": "false",
         "GTD_REVIEW_ENABLED": "false",
-        "PLUS_METADATA": "cache",
     }
     assert injected_vars("gateway", VALID) == {"BUILD_SHA": SHA, "MAINTENANCE_MODE": "false"}
     assert wrangler_args("gateway", VALID | {"TODOFY_MAINTENANCE_MODE": "true"}) == [
@@ -105,11 +103,9 @@ def test_the_marker_lists_every_input() -> None:
 @pytest.mark.parametrize(
     ("name", "value"),
     [
-        *[(item.source, None) for item in INJECTED["core"] if not item.default],
-        *[(item.source, "") for item in INJECTED["core"] if not item.default],
+        *[(item.source, None) for item in INJECTED["core"]],
+        *[(item.source, "") for item in INJECTED["core"]],
         ("TODOFY_GTD_REVIEW_ENABLED", "on"),
-        ("TODOFY_PLUS_METADATA", "Full"),
-        ("TODOFY_PLUS_METADATA", "off"),
         ("GITHUB_SHA", SHA[:39]),
         ("GITHUB_SHA", SHA.upper()),
         ("TODOFY_MAINTENANCE_MODE", "1"),
@@ -123,13 +119,6 @@ def test_a_missing_or_invalid_var_names_only_the_setting(name: str, value: str |
     with pytest.raises(SettingError) as raised:
         wrangler_args("core", env)
     assert str(raised.value) == f"Invalid or missing deploy setting: {name}"
-
-
-@pytest.mark.parametrize(("value", "deployed"), [(None, "cache"), ("", "cache"), ("cache", "cache"), ("full", "full")])
-def test_the_plus_rollback_switch_deploys_cache_until_it_is_set(value: str | None, deployed: str) -> None:
-    env = {key: item for key, item in (VALID | {"TODOFY_PLUS_METADATA": value}).items() if item is not None}
-    assert injected_vars("core", env)["PLUS_METADATA"] == deployed
-    assert "PLUS_METADATA" not in injected_vars("gateway", env)
 
 
 def test_the_core_secrets_are_its_projects() -> None:

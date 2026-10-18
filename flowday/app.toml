@@ -5,7 +5,7 @@ target = "cloudflare"
 
 [[workers]]
 config = "flowday/wrangler.toml"
-personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY", "CREDENTIAL_KEY"]
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"]
 manual_secrets = []
 optional_secrets = ["ACCESS_OWNER_ALIASES"]
 hosts = ["flowday"]
@@ -16,7 +16,7 @@ position = 6
 [[entries]]
 id = "flowday"
 name = "FlowDay"
-description = "Todoist 时间块、计时与回顾"
+description = "Tasks 时间块、计时与回顾"
 group = "apps"
 icon = "calendar-clock"
 accent = "teal"

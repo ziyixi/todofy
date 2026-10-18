@@ -213,11 +213,6 @@
           "source": "deploy"
         },
         {
-          "name": "CREDENTIAL_KEY",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
           "name": "CSRF_SIGNING_KEY",
           "type": "secret_text",
           "source": "deploy"
@@ -911,11 +906,6 @@
           "source": "config"
         },
         {
-          "name": "TASK_SOURCE",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
           "name": "TODOFY_HOOKS_HOSTS",
           "type": "plain_text",
           "source": "config"
@@ -1017,11 +1007,6 @@
           "source": "config"
         },
         {
-          "name": "PLUS_METADATA",
-          "type": "plain_text",
-          "source": "deploy"
-        },
-        {
           "name": "PROCESSING_PAUSED",
           "type": "plain_text",
           "source": "deploy"
@@ -1057,24 +1042,9 @@
           "source": "config"
         },
         {
-          "name": "TASK_SOURCE",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
           "name": "TODOFY_PUBLIC_HOST",
           "type": "plain_text",
           "source": "config"
-        },
-        {
-          "name": "TODOIST_API_BASE",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "TODOIST_API_KEY",
-          "type": "secret_text",
-          "source": "manual"
         },
         {
           "name": "TODOIST_DEFAULT_PROJECT_ID",

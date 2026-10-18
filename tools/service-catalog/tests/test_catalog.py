@@ -74,6 +74,9 @@ class CatalogTests(unittest.TestCase):
         before = json.loads((Path(__file__).parent / "home-before-p5.json").read_text())
         keys = ("id", "name", "description", "group", "icon", "accent", "url", "access", "status", "tile_metric", "app_only_signals", "order")
         existing = [entry for entry in before["entries"] if entry["id"] not in {"self-hosted", "newsletter", "notion-publish"}]
+        # Tasks replaced Todoist as the task store, which two descriptions named.
+        renamed = {"todofy": "邮件摘要、规划与每日提醒", "flowday": "Tasks 时间块、计时与回顾"}
+        existing = [entry | {"description": renamed.get(entry["id"], entry["description"])} for entry in existing]
         existing_ids = {entry["id"] for entry in existing}
         entries = [{key: entry[key] for key in keys} for entry in loaded.entries if entry["id"] in existing_ids]
         self.assertEqual(entries, existing)

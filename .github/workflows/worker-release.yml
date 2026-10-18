@@ -47,7 +47,6 @@ jobs:
       MAIL_HERO_NATIVE_BACKUP_ENABLED: ${{ vars.MAIL_HERO_NATIVE_BACKUP_ENABLED }}
       TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
       TODOFY_GTD_REVIEW_ENABLED: ${{ vars.TODOFY_GTD_REVIEW_ENABLED }}
-      TODOFY_PLUS_METADATA: ${{ vars.TODOFY_PLUS_METADATA }}
       TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
       TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
       TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
@@ -137,7 +136,6 @@ jobs:
           cf-api-token: ${{ secrets.CF_API_TOKEN }}
           dashboard-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
           dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
-          flowday-credential-key: ${{ secrets.FLOWDAY_CREDENTIAL_KEY }}
           flowday-csrf-signing-key: ${{ secrets.FLOWDAY_CSRF_SIGNING_KEY }}
           flowday-worker-secrets: ${{ secrets.FLOWDAY_WORKER_SECRETS }}
       - name: Release links

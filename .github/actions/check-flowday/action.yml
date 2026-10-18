@@ -38,7 +38,7 @@ runs:
         npm run lint
         npm run typecheck
         npm test
-    # Real D1 with the migrations, a fake Todoist Sync API, Access and CSRF; also the write budget of a simulated
+    # Real D1 with the migrations, a fake Tasks binding, Access and CSRF; also the write budget of a simulated
     # day and the CPU of the heaviest handlers against Workers Free's 10 ms.
     - name: Runtime tests (workerd with real D1)
       working-directory: flowday/worker
@@ -64,7 +64,6 @@ runs:
         FLOWDAY_ACCESS_OWNER: owner@example.com
         FLOWDAY_ACCESS_OWNER_ALIASES: ''
         FLOWDAY_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-        FLOWDAY_CREDENTIAL_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
       shell: bash -e {0}
       run: |
         node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/flowday-secrets.json"

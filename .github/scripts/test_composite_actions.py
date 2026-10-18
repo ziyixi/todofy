@@ -177,7 +177,7 @@ class CompositeActions(unittest.TestCase):
             "todofy": (
                 "TODOFY_REMINDER_ENABLED", "TODOFY_MAINTENANCE_MODE",
                 "TODOFY_PROCESSING_PAUSED", "TODOFY_FORCE_PAUSE_TODOIST",
-                "TODOFY_GTD_REVIEW_ENABLED", "TODOFY_PLUS_METADATA",
+                "TODOFY_GTD_REVIEW_ENABLED",
             ),
             "dashboard": ("DASHBOARD_CANARY_ENABLED",),
             "mail-hero": (

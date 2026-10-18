@@ -68,7 +68,6 @@ runs:
         TODOFY_PROCESSING_PAUSED: 'false'
         TODOFY_FORCE_PAUSE_TODOIST: 'false'
         TODOFY_GTD_REVIEW_ENABLED: 'false'
-        TODOFY_PLUS_METADATA: cache
         # The optional projects: one unset (uploaded as unset) and one set, so both paths are written.
         TODOFY_TODOIST_OPS_PROJECT_ID: ''
         TODOFY_TODOIST_REVIEW_PROJECT_ID: placeholder

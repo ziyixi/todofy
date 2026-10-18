@@ -146,8 +146,6 @@ TOGGLES = {
     "TODOFY_FORCE_PAUSE_TODOIST",
     "TODOFY_REMINDER_ENABLED",
     "TODOFY_GTD_REVIEW_ENABLED",
-    # The Todoist adapter's planning caches (cache, or full to turn them off): todofy's runtime/plus_cache.py.
-    "TODOFY_PLUS_METADATA",
     "DASHBOARD_CANARY_ENABLED",
     # mailsort's ceiling (live, shadow or off): the emergency switch of mailsort/docs/design.md section 10.
     "MAILSORT_MODE",
@@ -464,7 +462,8 @@ class Files(unittest.TestCase):
             "binding": "FLOWDAY_NATIVE_FOCUS", "service": "flowday", "entrypoint": "NativeFocusEntrypoint",
         }])
         for config in (core, gateway):
-            self.assertEqual(config["vars"]["TASK_SOURCE"], "tasks")
+            # Tasks is the only task store: no source switch remains.
+            self.assertNotIn("TASK_SOURCE", config["vars"])
             self.assertEqual(config["vars"]["TASKS_PUBLIC_URL"], "https://" + tasks["vars"]["PUBLIC_HOST"])
 
 
@@ -923,7 +922,7 @@ class Workflow(unittest.TestCase):
 
     def test_flowday_deploy_reads_the_dashboard_owner_and_its_own_keys(self):
         """FlowDay's owner addresses come from the dashboard's secrets (no FLOWDAY_ACCESS_OWNER* secret exists); its
-        CSRF key and credential key are its own, never another app's."""
+        CSRF key is its own, never another app's."""
         self.assertLessEqual(set(SHARED_SECRETS), PERSONAL_INPUTS)
         self.assertLessEqual(set(SHARED_SECRETS.values()), PERSONAL_INPUTS)
         read = {}
@@ -934,7 +933,6 @@ class Workflow(unittest.TestCase):
         self.assertEqual(read["FLOWDAY_ACCESS_OWNER"], {"DASHBOARD_ACCESS_OWNER"})
         self.assertEqual(read["FLOWDAY_ACCESS_OWNER_ALIASES"], {"DASHBOARD_ACCESS_OWNER_ALIASES"})
         self.assertEqual(read["FLOWDAY_CSRF_SIGNING_KEY"], {"FLOWDAY_CSRF_SIGNING_KEY"})
-        self.assertEqual(read["FLOWDAY_CREDENTIAL_KEY"], {"FLOWDAY_CREDENTIAL_KEY"})
         self.assertEqual(read["CLOUDFLARE_API_TOKEN"], {"CF_API_TOKEN"})
         self.assertEqual(set(read), {*markers(WRAPPERS["flowday"][0])["secrets"], "FLOWDAY_WORKER_SECRETS", "CLOUDFLARE_API_TOKEN"})
         self.assertNotRegex(effective_ci(), r"secrets\.FLOWDAY_ACCESS_OWNER")

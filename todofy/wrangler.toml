@@ -9,9 +9,9 @@
 # validates and adds the values that are never committed: with --var, MAINTENANCE_MODE, PROCESSING_PAUSED,
 # FORCE_PAUSE_TODOIST, REMINDER_ENABLED, GTD_REVIEW_ENABLED (GitHub environment variables) and BUILD_SHA (the
 # commit); with --secrets-file, as Worker secrets, TODOIST_DEFAULT_PROJECT_ID, TODOIST_OPS_PROJECT_ID and
-# TODOIST_REVIEW_PROJECT_ID (GitHub environment secrets; an unset optional project is uploaded as one space,
-# read as unset). A plain `pywrangler deploy` of this file DELETES those vars. Worker secrets (GEMINI_API_KEY,
-# TODOIST_API_KEY set by hand, and the projects) survive every deploy.
+# TODOIST_REVIEW_PROJECT_ID (GitHub environment secrets, now Tasks project IDs under their old names; an unset
+# optional project is uploaded as one space, read as unset). A plain `pywrangler deploy` of this file DELETES
+# those vars. Worker secrets (GEMINI_API_KEY set by hand, and the projects) survive every deploy.
 #
 # Runtime tests use wrangler.test.toml. Local dev (docs/dev-notes.md §1) uses local bindings only; local core
 # values and secrets go in todofy/.dev.vars (see .dev.vars.example), and D1 commands always pass --local.
@@ -60,11 +60,9 @@ entrypoint = "TasksApi"
 props = { access = "read-write" }
 
 [vars]
-TASK_SOURCE = "tasks"
 TASKS_PUBLIC_URL = "https://tasks.ziyixi.science"
-# Fixed upstreams, never variables, so a bad setting cannot send the API keys elsewhere (tests pin them).
+# A fixed upstream, never a variable, so a bad setting cannot send the API key elsewhere (tests pin it).
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com"
-TODOIST_API_BASE = "https://api.todoist.com"
 # The daily reminder links to the owner UI on this host (the gateway's TODOFY_PUBLIC_HOST).
 TODOFY_PUBLIC_HOST = "todofy.ziyixi.science"
 # The mail.received.v1 source this consumer accepts.

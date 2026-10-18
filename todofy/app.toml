@@ -16,7 +16,7 @@ position = 2
 [[workers]]
 config = "todofy/wrangler.toml"
 personal_secrets = ["TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"]
-manual_secrets = ["TODOIST_API_KEY", "GEMINI_API_KEY"]
+manual_secrets = ["GEMINI_API_KEY"]
 optional_secrets = ["TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"]
 hosts = []
 entry = "todofy"
@@ -26,7 +26,7 @@ position = 3
 [[entries]]
 id = "todofy"
 name = "Todofy"
-description = "邮件摘要、Todoist 任务与每日提醒"
+description = "邮件摘要、规划与每日提醒"
 group = "apps"
 icon = "list-checks"
 accent = "green"

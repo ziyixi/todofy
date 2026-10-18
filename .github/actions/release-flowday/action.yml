@@ -13,10 +13,6 @@ inputs:
     description: "dashboard access owner aliases"
     required: false
     default: ''
-  flowday-credential-key:
-    description: "flowday credential key"
-    required: false
-    default: ''
   flowday-csrf-signing-key:
     description: "flowday csrf signing key"
     required: false
@@ -74,7 +70,7 @@ runs:
     # The owner's addresses and the two keys are environment secrets (masked in this public log) and reach the
     # Worker as secrets through --secrets-file; wrangler prints plain vars. FlowDay's owner is the dashboard's owner
     # (one person, the same Access identities), so the addresses come from the dashboard's secrets; the
-    # CSRF key and the credential key (it seals the Todoist key in D1) are FlowDay's own. flowday/README.md "Deploy".
+    # CSRF key is FlowDay's own. flowday/README.md "Deploy".
     - name: Write the Worker secrets file
       if: inputs.required == 'true'
       working-directory: .release-source/flowday/worker
@@ -83,7 +79,6 @@ runs:
         FLOWDAY_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
         FLOWDAY_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
         FLOWDAY_CSRF_SIGNING_KEY: ${{ inputs.flowday-csrf-signing-key }}
-        FLOWDAY_CREDENTIAL_KEY: ${{ inputs.flowday-credential-key }}
       shell: bash -e {0}
       run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/flowday-secrets.json"
     # deploy-vars.mjs adds BUILD_SHA as --var and refuses a real deploy with the all-zeros D1 id or Access AUD.

@@ -15,6 +15,5 @@
 #
 # The reminder links to the local owner UI (the same host the tests use).
 TODOFY_PUBLIC_HOST=todofy.localhost
-# Worker secrets, only to call the real upstreams from a local core:
+# Worker secret, only to call the real Gemini from a local core:
 # GEMINI_API_KEY=
-# TODOIST_API_KEY=

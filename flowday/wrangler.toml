@@ -3,10 +3,9 @@
 # (the repository is public: nothing personal, no secret).
 #
 # Deployed only by CI ("FlowDay deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which appends
-# --var BUILD_SHA (the commit) and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES, CSRF_SIGNING_KEY and CREDENTIAL_KEY as
-# Worker secrets with --secrets-file (the dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES), the same owner, and FlowDay's
-# own FLOWDAY_CSRF_SIGNING_KEY and FLOWDAY_CREDENTIAL_KEY; README.md "Deploy"). A plain `wrangler deploy` of this
-# file DELETES BUILD_SHA.
+# --var BUILD_SHA (the commit) and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets
+# with --secrets-file (the dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES), the same owner, and FlowDay's own
+# FLOWDAY_CSRF_SIGNING_KEY; README.md "Deploy"). A plain `wrangler deploy` of this file DELETES BUILD_SHA.
 #
 # F2 (docs/design.md "Migration plan"): the D1 database "flowday" exists and the existing Access app "flowday" is
 # reused; their id and AUD are committed below, and deploy/deploy-vars.mjs still refuses an all-zeros id or AUD (a
@@ -24,7 +23,8 @@
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
 # Local dev: local bindings only (D1 commands always --local, never --remote), local values in flowday/.dev.vars
-# (see .dev.vars.example). No cron trigger and no Durable Object: the sync runs when the page asks for it.
+# (see .dev.vars.example). No cron trigger and no Durable Object: the sync runs when the page asks for it, and reads
+# Tasks through the TASKS binding.
 name = "flowday"
 account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
 main = "worker/src/index.ts"

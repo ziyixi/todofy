@@ -66,7 +66,6 @@ entrypoint = "NativeFocusEntrypoint"
 crons = ["*/10 * * * *"]
 
 [vars]
-TASK_SOURCE = "tasks"
 TASKS_PUBLIC_URL = "https://tasks.ziyixi.science"
 TODOFY_PUBLIC_HOST = "todofy.ziyixi.science"
 FLOWDAY_PUBLIC_URL = "https://flowday.ziyixi.science"

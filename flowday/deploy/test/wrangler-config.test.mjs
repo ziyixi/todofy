@@ -65,7 +65,7 @@ test('vars: the production host, the public Access issuer and the real AUD; noth
   assert.equal(config.vars.ACCESS_ISSUER, wrangler.experimental_readRawConfig({ config: new URL('../dashboard/wrangler.toml', APP).pathname }).rawConfig.vars.ACCESS_ISSUER)
   const names = Object.keys(config.vars)
   for (const { name } of INJECTED) assert.ok(!names.includes(name), name)
-  for (const name of ['ACCESS_OWNER', 'ACCESS_OWNER_ALIASES', 'CSRF_SIGNING_KEY', 'CREDENTIAL_KEY', 'DEV_AUTH_BYPASS', 'E2E_TEST_ROUTES']) assert.ok(!names.includes(name), name)
+  for (const name of ['ACCESS_OWNER', 'ACCESS_OWNER_ALIASES', 'CSRF_SIGNING_KEY', 'DEV_AUTH_BYPASS', 'E2E_TEST_ROUTES']) assert.ok(!names.includes(name), name)
   assert.ok(!readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.startsWith('#')).join('\n').includes('@'))
 })
 

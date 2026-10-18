@@ -21,14 +21,10 @@ CORE = _load("core")
 GATEWAY = _load("gateway")
 DOMAIN = re.compile(r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
-FIXED_UPSTREAMS = {
-    "GEMINI_API_BASE": "https://generativelanguage.googleapis.com",
-    "TODOIST_API_BASE": "https://api.todoist.com",
-}
+FIXED_UPSTREAMS = {"GEMINI_API_BASE": "https://generativelanguage.googleapis.com"}
 # The vars each Worker has in production: committed ones plus the deploy's --var.
 CORE_VARS = {
     "GEMINI_API_BASE",
-    "TODOIST_API_BASE",
     "TODOFY_PUBLIC_HOST",
     "MAIL_SOURCE_ID",
     "GEMINI_MODELS",
@@ -40,7 +36,6 @@ CORE_VARS = {
     "LEGACY_TEXT_RETENTION_DAYS",
     "GTD_COLLECT_UTC",
     "REPORT_CARRYOVER_DAYS",
-    "TASK_SOURCE",
     "TASKS_PUBLIC_URL",
 }
 GATEWAY_VARS = {
@@ -49,7 +44,6 @@ GATEWAY_VARS = {
     "ACCESS_ISSUER",
     "ACCESS_AUDIENCE",
     "FLOWDAY_PUBLIC_URL",
-    "TASK_SOURCE",
     "TASKS_PUBLIC_URL",
 }
 

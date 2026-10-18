@@ -21,8 +21,7 @@
     },
     "todofy-core": {
       "GEMINI_API_KEY": "<Gemini API key>",
-      "TODOIST_API_KEY": "<Todoist API token>",
-      "TODOIST_DEFAULT_PROJECT_ID": "<Todoist project id>"
+      "TODOIST_DEFAULT_PROJECT_ID": "<Tasks project id>"
     },
     "ziyixi-notion-publish": {
       "GITHUB_DISPATCH_TOKEN": "<GitHub token for this repository: Actions Read/Write and Deployments Read>"
