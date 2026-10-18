@@ -170,6 +170,14 @@ class Classify(unittest.TestCase):
             expect(T, T, T, F, F, packages=T, infra=T, proto=T, **ALL_CHECKED),
         )
 
+    def test_tasks_browser_specs_check_tasks_without_deploying_it(self):
+        spec = "tasks/web/test/browser/x.spec.ts"
+        result = push([spec])
+        self.assertTrue(result["tasks_check"])
+        self.assertEqual({key for key, value in result.items() if key.endswith("_check") and value}, {"tasks_check"})
+        self.assertFalse(any(value for key, value in result.items() if key.endswith(("_deploy", "_publish"))))
+        self.assertTrue(push([spec, "tasks/web/src/App.tsx"])["tasks_deploy"])
+
     def test_test_only_paths_do_not_hide_mixed_production_changes(self):
         for path in (
             "newsletter/src/newsletter/service.py",

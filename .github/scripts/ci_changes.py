@@ -210,8 +210,9 @@ CLOUD_CONFIG = {"config/cloud.toml", "config/resources.toml", "config/account-re
 # Reviewed test directories outside production entrypoints and image inputs. Do not replace this with
 # a filename glob: fixtures and files named "test" inside production source can be shipped. Newsletter's
 # Docker COPY/.dockerignore and Platform's minimal context exclude their tests; Todofy's Python base_dir
-# is worker/. The TS Workers bundle src/ imports, not sibling test/. Production/config changes in the
-# same diff still deploy normally. test_app_isolation.py guards imports across this boundary.
+# is worker/. The TS Workers bundle src/ imports, not sibling test/, and Tasks' web build bundles index.html
+# and src/, not its Playwright specs in test/. Production/config changes in the same diff still deploy
+# normally. test_app_isolation.py guards imports across this boundary.
 APP_TEST_DIRECTORIES = (
     "newsletter/tests/",
     "platform/tests/",
@@ -227,6 +228,7 @@ APP_TEST_DIRECTORIES = (
     "recall/worker/test/",
     "brief/worker/test/",
     "tasks/worker/test/",
+    "tasks/web/test/",
     "tasks/tools/test/",
 )
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
