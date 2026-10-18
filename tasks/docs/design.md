@@ -119,6 +119,8 @@ Resource references are checked again by database triggers. A task family is lim
 moves batch by depth to stay below Workers Free's D1 query limit. No new queue, DO or cron is needed.
 
 Owner requests validate Access before reading the body and validate Origin/CSRF before mutation decoding.
+The CSRF token and cookie last 168 hours, the Access session's length, so a PWA left open overnight can still
+save its first edit without a refresh.
 API responses, HTML, manifest and service worker use private no-store headers. Hashed JS/CSS can use the
 browser's private immutable cache. The service worker only supplies a clear offline page; it does not cache
 private tasks, credentials or writes. The installed PWA needs a connection to use task data.

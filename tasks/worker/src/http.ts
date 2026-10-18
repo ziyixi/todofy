@@ -42,9 +42,11 @@ export async function ownerRequest(request: Request, env: Env): Promise<Response
     };
     const path = new URL(request.url).pathname;
     if (path === '/api/tasks/csrf' && request.method === 'GET') {
+      // The token lasts as long as the 168-hour Access session, so a PWA left open overnight can still write.
       const issued = await issueCsrf(request, auth.owner, {
         cookieName: CSRF_COOKIE,
         key: await csrfKey(env),
+        ttlSeconds: 604800,
       });
       return secure(Response.json({ token: issued.token }, { headers: { 'set-cookie': issued.setCookie } }));
     }

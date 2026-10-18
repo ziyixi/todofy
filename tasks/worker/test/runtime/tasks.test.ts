@@ -247,6 +247,11 @@ test('a change cursor ahead of the database fails instead of reporting an empty,
   expect(await ahead.text()).toContain('Change cursor is ahead of this database');
 });
 
+test('the CSRF token lasts as long as the Access session', async () => {
+  const response = await harness.fetch('/api/tasks/csrf');
+  expect(response.headers.get('set-cookie')).toContain('Max-Age=604800');
+});
+
 test('rejects an unauthorized Origin before parsing malformed JSON', async () => {
   const response = await harness.fetch('/api/tasks/v1/tasks?request_id=' + randomUUID(), {
     method: 'POST',
