@@ -17,11 +17,23 @@ separate Task/Subtask and schedulable Step semantics, structured recurrence, nat
 tag/title cleanup and Focus timing against FlowDay's existing timer. Production cleanup must preserve
 task IDs, dependencies, completed history and time/queue references. No VPS, Newsletter or Recall changes.
 Current status and item-by-item evidence are tracked in [the refinement record](tasks/docs/refinement-verification.md).
-Implementation includes guarded native task fields, exact calendar eligibility, visible planning/dependency controls,
-structured recurrence and Focus completion settlement through the existing server timer. Real D1 tests cover
-request replay without advancing recurring tasks twice. Synthetic Chrome found and verified a recurrence
-popup overflow fix; screenshots and local checks are in the refinement record. Branch gate, production
-cleanup and production UI/metadata acceptance remain pending. No production cleanup has occurred.
+Implementation SHA `2dbd6aad31d7876a2a609ac3e172612f5d9f5616` passed complete branch
+[39102347298](https://github.com/ziyixi/todofy/actions/runs/39102347298), then the same-SHA main
+[39102825081](https://github.com/ziyixi/todofy/actions/runs/39102825081). Tasks, FlowDay and Todofy actual
+Worker/config/resource identities are verified by Deployments 7150745728, 7150757426 and 7150769623.
+Owner Chrome verified category counts, quiet empty search and working project collapse. One synthetic
+task saved/reopened its real native planning/effort/deadline/lead values, then was soft-deleted. It was
+never scheduled/completed/timed. Final checks include 37 web units, 39 real Chromium/D1 journeys,
+36 Worker runtime checks and 18 real Core/Tasks integration checks; current source remains unchanged.
+
+Production cleanup is **not done**. A private fresh plan targets 312 task rows (222 key suffixes,
+163 Deep, 119 Shallow, one overlapping effort unset as requested, four proven old Steps), eight obsolete
+labels, one exact Mail favorite, one separator filter and two already-queued Standalone facts.
+Automatic approval review refused the batch: it recognized only the owner's single-conflict consent.
+A concise full-scope confirmation is pending; do not work around that rejection or apply the batch
+before the owner answers. The private operator and inputs remain outside GitHub. Protected task/date/
+history snapshots and FlowDay queue/time comparisons still need to be collected for the actual cleanup.
+Do not mark the persistent 22-item goal complete while these data changes and acceptance remain pending.
 
 ### VPS release recovery (2026-10-18 UTC)
 

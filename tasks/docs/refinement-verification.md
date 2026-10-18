@@ -5,8 +5,11 @@ content, Todofy planning facts and FlowDay queues/timing. No VPS, Newsletter or 
 
 ## Acceptance
 
-Production evidence is pending until the same green branch SHA is released. Private cleanup inputs remain
-outside this public repository. Counts below describe metadata, not private task content.
+Implementation `2dbd6aad31d7876a2a609ac3e172612f5d9f5616` passed the complete
+[branch gate](https://github.com/ziyixi/todofy/actions/runs/39102347298) and the
+[same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/39102825081).
+Private cleanup inputs remain outside this public repository. **The planned production cleanup has not
+run:** automatic action review requires explicit confirmation of its entire batch scope.
 
 | Item | Result | Evidence before release |
 | --- | --- | --- |
@@ -15,7 +18,7 @@ outside this public repository. Counts below describe metadata, not private task
 | 3 | Empty Planning settings removed | Destination/component removed; old settings bookmark opens Plan. |
 | 4 | Projects managed from sidebar | Catalog contains Labels & filters; archived projects remain accessible. |
 | 5 | Dependencies are native; obsolete DAG status tags removed | Existing metadata contains no dependency declarations or native edges; no edges will be invented. Named dependencies and completion/unblocking pass browser checks. |
-| 6 | Obsolete Reminding/hakuhaha labels removed | Membership checked; production cleanup pending. |
+| 6 | Obsolete reminder/test labels removed | Membership checked; production cleanup pending. |
 | 7 | Native Deep/Shallow effort | Additive Tasks schema, copy/write/read and real D1 checks. One conflicting task will be unset per owner decision. |
 | 8 | My projects collapse works | Browser/UI checks include persisted collapse and restored projects. |
 | 9 | Empty search has no API error | Empty requests are skipped; clearing a pending query prevents stale results. |
@@ -58,9 +61,37 @@ completion-relative control fit without horizontal overflow.
 - Gateway: 143 unit checks; direct Focus SETTLE remains refused by the proxy.
 - Proto: format, Buf lint, AIP lint, breaking comparison against the branch base and generated schema check.
 
-## Release and cleanup
+## Production release and UI (2026-10-18 UTC)
 
-Pending: branch CI gate, same-SHA main release, guarded cleanup and production metadata/UI acceptance.
+The release independently verified Worker versions and persistent identities before recording these receipts:
+
+| Application | Verified Deployment | Worker version |
+| --- | --- | --- |
+| Tasks | 7150745728 | `c8dce429-8ab7-48c9-954d-67d8966f39f0` |
+| FlowDay | 7150757426 | `5ad78e1e-7aae-49a6-a0fb-7a4909902679` |
+| Todofy Core / Gateway | 7150769623 | `242ef20c-4ed8-4f4f-94ce-a2bcff79540a` / `8f61bf0e-9db2-4ef3-b7d6-24ee5819b747` |
+
+Owner Chrome confirmed 21 actual category badges, no empty-search error, the Labels & filters destination,
+no Planning settings link, and My projects toggling true → false → true. A newly created, explicitly
+synthetic ordinary task saved and reopened with Committed, Personal, Standalone action, Deep work,
+tomorrow's Deadline and a one-week start window. Independent limited D1 reads confirmed `kind=task`,
+`effort=deep`, the exact deadline, and a separate planning row with `lead_days=7` and `task=1`.
+The synthetic task was immediately soft-deleted in the UI. It was never scheduled, completed or timed;
+no real task was moved for acceptance. The production timer was idle before this check.
+
+The complete local UI suite passed 39 browser journeys, and the final web unit suite passed 37 checks.
+Native timer behavior was verified against real local FlowDay/D1, including expiry/reload and exact
+completion replay through Core. No production timer mutation is claimed.
+
+## Production cleanup awaiting confirmation
+
+The private read-only plan, refreshed after schema deployment, targets 312 task rows: 222 title markers,
+163 Deep and 119 Shallow facts, one conflict set to unspecified per the owner, and four proven Steps.
+It also removes eight obsolete labels, unfavorites the exact redundant Mail project, retires its
+separator filter and marks two already-queued ordinary tasks as Standalone actions. These operations
+remain unexecuted. Automatic review rejected the batch because it recognized only the single-conflict
+confirmation; the owner has been asked to confirm the concrete full scope.
+
 The cleanup must retain task IDs, parent/project identities, completion occurrences, dates, estimates,
 FlowDay queues and time history. Only the four children proven by existing AppendSteps receipts may
 change kind. Already queued ordinary tasks may receive the native Standalone action fact without
