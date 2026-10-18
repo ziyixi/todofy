@@ -25,7 +25,7 @@ Comments, attachments, reminders, assignment, calendar integration and voice inp
 The [design](docs/design.md) explains service boundaries and the interface. [Verification](docs/verification.md)
 separates local results from the remaining release and migration work. [Import](docs/import.md) lists private
 export and identity-check commands. [Backup](docs/backup.md) describes the weekly backup through Todofy, Time
-Travel and the restore into a new database.
+Travel, the restore into a new database and the one-time copy of FlowDay's older estimates into Tasks.
 
 A Task or Subtask describes an outcome. Add a Step beneath it to arrange an executable action in the week,
 or select Standalone action to schedule the Task itself. Only these executable items expose a clock time

@@ -98,3 +98,41 @@ The same commands work on a local copy: pass `--local --persist-to "$PRIV/d1"` i
 `migrations apply`, `execute` and `verify`, and any new UUID as the database id. `node --test
 tasks/tools/test/backup-restore.test.mjs` and `todofy/tests/runtime/test_backup.py` (a real backup of a real
 Tasks Worker, restored into a new local D1 and compared table by table) cover the tools with synthetic data.
+
+## One-time FlowDay estimate backfill
+
+Since 2026-10-18 a task's estimate is its Tasks duration alone. Before that, FlowDay kept its own estimate for a
+mirrored task once the owner set one there (`estimate_override=1`), and Plan showed that value. Run this once,
+right after the release that made the change: FlowDay's sync now replaces such an estimate as soon as its task
+changes in Tasks. `tools/prepare-estimate-backfill.ts` (logic in `tools/estimate-backfill.ts`) copies every
+FlowDay value that differs into Tasks with Tasks' own write semantics: `revision+1`, `updated_at` in
+milliseconds and a change-feed row, so FlowDay's mirror learns the value. Each statement applies only to the
+revision it read, so a task edited in between is left alone and counted again by the next dry run. Missing or
+deleted tasks, values outside 0 to 10,080 minutes and malformed ids are skipped and counted.
+
+From the repository root, with `PRIV` as above:
+
+```sh
+(cd flowday/worker && npx wrangler d1 execute DB --remote --config ../wrangler.toml --json \
+  --command "SELECT id, estimated_mins FROM tasks WHERE estimate_override=1 AND todoist_id IS NOT NULL" \
+  > "$PRIV/flowday-overrides.json")
+(cd tasks/worker && npx wrangler d1 execute DB --remote --config ../wrangler.toml --json \
+  --command "SELECT id, duration_minutes, revision FROM tasks WHERE deleted_at IS NULL" \
+  > "$PRIV/tasks-durations.json")
+# Dry run: prints counts only.
+node tasks/tools/prepare-estimate-backfill.ts --flowday "$PRIV/flowday-overrides.json" --tasks "$PRIV/tasks-durations.json"
+node tasks/tools/prepare-estimate-backfill.ts --flowday "$PRIV/flowday-overrides.json" --tasks "$PRIV/tasks-durations.json" \
+  --output "$PRIV/estimate-backfill.sql"
+# Note the current bookmark first, so Time Travel can undo the update.
+(cd tasks/worker && npx wrangler d1 time-travel info DB --config ../wrangler.toml)
+(cd tasks/worker && npx wrangler d1 execute DB --remote --config ../wrangler.toml --file "$PRIV/estimate-backfill.sql")
+```
+
+Then check it:
+
+1. Export Tasks again (the second command) and dry-run: `update_count` is 0.
+2. Open FlowDay and press Sync until it reports Synced. Export FlowDay again (the first command) and dry-run:
+   `update_count` is still 0, because the mirror now shows the Tasks values.
+3. Delete the three files in `$PRIV`; they hold task ids and estimates.
+
+`node --test tasks/tools/test/estimate-backfill.test.mjs` covers the generator on synthetic rows.
