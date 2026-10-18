@@ -9,6 +9,23 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+### Cloud reconcile recovery and inline subtasks (2026-10-18 UTC)
+
+Branch `codex/cloud-recovery-tasks` uses an isolated checkout while the owner's other agent works.
+The failed VPS comparison in [39147228294](https://github.com/ziyixi/todofy/actions/runs/39147228294)
+was recovered with the documented owner-run k3s restart. All three running Pod UIDs and restart counts
+were unchanged; the failed-job rerun passed. Fleet now reports a ready runtime and a clean reconcile plan.
+The separate Mail Hero stale-backup alert was traced to an expired native snapshot lease. The existing
+native retry verified 1,903 files / 66,221,731 bytes at 22:33:49 UTC and released its pause. No backup
+contents were read locally. Home's next due status refresh still needs checking before closure.
+The owner-approved legacy email project is archived through the owner UI. Its 192 incomplete and 2,115
+completed tasks remain intact; no filter or task was deleted. The original Todoist account was not changed.
+Inline child lists start collapsed, read bounded pages only when opened and reuse normal task actions.
+Schedule and priority icons now use the installed Base UI tooltip on hover/focus in both task menus.
+Local lint/type/build, 55 unit checks and 55 Chromium/local-D1 journeys pass. Chrome preview, branch gate,
+same-SHA release and production read-only expansion checks remain before closure. No schema, API,
+dependency, new cache or background polling was added. See [acceptance](tasks/docs/inline-subtasks-verification.md).
+
 ### Tasks workflow refinement (2026-10-18 UTC)
 
 Follow-up `codex/tasks-dependency-layout` is released after the owner reported a warm-open inward flash.

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Catalog, Task } from "../api";
 import { dateLabel, todayDate } from "../dates";
-import { TaskRow } from "./TaskRow";
+import { TaskTreeRow } from "./TaskTreeRow";
 import type { TaskMenuActions } from "./TaskMenu";
 
 export function TaskList({
@@ -15,6 +15,8 @@ export function TaskList({
   onReorder,
   groupBy = "none",
   menuActions,
+  showCompleted = false,
+  orderBy = "sort_order",
 }: {
   tasks: Task[];
   catalog: Catalog;
@@ -23,9 +25,11 @@ export function TaskList({
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onComplete: (task: Task) => void;
-  onReorder: (id: string, before: Task) => void;
+  onReorder: (id: string, before: Task, peers?: readonly Task[]) => void;
   groupBy?: "none" | "date" | "section";
   menuActions?: TaskMenuActions;
+  showCompleted?: boolean;
+  orderBy?: string;
 }) {
   const [draggedId, setDraggedId] = useState("");
   const [overId, setOverId] = useState("");
@@ -56,6 +60,25 @@ export function TaskList({
     return groups;
   }, [tasks, groupBy]);
   const today = todayDate(new Date(), catalog.timeZone || undefined);
+  const listedIds = useMemo(
+    () => new Set(tasks.map((task) => task.id)),
+    [tasks],
+  );
+  const row = {
+    catalog,
+    today,
+    busyIds,
+    selected,
+    onSelect,
+    onOpen,
+    onComplete,
+    onReorder,
+    draggedId,
+    overId,
+    setDraggedId,
+    setOverId,
+    menuActions,
+  };
   function heading(key: string): string {
     if (groupBy === "section")
       return (
@@ -79,25 +102,16 @@ export function TaskList({
           )}
           <ul className="task-list">
             {items.map((task) => (
-              <TaskRow
+              <TaskTreeRow
                 key={task.id}
                 task={task}
-                catalog={catalog}
-                today={today}
+                row={row}
+                listedIds={listedIds}
+                showCompleted={showCompleted}
+                orderBy={orderBy}
                 parentTitle={
                   task.parentTitle || taskIndex.get(task.parentId)?.title
                 }
-                busyIds={busyIds}
-                selected={selected}
-                onSelect={onSelect}
-                onOpen={onOpen}
-                onComplete={onComplete}
-                onReorder={onReorder}
-                draggedId={draggedId}
-                overId={overId}
-                setDraggedId={setDraggedId}
-                setOverId={setOverId}
-                menuActions={menuActions}
               />
             ))}
           </ul>

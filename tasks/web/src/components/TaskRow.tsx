@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { ContextMenu } from "@base-ui/react/context-menu";
 import { Menu } from "@base-ui/react/menu";
 import {
@@ -23,6 +23,29 @@ import {
   type TaskMenuProperty,
 } from "./TaskMenu";
 
+export interface TaskRowProps {
+  task: Task;
+  catalog: Catalog;
+  today: string;
+  parentTitle?: string;
+  busyIds: ReadonlySet<string>;
+  selected: ReadonlySet<string>;
+  onSelect: (id: string) => void;
+  onOpen: (id: string) => void;
+  onComplete: (task: Task) => void;
+  onReorder: (id: string, before: Task, peers?: readonly Task[]) => void;
+  draggedId: string;
+  overId: string;
+  setDraggedId: (id: string) => void;
+  setOverId: (id: string) => void;
+  menuActions?: TaskMenuActions;
+  expanded?: boolean;
+  onToggleChildren?: () => void;
+  childListId?: string;
+  childContent?: ReactNode;
+  peers?: readonly Task[];
+}
+
 export function TaskRow({
   task,
   catalog,
@@ -39,23 +62,12 @@ export function TaskRow({
   setDraggedId,
   setOverId,
   menuActions,
-}: {
-  task: Task;
-  catalog: Catalog;
-  today: string;
-  parentTitle?: string;
-  busyIds: ReadonlySet<string>;
-  selected: ReadonlySet<string>;
-  onSelect: (id: string) => void;
-  onOpen: (id: string) => void;
-  onComplete: (task: Task) => void;
-  onReorder: (id: string, before: Task) => void;
-  draggedId: string;
-  overId: string;
-  setDraggedId: (id: string) => void;
-  setOverId: (id: string) => void;
-  menuActions?: TaskMenuActions;
-}) {
+  expanded,
+  onToggleChildren,
+  childListId,
+  childContent,
+  peers,
+}: TaskRowProps) {
   const project = catalog.projects.find((item) => item.id === task.projectId);
   const due = task.dueDate || task.dueDatetime.slice(0, 10);
   const more = useRef<HTMLButtonElement>(null);
@@ -100,7 +112,7 @@ export function TaskRow({
     },
   };
   const row = (
-    <li
+    <div
       className={`task-row ${task.completed ? "is-completed" : ""} ${selected.has(task.id) ? "is-selected" : ""} ${overId === task.id ? "drop-before" : ""}`}
       onContextMenu={(event) => {
         setContextPoint({ x: event.clientX, y: event.clientY });
@@ -114,11 +126,25 @@ export function TaskRow({
       }}
       onDrop={(event) => {
         event.preventDefault();
-        if (draggedId && draggedId !== task.id) onReorder(draggedId, task);
+        if (draggedId && draggedId !== task.id)
+          onReorder(draggedId, task, peers);
         setDraggedId("");
         setOverId("");
       }}
     >
+      {onToggleChildren && (task.childCount > 0 || expanded) ? (
+        <button
+          className="task-expand"
+          aria-label={`${expanded ? "Collapse" : "Expand"} subtasks for ${task.title}`}
+          aria-expanded={expanded}
+          aria-controls={expanded ? childListId : undefined}
+          onClick={onToggleChildren}
+        >
+          <ChevronRight size={15} />
+        </button>
+      ) : (
+        <span className="task-expand-space" aria-hidden />
+      )}
       <button
         className="drag-handle"
         aria-label={`Drag ${task.title}`}
@@ -156,10 +182,9 @@ export function TaskRow({
           <span className="task-description">{task.descriptionPreview}</span>
         )}
         <span className="task-meta">
+          {task.kind === "step" && <span>Step</span>}
           {due && (
-            <span
-              className={due < today && !task.completed ? "overdue" : ""}
-            >
+            <span className={due < today && !task.completed ? "overdue" : ""}>
               <CalendarDays size={12} />
               {dateLabel(due, today)}
               {task.dueDatetime &&
@@ -295,23 +320,26 @@ export function TaskRow({
           </footer>
         </Dialog>
       )}
-    </li>
+    </div>
   );
   return (
-    <ContextMenu.Root disabled={!menuActions}>
-      <ContextMenu.Trigger render={row} />
-      {menuActions && (
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="task-menu-positioner">
-            <ContextMenu.Popup
-              className="task-menu-popup"
-              aria-label={`Actions for ${task.title}`}
-            >
-              <TaskMenuItems {...menuProps} actions={menuActions} />
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
-      )}
-    </ContextMenu.Root>
+    <li className="task-branch">
+      <ContextMenu.Root disabled={!menuActions}>
+        <ContextMenu.Trigger render={row} />
+        {menuActions && (
+          <ContextMenu.Portal>
+            <ContextMenu.Positioner className="task-menu-positioner">
+              <ContextMenu.Popup
+                className="task-menu-popup"
+                aria-label={`Actions for ${task.title}`}
+              >
+                <TaskMenuItems {...menuProps} actions={menuActions} />
+              </ContextMenu.Popup>
+            </ContextMenu.Positioner>
+          </ContextMenu.Portal>
+        )}
+      </ContextMenu.Root>
+      {childContent}
+    </li>
   );
 }

@@ -30,6 +30,11 @@ resource with `kind=step` and a Task/Subtask parent. A Step cannot contain child
 explicitly marked Standalone action enter the day calendar. Adding an ordinary Subtask does not make it a Step.
 The editor separates Subtasks and Steps, with completion, reopening, deletion and Step estimates in each list.
 
+Main lists also expose collapsed child branches. Expansion reads the existing parent query in bounded
+pages; the same row actions work for children. Today/search children already present in the root result
+are not duplicated. Completed visibility follows the current view. Child refreshes retain the rendered
+rows until their replacement arrives; collapsed branches make no background reads.
+
 Title, description and visible planning options stay in the main editor. Project, Date, Deadline, Start ahead,
 priority, labels and Effort occupy the narrow property rail. Start ahead accepts days or weeks before the
 Deadline and feeds Plan Review's Start now lane; it does not schedule a notification. `effort` is empty, `deep`

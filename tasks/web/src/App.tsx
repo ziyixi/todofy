@@ -323,7 +323,10 @@ export function App() {
           }
         >
           <TaskDialog
-            onChildAdded={actions.taskChanged}
+            onChildAdded={() => {
+              actions.taskChanged();
+              void list.read();
+            }}
             key={editor.task?.id || "new"}
             task={editor.task}
             defaults={editor.defaults}

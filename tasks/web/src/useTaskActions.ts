@@ -271,12 +271,16 @@ export function useTaskActions(
       setNotice("Could not copy the link. Open the task and copy its address.");
     }
   }
-  async function reorder(id: string, before: Task) {
+  async function reorder(
+    id: string,
+    before: Task,
+    peers: readonly Task[] = list.tasks,
+  ) {
     if (orderBy !== "sort_order") {
       setNotice("Choose Custom order before dragging tasks.");
       return;
     }
-    const task = list.tasks.find((item) => item.id === id);
+    const task = peers.find((item) => item.id === id);
     if (
       !task ||
       task.parentId !== before.parentId ||
@@ -286,7 +290,7 @@ export function useTaskActions(
       setNotice("Reorder tasks within the same project, section and parent.");
       return;
     }
-    const siblings = list.tasks.filter(
+    const siblings = peers.filter(
       (item) =>
         item.id !== id &&
         item.parentId === before.parentId &&
@@ -314,11 +318,18 @@ export function useTaskActions(
     }
   }
   async function batch(action: "complete" | "move", projectId = "") {
-    const targets = list.tasks.filter((task) => selected.has(task.id));
-    setBusyIds(new Set(targets.map((task) => task.id)));
+    const ids = [...selected];
+    setBusyIds(new Set(ids));
     setNotice("");
     let focusWarning = "";
     try {
+      const targets = await Promise.all(
+        ids.map(
+          (id) =>
+            list.tasks.find((task) => task.id === id) ??
+            api.getTask({ name: `tasks/${id}` }),
+        ),
+      );
       for (const task of targets) {
         if (action === "complete") {
           const { completion } = await writeCompletion(task);

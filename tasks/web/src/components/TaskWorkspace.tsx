@@ -112,6 +112,7 @@ export function TaskWorkspace({
               <button
                 className="icon-button"
                 aria-label="Edit project"
+                disabled={catalogLoading || !project}
                 onClick={() => editCatalog("project", project)}
               >
                 <Pencil size={17} />
@@ -238,6 +239,9 @@ export function TaskWorkspace({
         </p>
       )}
       <TaskList
+        key={`${route.page}:${route.id || ""}:${route.page === "upcoming" ? date : ""}`}
+        showCompleted={includeCompleted || route.page === "completed"}
+        orderBy={orderBy}
         menuActions={actions}
         tasks={list.tasks}
         catalog={catalog}
@@ -252,7 +256,7 @@ export function TaskWorkspace({
         }
         onOpen={(id) => void openTask(id)}
         onComplete={(task) => void complete(task)}
-        onReorder={(id, before) => void reorder(id, before)}
+        onReorder={(id, before, peers) => void reorder(id, before, peers)}
         groupBy={
           route.page === "upcoming"
             ? "date"
