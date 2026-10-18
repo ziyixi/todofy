@@ -103,9 +103,16 @@ They avoid one service call per task. Cloudflare documents a finite invocation c
 ## Performance and Cloudflare
 
 Task pages are limited to 100 rows. Lists return a short description preview; full descriptions load when
-a task opens. Indexed keyset pagination serves tasks, changes and history. Consumers advance their own
-change cursor. Plan/Focus code loads separately from the everyday task list. Timer rendering needs no
-server polling.
+a task opens. Indexed keyset pagination serves tasks, changes and history: a task cursor compares a row value
+and a task-ID lookup joins `json_each`, so both seek an index. Consumers advance their own change cursor.
+Plan/Focus code loads separately from the everyday task list. Timer rendering needs no server polling.
+
+Migration 0004 keeps reads independent of history. An open-roots index serves the Inbox and project roots
+without completed tasks, and a partial index counts only native completions, not imported occurrences.
+Section and project visibility triggers run only when `archived` (or a project's parent) changes, so a
+rename or recolour touches no task and leaves list etags valid. A label rename writes its catalog change
+before its task changes, so a paged change reader refreshes the catalog first. `read-budget.test.ts` holds
+these row counts.
 
 D1 batches atomically store each write with its request receipt; updates carry masks and current etags.
 Resource references are checked again by database triggers. A task family is limited to 32 hierarchy levels;

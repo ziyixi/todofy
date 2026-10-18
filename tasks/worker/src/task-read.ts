@@ -26,9 +26,11 @@ export async function listTasks(db: D1Database, request: ListTasksRequest, zone:
   const conditions = ['t.deleted_at IS NULL'];
   if (request.taskIds.length > 100) invalid('At most 100 task IDs may be requested');
   const values: (string | number)[] = [];
+  let source = 'tasks t';
   if (request.taskIds.length) {
-    conditions.push('t.id IN (SELECT value FROM json_each(?))');
-    values.push(JSON.stringify(request.taskIds.map(checkedId)));
+    // Each requested ID is one primary-key lookup, whatever the view's order would otherwise prefer.
+    source = 'json_each(?) j CROSS JOIN tasks t ON t.id=j.value';
+    values.push(JSON.stringify([...new Set(request.taskIds.map(checkedId))]));
   }
   if (request.parentId) {
     conditions.push('t.parent_id=?');
@@ -127,15 +129,16 @@ export async function listTasks(db: D1Database, request: ListTasksRequest, zone:
       typeof cursor[1] !== 'string'
     )
       invalid('Invalid page token');
+    // A row value seeks the order index; every sortable column is NOT NULL.
     const operator = direction === 'DESC' ? '<' : '>';
-    conditions.push(`(t.${column}${operator}? OR (t.${column}=? AND t.id${operator}?))`);
-    values.push(cursor[0] as string | number, cursor[0] as string | number, checkedId(cursor[1]));
+    conditions.push(`(t.${column},t.id)${operator}(?,?)`);
+    values.push(cursor[0] as string | number, checkedId(cursor[1]));
   }
   const size = Math.min(pageSize(request.pageSize), request.includeDescription ? 20 : 100);
   const rows = await storage(() =>
     db
       .prepare(
-        `SELECT ${taskProjection(request.includeDescription)},${childCounts} FROM tasks t WHERE ${conditions.join(' AND ')} ORDER BY t.${column} ${direction},t.id ${direction} LIMIT ?`,
+        `SELECT ${taskProjection(request.includeDescription)},${childCounts} FROM ${source} WHERE ${conditions.join(' AND ')} ORDER BY t.${column} ${direction},t.id ${direction} LIMIT ?`,
       )
       .bind(...values, size + 1)
       .all<TaskRow>(),

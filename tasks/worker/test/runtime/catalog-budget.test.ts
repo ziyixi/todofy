@@ -1,7 +1,7 @@
 import { stdout } from "node:process";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { getCatalog } from "../../src/catalog.ts";
-import { startHarness, type Harness } from "./harness.ts";
+import { measuredReads, startHarness, type Harness } from "./harness.ts";
 
 let harness: Harness;
 beforeAll(async () => {
@@ -11,40 +11,6 @@ afterAll(async () => {
   await harness.dispose();
 });
 
-/** D1's own row metrics, including first() and each statement executed by batch(). */
-function measuredReads(binding: D1Database) {
-  const metrics = { statements: 0, rowsRead: 0, rowsWritten: 0 };
-  const originals = new WeakMap<D1PreparedStatement, D1PreparedStatement>();
-  function record<T>(result: D1Result<T>): D1Result<T> {
-    metrics.statements++;
-    metrics.rowsRead += result.meta.rows_read;
-    metrics.rowsWritten += result.meta.rows_written;
-    return result;
-  }
-  function wrap(statement: D1PreparedStatement): D1PreparedStatement {
-    const counted = {
-      bind: (...values: unknown[]) => wrap(statement.bind(...values)),
-      all: async <T>() => record(await statement.all<T>()),
-      first: async <T>(column?: string) => {
-        const result = record(await statement.all());
-        const row = result.results[0];
-        return (column ? (row?.[column] ?? null) : (row ?? null)) as T | null;
-      },
-    } as unknown as D1PreparedStatement;
-    originals.set(counted, statement);
-    return counted;
-  }
-  const db = {
-    prepare: (sql: string) => wrap(binding.prepare(sql)),
-    batch: async <T>(statements: D1PreparedStatement[]) => {
-      const results = await binding.batch<T>(
-        statements.map((statement) => originals.get(statement) ?? statement),
-      );
-      return results.map(record);
-    },
-  } as unknown as D1Database;
-  return { db, metrics };
-}
 async function addTasks(prefix: string, count: number, completed: boolean) {
   const data = Array.from({ length: count }, (_, index) => ({
     id: `${prefix}-${String(index)}`,
