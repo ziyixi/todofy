@@ -107,3 +107,26 @@ it("reports Focus unavailability after the independent generic completion", asyn
     /^Task completed\. Focus/,
   );
 });
+
+it("shares the timer and today's queue across a batch and reads them again after a settlement", async () => {
+  const timer = vi
+    .spyOn(completionFocusApi, "getTimerSession")
+    .mockResolvedValue(create(TimerSessionSchema));
+  const flow = vi
+    .spyOn(completionFocusApi, "getFlow")
+    .mockResolvedValue(
+      create(FlowSchema, { name: "flows/2026-10-17", taskIds: [parent.id] }),
+    );
+  const settle = vi
+    .spyOn(planningApi, "completeTask")
+    .mockResolvedValue(create(CompleteTaskResponseSchema));
+  const reads = {};
+  const other = create(TaskSchema, { id: "other", name: "tasks/other" });
+  await settleCompletedTask(other, id, "1", "2026-10-17", reads);
+  await settleCompletedTask(other, id, "1", "2026-10-17", reads);
+  expect([timer.mock.calls.length, flow.mock.calls.length]).toEqual([1, 1]);
+  await settleCompletedTask(parent, id, "1", "2026-10-17", reads);
+  expect(settle).toHaveBeenCalledOnce();
+  await settleCompletedTask(other, id, "1", "2026-10-17", reads);
+  expect([timer.mock.calls.length, flow.mock.calls.length]).toEqual([2, 2]);
+});

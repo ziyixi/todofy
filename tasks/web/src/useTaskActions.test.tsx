@@ -10,6 +10,8 @@ import type { Route } from "./routes";
 import { useTaskActions } from "./useTaskActions";
 import * as focus from "./task-completion-focus";
 import { useTaskView } from "./useTaskView";
+import { TimerSessionSchema } from "@ziyixi/proto/flowday/ui/v1/time_entry_pb";
+import { FlowSchema } from "@ziyixi/proto/flowday/ui/v1/flow_pb";
 
 afterEach(() => {
   cleanup();
@@ -289,6 +291,7 @@ it("keeps an uncertain batch completion selected and replays it once before sett
     close.mock.calls[0]![0]!.requestId,
     "1",
     "2026-10-17",
+    {},
   );
   expect(result.current.selected.size).toBe(0);
 });
@@ -342,9 +345,7 @@ it("keeps a confirmed batch completion successful when its final refresh fails",
   vi.spyOn(focus, "settleCompletedTask").mockResolvedValue(undefined);
   const list = {
     tasks: [task],
-    refresh: vi
-      .fn()
-      .mockRejectedValue(new Error("Synthetic refresh failure")),
+    refresh: vi.fn().mockRejectedValue(new Error("Synthetic refresh failure")),
   } as unknown as ReturnType<typeof useTaskView>;
   const { result } = renderHook(() =>
     useTaskActions({ page: "inbox", id: "" }, "sort_order", list),
@@ -395,4 +396,53 @@ it("does not write generic task data for an unchanged draft while planning can s
   expect(update).not.toHaveBeenCalled();
   expect(listRead).toHaveBeenCalledTimes(1);
   expect(result.current.mutationRevision).toBe(0);
+});
+
+it("completes a selected parent once for its selected child and reads Focus once for the batch", async () => {
+  const parent = create(TaskSchema, {
+    id: "batch-parent",
+    name: "tasks/batch-parent",
+    title: "Synthetic selected parent",
+    etag: "1",
+  });
+  const child = create(TaskSchema, {
+    id: "batch-child",
+    name: "tasks/batch-child",
+    title: "Synthetic selected child",
+    parentId: parent.id,
+    etag: "1",
+  });
+  const other = create(TaskSchema, {
+    id: "batch-other",
+    name: "tasks/batch-other",
+    title: "Synthetic other task",
+    etag: "1",
+  });
+  const completed: string[] = [];
+  vi.spyOn(api, "completeTask").mockImplementation(async (request) => {
+    completed.push(request?.name || "");
+    return create(TaskSchema, { completed: true });
+  });
+  const timer = vi
+    .spyOn(focus.completionFocusApi, "getTimerSession")
+    .mockResolvedValue(create(TimerSessionSchema));
+  const flow = vi
+    .spyOn(focus.completionFocusApi, "getFlow")
+    .mockResolvedValue(create(FlowSchema, { name: "flows/2026-10-17" }));
+  const list = {
+    tasks: [parent, child, other],
+    refresh: vi.fn().mockResolvedValue(undefined),
+  } as unknown as ReturnType<typeof useTaskView>;
+  const { result } = renderHook(() =>
+    useTaskActions({ page: "today", id: "" }, "sort_order", list, "2026-10-17"),
+  );
+  await act(() =>
+    result.current.setSelected(new Set([parent.id, child.id, other.id])),
+  );
+  await act(() => result.current.batch("complete"));
+  expect(completed).toEqual([parent.name, other.name]);
+  expect(timer).toHaveBeenCalledOnce();
+  expect(flow).toHaveBeenCalledOnce();
+  expect(result.current.notice).toBe("Selected tasks completed");
+  expect(result.current.selected.size).toBe(0);
 });

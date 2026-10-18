@@ -11,7 +11,7 @@ import { isPlanning, type Route } from "./routes";
 import { scheduledDate, scheduledTime } from "./task-schedule";
 import { clearTaskStartAhead, taskScheduleFromText } from "./task-date-actions";
 import { todayDate } from "./dates";
-import { settleCompletedTask } from "./task-completion-focus";
+import { settleCompletedTask, type FocusReads } from "./task-completion-focus";
 import type { useTaskView } from "./useTaskView";
 
 export function useTaskActions(
@@ -315,10 +315,25 @@ export function useTaskActions(
     }
   }
   async function batch(action: "complete" | "move", projectId = "") {
-    const targets = list.tasks.filter((task) => selected.has(task.id));
-    setBusyIds(new Set(targets.map((task) => task.id)));
+    const chosen = list.tasks.filter((task) => selected.has(task.id));
+    const byId = new Map(list.tasks.map((task) => [task.id, task]));
+    // Completing or moving a task changes its descendants too, so a selected descendant is covered by its
+    // topmost selected ancestor; writing it again would only fail on its now stale etag.
+    const covered = new Map<string, string[]>();
+    for (const task of chosen) {
+      let root = task;
+      let parent = byId.get(task.parentId);
+      for (let depth = 0; parent && depth < 32; depth++) {
+        if (selected.has(parent.id)) root = parent;
+        parent = byId.get(parent.parentId);
+      }
+      covered.set(root.id, [...(covered.get(root.id) ?? []), task.id]);
+    }
+    const targets = chosen.filter((task) => covered.has(task.id));
+    setBusyIds(new Set(chosen.map((task) => task.id)));
     setNotice("");
     let focusWarning = "";
+    const reads: FocusReads = {};
     try {
       for (const task of targets) {
         if (action === "complete") {
@@ -328,6 +343,7 @@ export function useTaskActions(
             completion.requestId,
             completion.etag,
             today,
+            reads,
           );
           if (warning) focusWarning = warning;
         } else
@@ -343,8 +359,9 @@ export function useTaskActions(
             updateMask: { paths: ["project_id", "section_id", "parent_id"] },
             requestId: crypto.randomUUID(),
           });
+        const done = covered.get(task.id) ?? [task.id];
         setSelected(
-          (current) => new Set([...current].filter((id) => id !== task.id)),
+          (current) => new Set([...current].filter((id) => !done.includes(id))),
         );
       }
       setNotice(
