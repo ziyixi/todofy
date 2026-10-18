@@ -315,6 +315,8 @@ export function createPlanningActions(
   const plus = createHttpClient(PlusService, transports.plus);
   const flowday = createHttpClient(FlowDayUiService, transports.flowday);
   async function ensureSynced(ids: string[]) {
+    // FlowDay's queue holds any task ID and needs no mirror row for it; FlowDay's own page syncs the mirror.
+    if (provider === "tasks") return;
     await restored;
     if (
       ids.every(

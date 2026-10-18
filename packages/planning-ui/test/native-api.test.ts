@@ -250,3 +250,36 @@ it("takes every estimate from the task list: FlowDay's copy never replaces or fi
   expect(result.focus.flowTasks["local-one"]?.estimatedMinutes).toBe(20);
   expect(flowdayCalls.every((call) => call.startsWith("GET "))).toBe(true);
 });
+
+it("queues and moves a task FlowDay has not mirrored yet without forcing a FlowDay sync", async () => {
+  const calls: HttpCall[] = [];
+  const send: HttpSend = async (call) => {
+    calls.push(call);
+    const date = call.url.split("?")[0]!.split("/").at(-1)!.split(":")[0]!;
+    if (call.url.includes(":rollover"))
+      return Response.json({
+        flow: { name: "flows/2026-10-17", task_ids: [] },
+        destination_flow: { name: "flows/2026-10-18", task_ids: ["new-step"] },
+      });
+    return Response.json({
+      name: `flows/${date}`,
+      task_ids: call.httpMethod === "PATCH" ? ["new-step"] : [],
+    });
+  };
+  const api = createPlanningActions(
+    { plus: send, flowday: send },
+    undefined,
+    "tasks",
+  );
+  await api.addToDay("new-step", "2026-10-17");
+  await api.moveTaskToDay(
+    "new-step",
+    { date: "2026-10-17", taskIds: ["new-step"], completedTaskIds: [] },
+    { date: "2026-10-18", taskIds: [], completedTaskIds: [] },
+  );
+  expect(calls.map((call) => `${call.httpMethod} ${call.url}`)).toEqual([
+    "GET /api/v1/flows/2026-10-17",
+    "PATCH /api/v1/flows/2026-10-17?update_mask=task_ids",
+    "POST /api/v1/flows/2026-10-17:rollover",
+  ]);
+});
