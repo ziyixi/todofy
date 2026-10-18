@@ -185,7 +185,8 @@ service TasksUiService {
     option (google.api.http) = {delete: "/api/tasks/v1/{name=filters/*}"};
     option (google.api.method_signature) = "name";
   }
-  // Completes a task and its ordinary descendants, or advances a recurring task once.
+  // Completes a task and its descendants. A recurring task records one occurrence, advances its dates and
+  // reopens its descendants for the next cycle.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc CompleteTask(CompleteTaskRequest) returns (Task) {
@@ -194,7 +195,7 @@ service TasksUiService {
       body: "*"
     };
   }
-  // Reopens the task; historical completion records remain available.
+  // Reopens the task and its completed ancestors; historical completion records remain available.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc ReopenTask(ReopenTaskRequest) returns (Task) {

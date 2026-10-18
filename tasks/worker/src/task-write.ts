@@ -10,9 +10,9 @@ import type {
   ReopenTaskRequest,
 } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
-import { nextOccurrence } from '@ziyixi/task-dates';
+import { addDays, daysBetween, nextOccurrence } from '@ziyixi/task-dates';
 import { checkedId, resourceId, taskColumns, taskMessage, type TaskRow } from './model.ts';
-import { conflict, invalid, precondition, storage } from './errors.ts';
+import { conflict, invalid, precondition } from './errors.ts';
 import { commit, fingerprint, replay } from './receipts.ts';
 import { getTask } from './task-read.ts';
 import { taskValues, validateTask } from './task-validation.ts';
@@ -131,7 +131,7 @@ export async function updateTask(db: D1Database, input: UpdateTaskRequest, now: 
     if (!paths.includes('parent_id')) updated.parent_id = '';
   }
   const row = { ...updated, revision: old.revision + 1, updated_at: now };
-  await validateTask(db, row);
+  await validateTask(db, row, old);
   row.project_archived = 0;
   const writes = [
     db
@@ -195,56 +195,71 @@ export async function completeTask(db: D1Database, input: CompleteTaskRequest, n
   const old = await getTask(db, id);
   checkEtag(old, input.etag);
   if (old.completed) precondition('Task is already complete');
-  const recurringChild = await storage(() =>
-    db
-      .prepare(
-        `${subtree} SELECT id FROM tasks WHERE id IN (SELECT id FROM descendants) AND id<>? AND recurrence<>'' AND completed=0 LIMIT 1`,
-      )
-      .bind(id, id)
-      .first(),
-  );
-  if (recurringChild) precondition('Complete recurring subtasks separately before completing their parent');
-  let dates = {
-    dueDate: old.due_date,
-    dueDatetime: old.due_datetime,
-    dueTimezone: old.due_timezone,
-    recurrence: old.recurrence,
-  };
-  if (old.recurrence) {
-    try {
-      dates = nextOccurrence(dates, now, zone);
-    } catch {
-      precondition('Recurring date needs an explicit supported rule or a valid next time');
-    }
-  }
-  const row: TaskRow = {
+  let row: TaskRow = {
     ...old,
-    due_date: dates.dueDate,
-    due_datetime: dates.dueDatetime,
-    completed: old.recurrence ? 0 : 1,
+    completed: 1,
     completed_at: now,
     completed_count: (old.completed_count ?? 0) + 1,
     completed_child_count: old.child_count ?? 0,
     revision: old.revision + 1,
     updated_at: now,
   };
-  const writes = [
+  let writes: D1PreparedStatement[];
+  if (old.recurrence) {
+    let dates = {
+      dueDate: old.due_date,
+      dueDatetime: old.due_datetime,
+      dueTimezone: old.due_timezone,
+      recurrence: old.recurrence,
+    };
+    try {
+      dates = nextOccurrence(dates, now, zone);
+    } catch {
+      precondition('Recurring date needs an explicit supported rule or a valid next time');
+    }
+    row = {
+      ...row,
+      completed: 0,
+      due_date: dates.dueDate,
+      due_datetime: dates.dueDatetime,
+      deadline: old.deadline && addDays(old.deadline, daysBetween(old.due_date, dates.dueDate)),
+      completed_child_count: 0,
+    };
+    // One occurrence is recorded for the task alone; its subtasks and Steps reopen for the next cycle.
+    writes = [
+      db
+        .prepare(
+          `INSERT INTO completions(id,task_id,title,completed_at,due_date,project_id,task_created_at) SELECT ? || ':' || id,id,title,?,due_date,project_id,created_at FROM tasks WHERE id=?`,
+        )
+        .bind(input.requestId, now, id),
+      db
+        .prepare(
+          `${subtree} UPDATE tasks SET completed=0,completed_at=NULL,revision=revision+1,updated_at=? WHERE id IN (SELECT id FROM descendants) AND id<>? AND completed=1`,
+        )
+        .bind(id, now, id),
+    ];
+  } else {
+    // Every open descendant completes too. A recurring one ends its repetition with its parent.
+    writes = [
+      db
+        .prepare(
+          `${subtree} INSERT INTO completions(id,task_id,title,completed_at,due_date,project_id,task_created_at) SELECT ? || ':' || id,id,title,?,due_date,project_id,created_at FROM tasks WHERE id IN (SELECT id FROM descendants) AND completed=0`,
+        )
+        .bind(id, input.requestId, now),
+      db
+        .prepare(
+          `${subtree} UPDATE tasks SET completed=1,completed_at=?,revision=revision+1,updated_at=? WHERE id IN (SELECT id FROM descendants) AND id<>? AND completed=0`,
+        )
+        .bind(id, now, now, id),
+    ];
+  }
+  writes.push(
     db
       .prepare(
-        `${subtree} INSERT INTO completions(id,task_id,title,completed_at,due_date,project_id,task_created_at) SELECT ? || ':' || id,id,title,?,due_date,project_id,created_at FROM tasks WHERE id IN (SELECT id FROM descendants) AND completed=0`,
+        'UPDATE tasks SET completed=?,completed_at=?,due_date=?,due_datetime=?,deadline=?,revision=revision+1,updated_at=? WHERE id=?',
       )
-      .bind(id, input.requestId, now),
-    db
-      .prepare(
-        `${subtree} UPDATE tasks SET completed=1,completed_at=?,revision=revision+1,updated_at=? WHERE id IN (SELECT id FROM descendants) AND id<>? AND completed=0`,
-      )
-      .bind(id, now, now, id),
-    db
-      .prepare(
-        'UPDATE tasks SET completed=?,completed_at=?,due_date=?,due_datetime=?,revision=revision+1,updated_at=? WHERE id=?',
-      )
-      .bind(row.completed, now, row.due_date, row.due_datetime, now, id),
-  ];
+      .bind(row.completed, now, row.due_date, row.due_datetime, row.deadline, now, id),
+  );
   return result(
     await commit(
       db,
@@ -276,9 +291,17 @@ export async function reopenTask(db: D1Database, input: ReopenTaskRequest, now: 
     revision: old.revision + 1,
     updated_at: now,
   };
-  const write = db
-    .prepare('UPDATE tasks SET completed=0,completed_at=NULL,revision=revision+1,updated_at=? WHERE id=?')
-    .bind(now, id);
+  const writes = [
+    db
+      .prepare('UPDATE tasks SET completed=0,completed_at=NULL,revision=revision+1,updated_at=? WHERE id=?')
+      .bind(now, id),
+    // A reopened child is active again, so its completed ancestors reopen with it.
+    db
+      .prepare(
+        `WITH RECURSIVE ancestors(id,depth) AS (SELECT parent_id,1 FROM tasks WHERE id=? AND parent_id<>'' UNION ALL SELECT t.parent_id,a.depth+1 FROM tasks t JOIN ancestors a ON t.id=a.id WHERE t.parent_id<>'' AND a.depth<32) UPDATE tasks SET completed=0,completed_at=NULL,revision=revision+1,updated_at=? WHERE id IN (SELECT id FROM ancestors) AND completed=1 AND deleted_at IS NULL`,
+      )
+      .bind(id, now),
+  ];
   return result(
     await commit(
       db,
@@ -291,7 +314,7 @@ export async function reopenTask(db: D1Database, input: ReopenTaskRequest, now: 
         response: serialize(row),
         now,
       },
-      [write],
+      writes,
     ),
   );
 }

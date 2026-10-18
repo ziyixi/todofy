@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { nextOccurrence, previewDate, recurrenceRule, validDate } from '../src/index.ts';
+import { daysBetween, nextOccurrence, previewDate, recurrenceRule, validDate } from '../src/index.ts';
 
 test('plain dates remain calendar dates and timed input resolves the account timezone', () => {
   expect(previewDate('tomorrow', '2026-10-17', 'America/Los_Angeles')).toEqual({
@@ -78,4 +78,11 @@ test('the 30th clamps to February month-end and then returns to March 30', () =>
     expect(nextOccurrence(next, Date.parse(`${february}T12:00:00Z`), 'UTC').dueDate).toBe(`${year}-03-30`);
     expect(nextOccurrence(january, Date.parse(`${year}-03-01T12:00:00Z`), 'UTC').dueDate).toBe(`${year}-03-30`);
   }
+});
+
+test('days between calendar dates count across months and backwards', () => {
+  expect(daysBetween('2026-10-20', '2026-10-27')).toBe(7);
+  expect(daysBetween('2026-02-28', '2026-03-01')).toBe(1);
+  expect(daysBetween('2026-10-27', '2026-10-20')).toBe(-7);
+  expect(() => daysBetween('2026-02-30', '2026-03-01')).toThrow();
 });

@@ -66,7 +66,8 @@ export function validateTaskFields(row: TaskRow): string[] {
   return labels;
 }
 
-export async function validateTask(db: D1Database, row: TaskRow): Promise<void> {
+/** `old` is the stored row of an update: a child keeps its place under a parent that was completed since. */
+export async function validateTask(db: D1Database, row: TaskRow, old?: TaskRow): Promise<void> {
   const labels = validateTaskFields(row);
   const checks: D1PreparedStatement[] = [];
   if (row.project_id)
@@ -83,12 +84,14 @@ export async function validateTask(db: D1Database, row: TaskRow): Promise<void> 
         .prepare('SELECT id FROM sections WHERE id=? AND project_id=? AND deleted_at IS NULL AND archived=0')
         .bind(row.section_id, row.project_id),
     );
-  if (row.parent_id)
+  if (row.parent_id) {
+    const open = old?.parent_id === row.parent_id ? '' : ' AND completed=0';
     checks.push(
       db
-        .prepare("SELECT id FROM tasks WHERE id=? AND project_id=? AND deleted_at IS NULL AND completed=0 AND kind='task'")
+        .prepare(`SELECT id FROM tasks WHERE id=? AND project_id=? AND deleted_at IS NULL AND kind='task'${open}`)
         .bind(row.parent_id, row.project_id),
     );
+  }
   if (labels.length)
     checks.push(
       db

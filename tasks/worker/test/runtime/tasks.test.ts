@@ -15,6 +15,10 @@ interface WireTask {
   title: string;
   completed?: boolean;
   completed_count?: number;
+  completed_child_count?: number;
+  due_date?: string;
+  deadline?: string;
+  recurrence?: string;
 }
 async function createTask(title: string, extra: Record<string, unknown> = {}): Promise<WireTask> {
   const response = await harness.mutate('POST', `/api/tasks/v1/tasks?request_id=${randomUUID()}`, { title, ...extra });
@@ -63,6 +67,98 @@ test('completion preserves history and advances a recurring task only once', asy
   const history = await harness.fetch(`/api/tasks/v1/completions?task_id=${task.id}`);
   expect(((await history.json()) as { completions: unknown[] }).completions).toHaveLength(1);
   expect(((await (await harness.fetch(`/api/tasks/v1/${task.name}`)).json()) as WireTask).completed_count).toBe(1);
+});
+
+async function readTask(task: WireTask): Promise<WireTask> {
+  const response = await harness.fetch(`/api/tasks/v1/${task.name}`);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return response.json() as Promise<WireTask>;
+}
+async function complete(task: WireTask, action: 'complete' | 'reopen' = 'complete'): Promise<WireTask> {
+  const response = await harness.mutate('POST', `/api/tasks/v1/${task.name}:${action}`, {
+    etag: task.etag,
+    request_id: randomUUID(),
+  });
+  expect(response.status, await response.clone().text()).toBe(200);
+  return response.json() as Promise<WireTask>;
+}
+async function completions(task: WireTask): Promise<{ task_id: string }[]> {
+  const response = await harness.fetch(`/api/tasks/v1/completions?task_id=${task.id}`);
+  return ((await response.json()) as { completions?: { task_id: string }[] }).completions ?? [];
+}
+
+test('a recurring parent records one occurrence and reopens its subtasks and Steps for the next cycle', async () => {
+  const parent = await createTask('Synthetic weekly routine', { due_date: '2030-10-22', recurrence: 'every Tue' });
+  const step = await complete(await createTask('Synthetic routine step', { parent_id: parent.id, kind: 'step' }));
+  const subtask = await createTask('Synthetic routine subtask', { parent_id: parent.id });
+  const before = await readTask(parent);
+  expect(before.completed_child_count).toBe(1);
+  const stepHistory = (await completions(step)).length;
+  const next = await complete(before);
+  expect(next.due_date).toBe('2030-10-29');
+  expect(next.completed).toBeFalsy();
+  expect(next.completed_child_count).toBeUndefined();
+  expect((await readTask(parent)).completed_child_count).toBeUndefined();
+  const reopenedStep = await readTask(step);
+  expect(reopenedStep.completed).toBeFalsy();
+  expect(reopenedStep.etag).not.toBe(step.etag);
+  const openSubtask = await readTask(subtask);
+  expect(openSubtask.completed).toBeFalsy();
+  expect(openSubtask.etag).toBe(subtask.etag);
+  expect((await completions(parent)).map((row) => row.task_id)).toEqual([parent.id]);
+  expect(await completions(step)).toHaveLength(stepHistory);
+  expect(await completions(subtask)).toHaveLength(0);
+});
+
+test('a parent completes its recurring subtask, ending that repetition', async () => {
+  const parent = await createTask('Synthetic one-off parent');
+  const child = await createTask('Synthetic recurring child', { due_date: '2030-10-22', recurrence: 'every Tue' });
+  const moved = await harness.mutate(
+    'PATCH',
+    `/api/tasks/v1/${child.name}?request_id=${randomUUID()}&update_mask=parent_id&etag=${child.etag}`,
+    { parent_id: parent.id },
+  );
+  expect(moved.status, await moved.clone().text()).toBe(200);
+  await complete(parent);
+  const closed = await readTask(child);
+  expect(closed.completed).toBe(true);
+  expect(closed.due_date).toBe('2030-10-22');
+  expect(await completions(child)).toHaveLength(1);
+});
+
+test('a recurring deadline moves with its occurrence', async () => {
+  const task = await createTask('Synthetic deadline routine', {
+    due_date: '2030-10-22',
+    deadline: '2030-10-23',
+    recurrence: 'every Tue',
+  });
+  const next = await complete(task);
+  expect([next.due_date, next.deadline]).toEqual(['2030-10-29', '2030-10-30']);
+  expect((await readTask(task)).deadline).toBe('2030-10-30');
+});
+
+test('reopening a child reopens its completed parents, and children of a completed parent stay editable', async () => {
+  const parent = await createTask('Synthetic finished parent');
+  const child = await createTask('Synthetic reopened child', { parent_id: parent.id });
+  const step = await createTask('Synthetic finished step', { parent_id: parent.id, kind: 'step' });
+  await complete(parent);
+  const doneStep = await readTask(step);
+  const renamed = await harness.mutate(
+    'PATCH',
+    `/api/tasks/v1/${step.name}?request_id=${randomUUID()}&update_mask=title&etag=${doneStep.etag}`,
+    { title: 'Synthetic renamed finished step' },
+  );
+  expect(renamed.status, await renamed.clone().text()).toBe(200);
+  const reopened = await complete(await readTask(child), 'reopen');
+  expect(reopened.completed).toBeFalsy();
+  expect((await readTask(parent)).completed).toBeFalsy();
+  const edited = await harness.mutate(
+    'PATCH',
+    `/api/tasks/v1/${child.name}?request_id=${randomUUID()}&update_mask=title&etag=${reopened.etag}`,
+    { title: 'Synthetic edited child' },
+  );
+  expect(edited.status, await edited.clone().text()).toBe(200);
+  expect((await readTask(step)).completed).toBe(true);
 });
 
 test('parent completion and deletion include descendants', async () => {

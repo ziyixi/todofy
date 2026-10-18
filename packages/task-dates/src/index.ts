@@ -75,6 +75,11 @@ export function addDays(date: string, days: number): string {
   if (!validDate(date)) throw new TaskDateError('Invalid date');
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 }
+/** Calendar days from `from` to `to`, negative when `to` is earlier. */
+export function daysBetween(from: string, to: string): number {
+  if (!validDate(from) || !validDate(to)) throw new TaskDateError('Invalid date');
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY);
+}
 function calendar(date: string): Date {
   return new Date(`${date}T00:00:00Z`);
 }
