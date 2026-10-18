@@ -35,8 +35,9 @@ export function taskFilter(query: string, today: string): SqlFilter {
   function atom(text: string): string {
     if (text.startsWith('@'))
       return `EXISTS(SELECT 1 FROM task_labels tl JOIN labels l ON l.id=tl.label_id WHERE tl.task_id=t.id AND l.deleted_at IS NULL AND l.title=${bound(text.slice(1))} COLLATE NOCASE)`;
+    // An empty project ID is the Inbox too, so `#Inbox` also matches Quick Add and Mail tasks.
     if (text.startsWith('#'))
-      return `EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id AND p.deleted_at IS NULL AND p.title=${bound(text.slice(1))} COLLATE NOCASE)`;
+      return `EXISTS(SELECT 1 FROM projects p WHERE p.deleted_at IS NULL AND p.title=${bound(text.slice(1))} COLLATE NOCASE AND (p.id=t.project_id OR (p.inbox=1 AND t.project_id='')))`;
     const lower = text.toLowerCase();
     if (lower === 'all') return '1';
     if (lower === 'subtask') return "t.parent_id<>''";

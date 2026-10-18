@@ -33,7 +33,7 @@ message Task {
   string title = 3 [(google.api.field_behavior) = OPTIONAL];
   // Plain text or Markdown, at most 16000 characters.
   string description = 4 [(google.api.field_behavior) = OPTIONAL];
-  // Project ID; empty means Inbox.
+  // Project ID; empty means the Inbox, the same as the project with `inbox` set.
   string project_id = 5 [(google.api.field_behavior) = OPTIONAL];
   // Section ID, within the project.
   string section_id = 6 [(google.api.field_behavior) = OPTIONAL];

@@ -47,3 +47,31 @@ test('next N days includes today and N-1, excludes overdue and N, and uses deadl
   expect(await titles('', 'today')).toEqual(['Overdue', 'Today']);
   expect(await titles('', 'upcoming')).toEqual(['After third day', 'Seventh day', 'Third day', 'Today']);
 });
+
+test('#Inbox matches tasks with no project and tasks in the Inbox project; !#Inbox excludes both', async () => {
+  const label = await (
+    await harness.mutate('POST', `/api/tasks/v1/labels?request_id=${randomUUID()}`, { title: 'Synthetic inbox scope' })
+  ).json() as { id: string };
+  await harness.db
+    .prepare(
+      "INSERT INTO projects(id,title,inbox,created_at,updated_at) VALUES('synthetic-inbox','Inbox',1,1,1),('synthetic-work','Work',0,1,1)",
+    )
+    .run();
+  for (const [title, project_id] of [['Quick Add', ''], ['Filed in Inbox', 'synthetic-inbox'], ['Work item', 'synthetic-work']]) {
+    const response = await harness.mutate('POST', `/api/tasks/v1/tasks?request_id=${randomUUID()}`, {
+      title,
+      project_id,
+      label_ids: [label.id],
+    });
+    expect(response.status, await response.clone().text()).toBe(200);
+  }
+  async function titles(query: string) {
+    const parameters = new URLSearchParams({ view: 'filter', query, page_size: '100' });
+    const response = await harness.fetch(`/api/tasks/v1/tasks?${parameters.toString()}`);
+    expect(response.status, await response.clone().text()).toBe(200);
+    return ((await response.json()) as { tasks: { title: string }[] }).tasks.map((task) => task.title).sort();
+  }
+  expect(await titles('@Synthetic inbox scope & #Inbox')).toEqual(['Filed in Inbox', 'Quick Add']);
+  expect(await titles('@Synthetic inbox scope & !#inbox')).toEqual(['Work item']);
+  expect(await titles('@Synthetic inbox scope & #Work')).toEqual(['Work item']);
+});

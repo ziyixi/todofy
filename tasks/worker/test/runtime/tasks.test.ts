@@ -229,6 +229,24 @@ test('keyset pages preserve server sorting and reject a cursor for another view'
   ).toBe(400);
 });
 
+test('a change cursor ahead of the database fails instead of reporting an empty, current feed', async () => {
+  await createTask('Synthetic change feed task');
+  let token = '';
+  for (;;) {
+    const page = (await (await harness.fetch(`/api/tasks/v1/changes?page_size=100&page_token=${token}`)).json()) as {
+      next_page_token: string;
+      has_more?: boolean;
+    };
+    token = page.next_page_token;
+    if (!page.has_more) break;
+  }
+  const current = await harness.fetch(`/api/tasks/v1/changes?page_token=${token}`);
+  expect(current.status, await current.clone().text()).toBe(200);
+  const ahead = await harness.fetch('/api/tasks/v1/changes?page_token=999999');
+  expect(ahead.status).toBe(400);
+  expect(await ahead.text()).toContain('Change cursor is ahead of this database');
+});
+
 test('rejects an unauthorized Origin before parsing malformed JSON', async () => {
   const response = await harness.fetch('/api/tasks/v1/tasks?request_id=' + randomUUID(), {
     method: 'POST',

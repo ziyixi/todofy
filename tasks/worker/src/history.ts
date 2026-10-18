@@ -10,7 +10,7 @@ import {
   type ListCompletionsRequest,
 } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { checkedId, taskMessage, taskProjection, childCounts, type TaskRow } from './model.ts';
-import { invalid, storage } from './errors.ts';
+import { invalid, precondition, storage } from './errors.ts';
 import { pageSize } from './task-read.ts';
 
 export async function listChanges(db: D1Database, input: ListChangesRequest) {
@@ -29,6 +29,14 @@ export async function listChanges(db: D1Database, input: ListChangesRequest) {
       }>(),
   );
   const page = rows.results.slice(0, size);
+  if (!page.length && Number(cursor) > 0) {
+    // A cursor past the newest change means this database was restored or rebuilt behind its reader.
+    const newest = await storage(() =>
+      db.prepare('SELECT max(sequence) AS sequence FROM changes').first<{ sequence: number | null }>(),
+    );
+    if ((newest?.sequence ?? 0) < Number(cursor))
+      precondition('Change cursor is ahead of this database; reset the reader');
+  }
   const ids = [...new Set(page.filter((r) => r.resource === 'tasks').map((r) => r.resource_id))];
   const tasks = ids.length
     ? await storage(() =>
