@@ -365,8 +365,10 @@ coordinator may use a database at a time):
 3. Commit the restored database's `database_id` (and `database_name` if it has another name) to
    `[[d1_databases]]` in `wrangler.toml` on `main`; that push checks and deploys Todofy. Its
    `migrations apply` finds every migration already applied. Then open
-   `https://<owner host>/api/plus/v1/plan:verifyPlanStore` (Access login): every `*_row_count` equals its
-   `plan_*` table's rows in the manifest, and no other count is present ([todoist-plus.md](todoist-plus.md#planning-store)).
+   `https://tasks.ziyixi.science/api/plus/v1/plan:verifyPlanStore` (Tasks' Access login; Tasks forwards it on its
+   private Planning channel, and it is a read, so maintenance mode lets it through): every `*_row_count`
+   equals its `plan_*` table's rows in the manifest, and no other count is present
+   ([todoist-plus.md](todoist-plus.md#planning-store)).
 4. Set `TODOFY_MAINTENANCE_MODE=false` and run the workflow on `main`. Mail Hero redelivers what it
    held during maintenance. Events Todofy acknowledged after the backup was taken are not in the
    restored database, and Mail Hero does not send an acknowledged event again: compare with Mail Hero's
