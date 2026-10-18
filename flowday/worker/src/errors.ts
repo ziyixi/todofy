@@ -18,7 +18,8 @@ export const LOCALE = 'en';
 
 /**
  * Each reason's code (errors.proto lists the same), its developer message and the owner's copy. Exhaustive: a new
- * ErrorReason fails the typecheck until it is mapped here.
+ * ErrorReason fails the typecheck until it is mapped here. The TODOIST_* reasons are retired: FlowDay reads Tasks
+ * only and never answers them.
  */
 export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly message: string; readonly copy: string }>> = {
   UNAUTHORIZED: { code: Code.UNAUTHENTICATED, message: 'no valid Cloudflare Access login for the owner', copy: 'Not signed in, or the sign-in is no longer valid.' },
@@ -38,7 +39,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   },
   TODOIST_UNAUTHORIZED: { code: Code.FAILED_PRECONDITION, message: 'Todoist refused the stored API key', copy: 'Todoist rejected the API key. Check it in Settings.' },
   TODOIST_UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'Todoist failed or could not be reached', copy: 'Todoist could not be reached. FlowDay will try again later.' },
-  TASKS_UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'the native task source failed or could not be read', copy: 'Tasks could not be reached. FlowDay will try again later.' },
+  TASKS_UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'Tasks could not be read through the TASKS binding', copy: 'Tasks could not be reached. FlowDay will try again later.' },
   ESTIMATE_IN_TASKS: { code: Code.FAILED_PRECONDITION, message: 'a mirrored task takes its estimate from Tasks', copy: "This task's estimate comes from Tasks. Edit it there." },
   TIMER_CONFLICT: { code: Code.ABORTED, message: 'timer version changed', copy: 'The timer changed in another window. Refresh it before continuing.' },
   RELOAD_REQUIRED: { code: Code.FAILED_PRECONDITION, message: 'reload required for timer commands', copy: 'FlowDay has been updated. Reload to use the shared timer.' },

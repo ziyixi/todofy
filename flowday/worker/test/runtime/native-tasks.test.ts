@@ -1,4 +1,8 @@
-/** Native source over the real FlowDay D1 store; only synthetic task metadata crosses the fake binding. */
+/**
+ * The Tasks sync (../../src/native-tasks.ts) over the real FlowDay D1 store: what it writes and keeps, its throttle,
+ * claim and failure backoff (../../src/sync-control.ts). runNativeSync is called from Node with explicit clocks; the
+ * owner API tests go through the Worker. Only synthetic task metadata crosses the fake binding.
+ */
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,12 +10,13 @@ import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
 import { toWire } from '@ziyixi/proto/wire-json';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
+import { SyncTasksRequest_Mode } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
 import { CatalogSchema, ListChangesResponseSchema, type TaskChange } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { TaskSchema } from '@ziyixi/proto/tasks/ui/v1/task_pb';
 import { Meter } from '../../src/db.ts';
-import { runSync, AUTO_SYNC_MIN_INTERVAL_MS } from '../../src/sync.ts';
-import { getAllTasks, getDeletedTasks, updateTaskEstimate } from '../../src/store/tasks.ts';
-import { KEY_TASKS_CURSOR } from '../../src/native-tasks.ts';
+import { KEY_TASKS_CURSOR, runNativeSync } from '../../src/native-tasks.ts';
+import { getAllTasks, getDeletedTasks, softDeleteTask, updateTaskEstimate } from '../../src/store/tasks.ts';
+import { AUTO_SYNC_MIN_INTERVAL_MS, MANUAL_SYNC_MIN_INTERVAL_MS, autoInterval, type SyncMode } from '../../src/sync-control.ts';
 import { startHarness, type Harness } from './harness.ts';
 
 let h: Harness;
@@ -85,13 +90,15 @@ beforeEach(async () => {
   status = 200;
   catalog = syntheticCatalog();
 });
-async function sync(time = at) {
+async function sync(time = at, mode: SyncMode = 'auto') {
   const meter = new Meter();
-  const result = await runSync({ db: h.db(meter), mode: 'auto', credentialKey: undefined, tasks: source, now: new Date(time) });
+  const result = await runNativeSync({ db: h.db(meter), mode, source, now: new Date(time) });
   return { result, written: meter.rowsWritten };
 }
+/** The pages of changes Tasks was asked for. */
+const reads = () => requests.filter((path) => path.endsWith('/changes')).length;
 
-it('imports native IDs without a Todoist key and an unchanged page writes no task rows', async () => {
+it('imports Tasks IDs and an unchanged page writes no task rows', async () => {
   changes = [task('old-todoist-id')];
   expect((await sync()).result).toMatchObject({ kind: 'ok', response: { changed: 1, status: 'synced' } });
   expect(await getAllTasks(h.db())).toEqual([
@@ -107,7 +114,6 @@ it('imports native IDs without a Todoist key and an unchanged page writes no tas
   ]);
   expect(await sync(at + AUTO_SYNC_MIN_INTERVAL_MS)).toMatchObject({ result: { kind: 'ok', response: { changed: 0 } }, written: 2 });
   expect(requests.filter((path) => path.endsWith('/catalog'))).toHaveLength(1);
-  expect(h.todoist.requests).toHaveLength(0);
 });
 it('takes estimates from Tasks only and keeps queues and timer history while completed/deleted tasks hide and reopened tasks return', async () => {
   changes = [task('a'), task('b')];
@@ -156,14 +162,100 @@ it('does not advance the cursor after an upstream failure, and project archive h
   await sync(at + 4 * AUTO_SYNC_MIN_INTERVAL_MS);
   expect((await getAllTasks(h.db())).map((row) => row.id)).toEqual(['a']);
 });
-it('reports the native source without claiming a stored key and starts through the real owner API', async () => {
+it('reports Tasks as the source without a stored key and syncs through the real owner API', async () => {
   changes = [task('a')];
   const settings = await h.api.getSettings({ name: 'settings' });
   expect(settings.taskSource).toBe('tasks');
   expect(settings.todoistApiKeySet).toBe(false);
   const result = await h.api.syncTasks({});
   expect(result.changedTaskCount).toBe(1);
-  expect(h.todoist.requests).toHaveLength(0);
+  status = 503;
+  await h.sql("DELETE FROM settings WHERE key = 'sync_claimed_at'");
+  const failed = await h.call((api) => api.syncTasks({ mode: SyncTasksRequest_Mode.MANUAL }));
+  expect(failed.status).toMatchObject({ httpStatus: 503, reason: 'TASKS_UNAVAILABLE' });
+});
+it('a task deleted in FlowDay stays deleted even when Tasks changes it', async () => {
+  changes = [task('a'), task('b')];
+  await sync();
+  await softDeleteTask(h.db(), 'b');
+  changes.push(task('b', { title: 'Edited in Tasks' }));
+  await sync(at + AUTO_SYNC_MIN_INTERVAL_MS);
+  expect((await getAllTasks(h.db())).map((row) => row.id)).toEqual(['a']);
+  expect((await getDeletedTasks(h.db())).map((row) => row.id)).toEqual(['b']);
+});
+it('throttles: an automatic sync within 5 minutes and a manual one within 30 seconds read and write nothing', async () => {
+  changes = [task('a')];
+  await sync();
+  const auto = await sync(at + AUTO_SYNC_MIN_INTERVAL_MS - 1);
+  expect(auto).toEqual({
+    result: { kind: 'ok', response: { status: 'throttled', changed: 0, fullSync: false, lastSyncAt: new Date(at).toISOString(), nextAutoSyncAt: at + AUTO_SYNC_MIN_INTERVAL_MS } },
+    written: 0,
+  });
+  expect((await sync(at + MANUAL_SYNC_MIN_INTERVAL_MS - 1, 'manual')).result).toMatchObject({ response: { status: 'throttled' } });
+  expect(reads()).toBe(1);
+  expect((await sync(at + MANUAL_SYNC_MIN_INTERVAL_MS, 'manual')).result).toMatchObject({ response: { status: 'synced' } });
+});
+it('two concurrent syncs: exactly one reads Tasks', async () => {
+  changes = [task('a')];
+  const [a, b] = await Promise.all([sync(), sync()]);
+  const states = [a.result, b.result].map((result) => (result.kind === 'ok' ? result.response.status : result.kind));
+  expect(states.sort()).toEqual(['synced', 'throttled']);
+  expect(reads()).toBe(1);
+});
+it('a failed read writes only the claim and keeps the last successful sync time', async () => {
+  changes = [task('a')];
+  await sync();
+  status = 503;
+  expect(await sync(at + AUTO_SYNC_MIN_INTERVAL_MS, 'manual')).toEqual({ result: { kind: 'tasks' }, written: 1 });
+  expect(await h.sql('SELECT value FROM settings WHERE key = ?', 'last_sync_at')).toEqual([{ value: new Date(at).toISOString() }]);
+});
+it('failed syncs back off: the automatic interval doubles per failure (up to 32x) and resets after a success', async () => {
+  changes = [task('a')];
+  await sync();
+  status = 503;
+  let time = at;
+  const intervals: number[] = [];
+  for (let failures = 1; failures <= 7; failures += 1) {
+    const wait = autoInterval(failures - 1);
+    // One millisecond early: throttled, nothing read, nothing written.
+    expect(await sync(time + wait - 1)).toMatchObject({ result: { response: { status: 'throttled', nextAutoSyncAt: time + wait } }, written: 0 });
+    expect((await sync(time + wait)).result).toEqual({ kind: 'tasks' });
+    time += wait;
+    intervals.push(wait / AUTO_SYNC_MIN_INTERVAL_MS);
+  }
+  expect(intervals).toEqual([1, 2, 4, 8, 16, 32, 32]);
+  // "Sync now" is not backed off; its success resets the interval.
+  status = 200;
+  expect((await sync(time + MANUAL_SYNC_MIN_INTERVAL_MS, 'manual')).result).toMatchObject({ response: { status: 'synced' } });
+  expect((await sync(time + MANUAL_SYNC_MIN_INTERVAL_MS + AUTO_SYNC_MIN_INTERVAL_MS)).result).toMatchObject({ response: { status: 'synced' } });
+});
+it('a request stopped after its claim (e.g. out of CPU) counts as a failure, so it is not retried every 5 minutes', async () => {
+  changes = [task('a')];
+  await sync();
+  // The claim of a request that never finished: newer than last_sync_at, nothing else written.
+  await h.sql("UPDATE settings SET value = ? WHERE key = 'sync_claimed_at'", String(at + AUTO_SYNC_MIN_INTERVAL_MS));
+  expect((await sync(at + 2 * AUTO_SYNC_MIN_INTERVAL_MS)).result).toMatchObject({ response: { status: 'throttled' } });
+  expect((await sync(at + 3 * AUTO_SYNC_MIN_INTERVAL_MS)).result).toMatchObject({ response: { status: 'synced' } });
+});
+it('an interrupted run of pages resumes where it stopped, after the failure backoff', async () => {
+  changes = Array.from({ length: 101 }, (_, i) => task(`t${String(i)}`));
+  expect((await sync()).result).toMatchObject({ response: { status: 'partial', changed: 100 } });
+  status = 503;
+  expect((await sync(at + 1000)).result).toEqual({ kind: 'tasks' });
+  status = 200;
+  expect((await sync(at + 2000)).result).toMatchObject({ response: { status: 'throttled' } });
+  expect((await sync(at + 1000 + autoInterval(1))).result).toMatchObject({ response: { status: 'synced', changed: 1 } });
+  expect(await getAllTasks(h.db())).toHaveLength(101);
+});
+it('a Worker deployed without its TASKS binding answers TASKS_UNAVAILABLE and writes only the claim', async () => {
+  const unbound = await startHarness({ tasks: null });
+  try {
+    const result = await unbound.call((api) => api.syncTasks({ mode: SyncTasksRequest_Mode.MANUAL }));
+    expect(result.status).toMatchObject({ httpStatus: 503, reason: 'TASKS_UNAVAILABLE' });
+    expect(await unbound.sql('SELECT key FROM settings')).toEqual([{ key: 'sync_claimed_at' }]);
+  } finally {
+    await unbound.dispose();
+  }
 });
 
 it('a project rename or recolour reaches every mirrored task once, and other catalog changes write none', async () => {
@@ -217,4 +309,46 @@ it('after a Tasks restore the reset replays the new feed: tasks it holds return,
   expect((await getDeletedTasks(h.db())).map((row) => row.id)).toEqual(['deleted-here']);
   expect(await h.sql("SELECT deleted_source FROM tasks WHERE id='dropped'")).toEqual([{ deleted_source: 'sync' }]);
   expect(await h.sql('SELECT task_id FROM flow_tasks')).toEqual([{ task_id: 'kept' }]);
+});
+it('a simulated day (200 tasks, 20 Tasks changes, two open tabs polling every 10 minutes for 16 hours) stays far below 1,000 rows', async () => {
+  // 40 of the tasks are in Work, whose rename rewrites each of them.
+  const mirror = (n: number, fields: object = {}) => task(`t${String(n)}`, { projectId: n % 5 === 0 ? 'work' : 'inbox', ...fields });
+  changes = Array.from({ length: 200 }, (_, n) => mirror(n));
+  const day = at - 24 * 3_600_000;
+  const first = [await sync(day), await sync(day + 1000)] as const;
+  expect(first.map(({ result }) => result)).toMatchObject([{ response: { status: 'partial', changed: 100 } }, { response: { status: 'synced', changed: 100 } }]);
+  // 10 edits, 3 reschedules, 3 completions, 1 deletion, 2 new tasks and 1 project rename, spread over the day.
+  const edits: (() => void)[] = [
+    ...Array.from({ length: 10 }, (_, n) => () => changes.push(mirror(n * 7, { title: `Edited ${String(n)}` }))),
+    ...Array.from({ length: 3 }, (_, n) => () => changes.push(mirror(100 + n, { dueDate: '2026-10-20' }))),
+    ...Array.from({ length: 3 }, (_, n) => () => changes.push(mirror(150 + n, { completed: true }))),
+    () => changes.push({ name: 'tasks/t199', deleted: true }),
+    () => changes.push(mirror(500)),
+    () => changes.push(mirror(501)),
+    () => {
+      catalog = syntheticCatalog({ title: 'Renamed', color: '#299438' });
+      changes.push({ name: 'projects/work' });
+    },
+  ];
+  expect(edits).toHaveLength(20);
+  const totals = { rowsWritten: 0, synced: 0, throttled: 0, reads: 0 };
+  const readsBefore = reads();
+  const POLL = 10 * 60_000;
+  for (let time = at; time < at + 16 * 3_600_000; time += POLL) {
+    if (Math.floor((time - at) / POLL) % 4 === 1) edits.shift()?.();
+    // Two tabs (or a desktop window and a phone) poll three minutes apart: the throttle lets one through.
+    for (const { result, written } of [await sync(time), await sync(time + 3 * 60_000)]) {
+      totals.rowsWritten += written;
+      if (result.kind === 'ok' && result.response.status === 'throttled') totals.throttled += 1;
+      else if (result.kind === 'ok') totals.synced += 1;
+    }
+  }
+  totals.reads = reads() - readsBefore;
+  console.log(`write budget: the first sync of 200 tasks wrote ${String(first[0].written + first[1].written)} rows; the simulated day ${JSON.stringify(totals)}`);
+  expect(edits).toHaveLength(0);
+  expect(totals).toMatchObject({ synced: 96, throttled: 96, reads: 96 });
+  // 96 syncs x 2 rows (claim, last_sync_at), the cursor after each change, the changed rows and the renamed project's.
+  expect(totals.rowsWritten).toBeLessThan(320);
+  // 3 rows per new task (row, key, deleted_at index) + the settings rows.
+  expect(first[0].written + first[1].written).toBeLessThan(620);
 });

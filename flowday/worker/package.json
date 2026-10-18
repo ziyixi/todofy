@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Worker \"flowday\": FlowDay's owner API (Access, CSRF, D1 via drizzle-orm/d1, read-only incremental Todoist sync) and its static UI.",
+  "description": "Worker \"flowday\": FlowDay's owner API (Access, CSRF, D1 via drizzle-orm/d1, read-only incremental Tasks sync) and its static UI.",
   "engines": {
     "node": ">=26"
   },

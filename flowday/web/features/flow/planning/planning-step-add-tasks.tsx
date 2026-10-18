@@ -35,7 +35,7 @@ export function PlanningStepAddTasks({
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">Add tasks to your day</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Pick from Todoist now, or finish setup and drag more tasks in later.
+            Pick from Tasks now, or finish setup and drag more tasks in later.
           </p>
         </div>
         {unadded.length >= 2 && (
@@ -96,7 +96,7 @@ export function PlanningStepAddTasks({
           <p className="text-xs text-muted-foreground/60">
             {flowCount > 0
               ? "All available tasks added to flow"
-              : "No tasks available — sync Todoist first"}
+              : "No tasks available — sync Tasks first"}
           </p>
         </div>
       )}

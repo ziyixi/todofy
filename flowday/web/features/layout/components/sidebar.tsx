@@ -116,7 +116,7 @@ export function Sidebar({
         {/* Sidebar header */}
         <div className="flex h-10 items-center justify-between px-3">
           <span className="fd-section-label">
-            Todoist
+            Tasks
           </span>
           <div className="flex items-center gap-0.5">
             <TooltipIconButton

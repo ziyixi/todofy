@@ -1,26 +1,27 @@
 #!/usr/bin/env node
 // The app the Playwright suite and the screenshot scripts drive: the E2E static export (E2E_TEST_MODE=1, with the
 // test bridge) served by the Worker "flowday" under `wrangler dev`, with a fresh local D1 (../migrations applied),
-// the loopback dev bypass and the /api/test/* routes. Local only: nothing here reaches Cloudflare.
+// the loopback dev bypass, the /api/test/* routes and an empty Tasks as its TASKS binding (./e2e-tasks.mjs, the
+// Worker "tasks" in the same `wrangler dev`). Local only: nothing here reaches Cloudflare.
 //
 //   node scripts/e2e-server.mjs [--port 4567] [--skip-build]
 //
 // The values below are synthetic test values (no real owner, key or token).
 import { spawn } from "node:child_process";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workerDir = path.resolve(webDir, "..", "worker");
 const stateDir = path.join(webDir, "output", "e2e-state");
+const tasksConfig = path.join(stateDir, "tasks.wrangler.json");
 
 const TEST_VARS = {
   DEV_AUTH_BYPASS: "true",
   E2E_TEST_ROUTES: "true",
   ACCESS_OWNER: "owner@example.com",
   CSRF_SIGNING_KEY: "e2e0".repeat(16),
-  CREDENTIAL_KEY: "e2e1".repeat(16),
   BUILD_SHA: "dev",
 };
 
@@ -36,7 +37,7 @@ function run(command, args, cwd, env = {}) {
 
 const wranglerEnv = { WRANGLER_SEND_METRICS: "false", TZ: "UTC" };
 
-/** Builds the E2E export into out/ and gives the local D1 a fresh, migrated database. */
+/** Builds the E2E export into out/, gives the local D1 a fresh, migrated database and writes the fake Tasks' config. */
 export async function prepareE2E({ skipBuild = false } = {}) {
   if (!skipBuild) {
     await run("npm", ["run", "build"], webDir, { E2E_TEST_MODE: "1", TZ: "UTC", NEXT_TELEMETRY_DISABLED: "1" });
@@ -49,6 +50,8 @@ export async function prepareE2E({ skipBuild = false } = {}) {
     workerDir,
     { ...wranglerEnv, CI: "1" }
   );
+  const tasks = { name: "tasks", main: path.join(webDir, "scripts", "e2e-tasks.mjs"), compatibility_date: "2026-09-08" };
+  await writeFile(tasksConfig, JSON.stringify(tasks));
 }
 
 /** Starts `wrangler dev` on 127.0.0.1:<port>; returns the child process. */
@@ -57,7 +60,7 @@ export function startE2EWorker(port) {
   const child = spawn(
     "npx",
     [
-      "--no-install", "wrangler", "dev", "--config", "../wrangler.toml", "--ip", "127.0.0.1", "--port", String(port),
+      "--no-install", "wrangler", "dev", "--config", "../wrangler.toml", "--config", tasksConfig, "--ip", "127.0.0.1", "--port", String(port),
       "--local-upstream", `127.0.0.1:${port}`, "--persist-to", stateDir, "--show-interactive-dev-session=false", ...vars,
     ],
     { cwd: workerDir, stdio: ["ignore", "inherit", "inherit"], env: { ...process.env, ...wranglerEnv } }

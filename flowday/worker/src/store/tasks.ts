@@ -1,5 +1,6 @@
 /**
- * The tasks table: Todoist tasks (id = Todoist id) and FlowDay's own local tasks (id "local-<uuid>").
+ * The tasks table: the mirror of Tasks (id = the Tasks id; an imported task keeps its Todoist id) and FlowDay's own
+ * local tasks (id "local-<uuid>").
  *
  * Every write here changes only rows whose values differ, because D1 counts each written row plus one per index
  * entry the write touches (tasks keeps one secondary index, deleted_at, since migration 0003). Lists of ids travel
@@ -13,8 +14,8 @@ import { completedFlowTasks, flowTasks, tasks } from '../schema.ts';
 export type TaskRow = typeof tasks.$inferSelect;
 
 /**
- * Rows per upsert statement: keeps each JSON parameter well below D1's limits. The sync applies at most this many
- * Todoist items per request (../sync.ts SYNC_CHUNK), so one sync request runs one upsert statement.
+ * Rows per upsert statement: keeps each JSON parameter well below D1's limits. A sync page holds at most 100 changes
+ * (../native-tasks.ts NATIVE_SYNC_PAGE), so one sync request runs one upsert statement.
  */
 export const UPSERT_CHUNK = 200;
 
@@ -55,7 +56,7 @@ export async function getAllTasks(db: Db): Promise<TaskRecord[]> {
 
 /**
  * Tasks deleted in FlowDay itself (or with the legacy NULL source). Sync deletions are left out: they are
- * restored in Todoist, and listing every Todoist deletion would flood the trash dialog.
+ * restored in Tasks, and listing every Tasks deletion would flood the trash dialog.
  */
 export async function getDeletedTasks(db: Db): Promise<TaskRecord[]> {
   const rows = await db
@@ -218,7 +219,7 @@ export async function getTasksByIds(db: Db, ids: readonly string[]): Promise<Tas
   return (await tasksByIdsQuery(db, ids)).map(mapTaskRow);
 }
 
-// ---- the diff upsert shared by the Todoist sync, the E2E seed and the tests ----------------------------------
+// ---- the diff upsert shared by the Tasks sync, the E2E seed and the tests ------------------------------------
 
 /** One task as the upsert reads it from the JSON parameter (snake_case keys, SQLite values). */
 export interface TaskUpsertRow {
@@ -338,8 +339,8 @@ export function projectRefreshStatement(projects: readonly MirrorProject[]): SQL
 }
 
 /**
- * Hides (deleted_source 'sync') the visible Todoist tasks with these ids: completed or deleted in Todoist. A
- * Todoist task's id is its Todoist id, so the primary key finds it.
+ * Hides (deleted_source 'sync') the visible mirrored tasks with these ids: completed, archived or deleted in Tasks.
+ * A mirrored task's id is its Tasks id, so the primary key finds it.
  */
 export function hideStatement(ids: readonly string[], now: string): SQL {
   return sql`UPDATE tasks SET deleted_at = ${now}, deleted_source = 'sync'
@@ -347,42 +348,10 @@ export function hideStatement(ids: readonly string[], now: string): SQL {
       AND deleted_at IS NULL AND todoist_id IS NOT NULL`;
 }
 
-/**
- * After a full sync: hides every visible Todoist task that is not in the full list (`activeIds`). These come back
- * by themselves through the upsert when Todoist lists them again.
- */
-export function orphanStatement(activeIds: readonly string[], now: string): SQL {
-  return sql`UPDATE tasks SET deleted_at = ${now}, deleted_source = 'sync'
-    WHERE deleted_at IS NULL AND todoist_id IS NOT NULL
-      AND id NOT IN (SELECT value FROM json_each(${JSON.stringify(activeIds)}))`;
-}
-
-/** Hides the visible tasks of Todoist projects that were archived or deleted. */
-export function hideProjectsStatement(projectIds: readonly string[], now: string): SQL {
-  return sql`UPDATE tasks SET deleted_at = ${now}, deleted_source = 'sync'
-    WHERE deleted_at IS NULL AND todoist_id IS NOT NULL
-      AND todoist_project_id IN (SELECT value FROM json_each(${JSON.stringify(projectIds)}))`;
-}
-
-/** Renames or recolours the tasks of changed projects (only the rows whose name or colour differ). */
-export function projectStatement(projects: readonly { id: string; name: string; color: string }[]): SQL {
-  return sql`UPDATE tasks SET project_name = p.name, project_color = p.color
-    FROM (SELECT json_extract(value, '$.id') AS id, json_extract(value, '$.name') AS name,
-            json_extract(value, '$.color') AS color
-          FROM json_each(${JSON.stringify(projects)})) AS p
-    WHERE tasks.todoist_project_id = p.id
-      AND (tasks.project_name IS NOT p.name OR tasks.project_color IS NOT p.color)`;
-}
-
 /** Upserts these tasks (the diff upsert above) in one batch; returns the number of rows inserted or changed. */
 export async function upsertTasks(db: Db, list: readonly TaskRecord[], now: Date = new Date()): Promise<number> {
   const statements = upsertStatements(list.map((task) => taskToUpsertRow(task)), now.toISOString());
   return runStatements(db, statements);
-}
-
-/** Hides every visible Todoist task not listed in `activeIds`; returns the number of rows hidden. */
-export async function markOrphanedTodoistTasksDeleted(db: Db, activeIds: readonly string[], now: Date = new Date()): Promise<number> {
-  return runStatements(db, [orphanStatement(activeIds, now.toISOString())]);
 }
 
 /** Runs the statements as one atomic batch; returns the sum of their changes. */

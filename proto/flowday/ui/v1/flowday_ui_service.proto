@@ -1,5 +1,5 @@
 // FlowDay's owner API: the HTTP/JSON interface between FlowDay's UI (flowday/web, a Next.js static export) and the
-// Worker "flowday" (flowday/worker), which keeps everything in D1 and reads Todoist (never writes it).
+// Worker "flowday" (flowday/worker), which keeps everything in D1 and reads Tasks (never writes it).
 //
 // Callers. FlowDay's own UI uses its owner routes. Todofy uses the narrow NativeFocusEntrypoint service binding.
 //
@@ -63,7 +63,7 @@ option java_multiple_files = true;
 option java_outer_classname = "FlowDayUiServiceProto";
 option java_package = "science.ziyixi.flowday.ui.v1";
 
-// The owner's day planner: the tasks (from Todoist, and local ones), each day's flow and notes, the time logged, the
+// The owner's day planner: the tasks (from Tasks, and local ones), each day's flow and notes, the time logged, the
 // shared timer, the settings, and the raw rows of the reviews and exports (which the browser computes).
 service FlowDayUiService {
   option (google.api.default_host) = "flowday.ziyixi.science";
@@ -131,9 +131,9 @@ service FlowDayUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // Brings Todoist's changes in (flowday/docs/design.md §4): at most one Todoist read, throttled atomically across
-  // tabs and devices, a large answer applied over several requests (PARTIAL: ask again at once). Replaces POST
-  // /api/sync.
+  // Brings Tasks' changes in (flowday/docs/design.md §4): at most one page of changes read, throttled atomically
+  // across tabs and devices; more changes are applied over several requests (PARTIAL: ask again at once). Replaces
+  // POST /api/sync.
   rpc SyncTasks(SyncTasksRequest) returns (SyncTasksResponse) {
     option (google.api.http) = {
       post: "/api/v1/tasks:sync"
@@ -323,8 +323,8 @@ service FlowDayUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // Replaces the settings `update_mask` names (`todoist_api_key`, `day_capacity_minutes`), or both without one
-  // (AIP-134), in one atomic write; answers the stored settings. Replaces PUT /api/settings.
+  // Replaces the settings `update_mask` names (`day_capacity_minutes`), or all of them without one (AIP-134);
+  // answers the stored settings. The retired `todoist_api_key` is refused. Replaces PUT /api/settings.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc UpdateSettings(UpdateSettingsRequest) returns (Settings) {
@@ -355,8 +355,7 @@ message GetTaskRequest {
 // Input of ListTasks.
 message ListTasksRequest {
   // At most this many tasks (AIP-158): 0 means 200, a larger value is read as 200, and a negative one is
-  // INVALID_ARGUMENT (each answer is written within Workers Free's 10 ms of CPU, even an isolate's first; the sync
-  // keeps at most 1,000 Todoist tasks).
+  // INVALID_ARGUMENT (each answer is written within Workers Free's 10 ms of CPU, even an isolate's first).
   int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
   // The previous page's `next_page_token`, with the same `show_deleted` (another is INVALID_ARGUMENT).
   string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
@@ -442,9 +441,9 @@ message SyncTasksResponse {
   enum State {
     // Never written.
     STATE_UNSPECIFIED = 0;
-    // Todoist was read and its answer applied.
+    // Tasks was read and its last page of changes applied.
     STATE_SYNCED = 1;
-    // Part of a large answer was applied (or a full pass must follow): ask again at once.
+    // A page of changes was applied and more follow: ask again at once.
     STATE_PARTIAL = 2;
     // Another tab or device synced within the minimum interval: nothing was read or written.
     STATE_THROTTLED = 3;
@@ -454,7 +453,7 @@ message SyncTasksResponse {
   State state = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The task rows this request inserted, updated, hid or restored (0 when nothing changed).
   int32 changed_task_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether Todoist answered with a full sync (the first sync, a new key, or Todoist reset the sync token).
+  // Whether the page started from the beginning of Tasks' change feed (the first sync, or after a reset).
   bool full_sync = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When the last sync applied an answer (this one, unless THROTTLED); unset before the first one.
   google.protobuf.Timestamp last_sync_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -695,10 +694,11 @@ message GetSettingsRequest {
 
 // Input of UpdateSettings.
 message UpdateSettingsRequest {
-  // The new values: the fields `update_mask` names, or `todoist_api_key` and `day_capacity_minutes` without one.
+  // The new values: the fields `update_mask` names, or `day_capacity_minutes` without one.
   Settings settings = 1 [(google.api.field_behavior) = REQUIRED];
-  // AIP-134: `todoist_api_key`, `day_capacity_minutes` or both (a query parameter). Absent, empty or `*` replaces
-  // both (so the key must be given); any other field is INVALID_ARGUMENT, and output-only fields are ignored.
+  // AIP-134: `day_capacity_minutes` (a query parameter). Absent, empty or `*` replaces it, and a
+  // `todoist_api_key` given then is INVALID_ARGUMENT; any other field is INVALID_ARGUMENT, `todoist_api_key`
+  // included, and output-only fields are ignored.
   google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
@@ -758,7 +758,7 @@ message CommandTimerRequest {
     ACTION_RESUME = 3;
     // Save elapsed time and stop.
     ACTION_STOP = 4;
-    // Mark this day task done and stop its timer, after Todofy confirms Todoist completion.
+    // Mark this day task done and stop its timer, after Todofy confirms the completion in Tasks.
     ACTION_SETTLE = 5;
     // Discard the current unrecorded segment, preserving already saved time.
     ACTION_DISCARD = 6;

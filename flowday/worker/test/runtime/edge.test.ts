@@ -135,16 +135,9 @@ describe('with the loopback dev bypass', () => {
     const seeded = await h.fetch('/api/test/seed', { method: 'POST', body: JSON.stringify({ tasks: [{ id: 'a', title: 'Seeded' }], flows: { '2026-04-13': ['a'] } }) });
     expect(seeded.status).toBe(200);
     expect((await (await h.fetch('/api/v1/tasks')).json<{ tasks: { name: string }[] }>()).tasks.map((task) => task.name)).toEqual(['tasks/a']);
-    expect(await (await h.fetch('/api/test/sync-orphans', { method: 'POST', body: '{}' })).json()).toEqual({ ok: true, changed: 0 });
+    expect(await (await h.fetch('/api/test/sync-hide', { method: 'POST', body: '{}' })).json()).toEqual({ ok: true, changed: 0 });
     expect((await h.fetch('/api/test/reset', { method: 'POST' })).status).toBe(200);
     expect(await (await h.fetch('/api/v1/tasks')).json()).toEqual({});
-  });
-
-  it('a seeded Todoist key is sealed like one saved in Settings', async () => {
-    await h.fetch('/api/test/seed', { method: 'POST', body: JSON.stringify({ settings: { todoist_api_key: 'saved-secret-key' } }) });
-    const [row] = await h.sql<{ value: string }>("SELECT value FROM settings WHERE key = 'todoist_api_key'");
-    expect(row?.value).toMatch(/^v1\./);
-    expect((await (await h.fetch('/api/v1/settings')).json<{ todoist_api_key_set: boolean }>()).todoist_api_key_set).toBe(true);
   });
 
   it('a request that came through Cloudflare (cf-ray) never gets the bypass or the E2E routes', async () => {
@@ -155,7 +148,7 @@ describe('with the loopback dev bypass', () => {
 
   it('logs one line per mutation with IDs, route, status and row counts only: no title, note, token or key', async () => {
     h.logs.length = 0;
-    await h.api.updateSettings({ settings: { name: 'settings', todoistApiKey: 'synthetic-secret-key' }, updateMask: { paths: ['todoist_api_key'] } });
+    await h.call((api) => api.updateSettings({ settings: { name: 'settings', todoistApiKey: 'synthetic-secret-key' }, updateMask: { paths: ['todoist_api_key'] } }));
     await h.api.createTask({ task: { title: 'Synthetic private title' } });
     await h.api.updateNote({ note: { name: 'flows/2026-04-13/notes/t1', content: 'Synthetic private note' } });
     await h.call((api) => api.getTask({ name: 'tasks/synthetic-private-id' }));
@@ -165,7 +158,7 @@ describe('with the loopback dev bypass', () => {
       expect(Object.keys(JSON.parse(line) as object).sort()).toEqual(['code', 'method', 'request_id', 'route', 'rows_read', 'rows_written', 'status']);
     }
     expect(lines.map((line) => (JSON.parse(line) as { route: string; code: string | null }).route)).toEqual(['UpdateSettings', 'CreateTask', 'UpdateNote', 'GetTask']);
-    expect((JSON.parse(lines[3] ?? '{}') as { code: string }).code).toBe('NOT_FOUND');
+    expect([lines[0], lines[3]].map((line) => (JSON.parse(line ?? '{}') as { code: string }).code)).toEqual(['BAD_REQUEST', 'NOT_FOUND']);
     const all = h.logs.join('\n');
     for (const secret of ['synthetic-secret-key', 'Synthetic private title', 'Synthetic private note', 'synthetic-private-id', 'owner@example.com']) expect(all).not.toContain(secret);
   });
@@ -179,10 +172,10 @@ describe('with the loopback dev bypass', () => {
   });
 });
 
-describe('without E2E_TEST_ROUTES or CREDENTIAL_KEY', () => {
+describe('without E2E_TEST_ROUTES', () => {
   let h: Harness;
   beforeAll(async () => {
-    h = await startHarness({ bindings: { CREDENTIAL_KEY: '' } });
+    h = await startHarness();
   });
   afterAll(async () => {
     await h.dispose();
@@ -191,12 +184,5 @@ describe('without E2E_TEST_ROUTES or CREDENTIAL_KEY', () => {
   it('the E2E routes do not exist even over loopback', async () => {
     expect((await h.fetch('/api/test/health')).status).toBe(404);
     expect((await h.fetch('/api/test/reset', { method: 'POST' })).status).toBe(404);
-  });
-
-  it('without the credential key a Todoist key is refused (503), never stored in plain text', async () => {
-    const result = await h.call((api) => api.updateSettings({ settings: { name: 'settings', todoistApiKey: 'synthetic-secret-key' }, updateMask: { paths: ['todoist_api_key'] } }));
-    expect(result.status).toMatchObject({ httpStatus: 503, reason: 'NOT_CONFIGURED' });
-    expect(result.rowsWritten).toBe(0);
-    expect(await h.sql("SELECT * FROM settings WHERE key = 'todoist_api_key'")).toEqual([]);
   });
 });

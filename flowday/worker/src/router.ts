@@ -98,10 +98,9 @@ interface RouteInput {
   readonly url: URL;
   readonly requestId: string;
   readonly meter: Meter;
-  readonly fetcher: typeof fetch;
 }
 
-async function route({ request, env, url, requestId, meter, fetcher }: RouteInput): Promise<Routed> {
+async function route({ request, env, url, requestId, meter }: RouteInput): Promise<Routed> {
   const { pathname } = url;
   const head = request.method === 'HEAD';
   const read = request.method === 'GET' || head;
@@ -139,10 +138,10 @@ async function route({ request, env, url, requestId, meter, fetcher }: RouteInpu
   }
   const db = openDb(env.DB, meter);
   if (pathname.startsWith('/api/test/') && e2eEnabled(env, principal)) {
-    return { response: await e2eRoute(request, env, db, pathname), route: 'test', reason: null };
+    return { response: await e2eRoute(request, db, pathname), route: 'test', reason: null };
   }
   if (pathname === '/api/v1' || pathname.startsWith(API_PREFIX)) {
-    const ctx: RouteContext = { env, db, fetcher, now: () => new Date(), principal };
+    const ctx: RouteContext = { env, db, now: () => new Date(), principal };
     const result = await api.handle(request, ctx, requestId);
     if (result === null) return fail(flowdayError('NOT_FOUND'), 'api');
     return { response: result.response, route: result.route?.method.name ?? 'api', reason: result.error?.reason ?? null };
@@ -152,13 +151,13 @@ async function route({ request, env, url, requestId, meter, fetcher }: RouteInpu
   return { response: await uiAsset(request, env.ASSETS, pathname), route: 'ui', reason: null };
 }
 
-export async function handleRequest(request: Request, env: Env, fetcher: typeof fetch = fetch): Promise<Response> {
+export async function handleRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const requestId = newRequestId();
   const meter = new Meter();
   let routed: Routed;
   try {
-    routed = await route({ request, env, url, requestId, meter, fetcher });
+    routed = await route({ request, env, url, requestId, meter });
   } catch (error) {
     // Anything that escaped the routes: an RpcError of the transport routes (a missing CSRF secret), or a dependency
     // that failed (the asset store, D1 in the E2E routes): unavailable, as before.

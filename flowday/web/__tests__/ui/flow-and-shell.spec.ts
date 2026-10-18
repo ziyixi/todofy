@@ -10,7 +10,7 @@ import {
   openApp,
   resetAppState,
   seedAppState,
-  simulateTodoistOrphanSweep,
+  simulateSyncHide,
   taskPoolCard,
   TODAY,
   TOMORROW,
@@ -168,38 +168,38 @@ test("[UI-010] Deleted-task dialog restores a soft-deleted local task", async ({
   await expect(taskPoolCard(page, "Restore me")).toBeVisible();
 });
 
-test("[UI-016] Tasks deleted in Todoist disappear from the sidebar after sync", async ({
+test("[UI-016] Tasks deleted in Tasks disappear from the sidebar after sync", async ({
   page,
   request,
 }) => {
-  await seedAppState(request, "todoist-overdue");
+  await seedAppState(request, "mirrored-overdue");
   await openApp(page);
 
   await expect(page.getByRole("button", { name: /^Overdue/ })).toBeVisible();
   await expect(taskPoolCard(page, "Survives sync")).toBeVisible();
-  await expect(taskPoolCard(page, "Deleted in Todoist")).toBeVisible();
+  await expect(taskPoolCard(page, "Deleted in Tasks")).toBeVisible();
 
-  // Simulate the next sync: Todoist now only returns "td-keep". The other
-  // task is treated as deleted-in-Todoist and gets sync-soft-deleted.
-  await simulateTodoistOrphanSweep(request, ["td-keep"]);
+  // Simulate the next sync: Tasks reports "td-deleted" deleted, so the
+  // sync hides it.
+  await simulateSyncHide(request, ["td-deleted"]);
 
   await page.reload();
 
   await expect(taskPoolCard(page, "Survives sync")).toBeVisible();
-  await expect(taskPoolCard(page, "Deleted in Todoist")).toHaveCount(0);
+  await expect(taskPoolCard(page, "Deleted in Tasks")).toHaveCount(0);
 
   // Sync-deleted tasks must NOT clutter the trash dialog — the user manages
-  // those in Todoist itself. The dialog is reserved for FlowDay-local deletes.
+  // those in Tasks itself. The dialog is reserved for FlowDay-local deletes.
   await page.getByRole("button", { name: "Deleted tasks" }).click();
   await expect(page.getByRole("heading", { name: "Deleted Tasks" })).toBeVisible();
-  await expect(page.getByText("Deleted in Todoist")).toHaveCount(0);
+  await expect(page.getByText("Deleted in Tasks")).toHaveCount(0);
 });
 
 test("[UI-053] Mirrored task estimates are read-only: they are the Tasks duration", async ({
   page,
   request,
 }) => {
-  await seedAppState(request, "todoist-overdue");
+  await seedAppState(request, "mirrored-overdue");
   await openApp(page);
 
   const card = taskPoolCard(page, "Survives sync");
@@ -513,7 +513,7 @@ test("[UI-051] Local tasks completed on a prior day stay out of overdue", async 
   await expect(taskPoolCard(page, "Finished local yesterday")).toHaveCount(0);
 });
 
-test("[UI-045] Settings keep sync disabled until a key exists and preserve saved capacity", async ({
+test("[UI-045] Settings sync Tasks without a key and preserve saved capacity", async ({
   page,
   request,
 }) => {
@@ -522,10 +522,7 @@ test("[UI-045] Settings keep sync disabled until a key exists and preserve saved
 
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-  await expect(page.getByTestId("settings-sync-now")).toBeDisabled();
-
-  await page.getByTestId("settings-api-key-input").fill("todoist-test-key");
-  await page.getByTestId("settings-save-api-key").click();
+  await expect(page.getByText("No API key is needed.")).toBeVisible();
   await expect(page.getByTestId("settings-sync-now")).toBeEnabled();
 
   await page.getByTestId("capacity-input").fill("4.5");
@@ -533,11 +530,6 @@ test("[UI-045] Settings keep sync disabled until a key exists and preserve saved
   await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Settings" }).click();
-  await expect(page.getByTestId("settings-api-key-input")).toHaveAttribute(
-    "placeholder",
-    /key saved/
-  );
-  await expect(page.getByTestId("settings-sync-now")).toBeEnabled();
   await expect(page.getByTestId("capacity-input")).toHaveValue("4.5");
 });
 

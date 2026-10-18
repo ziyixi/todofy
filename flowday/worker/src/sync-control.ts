@@ -1,4 +1,4 @@
-/** Shared atomic throttling for the two read-only task sources. */
+/** The Tasks sync's atomic throttle and failure backoff (./native-tasks.ts). */
 import { sql } from 'drizzle-orm';
 import type { Db } from './db.ts';
 

@@ -34,7 +34,6 @@ import { decodePageToken, encodePageToken, PageTokenError, type PageParameters }
 import { create } from '@ziyixi/proto/protobuf';
 import { EmptySchema, timestampDate, timestampFromMs, type Timestamp } from '@ziyixi/proto/protobuf/wkt';
 import { errorDetail } from '@ziyixi/proto/rpc-status';
-import { importCredentialKey, isSealed, openCredential, sealCredential } from './credentials.ts';
 import { sqliteNow, type Db } from './db.ts';
 import type { Env } from './env.ts';
 import { flowdayError } from './errors.ts';
@@ -48,12 +47,10 @@ import {
   MAX_LABELS,
   MAX_NOTE,
   MAX_TITLE,
-  MAX_TODOIST_KEY,
   NOTE_PAGE,
   TASK_PAGE,
 } from './limits.ts';
 import type { NoteRecord, TaskRecord, TimeEntryRecord, TimerSessionRecord } from './model.ts';
-import { settings as settingsTable } from './schema.ts';
 import { analyticsPage, cursorFromValue, cursorValue, dayCapacity } from './store/analytics.ts';
 import { createTimeEntry, deleteTimeEntry, getTimeEntry, listTimeEntries, updateTimeEntry, type EntryCursor } from './store/entries.ts';
 import {
@@ -69,19 +66,18 @@ import {
   setFlowStatements,
 } from './store/flows.ts';
 import { getNote, listNotes, upsertNote } from './store/notes.ts';
-import { getPlanningDaysBetween, getSetting, getSettings, planningKey, setSettingQuery, setSettingSql } from './store/settings.ts';
+import { getPlanningDaysBetween, getSetting, getSettings, planningKey, setSetting, setSettingSql } from './store/settings.ts';
 import { createLocalTask, getTask, listTasks, restoreTask, runStatements, softDeleteTask, updateTaskEstimate, updateTaskTitle } from './store/tasks.ts';
 import { getActiveTimerSession } from './store/timer-session.ts';
 import { commandTimer } from './store/timer-commands.ts';
-import { KEY_API_KEY, KEY_CLAIMED_AT, KEY_LAST_SYNC_AT, KEY_PENDING, KEY_PROJECTS, KEY_SYNC_TOKEN, runSync } from './sync.ts';
+import { runNativeSync } from './native-tasks.ts';
+import { KEY_LAST_SYNC_AT } from './sync-control.ts';
 
 /** What every handler gets: ./router.ts authenticated the owner (and the transcoder checked CSRF) before routing. */
 export interface ApiContext {
   readonly env: Env;
   /** The metered D1 database of this request. */
   readonly db: Db;
-  /** Outbound fetch (Todoist); the global fetch in production. */
-  readonly fetcher: typeof fetch;
   /** The clock (tests pass a fixed one). */
   readonly now: () => Date;
 }
@@ -97,7 +93,7 @@ function notFound(): never {
 // ---- values ------------------------------------------------------------------------------------------------------
 
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
-/** Task IDs in fields: Todoist IDs, "local-<uuid>", "__flowday_misc__:<day>", "__flowday_quick__" (printable ASCII). */
+/** Task IDs in fields: Tasks IDs, "local-<uuid>", "__flowday_misc__:<day>", "__flowday_quick__" (printable ASCII). */
 const ID = /^[\x21-\x7e]{1,200}$/;
 /**
  * A resource ID in a name: the same without `/` (AIP-122) and `%`. A name of several segments keeps an encoded `/`
@@ -321,13 +317,11 @@ export function sessionMessage(session: TimerSessionRecord | null): TimerSession
   });
 }
 
-async function readSettings(db: Db, native = false): Promise<Settings> {
-  const values = await getSettings(db, [KEY_API_KEY, KEY_LAST_SYNC_AT, 'day_capacity_mins']);
+async function readSettings(db: Db): Promise<Settings> {
+  const values = await getSettings(db, [KEY_LAST_SYNC_AT, 'day_capacity_mins']);
   return create(SettingsSchema, {
     name: 'settings',
-    taskSource: native ? 'tasks' : 'todoist',
-    // Only a sealed key counts (a plaintext one from an older copy is never used).
-    todoistApiKeySet: isSealed(values.get(KEY_API_KEY)),
+    taskSource: 'tasks',
     dayCapacityMinutes: dayCapacity(values.get('day_capacity_mins') ?? null),
     lastSyncTime: storedTime(values.get(KEY_LAST_SYNC_AT)),
   });
@@ -433,32 +427,19 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
     return taskMessage({ ...stored.task, deletedAt: null });
   },
 
-  async syncTasks(request, { db, env, fetcher, now }) {
+  async syncTasks(request, { db, env, now }) {
     const mode = request.mode === SyncTasksRequest_Mode.MANUAL ? 'manual' : 'auto';
-    const outcome = await runSync({ db, mode, credentialKey: env.CREDENTIAL_KEY, fetcher, now: now(), tasks: env.TASKS });
-    switch (outcome.kind) {
-      case 'ok': {
-        const result = outcome.response;
-        const state = result.status === 'synced' ? SyncTasksResponse_State.SYNCED : result.status === 'partial' ? SyncTasksResponse_State.PARTIAL : SyncTasksResponse_State.THROTTLED;
-        return create(SyncTasksResponseSchema, {
-          state,
-          changedTaskCount: result.changed,
-          fullSync: result.fullSync,
-          lastSyncTime: storedTime(result.lastSyncAt),
-          nextAutoSyncTime: timestampFromMs(result.nextAutoSyncAt),
-        });
-      }
-      case 'no_key':
-        throw flowdayError('TODOIST_KEY_MISSING');
-      case 'key_unreadable':
-        throw flowdayError('TODOIST_KEY_UNREADABLE');
-      case 'not_configured':
-        throw flowdayError('NOT_CONFIGURED');
-      case 'tasks':
-        throw flowdayError('TASKS_UNAVAILABLE');
-      case 'todoist':
-        throw flowdayError(outcome.failure === 'unauthorized' ? 'TODOIST_UNAUTHORIZED' : 'TODOIST_UNAVAILABLE');
-    }
+    const outcome = await runNativeSync({ db, mode, source: env.TASKS, now: now() });
+    if (outcome.kind === 'tasks') throw flowdayError('TASKS_UNAVAILABLE');
+    const result = outcome.response;
+    const state = result.status === 'synced' ? SyncTasksResponse_State.SYNCED : result.status === 'partial' ? SyncTasksResponse_State.PARTIAL : SyncTasksResponse_State.THROTTLED;
+    return create(SyncTasksResponseSchema, {
+      state,
+      changedTaskCount: result.changed,
+      fullSync: result.fullSync,
+      lastSyncTime: storedTime(result.lastSyncAt),
+      nextAutoSyncTime: timestampFromMs(result.nextAutoSyncAt),
+    });
   },
 
   // ---- flows ----
@@ -644,36 +625,23 @@ export const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, ApiCont
 
   // ---- settings ----
 
-  async getSettings(request, { db, env }) {
+  async getSettings(request, { db }) {
     if (request.name !== 'settings') notFound();
-    return readSettings(db, Boolean(env.TASKS));
+    return readSettings(db);
   },
 
-  async updateSettings(request, { db, env }) {
+  async updateSettings(request, { db }) {
     const input = request.settings ?? bad();
     if (input.name !== 'settings') notFound();
-    const mask = maskOf(request.updateMask, ['todoist_api_key', 'day_capacity_minutes'], ['name', 'todoist_api_key_set', 'last_sync_time', 'task_source']).fields;
-    const writes = [];
-    if (mask.has('day_capacity_minutes') && (input.dayCapacityMinutes < 0 || input.dayCapacityMinutes > MAX_DAY_CAPACITY_MINUTES)) bad();
-    if (mask.has('todoist_api_key')) {
-      if (env.TASKS) bad(); // The active service binding owns the source; a key cannot silently switch it.
-      const key = input.todoistApiKey.trim();
-      if (key === '' || key.length > MAX_TODOIST_KEY) bad();
-      // The key is stored only sealed under CREDENTIAL_KEY (./credentials.ts); saving the same key writes nothing.
-      const credentialKey = await importCredentialKey(env.CREDENTIAL_KEY);
-      if (credentialKey === null) throw flowdayError('NOT_CONFIGURED');
-      if ((await openCredential(credentialKey, KEY_API_KEY, await getSetting(db, KEY_API_KEY))) !== key) {
-        // A new key may be another account: the next sync starts over with a full sync, right away.
-        writes.push(
-          setSettingQuery(db, KEY_API_KEY, await sealCredential(credentialKey, KEY_API_KEY, key)),
-          db.delete(settingsTable).where(sql`${settingsTable.key} IN (${KEY_SYNC_TOKEN}, ${KEY_PROJECTS}, ${KEY_CLAIMED_AT}, ${KEY_PENDING})`),
-        );
-      }
+    // FlowDay reads Tasks only and stores no Todoist key: a mask that names todoist_api_key is refused, and so is a
+    // whole-resource update that carries one.
+    const mask = maskOf(request.updateMask, ['day_capacity_minutes'], ['name', 'todoist_api_key_set', 'last_sync_time', 'task_source']);
+    if (mask.whole && input.todoistApiKey !== '') bad();
+    if (mask.fields.has('day_capacity_minutes')) {
+      if (input.dayCapacityMinutes < 0 || input.dayCapacityMinutes > MAX_DAY_CAPACITY_MINUTES) bad();
+      await setSetting(db, 'day_capacity_mins', String(input.dayCapacityMinutes));
     }
-    if (mask.has('day_capacity_minutes')) writes.push(setSettingQuery(db, 'day_capacity_mins', String(input.dayCapacityMinutes)));
-    const [first, ...rest] = writes;
-    if (first !== undefined) await db.batch([first, ...rest]);
-    return readSettings(db, Boolean(env.TASKS));
+    return readSettings(db);
   },
 
   // ---- analytics ----

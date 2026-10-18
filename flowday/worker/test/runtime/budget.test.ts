@@ -2,7 +2,7 @@ import { CommandTimerRequest_Action as Action } from '@ziyixi/proto/flowday/ui/v
 /**
  * The D1 rows a typical day of using FlowDay writes through the owner API (../../../docs/design.md "Write budget"), as
  * D1 reports them (x-flowday-rows-written), each call made as the UI makes it (the shared typed client, update masks,
- * a request_id per create). The sync's share is in ./sync.test.ts ("write budget"); together they
+ * a request_id per create). The sync's share is in ./native-tasks.test.ts ("a simulated day"); together they
  * stay far below the 1,000 rows a day the owner set as FlowDay's ceiling (the account's Free allowance is 100,000
  * rows a day, shared by every app).
  */

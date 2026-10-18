@@ -19,7 +19,7 @@ const FORBIDDEN_TEXT = [
   "/api/test/health",
   "/api/test/reset",
   "/api/test/seed",
-  "/api/test/sync-orphans",
+  "/api/test/sync-hide",
   "features/testing/client",
 ];
 const TEXT_EXTENSIONS = new Set([".html", ".js", ".json", ".txt", ".css", ".webmanifest"]);

@@ -72,8 +72,6 @@ function resetTodoistStore() {
     isLoading: false,
     isSyncing: false,
     lastSyncAt: null,
-    hasApiKey: false,
-    taskSource: "todoist",
     searchQuery: "",
   });
 }
@@ -115,21 +113,14 @@ describe("todoist store", () => {
     resetTimerStore();
   });
 
-  it("hydrates a native task source without pretending a Todoist key exists, then syncs normally", async () => {
-    setSetting("task_source", "tasks");
+  it("hydrates the tasks and the last sync time, then syncs Tasks without any key", async () => {
+    setSetting("last_sync_at", "2026-04-13T08:00:00.000Z");
     upsertTasks([makeTask()]);
     vi.stubGlobal("fetch", fakeFetch);
     await useTodoistStore.getState().hydrate();
-    expect(useTodoistStore.getState()).toMatchObject({ taskSource: "tasks", hasApiKey: false });
+    expect(useTodoistStore.getState().lastSyncAt).toBe("2026-04-13T08:00:00.000Z");
     expect(await useTodoistStore.getState().sync("auto")).toBe(true);
     expect(useTodoistStore.getState().tasks).toHaveLength(1);
-  });
-
-  it("treats older settings with no task_source as Todoist", async () => {
-    setSetting("todoist_api_key", "synthetic");
-    vi.stubGlobal("fetch", fakeFetch);
-    await useTodoistStore.getState().hydrate();
-    expect(useTodoistStore.getState()).toMatchObject({ taskSource: "todoist", hasApiKey: true });
   });
 
   it("sync toggles syncing state, refreshes tasks, and preserves lastSyncAt", async () => {

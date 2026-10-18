@@ -1,4 +1,4 @@
-// The owner's settings (flowday/docs/design.md §3): the Todoist API key FlowDay reads with, and the day's capacity.
+// The owner's settings (flowday/docs/design.md §3): the day's capacity and the Tasks sync's state.
 
 syntax = "proto3";
 
@@ -23,21 +23,19 @@ message Settings {
 
   // Always `settings`.
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
-  // The Todoist API key FlowDay syncs with: 1 to 200 characters (trimmed). Written only: the Worker stores it sealed
-  // (AES-GCM under its CREDENTIAL_KEY secret) and never answers it. Saving the key that is stored already changes
-  // nothing; another key restarts the sync with a full sync.
+  // Retired: FlowDay reads Tasks only and stores no Todoist key. An update that names this field is refused
+  // (BAD_REQUEST); it is never answered.
   string todoist_api_key = 2 [
     (google.api.field_behavior) = INPUT_ONLY,
     (google.api.field_behavior) = OPTIONAL
   ];
-  // Whether a sealed Todoist API key is stored (a plaintext key of an older copy does not count: the sync never
-  // uses one).
+  // Retired: always false.
   bool todoist_api_key_set = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The minutes of planned work a day holds, 0 to 1,440 (360 until set).
   int32 day_capacity_minutes = 4 [(google.api.field_behavior) = OPTIONAL];
-  // When the last sync with Todoist read and applied an answer; unset before the first one.
+  // When the last sync with Tasks read and applied a page; unset before the first one.
   google.protobuf.Timestamp last_sync_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Current read-only task source: tasks via a service binding, or todoist via the stored key.
-  // Older replies omit this field; clients treat that as todoist.
+  // The read-only task source: always `tasks` (Tasks through its service binding). Replies of releases before
+  // Tasks may omit it.
   string task_source = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

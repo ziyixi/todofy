@@ -88,7 +88,7 @@ function countingContext(counter: { rowsRead: number }): ApiContext {
       first: () => statement.first(),
     }) as unknown as D1PreparedStatement;
   const binding = { prepare: (query: string) => wrap(h.binding.prepare(query)) } as unknown as D1Database;
-  return { env: {} as Env, db: openDb(binding, new Meter()), fetcher: fetch, now: () => new Date('2026-10-02T00:00:00Z') };
+  return { env: {} as Env, db: openDb(binding, new Meter()), now: () => new Date('2026-10-02T00:00:00Z') };
 }
 
 interface Reading {

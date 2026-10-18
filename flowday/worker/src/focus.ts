@@ -29,12 +29,11 @@ const focusApi = new HttpTranscoder<ShapeOf<typeof FlowDayUiService>, ApiContext
 
 /**
  * Tasks' Plan and Focus, through Todofy's private Planning channel. Only same-account bindings reach it; the default
- * fetch keeps owner authentication. It needs TASKS: FlowDay's tasks are a mirror of Tasks.
+ * fetch keeps owner authentication.
  */
 export class NativeFocusEntrypoint extends WorkerEntrypoint<Env> {
   override async fetch(request: Request): Promise<Response> {
-    if (!this.env.TASKS) return focusApi.errorResponse(flowdayError('TASKS_UNAVAILABLE'), crypto.randomUUID());
-    const context = { env: this.env, db: openDb(this.env.DB, new Meter()), fetcher: fetch, now: () => new Date() };
+    const context = { env: this.env, db: openDb(this.env.DB, new Meter()), now: () => new Date() };
     const result = await focusApi.handle(request, context, crypto.randomUUID());
     return result?.response ?? focusApi.errorResponse(flowdayError('NOT_FOUND'), crypto.randomUUID());
   }

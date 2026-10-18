@@ -73,7 +73,7 @@ export type SeedName =
   | "future-dated-pool"
   | "two-flow-tasks"
   | "analytics-seeded"
-  | "todoist-overdue"
+  | "mirrored-overdue"
   | "wizard-over-capacity"
   | "multi-day-readonly"
   | "sidebar-section-state"
@@ -81,7 +81,7 @@ export type SeedName =
   | "quick-task-group"
   | "quick-task-analytics"
   | "local-completed-yesterday"
-  | "settings-saved-key"
+  | "settings-synced"
   | "analytics-multi-date";
 
 function localTask(
@@ -467,10 +467,9 @@ function buildSeed(name: SeedName): SeedPayload {
         },
       };
 
-    case "settings-saved-key":
+    case "settings-synced":
       return {
         settings: {
-          todoist_api_key: "saved-secret-key",
           last_sync_at: `${TODAY}T12:00:00.000Z`,
           day_capacity_mins: 210,
           [`planning_completed:${TODAY}`]: true,
@@ -594,9 +593,9 @@ function buildSeed(name: SeedName): SeedPayload {
           day_capacity_mins: 360,
         },
       };
-    case "todoist-overdue":
-      // Two Todoist-sourced overdue tasks. The UI test deletes one in
-      // Todoist (simulated via /api/test/sync-orphans) and verifies it
+    case "mirrored-overdue":
+      // Two overdue tasks mirrored from Tasks. The UI test deletes one in
+      // Tasks (simulated via /api/test/sync-hide) and verifies it
       // disappears from the sidebar while the other stays put.
       return {
         tasks: [
@@ -605,7 +604,7 @@ function buildSeed(name: SeedName): SeedPayload {
             dueDate: YESTERDAY,
             estimatedMins: 25,
           }),
-          localTask("td-deleted", "Deleted in Todoist", {
+          localTask("td-deleted", "Deleted in Tasks", {
             todoistId: "td-deleted",
             dueDate: YESTERDAY,
             estimatedMins: 15,
@@ -634,12 +633,13 @@ export async function seedAppState(request: APIRequestContext, name: SeedName) {
   expect(response.ok()).toBeTruthy();
 }
 
-export async function simulateTodoistOrphanSweep(
+/** What the next sync does with tasks Tasks reports completed, archived or deleted. */
+export async function simulateSyncHide(
   request: APIRequestContext,
-  activeTodoistIds: string[]
+  taskIds: string[]
 ) {
-  const response = await request.post("/api/test/sync-orphans", {
-    data: { activeTodoistIds },
+  const response = await request.post("/api/test/sync-hide", {
+    data: { taskIds },
   });
   expect(response.ok()).toBeTruthy();
   return response.json();

@@ -4,6 +4,9 @@
  * and 0003 drops four indexes no query needs (each cost one D1 row write per insert).
  * The live file's tasks table got description, deleted_at and deleted_source by ALTER TABLE, so they come last.
  */
+import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startHarness, type Harness } from './harness.ts';
 
@@ -88,5 +91,15 @@ describe('schema', () => {
     const [entry] = await h.sql<{ source: string; created_at: string }>('SELECT source, created_at FROM time_entries');
     expect(entry?.source).toBe('timer');
     expect(entry?.created_at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  });
+
+  it('0005 deletes the retired Todoist settings and the first catalog cache, and keeps every other setting', async () => {
+    const retired = ['todoist_api_key', 'todoist_sync_token', 'todoist_projects', 'todoist_sync_pending', 'todoist_hierarchy_refresh', 'tasks_sync_catalog'];
+    const kept = ['day_capacity_mins', 'last_sync_at', 'planning_completed:2026-04-13', 'sync_claimed_at', 'tasks_sync_catalog_v2', 'tasks_sync_cursor'];
+    await h.sql('DELETE FROM settings');
+    for (const key of [...retired, ...kept]) await h.sql('INSERT INTO settings (key, value) VALUES (?, ?)', key, 'synthetic');
+    const migration = await readFile(join(dirname(fileURLToPath(import.meta.url)), '../../../migrations/0005_drop_todoist_settings.sql'), 'utf8');
+    await h.sql(migration.replace(/--[^\n]*/g, ''));
+    expect((await h.sql<{ key: string }>('SELECT key FROM settings ORDER BY key')).map((row) => row.key)).toEqual(kept);
   });
 });

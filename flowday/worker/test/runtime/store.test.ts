@@ -14,8 +14,9 @@ import {
   getAllTasks,
   getDeletedTasks,
   getTasksByIds,
-  markOrphanedTodoistTasksDeleted,
+  hideStatement,
   restoreTask,
+  runStatements,
   softDeleteTask,
   updateTaskEstimate,
   upsertTasks,
@@ -56,6 +57,8 @@ function makeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
 }
 
 const ids = (tasks: TaskRecord[]) => tasks.map((task) => task.id).sort();
+/** What a sync does with the tasks Tasks reports completed, archived or deleted; the rows it hid. */
+const hide = (taskIds: readonly string[]) => runStatements(h.db(), [hideStatement(taskIds, new Date().toISOString())]);
 
 describe('settings', () => {
   it('returns null for a missing setting, sets, overwrites', async () => {
@@ -95,22 +98,22 @@ describe('tasks', () => {
     expect(ids(await getAllTasks(db))).toEqual(['t1']);
   });
 
-  it('marks Todoist-orphaned tasks deleted (source sync, hidden from the trash)', async () => {
+  it('hides the mirrored tasks Tasks reports closed (source sync, out of the trash), never a local one', async () => {
     const db = h.db();
     await upsertTasks(db, [
       makeTask({ id: 'td-1', todoistId: 'td-1' }),
       makeTask({ id: 'td-2', todoistId: 'td-2' }),
       makeTask({ id: 'local-1', todoistId: null }),
     ]);
-    expect(await markOrphanedTodoistTasksDeleted(db, ['td-1'])).toBe(1);
+    expect(await hide(['td-2', 'local-1'])).toBe(1);
     expect(ids(await getAllTasks(db))).toEqual(['local-1', 'td-1']);
     expect(await getDeletedTasks(db)).toEqual([]);
   });
 
-  it('restores a sync-deleted task when Todoist returns it; keeps a task deleted in FlowDay deleted', async () => {
+  it('restores a sync-hidden task when Tasks lists it again; keeps a task deleted in FlowDay deleted', async () => {
     const db = h.db();
     await upsertTasks(db, [makeTask({ id: 'td-1', todoistId: 'td-1', title: 'Original' }), makeTask({ id: 'td-2', todoistId: 'td-2' })]);
-    await markOrphanedTodoistTasksDeleted(db, ['td-2']);
+    await hide(['td-1']);
     await softDeleteTask(db, 'td-2');
     expect(await getAllTasks(db)).toEqual([]);
     await upsertTasks(db, [makeTask({ id: 'td-1', todoistId: 'td-1', title: 'Resurrected' }), makeTask({ id: 'td-2', todoistId: 'td-2' })]);
@@ -127,29 +130,26 @@ describe('tasks', () => {
     expect(await getDeletedTasks(db)).toHaveLength(1);
   });
 
-  it('orphan marking: a no-op without Todoist tasks, idempotent, and survives orphan → restore → orphan', async () => {
+  it('hiding is idempotent and survives hide → restore → hide', async () => {
     const db = h.db();
-    await upsertTasks(db, [makeTask({ id: 'local-only' })]);
-    expect(await markOrphanedTodoistTasksDeleted(db, [])).toBe(0);
     await upsertTasks(db, [makeTask({ id: 'td-1', todoistId: 'td-1' })]);
-    expect(await markOrphanedTodoistTasksDeleted(db, [])).toBe(1);
+    expect(await hide(['td-1'])).toBe(1);
     const [first] = await h.sql<{ deleted_at: string }>("SELECT deleted_at FROM tasks WHERE id = 'td-1'");
-    expect(await markOrphanedTodoistTasksDeleted(db, [])).toBe(0);
+    expect(await hide(['td-1'])).toBe(0);
     const [second] = await h.sql<{ deleted_at: string; deleted_source: string }>("SELECT deleted_at, deleted_source FROM tasks WHERE id = 'td-1'");
     expect(second).toEqual({ deleted_at: first?.deleted_at, deleted_source: 'sync' });
     await upsertTasks(db, [makeTask({ id: 'td-1', todoistId: 'td-1' })]);
-    expect(ids(await getAllTasks(db))).toEqual(['local-only', 'td-1']);
-    expect(await markOrphanedTodoistTasksDeleted(db, [])).toBe(1);
+    expect(ids(await getAllTasks(db))).toEqual(['td-1']);
+    expect(await hide(['td-1'])).toBe(1);
     expect(await getDeletedTasks(db)).toEqual([]);
   });
 
-  it('orphan marking with more than 100 active ids (one JSON parameter, not 100+ bound parameters)', async () => {
+  it('hides more than 100 ids at once (one JSON parameter, not 100+ bound parameters)', async () => {
     const db = h.db();
     const all = Array.from({ length: 250 }, (_, n) => makeTask({ id: `td-${String(n)}`, todoistId: `td-${String(n)}` }));
     await upsertTasks(db, all);
-    const active = all.slice(0, 180).map((task) => task.id);
-    expect(await markOrphanedTodoistTasksDeleted(db, active)).toBe(70);
-    expect(await getAllTasks(db)).toHaveLength(180);
+    expect(await hide(all.slice(0, 180).map((task) => task.id))).toBe(180);
+    expect(await getAllTasks(db)).toHaveLength(70);
   });
 
   it('getTasksByIds with more than 100 ids, deleted tasks included, duplicates ignored', async () => {

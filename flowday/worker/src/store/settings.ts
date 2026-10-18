@@ -1,7 +1,7 @@
 /**
- * Key-value settings. A write that would store the same value writes nothing. Keys:
- * todoist_api_key, day_capacity_mins, planning_completed:<date>, last_sync_at (container era), and the sync's own
- * todoist_sync_token, todoist_projects and sync_claimed_at (../sync.ts).
+ * Key-value settings. A write that would store the same value writes nothing. Keys: day_capacity_mins,
+ * planning_completed:<date>, last_sync_at (container era), and the sync's own sync_claimed_at (../sync-control.ts),
+ * tasks_sync_cursor, tasks_sync_catalog_v2 and tasks_sync_pending (../native-tasks.ts).
  */
 import { and, eq, gte, inArray, lt, lte, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db.ts';

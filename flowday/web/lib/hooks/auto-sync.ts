@@ -1,5 +1,5 @@
 /**
- * When the page asks the Worker to sync Todoist (../../docs/design.md "Todoist sync"): once when the page opens,
+ * When the page asks the Worker to sync Tasks (../../docs/design.md §4): once when the page opens,
  * then every 10 minutes while the page is visible, and again on becoming visible when the last attempt is older
  * than 5 minutes. Nothing runs while the page is hidden (a background tab or a minimised PWA window). The Worker
  * throttles as well (5 minutes for automatic syncs, across tabs and devices), so a second tab costs nothing.

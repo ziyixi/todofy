@@ -16,7 +16,7 @@ import { addCompletedFlowTask, getAllFlows, setFlowTaskIds } from '../../src/sto
 import { createTimeEntry, getEntriesByTask } from '../../src/store/entries.ts';
 import { getSetting, setSetting } from '../../src/store/settings.ts';
 import { upsertTasks } from '../../src/store/tasks.ts';
-import { startHarness, storeTodoistKey, type Harness } from './harness.ts';
+import { startHarness, type Harness } from './harness.ts';
 
 let h: Harness;
 beforeAll(async () => {
@@ -420,48 +420,28 @@ describe('time entries', () => {
 });
 
 describe('settings', () => {
-  it('GetSettings answers the defaults and the last sync time when there is one', async () => {
-    expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ name: 'settings', todoistApiKeySet: false, dayCapacityMinutes: 360, todoistApiKey: '' });
+  it('GetSettings answers the defaults, Tasks as the source and the last sync time when there is one', async () => {
+    expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ name: 'settings', taskSource: 'tasks', todoistApiKeySet: false, dayCapacityMinutes: 360, todoistApiKey: '' });
     await setSetting(h.db(), 'last_sync_at', '2026-04-13T12:00:00.000Z');
     expect(iso((await h.api.getSettings({ name: 'settings' })).lastSyncTime)).toBe('2026-04-13T12:00:00.000Z');
   });
 
-  it('UpdateSettings stores the key sealed (never answered), refuses an empty key, and a new key restarts the sync', async () => {
-    await setSetting(h.db(), 'todoist_sync_token', 'old-token');
-    await setSetting(h.db(), 'sync_claimed_at', String(Date.now()));
-    await setSetting(h.db(), 'todoist_sync_pending', '{"base":"*","token":"t","after":"x"}');
-    const saved = await h.api.updateSettings({ settings: { name: 'settings', todoistApiKey: 'my-secret-key-12345' }, updateMask: { paths: ['todoist_api_key'] } });
-    expect(saved).toMatchObject({ todoistApiKeySet: true, todoistApiKey: '' });
-    const raw = await (await h.fetch('/api/v1/settings')).text();
-    expect(raw).not.toContain('my-secret-key');
-    // Only ciphertext is stored: D1, its Time Travel history and any export never hold the key.
-    const stored = await getSetting(h.db(), 'todoist_api_key');
-    expect(stored).toMatch(/^v1\./);
-    expect(stored).not.toContain('my-secret-key');
-    for (const key of ['todoist_sync_token', 'sync_claimed_at', 'todoist_sync_pending']) expect(await getSetting(h.db(), key)).toBeNull();
-    const same = await h.call((api) => api.updateSettings({ settings: { name: 'settings', todoistApiKey: 'my-secret-key-12345' }, updateMask: { paths: ['todoist_api_key'] } }));
-    expect(same.rowsWritten).toBe(0);
-    expect(await getSetting(h.db(), 'todoist_api_key')).toBe(stored);
-    expect((await h.call((api) => api.updateSettings({ settings: { name: 'settings', todoistApiKey: '' }, updateMask: { paths: ['todoist_api_key'] } }))).status?.reason).toBe('BAD_REQUEST');
-    // Without a mask both fields are replaced, so the key must be given.
-    expect((await h.call((api) => api.updateSettings({ settings: { name: 'settings', dayCapacityMinutes: 300 } }))).status?.reason).toBe('BAD_REQUEST');
+  it('UpdateSettings refuses a Todoist key, named in the mask or in a whole update, and stores nothing', async () => {
+    const named = await h.call((api) => api.updateSettings({ settings: { name: 'settings', todoistApiKey: 'synthetic-key' }, updateMask: { paths: ['todoist_api_key'] } }));
+    expect(named.status?.reason).toBe('BAD_REQUEST');
+    const whole = await h.call((api) => api.updateSettings({ settings: { name: 'settings', todoistApiKey: 'synthetic-key', dayCapacityMinutes: 300 } }));
+    expect(whole.status?.reason).toBe('BAD_REQUEST');
+    expect(await h.sql('SELECT key FROM settings')).toEqual([]);
   });
 
-  it('a plaintext key from an older copy counts as no key', async () => {
-    await setSetting(h.db(), 'todoist_api_key', 'plain-token');
-    expect((await h.api.getSettings({ name: 'settings' })).todoistApiKeySet).toBe(false);
-    const result = await h.call((api) => api.syncTasks({ mode: SyncTasksRequest_Mode.MANUAL }));
-    expect(result.status).toMatchObject({ httpStatus: 400, reason: 'TODOIST_KEY_UNREADABLE' });
-    expect(h.todoist.requests).toHaveLength(0);
-  });
-
-  it('UpdateSettings sets the capacity (0 to 1,440) and the key together', async () => {
-    const both = await h.api.updateSettings({ settings: { name: 'settings', todoistApiKey: 'combo-secret', dayCapacityMinutes: 480 } });
-    expect(both).toMatchObject({ todoistApiKeySet: true, dayCapacityMinutes: 480 });
+  it('UpdateSettings sets the capacity (0 to 1,440), with its mask or as a whole update', async () => {
+    expect(await h.api.updateSettings({ settings: { name: 'settings', dayCapacityMinutes: 480 } })).toMatchObject({ todoistApiKeySet: false, dayCapacityMinutes: 480 });
     for (const mins of [-100, 1441]) {
       expect((await h.call((api) => api.updateSettings({ settings: { name: 'settings', dayCapacityMinutes: mins }, updateMask: { paths: ['day_capacity_minutes'] } }))).status?.reason).toBe('BAD_REQUEST');
     }
     expect((await h.call((api) => api.updateSettings({ settings: { name: 'settings', dayCapacityMinutes: 0 }, updateMask: { paths: ['day_capacity_minutes'] } }))).value?.dayCapacityMinutes).toBe(0);
+    const same = await h.call((api) => api.updateSettings({ settings: { name: 'settings', dayCapacityMinutes: 0 }, updateMask: { paths: ['day_capacity_minutes'] } }));
+    expect(same.rowsWritten).toBe(0);
   });
 });
 
@@ -474,37 +454,13 @@ describe('legacy timer writes', () => {
 });
 
 describe('SyncTasks', () => {
-  it('TODOIST_KEY_MISSING without a key', async () => {
-    const result = await h.call((api) => api.syncTasks({ mode: SyncTasksRequest_Mode.MANUAL }));
-    expect(result.status).toMatchObject({ httpStatus: 400, reason: 'TODOIST_KEY_MISSING', localizedMessage: { locale: 'en', message: 'No Todoist API key configured. Add one in Settings.' } });
-  });
-
-  it('syncs through the Worker, then throttles the next automatic sync', async () => {
-    await storeTodoistKey(h.db(), 'synthetic-token');
-    h.todoist.setProjects([{ id: 'p1', name: 'Inbox', color: 'blue' }]);
-    h.todoist.setItems([{ id: 'td-1', content: 'From Todoist', project_id: 'p1' }]);
+  it('syncs Tasks through the Worker, then throttles the next automatic sync', async () => {
     const first = await h.api.syncTasks({ mode: SyncTasksRequest_Mode.AUTO });
-    expect(first).toMatchObject({ state: SyncTasksResponse_State.SYNCED, changedTaskCount: 1, fullSync: true });
+    expect(first).toMatchObject({ state: SyncTasksResponse_State.SYNCED, changedTaskCount: 0, fullSync: true });
     expect(first.lastSyncTime).toBeDefined();
-    expect((await h.api.listTasks({})).tasks.map((task) => task.title)).toEqual(['From Todoist']);
     const second = await h.call((api) => api.syncTasks({}));
     expect(second.value).toMatchObject({ state: SyncTasksResponse_State.THROTTLED, changedTaskCount: 0 });
     expect(second.rowsWritten).toBe(0);
-  });
-
-  it('sends the opened key to Todoist only', async () => {
-    await h.api.updateSettings({ settings: { name: 'settings', todoistApiKey: 'saved-through-settings' }, updateMask: { paths: ['todoist_api_key'] } });
-    await h.api.syncTasks({ mode: SyncTasksRequest_Mode.MANUAL });
-    expect(h.todoist.requests.map((request) => request.authorization)).toEqual(['Bearer saved-through-settings']);
-  });
-
-  it('TODOIST_UNAUTHORIZED when Todoist refuses the key; TODOIST_UNAVAILABLE when it fails', async () => {
-    await storeTodoistKey(h.db(), 'synthetic-token');
-    h.todoist.status = 401;
-    expect((await h.call((api) => api.syncTasks({ mode: SyncTasksRequest_Mode.MANUAL }))).status).toMatchObject({ httpStatus: 400, reason: 'TODOIST_UNAUTHORIZED' });
-    h.todoist.status = 500;
-    await h.sql("DELETE FROM settings WHERE key = 'sync_claimed_at'");
-    expect((await h.call((api) => api.syncTasks({ mode: SyncTasksRequest_Mode.MANUAL }))).status).toMatchObject({ httpStatus: 503, reason: 'TODOIST_UNAVAILABLE' });
   });
 });
 

@@ -1,7 +1,7 @@
 {
   "name": "FlowDay",
   "short_name": "FlowDay",
-  "description": "A visual daily task flow planner with Todoist integration — plan your day, track your time, review your work.",
+  "description": "A visual daily task flow planner for your Tasks — plan your day, track your time, review your work.",
   "start_url": "/",
   "id": "/",
   "display": "standalone",

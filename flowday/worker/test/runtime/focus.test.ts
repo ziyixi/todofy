@@ -51,14 +51,4 @@ describe('private Focus entrypoint', () => {
     expect((await h.focusFetch('/api/v1/settings')).status).toBe(404);
   });
 
-  it('answers unavailable without the TASKS binding', async () => {
-    const alone = await startHarness({ bindings: { DEV_AUTH_BYPASS: 'false' } });
-    try {
-      const response = await alone.focusFetch('/api/v1/timerSession');
-      expect(response.status).toBe(503);
-      expect(await response.text()).toContain('TASKS_UNAVAILABLE');
-    } finally {
-      await alone.dispose();
-    }
-  });
 });

@@ -1,10 +1,10 @@
 /**
- * The Worker's own records: what the store (./store/*) reads from and writes to D1, and what the sync (./sync.ts)
- * reports. They are not the wire: the owner API's shapes are the messages of flowday.ui.v1
+ * The Worker's own records: what the store (./store/*) reads from and writes to D1, and what the sync
+ * (./native-tasks.ts) reports. They are not the wire: the owner API's shapes are the messages of flowday.ui.v1
  * (proto/flowday/ui/v1, generated into @ziyixi/proto), which ./api.ts builds from these records.
  */
 
-/** Todoist's priority scale: 1 (normal) to 4 (urgent). */
+/** FlowDay's priority scale: 1 (normal) to 4 (urgent). */
 export type TaskPriority = 1 | 2 | 3 | 4;
 
 /** A row of `tasks`, as stored (times as stored strings, absent values null). */
@@ -67,16 +67,15 @@ export interface TimerSessionRecord {
 }
 
 /**
- * What one sync request did (flowday.ui.v1 SyncTasksResponse). `synced`: Todoist was read and its answer applied;
- * `changed` task rows were written. `partial`: part of a large answer was applied (or a full pass must follow); the
- * page asks again right away. `throttled`: another tab or device synced within the minimum interval; nothing was
- * read or written.
+ * What one sync request did (flowday.ui.v1 SyncTasksResponse). `synced`: Tasks was read and its last page of changes
+ * applied; `changed` task rows were written. `partial`: a page was applied and more follow; the page asks again
+ * right away. `throttled`: another tab or device synced within the minimum interval; nothing was read or written.
  */
 export interface SyncResult {
   status: 'synced' | 'partial' | 'throttled';
   /** Task rows this sync inserted, updated, hid or restored (0 when nothing changed). */
   changed: number;
-  /** Whether Todoist answered with a full sync (first sync, new token, or Todoist reset the sync token). */
+  /** Whether this page started from the beginning of Tasks' change feed (the first sync, or after a reset). */
   fullSync: boolean;
   lastSyncAt: string | null;
   /** Earliest time (epoch ms) at which an automatic sync may run again (later after failed syncs). */

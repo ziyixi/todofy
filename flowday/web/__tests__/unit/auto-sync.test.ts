@@ -34,7 +34,7 @@ function harness(visible = true) {
   return { env, syncs, advance, pending: () => pending, start: () => now };
 }
 
-describe("automatic Todoist sync scheduling", () => {
+describe("automatic Tasks sync scheduling", () => {
   it("syncs when the page opens, then every 10 minutes while visible", () => {
     const h = harness();
     const t0 = h.start();

@@ -18,12 +18,10 @@ export const MAX_NOTE = 100_000;
 export const MAX_ESTIMATE_MINUTES = 100_000;
 /** The day's capacity, in minutes. */
 export const MAX_DAY_CAPACITY_MINUTES = 1440;
-/** The Todoist API key, in characters (trimmed). */
-export const MAX_TODOIST_KEY = 200;
 /** A task ID the timer session holds, in characters. */
 export const MAX_SESSION_ID = 200;
 
-/** ListTasks: the largest page (the sync keeps at most 1,000 Todoist tasks). */
+/** ListTasks: the largest page. */
 export const TASK_PAGE = 200;
 /** ListFlows: the largest page, in days. */
 export const FLOW_PAGE = 200;

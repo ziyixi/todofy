@@ -11,7 +11,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "FlowDay",
-  description: "A visual daily task flow planner with Todoist integration",
+  description: "A visual daily task flow planner for your Tasks",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",

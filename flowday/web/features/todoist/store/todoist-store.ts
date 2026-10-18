@@ -21,8 +21,8 @@ import {
 
 const EMPTY_IDS: string[] = [];
 /**
- * A `partial` answer means the Worker applied one chunk of a large Todoist answer (or must follow up with a full
- * pass): ask again right away, up to this many requests per sync (1,000 tasks take 5 chunks).
+ * A `partial` answer means the Worker applied one page of Tasks' changes and more follow: ask again right away, up
+ * to this many requests per sync (a page holds at most 100 changes).
  */
 export const MAX_SYNC_REQUESTS = 12;
 
@@ -31,8 +31,6 @@ export const useTodoistStore = create<TodoistState>()((set, get) => ({
   isLoading: false,
   isSyncing: false,
   lastSyncAt: null,
-  hasApiKey: false,
-  taskSource: "todoist",
   nextAutoSyncAt: 0,
   searchQuery: "",
 
@@ -98,7 +96,7 @@ export const useTodoistStore = create<TodoistState>()((set, get) => ({
         set({ tasks });
       }
       if (settings) {
-        set({ lastSyncAt: settings.lastSyncAt, hasApiKey: settings.hasApiKey, taskSource: settings.taskSource });
+        set({ lastSyncAt: settings.lastSyncAt });
       }
     } catch {
       // Hydration failures leave the current cache intact until the next sync succeeds.

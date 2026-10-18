@@ -1,7 +1,7 @@
 /**
  * workerd harness (../../../docs/design.md "Tests"): bundles src/index.ts with esbuild and runs it in Miniflare as
- * the Worker "flowday" with a real D1 database (../../../migrations applied), a fake ASSETS binding and an outbound
- * handler that plays the Todoist Sync API (FakeTodoist). The dev bypass signs the owner in over loopback http.
+ * the Worker "flowday" with a real D1 database (../../../migrations applied), a fake ASSETS binding and a fake TASKS
+ * binding (an empty Tasks unless a test passes its own). The dev bypass signs the owner in over loopback http.
  * Store-level tests use the same D1 database from Node through Miniflare's binding proxy (harness.db()).
  * All data is synthetic; nothing leaves the process.
  */
@@ -15,9 +15,7 @@ import type { ShapeOf } from '@ziyixi/proto/http-transcoder';
 import type { Status } from '@ziyixi/proto/rpc-status';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { importCredentialKey, sealCredential } from '../../src/credentials.ts';
 import { Meter, openDb, type Db } from '../../src/db.ts';
-import { setSetting } from '../../src/store/settings.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const APP = resolve(ROOT, '..');
@@ -29,16 +27,8 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
   ACCESS_OWNER: 'owner@example.com',
   ACCESS_OWNER_ALIASES: '',
   CSRF_SIGNING_KEY: 'cd'.repeat(32),
-  CREDENTIAL_KEY: 'ef'.repeat(32),
   DEV_AUTH_BYPASS: 'true',
 };
-
-/** Stores a Todoist key the way Settings does: sealed under the synthetic CREDENTIAL_KEY. */
-export async function storeTodoistKey(db: Db, token: string): Promise<void> {
-  const key = await importCredentialKey(SYNTHETIC_BINDINGS['CREDENTIAL_KEY']);
-  if (key === null) throw new Error('no synthetic credential key');
-  await setSetting(db, 'todoist_api_key', await sealCredential(key, 'todoist_api_key', token));
-}
 
 export const TABLES = ['flow_task_notes', 'completed_flow_tasks', 'flow_tasks', 'time_entries', 'tasks', 'settings', 'active_timer_session', 'timer_commands'] as const;
 
@@ -83,145 +73,11 @@ export async function migrationStatements(): Promise<string[]> {
   return out;
 }
 
-// ---- the fake Todoist Sync API -------------------------------------------------------------------------------------
-
-export interface FakeItem {
-  id: string;
-  content: string;
-  description?: string;
-  project_id: string;
-  priority?: number;
-  labels?: string[];
-  due?: { date: string } | null;
-  parent_id?: string | null;
-  deadline?: { date: string } | null;
-  duration?: { amount: number; unit: string } | null;
-  added_at?: string;
-  completed_at?: string | null;
-  checked?: boolean;
-  is_deleted?: boolean;
-}
-
-export interface FakeProject {
-  id: string;
-  name: string;
-  color: string;
-  is_deleted?: boolean;
-  is_archived?: boolean;
-}
-
-export interface TodoistRequest {
-  url: string;
-  method: string;
-  authorization: string | null;
-  /** The form fields of the request body. */
-  form: Record<string, string>;
-}
-
-/**
- * A Todoist account with a revision counter: every change bumps it, the sync token is the revision, and an
- * incremental read returns the items and projects changed after the token's revision (completed and deleted ones
- * flagged). A full read ("*") returns every active item and every project.
- */
-export class FakeTodoist {
-  revision = 1;
-  status = 200;
-  /** When set, the next answers are full syncs even for a stored token (Todoist resets tokens sometimes). */
-  forceFull = false;
-  readonly requests: TodoistRequest[] = [];
-  private readonly items = new Map<string, { item: FakeItem; revision: number }>();
-  private readonly projects = new Map<string, { project: FakeProject; revision: number }>();
-
-  setProjects(projects: FakeProject[]): void {
-    this.revision += 1;
-    for (const project of projects) this.projects.set(project.id, { project: { ...project }, revision: this.revision });
-  }
-
-  setItems(items: FakeItem[]): void {
-    this.revision += 1;
-    for (const item of items) this.items.set(item.id, { item: { ...item }, revision: this.revision });
-  }
-
-  update(id: string, patch: Partial<FakeItem>): void {
-    const current = this.items.get(id);
-    if (current === undefined) throw new Error(`no fake item ${id}`);
-    this.revision += 1;
-    this.items.set(id, { item: { ...current.item, ...patch }, revision: this.revision });
-  }
-
-  complete(id: string): void {
-    this.update(id, { checked: true, completed_at: '2026-04-13T12:00:00.000000Z' });
-  }
-
-  remove(id: string): void {
-    this.update(id, { is_deleted: true });
-  }
-
-  /**
-   * Archives or unarchives a project. Only the project is reported as changed (its items are not), the least
-   * helpful way Todoist may report it; a full read leaves out archived projects and their items.
-   */
-  archiveProject(id: string, archived = true): void {
-    const current = this.projects.get(id);
-    if (current === undefined) throw new Error(`no fake project ${id}`);
-    this.revision += 1;
-    this.projects.set(id, { project: { ...current.project, is_archived: archived }, revision: this.revision });
-  }
-
-  /** Ids of the items Todoist lists as active (neither completed nor deleted). */
-  activeIds(): string[] {
-    return [...this.items.values()].filter(({ item }) => item.checked !== true && item.is_deleted !== true).map(({ item }) => item.id);
-  }
-
-  /** A fetch that answers like Todoist's Sync API (for runSync called from Node). */
-  readonly fetcher: typeof fetch = async (input, init) => {
-    const request = new Request(input, init);
-    return this.answer(request, await request.text());
-  };
-
-  answer(request: Request, body: string): Response {
-    const form = Object.fromEntries(new URLSearchParams(body));
-    this.requests.push({ url: request.url, method: request.method, authorization: request.headers.get('authorization'), form });
-    if (this.status !== 200) return new Response('{"error":"synthetic"}', { status: this.status });
-    const token = form['sync_token'] ?? '*';
-    const full = token === '*' || this.forceFull;
-    const since = full ? 0 : Number(token);
-    const archived = new Set([...this.projects.values()].filter(({ project }) => project.is_archived === true).map(({ project }) => project.id));
-    // Every field of a Todoist API v1 item, so the answer has a real answer's size and parse cost.
-    const items = [...this.items.values()]
-      .filter(({ item, revision }) =>
-        full ? item.checked !== true && item.is_deleted !== true && !archived.has(item.project_id) : revision > since,
-      )
-      .map(({ item }, index) => ({
-        user_id: '2671355',
-        section_id: index % 3 === 0 ? `s-${item.project_id}` : null,
-        parent_id: null,
-        added_by_uid: '2671355',
-        assigned_by_uid: null,
-        responsible_uid: null,
-        description: '',
-        priority: 1,
-        labels: [],
-        due: null,
-        deadline: null,
-        duration: null,
-        child_order: index,
-        day_order: -1,
-        is_collapsed: false,
-        note_count: 0,
-        added_at: '2026-04-01T00:00:00.000000Z',
-        updated_at: '2026-04-02T08:15:30.000000Z',
-        completed_at: null,
-        checked: false,
-        is_deleted: false,
-        ...item,
-        ...(item.due ? { due: { timezone: null, string: 'every weekday', lang: 'en', is_recurring: false, ...item.due } } : {}),
-      }));
-    const projects = [...this.projects.values()]
-      .filter(({ project, revision }) => (full ? project.is_deleted !== true && project.is_archived !== true : revision > since))
-      .map(({ project }) => ({ is_deleted: false, is_archived: false, ...project }));
-    return Response.json({ sync_token: String(this.revision), full_sync: full, items, projects, user: {} });
-  }
+/** An empty Tasks: no change since the start of its feed, and a catalog with only the Inbox. */
+export function emptyTasks(request: Request): Promise<Response> {
+  const { pathname } = new URL(request.url);
+  if (pathname.endsWith('/catalog')) return Promise.resolve(Response.json({ projects: [{ id: 'inbox', name: 'projects/inbox', title: 'Inbox', inbox: true }] }));
+  return Promise.resolve(Response.json({ changes: [], next_page_token: '0' }));
 }
 
 // ---- the harness -------------------------------------------------------------------------------------------------------
@@ -240,7 +96,6 @@ export interface Harness {
   readonly mf: Miniflare;
   /** The Worker's log lines (console output), kept instead of printed; warnings and errors are also printed. */
   readonly logs: string[];
-  readonly todoist: FakeTodoist;
   /** A request to "flowday" over loopback http (the dev bypass signs the owner in). */
   fetch(path: string, init?: RequestInit): Promise<Response>;
   focusFetch(path: string, init?: RequestInit): Promise<Response>;
@@ -258,14 +113,14 @@ export interface Harness {
   /** The D1 binding itself (Miniflare's proxy from Node). */
   readonly binding: D1Database;
   sql<T>(query: string, ...params: unknown[]): Promise<T[]>;
-  /** Deletes every row of every table and resets the fake Todoist. */
+  /** Deletes every row of every table. */
   reset(): Promise<void>;
   dispose(): Promise<void>;
 }
 
 export interface HarnessOptions {
-  /** Synthetic native Tasks service; no public source credentials. */
-  readonly tasks?: (request: Request) => Promise<Response>;
+  /** The TASKS binding: a synthetic Tasks (emptyTasks by default), or null for a Worker deployed without it. */
+  readonly tasks?: ((request: Request) => Promise<Response>) | null;
   readonly bindings?: Record<string, string>;
   /** Extra outbound routes (e.g. the Access certs endpoint), by URL. */
   readonly routes?: Map<string, () => Response>;
@@ -276,13 +131,12 @@ export interface HarnessOptions {
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const temp = await mkdtemp(join(tmpdir(), 'flowday-runtime-'));
   const script = await workerBundle();
-  let todoist = new FakeTodoist();
-  const outbound = async (request: Request): Promise<Response> => {
+  const outbound = (request: Request): Response => {
     const extra = options.routes?.get(request.url);
     if (extra) return extra();
-    if (request.url === 'https://api.todoist.com/api/v1/sync') return todoist.answer(request, await request.text());
     return new Response('no outbound fetch expected', { status: 599 });
   };
+  const tasks = options.tasks === undefined ? emptyTasks : options.tasks;
   const assets = (request: Request): Response => {
     const { pathname } = new URL(request.url);
     if (pathname === '/' || pathname === '/index.html') return new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } });
@@ -309,7 +163,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           script,
           compatibilityDate: '2026-09-08',
           d1Databases: { DB: 'flowday-test' },
-          serviceBindings: { ASSETS: (request: Request) => assets(request), ...(options.tasks ? { TASKS: options.tasks } : {}) },
+          serviceBindings: { ASSETS: (request: Request) => assets(request), ...(tasks === null ? {} : { TASKS: tasks }) },
           bindings: { ...SYNTHETIC_BINDINGS, ...options.bindings },
           outboundService: (request: Request) => outbound(request),
         },
@@ -360,9 +214,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     mf,
     logs,
     binding,
-    get todoist() {
-      return todoist;
-    },
     fetch: fetchFlowday,
     async get<T>(path: string) {
       const response = await fetchFlowday(path);
@@ -391,7 +242,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     },
     async reset() {
       await binding.batch(TABLES.map((table) => binding.prepare(`DELETE FROM ${table}`)));
-      todoist = new FakeTodoist();
     },
     async dispose() {
       await mf.dispose();

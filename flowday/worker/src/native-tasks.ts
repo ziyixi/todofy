@@ -1,4 +1,10 @@
-/** Native Tasks changes, read only over the named service binding. No credentials or public fetch. */
+/**
+ * SyncTasks: brings Tasks' changes into D1 (../../docs/design.md §4), read only over the TASKS service binding (no
+ * credentials, no public fetch). One request claims the sync atomically (./sync-control.ts: concurrent tabs or
+ * devices cannot both read, and failed syncs back off), reads one bounded page of changes, and applies it in one
+ * batch with its cursor. A missing binding, a failed read or an invalid page is { kind: 'tasks' }: nothing but the
+ * claim is written, and the cursor stays where it was.
+ */
 import { createHttpClient, RpcStatusError, HttpResponseError } from '@ziyixi/proto/http-client';
 import { timestampMs } from '@ziyixi/proto/protobuf/wkt';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
@@ -6,7 +12,7 @@ import { CatalogSchema, TasksUiService, type Catalog } from '@ziyixi/proto/tasks
 import type { Task } from '@ziyixi/proto/tasks/ui/v1/task_pb';
 import { sql } from 'drizzle-orm';
 import { batchSql, type Db } from './db.ts';
-import type { SyncOutcome } from './sync.ts';
+import type { SyncResult } from './model.ts';
 import {
   AUTO_SYNC_MIN_INTERVAL_MS,
   MANUAL_SYNC_MIN_INTERVAL_MS,
@@ -27,6 +33,9 @@ export const KEY_TASKS_PENDING = 'tasks_sync_pending';
 export const NATIVE_SYNC_PAGE = 100;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 class TasksReadError extends Error {}
+
+/** What one sync request did, or that Tasks could not be read (TASKS_UNAVAILABLE). */
+export type SyncOutcome = { kind: 'ok'; response: SyncResult } | { kind: 'tasks' };
 
 function cachedCatalog(text: string | null | undefined): Catalog | undefined {
   if (!text) return undefined;

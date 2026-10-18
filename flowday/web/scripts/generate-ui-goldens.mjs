@@ -268,7 +268,6 @@ const payloads = {
   settings: {
     settings: {
       ...baseSettings,
-      todoist_api_key: "saved-secret-key",
       last_sync_at: `${today}T12:00:00.000Z`,
       day_capacity_mins: 300,
     },

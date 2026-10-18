@@ -15,7 +15,7 @@ test("[UI-001] App shell renders on a clean day", async ({ page, request }) => {
   await seedAppState(request, "shell-empty");
   await openApp(page);
 
-  await expect(page.getByText("Todoist")).toBeVisible();
+  await expect(page.getByText("Tasks", { exact: true })).toBeVisible();
   await expect(page.getByTestId("day-flow-empty-state")).toBeVisible();
   await expect(page.getByText("Your day flow will appear here")).toBeVisible();
   await expect(page.getByRole("button", { name: "Settings" })).toBeVisible();

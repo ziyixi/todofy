@@ -330,15 +330,13 @@ const handlers: ServiceHandlers<ShapeOf<typeof FlowDayUiService>, Context> = {
   async getSettings(_request, { fake }) {
     return create(SettingsSchema, {
       name: "settings",
-      todoistApiKeySet: fake.settings.has("todoist_api_key"),
-      taskSource: fake.settings.get("task_source") ?? "",
+      taskSource: "tasks",
       dayCapacityMinutes: Number(fake.settings.get("day_capacity_mins") ?? "360"),
       lastSyncTime: at(fake.settings.get("last_sync_at") ?? null),
     });
   },
   async updateSettings({ settings, updateMask }, { fake }) {
-    const paths = updateMask?.paths ?? ["todoist_api_key", "day_capacity_minutes"];
-    if (paths.includes("todoist_api_key")) fake.settings.set("todoist_api_key", "sealed");
+    const paths = updateMask?.paths ?? ["day_capacity_minutes"];
     if (paths.includes("day_capacity_minutes")) fake.settings.set("day_capacity_mins", String(settings?.dayCapacityMinutes ?? 0));
     return handlers.getSettings({ $typeName: "flowday.ui.v1.GetSettingsRequest", name: "settings" }, { fake });
   },

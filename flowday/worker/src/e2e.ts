@@ -6,7 +6,6 @@
  */
 import { sql } from 'drizzle-orm';
 import type { TaskPriority, TaskRecord } from './model.ts';
-import { importCredentialKey, sealCredential } from './credentials.ts';
 import type { Db } from './db.ts';
 import type { Env } from './env.ts';
 import { flowdayError } from './errors.ts';
@@ -15,7 +14,7 @@ import { createTimeEntry } from './store/entries.ts';
 import { setFlowStatements } from './store/flows.ts';
 import { upsertNote } from './store/notes.ts';
 import { setSetting } from './store/settings.ts';
-import { markOrphanedTodoistTasksDeleted, runStatements, upsertTasks } from './store/tasks.ts';
+import { hideStatement, runStatements, upsertTasks } from './store/tasks.ts';
 
 export function e2eEnabled(env: Env, principal: Principal): boolean {
   return env.E2E_TEST_ROUTES === 'true' && principal.bypassed;
@@ -81,8 +80,8 @@ function toTask(seed: TaskSeed): TaskRecord {
   };
 }
 
-/** Seeds synthetic data. A seeded Todoist key is sealed like one saved in Settings (`credentialKey`: the secret). */
-export async function seed(db: Db, payload: SeedPayload, credentialKey?: string): Promise<void> {
+/** Seeds synthetic data. */
+export async function seed(db: Db, payload: SeedPayload): Promise<void> {
   if (payload.tasks !== undefined && payload.tasks.length > 0) {
     await upsertTasks(db, payload.tasks.map(toTask));
     for (const task of payload.tasks) {
@@ -112,14 +111,10 @@ export async function seed(db: Db, payload: SeedPayload, credentialKey?: string)
       source: entry.source ?? 'timer',
     });
   }
-  const sealing = await importCredentialKey(credentialKey);
-  for (const [key, value] of Object.entries(payload.settings ?? {})) {
-    const stored = key === 'todoist_api_key' && sealing !== null ? await sealCredential(sealing, key, String(value)) : String(value);
-    await setSetting(db, key, stored);
-  }
+  for (const [key, value] of Object.entries(payload.settings ?? {})) await setSetting(db, key, String(value));
 }
 
-export async function e2eRoute(request: Request, env: Env, db: Db, pathname: string): Promise<Response> {
+export async function e2eRoute(request: Request, db: Db, pathname: string): Promise<Response> {
   switch (`${request.method} ${pathname}`) {
     case 'GET /api/test/health':
       return jsonResponse({ ok: true });
@@ -129,7 +124,7 @@ export async function e2eRoute(request: Request, env: Env, db: Db, pathname: str
     case 'POST /api/test/seed': {
       const payload = (await readBody(request)) as SeedPayload;
       if (payload.resetFirst !== false) await clearAll(db);
-      await seed(db, payload, env.CREDENTIAL_KEY);
+      await seed(db, payload);
       return jsonResponse({ ok: true });
     }
     case 'POST /api/test/timer-elapsed': {
@@ -139,12 +134,11 @@ export async function e2eRoute(request: Request, env: Env, db: Db, pathname: str
       await db.run(sql`UPDATE active_timer_session SET segment_wall_start = ${new Date(Date.now() - seconds * 1000).toISOString()} WHERE id = 'main' AND status = 'running'`);
       return jsonResponse({ ok: true });
     }
-    case 'POST /api/test/sync-orphans': {
+    case 'POST /api/test/sync-hide': {
+      // What a sync does with the tasks Tasks reports completed, archived or deleted.
       const body = await readBody(request);
-      const ids = Array.isArray(body['activeTodoistIds'])
-        ? body['activeTodoistIds'].filter((value): value is string => typeof value === 'string')
-        : [];
-      return jsonResponse({ ok: true, changed: await markOrphanedTodoistTasksDeleted(db, ids) });
+      const ids = Array.isArray(body['taskIds']) ? body['taskIds'].filter((value): value is string => typeof value === 'string') : [];
+      return jsonResponse({ ok: true, changed: await runStatements(db, [hideStatement(ids, new Date().toISOString())]) });
     }
     default:
       throw flowdayError('NOT_FOUND');

@@ -1,6 +1,6 @@
 /**
  * The D1 tables (../../migrations/), as drizzle-orm sees them. 0001 is the container-era SQLite schema unchanged;
- * 0002 adds tasks.todoist_project_id for the incremental Todoist sync.
+ * 0002 adds tasks.todoist_project_id (now the Tasks project ID), 0005 drops the retired Todoist sync settings.
  */
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
@@ -31,8 +31,8 @@ export const tasks = sqliteTable('tasks', {
   syncedAt: text('synced_at'),
   description: text('description'),
   deletedAt: text('deleted_at'),
-  // 'sync' = Todoist no longer lists this task (completed or deleted there); 'local' or null = deleted in FlowDay.
-  // Sync-deleted tasks come back by themselves when Todoist lists them again.
+  // 'sync' = Tasks reported this task completed, archived or deleted; 'local' or null = deleted in FlowDay.
+  // Sync-deleted tasks come back by themselves when Tasks lists them again.
   deletedSource: text('deleted_source'),
   todoistProjectId: text('todoist_project_id'),
   parentId: text('parent_id'),

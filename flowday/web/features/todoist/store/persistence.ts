@@ -37,7 +37,7 @@ export async function loadTasksAndSettings(): Promise<{
 }
 
 /**
- * Asks the Worker to bring in Todoist's changes. The automatic sync is quiet (a failure waits for the next
+ * Asks the Worker to bring in Tasks' changes. The automatic sync is quiet (a failure waits for the next
  * attempt); "Sync now" shows its failure.
  */
 export async function syncTasksOnServer(mode: SyncMode): Promise<SyncResult> {

@@ -163,7 +163,7 @@ export interface SyncResult {
 }
 
 /**
- * Asks the Worker to bring in Todoist's changes. The automatic sync is quiet (a failure waits for the next attempt);
+ * Asks the Worker to bring in Tasks' changes. The automatic sync is quiet (a failure waits for the next attempt);
  * "Sync now" shows its failure. Throws ApiError on failure.
  */
 export async function syncTasks(mode: SyncMode): Promise<SyncResult> {
@@ -183,27 +183,20 @@ export async function syncTasks(mode: SyncMode): Promise<SyncResult> {
 
 // ---- settings -----------------------------------------------------------------------------------------------------
 
-/** The settings as the UI shows them (the key itself is never answered). */
+/** The settings as the UI shows them. */
 export interface SettingsView {
-  taskSource: "todoist" | "tasks";
-  hasApiKey: boolean;
   lastSyncAt: string | null;
   dayCapacityMins: number;
 }
 
 function settingsFromMessage(settings: Settings): SettingsView {
-  return { taskSource: settings.taskSource === "tasks" ? "tasks" : "todoist", hasApiKey: settings.todoistApiKeySet, lastSyncAt: iso(settings.lastSyncTime), dayCapacityMins: settings.dayCapacityMinutes };
+  return { lastSyncAt: iso(settings.lastSyncTime), dayCapacityMins: settings.dayCapacityMinutes };
 }
 
 /** The settings; null when they could not be read. */
 export async function loadSettings(): Promise<SettingsView | null> {
   const settings = await readOrNull(() => flowday.getSettings({ name: "settings" }));
   return settings === null ? null : settingsFromMessage(settings);
-}
-
-/** Stores the Todoist API key (the Worker seals it): true when it was saved (the banner shows a failure). */
-export function saveTodoistKey(key: string): Promise<boolean> {
-  return writeOk(() => flowday.updateSettings({ settings: { name: "settings", todoistApiKey: key }, updateMask: { paths: ["todoist_api_key"] } }));
 }
 
 /** Stores the day's capacity: true when it was saved (the banner shows a failure). */

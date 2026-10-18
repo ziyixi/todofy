@@ -4,12 +4,9 @@ import { useEffect } from "react";
 import { useTodoistStore } from "@/features/todoist/store";
 import { startAutoSync } from "./auto-sync";
 
-/** Runs the visibility-aware automatic Todoist sync (./auto-sync.ts) while a task source is configured. */
+/** Runs the visibility-aware automatic Tasks sync (./auto-sync.ts) while the page is open. */
 export function useAutoSync() {
-  const configured = useTodoistStore((s) => s.taskSource === "tasks" || s.hasApiKey);
-
   useEffect(() => {
-    if (!configured) return;
     const autoSync = startAutoSync({
       now: () => Date.now(),
       isVisible: () => document.visibilityState === "visible",
@@ -23,5 +20,5 @@ export function useAutoSync() {
       document.removeEventListener("visibilitychange", onVisibility);
       autoSync.stop();
     };
-  }, [configured]);
+  }, []);
 }

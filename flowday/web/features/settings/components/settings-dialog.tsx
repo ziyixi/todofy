@@ -14,11 +14,7 @@ import { ExportDialog } from "./export-dialog";
 import { useIdlePermissionStatus } from "../hooks/use-idle-permission-status";
 import { useTodoistStore } from "@/features/todoist/store";
 import { useFlowStore } from "@/features/flow/store";
-import {
-  loadSettings,
-  saveDayCapacity,
-  saveTodoistKey,
-} from "@/lib/client/flowday-api";
+import { loadSettings, saveDayCapacity } from "@/lib/client/flowday-api";
 import { cn } from "@/lib/utils";
 
 interface SettingsDialogProps {
@@ -27,10 +23,6 @@ interface SettingsDialogProps {
 }
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const [apiKey, setApiKey] = useState("");
-  const [hasExistingKey, setHasExistingKey] = useState(false);
-  const [taskSource, setTaskSource] = useState<"todoist" | "tasks">("todoist");
-  const [saving, setSaving] = useState(false);
   const [capacityHours, setCapacityHours] = useState("6");
   const [savingCapacity, setSavingCapacity] = useState(false);
   const [message, setMessage] = useState<{
@@ -49,44 +41,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   useEffect(() => {
     if (!open) return;
 
-    setApiKey("");
     setMessage(null);
 
     void loadSettings().then((data) => {
       if (!data) return;
-      setHasExistingKey(data.hasApiKey);
-      setTaskSource(data.taskSource);
       setCapacityHours(String(data.dayCapacityMins / 60));
     });
   }, [open]);
-
-  async function handleSave() {
-    if (!apiKey.trim()) {
-      setMessage({ type: "error", text: "API key cannot be empty" });
-      return;
-    }
-
-    setSaving(true);
-    setMessage(null);
-    try {
-      if (await saveTodoistKey(apiKey.trim())) {
-        setHasExistingKey(true);
-        setApiKey("");
-        // The automatic sync starts now that a key is stored.
-        useTodoistStore.setState({ hasApiKey: true });
-        setMessage({
-          type: "success",
-          text: "API key saved. Click Sync Now to fetch tasks.",
-        });
-      } else {
-        setMessage({ type: "error", text: "Failed to save" });
-      }
-    } catch {
-      setMessage({ type: "error", text: "Failed to save" });
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function handleSync() {
     setMessage(null);
@@ -129,65 +90,22 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         </DialogHeader>
 
         <div className="space-y-4">
-          {taskSource === "tasks" ? (
-            <div className="rounded-md border border-border/60 bg-background/25 p-3">
-              <p className="text-sm font-medium text-foreground">
-                Tasks connected
-              </p>
-              <p className="text-xs text-muted-foreground">
-                FlowDay reads Tasks automatically. No API key is needed.
-              </p>
-            </div>
-          ) : (
-            <div className="rounded-md border border-border/60 bg-background/25 p-3">
-              <label className="text-sm font-medium text-foreground">
-                Todoist API Key
-              </label>
-              <p className="text-xs text-muted-foreground">
-                Find your API key at{" "}
-                <span className="font-medium">
-                  Settings → Integrations → Developer
-                </span>{" "}
-                in Todoist. FlowDay only reads your tasks and never writes to
-                Todoist.
-              </p>
-              <div className="flex gap-2">
-                <Input
-                  data-testid="settings-api-key-input"
-                  type="password"
-                  placeholder={
-                    hasExistingKey
-                      ? "••••••••  (key saved)"
-                      : "Enter your API key"
-                  }
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  className="flex-1"
-                />
-                <Button
-                  data-testid="settings-save-api-key"
-                  onClick={handleSave}
-                  disabled={saving}
-                >
-                  Save
-                </Button>
-              </div>
-            </div>
-          )}
-
           <div className="rounded-md border border-border/60 bg-background/25 p-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-foreground">
-                {taskSource === "tasks" ? "Tasks Sync" : "Todoist Sync"}
-              </label>
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  Tasks Sync
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  FlowDay reads Tasks automatically. No API key is needed.
+                </p>
+              </div>
               <Button
                 data-testid="settings-sync-now"
                 variant="outline"
                 size="sm"
                 onClick={handleSync}
-                disabled={
-                  isSyncing || (taskSource !== "tasks" && !hasExistingKey)
-                }
+                disabled={isSyncing}
               >
                 <RefreshCw
                   className={cn(
@@ -201,11 +119,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             {lastSyncAt && (
               <p className="text-xs text-muted-foreground">
                 Last synced: {new Date(lastSyncAt).toLocaleString()}
-              </p>
-            )}
-            {taskSource !== "tasks" && !hasExistingKey && (
-              <p className="text-xs text-muted-foreground/60">
-                Save an API key to enable syncing.
               </p>
             )}
             <p className="text-xs text-muted-foreground/60">
