@@ -234,12 +234,6 @@ TASK_INTENT_TASKS = Table(
 )
 
 PLUS_SETTINGS = Table("plus_settings", ("id", "mapping", "timezone", "week_start", "enabled"), ("id",), 50)
-PLUS_CONNECTIONS = Table(
-    "plus_connections", ("id", "display_name", "token_sha256", "revoked", "created_at"), ("id",), 50
-)
-PLUS_ACTIONS = Table(
-    "plus_actions", ("request_id", "request_hash", "commands", "response", "created_at"), ("request_id",), 50
-)
 PLUS_WEEKS = Table("plus_weeks", ("task_id", "week_start", "committed", "bet"), ("task_id",), 500)
 # The planning store (migration 0007): owner facts and task identities, never task content. plan_tasks is the last
 # table, after those that hold its IDs. The order alone does not keep a backup's task IDs complete: the job takes
@@ -310,8 +304,6 @@ TABLES = {
         TASK_INTENTS,
         TASK_INTENT_TASKS,
         PLUS_SETTINGS,
-        PLUS_CONNECTIONS,
-        PLUS_ACTIONS,
         PLUS_WEEKS,
         PLAN_SETTINGS,
         PLAN_MARKS,

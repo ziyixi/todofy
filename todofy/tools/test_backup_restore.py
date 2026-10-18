@@ -240,32 +240,59 @@ def test_a_backup_from_before_the_briefs_restores_them_as_never_derived(tmp_path
     assert target.execute("SELECT count(*) FROM plan_task_state").fetchone() == (0,)
 
 
-def test_retired_tables_restore_until_a_migration_drops_them(source, tmp_path, monkeypatch):
-    source.execute("INSERT INTO plus_weeks VALUES ('A', '2026-09-28', 1, 0)")
-    backup_of(source, tmp_path)
+# The idle Plus tables migration 0012 drops, as the releases before it backed them up.
+IDLE_PLUS = [
+    sql.Table("plus_connections", ("id", "display_name", "token_sha256", "revoked", "created_at"), ("id",), 50),
+    sql.Table(
+        "plus_actions", ("request_id", "request_hash", "commands", "response", "created_at"), ("request_id",), 50
+    ),
+]
+
+
+def checkout(root: Path, migrations: list[Path], *later: tuple[str, str]) -> Path:
+    """A checkout's migrations directory: ``migrations`` and ``later``."""
+    root.mkdir()
+    for migration in migrations:
+        (root / migration.name).write_text(migration.read_text())
+    for name, statement in later:
+        (root / name).write_text(statement)
+    return root
+
+
+def test_retired_tables_restore_until_a_migration_drops_them(tmp_path, monkeypatch):
+    before = [migration for migration in MIGRATIONS if migration.name < "0012"]
+    old = database(migrations=before)
+    seed(old)
+    old.execute("INSERT INTO plus_actions VALUES ('r1', 'h', '[]', NULL, 1)")
+    old.execute("INSERT INTO plus_weeks VALUES ('A', '2026-09-28', 1, 0)")
+    backup_of(old, tmp_path, schema_version=before[-1].name, release=[*sql.TABLES.values(), *IDLE_PLUS])
+    # A checkout before 0012 restores them like every other table.
+    monkeypatch.setattr(backup_restore, "MIGRATIONS_DIR", checkout(tmp_path / "then", before))
     assert backup_restore.retired_tables() == frozenset()
-    assert "PASS plus_weeks rows=1 statements=1" in write_sql(tmp_path, tmp_path / "now.sql", legacy_text=True)
-    # A later checkout whose migration drops one of them (a comment drops nothing).
+    assert "PASS plus_actions rows=1 statements=1" in write_sql(tmp_path, tmp_path / "then.sql", legacy_text=True)
+    # This checkout's 0012 drops them: the restore leaves them out, and says so.
+    monkeypatch.undo()
+    assert backup_restore.retired_tables() == {"plus_connections", "plus_actions"}
+    lines = write_sql(tmp_path, tmp_path / "now.sql", legacy_text=True)
+    assert lines[:2] == ["SKIP plus_connections (retired)", "SKIP plus_actions (retired)"]
+    assert "PASS plus_weeks rows=1 statements=1" in lines
+    # A later checkout whose migration drops one more of them (a comment drops nothing).
     drop = (
         "9999_drop_plus_weeks.sql",
         "-- DROP TABLE plus_settings\nDROP INDEX plus_weeks_ended; DROP TABLE plus_weeks;",
     )
-    later = tmp_path / "migrations"
-    later.mkdir()
-    for migration in MIGRATIONS:
-        (later / migration.name).write_text(migration.read_text())
-    (later / drop[0]).write_text(drop[1])
-    monkeypatch.setattr(backup_restore, "MIGRATIONS_DIR", later)
-    assert backup_restore.retired_tables() == {"plus_weeks"}
+    monkeypatch.setattr(backup_restore, "MIGRATIONS_DIR", checkout(tmp_path / "later", MIGRATIONS, drop))
+    assert backup_restore.retired_tables() == {"plus_connections", "plus_actions", "plus_weeks"}
     lines = write_sql(tmp_path, tmp_path / "restore.sql", legacy_text=True)
-    assert lines[0] == "SKIP plus_weeks (retired)" and not any(" plus_weeks " in line for line in lines[1:])
+    skipped = ["SKIP plus_weeks (retired)", "SKIP plus_connections (retired)", "SKIP plus_actions (retired)"]
+    assert lines[:3] == skipped and not any(" plus_weeks " in line for line in lines[3:])
     target = database(drop)
     target.executescript((tmp_path / "restore.sql").read_text())
-    task_rows = "SELECT * FROM plan_tasks ORDER BY id"
-    assert target.execute(task_rows).fetchall() == source.execute(task_rows).fetchall()
+    events = "SELECT event_id, state FROM mail_events ORDER BY event_id"
+    assert target.execute(events).fetchall() == old.execute(events).fetchall()
     ok, checked = verify(SqliteWrangler(target), "DB", tmp_path, legacy_text=True)
-    assert ok and checked[1] == "SKIP plus_weeks (retired)"
-    assert all(line.startswith("PASS ") for line in checked[2:])
+    assert ok and checked[1:4] == skipped
+    assert all(line.startswith("PASS ") for line in checked[4:])
 
 
 def test_the_legacy_text_can_be_left_out(source, tmp_path):

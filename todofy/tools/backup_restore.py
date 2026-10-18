@@ -64,10 +64,10 @@ APP = Path(__file__).resolve().parents[1]
 PRODUCTION_CONFIG = APP / "wrangler.toml"
 MIGRATIONS_DIR = APP / "migrations"
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-# The tables the planning store (migration 0007) replaces. A backup made while one exists holds it, so once a
-# migration of this checkout drops one, restore leaves it out instead of failing on a table the schema no
-# longer has. Until that migration exists, they restore like every other table.
-RETIRED_TABLES = ("plus_settings", "plus_weeks", "plus_actions")
+# The tables the planning store (migration 0007) replaces, and the idle Plus tables 0012 drops. A backup made
+# while one exists holds it, so once a migration of this checkout drops one, restore leaves it out instead of
+# failing on a table the schema no longer has. Until that migration exists, they restore like every other table.
+RETIRED_TABLES = ("plus_settings", "plus_weeks", "plus_connections", "plus_actions")
 DROP_TABLE = re.compile(r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)", re.IGNORECASE)
 
 

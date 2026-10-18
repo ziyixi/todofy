@@ -102,8 +102,6 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "task_intents",
         "task_intent_tasks",
         "plus_settings",
-        "plus_connections",
-        "plus_actions",
         "plus_weeks",
         "plan_settings",
         "plan_tasks",
