@@ -37,7 +37,7 @@ DO_SCHEMA = (
     " plan_etag TEXT, result TEXT CHECK (result IS NULL OR length(result) <= 4096), created_at INTEGER NOT NULL,"
     " finished_at INTEGER, CHECK ((state = 'done') = (finished_at IS NOT NULL)),"
     " CHECK (state = 'started' OR commands IS NULL))",
-    # Only the retired DeleteMailItems check read the unfinished writes by this index.
+    # Nothing reads the unfinished receipts by this index any more.
     "DROP INDEX IF EXISTS plus_receipts_started",
 )
 FIND = (

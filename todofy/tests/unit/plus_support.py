@@ -121,7 +121,7 @@ def stubbed_pyodide(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]
 
 
 async def confirm_plan(core: Any) -> None:
-    """The setup the owner confirmed in Todoist mode, as the retired ConfirmPlanMapping saved it: the week's
+    """The setup the owner confirmed in Todoist mode, as the retired confirmation saved it: the week's
     membership of every listed task, then the discovered mapping, enabled. Call inside stubbed_pyodide."""
     from todofy.core.sql import plus as sql
     from todofy.runtime import plus_api, plus_store

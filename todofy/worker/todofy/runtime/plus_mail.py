@@ -182,12 +182,11 @@ async def _open_linked_task(core: Any, task_id: str) -> dict[str, Any] | None:
 
 
 async def convert(core: Any, request: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
-    """ConvertMailItem: create the first generic Inbox task on owner action; then consume the Mail entry. Its
-    receipt keeps the name FileMailItem, as receipts written before have it."""
+    """ConvertMailItem: create the first generic Inbox task on owner action; then consume the Mail entry."""
     if not native_tasks.enabled(core.env):
         raise todoist.PlusError("BAD_REQUEST")
     event_id, request_id = plus.check_id(request["event_id"]), request["request_id"]
-    digest = plus.fingerprint(["FileMailItem", request])
+    digest = plus.fingerprint(["ConvertMailItem", request])
     previous = await receipts.find(core, request_id)
     if previous is not None and previous.request_hash != digest:
         raise todoist.PlusError("BAD_REQUEST")
@@ -240,7 +239,7 @@ async def convert(core: Any, request: dict[str, Any], current: dict[str, Any]) -
                 body["task"].update(label_ids=[filed[0]], priority=filed[1])
             operation = {"method": "CreateTask", "body": body}
         commands = [operation]
-        await receipts.start(core, request_id, "FileMailItem", digest, commands)
+        await receipts.start(core, request_id, "ConvertMailItem", digest, commands)
     else:
         commands = previous.commands
     result = await todoist._native(native_plus.commands(core, commands))
@@ -256,20 +255,19 @@ async def convert(core: Any, request: dict[str, Any], current: dict[str, Any]) -
 
 
 async def delete_summaries(core: Any, request: dict[str, Any]) -> dict[str, Any]:
-    """DeleteMailSummaries: delete pending summaries, preserving the event ledger and every generic Tasks resource.
-    Its receipt keeps the name DeleteMailItems, as receipts written before have it."""
+    """DeleteMailSummaries: delete pending summaries, preserving the event ledger and every generic Tasks resource."""
     if not native_tasks.enabled(core.env):
         raise todoist.PlusError("BAD_REQUEST")
     ids = _task_ids({"task_ids": request["event_ids"]}, least=1)
     request_id = request["request_id"]
-    digest = plus.fingerprint(["DeleteMailItems", request])
+    digest = plus.fingerprint(["DeleteMailSummaries", request])
     previous = await receipts.find(core, request_id)
     if previous is not None and previous.request_hash != digest:
         raise todoist.PlusError("BAD_REQUEST")
     if previous is not None and previous.result is not None:
         kept = {ids[index] for index in previous.result["kept_events"]}
     else:
-        await receipts.start(core, request_id, "DeleteMailItems", digest, [])
+        await receipts.start(core, request_id, "DeleteMailSummaries", digest, [])
         bound = json.dumps(ids)
         _, remaining = await core.env.DB.batch(
             [
