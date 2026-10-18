@@ -11,8 +11,9 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ### Tasks workflow refinement (2026-10-18 UTC)
 
-The owner's acceptance list now contains 28 items. The original implementation was
-`codex/tasks-workflow-refinement`; current work is on `codex/tasks-read-efficiency`.
+All 28 items in the owner's acceptance list are implemented and released. The original branch was
+`codex/tasks-workflow-refinement`; `codex/tasks-read-efficiency` completes the read/DB work.
+Closing branch `codex/tasks-read-verification` records the production evidence only.
 The scope is native counts/navigation, ordinary task editing with planning/dependencies/start windows,
 separate Task/Subtask and schedulable Step semantics, structured recurrence, native effort, legacy
 tag/title cleanup and Focus timing against FlowDay's existing timer. Production cleanup must preserve
@@ -39,7 +40,7 @@ corrected to milliseconds and verified. The existing changefeed received new eve
 sequence and consumer cursors were retained. One embedded key in the same frozen task set was also removed.
 Production Chrome confirms the obsolete Favorites section and old labels/filters are absent.
 
-Branch `codex/tasks-details-polish` now covers the owner's added items 23–26: stable task-detail loading
+Branch `codex/tasks-details-polish` completed the owner's added items 23–26: stable task-detail loading
 without a false unchecked phase or changing modal height, deliberate Action/Status option placement,
 visible supported Date/Deadline input formats, and a floating label picker that does not expand the editor.
 No new infrastructure or settings were needed. The combined local checks passed: 37 web units,
@@ -59,8 +60,25 @@ within one planning request; Tasks deploys before the new Core/FlowDay consumers
 measurements fell from 4,254 to 179 read rows for a full Catalog and 10 for metadata only, all zero writes.
 Growing completed label history from 2,000 to 4,000 keeps count results and 298 read rows unchanged.
 Backend, cross-language and proto checks pass. Final combined web checks also pass: lint/type/build,
-55 unit/hook checks and 47 real Chromium/local-D1 journeys. Branch CI and the same-SHA Actions release
-remain. Do not complete the 28-item goal before production is checked.
+55 unit/hook checks and 47 real Chromium/local-D1 journeys. The complete branch gate
+[39114444628](https://github.com/ziyixi/todofy/actions/runs/39114444628) and same-SHA main release
+[39114918906](https://github.com/ziyixi/todofy/actions/runs/39114918906) both passed at
+`2bfe0add9c515b24e0c30a5d1bb36f4f4185231d`.
+
+Independent read-only provider verification confirms this SHA, registered databases/namespaces, static
+bindings/vars, schedules and exposure settings, with zero differences for these four Workers:
+
+| Application | Successful Deployment | Actual Worker version |
+| --- | --- | --- |
+| Tasks | 7152582778 | `0493376d-5a71-4a76-a12b-1e4beb266d99` |
+| FlowDay | 7152598143 | `dfe80fa3-1b70-4384-b0a6-944b22cd3786` |
+| Todofy Core / Gateway | 7152610118 | `12205dc1-bb5b-4347-916e-c084e3a0132e` / `217b411b-a885-4c92-93f0-7435e0c8a911` |
+
+Owner Chrome loaded the new `index-CfShSuyT.js`, 19 category badges and a real task's loaded planning
+controls in the unchanged 860×780 frame. The dialog was closed without saving. Full-description cache
+reuse, exact read counts, no-op writes and mutation conflicts are established by the synthetic browser
+and real local-D1 checks, not by reading private production descriptions. The earlier authorized cleanup
+and all protected history/queue/time comparisons above remain the data acceptance evidence.
 
 Initial branch run [39113526896](https://github.com/ziyixi/todofy/actions/runs/39113526896) was cancelled
 after the unchanged Recall WebKit fixture failed its focused-page assertion. Its fake tab activation had
@@ -68,7 +86,10 @@ not brought the real test page to the front; the test also anchored dwell time b
 A test-only correction now waits for navigation/foreground and advances from the recorded focus start.
 A fresh current-source extension build passes all 16 existing WebKit cases, with capture/upload/dedup
 assertions retained. An earlier local failure used stale ignored build output and is excluded as evidence.
-No Recall product code or installed extension was changed. The corrected SHA must pass the full gate.
+No Recall product code or installed extension was changed. The corrected SHA passed the full gate.
+The existing test-path release classification also rebuilt/redeployed the unchanged Recall product and
+published its artifacts in main run 39114918906 (Deployment 7152579970); no installed Chrome/phone files
+were updated, and this is not new phone/Orion product acceptance. VPS and Newsletter releases were skipped.
 
 The owner also reported a transient approximately 20-second Tasks refresh stall. Public HTTP redirected
 to Access in about 0.1 seconds, while authenticated Chrome inspection stalled and later recovered in the
