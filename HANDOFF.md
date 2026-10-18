@@ -11,8 +11,8 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ### Native Tasks replacement (2026-10-18)
 
-Branch `codex/tasks-native`, working checkout `/private/tmp/todofy-tasks-impl`. Native Tasks refinement is live
-at `77edb46915f6939675fa98e011dd21516738fdff`. Complete branch gate
+Branch `codex/tasks-native`, working checkout `/private/tmp/todofy-tasks-impl`. The native Tasks cutover was
+verified at `77edb46915f6939675fa98e011dd21516738fdff`. Complete branch gate
 [39086347716](https://github.com/ziyixi/todofy/actions/runs/39086347716) passed. The
 [same-SHA main 39086983750](https://github.com/ziyixi/todofy/actions/runs/39086983750) verified Tasks → FlowDay →
 Todofy → Home, with Deployments `7148421922`, `7148434459`, `7148449126`, `7148465493`. Its separate VPS job
