@@ -5,6 +5,9 @@ current production state; [HANDOFF](../HANDOFF.md) names the current rollout and
 
 ## Archived handoffs
 
+[Handoff through October 18, 2026](history/handoff-2026-10-18.md) keeps the release receipts and completed notes
+moved out of HANDOFF on October 18: the Tasks refinement and native cutover, the VPS host recovery, Recall, Mailsort
+and the October 11 maintenance, with counts of private data replaced by neutral wording.
 [Handoff through October 11, 2026](history/handoff-2026-10-11.md) preserves the rollout evidence and earlier
 waiting lists from `414925e`. Later observations in that snapshot supersede many earlier entries. Current work and
 remaining acceptance are in [HANDOFF](../HANDOFF.md); current rebuild steps and verified limits are in

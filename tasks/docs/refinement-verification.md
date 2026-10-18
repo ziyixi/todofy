@@ -13,7 +13,7 @@ Private cleanup inputs remain outside this public repository. Items 23–26 pass
 [39110446990](https://github.com/ziyixi/todofy/actions/runs/39110446990) and the same-SHA main release
 [39110769544](https://github.com/ziyixi/todofy/actions/runs/39110769544) at
 `f5745def60865a832781727bb71919754ee23b0e`; owner Chrome confirmed the deployed controls.
-The current release receipt for items 27–28 is maintained in [HANDOFF](../../HANDOFF.md#tasks-workflow-refinement-2026-10-18-utc).
+The release receipt for items 27–28 is in [the October 18 handoff archive](../../docs/history/handoff-2026-10-18.md#tasks-workflow-refinement-2026-10-18-utc).
 
 | Item | Required result | Evidence |
 | --- | --- | --- |
@@ -222,7 +222,8 @@ future dialog/popover changes. Intentional expansion is distinct from loading-in
 
 The sidebar resize hit area stays unchanged; its hover/focus feedback is a short central line instead
 of a full-height rail. Application/backend contracts, database rows and installed extensions are unchanged.
-Local combined checks, same-SHA branch/main release and production inspection are recorded in HANDOFF.
+Local combined checks, same-SHA branch/main release and production inspection are recorded in
+[the October 18 handoff archive](../../docs/history/handoff-2026-10-18.md#tasks-workflow-refinement-2026-10-18-utc).
 
 Actual Chrome with a synthetic local task shows the default collapsed date controls:
 
