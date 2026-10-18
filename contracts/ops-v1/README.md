@@ -157,7 +157,7 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
   `critical`; otherwise `ok` (`info` signals allowed).
 - `modes`: booleans; `maintenance` always present. Mail Hero: `force_send_paused` (deployment variable),
   `send_paused` (owner switch), `forwarding` (mode forward with a current endpoint), `backup_active`.
-  Todofy: `processing_paused`, `force_pause_todoist`, `reminder_enabled`, `backup_active`. The watch app: `maintenance` (always false: it has no maintenance switch)
+  Todofy: `processing_paused`, `force_pause_todoist` (its task writes to Tasks are paused; the name stays), `reminder_enabled`, `backup_active`. The watch app: `maintenance` (always false: it has no maintenance switch)
   and `notifications` (its TODOFY binding is configured: the daily digest and urgent changes go to Todofy). mailsort:
   `maintenance` (always false), `mode_limited` (the deployment variable MODE is below live), `live`, `sorting_off`,
   `breaker` (read from storage; a `status_unavailable` status has only `maintenance` and `mode_limited`). recall:
@@ -211,7 +211,7 @@ the dashboard shows unknown ones generically.
 - Auto-expiry: the effective level is `shed` only while `now < until`; no alarm is needed. An expired or
   normal guard reads `{level: "normal", reason: null, until: null, set_at: null, deferred: []}`.
 - `deferred` lists the job codes that shed defers in this app. **Shed never stops** ingest, parsing,
-  webhook intake, delivery or its retries, Gemini/Todoist processing of real mail, the canary,
+  webhook intake, delivery or its retries, Gemini and Tasks processing of real mail, the canary,
   schedule-keeping alarms, integrity repair, the daily reminder/digest or alert evaluation. Each deferred
   job still runs when its own bound is reached (a guard renewed forever cannot starve it), and the bound
   covers the whole job: once due, a job that works in pages or batches keeps its normal cadence until
@@ -255,7 +255,7 @@ reads `not_seen`), `processing` (taken over, not finished; `waiting_code` `proce
 `maintenance`, `backup_active` or `retry_wait` when it is held, which is reported and never turned into a
 failure), `ok` (the summary call answered and the result passed Todofy's validation; `completed_at`) or
 `failed` (`completed_at`, `error_code` from Todofy's vocabulary, e.g. `llm_quota`,
-`llm_budget_exhausted`). A canary never reaches Todoist, reports, the attention list or the reminder.
+`llm_budget_exhausted`). A canary never reaches Tasks, reports, the attention list or the reminder.
 
 ### `reportOps(report)` → `OpsReportReceipt` (Todofy)
 
@@ -265,7 +265,7 @@ unless the stored one has a later `generated_at` (then `stored: false` and the r
 stored one), so a retried older report cannot win. `generated_at` more than 5 minutes ahead of Todofy's
 clock is `invalid_input`. An empty `items` list clears the ops section.
 
-**Digest.** Todofy's daily attention reminder (at most one Todoist task per UTC day, frozen title and
+**Digest.** Todofy's daily attention reminder (at most one task in Tasks per UTC day, frozen title and
 body, existing retry rules) gains an ops section built from the stored report when its `generated_at`
 is at most 36 hours old: the `warning` and `critical` items, critical first. Each report is listed by at
 most one day's reminder. A day with ops items but no attention items still creates that day's one task,

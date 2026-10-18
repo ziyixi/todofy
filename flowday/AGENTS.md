@@ -2,13 +2,10 @@
 
 The root [`AGENTS.md`](../AGENTS.md) applies here too. FlowDay-specific rules:
 
-- **Read-only task source.** FlowDay reads native Tasks through its optional `TASKS` binding, or Todoist when
-  the binding is absent. It never writes either task store. Source selection is deployment-owned; a failed native
-  read never falls back to Todoist. Todofy remains the only Todoist writer in this repository.
-- **Public repository.** Never commit a database file, a Todoist token, an owner email, a real task
+- **Read-only task source.** FlowDay reads Tasks through its required `TASKS` binding and never writes it;
+  a failed read answers `TASKS_UNAVAILABLE`. Todoist is not a task source; no FlowDay code reads or writes it.
+- **Public repository.** Never commit a database file, a token, an owner email, a real task
   title or a screenshot of real data. Tests, seeds, README figures and goldens use synthetic data only.
-  The Todoist key is stored only sealed (AES-GCM under the `CREDENTIAL_KEY` secret, `worker/src/credentials.ts`);
-  never store, export or log it in plain text.
   Never open the live FlowDay database; when a real copy is needed, copy it first and open the copy
   read-only (`file:<copy>?immutable=1`), or, when its WAL must be applied, let `deploy/migrate/flowday_migrate.py
   export` checkpoint a second copy in a private local directory (`mktemp -d`; never in the repository or a
@@ -42,13 +39,13 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. FlowDay-specific rules:
   elsewhere): CSRF, one retry on an expired token, visible failures. Never swallow a failed write.
 - **D1 writes stay minimal.** The 100,000 rows/day write allowance is shared by every app in the
   account, and each index touched counts as another row written. Sync reads only what changed in
-  Todoist, writes only rows whose values changed, runs on page open, slow polling while the page is
+  Tasks, writes only rows whose values changed, runs on page open, slow polling while the page is
   visible and a manual refresh, stops while hidden, and is throttled atomically on the server. Keep a
-  typical day well under 1,000 rows written: `worker/test/runtime/sync.test.ts` and `budget.test.ts`
-  prove it. Remember that SQLite rewrites an index entry whenever its column is in an UPDATE's SET list, and
+  typical day well under 1,000 rows written: `worker/test/runtime/native-tasks.test.ts` ("a simulated day")
+  and `budget.test.ts` prove it. Remember that SQLite rewrites an index entry whenever its column is in an UPDATE's SET list, and
   add an index only for a query that needs it (each one costs a row on every insert).
-- **Bounded sync work.** One request applies at most `SYNC_CHUNK` Todoist items and parses at most
-  `MAX_SYNC_ITEMS`/`MAX_SYNC_BYTES`; check a cap change against the cold first run in `cpu.test.ts`.
+- **Bounded sync work.** One request applies at most one page of `NATIVE_SYNC_PAGE` changes from a response
+  of at most 2 MiB; check a cap change against the cold first run in `native-tasks-cpu.test.ts`.
 - **Next.js.** This Next.js version has breaking changes from older ones: read the relevant guide in
   `web/node_modules/next/dist/docs/` before changing framework code, and heed deprecation notices.
 - **Style.** English code comments; small, tidy modules. Before committing run, in `worker/`, `npm run

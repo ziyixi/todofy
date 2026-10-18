@@ -3,8 +3,9 @@
 How to work on Todofy: local commands, repo layout, the Python Workers idioms this code relies on, and
 the contracts between modules. Todofy is two Workers: the TypeScript gateway `todofy` (`gateway/`: host
 routing, Access, CSRF, webhook and Basic credentials, assets, cron) and the Python `todofy-core`
-(`worker/`), which hosts the `TodofyCore` Durable Object where all D1, Gemini and Todoist work
-runs. `gateway-contract.md` is the contract between them. Plans and decisions live in `cloudflare-migration-plan.md` (v2, §0.1
+(`worker/`), which hosts the `TodofyCore` Durable Object where all D1, Gemini and Tasks work
+runs (Tasks through the core's `TASKS` binding; Todoist is not a task store any more, and the module and
+column names that still say `todoist` are frozen identities). `gateway-contract.md` is the contract between them. Plans and decisions live in `cloudflare-migration-plan.md` (v2, §0.1
 overrides) and `implementation-order.md`; where they disagree with this file on a name or interface,
 this file reflects what is in the tree. The retired Go service is gone from the tree (S11); it stays in
 the git history at `6c46ed4`.
@@ -231,8 +232,8 @@ Outbound calls (`runtime/interop.py`)
   covers the body read and really closes the socket (runtime-tested against a hanging fake).
 - Pyodide raises AbortError (an OSError) for every fetch failure. Only `signal.aborted` separates a
   timeout (`Failure.TIMEOUT`) from anything else, and nothing proves a failed request was never sent, so
-  every other failure is `Failure.LOST`. `Failure.NOT_SENT` is never produced; if the Todoist owner finds a
-  reliable pre-send signal it can add one, with a runtime test using a refused port.
+  every other failure is `Failure.LOST`. `Failure.NOT_SENT` is never produced by a fetch (only by a missing
+  `TASKS` binding); a reliable pre-send signal could add one, with a runtime test using a refused port.
 - `upstream.outcome()` → `core.classify.HttpOutcome` (parses Retry-After) — feed it to `classify_*`.
 - `to_js(value)` makes plain JS objects (default conversion builds a Map); `ArrayBuffer.to_bytes()`;
   `sha256_hex(bytes)` uses WebCrypto.
@@ -344,11 +345,11 @@ module seams. Signatures are the contract between modules — change one togethe
 
 | Owner | Files |
 |---|---|
-| **P – pipeline** | `runtime/coordinator.py`, `runtime/ledger.py`, `runtime/gemini.py`, `runtime/todoist.py`, `core/sql/ledger.py`, `config.py`, `interop.py` |
+| **P – pipeline** | `runtime/coordinator.py`, `runtime/ledger.py`, `runtime/gemini.py`, `runtime/native_tasks.py`, `core/sql/ledger.py`, `config.py`, `interop.py` |
 | **O – owner API** | `runtime/api.py`, `core/sql/views.py` |
 | **G – gateway** | `gateway/` (TypeScript: routing, Access, CSRF, webhook and Basic credentials, assets, cron) |
 | **R – reports & reminders** | `runtime/reports.py`, `runtime/reminder.py`, `runtime/retention.py`, `core/sql/{reports,reminders,retention}.py` |
-| **T – runtime tests** | `tests/fakes/{gemini_fake,todoist_fake}.py`, `tests/runtime/test_*.py` scenarios (v2 §6.2 + impl-order §1.5), `wrangler.test.toml` and `gateway/wrangler.test*.toml` vars |
+| **T – runtime tests** | `tests/fakes/gemini_fake.py`, `tests/runtime/tasks_support.py`, `tests/runtime/test_*.py` scenarios (v2 §6.2 + impl-order §1.5), `wrangler.test.toml` and `gateway/wrangler.test*.toml` vars |
 
 `entry.py`, `http.py`, `core/*` and the migration stay with the lead; a new `ApiError` or a schema change
 goes through the lead. The signatures below are as built (S5/S6 done); the spike code is gone.
@@ -368,16 +369,15 @@ def gemini_models(env) -> list[str]                 # GEMINI_MODELS csv, first i
 def gemini_email_models(env) -> list[str]           # GEMINI_EMAIL_MODELS, unset inherits GEMINI_MODELS
 ```
 Vars (plain, with defaults): `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_EMAIL_MODELS`,
-`GEMINI_TIMEOUT_MS` (60000), `GEMINI_DAILY_TOKEN_BUDGET` (3000000), `TODOIST_API_BASE`,
-`TODOIST_DEFAULT_PROJECT_ID`, `LOOKUP_DELAY_MS` (120000), `BACKOFF_BASE_MS` (60000),
-`WATCHDOG_MS` (120000), `TODOIST_ATTEMPT_TIMEOUT_MS` (14000), `REPORT_DEFAULT_TOP` (10), `REPORT_PRECOMPUTE_UTC` ("13:30"), `REMINDER_ENABLED`,
+`GEMINI_TIMEOUT_MS` (60000), `GEMINI_DAILY_TOKEN_BUDGET` (3000000), `TASKS_PUBLIC_URL`,
+`TODOIST_DEFAULT_PROJECT_ID` (a Tasks project ID), `LOOKUP_DELAY_MS` (120000), `BACKOFF_BASE_MS` (60000),
+`WATCHDOG_MS` (120000), `REPORT_DEFAULT_TOP` (10), `REPORT_PRECOMPUTE_UTC` ("13:30"), `REMINDER_ENABLED`,
 `LEGACY_TEXT_RETENTION_DAYS`, `MAINTENANCE_MODE`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`,
 `BUILD_SHA`, `TODOFY_PUBLIC_HOST` (the reminder's link); the GTD ledger's `GTD_COLLECT_UTC` ("13:00", `off`
 in the test config), `GTD_REVIEW_ENABLED`, `REPORT_CARRYOVER_DAYS` (14; 0 turns the carryover off),
-`TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional; unset = the default project),
-`PLUS_METADATA` (`cache`; `full` turns the Todoist adapter's caches off, runtime/plus_cache.py) and the
-test knobs `GTD_PAGE_TIMEOUT_MS` (20000), `PLUS_METADATA_MAX_AGE_MS` (300000) and `MAIL_BRIEFS_PACE_MS` (30000, between the brief backfill's model calls). Core secrets set by the owner: `GEMINI_API_KEY`,
-`TODOIST_API_KEY`. The gateway's vars and secrets (`ACCESS_*`, `TODOFY_HOOKS_HOSTS`,
+`TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional; unset = the default project) and the
+test knob `GTD_PAGE_TIMEOUT_MS` (20000). The core's one secret set by the owner: `GEMINI_API_KEY`; Tasks is
+reached through the `TASKS` binding. The gateway's vars and secrets (`ACCESS_*`, `TODOFY_HOOKS_HOSTS`,
 `MAIL_WEBHOOK_TOKEN_SHA256(_PREVIOUS)`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`) are listed in
 gateway-contract.md §1. Test configs shorten `*_MS` values (including the gateway's
 `JWKS_REFRESH_COOLDOWN_MS`); production never sets them.
@@ -413,13 +413,13 @@ reservation of a summary call an eviction cut short → `ledger.recover_interrup
 `retention.tick` when their `control` time is due → `gtd.tick` when `gtd_state` says the snapshot or the
 review is due → next alarm = min(ledger due, control times, GTD times). A
 wake-up that arrives while the loop runs re-arms the alarm for now when the loop ends. DO SQLite tables
-it owns: `control(next_reminder_check, next_report, next_maintenance, todoist_blocked_until)`,
-`llm_usage(day, reserved_tokens, used_tokens, calls)`, `llm_inflight(event_id, day, reserved)`,
-`todoist_calls(minute_bucket, count)`, `report_requests(hour_bucket, count)`,
+it owns: `control(next_reminder_check, next_report, next_maintenance, todoist_blocked_until)` (the last
+column is no longer read), `llm_usage(day, reserved_tokens, used_tokens, calls)`,
+`llm_inflight(event_id, day, reserved)`, `report_requests(hour_bucket, count)`,
 `report_failures(kind, top_n, day, count)`; `gtd_state` (runtime/gtd.py) holds the GTD ledger's schedule,
-collection cursor, ops facts and HMAC key as one JSON document; `plus_cache` (runtime/plus_cache.py) Todoist
-Plus's rebuildable metadata and connection copies, `plus_receipts` (runtime/plus_receipts.py) its writes'
-replay receipts, IDs only once done, read for 30 days and never deleted. Budget helpers used by R:
+collection cursor, ops facts and HMAC key as one JSON document; `plus_receipts` (runtime/plus_receipts.py) the
+planning writes' replay receipts, IDs only once done, read for 30 days and never deleted. A release that still
+wrote Todoist left `todoist_calls`, `plus_cache` and the mail-brief tables; `DO_SCHEMA` drops them. Budget helpers used by R:
 ```python
 def reserve_tokens(self, tokens: int, now: int) -> bool
 def settle_tokens(self, reserved: int, used: int, now: int) -> None
@@ -485,26 +485,20 @@ recommendation sizes keep the default Flash-first chain. Both share the same dea
 token budget. A completed email keeps its frozen summary and model through a config change.
 `SUMMARY_EMAIL` differs from Go's bytes in one deliberate line (2026-10): the summary starts with a
 one-sentence brief, which `core/mailbox.brief_of` reads back and `COMPLETE_SUMMARY` stores in
-`summaries.brief`. The one-time brief backfill (`runtime/mail_briefs.py`, `system=prompts.BRIEF_EMAIL`,
-the stored subject and summary as `user`) reserves against at most half of the day's budget
-(`reserve_tokens(share=0.5)`); see `runtime/mail_briefs.py`.
+`summaries.brief`. The one-time brief backfill of older summaries ran in an earlier release and is gone.
 
-### todoist.py (P; used by R)
+### native_tasks.py (P; used by R)
 ```python
-@dataclass(frozen=True, slots=True)
-class CreateResult:
-    verdict: TaskVerdict            # or ReminderVerdict via classify_reminder
-    task_id: str
-
 async def create_task(env, request: TaskRequest, *, budget_ms: int) -> CreateResult
-    # up to TODOIST_MAX_ATTEMPTS while verdict.retry_inline, TODOIST_ATTEMPT_TIMEOUT(_MS) each,
-    # backoff.inline_delay between, same frozen bytes and X-Request-Id every time. Once an attempt may
-    # have created the task (a timeout, say), the call ends CREATED or UNKNOWN only
-    # (classify.final_task_verdict): a later 429/5xx never turns into a durable resend.
+    # one bounded CreateTask on the TASKS binding under request_id(X-Request-Id), the uuid5 of the frozen
+    # Todoist-era request ID, so a replay is answered from Tasks' requests table. A lost answer is LOST
+    # (unknown, never resent); a refused binding (401/403) is an outage (503), retried later; no TASKS
+    # binding is NOT_SENT.
 async def find_footer_tasks(env, event_id: str) -> list[str] | None
-    # GET /api/v1/tasks?project_id=&cursor=, ≤ LOOKUP_MAX_PAGES pages, None on any failure
+    # Tasks' search for the footer, ≤ LOOKUP_MAX_PAGES pages; None unless the whole scan finished
 ```
-Build requests with `todoist_request.build_task_request` and `request_id.todoist_request_id`.
+Build requests with `todoist_request.build_task_request` (the module keeps its name: it defines the frozen
+request identity stored in `todoist_request_id`) and `request_id.todoist_request_id`.
 
 ### reminder.py (R)
 ```python
@@ -527,19 +521,17 @@ async def daily(db, days: int, now: int) -> dict       # the previous gateway's 
 async def day_page(db, size, before, now) -> (days, before)    # ListGtdDays (todofy.ui.v1 GtdDay), newest first
 async def review_page(db, size, before, now) -> (reviews, last)  # ListGtdReviews, the last 12 weeks
 ```
-The coordinator stands in for the Todoist budget (`count_todoist_calls`, `todoist_wait`, `block_todoist`)
-and step metrics (`record_step`). **Snapshot**: once a UTC day at `GTD_COLLECT_UTC`, `GET /api/v1/tasks`
-(every project, `limit=200`, ≤ 10 pages), then `GET /api/v1/tasks/completed/by_completion_date` (7-day
-window, ≤ 5 pages), then the aggregates: at most `CALLS_PER_ALARM` (5) GETs per invocation, continuing a
-second later from the cursor in `gtd_state`. Each page is one `INSERT … SELECT … FROM json_each(?)` of
+The coordinator stands in for step metrics (`record_step`). **Snapshot**: once a UTC day at
+`GTD_COLLECT_UTC`, Tasks' `ListTasks` over the `TASKS` binding (every project, 100 a page, ≤ 20 pages), then
+`ListCompletions` (7-day window, ≤ 10 pages), then the aggregates: at most `CALLS_PER_ALARM` (5) reads per
+invocation, continuing a second later from the cursor in `gtd_state`. Each page is one `INSERT … SELECT … FROM json_each(?)` of
 `core.gtd.snapshot_row` objects: a metadata whitelist plus `content_hmac` (HMAC-SHA256 with a key made in
 and never leaving the object's storage); titles and descriptions are dropped with the page. A failed list
-is retried in 10 minutes (Retry-After honoured; 401/403 blocks Todoist for 6 h like any call) at most three
-times a UTC day; more than 10 pages is `partial` (aggregates stored with `complete = 0`, no counters, no
+is retried in 10 minutes at most three times a UTC day; more than 20 pages is `partial` (aggregates stored with `complete = 0`, no counters, no
 carryover); a failed completed list leaves `completed_7d` NULL (`completed_source = 'none'`). Skipped while
-`PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, a Todoist block or a full call window; a `shed` guard defers a
+`PROCESSING_PAUSED` or `FORCE_PAUSE_TODOIST`; a `shed` guard defers a
 new snapshot (job `gtd_snapshot`, 48 h bound). **Review**: Sunday 17:00 UTC to the end of the ISO week, when
-`GTD_REVIEW_ENABLED`: one Todoist task per ISO week (`gtd_reviews`, claimed before the POST with its title,
+`GTD_REVIEW_ENABLED`: one task in Tasks per ISO week (`gtd_reviews`, claimed before the create with its title,
 body and project frozen; `X-Request-Id = todoist_request_id(subject, body, "todofy-review:" + week)`);
 `unknown` is never resent, `failed` is retried hourly up to 5 times within the week, a week left `sending`
 becomes `unknown`. The body holds counts, trends and links only (`core.gtd.review_body`). The daily
@@ -731,7 +723,7 @@ day after it was generated, so the dashboard's 23:40 report is the next day's di
 that evening.
 
 ### task-intent-v1 (`core/intents.py`, `core/sql/intents.py`, `runtime/intents.py`, `gateway/src/ops.ts`)
-Another app in the account proposes Todoist tasks through the gateway's `Intents` entrypoint, for the one source
+Another app in the account proposes tasks through the gateway's `Intents` entrypoint, for the one source
 its binding names (`proposeTasks`, `taskIntentStatus`; contract `../contracts/task-intent-v1`). Todofy never calls Gemini
 for an intent, never fetches its URLs, and logs only the source, intent ID, task number, counts and codes.
 
@@ -755,24 +747,24 @@ holds is answered `paused` (recorded, the pause's code), not its old failure: no
 `taskIntentStatus` keeps answering `failed` until a proposal after the pause re-queues it.
 (2) `TASK_INTENT_SOURCES` (unset: every source the contract knows; empty: none, an off switch that
 leaves mail running) → `source_not_allowed`; an item URL whose host is not exactly on the source's list (watch:
-the deployment's Watch host) → `url_not_allowed`. (3) Maintenance, processing pause, `FORCE_PAUSE_TODOIST`, the Todoist
-auth block, a backup lease → `paused`, nothing written. (4) One batch: the intent row, inserted only while
+the deployment's Watch host) → `url_not_allowed`. (3) Maintenance, processing pause, `FORCE_PAUSE_TODOIST`,
+a backup lease → `paused`, nothing written. (4) One batch: the intent row, inserted only while
 the source has fewer than 10 intents that UTC day (`RECORD`, count on `task_intents_created`), its task
 rows with a frozen UUID `X-Request-Id` each (`RECORD_TASKS`, guarded by `changes() = 1`), and the row as
 stored; no insert and no row → `daily_limit`, a row → a concurrent twin, replayed. Then the alarm is woken.
 
-Creating (`step`, from `coordinator._step`): intents need Todoist, so they are considered only while
-`_todoist_wait` allows calls; when mail and an intent are both due they take turns (`intent_turn`). A
-step works on the oldest due intent: a task left `sending` was interrupted and becomes `unknown`; then at
-most one read-only footer lookup and six creates, each re-gated by `_todoist_wait`, counted in the
-15-minute window, under the watchdog, and no new call once the step has run 60 s. In subtasks mode the
+Creating (`step`, from `coordinator._step`): intents write Tasks, so they are considered only while
+`task_writes_wait` allows writes (not while `FORCE_PAUSE_TODOIST`); when mail and an intent are both due they
+take turns (`intent_turn`). A step works on the oldest due intent: a task left `sending` was interrupted and
+becomes `unknown`; then at most one read-only footer lookup and six creates, under the watchdog, and no new
+call once the step has run 60 s. In subtasks mode the
 parent (n = 0) goes first and every child sends `parent_id` instead of `project_id`
 (`build_task_request(..., parent_id=)`); no child is sent before the parent exists or after it failed.
 Task states (`core.intents.TaskState`): created; unknown (a timeout, lost answer, 500 or 2xx without an
 ID) → footer lookup after `LOOKUP_DELAY_MS`: a match is created (the first of several), none fails the
 task `todoist_result_unknown`, a failed scan retries up to 6 times; recheck (after the proposer's retry)
-→ the same lookup, none resends the frozen request; 401/403 → the existing 6 h block, the task waits;
-another 4xx or a request Todoist would refuse → failed `todoist_rejected`; 429/502-504/not sent →
+→ the same lookup, none resends the frozen request; a 4xx or a request Tasks would refuse → failed
+`todoist_rejected`; 429/502-504/not sent →
 durable backoff (`rate_limited` / `retry_wait`) until 48 tries or 7 days, then failed
 `todoist_rejected`. The intent is `created` when every task exists (its text is dropped in the same
 statement), `failed` when no task can progress, else `pending` due at its earliest actionable task.
@@ -792,12 +784,10 @@ creating its unfinished tasks (reconcile with the proposer first, like mail).
 
 ### Fakes (T)
 Extend `tests/fakes/server.py` rather than forking it: `gemini_fake.py` (x-goog-api-key check,
-`generateContent` queue, `usageMetadata`, records `systemInstruction`/`responseSchema`) and
-`todoist_fake.py` (Bearer check → 401, auto-increment ids, `GET /api/v1/tasks` paged
-`{results, next_cursor}` for one project or all, `GET /api/v1/tasks/completed/by_completion_date` paged
-`{items, next_cursor}` with the cursor left out on the last page, task metadata (priority, due, deadline,
-labels, added_at), `complete()`/`delete()`, records `X-Request-Id`); both seed 429 with `Retry-After` in
-seconds and HTTP-date forms, `delay_ms`, and `hang`. The reports probe (`tests/runtime/reports_probe`) also
+`generateContent` queue, `usageMetadata`, records `systemInstruction`/`responseSchema`; seeds 429 with
+`Retry-After` in seconds and HTTP-date forms, `delay_ms`, and `hang`). Tasks is never faked: the runtime
+harness starts the real Tasks Worker on its own local D1 and binds it as `TASKS`; `tests/runtime/tasks_support.py`
+seeds and reads its tables. The reports probe (`tests/runtime/reports_probe`) also
 has a Durable Object, `GtdProbe`, that runs `runtime/gtd.py` on a real object storage at any `now`.
 
 ## 6. Metrics and ops queries
@@ -841,7 +831,7 @@ recorded), `mails_completed`, `mails_failed` (moves to `failed_summary`), `laten
   ends, not to D1. Like the data point, the counter write is best effort: `runtime/metrics.record`
   never raises and logs `{"metrics": "count_failed"}` (a full object storage, say), and every caller
   runs it after the step's result is committed (the ledger transition, the reminder's `FINISH`), so it
-  can never sit between a Gemini call or a created Todoist task and its record. A failed write only
+  can never sit between a Gemini call or a created task and its record. A failed write only
   under-counts that day (`tests/runtime/test_metrics_daily.py`, `tests/unit/test_metrics_record.py`).
 - A few minutes after UTC midnight (`metric_flush.next_at`, one more time in `_next_alarm_ms`) the
   object writes each finished day as one `INSERT … SELECT … FROM json_each(?)` statement plus one bounded
@@ -921,7 +911,7 @@ Rows are sampled at high volume, so always count with `SUM(_sample_interval)` an
    GROUP BY day, model, step
    ORDER BY day DESC, tokens_in DESC
    ```
-4. Todoist retries and slow creates (attempts > 1 means inline retries happened):
+4. Task writes and slow creates (one CreateTask per step since Tasks; older points may count inline retries):
    ```sql
    SELECT blob1 AS step, blob2 AS outcome, SUM(_sample_interval) AS steps,
           SUM(double4 * _sample_interval) AS requests,

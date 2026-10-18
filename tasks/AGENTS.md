@@ -8,8 +8,7 @@ Read the root rules, [README](README.md), [design](docs/design.md) and [verifica
 - Tasks owns task content; Todofy owns planning/mail and FlowDay owns queues/timing. Share code only through
   `packages/` and contracts through root `proto/`. Never import another app's implementation.
 - The installed PWA uses online task data. Do not add offline writes or private-data caching without a real need.
-- Keep native source activation separate from deployment. Import coverage and planning/FlowDay identities
-  must be checked before switching writers. Never fall back to Todoist after a native operation fails.
+- Todoist is not a task source; no code reads or writes it.
 - Preserve imported IDs, archived state, history and source completion counts. API access and a green build
   do not prove complete migration. Keep private snapshots outside the public repository.
 - Todofy's weekly backup copies every table through `TasksApi.exportBackup`; a migration that adds a table or

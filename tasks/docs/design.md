@@ -90,9 +90,8 @@ The Mail page reads only its bounded mail API and summaries expanded by the owne
 FlowDay or a task-project snapshot to discover mail. Optional tag/priority shortcuts are ordinary Tasks
 labels, separate from planning flags. Weekly review and GTD carryover count the pending Mail collection.
 
-New native planning, filing and order writes use generated Tasks method/body requests. The source-specific
-Sync converter is limited to unfinished historical receipts. Old Todoist mode stays isolated; there is no
-fallback from a failed native operation to the old account. A binding grants `read` or `read-write` access,
+Planning, filing and order writes use generated Tasks method/body requests; no Todoist path or fallback
+remains. A binding grants `read` or `read-write` access,
 so the Tasks implementation does not enumerate application names or understand mail categories.
 
 Bulk order updates use one Tasks request, one receipt and a bounded D1 transaction for all supplied etags.

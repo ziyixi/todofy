@@ -1,10 +1,10 @@
-# `task-intent-v1`: another app proposes Todoist tasks to Todofy
+# `task-intent-v1`: another app proposes tasks to Todofy
 
-Todofy is the only app that writes to Todoist. When another app in the account wants tasks created
-(today the watch app: its daily digest and urgent changes), it sends Todofy a **task intent**: a parent
-title and up to 30 items, under an idempotency key the proposer chooses. Todofy records it in its own
-D1 ledger, creates the tasks with its existing Todoist client and answers with counts. The proposer
-never sees a Todoist token, and a repeated or retried proposal never creates a task twice.
+When another app in the account wants tasks created (today the watch app: its daily digest and urgent changes),
+it sends Todofy a **task intent**: a parent title and up to 30 items, under an idempotency key the proposer
+chooses. Todofy records it in its own D1 ledger, creates the tasks in Tasks through its `TASKS` binding and
+answers with counts. The proposer never holds a Tasks credential, and a repeated or retried proposal never
+creates a task twice. (Until 2026-10 the tasks went to Todoist; the `todoist_*` codes keep their names.)
 
 Status: contract written 2026-09-30; both sides are implemented and released. The proposer is the watch app
 (`watch/worker/src/todofy.ts`); Todofy's side is `todofy/worker/todofy/core/intents.py` (validation, canonical form,
@@ -106,7 +106,7 @@ The same `(source, intent_id)` with the same hash is a replay; with another hash
 | `pending` | true | Recorded; Todofy's alarm is creating the tasks (`tasks_created` so far). `error_code` `retry_wait` or `rate_limited` while an attempt waits. | poll `taskIntentStatus` after `retry_after_seconds` (≥ 3 s) |
 | `created` | true | Every task exists. From `taskIntentStatus`, or from `proposeTasks` never (creation is asynchronous). | done |
 | `duplicate` | true | `proposeTasks` for an intent that was **already** fully created: nothing new was sent. | show "already sent" |
-| `paused` | false | Todofy does not accept intents now: `maintenance`, `processing_paused`, `todoist_paused` (`FORCE_PAUSE_TODOIST`), `todoist_blocked` (auth block), `backup_active`. **Nothing was recorded.** | may edit and propose again later (same `intent_id` is fine) |
+| `paused` | false | Todofy does not accept intents now: `maintenance`, `processing_paused`, `todoist_paused` (`FORCE_PAUSE_TODOIST`), `backup_active` (`todoist_blocked`, the Todoist auth block, is no longer answered). **Nothing was recorded.** | may edit and propose again later (same `intent_id` is fine) |
 | `paused` | true | Recorded earlier, creation held for the same reasons; resumes by itself. Also the answer to `proposeTasks` for a **failed** intent while a pause holds: nothing was re-queued, and `taskIntentStatus` keeps answering `failed`. | poll less often; after a retry of a failed intent, show it as still failed and retry after the pause |
 | `failed` | true | Todoist refused a task (`todoist_rejected`) or its result stayed unknown after the footer lookup (`todoist_result_unknown`); `tasks_created` < `tasks_total`. | offer retry: `proposeTasks` again with the **same** content re-queues only the unfinished tasks (unknown ones get a lookup first) |
 | `rejected` | false | Refused, nothing recorded or sent: `daily_limit`, `url_not_allowed`, `source_not_allowed`. | show the reason |
@@ -117,7 +117,7 @@ The same `(source, intent_id)` with the same hash is a replay; with another hash
 than every `statusMinIntervalSeconds` (3 s).
 
 **Content rule.** Results carry codes, counts, booleans, the caller's own IDs and a timestamp: never
-task text, Todoist IDs or remote response text. Todofy logs only `source`, `intent_id`, counts and codes.
+task text, task IDs or remote response text. Todofy logs only `source`, `intent_id`, counts and codes.
 
 ## Todofy's side (implemented; keeps every existing behaviour identical)
 
@@ -135,20 +135,18 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
   is re-queued (no write under a pause) and the answer is `paused` (recorded, the pause's code;
   `taskIntentStatus` still answers `failed`); otherwise its current state, reported as `paused`
   (recorded) while a pause holds; (2) maintenance /
-  processing paused / force pause / auth block / backup lease → `paused`, nothing written; (3)
+  processing paused / force pause / backup lease → `paused`, nothing written; (3)
   `daily_limit` (10 new intents per source and UTC day) → `rejected`; (4) insert the intent and its task
   rows in one D1 batch and wake the alarm → `pending`. It never calls Gemini.
 - **Create** (alarm): intent work shares the existing `_step` with the mail ledger (when both are due
   they alternate, so mail keeps its cadence); one step creates at most **6** tasks of one intent through
-  the existing `todoist.create_task` (≤ 3 attempts each, same frozen bytes and `X-Request-Id`), which
-  keeps a step under Workers Free's 50 subrequests per invocation. Every call is counted in the existing
-  15-minute Todoist window and gated by the existing `_todoist_wait` (force pause, auth block, window).
-  In subtasks mode the parent (n = 0) is created first and its Todoist ID becomes each child's
+  `native_tasks.create_task` (one bounded `CreateTask` each under the frozen request ID), which keeps a step
+  under Workers Free's 50 subrequests per invocation; intent steps run only while task writes are open (not
+  under `FORCE_PAUSE_TODOIST`). In subtasks mode the parent (n = 0) is created first and its task ID becomes each child's
   `parent_id` (`core/todoist_request.build_task_request` gains an optional `parent_id`; a child sends it
   instead of `project_id`, and a child's frozen body is built only once the parent's ID is known). If the
   parent fails, no child is sent. Verdicts map as for mail: CREATED → task done;
-  RETRY_LATER → `retry_wait` with the existing backoff; BLOCKED → the existing 6 h auth block
-  (`paused`/`todoist_blocked`); UNKNOWN → a read-only footer lookup (existing `find_footer_tasks`
+  RETRY_LATER → `retry_wait` with the existing backoff; UNKNOWN → a read-only footer lookup (existing `find_footer_tasks`
   generalised to a footer string) before anything is resent; a 4xx refusal → `failed`/`todoist_rejected`.
   Automatic attempts stop after 48 tries or 7 days per task (→ `failed`).
 - **Task text** (deterministic, `core/intents.py`: `task_text`, `footer`): content = the title; description = the
@@ -157,7 +155,7 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
   parent title is added as a line above the footer (`— 网页监视 · 紧急变化`). Titles are sent as
   given (no Markdown added).
 - **Retention**: `payload_json` is set to NULL once every task exists or the intent is failed for
-  30 days; the row (hash, counts, codes, request IDs, Todoist IDs) is kept 400 days for idempotency, then
+  30 days; the row (hash, counts, codes, request IDs, task IDs) is kept 400 days for idempotency, then
   deleted with the existing retention tick.
 - **Not affected by the ops-v1 guard** (owner-initiated, like real mail), not reported in the reminder,
   not in `status()` beyond two counters (`intents_pending`, `intents_failed_7d`).
@@ -181,8 +179,8 @@ task text, Todoist IDs or remote response text. Todofy logs only `source`, `inte
   fixtures), and Todofy's `test_intents.py` pins the canonical form and SHA-256 of every intent fixture (D1 keeps
   those hashes 400 days; a replay must hash the same).
 - Todofy: unit tests of validation, canonical hash, rendering and the state machine; runtime tests over a
-  real service binding (fake Todoist): replay, conflict, pause, unknown + lookup, partial failure retry,
-  48-attempt cap, and that mail processing is unchanged with and without intents.
+  real service binding (a real Tasks Worker): replay, conflict, pause, unknown + lookup, partial failure retry,
+  and that mail processing is unchanged with and without intents.
 - The watch app: its client maps every state and error code to recorded, refused or a retry.
 
 Changing the contract: additive changes (a new source, a new error code) update the `.proto` file, the

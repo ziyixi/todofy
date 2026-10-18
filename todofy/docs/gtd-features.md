@@ -23,6 +23,18 @@ Rules that hold throughout (they restate `dev-notes.md` and `contracts/ops-v1` f
   (never an older day's list) the recommendation input, prompt and payload are byte-for-byte today's
   24 h report, plus the two new counts at 0. The optional completed list never blocks Todoist.
 
+## Since Tasks replaced Todoist (2026-10)
+
+This section supersedes the Todoist specifics below, which stay as the design record. The snapshot reads
+Tasks through the core's `TASKS` binding: `ListTasks` (at most 20 pages of 100) and `ListCompletions` (the
+7-day window, at most 10 pages), at most `CALLS_PER_ALARM` (5) reads per invocation. There is no Todoist
+token, call window or auth block, and no `todoist_blocked` signal: collection and the review are held only by
+`PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, `MAINTENANCE_MODE` and the ops `shed` guard, and a failed read
+retries in 10 minutes as before. The review is created in Tasks under its frozen request ID; its links open
+Tasks (`<TASKS_PUBLIC_URL>/?task=<id>` for the oldest inbox tasks, `周回顾：<TASKS_PUBLIC_URL>/?review=1#/plan`
+for Plan's weekly review), and its first line reads "Tasks 元数据". The three project secrets keep their
+`TODOIST_*_PROJECT_ID` names and hold Tasks project IDs.
+
 ## 1. Todoist API v1 facts this design relies on
 
 Checked on 2026-09-30 against the OpenAPI document embedded in https://developer.todoist.com/api/v1/
@@ -208,7 +220,7 @@ its next time to the alarm.
 
 | Job | When | Gate | Per alarm | Per day |
 | --- | --- | --- | --- | --- |
-| collect | `GTD_COLLECT_UTC` (default `13:00`, `off` in test configs); a failed attempt retries in 10 min, ≤ 3 attempts a UTC day | skipped while `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, a Todoist auth block or a full call window (`_todoist_wait`); `MAINTENANCE_MODE` stops the whole alarm; deferrable under an ops `shed` guard as job `gtd_snapshot` (bound 48 h) | ≤ 5 Todoist GETs and ≤ 8 D1 statements, continuing 1 s later | 2–4 GETs typical, ≤ 15 max; ≈ 300 rows written + 300 deleted |
+| collect | `GTD_COLLECT_UTC` (default `13:00`, `off` in test configs); a failed attempt retries in 10 min, ≤ 3 attempts a UTC day | skipped while `PROCESSING_PAUSED` or `FORCE_PAUSE_TODOIST`; `MAINTENANCE_MODE` stops the whole alarm; deferrable under an ops `shed` guard as job `gtd_snapshot` (bound 48 h) | ≤ 5 Todoist GETs and ≤ 8 D1 statements, continuing 1 s later | 2–4 GETs typical, ≤ 15 max; ≈ 300 rows written + 300 deleted |
 | review | Sunday 17:00 UTC (09:00 PST / 10:00 PDT); failed create retried hourly, ≤ 5 attempts, only until the ISO week ends | `GTD_REVIEW_ENABLED` and the same Todoist gates; never deferred by `shed` (owner-facing, like the reminder) | 1 POST, ≤ 6 D1 statements | 1 POST a week |
 
 Collection runs as one loop per alarm: task pages, then completed pages, then the aggregate, at most 5
@@ -239,7 +251,7 @@ honours `Retry-After` inside the 10-minute retry. Each call counts in `_count_to
   output pinned by `tests/unit/test_gtd.py`:
 
   ```
-  快照 2026-10-04（Todoist 元数据，只含计数）
+  快照 2026-10-04（Tasks 元数据，只含计数）
   收件箱：开放 23（上周 31，-8）；最老 41 天（上周 41，持平）；0–7 天 12 · 8–14 天 5 · 15–30 天 4 · >30 天 2
   全部项目：开放 57（上周 57，持平） · 逾期 3（上周 3，持平） · 无日期 40（上周 40，持平）
   近 7 天：新建 35 · 完成 42（上周 42，持平）
@@ -255,15 +267,15 @@ honours `Retry-After` inside the 10-minute retry. Each call counts in `_count_to
   all-project open, overdue, undated and completed. "本周重点" (at most two lines) comes from the numbers:
   inbox tasks older than 30 days, overdue grown since last week (or any overdue when nothing else stands
   out), inbox grown since last week. When the snapshot day has inbox tasks, a line
-  `收件箱最老的任务：https://app.todoist.com/app/task/<id> …` links the three oldest by ID (`OLDEST_TASKS`,
+  `收件箱最老的任务：<TASKS_PUBLIC_URL>/?task=<id> …` links the three oldest by ID (`OLDEST_TASKS`,
   one bounded read of that day's rows; IDs outside `[A-Za-z0-9_-]` are left out). Mail Hero has no
   `needs_review` counter in ops-v1 today; the review lists the Mail Hero items of the stored dashboard
   report (`parse_failed`, `delivery_failed`, `pending_stale`, …, with their numeric metrics), which is the
   existing data Todofy may read. A Mail Hero `needs_review` counter plus a dashboard digest item is a
   separate, additive ops-v1 change. The dashboard link comes from the stored report's `dashboard_url`;
-  without one the line is left out. Once Todoist Plus is set up (`plus_settings`, read in the body's
-  first batch), the links end with `Plus 周回顾：https://app.todoist.com/app/today?todoist-plus=review`,
-  which opens Plan's weekly review checklist where the extension is installed.
+  without one the line is left out. Once planning is set up (`plus_settings`, read in the body's
+  first batch), the links end with `周回顾：<TASKS_PUBLIC_URL>/?review=1#/plan`, which opens Plan's weekly
+  review checklist in Tasks.
 - Schedule: outside Sunday 17:00 UTC – Monday 00:00 UTC nothing runs; inside it, a disabled or paused
   review is looked at again every 10 minutes (switching it on during the window still makes that week's
   task).
@@ -349,7 +361,6 @@ fallback is automatic and `REPORT_CARRYOVER_DAYS=0` is the committed kill switch
 | --- | --- |
 | Todoist list fails, times out, returns malformed pages, or > 10 pages | snapshot `failed`/`partial`; recommendation = today's 24 h report; counters left out; retried ≤ 3 times that day |
 | Completed call fails (any status, 401/403 included) | `completed_7d` NULL, `completed_source = 'none'`, review says "完成：不可用"; review completion is picked up the next day; **no Todoist block** (the endpoint may refuse a valid token, and a block would stop mail tasks for 6 h every day) |
-| Auth 401/403 on the task list | the shared 6 h Todoist block (also pauses mail tasks, as today); `todoist_blocked` signal |
 | Today's snapshot failed, partial or late | nothing carried: the 24 h report (never yesterday's list) |
 | Recommendation attempt with carryover fails | later attempts that UTC day are the 24 h report; a refused token reservation retries at once without the carryover |
 | DO storage lost | new HMAC key (hashes change once), schedule due now, counters absent until the next collect |

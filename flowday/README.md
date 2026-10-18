@@ -4,8 +4,8 @@ FlowDay is a daily execution board for solo work: it shows tasks from your confi
 belongs in today, order it as a queue, run a timer on one task at a time (time blocks, Pomodoro,
 misc time), and review what actually happened.
 
-Task sources are read-only for FlowDay. Production reads native Tasks through the private `TASKS` service binding;
-Todoist remains the source only where that binding is absent. A mirrored task's estimate is its Tasks duration,
+Tasks is FlowDay's only task source, read-only, through the private `TASKS` service binding. A mirrored task's
+estimate is its Tasks duration,
 shown read-only and edited in Tasks. Local tasks with their estimates, queues and time records belong to FlowDay.
 
 ![FlowDay showing a planned day with arranged tasks, a task pool, and completed work](docs/readme/flowday-main.png)
@@ -30,8 +30,8 @@ window.
 | Path | What it is |
 | --- | --- |
 | `wrangler.toml` | The Worker's production config (static assets from `web/out`, D1 `DB`, the Access AUD, the Custom Domain `flowday.ziyixi.science` and `PUBLIC_HOST`) |
-| `worker/` | The Worker: `src/` (router, Access and CSRF, API, D1 stores, the read-only Todoist sync), `test/` (Node unit tests; `test/runtime/` on workerd with real D1) |
-| `migrations/` | D1 schema: `0001` is the container-era SQLite schema, unchanged; `0002` adds `tasks.todoist_project_id`; `0003` drops four indexes no query needs |
+| `worker/` | The Worker: `src/` (router, Access and CSRF, API, D1 stores, the read-only Tasks sync), `test/` (Node unit tests; `test/runtime/` on workerd with real D1) |
+| `migrations/` | D1 schema: `0001` is the container-era SQLite schema, unchanged; `0002` adds `tasks.todoist_project_id` (now the Tasks project ID); `0003` drops four indexes no query needs; `0004` adds the Focus columns and timer receipts; `0005` deletes the retired Todoist settings |
 | `web/` | The UI (`app/`, `components/`, `features/`, `lib/`), its tests (`web/__tests__/`) and scripts |
 | `deploy/` | `deploy-vars.mjs` (the deploy wrapper, the dashboard's shape: `BUILD_SHA` and the Worker secrets at deploy; refuses a placeholder D1 id or AUD) and its tests; `migrate/flowday_migrate.py`, the F4 import of the container's SQLite file into D1 (export, check-empty, import, verify, reset; within the account's daily D1 write budget, read from the GraphQL Analytics API; [`docs/design.md`](docs/design.md) section 11) |
 | `docs/design.md` | The Workers Free design: sync, write budget, limits, security, migration plan |
@@ -68,7 +68,7 @@ with `E2E_TEST_ROUTES=true` under the loopback bypass. Screenshots and goldens a
 fixed date, viewport and seed data, so compare them on the same platform.
 
 Test data is always synthetic. Never commit a database file, a real task title, a screenshot of real
-data or a Todoist token.
+data or a token.
 
 ## Deploy
 
@@ -87,14 +87,13 @@ dry-runs, runs the hostname guard (`tools/cf-guard`), applies the D1 migrations
 
 The deploy token is `CF_API_TOKEN`, as for the dashboard.
 
-The wrapper writes four Worker secrets:
+The wrapper writes three Worker secrets:
 
 | Worker secret | From the `production` environment secret | Why |
 | --- | --- | --- |
 | `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | FlowDay's owner is the dashboard's owner: one person with the same Access identities, so FlowDay reuses the dashboard's secret instead of a copy that could drift |
 | `ACCESS_OWNER_ALIASES` | `DASHBOARD_ACCESS_OWNER_ALIASES` | as above |
 | `CSRF_SIGNING_KEY` | `FLOWDAY_CSRF_SIGNING_KEY` (FlowDay's own) | a separate key per app: a token of one app never verifies at another |
-| `CREDENTIAL_KEY` | `FLOWDAY_CREDENTIAL_KEY` (FlowDay's own) | seals the Todoist key stored in D1 (AES-256-GCM, `worker/src/credentials.ts`). Keep an offline copy; losing or changing it only means entering the Todoist key again |
 
 Inside the job the inputs keep their `FLOWDAY_*` names; only the job's `env:` maps the owner's two to the
 dashboard's secrets, and `.github/scripts/test_wrangler_configs.py` checks that mapping (and that the dashboard's
@@ -154,7 +153,7 @@ one Custom Domain, `flowday.ziyixi.science`).
 - **Remove FlowDay's Worker.** Remove `FlowDay deploy` and FlowDay from `PRODUCTION` (`test_wrangler_configs.py`)
   and `drift_desired.py`, and regenerate the dashboard's desired state, in one commit; then delete the Worker
   `flowday` in the Cloudflare dashboard. Delete the D1 `flowday` only on purpose (export it first with
-  `wrangler d1 export`), and the secrets `FLOWDAY_CSRF_SIGNING_KEY` and `FLOWDAY_CREDENTIAL_KEY`
+  `wrangler d1 export`), and the secret `FLOWDAY_CSRF_SIGNING_KEY`
   (`gh secret delete <name> -R ziyixi/todofy --env production`). The `DASHBOARD_ACCESS_OWNER*` secrets stay (the
   dashboard, the links app and the watch app use them), and so do the Access apps `flowday` and `flowday-bypass` (the container's hostname
   uses them until F6). The D1 `flowday` and both Access apps are managed by `infra/` (IaC P4): never delete or edit
@@ -193,6 +192,6 @@ Review the day or the week:
 
 Focus in Tasks uses the same daily queue and server-owned timer through Todofy's private service binding to
 FlowDay's `NativeFocusEntrypoint`. Timer changes are checked against the current version so another window cannot
-overwrite a newer session. Reload any FlowDay tab that was open before this update. FlowDay still never writes
-Todoist; completing a task from Focus is performed by Todofy. A mirrored task's estimate is its Tasks duration; only
+overwrite a newer session. Reload any FlowDay tab that was open before this update. FlowDay never writes
+Tasks; completing a task from Focus is performed by Todofy. A mirrored task's estimate is its Tasks duration; only
 a local task's is edited here.

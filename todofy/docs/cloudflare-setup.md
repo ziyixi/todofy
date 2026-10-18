@@ -11,8 +11,8 @@ Todofy is two Workers ([gateway-contract.md](gateway-contract.md)):
 
 - `todofy`, the TypeScript gateway: the custom domains, Access and CSRF checks, webhook and newsletter
   credential checks, the UI assets and the cron. It holds the credential digests and the owner emails.
-- `todofy-core`, the Python Worker that hosts the Durable Object. It has no public route; it holds D1 and
-  the Gemini and Todoist API keys, and does all the work inside the object (30 s CPU per call instead of
+- `todofy-core`, the Python Worker that hosts the Durable Object. It has no public route; it holds D1, the
+  Gemini API key and the `TASKS` binding to Tasks, and does all the work inside the object (30 s CPU per call instead of
   a plain Worker's 10 ms on Workers Free).
 
 ## 1. D1 database
@@ -73,15 +73,15 @@ Environment secrets:
 | `CF_API_TOKEN` | Cloudflare API token: Workers Scripts edit (covers both Workers), D1 edit, zone Workers Routes / Custom Domains and DNS edit for the zone, account settings read. No billing permissions. |
 | `TODOFY_ACCESS_OWNER` | the owner's primary Access email |
 | `TODOFY_ACCESS_OWNER_ALIASES` | comma-separated other logins of the owner (may be empty) |
-| `TODOFY_TODOIST_DEFAULT_PROJECT_ID` | Todoist project for new tasks (required). Deployed to the core as the Worker secret `TODOIST_DEFAULT_PROJECT_ID` |
-| `TODOFY_TODOIST_OPS_PROJECT_ID` | optional: the Todoist project of the daily `[Todofy System]` reminder (with the ops digest). Unset or empty: the default project, as before. Deployed as the core secret `TODOIST_OPS_PROJECT_ID`, uploaded as one space when unset (read as unset; removing the GitHub secret therefore also unsets it on the Worker at the next deploy); a day's project is frozen with its claim, so changing it affects the next day ([gtd-features.md](gtd-features.md) §3) |
+| `TODOFY_TODOIST_DEFAULT_PROJECT_ID` | the Tasks project for the tasks Todofy creates (required; the name stays from the Todoist era). Deployed to the core as the Worker secret `TODOIST_DEFAULT_PROJECT_ID` |
+| `TODOFY_TODOIST_OPS_PROJECT_ID` | optional: the Tasks project of the daily `[Todofy System]` reminder (with the ops digest). Unset or empty: the default project, as before. Deployed as the core secret `TODOIST_OPS_PROJECT_ID`, uploaded as one space when unset (read as unset; removing the GitHub secret therefore also unsets it on the Worker at the next deploy); a day's project is frozen with its claim, so changing it affects the next day ([gtd-features.md](gtd-features.md) §3) |
 | `TODOFY_TODOIST_REVIEW_PROJECT_ID` | optional: the project of the Sunday review task, the core secret `TODOIST_REVIEW_PROJECT_ID`; unset or empty: the default project (uploaded as one space, like the Ops project) |
 
 These are secrets rather than variables because the repository is public and wrangler prints every plain
 var with its value in the deploy log (pywrangler also echoes its command line). The deploy's "Write the
 Worker secrets files" step writes each Worker's own owner-only file, and the deploy passes it as Worker
 secrets (`--secrets-file`, hidden in the Cloudflare dashboard and API): the owner emails to the gateway
-`todofy` only, the Todoist projects to `todofy-core` only.
+`todofy` only, the Tasks projects to `todofy-core` only.
 
 Environment variables: only the operational switches, stated at every deploy so a release never overwrites
 the operational state ([ci-cd.md](ci-cd.md) "Changing a switch"). `deploy/deploy_vars.py` validates them
@@ -95,7 +95,6 @@ vars, as is `BUILD_SHA`):
 | `TODOFY_PROCESSING_PAUSED` | `true` / `false` (required); core |
 | `TODOFY_FORCE_PAUSE_TODOIST` | `true` / `false` (required); core |
 | `TODOFY_GTD_REVIEW_ENABLED` | `true` / `false` (required); core. The Sunday review task ([gtd-features.md](gtd-features.md) §7); `false` stops it without a code change. The daily snapshot itself is committed (`GTD_COLLECT_UTC`) |
-| `TODOFY_PLUS_METADATA` | `cache` / `full` (set like every switch; bootstrap sets `cache`, and a deploy refuses it unset); core. `full` turns the Todoist adapter's planning caches off (`runtime/plus_cache.py`) |
 
 Every other setting is committed in the two production configs (top level = production; the repository
 is public, so nothing personal or secret goes there), and changing one is a commit:
@@ -112,9 +111,9 @@ is public, so nothing personal or secret goes there), and changing one is a comm
 | lookup delay, legacy text retention | `wrangler.toml` `LOOKUP_DELAY_MS`, `LEGACY_TEXT_RETENTION_DAYS` (`0` keeps imported mail text forever) |
 | GTD snapshot time, carryover | `wrangler.toml` `GTD_COLLECT_UTC` (`13:00`, before the 13:30 precompute; `off` stops the snapshot and with it the carryover and the GTD counters), `REPORT_CARRYOVER_DAYS` (`14`, at most 14; `0` turns the carryover off) |
 
-The Gemini and Todoist base URLs are fixed in `wrangler.toml` and pinned by tests. `BUILD_SHA` (the commit)
+The Gemini base URL is fixed in `wrangler.toml` and pinned by tests. `BUILD_SHA` (the commit)
 is added at deploy on both Workers. Each Worker gets only the vars it reads: hosts and `ACCESS_*` go to the
-gateway; the mail source, Gemini, Todoist, report, retention and switch settings go to the core;
+gateway; the mail source, Gemini, Tasks, report, retention and switch settings go to the core;
 `BUILD_SHA`, `MAINTENANCE_MODE` and `TODOFY_PUBLIC_HOST` go to both. `deploy/test_wrangler_configs.py`
 checks the committed values (formats, bounds, host order, the core/gateway pairing).
 
@@ -143,16 +142,17 @@ Core `todofy-core`:
 | Secret | How to derive it |
 |---|---|
 | `GEMINI_API_KEY` | a Gemini API key for Todofy |
-| `TODOIST_API_KEY` | a Todoist API token |
+
+The core reaches Tasks through its `TASKS` service binding and needs no Tasks credential.
 
 Until a gateway secret is set, the endpoint that needs it answers 503 `not_configured` (the webhook, the
 newsletter endpoints, or owner writes). A missing core key shows as not configured on the UI's setup
 page. `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` are also gateway secrets, but every deploy sets them from
 the GitHub environment secrets; do not `secret put` them.
 
-On a fresh account, put the core keys before the first deploy: `todofy-core` does not exist yet, so
+On a fresh account, put the core key before the first deploy: `todofy-core` does not exist yet, so
 wrangler asks whether to create it; answer yes. It creates an empty placeholder Worker holding only the
-two secrets, and the first deploy replaces its code and keeps the secrets (wrangler 4.142.0 behaviour,
+secret, and the first deploy replaces its code and keeps the secret (wrangler 4.142.0 behaviour,
 read from its source). The gateway secrets can be put after the first deploy.
 
 Also on a fresh account (or after the `todofy` script was deleted): a script without a migration tag
@@ -233,21 +233,21 @@ in [gateway-contract.md](gateway-contract.md):
   `TODOFY_PUBLIC_HOST`. A `shed` guard it sets defers only the weekly backup (never past 7.5 days since
   the last complete one, 12 h before `backup_stale` at 8 days), retention and the metrics rollup (never
   past 72 h since their last complete run; once due they run until caught up) and the GTD ledger's daily
-  Todoist snapshot (never past 48 h since the last one); mail, canaries, the reminder, the Sunday review and
+  Tasks snapshot (never past 48 h since the last one); mail, canaries, the reminder, the Sunday review and
   report precompute keep running. Guard and latest report live in the
   object's storage, not in D1 or the backups.
 
 - Task intents (contracts/task-intent-v1): the watch app binds the least-privilege `Intents` entrypoint to propose
-  Todoist tasks (`props = { source = "watch" }`: only its own source's intents, none of the ops-v1 methods;
+  tasks (`props = { source = "watch" }`: only its own source's intents, none of the ops-v1 methods;
   `docs/gateway-contract.md` §3.8), so Todofy deploys before watch (CI's `Watch deploy` waits for `Todofy deploy`);
   a watch call to an older Todofy is retried as `unavailable`. Nothing to configure: intents use the
-  existing `TODOIST_API_KEY` and `TODOIST_DEFAULT_PROJECT_ID`. `MAINTENANCE_MODE`, `PROCESSING_PAUSED`
+  `TASKS` binding and the existing `TODOIST_DEFAULT_PROJECT_ID`. `MAINTENANCE_MODE`, `PROCESSING_PAUSED`
   and `FORCE_PAUSE_TODOIST` hold intents as they hold mail (new proposals answer `paused`, nothing is
   recorded). To turn the intake off without holding mail, add `TASK_INTENT_SOURCES = ""` to the `[vars]`
   of `wrangler.toml` (and to `CORE_VARS` in `deploy/test_wrangler_configs.py`) and deploy (every proposal then answers `rejected`/`source_not_allowed`; recorded
   intents still finish); unset, it accepts every source the contract lists. A source the contract no longer lists
   (its enum value reserved) is refused like an unknown one; a still-pending ledger row of it fails at its next step
-  without a Todoist call, and retention removes its rows like any others. After a D1 restore, pending intents
+  without a Tasks write, and retention removes its rows like any others. After a D1 restore, pending intents
   resume creating their unfinished tasks: keep `FORCE_PAUSE_TODOIST` on until they are reconciled.
 
 ## 6. Local checks before the first deploy
@@ -259,7 +259,7 @@ locally too. Build the UI first (`npm run build --prefix web`).
 ```sh
 export GITHUB_SHA=$(git rev-parse HEAD) TODOFY_MAINTENANCE_MODE=false TODOFY_PROCESSING_PAUSED=false \
   TODOFY_FORCE_PAUSE_TODOIST=false TODOFY_REMINDER_ENABLED=false TODOFY_TODOIST_DEFAULT_PROJECT_ID=placeholder \
-  TODOFY_GTD_REVIEW_ENABLED=false TODOFY_PLUS_METADATA=cache TODOFY_ACCESS_OWNER=owner@example.com \
+  TODOFY_GTD_REVIEW_ENABLED=false TODOFY_ACCESS_OWNER=owner@example.com \
   TODOFY_ACCESS_OWNER_ALIASES=
 secrets=$(mktemp -d)
 uv run python deploy/deploy_vars.py secrets core "$secrets/core.json"
@@ -389,9 +389,8 @@ The release that adds [gtd-features.md](gtd-features.md) needs these owner steps
 
 1. Before merging: set the GitHub environment variable `TODOFY_GTD_REVIEW_ENABLED` to `false` (Settings →
    Environments → `production`). The deploy refuses to run without it, like every switch.
-2. Optional, any time: create the Todoist projects "Ops" and "Review" by hand and store their IDs as the
-   environment secrets `TODOFY_TODOIST_OPS_PROJECT_ID` and `TODOFY_TODOIST_REVIEW_PROJECT_ID` (the ID is the
-   last part of the project's URL). Unset, both tasks go to the default project, as before.
+2. Optional, any time: create the Tasks projects "Ops" and "Review" by hand and store their IDs as the
+   environment secrets `TODOFY_TODOIST_OPS_PROJECT_ID` and `TODOFY_TODOIST_REVIEW_PROJECT_ID`. Unset, both tasks go to the default project, as before.
 3. Before merging, in the newsletter (separate repository): change its recommendation captions, which
    say "近 24 小时" (`source_label` and `_LIMITATIONS` in `src/newsletter/todofy.py`), to cover older
    still-open tasks, e.g. "近 24 小时 + 仍未完成的旧任务". Carried picks start their reason with

@@ -198,7 +198,7 @@ that passed is what ships:
 1. install locked dependencies (root, `gateway/`, `web/`) and build the UI from the verified revision
 2. read the hosts from the committed `gateway/wrangler.toml` (the environment URL and the probes below)
 3. "Write the Worker secrets files", the only step that reads the personal environment secrets:
-   `deploy/deploy_vars.py secrets core` writes the core's owner-only secrets file (the Todoist projects) and
+   `deploy/deploy_vars.py secrets core` writes the core's owner-only secrets file (the Tasks projects) and
    `secrets gateway` the gateway's (the owner's Access emails), both in `$RUNNER_TEMP`, removed at the end
    even on failure; then dry-run both bundles before changing anything
 4. `wrangler d1 migrations apply DB --remote --config wrangler.toml`, then
@@ -209,8 +209,8 @@ that passed is what ships:
 
    `deploy/deploy_vars.py` adds what is never committed and refuses a missing or invalid value, because a
    deploy without a var deletes it. With `--var`: `BUILD_SHA` (the commit) and `MAINTENANCE_MODE` on both
-   Workers; `REMINDER_ENABLED`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, `GTD_REVIEW_ENABLED` and
-   `PLUS_METADATA` (`cache` while its variable is unset) on the core. With `--secrets-file`, as Worker secrets (wrangler and the Cloudflare dashboard show a plain var's
+   Workers; `REMINDER_ENABLED`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST` and `GTD_REVIEW_ENABLED` on the
+   core. With `--secrets-file`, as Worker secrets (wrangler and the Cloudflare dashboard show a plain var's
    value, and pywrangler echoes its command line): `TODOIST_DEFAULT_PROJECT_ID` (required),
    `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional) on the core; `ACCESS_OWNER` and
    `ACCESS_OWNER_ALIASES` on the gateway. A deploy keeps every secret it does not upload, so an unset
@@ -229,7 +229,7 @@ that passed is what ships:
    Rolling this change back (a revert) sends the projects as `--var` again next to the secrets of the same
    name; that direction is not verified in production. If Cloudflare refuses that deploy, delete the three
    secrets (`npx wrangler secret delete <NAME> --config wrangler.toml`, from `todofy/`) and rerun the
-   workflow at once (between the two, new tasks have no project and go to the Todoist inbox).
+   workflow at once (between the two, new tasks have no project and go to the Tasks Inbox).
 6. poll `https://<first hooks host>/health` until it reports this commit (10 × 15 s; the first deploy waits
    for the Custom Domain certificate). The gateway answers `/health` without the Durable Object, so this
    proves the gateway build only.
@@ -275,7 +275,7 @@ The first deploy of the split replaces the old single Python Worker `todofy`; it
 ## Changing a switch
 
 Operational switches (`TODOFY_MAINTENANCE_MODE`, `TODOFY_PROCESSING_PAUSED`, `TODOFY_FORCE_PAUSE_TODOIST`,
-`TODOFY_REMINDER_ENABLED`, `TODOFY_GTD_REVIEW_ENABLED`, `TODOFY_PLUS_METADATA`) are the only GitHub
+`TODOFY_REMINDER_ENABLED`, `TODOFY_GTD_REVIEW_ENABLED`) are the only GitHub
 environment variables the deploy reads, so a deploy never overwrites the operational state:
 
 1. Settings → Environments → `production` → edit the variable.

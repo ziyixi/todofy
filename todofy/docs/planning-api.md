@@ -11,8 +11,8 @@ service is a breaking change; its paths stay `/api/plus/v1/*`.
 
 Tasks serves `/api/plus/v1/*` and `/api/plus/flowday/*` on its own origin, behind the owner's Access login, Origin
 and CSRF. It forwards each request on its `PLANNING` service binding to the gateway's `Planning` entrypoint
-(`gateway/src/planning.ts`, props `{source: "tasks"}`; any other source is 403, and a gateway whose `TASK_SOURCE`
-is not `tasks` answers 503). No public host routes either prefix: the owner host and the hooks hosts answer 404.
+(`gateway/src/planning.ts`, props `{source: "tasks"}`; any other source is 403). No public host routes either
+prefix: the owner host and the hooks hosts answer 404.
 
 `nativePlanning` (`gateway/src/plus.ts`) allows exactly the methods Tasks calls: ReadPlan, ListPlanningTasks,
 SetTaskPlan, SetTaskLead, AppendTaskSteps, CompleteTask, SetWeeklyBet, SetTaskDependency, ResolveDependencies,

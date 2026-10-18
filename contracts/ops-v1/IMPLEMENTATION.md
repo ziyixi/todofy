@@ -350,14 +350,14 @@ counted. The GTD ledger adds no D1 read (object storage, below). Object storage:
 
 Signals: `maintenance_mode` (critical); `processing_paused`, `todoist_paused` (warning);
 `reminder_disabled` (info); `attention` (warning, `count`); `due_backlog` (warning, oldest due ≥ 1 h,
-`oldest_age_seconds`); `todoist_blocked` (critical, `seconds_left`); `gemini_budget_80` (warning) and
+`oldest_age_seconds`); `gemini_budget_80` (warning) and
 `gemini_budget_95` (critical) on (used + reserved) / budget, metrics `percent, used_tokens,
 reserved_tokens, budget_tokens`; `backup_stale` (critical: backups bound and no complete backup or the
 last one older than 8 days; `age_seconds, has_backup`), `backup_failed` (warning, last job failed),
 `backup_disabled` / `backup_active` (info); `reminder_failed` (warning: today's row `failed` with no
 attempts left, or `unknown`; `attempts`); `guard_shed` (info); from the GTD ledger
 (todofy/docs/gtd-features.md, object storage only): `gtd_snapshot_stale` (warning, `age_hours`: the daily
-Todoist snapshot is allowed and its last ok run, or the first attempt, is over 48 h old) and
+Tasks snapshot is allowed and its last ok run, or the first attempt, is over 48 h old) and
 `review_overdue` (info, `days`: the weekly review and the daily snapshot that sees it done are both on,
 and its last completion is over 10 days old;
 info on purpose, so a skipped personal review never degrades the tile or enters the digest). Health as in
@@ -365,11 +365,13 @@ README.md.
 
 Counters: `active_events`, `attention_events`, `received_24h`, `oldest_due_age_seconds`,
 `gemini_used_tokens`, `gemini_reserved_tokens`, `gemini_token_budget`, `gemini_calls`,
-`todoist_window_calls`, `todoist_window_limit`, `intents_pending`, `intents_failed_7d` (task-intent-v1),
+`intents_pending`, `intents_failed_7d` (task-intent-v1),
 `backup_age_seconds`, and the GTD ledger's `inbox_open`,
 `inbox_oldest_days`, `overdue`, `carryover_open` (mail tasks of the 14 days before the last 24 h still
 open), `completed_7d` (the latest complete snapshot aggregate, each left out while unknown) and
-`review_age_days` (while the review and the snapshot are on): at most 19 of the 32 allowed.
+`review_age_days` (while the review and the snapshot are on): at most 17 of the 32 allowed. Releases that still
+wrote Todoist also reported `todoist_blocked` (critical) and the counters `todoist_window_calls` and
+`todoist_window_limit`.
 `last_backup_at` from
 `backup.overview`; `ui_url` = `https://{TODOFY_PUBLIC_HOST}/`; capabilities `["canary_consumer",
 "guard", "ops_digest"]`; modes `maintenance`, `processing_paused`, `force_pause_todoist`,
@@ -447,12 +449,12 @@ loop every second). `setGuard(normal)` from shed sets `control.next_maintenance`
 | a backup job already running (`backup.run` with `state.job`) | keep | it holds the ledger; abandoning it wastes its reads and restarts later |
 | reminder / digest tick | keep | schedule-keeping; the digest is how a shed day is reported |
 | report precompute (`reports.tick`) | keep | deferring moves the cost to the newsletter's on-demand computation, it saves nothing |
-| `todoist_calls`, `llm_usage`, `report_*` DO housekeeping | keep | DO only |
+| `llm_usage`, `report_*` DO housekeeping | keep | DO only |
 | cron `wake()` | keep | schedule |
 | `weekly_backup`: starting a new job (`backup.run` with no job) | **defer** unless the last complete backup is older than 7.5 days or there is none | D1 rows read of a full export; bounded so a renewed shed cannot skip a whole week, and 12 h below `backup_stale` (8 days) so the guard never raises that critical signal itself |
 | `retention` tick (`control.next_maintenance`) | **defer** (72 h since the last sweep that left no expired rows; a sweep that continues in a minute does not count) | pure cleanup of expired rows, bounded batches; once due it drains the whole backlog |
 | `metrics_rollup` (`_metrics_tick`, `metrics.flush`) | **defer** (72 h since the last flush that caught up; one that continues in a minute does not count) | the walk is cursor-based and catches up 7 days per flush, so no day is lost; days only appear later on the trends page |
-| `gtd_snapshot` (a new daily Todoist snapshot, `runtime/gtd.py`) | **defer** (48 h since the last completed snapshot; one already running continues) | a few hundred D1 rows written a day; the carryover and the GTD counters then use an older snapshot or none, and the brief falls back to the 24 h report |
+| `gtd_snapshot` (a new daily Tasks snapshot, `runtime/gtd.py`) | **defer** (48 h since the last completed snapshot; one already running continues) | a few hundred D1 rows written a day; the carryover and the GTD counters then use an older snapshot or none, and the brief falls back to the 24 h report |
 | GTD review (Sunday task) | keep | owner-facing, like the reminder |
 
 `GuardState.deferred` for Todofy is `["weekly_backup", "retention", "metrics_rollup", "gtd_snapshot"]` while

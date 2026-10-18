@@ -10,8 +10,9 @@ CNAME; the container stays stopped for the rollback window (F5), and its retirem
 Owner decisions (2026-10-01) this design follows:
 
 - FlowDay is barely used and may be changed freely.
-- It is a **read-only view of Todoist** plus FlowDay's own time blocks. Todofy is the only Todoist writer.
-- Sync only has to bring Todoist's changes in; a slower sync is fine.
+- It is a **read-only view of the task store** plus FlowDay's own time blocks: Tasks since 2026-10 (section 4),
+  Todoist before. FlowDay never writes the task store.
+- Sync only has to bring the store's changes in; a slower sync is fine.
 - **D1 writes must stay minimal.** The Free allowance of 100,000 rows written per day is shared by every app on
   the account, and there must be room for future services. Target: a typical day stays well under 1,000 rows.
 - No container in the target architecture.
@@ -21,16 +22,16 @@ Owner decisions (2026-10-01) this design follows:
 ```
 browser ── Cloudflare Access ── Worker "flowday" ──┬── ASSETS: web/out (Next.js static export)
  (UI, reviews,                  (edge-auth JWT,     ├── D1 "flowday" (drizzle-orm/d1)
-  exports)                       CSRF + Origin)     └── api.todoist.com/api/v1/sync (read only)
+  exports)                       CSRF + Origin)     └── TASKS: Tasks' TasksApi (service binding, read only)
 ```
 
 | Path | What it is |
 | --- | --- |
 | `wrangler.toml` | The production config: top level only, `workers_dev = false`, `preview_urls = false`; the real D1 id and Access AUD since F2; one Custom Domain and `PUBLIC_HOST` naming it: the staging host `flowday-next.ziyixi.science` in F3, the production host `flowday.ziyixi.science` since F4 |
-| `worker/src/` | `index.ts` (handler) → `router.ts` (Access, PWA exceptions, logging) → `api.ts` (routes) → `store/*` (D1), `sync.ts` + `todoist.ts` (Todoist), `credentials.ts` (the sealed Todoist key), `assets.ts` (static files, CSP), `e2e.ts` (test routes) |
-| `migrations/` | `0001_init.sql`: the container-era SQLite schema, unchanged. `0002_incremental_sync.sql`: `tasks.todoist_project_id`. `0003_fewer_task_indexes.sql`: drops four indexes no query needs. `0004_focus.sql`: hierarchy/deadline fields, estimate ownership and timer command versions/receipts |
+| `worker/src/` | `index.ts` (handler) → `router.ts` (Access, PWA exceptions, logging) → `api.ts` (routes) → `store/*` (D1), `native-tasks.ts` + `sync-control.ts` (the Tasks sync and its throttle), `assets.ts` (static files, CSP), `e2e.ts` (test routes) |
+| `migrations/` | `0001_init.sql`: the container-era SQLite schema, unchanged. `0002_incremental_sync.sql`: `tasks.todoist_project_id`. `0003_fewer_task_indexes.sql`: drops four indexes no query needs. `0004_focus.sql`: hierarchy/deadline fields, estimate ownership and timer command versions/receipts. `0005_drop_todoist_settings.sql`: deletes the retired Todoist settings |
 | `web/` | The Next.js UI as a static export (`output: "export"`). It has no server code; `lib/client/http.ts` is its only `fetch` |
-| `deploy/deploy-vars.mjs` | The deploy wrapper, the dashboard's shape: `BUILD_SHA` as a var, the owner and both keys as Worker secrets. It refuses a real deploy while the D1 id or the Access AUD is the all-zeros placeholder (a guard against a revert to the F1 config) |
+| `deploy/deploy-vars.mjs` | The deploy wrapper, the dashboard's shape: `BUILD_SHA` as a var, the owner and the CSRF key as Worker secrets. It refuses a real deploy while the D1 id or the Access AUD is the all-zeros placeholder (a guard against a revert to the F1 config) |
 
 There is no cron, no Durable Object and no Queue. The sync runs when a page asks for it (section 4).
 
@@ -46,8 +47,9 @@ fields, errors), in the AIP style of the repository's other UI APIs (`proto/READ
 it through the shared transcoder (`worker/src/router.ts`, handlers in `api.ts`) after Access, with the CSRF and
 Origin check in the transcoder's `authorize` hook, before any body is read; the UI calls it through the shared typed
 client (section 8). Bodies and answers are wire JSON (snake_case, enum names in lower case, RFC 3339 times); errors
-are `google.rpc.Status` bodies whose `ErrorInfo.reason` is FlowDay's (`errors.proto`: `TODOIST_KEY_MISSING`,
-`TODOIST_KEY_UNREADABLE`, `TODOIST_UNAUTHORIZED`, `TODOIST_UNAVAILABLE`, `TASK_NOT_DELETED`) or a shared one, with the
+are `google.rpc.Status` bodies whose `ErrorInfo.reason` is FlowDay's (`errors.proto`: `TASKS_UNAVAILABLE`,
+`ESTIMATE_IN_TASKS`, `TASK_NOT_DELETED`, `TIMER_CONFLICT`, `RELOAD_REQUIRED`; the `TODOIST_*` reasons are retired and
+never sent) or a shared one, with the
 owner's English copy as its `LocalizedMessage`. A failed D1 call is `UNAVAILABLE` (safe to repeat), any other surprise
 `INTERNAL`.
 
@@ -58,7 +60,7 @@ owner's English copy as its `LocalizedMessage`. A failed D1 call is `UNAVAILABLE
 | `flows/{day}/notes/{task}` | `GET {parent}/notes`, `GET`, `PATCH` | One markdown note per task and day; one never written reads as empty |
 | `timeEntries/{entry}` | `GET timeEntries?task_id&flow_date`, `GET`, `POST timeEntries`, `PATCH`, `DELETE` | Time entries by task, day or both (pages); a new one (its `request_id` is its ID); start and end (the duration follows) |
 | `timerSession` | `GET`, `POST :command` | Server-owned start, pause, resume, stop and pomodoro transitions with an etag and request ID |
-| `settings` | `GET`, `PATCH` | Whether a sealed Todoist key is stored (never the key), the day's capacity, the last sync |
+| `settings` | `GET`, `PATCH` | The source (always `tasks`), the day's capacity, the last sync; a `todoist_api_key` is refused |
 | (analytics) | `GET analytics:query?start_date&end_date` | Raw rows of a range of days (planned tasks, done tasks, time entries), or every time entry without one, at most 200 rows a page with the tasks they name. See section 8 |
 
 `GET /api/csrf` (the token and its cookie, 12-hour validity), `/health`, the PWA files and the E2E routes
@@ -92,84 +94,70 @@ task_id)` index serves the same lookups and ranges). `worker/test/runtime/schema
 columns in order, the six remaining indexes, the column defaults, and checks with `EXPLAIN QUERY PLAN` that every
 lookup by day, task or id still uses an index.
 
-Settings keys: `todoist_api_key`, `day_capacity_mins`, `planning_completed:<date>` and `last_sync_at` (container
-era). The sync adds `todoist_sync_token`, `todoist_projects` (the `{id: [name, colour]}` map), `sync_claimed_at`
-(epoch ms, with the count of failed syncs before it) and, only while a large answer is being applied,
-`todoist_sync_pending`.
+Settings keys: `day_capacity_mins`, `planning_completed:<date>` and `last_sync_at` (container era). The sync adds
+`sync_claimed_at` (epoch ms, with the count of failed syncs before it), `tasks_sync_cursor`, `tasks_sync_catalog_v2`
+(the last catalog read) and, only while more pages follow, `tasks_sync_pending`. `0005` deleted the Todoist era's
+keys: the sealed key (`todoist_api_key`; its `CREDENTIAL_KEY` secret is gone too), `todoist_sync_token`,
+`todoist_projects`, `todoist_sync_pending`, `todoist_hierarchy_refresh` and the first catalog cache
+`tasks_sync_catalog`. FlowDay holds no credential for its source.
 
-**The Todoist key is stored sealed.** `credentials.ts` encrypts it with AES-256-GCM under the Worker secret
-`CREDENTIAL_KEY` (64 hex characters, from the deploy wrapper), with the settings key name as additional data:
-`v1.<iv>.<ciphertext>`. D1, its Time Travel history and any export therefore hold only ciphertext. `GetSettings`
-reports only whether a sealed key exists (`todoist_api_key_set`); saving the same key again writes nothing. A value
-without the prefix (a plaintext key from an older copy) is never used: `SyncTasks` answers `FAILED_PRECONDITION`
-with the reason `TODOIST_KEY_UNREADABLE`. Without `CREDENTIAL_KEY` the Worker refuses to store a key
-(`UNAVAILABLE`, reason `NOT_CONFIGURED`).
-Losing or changing the secret only means entering the Todoist key again.
+## 4. Tasks sync
 
-## 4. Todoist sync
+**Read only.** `native-tasks.ts` reads Tasks through the `TASKS` service binding to its named `TasksApi`
+entrypoint (`props.access = "read"`), with generated `TasksUiService` GET requests only; the entrypoint denies writes
+on its side too. No credential, no public fetch. A missing binding, a failed read or an invalid page answers
+`TASKS_UNAVAILABLE` (503) and never falls back to anything else.
 
-**Read only.** `todoist.ts` calls exactly one endpoint: `POST https://api.todoist.com/api/v1/sync` with
-`sync_token` and `resource_types=["items","projects"]`. It never sends `commands`. A test asserts the request
-carries exactly those two form fields.
-
-**Incremental.** The stored `sync_token` makes Todoist return only the items and projects that changed since the
-last sync. Completed items come back with `checked`, deleted ones with `is_deleted`. A quiet day therefore reads
-almost nothing. The token `*` asks for a full sync: the first sync, a new API key (saving a different key clears
-the token, the project map and the claim), or Todoist resetting the token on its side (`full_sync: true`).
+**Incremental.** `ListChanges` returns the task changes after `tasks_sync_cursor`, at most `NATIVE_SYNC_PAGE` (100)
+per page; the catalog (projects and labels) is read only on first use or when a page reports a catalog change, and
+cached in `tasks_sync_catalog_v2`. Responses are bounded to 2 MiB. The mirror keeps the bounded description preview;
+full task text stays in Tasks. An empty cursor starts the feed from the beginning (`full_sync`).
 
 **One request, at most three D1 round trips:**
 
-1. One read of the six settings above (`todoist_api_key`, `todoist_sync_token`, `todoist_projects`,
-   `sync_claimed_at`, `last_sync_at`, `todoist_sync_pending`). Without a key the answer is `400 no_todoist_key`
-   and nothing is written.
-2. **Atomic throttle**, 1 row: a compare-and-set of the claim read in step 1,
+1. One read of the settings (`tasks_sync_cursor`, `tasks_sync_catalog_v2`, `tasks_sync_pending`, `sync_claimed_at`,
+   `last_sync_at`).
+2. **Atomic throttle**, 1 row (`sync-control.ts`): a compare-and-set of the claim read in step 1,
    `INSERT INTO settings (key, value) VALUES ('sync_claimed_at', :claim) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE settings.value IS :previous AND CAST(settings.value AS INTEGER) <= :now - :interval`.
    Exactly one of several concurrent tabs or devices gets `changes = 1`. The others answer `throttled` without
-   reading Todoist or writing anything. The interval is 5 minutes for `auto` and 30 seconds for `manual`.
-3. One Todoist read (1 subrequest), then **one atomic `batch`** that applies at most `SYNC_CHUNK` (200) items, in
-   id order:
-   - Diff upsert of the active items (`json_each` over one JSON parameter). A row whose values are all unchanged
-     is not written.
-   - Completed or deleted items are hidden (`deleted_source = 'sync'`), and so are the tasks of projects that were
-     archived or deleted (their items count as gone). Projects that were renamed or recoloured update exactly
-     their own tasks (`UPDATE … FROM json_each`, joined on `todoist_project_id`).
-   - Full sync: every visible Todoist task that is no longer listed is hidden (`NOT IN (SELECT value FROM json_each(?))`).
-   - `todoist_sync_token` and `todoist_projects`, each written only when it changed, and `last_sync_at`.
+   reading Tasks or writing anything. The interval is 5 minutes for `auto` and 30 seconds for `manual`, and 0 for
+   the next page of a run (`tasks_sync_pending`).
+3. One page read (and the catalog when needed), then **one atomic `batch`** that applies the page with its cursor:
+   - after a catalog read, every mirrored task takes its project's current name and colour (only rows that differ,
+     hidden ones included); a task without a project is in the catalog's Inbox;
+   - diff upsert of the open tasks (`json_each` over one JSON parameter); a row whose values are all unchanged is
+     not written, and a task hidden by a sync comes back;
+   - completed, deleted or archived tasks are hidden (`deleted_source = 'sync'`), never physically deleted;
+   - `tasks_sync_cursor`, `tasks_sync_catalog_v2` (each written only when it changed), `tasks_sync_pending` and
+     `last_sync_at`.
 
-**Bounded work per request.** Todoist sends a full sync in one piece. An answer of more than `SYNC_CHUNK` items is
-applied over several requests: each answers `partial`, the page asks again right away (at most 12 requests per
-sync), and every request re-reads the answer and applies the next chunk after the cursor stored in
-`todoist_sync_pending` (`{base, token, after}`, 1 row). Until the last chunk the stored sync token is unchanged;
-the pass then stores the token of its *first* answer, so anything that changed while the pass ran comes back in
-the next incremental sync. An incremental pass that Todoist answers with a full sync restarts as a full pass.
-Answers over `MAX_SYNC_ITEMS` (1,000) or `MAX_SYNC_BYTES` (1 MiB, counted in bytes before decoding) are refused
-as too large before they are parsed (section 6).
+**Paging.** More changes than a page answer `partial`; the page asks again right away (at most 12 requests per
+sync) and the next page starts at the stored cursor.
 
-**Archived projects.** An archived or deleted project leaves the project map and its tasks are hidden. A project
-that an incremental answer lists but the map does not know (a new project, or an unarchived one whose tasks
-Todoist may not list as changed) is followed by a full pass right away (`partial`), which writes only what
-differs: for 200 unchanged tasks, a few settings rows.
+**Kept from the container era** (each has a test): a task hidden by a sync comes back by itself when Tasks lists it
+again; a task deleted in FlowDay (`'local'`, or the legacy `NULL` source) stays deleted; a mirrored task's estimate
+is its Tasks duration (every changed row takes it, a cleared duration clears it, the editor shows it read-only and
+UpdateTask refuses another value, `ESTIMATE_IN_TASKS`); local tasks are never touched by the sync. Imported tasks keep
+their FlowDay primary keys and the `todoist_id`/`todoist_project_id` columns, which now hold Tasks IDs; queues,
+estimates, timers and past time entries keep their references.
 
-**Kept from the container era** (each has a test): a task hidden by a sync comes back by itself when Todoist
-lists it again; a task deleted in FlowDay (`'local'`, or the legacy `NULL` source) stays deleted; a synced task's
-estimate is the source's duration (a day counts as 480 minutes), and a missing duration clears it; due dates are
-cut to the day; local tasks are never touched by the sync.
+**Failures and backoff.** A failed read writes only the claim, so `last_sync_at` still means "last successful sync
+request", and the cursor stays where it was. A claim newer than `last_sync_at` is a failed sync, including a request
+the runtime stopped (for example for CPU) after its claim. Each failure in a row doubles the automatic interval (5,
+10, 20 … up to 160 minutes), stored with the claim as `<epoch ms>:<failures>`, so a failing sync cannot repeat every
+5 minutes all day. "Sync now" keeps its 30 seconds; the next success resets the interval. A run of pages that failed
+mid-way resumes from its cursor after the backoff.
 
-**Failures and backoff.** Todoist 401/403 answers `502 todoist_unauthorized`; anything else answers
-`502 todoist_unavailable`. Either way only the claim was written, so `last_sync_at` still means "last successful
-sync request". A claim newer than `last_sync_at` is a failed sync, including a request the runtime stopped (for
-example for CPU) after its claim. Each failure in a row doubles the automatic interval (5, 10, 20 … up to 160
-minutes), stored with the claim as `<epoch ms>:<failures>`, so a failing sync cannot repeat every 5 minutes all
-day. "Sync now" keeps its 30 seconds; the next success resets the interval. A pass that failed mid-way resumes
-from its cursor.
+**After a Tasks restore** a change cursor ahead of Tasks fails the sync with `TASKS_UNAVAILABLE` instead of reporting
+it synced; `deploy/reset-tasks-mirror.sql` hides the mirrored rows and forgets the cursor and catalog, so the next
+sync replays the restored feed from the start ([Tasks backup](../../tasks/docs/backup.md)).
 
 **When the page syncs** (`web/lib/hooks/auto-sync.ts`, tested with a fake clock):
 
 - once when the page opens;
 - every 10 minutes while the page is visible;
 - on becoming visible again, when the last attempt is older than 5 minutes;
-- never while the page is hidden (a background tab or a minimised PWA window), and not at all without a stored
-  key.
+- never while the page is hidden (a background tab or a minimised PWA window).
 
 The Sync buttons send `manual`. A `partial` answer is followed by the next request right away. The task list is
 reloaded once at the end, only when an answer reported changes, a full sync, or a `last_sync_at` that another tab
@@ -205,19 +193,19 @@ unread indexes, a new task cost 5 rows and a new flow task 5.
 - Notes save 1.5 s after typing stops (500 ms in the container). A pending save is flushed when the card closes
   or the page hides.
 
-**Measured** (`worker/test/runtime/sync.test.ts` and `budget.test.ts`, which assert the bounds):
+**Measured** (`worker/test/runtime/native-tasks.test.ts` and `budget.test.ts`, which assert the bounds):
 
 | Scenario | Rows written |
 | --- | --- |
-| Simulated day of sync: 200 tasks, 20 Todoist changes (10 edits, 3 reschedules, 3 completions, 1 deletion, 2 new tasks, 1 project rename covering 40 tasks), two tabs polling every 10 minutes for 16 hours. Result: 96 syncs, 96 throttled, 96 Todoist reads | **280** (asserted < 320) |
+| Simulated day of sync: 200 tasks, 20 Tasks changes (10 edits, 3 reschedules, 3 completions, 1 deletion, 2 new tasks, 1 project rename covering 40 tasks), two tabs polling every 10 minutes for 16 hours. Result: 96 syncs, 96 throttled, 96 page reads | **281** (asserted < 320) |
 | Simulated day of use: plan 8 tasks, reorder twice, 8 estimates, 12 timer segments, 6 notes × 5 saves, 2 manual entries, 6 completions, a rollover, a quick task | **221** (asserted < 250, and no step above its count through the routes before `flowday.ui.v1`: the same 221) |
-| One-off first sync of a new account with 200 tasks | 608 (3 per task; asserted < 620) |
-| A sync with no Todoist change | 2 (claim + `last_sync_at`), or 3 if Todoist rotates the token |
-| Each extra chunk of a large answer | its changed rows + 3 (claim, `last_sync_at`, cursor) |
+| One-off first sync of a new account with 200 tasks (two pages) | 614 (3 per task; asserted < 620) |
+| A sync with no change in Tasks | 2 (claim + `last_sync_at`) |
+| Each further page of a run | its changed rows + the claim, `last_sync_at` and cursor |
 | A throttled sync | 0 |
 
 `last_sync_at` is written on every sync on purpose: it marks the claim as finished, which the failure backoff
-needs (96 of the 280 rows). A typical day is therefore about **500 rows**, about 0.5% of the account's 100,000.
+needs (192 of the 281 rows). A typical day is therefore about **500 rows**, about 0.5% of the account's 100,000.
 Before the port, the container
 upserted every task every 60 seconds whether or not the tab was visible. That was about 4 rows per task per
 sync: roughly 0.58–1.15 million rows a day for 200 tasks.
@@ -251,9 +239,9 @@ index was not added, because it would cost a row write per entry.
 
 | Limit | FlowDay |
 | --- | --- |
-| 10 ms CPU per request | Measured in workerd from the isolate's CPU profile (`cpu.test.ts`), with answers that carry every field of a Todoist API v1 item (1,000 items: 595 KiB). Since the `flowday.ui.v1` review fixes (2026-10-02, reference milliseconds, medians of three fresh isolates on the first run): **every list as an isolate's first API request**, on a heavy owner's history (1,000 tasks, 396 days of 8 planned and 4 done tasks, 2,000 entries): a page of 200 tasks **5.5 ms** (8.5 before), 200 days of flows **6.3** (10.1), 200 of a task's entries **5.1** (7.5), 100 notes of 2,000 characters **3.7** (6.0), the first analytics page of every entry **6.5** (9.5) and of 396 days **6.7** (25.6: that page then carried the whole range's flows and their tasks); warm 1.4–3.7 ms. The sync's first chunk of a full sync of 1,000 tasks 6.3 ms on the isolate's first run, 3.4 ms warm; its last chunk 3.2 ms; incremental sync with 20 changes 1.9 ms; a week of analytics 2.3 ms; the page with CSP hashing 0.4–0.8 ms. An isolate's first run of a list cost several times a warm one, mostly in drizzle's query building and row mapping, the messages and the wire writer: `worker/src/warmup.ts` runs each list's query (through a binding that is never called) and answer on synthetic rows at startup, in the global scope (100 rounds add about 80 ms to an isolate's startup in workerd, against Workers' 1 s startup limit; the previous warm-up of the messages only, about 30 ms; `worker/test/warmup.test.ts` checks its rows map as a request's do), and the page sizes (`worker/src/limits.ts`) bound the rest. The test asserts every warm best < 6 ms, the sync's first run < 15 ms and every list's first request < 10 ms, the Free limit itself (GitHub runners read cold runs up to about 1.3 times the reference machine, an Apple M1 Max, which 6.7 ms stays within); the other handlers are measured in the last isolate of the sync's session (`tools/workerd-cpu` and its README). Measured CPU scales with the machine (GitHub runners measure the sync 1.1–2.1× the reference, varying 2× within an hour), so the test calibrates in the same isolate with the meter it shares with the other apps (`tools/workerd-cpu`): a fixed, deterministic workload shaped like the sync's (parse a synthetic 1,000-item answer, sort, map to rows, serialise) runs in the Worker through the inspector's `Runtime.evaluate`, and its warm median wall time over the reference's (4.8 ms) is the speed each isolate's numbers are divided by, never below 1×; a median above 5× fails the test as too slow to measure. 2,000 items measured 10–14 ms on the first run, hence `MAX_SYNC_ITEMS` = 1,000. These are estimates on the test machine, not Cloudflare's meter; a sync request stopped for CPU resumes from its cursor after the backoff. In Observability, watch the log lines whose `route` is `SyncTasks` (`POST /api/v1/tasks:sync`) and any `INTERNAL` or `UNAVAILABLE` |
-| 50 subrequests | `SyncTasks` (`POST /api/v1/tasks:sync`): 1 (Todoist). Everything else: 0 |
-| 50 D1 queries per invocation | A sync request: 1 settings read, 1 claim, and a batch of at most 1 upsert + restore + hide + orphan or project statements + hide by project + 4 settings = 12 |
+| 10 ms CPU per request | Measured in workerd from the isolate's CPU profile (`cpu.test.ts`). Since the `flowday.ui.v1` review fixes (2026-10-02, reference milliseconds, medians of three fresh isolates on the first run): **every list as an isolate's first API request**, on a heavy owner's history (1,000 tasks, 396 days of 8 planned and 4 done tasks, 2,000 entries): a page of 200 tasks **5.5 ms** (8.5 before), 200 days of flows **6.3** (10.1), 200 of a task's entries **5.1** (7.5), 100 notes of 2,000 characters **3.7** (6.0), the first analytics page of every entry **6.5** (9.5) and of 396 days **6.7** (25.6: that page then carried the whole range's flows and their tasks); warm 1.4–3.7 ms. The Tasks sync's page of 100 changes is measured cold in `native-tasks-cpu.test.ts` (first run and median below 10 ms, in three fresh isolates); a week of analytics 2.3 ms; the page with CSP hashing 0.4–0.8 ms. An isolate's first run of a list cost several times a warm one, mostly in drizzle's query building and row mapping, the messages and the wire writer: `worker/src/warmup.ts` runs each list's query (through a binding that is never called) and answer on synthetic rows at startup, in the global scope (100 rounds add about 80 ms to an isolate's startup in workerd, against Workers' 1 s startup limit; the previous warm-up of the messages only, about 30 ms; `worker/test/warmup.test.ts` checks its rows map as a request's do), and the page sizes (`worker/src/limits.ts`) bound the rest. The test asserts every warm best < 6 ms and every list's first request < 10 ms, the Free limit itself (GitHub runners read cold runs up to about 1.3 times the reference machine, an Apple M1 Max, which 6.7 ms stays within); the heavy handlers are measured warm in one isolate of their own (`tools/workerd-cpu` and its README). Measured CPU scales with the machine (GitHub runners measure the sync 1.1–2.1× the reference, varying 2× within an hour), so the test calibrates in the same isolate with the meter it shares with the other apps (`tools/workerd-cpu`): a fixed, deterministic workload shaped like the sync's (parse a synthetic 1,000-item answer, sort, map to rows, serialise) runs in the Worker through the inspector's `Runtime.evaluate`, and its warm median wall time over the reference's (4.8 ms) is the speed each isolate's numbers are divided by, never below 1×; a median above 5× fails the test as too slow to measure. These are estimates on the test machine, not Cloudflare's meter; a sync request stopped for CPU resumes from its cursor after the backoff. In Observability, watch the log lines whose `route` is `SyncTasks` (`POST /api/v1/tasks:sync`) and any `INTERNAL` or `UNAVAILABLE` |
+| 50 subrequests | `SyncTasks` (`POST /api/v1/tasks:sync`): 1 or 2 over the `TASKS` binding (the page, and the catalog when it changed). Everything else: 0 |
+| 50 D1 queries per invocation | A sync request: 1 settings read, 1 claim, and a batch of at most 1 project refresh + 1 upsert + restore + hide + 4 settings = 10 |
 | 100 bound parameters per statement | Id lists always travel as one JSON parameter to `json_each(?)`. Tests cover 140–250 ids |
 | Script size | 516.1 KiB raw, **114.3 KiB gzip** since `flowday.ui.v1` (261.2 KiB raw, 56.1 KiB gzip before: the protobuf-es runtime, the HTTP runtime of `proto/ts` and the descriptors). CI fails above a 140 KiB gzip budget, a ratchet at about 1.2 times that (`worker/scripts/bundle-size.mjs`, measured by the shared `tools/bundle-size`) |
 | Static assets | 44 files, 1.77 MiB (`web/scripts/check-export.mjs` keeps it under 1,000 files); the UI's JavaScript 398.9 KiB gzip (362.8 KiB before), held to a 480 KiB budget (`web/scripts/js-budget.mjs`) |
@@ -288,8 +276,6 @@ The reviews moved to the browser because they ran per minute of logged time. On 
 - **E2E routes.** `/api/test/*` exists only with `E2E_TEST_ROUTES=true` and an active loopback bypass. The
   production export is checked for E2E markers.
 - **Logs.** IDs, routes, statuses, codes and row counts only. Never a token, a title or a body.
-- **Todoist key at rest.** Sealed with AES-GCM under `CREDENTIAL_KEY` (section 3); never stored, exported or
-  logged in plain text.
 
 ## 8. Client
 
@@ -323,10 +309,10 @@ The reviews moved to the browser because they ran per minute of logged time. On 
 
 | Suite | Where | What |
 | --- | --- | --- |
-| Worker unit | `worker/test/*.test.ts` (Node) | Todoist parsing and failure mapping, the request body (never `commands`), the byte cap, the chunk plan, claims and backoff, sealing and opening the key, CSP hashing, the PWA list, the startup warm-up (its rows map as a request's do; its time) |
-| Worker runtime | `worker/test/runtime/*.test.ts` (Miniflare/workerd, real D1, a fake Todoist Sync API with full item shapes) | Schema and query plans; every store module (the container's query tests, async), including more than 100 ids and row counts; every rpc of `flowday.ui.v1` through the shared typed client with CSRF (pages and their tokens, update masks, the `request_id` of a create, AIP-164 deletes, Status reasons), the wire JSON, and the old routes' 410; Access with real RS256 JWTs; CSRF and Origin; PWA exceptions; CSP; E2E gating; the sync rules, throttle, concurrency, backoff, chunked passes, archived projects and the sealed key; the write budget; the rows each paged list reads (`reads.test.ts`); CPU, with every list as an isolate's first request |
+| Worker unit | `worker/test/*.test.ts` (Node) | CSP hashing, the PWA list, the startup warm-up (its rows map as a request's do; its time) |
+| Worker runtime | `worker/test/runtime/*.test.ts` (Miniflare/workerd, real D1, a fake `TASKS` binding: an empty Tasks unless a test serves its own) | Schema and query plans; every store module (the container's query tests, async), including more than 100 ids and row counts; every rpc of `flowday.ui.v1` through the shared typed client with CSRF (pages and their tokens, update masks, the `request_id` of a create, AIP-164 deletes, Status reasons), the wire JSON, and the old routes' 410; Access with real RS256 JWTs; CSRF and Origin; PWA exceptions; CSP; E2E gating; the sync rules, throttle, concurrency, backoff, paging, archive and restore, a missing binding; the write budget; the rows each paged list reads (`reads.test.ts`); CPU, with every list as an isolate's first request |
 | UI unit and integration | `web/__tests__` (Vitest, an in-memory fake of the Worker serving `FlowDayUiService` through the same shared transcoder, so on the real wire) | Stores, the client and its transport (CSRF retry, session expiry, banner, requests never laid out), the auto-sync scheduler, reviews and exports from rows |
-| Playwright | `web/__tests__/ui` against `wrangler dev` (`web/scripts/e2e-server.mjs`: E2E export, local D1, bypass) | The 52 UI scenarios. With `flowday.ui.v1` 51 passed locally (Chromium headless shell, 2026-10-02); UI-005 (a note typed 0.7 s before a reload) fails about 3 runs in 5 on `main` as well, the same rate. CI does not run them yet, as before F1 |
+| Playwright | `web/__tests__/ui` against `wrangler dev` (`web/scripts/e2e-server.mjs`: E2E export, local D1, bypass, an empty fake Tasks as `TASKS`) | The 53 UI scenarios; all 53 passed locally on 2026-10-18 (Chromium headless shell). With `flowday.ui.v1` 51 passed locally (Chromium headless shell, 2026-10-02); UI-005 (a note typed 0.7 s before a reload) fails about 3 runs in 5 on `main` as well, the same rate. CI does not run them yet, as before F1 |
 | Import tool | `deploy/migrate/test_flowday_migrate.py` (Python, synthetic container-era files only) | One operand per value for every hard text (quotes, SQL syntax, emoji, all control characters, hundreds of CRLFs, transaction keywords), exact reals, the statement limit, a WAL that only the staged checkpoint applies, untouched source files, the host's hashes, the excluded key, refusals (a NULL primary key, a cloud-synced work directory); a full export, import into a local D1 (the pinned wrangler and the committed migrations) with edge reals and ±Inf, verify and reset, and no wrangler debug log left behind; the `--remote` paths and the daily write budget against a fake wrangler |
 | Config and wrapper | `deploy/test/*.test.mjs`, `.github/scripts/test_wrangler_configs.py`, `test_ci_changes.py`, `test_drift_desired.py` | No route and no hostname (F2), the real D1 id and AUD, no personal value, the placeholder guard; the deploy job's secrets (the dashboard's owner, FlowDay's own keys), migrations before the Worker, the hostname guard, and its production check against a stubbed wrangler; the dashboard's desired state for drift |
 
@@ -519,8 +505,7 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
 `NativeFocusEntrypoint` is a same-account service binding that Todofy's private Planning channel uses for Tasks'
 Plan and Focus. It permits paged task reads, daily flow reads, queue order changes, day moves and timer commands
 (ListTasks, GetFlow, UpdateFlow, RolloverFlow, GetTimerSession, CommandTimer). Every other method is NOT_FOUND
-there; estimates are Tasks durations, and FlowDay's own page runs the sync. Without the `TASKS` binding it answers
-TASKS_UNAVAILABLE. It does not expose settings, credentials, local-task creation/deletion or the public owner
+there; estimates are Tasks durations, and FlowDay's own page runs the sync. It does not expose settings, credentials, local-task creation/deletion or the public owner
 authentication bypass. The normal Worker fetch still checks Access, Origin and CSRF.
 
 Todofy completes the task in Tasks first, then sends `SETTLE` with a stable request ID and the observed timer etag.
@@ -533,9 +518,8 @@ the `estimate_override` marker (set on existing nonempty estimates), which kept 
 duration. Since 2026-10-18 nothing reads or sets it: the source's duration is a mirrored task's only estimate. The
 column stays for the one-time copy of those estimates into Tasks
 ([backup](../../tasks/docs/backup.md#one-time-flowday-estimate-backfill)).
-Existing Todoist sync state also gets a one-shot hierarchy refresh marker. The new Worker starts a full pass
-through the existing bounded sync pipeline, ignoring old pending cursors, resumes its own partial pass, and clears
-the marker with the final batch. Fresh accounts already start with a full sync; estimates, queues and timers remain.
+Existing Todoist sync state also got a one-shot hierarchy refresh marker for the Todoist sync of that release;
+`0005` deleted it with the rest of the Todoist settings.
 The timer remains one session row; its command receipts and recorded time entries are included in the normal D1 backup.
 
 Local checks on October 13 passed Worker lint/typecheck, 21 unit tests, 123 real-D1/workerd cases (including timer
@@ -550,39 +534,3 @@ under Python 3.12, including the SQLite expression-limit test. Existing estimate
 overrides even when `0004` ran before the insert; verification still compares every original column exactly and
 checks the added state explicitly. Changed hierarchy, deadline, estimate ownership, timer version or timer command
 rows cause verification and reset without `--confirm-database flowday` to stop.
-
-
-## Native Tasks source
-
-A `TASKS` service binding to Tasks' named `TasksApi` entrypoint, with `props.access = "read"`, selects native
-Tasks; production binds it (`flowday/wrangler.toml`). Without it, the Todoist path is unchanged.
-
-The native adapter uses generated `TasksUiService` GET requests, at most 100 changes per invocation, and a
-catalog refresh only on first use or a catalog-change notification. The service entrypoint separately denies
-writes. `tasks_sync_cursor`, `tasks_sync_catalog_v2` and `tasks_sync_pending` are separate from Todoist's cursor;
-existing atomic throttling and failure backoff are shared. A page and its cursor commit in one D1 batch.
-An empty page updates only the claim and last successful check time. Responses are bounded to 2 MiB. The mirror reads the bounded description preview; full task text stays in Tasks.
-
-Imported IDs keep their existing FlowDay primary keys and legacy `todoist_id`/`todoist_project_id` columns;
-these columns remain compatibility storage, not evidence that the external API is still used. Queues, estimates,
-timers and past time entries keep their references. Completed, deleted or archived source tasks are concealed
-by the existing sync-deletion marker; they are not physically deleted. Reopening or restoring a task makes it
-visible again. A mirrored task's estimate is its Tasks duration: every changed row takes it, a cleared duration
-clears it, the editor shows it read-only and UpdateTask refuses another value (`ESTIMATE_IN_TASKS`).
-
-Tasks emits task changes for project archive/restore and label updates. That allows this mirror to update only
-changed rows, without a second snapshot state machine. A project rename or recolour emits only a catalog change,
-so whenever a sync reads the catalog it also writes each project's current name and colour into the mirrored
-rows, hidden ones included, that still show another; an unchanged catalog writes none. A task with an empty
-project ID is in the Inbox, so the mirror names the catalog's inbox project for it. The `_v2` catalog key made
-the first sync after this change read the catalog once and heal existing rows. A change cursor ahead of Tasks,
-after a Tasks restore, fails the sync with `TASKS_UNAVAILABLE` instead of reporting it synced; after any Tasks
-restore, `deploy/reset-tasks-mirror.sql` hides the mirrored rows and forgets the cursor and catalog, so the next
-sync replays the restored feed from the start ([Tasks backup](../../tasks/docs/backup.md)). Native source failures report `TASKS_UNAVAILABLE` and
-never trigger a Todoist fallback. Settings returns `task_source` so native sync works without asking for an API
-key; an older response without that field remains Todoist. A native deployment rejects writes to the obsolete
-Todoist-key setting, while keeping ordinary capacity settings editable.
-
-The synthetic native runtime tests cover ID preservation, unchanged-page write counts, paging, source failures,
-archive/restore, queue and timer retention, and Tasks-only estimates. The dedicated CPU test measures the real owner
-handler with a 100-task synthetic page; it does not claim every possible 2 MiB payload has the same CPU cost.
