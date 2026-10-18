@@ -1,4 +1,4 @@
-"""Global brakes: the three operator switches, the Todoist auth block and the daily token budget.
+"""Global brakes: the three operator switches and the daily token budget.
 
 Each state is global to the Durable Object, so every test here starts its own Worker.
 """
@@ -9,8 +9,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from tests.fakes.gemini_fake import GeminiFake
-from tests.fakes.server import Reply
-from tests.fakes.todoist_fake import TASKS_PATH, TodoistFake
+from tests.runtime import tasks_support as tasks
 from tests.runtime.conftest import Launch
 from tests.runtime.harness import AUTH, HOOKS_HOST, Worker, mail_event, reason
 
@@ -26,27 +25,6 @@ def _arrive(worker: Worker) -> str:
     event_id, body = mail_event()
     assert worker.post_event(body).status_code == 204
     return event_id
-
-
-@pytest.mark.reaches("todoist_auth_blocked")
-@pytest.mark.parametrize("status", [401, 403])
-def test_a_todoist_auth_failure_pauses_the_whole_task_stage(
-    launch: Launch, fresh_todoist: TodoistFake, status: int
-) -> None:
-    worker = launch()
-    fresh_todoist.queue("POST", TASKS_PATH, Reply(status, {"error": "forbidden"}))
-    first = _arrive(worker)
-
-    blocked = worker.wait_event(first, lambda e: e["error_code"] == "todoist_auth_blocked")
-    second = _arrive(worker)
-    worker.wait_event(second, {"summarized"})
-    time.sleep(QUIET_S)
-
-    assert blocked["state"] == "summarized"
-    until = _stamp(worker.overview()["todoist"]["block_expire_time"])
-    assert abs(until - datetime.now(UTC) - timedelta(hours=6)) < timedelta(minutes=1)
-    assert worker.event(second)["state"] == "summarized"
-    assert len(fresh_todoist.creates()) == 1
 
 
 @pytest.mark.reaches("llm_budget_exhausted")
@@ -102,15 +80,12 @@ def test_processing_paused_accepts_mail_but_does_no_work(launch: Launch, fresh_g
     assert worker.overview()["switches"]["processing_paused"] is True
 
 
-def test_force_pause_todoist_summarises_but_holds_tasks(
-    launch: Launch, fresh_gemini: GeminiFake, fresh_todoist: TodoistFake
-) -> None:
+def test_force_pause_todoist_summarises_mail_and_writes_no_task(launch: Launch, fresh_gemini: GeminiFake) -> None:
     worker = launch(FORCE_PAUSE_TODOIST="true")
     event_id = _arrive(worker)
 
-    worker.wait_event(event_id, {"summarized"})
+    worker.wait_event(event_id, {"complete"})  # Mail needs no task
     time.sleep(QUIET_S)
 
-    assert worker.event(event_id)["state"] == "summarized"
-    assert len(fresh_gemini.calls_mentioning(event_id)) == 1 and fresh_todoist.creates() == []
+    assert len(fresh_gemini.calls_mentioning(event_id)) == 1 and tasks.created(worker) == []
     assert worker.overview()["switches"]["force_pause_todoist"] is True

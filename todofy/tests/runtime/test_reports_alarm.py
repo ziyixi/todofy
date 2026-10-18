@@ -10,8 +10,7 @@ import pytest
 
 from tests.fakes.gemini_fake import API_KEY as GEMINI_KEY
 from tests.fakes.gemini_fake import GeminiFake
-from tests.fakes.todoist_fake import PROJECT_ID, TodoistFake
-from tests.fakes.todoist_fake import TOKEN as TODOIST_TOKEN
+from tests.runtime import tasks_support as tasks
 from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import assert_contract
 from tests.runtime.reports_support import NEWSLETTER, digest
@@ -21,10 +20,9 @@ NOW = int(time.time())
 
 
 class Stack:
-    def __init__(self, worker: Worker, gemini: GeminiFake, todoist: TodoistFake) -> None:
+    def __init__(self, worker: Worker, gemini: GeminiFake) -> None:
         self.worker = worker
         self.gemini = gemini
-        self.todoist = todoist
 
     def until(self, condition: Callable[[], Any], timeout_s: float = 30) -> Any:
         deadline = time.monotonic() + timeout_s
@@ -36,13 +34,10 @@ class Stack:
 
 @pytest.fixture(scope="module")
 def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
-    gemini, todoist = GeminiFake(), TodoistFake()
+    gemini = GeminiFake()
     variables = {
         "GEMINI_API_BASE": gemini.url,
         "GEMINI_API_KEY": GEMINI_KEY,
-        "TODOIST_API_BASE": todoist.url,
-        "TODOIST_API_KEY": TODOIST_TOKEN,
-        "TODOIST_DEFAULT_PROJECT_ID": PROJECT_ID,
         "REPORT_BASIC_AUTH_SHA256": digest(*NEWSLETTER),
         "REPORT_PRECOMPUTE_UTC": "00:00",
         "REMINDER_ENABLED": "true",
@@ -58,10 +53,9 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
                 f" 'failed_summary', 'summary_failed', {NOW - 60}, {NOW - 60})"
             )
             assert worker.trigger_cron("*/10 * * * *").status_code == 200
-            yield Stack(worker, gemini, todoist)
+            yield Stack(worker, gemini)
     finally:
         gemini.close()
-        todoist.close()
 
 
 def test_alarm_precomputes_both_reports_once(stack):
@@ -97,11 +91,11 @@ def test_other_top_is_computed_on_demand_by_the_coordinator(stack):
 
 
 def test_alarm_sends_one_reminder_for_the_day(stack):
-    [create] = stack.until(lambda: stack.todoist.creates())
-    assert create.json()["content"] == reminder_title(1)
-    assert "e-failed · failed_summary · summary_failed" in create.json()["description"]
+    [created] = stack.until(lambda: tasks.created(stack.worker))
+    assert created["title"] == reminder_title(1)
+    assert "e-failed · failed_summary · summary_failed" in created["description"]
     [row] = stack.until(lambda: stack.worker.d1("SELECT state, task_id FROM mail_reminders WHERE state != 'sending'"))
-    assert row == {"state": "created", "task_id": stack.todoist.tasks[0].id}
+    assert row == {"state": "created", "task_id": created["id"]}
     assert stack.worker.trigger_cron("*/10 * * * *").status_code == 200
     time.sleep(2)
-    assert len(stack.todoist.creates()) == 1
+    assert len(tasks.created(stack.worker)) == 1

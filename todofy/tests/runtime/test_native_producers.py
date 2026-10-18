@@ -1,4 +1,4 @@
-"""Native producer defaults use Tasks Inbox, independent of the former mail-project setting."""
+"""Producers default to the Tasks Inbox, whatever TODOIST_DEFAULT_PROJECT_ID names."""
 
 import json
 import time
@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from tests.runtime.harness import ROOT, _wrangler
+from tests.runtime.harness import ROOT
 from tests.runtime.test_clients_native_tasks import call, rpc
 from tests.runtime.test_clients_native_tasks import native as native_fixture
 from todofy.core import gtd, intents
@@ -106,18 +106,7 @@ def test_new_reminder_and_review_default_to_native_inbox_but_explicit_project_is
 def test_native_gtd_uses_actual_inbox_and_untriaged_mail_instead_of_old_mail_project(producer):
     native = producer
     # An imported account can have a physical Inbox ID. Blank new task IDs and that ID are one Inbox.
-    _wrangler(
-        "d1",
-        "execute",
-        "DB",
-        "--local",
-        "--persist-to",
-        str(native.persist_to),
-        "--config",
-        native.configs[1],
-        "--command",
-        "INSERT INTO projects(id,title,inbox,created_at,updated_at) VALUES('physical-inbox','Inbox',1,1,1)",
-    )
+    native.tasks_d1("INSERT INTO projects(id,title,inbox,created_at,updated_at) VALUES('physical-inbox','Inbox',1,1,1)")
     rpc(
         native,
         "CreateTask",

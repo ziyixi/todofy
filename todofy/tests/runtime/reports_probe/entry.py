@@ -11,6 +11,7 @@ overrides from the ``x-probe-vars`` header.
 """
 
 import json
+import types
 from dataclasses import asdict, replace
 from typing import Any
 from urllib.parse import urlsplit
@@ -19,7 +20,7 @@ from workers import DurableObject, Response, WorkerEntrypoint
 
 from todofy.core import gtd as gtd_rules
 from todofy.core import ops
-from todofy.core.backoff import REPORT_ON_DEMAND_BUDGET, TODOIST_AUTH_BLOCK
+from todofy.core.backoff import REPORT_ON_DEMAND_BUDGET
 from todofy.core.vocab import EventState
 from todofy.runtime import gtd, ledger, reminder, reports, retention
 from todofy.runtime import ops as ops_runtime
@@ -54,6 +55,20 @@ class FailingDb:
 
     def batch(self, statements: Any) -> Any:
         return self._db.batch(statements)
+
+
+class FailingTasks:
+    """The TASKS binding whose ``methods`` answer 503, as an outage of Tasks would; every other call reaches
+    Tasks."""
+
+    def __init__(self, tasks: Any, methods: set[str]) -> None:
+        self._tasks = tasks
+        self._methods = methods
+
+    async def call(self, method: str, body: str) -> Any:
+        if method in self._methods:
+            return types.SimpleNamespace(status=503, body="{}")
+        return await self._tasks.call(method, body)
 
 
 class Budget:
@@ -112,26 +127,14 @@ class Budget:
 
 
 class GtdHost:
-    """Stands in for the coordinator in runtime/gtd.py: the object's storage, the Todoist budget
-    (``wait`` is what ``todoist_wait`` answers: None means Todoist may be called), the auth block,
-    step metrics and the stored ops report. ``calls`` records what the module asked for."""
+    """Stands in for the coordinator in runtime/gtd.py: the object's storage, step metrics and the stored ops
+    report. ``calls`` records what the module asked for."""
 
-    def __init__(self, env: Any, store: Any, wait: int | None, ops_report: dict[str, Any] | None) -> None:
+    def __init__(self, env: Any, store: Any, ops_report: dict[str, Any] | None) -> None:
         self.env = env
         self.sql = store
-        self.wait = wait
         self.ops_report = None if ops_report is None else ops.stored_report(ops.compact(ops_report))
         self.calls: list[list[Any]] = []
-
-    def count_todoist_calls(self, calls: int, now: int) -> None:
-        self.calls.append(["count", calls, now])
-
-    def todoist_wait(self, now: int) -> int | None:
-        return self.wait
-
-    def block_todoist(self, now: int) -> int:
-        self.calls.append(["block", now])
-        return now + TODOIST_AUTH_BLOCK
 
     def record_step(self, point: Any, now: int) -> None:
         self.calls.append(["step", str(point.step), str(point.outcome), point.code])
@@ -151,8 +154,11 @@ class GtdProbe(DurableObject):
 
     async def run(self, text: str) -> str:
         args = json.loads(text)
-        env = Overlay(self.env, args.get("vars", {}))
-        host = GtdHost(env, self.sql, args.get("wait"), args.get("ops_report"))
+        overrides: dict[str, Any] = dict(args.get("vars", {}))
+        if methods := args.get("fail_tasks"):
+            overrides["TASKS"] = FailingTasks(self.env.TASKS, set(methods))
+        env = Overlay(self.env, overrides)
+        host = GtdHost(env, self.sql, args.get("ops_report"))
         data: dict[str, Any] = {}
         match args["op"]:
             case "tick":

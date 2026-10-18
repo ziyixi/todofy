@@ -19,6 +19,10 @@ from todofy.core.vocab import Code
 
 # A correct Worker cannot be driven to an unhandled exception from outside.
 UNREACHABLE = {ApiError.INTERNAL_ERROR}
+# Outcomes the real Tasks Worker cannot be made to give from outside: a create whose answer is lost (or a 5xx),
+# and a 429. Their classification is host-tested (tests/unit/test_classify.py, test_native_tasks.py), and the
+# rows they leave are seeded where a scenario resolves them (test_scenarios_reconcile.py).
+NOT_DRIVEN = {Code.TODO_RESULT_UNKNOWN, Code.TODOIST_RATE_LIMITED}
 # Only the owner API before todofy.ui.v1 answered these (TodofyCore.owner_api, which only the previous gateway
 # calls during this deploy; removed in the next release): the gateway's own routes never do.
 BEFORE_UI_V1 = {
@@ -53,7 +57,7 @@ def _marks() -> Iterator[tuple[str, str]]:
 REACHED = dict(_marks())
 
 
-@pytest.mark.parametrize("code", list(Code))
+@pytest.mark.parametrize("code", [code for code in Code if code not in NOT_DRIVEN])
 def test_every_ledger_code_is_reached(code: Code) -> None:
     assert code in REACHED, f"no scenario reaches {code}"
 

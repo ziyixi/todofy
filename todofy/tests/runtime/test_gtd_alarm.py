@@ -1,7 +1,7 @@
 """The GTD ledger through the shipped Worker (docs/gtd-features.md): the coordinator's alarm takes
-the daily Todoist snapshot, ops-v1 status() carries its counters (validated against contracts/ops-v1),
+the daily Tasks snapshot, ops-v1 status() carries its counters (validated against contracts/ops-v1),
 the owner API serves the series, and an owner recompute of the recommendation carries still-open
-mail tasks. A paused Todoist makes no GTD call. Synthetic tasks only."""
+mail tasks. Paused task writes take no snapshot. Synthetic tasks only."""
 
 import json
 import time
@@ -12,7 +12,7 @@ import pytest
 from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 
 from tests.fakes.gemini_fake import GeminiFake
-from tests.fakes.todoist_fake import TodoistFake, stamp
+from tests.runtime import tasks_support as tasks
 from tests.runtime.conftest import pipeline_vars
 from tests.runtime.harness import wait_until
 from tests.runtime.ops_support import OpsStack, start_ops_stack
@@ -32,13 +32,11 @@ def wake(stack: OpsStack) -> None:
 
 
 @pytest.fixture(scope="module")
-def launch_stack(
-    tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake, todoist: TodoistFake
-) -> Iterator[StackLaunch]:
+def launch_stack(tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake) -> Iterator[StackLaunch]:
     running: list[Iterator[OpsStack]] = []
 
     def start(**overrides: str) -> OpsStack:
-        variables = pipeline_vars(gemini, todoist) | {"GTD_COLLECT_UTC": "00:00"} | overrides
+        variables = pipeline_vars(gemini) | {"GTD_COLLECT_UTC": "00:00"} | overrides
         process = start_ops_stack(tmp_path_factory.mktemp("gtd"), variables)
         running.append(process)
         return next(process)
@@ -48,28 +46,31 @@ def launch_stack(
         process.close()
 
 
-@pytest.fixture(scope="module")
-def seeded(todoist: TodoistFake) -> list[str]:
-    """Tasks in Todoist before the Worker starts: its first alarm takes the snapshot."""
-    todoist.reset()
-    ids = [
-        todoist.add_task(SENTINEL, SENTINEL, added_at=stamp(NOW - 3 * DAY), due={"date": gtd.day_of(NOW - 2 * DAY)}).id,
-        todoist.add_task(SENTINEL, SENTINEL, added_at=stamp(NOW - 40 * DAY)).id,
-        todoist.add_task(SENTINEL, SENTINEL, project_id="work").id,
-    ]
-    done = todoist.add_task(SENTINEL, SENTINEL, added_at=stamp(NOW - DAY))
-    todoist.complete(done.id, NOW - 3600)
+def seed(stack: OpsStack) -> list[str]:
+    """Tasks in Tasks before the first alarm, which takes the snapshot: three open (two in the Inbox), one done."""
+    ids = tasks.seed(
+        stack,
+        {"title": SENTINEL, "description": SENTINEL, "added": NOW - 3 * DAY, "due_date": gtd.day_of(NOW - 2 * DAY)},
+        {"title": SENTINEL, "description": SENTINEL, "added": NOW - 40 * DAY},
+        {"title": SENTINEL, "description": SENTINEL, "project": "work", "added": NOW - 5 * DAY},
+        {"title": SENTINEL, "description": SENTINEL, "added": NOW - DAY},
+        now=NOW,
+    )
+    tasks.complete(stack, ids[-1], NOW - 3600)
     return ids
 
 
 @pytest.fixture(scope="module")
-def stack(launch_stack: StackLaunch, seeded: list[str]) -> OpsStack:
+def stack(launch_stack: StackLaunch) -> OpsStack:
     stack = launch_stack()
-    # Mail tasks from before the 24 h window, one still open in Todoist.
+    ids = seed(stack)
+    # Mail from before the 24 h window: one converted to a task that is still open, one still pending in Mail,
+    # one converted to a task that is gone.
     stack.d1(
-        "INSERT INTO summaries (event_id, created_at, subject, summary, model, task_id) VALUES"
-        f" ('old-open', {NOW - 3 * DAY}, 's', '三天前的提醒', 'm', '{seeded[0]}'),"
-        f" ('old-closed', {NOW - 4 * DAY}, 's', '已完成', 'm', 'closed-task')"
+        "INSERT INTO summaries (event_id, created_at, subject, summary, model, task_id, triaged_at) VALUES"
+        f" ('old-open', {NOW - 3 * DAY}, 's', '三天前的提醒', 'm', '{ids[0]}', {NOW - 3 * DAY}),"
+        f" ('old-pending', {NOW - 2 * DAY}, 's', '两天前的邮件', 'm', '', NULL),"
+        f" ('old-closed', {NOW - 4 * DAY}, 's', '已完成', 'm', 'closed-task', {NOW - 4 * DAY})"
     )
     wake(stack)
     wait_until(
@@ -78,13 +79,12 @@ def stack(launch_stack: StackLaunch, seeded: list[str]) -> OpsStack:
     return stack
 
 
-def test_the_alarm_takes_the_daily_snapshot(stack: OpsStack, todoist: TodoistFake) -> None:
+def test_the_alarm_takes_the_daily_snapshot(stack: OpsStack) -> None:
     [snapshot] = stack.d1("SELECT day, status, task_count FROM gtd_snapshots")
     assert snapshot == {"day": gtd.day_of(int(time.time())), "status": "ok", "task_count": 3}
     daily = {row["scope"]: row for row in stack.d1("SELECT * FROM gtd_daily")}
     assert (daily["all"]["open"], daily["all"]["overdue"], daily["all"]["mail_open"]) == (3, 1, 1)
     assert (daily["inbox"]["open"], daily["inbox"]["oldest_days"], daily["inbox"]["completed_7d"]) == (2, 40, 1)
-    assert len(todoist.lists()) == 1 and len(todoist.completed_lists()) == 1
 
 
 def test_status_carries_the_gtd_counters(stack: OpsStack) -> None:
@@ -122,7 +122,7 @@ def test_an_owner_recompute_carries_the_open_mail_task(stack: OpsStack, gemini: 
     report = answer["recommendation"]
     assert (report["new_count"], report["carryover_count"]) == (0, 1)
     [call] = gemini.calls_mentioning("三天前的提醒")
-    assert "[3 天前] 三天前的提醒" in call.user and "已完成" not in call.user
+    assert "[3 天前] 三天前的提醒" in call.user and "已完成" not in call.user and "两天前的邮件" not in call.user
 
 
 def test_the_snapshot_holds_no_task_text(stack: OpsStack) -> None:
@@ -132,13 +132,12 @@ def test_the_snapshot_holds_no_task_text(stack: OpsStack) -> None:
     assert SENTINEL not in log
 
 
-def test_a_paused_todoist_makes_no_gtd_call(launch_stack: StackLaunch, todoist: TodoistFake) -> None:
-    todoist.reset()
-    todoist.add_task(SENTINEL)
+def test_paused_task_writes_take_no_snapshot(launch_stack: StackLaunch) -> None:
     paused = launch_stack(FORCE_PAUSE_TODOIST="true")
+    tasks.seed(paused, {"title": SENTINEL}, now=NOW)
     wake(paused)
     time.sleep(3)
-    assert todoist.received("GET") == [] and paused.d1("SELECT day FROM gtd_snapshots") == []
+    assert paused.d1("SELECT day FROM gtd_snapshots") == []
     status = paused.ok("status", definition="OpsStatus")
     # Paused on purpose: the snapshot is not called stale, and there are no counters to report.
     assert "gtd_snapshot_stale" not in [signal["code"] for signal in status["signals"]]

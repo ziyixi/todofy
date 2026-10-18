@@ -27,11 +27,12 @@ from tests.runtime.harness import (
     CSRF_SIGNING_KEY,
     GATEWAY_CONFIG,
     ROOT,
+    TASKS,
     WRANGLER,
     Worker,
     _run,
-    _wrangler,
     reason,
+    tasks_config,
     wait_until,
 )
 from todofy.core.sql import backup as sql
@@ -39,7 +40,6 @@ from todofy.core.sql import backup as sql
 BUCKET = "todofy-backups"
 TOOL = ROOT / "tools" / "backup_restore.py"
 EVENTS, TRANSITIONS, LEGACY_TEXTS = 30, 1100, 4
-TASKS = ROOT.parent / "tasks"
 TASKS_TOOL = TASKS / "tools" / "backup-restore.ts"
 # Every Tasks table a restore writes, with its order, and task_labels, which its triggers rebuild.
 TASKS_TABLES = {
@@ -59,35 +59,10 @@ OLD_COMPLETE = [f"backups/2020-0{month}-05/" for month in range(1, 7)]
 OLD_INCOMPLETE = "backups/2020-01-12/"
 
 
-def tasks_config(path: Path, database_id: str) -> Path:
-    """The Tasks Worker on its own local D1 (a Worker config, so `d1 execute` also reads it)."""
-    path.write_text(
-        json.dumps(
-            {
-                "name": "backup-tasks",
-                "main": str(TASKS / "worker/src/index.ts"),
-                "compatibility_date": "2026-09-08",
-                "workers_dev": False,
-                "preview_urls": False,
-                "d1_databases": [
-                    {
-                        "binding": "DB",
-                        "database_name": "backup-tasks-test",
-                        "database_id": database_id,
-                        "migrations_dir": str(TASKS / "migrations"),
-                    }
-                ],
-                "vars": {"TIME_ZONE": "America/Los_Angeles", "PUBLIC_HOST": "tasks.localhost"},
-            }
-        )
-    )
-    return path
-
-
 @pytest.fixture(scope="module")
 def backup_worker(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Worker]:
     state = tmp_path_factory.mktemp("backup-worker")
-    tasks = tasks_config(state / "tasks.json", "00000000-0000-4000-8000-000000000003")
+    tasks = str(tasks_config(state / "tasks.json", "backup-tasks", "00000000-0000-4000-8000-000000000003"))
     config = tomllib.loads(CORE_CONFIG.read_text())
     config["r2_buckets"] = [{"binding": "BACKUPS", "bucket_name": BUCKET}]
     config["services"] = [
@@ -96,10 +71,9 @@ def backup_worker(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Worker]:
     config["vars"]["BACKUP_QUERY_BUDGET"] = "1"
     generated = ROOT / f"wrangler.test-run-{uuid.uuid4().hex}.json"
     generated.write_text(json.dumps(config))
-    _wrangler("d1", "migrations", "apply", "DB", "--local", "--persist-to", str(state), "--config", str(tasks))
     # The Tasks config is the server's last (tasks_d1 reads it).
     worker = Worker(
-        [GATEWAY_CONFIG, generated.name, str(tasks)], generated.name, state, {"CSRF_SIGNING_KEY": CSRF_SIGNING_KEY}
+        [GATEWAY_CONFIG, generated.name, tasks], generated.name, state, {"CSRF_SIGNING_KEY": CSRF_SIGNING_KEY}, tasks
     )
     try:
         yield from _run(worker)

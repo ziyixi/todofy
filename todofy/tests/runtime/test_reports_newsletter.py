@@ -13,7 +13,6 @@ import httpx
 import pytest
 
 from tests.fakes.gemini_fake import GeminiFake, error_reply, text_reply
-from tests.fakes.todoist_fake import TodoistFake
 from tests.runtime.conftest import pipeline_vars
 from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import assert_contract
@@ -42,10 +41,10 @@ def auth_failures(worker: Worker) -> int | None:
 
 
 def start_newsletter(
-    tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake, todoist: TodoistFake, digests: str | None
+    tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake, digests: str | None
 ) -> Iterator[Worker]:
     """A fresh gateway and core: the failure count and the gateway's lock last an hour."""
-    variables = pipeline_vars(gemini, todoist)
+    variables = pipeline_vars(gemini)
     del variables["REPORT_BASIC_AUTH_SHA256"]
     if digests is not None:
         variables["REPORT_BASIC_AUTH_SHA256"] = digests
@@ -53,10 +52,8 @@ def start_newsletter(
 
 
 @pytest.fixture(name="newsletter")
-def newsletter_fixture(
-    tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake, todoist: TodoistFake
-) -> Iterator[Worker]:
-    yield from start_newsletter(tmp_path_factory, gemini, todoist, f"{digest(*NEWSLETTER)},{digest(*ROTATED)}")
+def newsletter_fixture(tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake) -> Iterator[Worker]:
+    yield from start_newsletter(tmp_path_factory, gemini, f"{digest(*NEWSLETTER)},{digest(*ROTATED)}")
 
 
 def seed_summaries(probe: Probe, *texts: str, age: int = HOUR) -> None:
@@ -131,8 +128,8 @@ def test_both_rotation_digests_are_accepted(newsletter: Worker):
     assert auth_failures(newsletter) is None
 
 
-def test_missing_digest_is_503_not_configured(tmp_path_factory, gemini, todoist):
-    for worker in start_newsletter(tmp_path_factory, gemini, todoist, None):
+def test_missing_digest_is_503_not_configured(tmp_path_factory, gemini):
+    for worker in start_newsletter(tmp_path_factory, gemini, None):
         response = worker.hooks.get("/api/summary", auth=NEWSLETTER)
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "not_configured"

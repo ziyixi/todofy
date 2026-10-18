@@ -18,7 +18,6 @@ from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 
 from tests import mail_contract
 from tests.fakes.gemini_fake import GeminiFake
-from tests.fakes.todoist_fake import TodoistFake
 from tests.runtime.harness import Worker, mail_event, transitions, wait_until
 from tests.runtime.owner_support import assert_message, assert_status
 
@@ -55,9 +54,7 @@ def _patch_object(worker: Worker, *statements: tuple[str, tuple[object, ...]]) -
     worker.start()
 
 
-def test_a_finished_day_is_written_once_and_served(
-    worker: Worker, fresh_gemini: GeminiFake, fresh_todoist: TodoistFake
-) -> None:
+def test_a_finished_day_is_written_once_and_served(worker: Worker, fresh_gemini: GeminiFake) -> None:
     # The first alarm starts counting at the newest transition and forgets its partial day.
     _complete_one_mail(worker)
     # Count the whole ledger from here on, and hold the flush while the next mail runs.
@@ -85,9 +82,9 @@ def test_a_finished_day_is_written_once_and_served(
     yesterday = _utc_day(-1)
     written = wait_until(lambda: _metric_rows(worker, yesterday) or None, 20, "yesterday's metrics")
     # Mail counts come from the ledger (both mails, not the canary); step counters only from the
-    # second mail and the canary's summary call.
+    # second mail's and the canary's summary calls. Mail creates no task.
     assert written["mails_received"] == 2 and written["mails_completed"] == 2
-    assert written["todoist_creates"] == 1 and written["gemini_calls"] == 2
+    assert "todoist_creates" not in written and written["gemini_calls"] == 2
     assert written["gemini_tokens:model-a"] > 0
     # Two mails whose end-to-end times may differ by a second on a slow runner.
     assert 0 <= written["latency_p50_s"] <= written["latency_p90_s"] < 60
@@ -122,9 +119,7 @@ def test_neighbouring_paths_are_not_found(worker: Worker, path: str) -> None:
     assert worker.owner.get(path).status_code == 404
 
 
-def test_a_failing_counter_write_never_fails_the_step(
-    worker: Worker, fresh_gemini: GeminiFake, fresh_todoist: TodoistFake
-) -> None:
+def test_a_failing_counter_write_never_fails_the_step(worker: Worker, fresh_gemini: GeminiFake) -> None:
     _complete_one_mail(worker)  # the object and its storage exist from here on
     # Every insert into the object's step counters fails, as with a full object storage.
     _patch_object(
@@ -139,19 +134,15 @@ def test_a_failing_counter_write_never_fails_the_step(
         event_id, body = mail_event()
         assert worker.post_event(body).status_code == 204
         event = worker.wait_event(event_id, {"complete"})
-        # One summary and one task: the Gemini call is not rerun and the created task is not
-        # left in todo_sending (then todo_unknown and a lookup) by the failed counter write.
+        # One summary: the Gemini call is not rerun, and the mail completes, despite the failed counter write.
         assert [(t[0], t[1]) for t in transitions(event)] == [
             (None, "pending"),
             ("pending", "summarizing"),
-            ("summarizing", "summarized"),
-            ("summarized", "todo_sending"),
-            ("todo_sending", "complete"),
+            ("summarizing", "complete"),
         ]
         assert len(fresh_gemini.calls_mentioning(event_id)) == 1
-        assert len(fresh_todoist.creates_for(event_id)) == 1
         log = wait_until(
-            lambda: (text := (worker.persist_to / "dev.log").read_text()).count('"count_failed"') >= 2 and text,
+            lambda: (text := (worker.persist_to / "dev.log").read_text()).count('"count_failed"') >= 1 and text,
             10,
             "the count_failed log lines",
         )
@@ -162,7 +153,7 @@ def test_a_failing_counter_write_never_fails_the_step(
 
 @pytest.mark.parametrize("new_mail", [True, False], ids=["ids_reused", "ids_lower"])
 def test_a_restored_database_restarts_counting_instead_of_writing_zeros(
-    worker: Worker, fresh_gemini: GeminiFake, fresh_todoist: TodoistFake, new_mail: bool
+    worker: Worker, fresh_gemini: GeminiFake, new_mail: bool
 ) -> None:
     _complete_one_mail(worker)  # the object and its storage exist from here on
     # Hold the flush while the mails run.

@@ -1,9 +1,9 @@
 """Fixtures for the black-box runtime tests; the machinery lives in harness.py.
 
-Each scenario module gets its own fakes and its own Worker (a fresh D1 and
-Durable Object), because the object is one serial executor with global state:
-a hanging upstream, a Todoist auth block or a spent token budget would
-otherwise leak into the next module.
+Each scenario module gets its own fakes and its own Worker (a fresh D1, Durable
+Object and Tasks D1), because the object is one serial executor with global state:
+a hanging upstream or a spent token budget would otherwise leak into the next
+module.
 """
 
 from collections.abc import Callable, Iterator
@@ -12,8 +12,6 @@ import pytest
 
 from tests.fakes.gemini_fake import API_KEY as GEMINI_KEY
 from tests.fakes.gemini_fake import GeminiFake
-from tests.fakes.todoist_fake import PROJECT_ID, TodoistFake
-from tests.fakes.todoist_fake import TOKEN as TODOIST_TOKEN
 from tests.runtime.harness import (
     CSRF_SIGNING_KEY,
     GATEWAY_AUTH_CONFIG,
@@ -38,14 +36,11 @@ def pytest_configure(config: pytest.Config) -> None:
     # pytest-xdist may only hand out whole files (--dist loadfile): the rootdir conftest.py refuses the rest.
 
 
-def pipeline_vars(gemini: GeminiFake, todoist: TodoistFake) -> dict[str, str]:
+def pipeline_vars(gemini: GeminiFake) -> dict[str, str]:
     """Secrets and upstream URLs for a fully configured Worker (timings are in the core's wrangler.test.toml)."""
     return {
         "GEMINI_API_BASE": gemini.url,
         "GEMINI_API_KEY": GEMINI_KEY,
-        "TODOIST_API_BASE": todoist.url,
-        "TODOIST_API_KEY": TODOIST_TOKEN,
-        "TODOIST_DEFAULT_PROJECT_ID": PROJECT_ID,
         "MAIL_WEBHOOK_TOKEN_SHA256": sha256_hex(WEBHOOK_TOKEN),
         "MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS": sha256_hex(PREVIOUS_WEBHOOK_TOKEN),
         "REPORT_BASIC_AUTH_SHA256": sha256_hex(f"{REPORT_USER}:{REPORT_PASSWORD}"),
@@ -61,21 +56,13 @@ def gemini() -> Iterator[GeminiFake]:
 
 
 @pytest.fixture(scope="module")
-def todoist() -> Iterator[TodoistFake]:
-    server = TodoistFake()
-    yield server
-    server.close()
-
-
-@pytest.fixture(scope="module")
-def launch(tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake, todoist: TodoistFake) -> Iterator[Launch]:
-    """Start the gateway and core wired to this module's fakes; ``NAME=None`` drops a var, others override."""
+def launch(tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake) -> Iterator[Launch]:
+    """Start the gateway, core and Tasks wired to this module's fakes; ``NAME=None`` drops a var, others
+    override."""
     running: list[Iterator[Worker]] = []
 
     def start(config: str = GATEWAY_CONFIG, **overrides: str | None) -> Worker:
-        variables = {
-            name: value for name, value in (pipeline_vars(gemini, todoist) | overrides).items() if value is not None
-        }
+        variables = {name: value for name, value in (pipeline_vars(gemini) | overrides).items() if value is not None}
         process = start_gateway(tmp_path_factory.mktemp("worker"), variables, config)
         running.append(process)
         return next(process)
@@ -94,12 +81,6 @@ def worker(launch: Launch) -> Worker:
 def fresh_gemini(gemini: GeminiFake) -> GeminiFake:
     gemini.reset()
     return gemini
-
-
-@pytest.fixture
-def fresh_todoist(todoist: TodoistFake) -> TodoistFake:
-    todoist.reset()
-    return todoist
 
 
 @pytest.fixture

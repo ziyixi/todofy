@@ -15,10 +15,8 @@ from tests.fakes.server import (
     retry_after_http_date,
     retry_after_seconds,
 )
-from tests.fakes.todoist_fake import COMPLETED_PATH, PROJECT_ID, TASKS_PATH, TOKEN, TodoistFake, stamp
 
 GEMINI_KEY = {"x-goog-api-key": API_KEY}
-TODOIST_AUTH = {"authorization": f"Bearer {TOKEN}"}
 
 
 @pytest.fixture
@@ -35,9 +33,23 @@ def gemini() -> Iterator[GeminiFake]:
     server.close()
 
 
+class Counter(FakeServer):
+    """An upstream with one route: POST /items stores an item, GET /items answers how many there are."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.items: list[str] = []
+        self.route("POST", "/items", lambda request, _: self._add(request))
+        self.route("GET", "/items", lambda request, _: Reply(200, {"count": len(self.items)}))
+
+    def _add(self, request) -> Reply:
+        self.items.append(request.body.decode())
+        return Reply(200, {"count": len(self.items)})
+
+
 @pytest.fixture
-def todoist() -> Iterator[TodoistFake]:
-    server = TodoistFake()
+def counter() -> Iterator[Counter]:
+    server = Counter()
     yield server
     server.close()
 
@@ -163,98 +175,20 @@ def test_gemini_queues_per_model_before_any_model(gemini: GeminiFake) -> None:
     assert again.status_code == 200
 
 
-def test_todoist_rejects_a_wrong_token(todoist: TodoistFake) -> None:
-    response = httpx.post(todoist.url + TASKS_PATH, json={"content": "x"}, headers={"authorization": "Bearer nope"})
-    assert response.status_code == 401
-    assert todoist.tasks == []
-
-
-def test_todoist_creates_tasks_with_increasing_ids_and_records_the_request_id(todoist: TodoistFake) -> None:
-    ids = []
-    for n in range(2):
-        response = httpx.post(
-            todoist.url + TASKS_PATH,
-            json={"content": f"t{n}", "description": "d", "project_id": "p1"},
-            headers=TODOIST_AUTH | {"x-request-id": f"todofy-{n}"},
-        )
-        assert response.status_code == 200 and response.json()["labels"] == []
-        ids.append(response.json()["id"])
-    assert ids == sorted(ids) and len(set(ids)) == 2
-    assert [task.request_id for task in todoist.tasks] == ["todofy-0", "todofy-1"]
-    assert httpx.post(todoist.url + TASKS_PATH, json={"content": " "}, headers=TODOIST_AUTH).status_code == 400
-
-
-def test_todoist_lists_active_tasks_of_one_project_in_pages(todoist: TodoistFake) -> None:
-    todoist.max_page_size = 2
-    wanted = [todoist.add_task(f"a{n}", f"footer {n}") for n in range(5)]
-    todoist.add_task("done", checked=True)
-    todoist.add_task("gone", is_deleted=True)
-    todoist.add_task("elsewhere", project_id="other")
-
-    seen, cursor, pages = [], None, 0
-    while True:
-        params = {"project_id": PROJECT_ID, "limit": 200} | ({"cursor": cursor} if cursor else {})
-        page = httpx.get(todoist.url + TASKS_PATH, params=params, headers=TODOIST_AUTH).json()
-        seen += [task["id"] for task in page["results"]]
-        pages += 1
-        if not (cursor := page["next_cursor"]):
-            break
-    assert (seen, pages) == ([task.id for task in wanted], 3)
-    assert httpx.get(todoist.url + TASKS_PATH, params={"cursor": "bad"}, headers=TODOIST_AUTH).status_code == 400
-
-
-def test_applied_reply_creates_the_task_but_answers_differently(todoist: TodoistFake) -> None:
-    todoist.queue("POST", TASKS_PATH, Reply(500, {"error": "boom"}, applied=True))
-    response = httpx.post(todoist.url + TASKS_PATH, json={"content": "lost"}, headers=TODOIST_AUTH)
+def test_applied_reply_runs_the_route_but_answers_differently(counter: Counter) -> None:
+    counter.queue("POST", "/items", Reply(500, {"error": "boom"}, applied=True))
+    response = httpx.post(counter.url + "/items", content="lost")
     assert response.status_code == 500
-    assert [task.content for task in todoist.tasks] == ["lost"]
+    assert counter.items == ["lost"]
 
 
-def test_pass_serves_the_route_after_a_delay_and_only_then_the_queue(todoist: TodoistFake) -> None:
-    todoist.add_task("t", "d")
-    todoist.queue("GET", TASKS_PATH, Reply(None, delay_ms=200))
-    todoist.queue("GET", TASKS_PATH, Reply(500))
+def test_pass_serves_the_route_after_a_delay_and_only_then_the_queue(counter: Counter) -> None:
+    counter.items.append("seeded")
+    counter.queue("GET", "/items", Reply(None, delay_ms=200))
+    counter.queue("GET", "/items", Reply(500))
     started = time.monotonic()
-    first = httpx.get(todoist.url + TASKS_PATH, headers=TODOIST_AUTH)
-    assert first.status_code == 200 and len(first.json()["results"]) == 1
+    first = httpx.get(counter.url + "/items")
+    assert first.status_code == 200 and first.json() == {"count": 1}
     assert time.monotonic() - started >= 0.2
-    assert httpx.get(todoist.url + TASKS_PATH, headers=TODOIST_AUTH).status_code == 500
-    assert PASS.status is None and todoist.pending("GET", TASKS_PATH) == 0
-
-
-def test_todoist_seed_and_state_over_http(todoist: TodoistFake) -> None:
-    seed = {"tasks": [{"content": "seeded", "description": "Mail Hero event: x", "checked": True}]}
-    assert httpx.post(todoist.url + "/admin/seed", json=seed).status_code == 200
-    [task] = httpx.get(todoist.url + "/admin/state").json()["tasks"]
-    assert (task["content"], task["checked"], task["project_id"]) == ("seeded", True, PROJECT_ID)
-    httpx.post(todoist.url + "/admin/reset")
-    assert todoist.tasks == []
-
-
-def test_todoist_lists_every_project_without_a_filter(todoist: TodoistFake) -> None:
-    todoist.add_task("a")
-    todoist.add_task("b", project_id="other", priority=4, due={"date": "2026-10-05"}, labels=["x"])
-    page = httpx.get(todoist.url + TASKS_PATH, params={"limit": 200}, headers=TODOIST_AUTH).json()
-    assert [(task["project_id"], task["priority"]) for task in page["results"]] == [(PROJECT_ID, 1), ("other", 4)]
-    assert page["results"][1]["due"] == {"date": "2026-10-05"} and page["next_cursor"] is None
-
-
-def test_todoist_lists_completed_tasks_in_a_window_and_omits_the_last_cursor(todoist: TodoistFake) -> None:
-    todoist.max_page_size = 2
-    now = 1_790_000_000.0
-    done = [todoist.add_task(f"d{n}", added_at=stamp(now - 86_400)) for n in range(3)]
-    for offset, task in enumerate(done):
-        todoist.complete(task.id, now - 60 * offset)
-    old = todoist.add_task("old")
-    todoist.complete(old.id, now - 8 * 86_400)
-    todoist.add_task("open")
-    params = {"since": stamp(now - 7 * 86_400), "until": stamp(now + 1), "limit": 200}
-    first = httpx.get(todoist.url + COMPLETED_PATH, params=params, headers=TODOIST_AUTH).json()
-    assert [task["content"] for task in first["items"]] == ["d0", "d1"] and first["next_cursor"]
-    second = httpx.get(
-        todoist.url + COMPLETED_PATH, params=params | {"cursor": first["next_cursor"]}, headers=TODOIST_AUTH
-    ).json()
-    assert [task["content"] for task in second["items"]] == ["d2"] and "next_cursor" not in second
-    active = httpx.get(todoist.url + TASKS_PATH, headers=TODOIST_AUTH).json()["results"]
-    assert [task["content"] for task in active] == ["open"]
-    assert httpx.get(todoist.url + COMPLETED_PATH, params={"limit": 5}, headers=TODOIST_AUTH).status_code == 400
+    assert httpx.get(counter.url + "/items").status_code == 500
+    assert PASS.status is None and counter.pending("GET", "/items") == 0

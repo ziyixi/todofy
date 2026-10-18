@@ -7,7 +7,7 @@ import js
 from workers import Response, WorkerEntrypoint
 
 from todofy.core.todoist_request import build_task_request
-from todofy.runtime import gtd, intents, native_plan, native_plus, native_tasks, plus_week, reminder, todoist
+from todofy.runtime import gtd, intents, native_plan, native_plus, native_tasks, plus_week, reminder
 from todofy.runtime.coordinator import TodofyCore
 from todofy.runtime.interop import to_js
 
@@ -52,8 +52,9 @@ class Default(WorkerEntrypoint):
                 result = {"tasks": await native_plan.read_overlay(self.env, data["tasks"])}
             else:
                 try:
-                    revision = await native_plan.save_state(
-                        self.env, data["task_id"], data["labels"], data["expected_rev"], data["request_id"]
+                    state = native_plan.state_from_labels(data["labels"])
+                    revision = await native_plan.save_fields(
+                        self.env, data["task_id"], state, data["expected_rev"], data["request_id"]
                     )
                     result = {"revision": revision}
                 except native_tasks.NativeTasksError as error:
@@ -64,13 +65,12 @@ class Default(WorkerEntrypoint):
                 data["description"],
                 data.get("project_id", ""),
                 data["request_id"],
-                "unused",
                 parent_id=data.get("parent_id", ""),
             )
-            created = await todoist.create_task(self.env, frozen, budget_ms=1000)
+            created = await native_tasks.create_task(self.env, frozen, budget_ms=1000)
             result = {"result": created.verdict.result, "task_id": created.task_id, "attempts": created.attempts}
         elif path == "/native/find":
-            result = {"ids": await todoist.find_footer_tasks(self.env, data["event_id"])}
+            result = {"ids": await native_tasks.find_footer_tasks(self.env, data["event_id"])}
         else:
             return Response("not found", status=404)
         return Response(json.dumps(result), headers={"content-type": "application/json"})
@@ -105,12 +105,12 @@ class NativePlusProbe(TodofyCore):
             self.running = False
 
     async def reset_week(self, week):
-        return await plus_week.reset_ended(self, week, native_plan.CANONICAL_MAPPING)
+        return await plus_week.reset_ended(self, week)
 
     async def run(self, text):
         data = json.loads(text)
         try:
-            result = await native_plus.resume(self, data["commands"])
+            result = await native_plus.commands(self, data["commands"])
         except native_tasks.NativeTasksError as error:
             result = {"error": error.status}
         return json.dumps(result)

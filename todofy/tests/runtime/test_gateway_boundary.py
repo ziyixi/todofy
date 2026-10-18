@@ -18,7 +18,6 @@ from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 from ziyixi_proto.wire_json import from_wire
 
 from tests.fakes.gemini_fake import GeminiFake
-from tests.fakes.todoist_fake import TodoistFake
 from tests.runtime.conftest import pipeline_vars
 from tests.runtime.harness import (
     OWNER,
@@ -77,18 +76,16 @@ script_name = "todofy-core"
 
 
 @pytest.fixture(scope="module")
-def core(tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake, todoist: TodoistFake) -> Iterator[Worker]:
+def core(tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake) -> Iterator[Worker]:
     state = tmp_path_factory.mktemp("boundary-probe")
     (state / "probe.js").write_text(PROBE_SCRIPT)
     (state / "wrangler.toml").write_text(PROBE_CONFIG)
-    yield from start_gateway(state, pipeline_vars(gemini, todoist), str(state / "wrangler.toml"))
+    yield from start_gateway(state, pipeline_vars(gemini), str(state / "wrangler.toml"))
 
 
 @pytest.fixture(scope="module")
-def gateway_alone(
-    tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake, todoist: TodoistFake
-) -> Iterator[Worker]:
-    yield from start_gateway(tmp_path_factory.mktemp("gateway-alone"), pipeline_vars(gemini, todoist), core=False)
+def gateway_alone(tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake) -> Iterator[Worker]:
+    yield from start_gateway(tmp_path_factory.mktemp("gateway-alone"), pipeline_vars(gemini), core=False)
 
 
 def _envelope_id(response: httpx.Response) -> str:
@@ -157,7 +154,7 @@ def test_fetch_changes_nothing_and_rpc_answers_results(core: Worker) -> None:
     assert _rpc(core, "newsletter", "weekly", "") == _error(404, ApiError.NOT_FOUND)
     setup = _rpc(core, "setup")
     assert set(setup) == {"mail_source_id", "configured"}
-    assert set(setup["configured"]) == {"gemini_api_key", "todoist_api_key", "todoist_project"}
+    assert set(setup["configured"]) == {"gemini_api_key", "todoist_project"}
 
     # todofy.ui.v1: the response message as wire JSON text, and the next page's cursor.
     page = _rpc(core, "owner_ui", OWNER, "ListMailEvents", '{"page_size":1}', None)

@@ -1,9 +1,10 @@
 """Single source of the ledger vocabulary: states, error codes and owner actions.
 
-Codes marked ``legacy`` were written by the retired Go service and imported
-ledger rows still carry them. The Worker produces none of them for its own
-events; it writes ``invalid_saved_event`` only for an imported row that is still
-due but has no stored payload the contract accepts.
+Codes marked ``legacy`` were written by a retired writer, the Go service or the
+release that still wrote Todoist (``todoist_auth_blocked``), and older ledger rows
+still carry them. The Worker produces none of them for its own events; it writes
+``invalid_saved_event`` only for an imported row that is still due but has no
+stored payload the contract accepts.
 """
 
 from dataclasses import dataclass
@@ -74,7 +75,7 @@ class CodeInfo:
     """What the ledger needs to know about a code. The owner-facing Chinese text lives only
     in web/src/lib/labels.ts, so there is one copy to keep in step with the behaviour."""
 
-    legacy: bool = False  # only the retired Go service wrote it
+    legacy: bool = False  # only a retired writer wrote it
 
 
 EVENT_ERROR_CODES: dict[Code, CodeInfo] = {
@@ -85,7 +86,7 @@ EVENT_ERROR_CODES: dict[Code, CodeInfo] = {
     Code.LLM_REQUEST_REJECTED: CodeInfo(),
     Code.PROCESSING_INTERRUPTED_LIMIT: CodeInfo(),
     Code.TODOIST_REJECTED: CodeInfo(),
-    Code.TODOIST_AUTH_BLOCKED: CodeInfo(),
+    Code.TODOIST_AUTH_BLOCKED: CodeInfo(legacy=True),
     Code.TODOIST_RATE_LIMITED: CodeInfo(),
     Code.TODOIST_UNAVAILABLE: CodeInfo(),
     Code.TODO_RESULT_UNKNOWN: CodeInfo(),

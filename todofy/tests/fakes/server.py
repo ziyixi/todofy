@@ -1,4 +1,4 @@
-"""In-process loopback HTTP fake for upstream APIs (Gemini, Todoist, Access JWKS).
+"""In-process loopback HTTP fake for upstream APIs (Gemini, Access JWKS).
 
 Tests queue replies per (method, path), read back what the Worker sent, and can
 make a reply hang until the client gives up, which is how outbound timeouts are

@@ -1,7 +1,7 @@
 """ops-v1 end to end (contracts/ops-v1): a dashboard stand-in calls the gateway's ``Ops``
 entrypoint over a service binding, in front of the real gateway, core, D1 and object.
 
-Canary events are processed through (fake) Gemini and end ``ok`` without any Todoist call,
+Canary events are processed through (fake) Gemini and end ``ok`` without any Tasks write,
 report input, list entry, count or reminder; status/setGuard/canaryResult/reportOps answer
 values that validate against the shared schema; a shed guard defers retention and lets it run
 once it ends; the daily reminder carries the ops digest, one task per day.
@@ -18,7 +18,7 @@ import pytest
 
 from tests import mail_contract
 from tests.fakes.gemini_fake import GeminiFake, error_reply
-from tests.fakes.todoist_fake import TodoistFake
+from tests.runtime import tasks_support as tasks
 from tests.runtime.conftest import pipeline_vars
 from tests.runtime.harness import error_code, mail_event, reason, transitions, wait_until
 from tests.runtime.ops_support import OpsStack, start_ops_stack
@@ -77,13 +77,11 @@ def seed(stack: OpsStack, event_id: str, state: str, *, body: bytes | None, crea
 
 
 @pytest.fixture(scope="module")
-def launch_stack(
-    tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake, todoist: TodoistFake
-) -> Iterator[StackLaunch]:
+def launch_stack(tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake) -> Iterator[StackLaunch]:
     running: list[Iterator[OpsStack]] = []
 
     def start(**overrides: str) -> OpsStack:
-        process = start_ops_stack(tmp_path_factory.mktemp("ops"), pipeline_vars(gemini, todoist) | overrides)
+        process = start_ops_stack(tmp_path_factory.mktemp("ops"), pipeline_vars(gemini) | overrides)
         running.append(process)
         return next(process)
 
@@ -124,9 +122,7 @@ def test_status_validates_and_carries_no_mail_content(stack: OpsStack) -> None:
 # ---- canary ----------------------------------------------------------------------------------
 
 
-def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(
-    stack: OpsStack, fresh_gemini: GeminiFake, fresh_todoist: TodoistFake
-) -> None:
+def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(stack: OpsStack, fresh_gemini: GeminiFake) -> None:
     assert stack.ok("canaryResult", CANARY_ID, definition="CanaryResult") == {"state": "not_seen"}
     before = stack.overview()
 
@@ -136,7 +132,7 @@ def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(
     assert result["state"] == "ok", result
     [call] = fresh_gemini.calls_mentioning(CANARY_TEXT)
     assert call.system.strip() and call.model == "gemini-3.5-flash-lite"
-    assert fresh_todoist.creates() == [] and fresh_todoist.lists() == []
+    assert tasks.created(stack) == []
     event = stack.event(CANARY_ID)
     assert (event["state"], event["canary"], event["allowed_actions"], event["summary"]) == ("complete", True, [], None)
     assert transitions(event) == [
@@ -168,7 +164,7 @@ def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(
 
 
 def test_a_canary_whose_summary_keeps_failing_ends_failed_after_three_attempts(
-    stack: OpsStack, fresh_gemini: GeminiFake, fresh_todoist: TodoistFake
+    stack: OpsStack, fresh_gemini: GeminiFake
 ) -> None:
     for _ in range(9):  # three steps, each trying all three email models
         fresh_gemini.queue_generate(error_reply(503))
@@ -181,14 +177,12 @@ def test_a_canary_whose_summary_keeps_failing_ends_failed_after_three_attempts(
     event = stack.event(event_id)
     assert (event["state"], event["attempt_count"], event["allowed_actions"]) == ("ignored", 3, [])
     assert len(fresh_gemini.calls_mentioning(CANARY_TEXT)) == 9
-    assert fresh_todoist.creates() == []
+    assert tasks.created(stack) == []
     assert stack.ok("status", definition="OpsStatus")["counters"]["attention_events"] == 0
 
 
 @pytest.mark.reaches("canary_side_effect_blocked")
-def test_a_canary_left_at_a_todoist_step_by_an_older_release_never_reaches_todoist(
-    stack: OpsStack, fresh_todoist: TodoistFake
-) -> None:
+def test_a_canary_left_at_a_task_step_by_an_older_release_never_reaches_tasks(stack: OpsStack) -> None:
     now = int(time.time())
     summarized, unknown, created = (str(uuid.uuid4()) for _ in range(3))
     _, body = canary_event()
@@ -210,15 +204,12 @@ def test_a_canary_left_at_a_todoist_step_by_an_older_release_never_reaches_todoi
         assert (result["state"], result["error_code"]) == ("failed", "canary_side_effect_blocked")
     assert stack.wait_event(created, {"complete"})["canary"] is True
     assert stack.ok("canaryResult", created, definition="CanaryResult")["state"] == "ok"
-    assert [c for c in fresh_todoist.creates() if real_id not in c.json()["description"]] == []
-    assert fresh_todoist.lists() == []
+    assert tasks.created(stack) == []
     ids = "', '".join((summarized, unknown, created))
     assert stack.d1(f"SELECT count(*) AS n FROM summaries WHERE event_id IN ('{ids}')") == [{"n": 0}]
 
 
-def test_an_interrupted_canary_ends_failed_where_mail_would_wait_for_the_owner(
-    stack: OpsStack, fresh_todoist: TodoistFake
-) -> None:
+def test_an_interrupted_canary_ends_failed_where_mail_would_wait_for_the_owner(stack: OpsStack) -> None:
     now = int(time.time())
     crashed, sending = str(uuid.uuid4()), str(uuid.uuid4())
     _, body = canary_event()
@@ -234,7 +225,7 @@ def test_an_interrupted_canary_ends_failed_where_mail_would_wait_for_the_owner(
     for event_id, code in ((crashed, "processing_interrupted_limit"), (sending, "canary_side_effect_blocked")):
         result = stack.ok("canaryResult", event_id, definition="CanaryResult")
         assert (result["state"], result["error_code"]) == ("failed", code)
-    assert fresh_todoist.lists() == []
+    assert tasks.created(stack) == []
 
 
 def test_canary_result_of_a_real_mail_or_a_bad_id(stack: OpsStack) -> None:
@@ -253,7 +244,7 @@ def daily_report(generated_at: float, **changes: Any) -> dict[str, Any]:
     return json.loads(path.read_text()) | {"generated_at": stamp(generated_at)} | changes
 
 
-def test_report_ops_stores_the_latest_report_within_its_bounds(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
+def test_report_ops_stores_the_latest_report_within_its_bounds(stack: OpsStack) -> None:
     now = time.time()
     report = daily_report(now - 60)
     item = report["items"][0]
@@ -279,8 +270,8 @@ def test_report_ops_stores_the_latest_report_within_its_bounds(stack: OpsStack, 
     assert older == stored | {"stored": False}
     cleared = stack.ok("reportOps", daily_report(now, items=[]), definition="OpsReportReceipt")
     assert cleared == {"stored": True, "generated_at": stamp(now), "item_count": 0}
-    # This server's reminder is off: whatever tasks mail created, none is a reminder.
-    assert [c for c in fresh_todoist.creates() if c.json()["content"].startswith("[Todofy System]")] == []
+    # This server's reminder is off: no reminder task.
+    assert [task for task in tasks.created(stack) if task["title"].startswith("[Todofy System]")] == []
 
 
 # ---- setGuard ----------------------------------------------------------------------------------
@@ -374,7 +365,7 @@ def test_maintenance_reads_as_down_and_the_surface_keeps_working(launch_stack: S
 
 
 def test_the_daily_reminder_carries_the_ops_digest_once_a_day(
-    launch_stack: StackLaunch, fresh_gemini: GeminiFake, fresh_todoist: TodoistFake
+    launch_stack: StackLaunch, fresh_gemini: GeminiFake
 ) -> None:
     digesting = launch_stack(REMINDER_ENABLED="true")
     now = time.time()
@@ -385,19 +376,18 @@ def test_the_daily_reminder_carries_the_ops_digest_once_a_day(
     canary_id, canary = canary_event()
     assert digesting.post_event(canary).status_code == 204
     wait_canary(digesting, canary_id, {"ok"})
-    assert fresh_todoist.creates() == []  # nothing needs attention and there is no ops report yet
+    assert tasks.created(digesting) == []  # nothing needs attention and there is no ops report yet
 
     # A report generated before today's UTC day began (the dashboard's 23:40 report) is today's
     # digest; one from today would wait for tomorrow (test_reminder_daily.py).
     report = daily_report(now - now % 86_400 - 60)
     digesting.ok("reportOps", report, definition="OpsReportReceipt")
-    [create] = fresh_todoist.wait_for(lambda: fresh_todoist.creates() or None, 30)
+    [task] = wait_until(lambda: tasks.created(digesting) or None, 30, "the reminder task")
 
     day = datetime.fromtimestamp(now, UTC).date().isoformat()
     digest = ops.digest(ops.report(report, int(now)), int(now))
     assert digest is not None and len(digest.items) == 4
-    task = create.json()
-    assert task["content"] == reminder_title(0, 4) == "[Todofy System] 运维：4 项需要关注"
+    assert task["title"] == reminder_title(0, 4) == "[Todofy System] 运维：4 项需要关注"
     assert task["description"] == reminder_body(0, day, [], "todofy.localhost", digest)
     assert stuck not in task["description"] and canary_id not in task["description"]
     row = digesting.d1(f"SELECT state, attention_count, ops_count FROM mail_reminders WHERE day = '{day}'")
@@ -406,4 +396,4 @@ def test_the_daily_reminder_carries_the_ops_digest_once_a_day(
     # A newer report the same day never makes a second task.
     digesting.ok("reportOps", daily_report(time.time()), definition="OpsReportReceipt")
     time.sleep(4)
-    assert len(fresh_todoist.creates()) == 1
+    assert len(tasks.created(digesting)) == 1

@@ -1,16 +1,15 @@
 """task-intent-v1 end to end (contracts/task-intent-v1): a stand-in for the watch app calls the gateway's
 ``Intents`` entrypoint over its service binding (``proposeTasks`` / ``taskIntentStatus``, ``props.source =
-"watch"``), in front of the real gateway, core, D1, Durable Object alarm and the fake Todoist.
+"watch"``), in front of the real gateway, core, D1, Durable Object alarm and the real Tasks Worker.
 
 Covered: a parent with subtasks and separate tasks created once, parent first (the watch app's digest, SOURCE_WATCH,
-too); a replay answered
-``duplicate`` without a Todoist call; a conflict; every refusal (schema, size, URL host, source,
-pause, daily limit per source); frozen X-Request-Id and bytes across retries; a partial failure retried by the
-proposer (only the unfinished tasks are sent again); an unknown result settled by the read-only
-footer lookup instead of a resend; an interrupted call; the 48-attempt cap; the Todoist auth block;
-a recorded row of a source the contract no longer knows; and mail processing going on while intents are
-created. Every value validates against the schema.
-Synthetic data only.
+too); a replay answered ``duplicate`` without a Tasks write; a conflict; every refusal (schema, size, URL host,
+source, pause, daily limit per source); a partial failure retried by the proposer (only the unfinished tasks are
+sent again, under their frozen request IDs); an unknown result settled by the read-only footer lookup instead of a
+resend; an interrupted call; a recorded row of a source the contract no longer knows; and mail processing going on
+while intents are created. A Tasks call cannot be made to fail or lose its answer, so those outcomes are seeded as
+the ledger records them (core/intents.py's rules are host-tested in tests/unit/test_intents.py). Every value
+validates against the schema. Synthetic data only.
 """
 
 import json
@@ -24,13 +23,13 @@ import pytest
 
 from tests import mail_contract
 from tests.fakes.gemini_fake import GeminiFake
-from tests.fakes.server import Recorded, Reply, rate_limited, retry_after_seconds
-from tests.fakes.todoist_fake import PROJECT_ID, TASKS_PATH, TodoistFake
+from tests.runtime import tasks_support as tasks
 from tests.runtime.conftest import pipeline_vars
 from tests.runtime.harness import mail_event, wait_until
 from tests.runtime.ops_support import OpsStack, start_ops_stack
 from todofy.core import intents
 from todofy.core.ops import timestamp
+from todofy.runtime.native_tasks import request_id
 
 CONTRACT = mail_contract.TODOFY.parent / "contracts" / "task-intent-v1"
 SCHEMA = json.loads((CONTRACT / "task-intent-v1.schema.json").read_text())
@@ -88,9 +87,19 @@ def footer(doc: dict[str, Any], n: int) -> str:
     return intents.footer(doc["source"], doc["intent_id"], n)
 
 
-def creates_of(todoist: TodoistFake, doc: dict[str, Any], n: int) -> list[Recorded]:
-    """Every POST for task n of this intent (its footer ends the description)."""
-    return [r for r in todoist.creates() if intents.has_footer(r.json()["description"], footer(doc, n))]
+def tasks_of(stack: OpsStack, doc: dict[str, Any], n: int) -> list[dict[str, Any]]:
+    """Every task Tasks holds for task n of this intent (its footer ends the description)."""
+    return [task for task in tasks.created(stack) if intents.has_footer(task["description"], footer(doc, n))]
+
+
+def intent_tasks(stack: OpsStack, doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every task Tasks holds for this intent, in the order they were created."""
+    numbers = intents.intent(doc).task_numbers
+    return [
+        task
+        for task in tasks.created(stack)
+        if any(intents.has_footer(task["description"], footer(doc, n)) for n in numbers)
+    ]
 
 
 def rows(stack: OpsStack, doc: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -107,8 +116,8 @@ def literal(value: Any) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def seed(stack: OpsStack, doc: dict[str, Any], *, created_at: int, tasks: dict[int, dict[str, Any]]) -> None:
-    """Write an intent the way a proposal records it, with some task rows changed (``tasks``),
+def seed(stack: OpsStack, doc: dict[str, Any], *, created_at: int, rows: dict[int, dict[str, Any]]) -> None:
+    """Write an intent the way a proposal records it, with some task rows changed (``rows``),
     then wake the alarm."""
     value = intents.intent(doc)
     intent_row = {
@@ -140,7 +149,7 @@ def seed(stack: OpsStack, doc: dict[str, Any], *, created_at: int, tasks: dict[i
             "error_code": "",
             "started_at": created_at,
             "updated_at": created_at,
-        } | tasks.get(n, {})
+        } | rows.get(n, {})
         statements.append(
             f"INSERT INTO task_intent_tasks ({', '.join(row)}) VALUES ({', '.join(map(literal, row.values()))})"
         )
@@ -178,13 +187,11 @@ def wake(stack: OpsStack) -> None:
 
 
 @pytest.fixture(scope="module")
-def launch_stack(
-    tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake, todoist: TodoistFake
-) -> Iterator[StackLaunch]:
+def launch_stack(tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake) -> Iterator[StackLaunch]:
     running: list[Iterator[OpsStack]] = []
 
     def start(**overrides: str) -> OpsStack:
-        process = start_ops_stack(tmp_path_factory.mktemp("intents"), pipeline_vars(gemini, todoist) | overrides)
+        process = start_ops_stack(tmp_path_factory.mktemp("intents"), pipeline_vars(gemini) | overrides)
         running.append(process)
         return next(process)
 
@@ -201,7 +208,7 @@ def stack(launch_stack: StackLaunch) -> OpsStack:
 # ---- created, replayed, conflicting --------------------------------------------------------------
 
 
-def test_a_parent_and_its_subtasks_are_created_once_parent_first(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
+def test_a_parent_and_its_subtasks_are_created_once_parent_first(stack: OpsStack) -> None:
     doc = new_intent()
     first = propose(stack, doc)
     assert (first["state"], first["recorded"], first["tasks_total"], first["tasks_created"]) == ("pending", True, 4, 0)
@@ -214,27 +221,27 @@ def test_a_parent_and_its_subtasks_are_created_once_parent_first(stack: OpsStack
         None,
         None,
     )
-    posts = fresh_todoist.creates()
-    assert len(posts) == 4
-    parent, *children = (post.json() for post in posts)
+    created = intent_tasks(stack, doc)
+    assert len(created) == 4
+    parent, *children = created
     value = intents.intent(doc)
-    assert parent == {
-        "content": doc["parent"]["title"],
-        "description": intents.task_text(value, 0)[1],
-        "project_id": PROJECT_ID,
-    }
-    [parent_task] = [task for task in fresh_todoist.tasks if task.content == doc["parent"]["title"]]
+    assert (parent["title"], parent["description"], parent["project_id"], parent["parent_id"]) == (
+        doc["parent"]["title"],
+        intents.task_text(value, 0)[1],
+        "",  # the Inbox
+        "",
+    )
     for n, child in enumerate(children, start=1):
-        content, description = intents.task_text(value, n)
-        assert child == {"content": content, "description": description, "parent_id": parent_task.id}
-    assert all(task.project_id == PROJECT_ID for task in fresh_todoist.tasks)
-    request_ids = fresh_todoist.request_ids()
-    assert len(set(request_ids)) == 4 and all(len(rid) == 36 and set(rid) <= UUID_CHARS for rid in request_ids)
+        assert (child["title"], child["description"], child["parent_id"]) == (
+            *intents.task_text(value, n),
+            parent["id"],
+        )
 
     intent_row, task_rows = rows(stack, doc)
     assert (intent_row["state"], intent_row["tasks_created"], intent_row["payload_json"]) == ("created", 4, None)
-    assert [row["request_id"] for row in task_rows] == request_ids
-    assert [row["todoist_id"] for row in task_rows] == [task.id for task in fresh_todoist.tasks]
+    assert all(len(row["request_id"]) == 36 and set(row["request_id"]) <= UUID_CHARS for row in task_rows)
+    assert {request_id(row["request_id"]) for row in task_rows} <= set(tasks.request_ids(stack))
+    assert [row["todoist_id"] for row in task_rows] == [task["id"] for task in created]
 
     # A replay (the proposer lost the answer, or pressed send again) creates nothing.
     again = propose(stack, doc)
@@ -246,51 +253,47 @@ def test_a_parent_and_its_subtasks_are_created_once_parent_first(stack: OpsStack
     )
     assert status(stack, doc) == done
     time.sleep(1.5)
-    assert len(fresh_todoist.creates()) == 4
-    # Results never carry task text or Todoist IDs.
+    assert len(intent_tasks(stack, doc)) == 4
+    # Results never carry task text or Tasks IDs.
     dumped = json.dumps([first, done, again], ensure_ascii=False)
-    assert doc["parent"]["title"] not in dumped and parent_task.id not in dumped
+    assert doc["parent"]["title"] not in dumped and parent["id"] not in dumped
 
 
-def test_separate_mode_creates_top_level_tasks_that_name_the_parent(
-    stack: OpsStack, fresh_todoist: TodoistFake
-) -> None:
+def test_separate_mode_creates_top_level_tasks_that_name_the_parent(stack: OpsStack) -> None:
     doc = new_intent("separate-2.json")
     assert propose(stack, doc)["tasks_total"] == 2
     assert wait_state(stack, doc, {"created", "failed"})["state"] == "created"
     value = intents.intent(doc)
-    assert [post.json() for post in fresh_todoist.creates()] == [
-        {"content": content, "description": description, "project_id": PROJECT_ID}
-        for content, description in (intents.task_text(value, n) for n in (1, 2))
+    created = intent_tasks(stack, doc)
+    assert [(task["title"], task["description"], task["project_id"], task["parent_id"]) for task in created] == [
+        (*intents.task_text(value, n), "", "") for n in (1, 2)
     ]
-    assert all(f"— {doc['parent']['title']}" in post.json()["description"] for post in fresh_todoist.creates())
+    assert all(f"— {doc['parent']['title']}" in task["description"] for task in created)
 
 
-def test_a_watch_digest_is_created_like_any_intent_and_links_only_to_the_app(
-    stack: OpsStack, fresh_todoist: TodoistFake
-) -> None:
+def test_a_watch_digest_is_created_like_any_intent_and_links_only_to_the_app(stack: OpsStack) -> None:
     """SOURCE_WATCH (the watch app's daily digest): recorded under its own source, the parent first, every item a
-    subtask whose description is its link to the watch app and the footer; the default project."""
+    subtask whose description is its link to the watch app and the footer; the Inbox."""
     doc = new_intent("watch-digest.json")
     first = propose(stack, doc)
     assert (first["source"], first["state"], first["recorded"], first["tasks_total"]) == ("watch", "pending", True, 5)
     assert wait_state(stack, doc, {"created", "failed"})["state"] == "created"
     value = intents.intent(doc)
-    parent, *children = (post.json() for post in fresh_todoist.creates())
-    assert parent == {
-        "content": doc["parent"]["title"],
-        "description": intents.task_text(value, 0)[1],
-        "project_id": PROJECT_ID,
-    }
-    assert [child["content"] for child in children] == [item["title"] for item in doc["items"]]
+    parent, *children = intent_tasks(stack, doc)
+    assert (parent["title"], parent["description"], parent["project_id"]) == (
+        doc["parent"]["title"],
+        intents.task_text(value, 0)[1],
+        "",
+    )
+    assert [child["title"] for child in children] == [item["title"] for item in doc["items"]]
     for n, child in enumerate(children, start=1):
         assert child["description"].startswith("https://watch.ziyixi.science/watches/")
-        assert intents.has_footer(child["description"], footer(doc, n))
+        assert intents.has_footer(child["description"], footer(doc, n)) and child["parent_id"] == parent["id"]
     assert rows(stack, doc)[0]["source"] == "watch"
     assert propose(stack, doc)["state"] == "duplicate"
 
 
-def test_the_intents_entrypoint_takes_only_its_bindings_source(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
+def test_the_intents_entrypoint_takes_only_its_bindings_source(stack: OpsStack) -> None:
     """The watch app binds ``Intents`` with ``props.source = "watch"``: its own intents go through; another
     source's (its allow-list and daily quota) and the ops-v1 methods are not reachable through it, and ``Ops`` has
     no task-intent methods."""
@@ -309,10 +312,10 @@ def test_the_intents_entrypoint_takes_only_its_bindings_source(stack: OpsStack, 
         assert "error" in stack.intents(method, {}), method
     for method, value in (("proposeTasks", doc), ("taskIntentStatus", ref(doc))):
         assert "error" in stack.ops(method, value), method
-    assert len(fresh_todoist.creates()) == 1
+    assert len(intent_tasks(stack, doc)) == 1
 
 
-def test_the_same_intent_id_with_other_content_is_a_conflict(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
+def test_the_same_intent_id_with_other_content_is_a_conflict(stack: OpsStack) -> None:
     doc = new_intent("minimal.json")
     propose(stack, doc)
     created = wait_state(stack, doc, {"created"})
@@ -321,13 +324,13 @@ def test_the_same_intent_id_with_other_content_is_a_conflict(stack: OpsStack, fr
         assert (refused["state"], refused["error_code"], refused["recorded"]) == ("rejected", "intent_conflict", True)
         assert (refused["tasks_total"], refused["tasks_created"]) == (2, 2)
     assert status(stack, doc) == created
-    assert len(fresh_todoist.creates()) == 2
+    assert len(intent_tasks(stack, doc)) == 2
 
 
 # ---- refusals ------------------------------------------------------------------------------------
 
 
-def test_input_the_contract_refuses(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
+def test_input_the_contract_refuses(stack: OpsStack) -> None:
     doc = new_intent()
     invalid = [
         doc | {"items": [{"title": "t", "url": "http://watch.ziyixi.science/watches/w1"}]},
@@ -346,9 +349,8 @@ def test_input_the_contract_refuses(stack: OpsStack, fresh_todoist: TodoistFake)
     assert stack.d1(f"SELECT count(*) AS n FROM task_intents WHERE intent_id = '{doc['intent_id']}'") == [{"n": 0}]
 
 
-def test_a_url_off_the_sources_allow_list_is_rejected_and_nothing_recorded(
-    stack: OpsStack, fresh_todoist: TodoistFake
-) -> None:
+def test_a_url_off_the_sources_allow_list_is_rejected_and_nothing_recorded(stack: OpsStack) -> None:
+    refused_docs = []
     for url in ("https://example.org/abs/2609.00001", "https://watch.ziyixi.science.example.org/watches/w1"):
         doc = new_intent("minimal.json", items=[{"title": "Synthetic", "url": url}])
         refused = propose(stack, doc)
@@ -359,136 +361,122 @@ def test_a_url_off_the_sources_allow_list_is_rejected_and_nothing_recorded(
             0,
         )
         assert status(stack, doc)["state"] == "not_found"
+        refused_docs.append(doc)
     # The list is exact: a watch task never links to another host, or to a watched page.
     for url in ("https://other.example.com/abs/2609.00001", "https://shop.example.com/kettle"):
         doc = new_intent("watch-urgent.json", items=[{"title": "Synthetic", "url": url}])
         refused = propose(stack, doc)
         assert (refused["state"], refused["error_code"], refused["recorded"]) == ("rejected", "url_not_allowed", False)
-    assert fresh_todoist.creates() == []
+        refused_docs.append(doc)
+    assert [task for doc in refused_docs for task in intent_tasks(stack, doc)] == []
 
 
-# ---- retries, failures and unknown results -------------------------------------------------------
+# ---- failures and unknown results ----------------------------------------------------------------
 
 
-def test_retries_send_the_same_frozen_bytes_and_request_id(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
-    # Three 429s use up the in-call attempts; the durable retry a second later succeeds.
-    for _ in range(3):
-        fresh_todoist.queue("POST", TASKS_PATH, rate_limited(retry_after_seconds(1)))
-    doc = new_intent("minimal.json")
-    propose(stack, doc)
-    assert wait_state(stack, doc, {"created", "failed"})["state"] == "created"
-    parent_posts = creates_of(fresh_todoist, doc, 0)
-    assert len(parent_posts) == 4
-    assert len({(post.body, post.headers["x-request-id"]) for post in parent_posts}) == 1
-    assert len(creates_of(fresh_todoist, doc, 1)) == 1
-
-
-def test_a_partial_failure_is_retried_by_the_proposer_without_duplicates(
-    stack: OpsStack, fresh_todoist: TodoistFake
-) -> None:
+def test_a_partial_failure_is_retried_by_the_proposer_without_duplicates(stack: OpsStack) -> None:
     doc = new_intent("separate-2.json")
     doc["items"] = [
         *doc["items"],
         {"title": "Third synthetic watch", "url": "https://watch.ziyixi.science/watches/w2609-00003"},
     ]
-    # Item 2 is refused (400); items 1 and 3 are created.
-    for reply in (Reply(status=None), Reply(400, {"error": "synthetic refusal"}), Reply(status=None)):
-        fresh_todoist.queue("POST", TASKS_PATH, reply)
-    propose(stack, doc)
-    failed = wait_state(stack, doc, {"created", "failed"})
+    now = int(time.time())
+    # Items 1 and 3 were created; item 2 was refused.
+    refused_id = str(uuid.uuid4())
+    seed(
+        stack,
+        doc,
+        created_at=now - 3600,
+        rows={
+            1: {"state": "created", "todoist_id": "6Xone", "attempts": 1},
+            2: {"state": "failed", "error_code": "todoist_rejected", "attempts": 1, "request_id": refused_id},
+            3: {"state": "created", "todoist_id": "6Xthree", "attempts": 1},
+        },
+    )
+    key = f"source = '{doc['source']}' AND intent_id = '{doc['intent_id']}'"
+    stack.d1(
+        f"UPDATE task_intents SET state = 'failed', error_code = 'todoist_rejected', tasks_created = 2 WHERE {key}"
+    )
+    failed = status(stack, doc)
     assert (failed["state"], failed["error_code"], failed["tasks_created"], failed["tasks_total"]) == (
         "failed",
         "todoist_rejected",
         2,
         3,
     )
-    assert failed["recorded"] is True and failed["retry_after_seconds"] is None
-    refused = creates_of(fresh_todoist, doc, 2)
-    assert len(refused) == 1
 
     retried = propose(stack, doc)  # the owner's 重试: same intent, same content
     assert (retried["state"], retried["recorded"], retried["tasks_created"]) == ("pending", True, 2)
     assert wait_state(stack, doc, {"created", "failed"})["state"] == "created"
-    assert [len(creates_of(fresh_todoist, doc, n)) for n in (1, 2, 3)] == [1, 2, 1]
-    resent = creates_of(fresh_todoist, doc, 2)
-    assert resent[0].headers["x-request-id"] == resent[1].headers["x-request-id"] and resent[0].body == resent[1].body
+    assert [len(tasks_of(stack, doc, n)) for n in (1, 2, 3)] == [0, 1, 0]  # only the unfinished one is sent
+    assert request_id(refused_id) in tasks.request_ids(stack)  # under its frozen request ID
     assert propose(stack, doc)["state"] == "duplicate"
 
 
-def test_no_child_is_sent_while_the_parent_is_refused(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
+def test_no_child_is_sent_while_the_parent_is_unfinished(stack: OpsStack) -> None:
     doc = new_intent()
-    fresh_todoist.queue("POST", TASKS_PATH, Reply(422, {"error": "synthetic refusal"}))
-    propose(stack, doc)
-    failed = wait_state(stack, doc, {"created", "failed"})
-    assert (failed["state"], failed["error_code"], failed["tasks_created"]) == ("failed", "todoist_rejected", 0)
-    assert len(fresh_todoist.creates()) == 1
+    now = int(time.time())
+    seed(stack, doc, created_at=now - 3600, rows={0: {"state": "failed", "error_code": "todoist_rejected"}})
+    key = f"source = '{doc['source']}' AND intent_id = '{doc['intent_id']}'"
+    stack.d1(f"UPDATE task_intents SET state = 'failed', error_code = 'todoist_rejected' WHERE {key}")
+    time.sleep(2)
+    assert intent_tasks(stack, doc) == []
 
     assert propose(stack, doc)["state"] == "pending"
     assert wait_state(stack, doc, {"created", "failed"})["state"] == "created"
-    [parent] = [task for task in fresh_todoist.tasks if task.parent_id is None]
-    assert sorted(task.parent_id or "" for task in fresh_todoist.tasks) == ["", parent.id, parent.id, parent.id]
+    parent, *children = intent_tasks(stack, doc)
+    assert parent["parent_id"] == "" and [child["parent_id"] for child in children] == [parent["id"]] * 3
 
 
-def test_an_unknown_create_is_found_by_the_lookup_and_never_resent(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
+def test_an_unknown_create_is_found_by_the_lookup_and_never_resent(stack: OpsStack) -> None:
     doc = new_intent()
-    # Todoist creates the parent but the answer is a 500: the result is unknown.
-    fresh_todoist.queue("POST", TASKS_PATH, Reply(500, {"error": "synthetic"}, applied=True))
-    propose(stack, doc)
+    now = int(time.time())
+    # Tasks created the parent but its answer was lost: the result is unknown, and the lookup is due.
+    [parent] = tasks.seed(
+        stack, {"title": doc["parent"]["title"], "description": f"synthetic\n\n{footer(doc, 0)}"}, now=now
+    )
+    seed(stack, doc, created_at=now - 3600, rows={0: {"state": "unknown", "attempts": 1, "next_attempt_at": now}})
     assert wait_state(stack, doc, {"created", "failed"})["state"] == "created"
-    assert len(creates_of(fresh_todoist, doc, 0)) == 1
-    assert fresh_todoist.lists(), "the footer lookup read the task list"
-    [parent] = [task for task in fresh_todoist.tasks if task.content == doc["parent"]["title"]]
-    assert {task.parent_id for task in fresh_todoist.tasks if task is not parent} == {parent.id}
+    assert [task["id"] for task in tasks_of(stack, doc, 0)] == [parent]
+    assert [task["parent_id"] for task in intent_tasks(stack, doc)[1:]] == [parent] * 3
     _, task_rows = rows(stack, doc)
-    assert task_rows[0]["todoist_id"] == parent.id
+    assert task_rows[0]["todoist_id"] == parent
 
 
-def test_an_unknown_create_todoist_never_made_waits_for_the_proposer(
-    stack: OpsStack, fresh_todoist: TodoistFake
-) -> None:
+def test_an_unknown_create_tasks_never_made_waits_for_the_proposer(stack: OpsStack) -> None:
     doc = new_intent("separate-2.json")
-    fresh_todoist.queue("POST", TASKS_PATH, Reply(500, {"error": "synthetic"}))  # not created
-    propose(stack, doc)
+    now = int(time.time())
+    frozen_id = str(uuid.uuid4())
+    seed(
+        stack,
+        doc,
+        created_at=now - 3600,
+        rows={1: {"state": "unknown", "attempts": 1, "next_attempt_at": now, "request_id": frozen_id}},
+    )
     failed = wait_state(stack, doc, {"created", "failed"})
     assert (failed["state"], failed["error_code"], failed["tasks_created"]) == ("failed", "todoist_result_unknown", 1)
-    assert len(creates_of(fresh_todoist, doc, 1)) == 1  # looked up, not resent
+    assert tasks_of(stack, doc, 1) == []  # looked up, not resent
 
-    lists_before = len(fresh_todoist.lists())
     assert propose(stack, doc)["state"] == "pending"
     assert wait_state(stack, doc, {"created", "failed"})["state"] == "created"
     # Looked up again first; only then resent with its frozen request ID.
-    assert len(fresh_todoist.lists()) > lists_before
-    first, second = creates_of(fresh_todoist, doc, 1)
-    assert (first.body, first.headers["x-request-id"]) == (second.body, second.headers["x-request-id"])
+    assert len(tasks_of(stack, doc, 1)) == 1 and request_id(frozen_id) in tasks.request_ids(stack)
 
 
-def test_an_interrupted_call_is_looked_up_before_anything_is_resent(
-    stack: OpsStack, fresh_todoist: TodoistFake
-) -> None:
+def test_an_interrupted_call_is_looked_up_before_anything_is_resent(stack: OpsStack) -> None:
     now = int(time.time())
     doc = new_intent("separate-2.json")
-    # A step was evicted mid-call on item 1, after Todoist had created it.
-    fresh_todoist.add_task(doc["items"][0]["title"], f"synthetic\n\n{footer(doc, 1)}")
-    seed(stack, doc, created_at=now - 86400, tasks={1: {"state": "sending"}})
+    # A step was evicted mid-call on item 1, after Tasks had created it.
+    [made] = tasks.seed(
+        stack, {"title": doc["items"][0]["title"], "description": f"synthetic\n\n{footer(doc, 1)}"}, now=now
+    )
+    seed(stack, doc, created_at=now - 86400, rows={1: {"state": "sending"}})
     assert wait_state(stack, doc, {"created", "failed"})["state"] == "created"
-    assert creates_of(fresh_todoist, doc, 1) == [] and len(creates_of(fresh_todoist, doc, 2)) == 1
-
-
-def test_automatic_attempts_stop_after_48(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
-    now = int(time.time())
-    doc = new_intent("minimal.json", mode="separate")
-    for _ in range(3):
-        fresh_todoist.queue("POST", TASKS_PATH, Reply(503, {"error": "synthetic"}))
-    seed(stack, doc, created_at=now - 86400, tasks={1: {"attempts": 47, "started_at": now - 3600}})
-    failed = wait_state(stack, doc, {"created", "failed"})
-    assert (failed["state"], failed["error_code"], failed["tasks_created"]) == ("failed", "todoist_rejected", 0)
-    assert len(creates_of(fresh_todoist, doc, 1)) == 3
-    _, [task] = rows(stack, doc)
-    assert (task["state"], task["attempts"]) == ("failed", 48)
+    assert [task["id"] for task in tasks_of(stack, doc, 1)] == [made] and len(tasks_of(stack, doc, 2)) == 1
 
 
 def test_mail_keeps_its_cadence_while_a_large_intent_is_created(
-    launch_stack: StackLaunch, fresh_todoist: TodoistFake, fresh_gemini: GeminiFake
+    launch_stack: StackLaunch, fresh_gemini: GeminiFake
 ) -> None:
     """Its own server: the module's earlier tests already use up most of the source's ten intents today."""
     stack = launch_stack()
@@ -499,10 +487,12 @@ def test_mail_keeps_its_cadence_while_a_large_intent_is_created(
     stack.wait_event(event_id, {"complete"}, timeout_s=60)
     done = wait_state(stack, doc, {"created", "failed"}, timeout_s=90)
     assert (done["state"], done["tasks_created"]) == ("created", 31)
-    posts = fresh_todoist.creates()
-    mail_at = next(i for i, post in enumerate(posts) if event_id in post.json()["description"])
-    assert mail_at < len(posts) - 1, "mail was not held back until every intent task existed"
-    assert len(posts) == 32
+    [summarised] = stack.d1(
+        f"SELECT max(at) AS at FROM event_transitions WHERE event_id = '{event_id}' AND to_state = 'complete'"
+    )
+    [last] = stack.tasks_d1("SELECT max(created_at) AS at FROM tasks")
+    assert summarised["at"] <= last["at"] // 1000, "mail was held back until every intent task existed"
+    assert len(intent_tasks(stack, doc)) == 31
 
 
 def test_status_counts_intents(stack: OpsStack) -> None:
@@ -511,7 +501,7 @@ def test_status_counts_intents(stack: OpsStack) -> None:
     assert counters["intents_failed_7d"] >= 0
 
 
-def test_the_daily_limit_counts_new_intents_per_source(launch_stack: StackLaunch, fresh_todoist: TodoistFake) -> None:
+def test_the_daily_limit_counts_new_intents_per_source(launch_stack: StackLaunch) -> None:
     """Its own server, so the count starts at zero. The limit is per source: another source's full day (here rows of a
     source the contract no longer knows, as the ledger may still hold them) does not hold the watch app's intents."""
     stack = launch_stack()
@@ -527,14 +517,12 @@ def test_the_daily_limit_counts_new_intents_per_source(launch_stack: StackLaunch
     assert (refused["state"], refused["error_code"], refused["recorded"]) == ("rejected", "daily_limit", False)
     assert 0 < refused["retry_after_seconds"] <= 86400
     assert status(stack, over)["state"] == "not_found"
-    assert len(fresh_todoist.creates()) == 2 * intents.INTENTS_PER_SOURCE_PER_DAY
+    assert len(tasks.created(stack)) == 2 * intents.INTENTS_PER_SOURCE_PER_DAY
 
 
-def test_a_pending_row_of_a_source_the_contract_no_longer_knows_fails_and_sends_nothing(
-    stack: OpsStack, fresh_todoist: TodoistFake
-) -> None:
+def test_a_pending_row_of_a_source_the_contract_no_longer_knows_fails_and_sends_nothing(stack: OpsStack) -> None:
     """A row recorded under a source whose enum value is now reserved: its frozen text no longer reads as an intent, so
-    the next step marks it failed (todoist_rejected) without a Todoist call. Nothing deletes the row; no proposer can
+    the next step marks it failed (todoist_rejected) without a Tasks write. Nothing deletes the row; no proposer can
     ask for it (no binding names the source, and the core's strict read refuses it)."""
     now = int(time.time())
     key = {"source": "other", "intent_id": "other-pending"}
@@ -554,31 +542,15 @@ def test_a_pending_row_of_a_source_the_contract_no_longer_knows_fails_and_sends_
 
     settled = wait_until(failed, 40, "the row of an unknown source failed")
     assert settled == {"state": "failed", "error_code": "todoist_rejected"}
-    assert fresh_todoist.creates() == []
+    assert [task for task in tasks.created(stack) if "other-pending" in task["description"]] == []
     asked = stack.intents("taskIntentStatus", {"version": "task-intent-v1"} | key)
     assert asked == {"error": "invalid_input", "name": "Error"}
-
-
-def test_an_auth_block_holds_recorded_intents_and_refuses_new_ones(stack: OpsStack, fresh_todoist: TodoistFake) -> None:
-    """Last in this module: the 6 h Todoist block stays in this server's object."""
-    now = int(time.time())
-    doc = new_intent("minimal.json")
-    fresh_todoist.queue("POST", TASKS_PATH, Reply(401, {"error": "synthetic"}))
-    seed(stack, doc, created_at=now - 86400, tasks={})
-    held = wait_state(stack, doc, {"paused"})
-    assert (held["recorded"], held["error_code"], held["tasks_created"]) == (True, "todoist_blocked", 0)
-    assert 21000 < held["retry_after_seconds"] <= 21600
-    fresh = propose(stack, new_intent("minimal.json"))
-    assert (fresh["state"], fresh["recorded"], fresh["error_code"]) == ("paused", False, "todoist_blocked")
-    assert len(fresh_todoist.creates()) == 1
 
 
 # ---- switches (their own servers) ----------------------------------------------------------------
 
 
-def test_force_pause_refuses_new_intents_and_holds_recorded_ones(
-    launch_stack: StackLaunch, fresh_todoist: TodoistFake
-) -> None:
+def test_force_pause_refuses_new_intents_and_holds_recorded_ones(launch_stack: StackLaunch) -> None:
     held_stack = launch_stack(FORCE_PAUSE_TODOIST="true")
     doc = new_intent()
     paused = propose(held_stack, doc)
@@ -593,7 +565,7 @@ def test_force_pause_refuses_new_intents_and_holds_recorded_ones(
     assert held_stack.d1("SELECT count(*) AS n FROM task_intents") == [{"n": 0}]
 
     now = int(time.time())
-    seed(held_stack, doc, created_at=now, tasks={})
+    seed(held_stack, doc, created_at=now, rows={})
     for answer in (status(held_stack, doc), propose(held_stack, doc)):
         assert (answer["state"], answer["recorded"], answer["error_code"]) == ("paused", True, "todoist_paused")
 
@@ -604,7 +576,7 @@ def test_force_pause_refuses_new_intents_and_holds_recorded_ones(
         held_stack,
         failed_doc,
         created_at=now,
-        tasks={0: {"state": "created", "todoist_id": "6X0"}, 1: {"state": "failed", "error_code": "todoist_rejected"}},
+        rows={0: {"state": "created", "todoist_id": "6X0"}, 1: {"state": "failed", "error_code": "todoist_rejected"}},
     )
     key = f"source = '{failed_doc['source']}' AND intent_id = '{failed_doc['intent_id']}'"
     held_stack.d1(
@@ -618,12 +590,10 @@ def test_force_pause_refuses_new_intents_and_holds_recorded_ones(
     assert intent_row["state"] == "failed"
     assert [row["state"] for row in task_rows] == ["created", "failed"]
     time.sleep(2)
-    assert fresh_todoist.creates() == []
+    assert tasks.created(held_stack) == []
 
 
-def test_an_intake_without_accepted_sources_rejects_every_proposal(
-    launch_stack: StackLaunch, fresh_todoist: TodoistFake
-) -> None:
+def test_an_intake_without_accepted_sources_rejects_every_proposal(launch_stack: StackLaunch) -> None:
     closed = launch_stack(TASK_INTENT_SOURCES="")
     doc = new_intent("minimal.json")
     refused = propose(closed, doc)

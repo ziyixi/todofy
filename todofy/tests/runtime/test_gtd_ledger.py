@@ -1,7 +1,8 @@
-"""runtime/gtd.py in real workerd (D1, a real object storage) against the Todoist fake: the daily
+"""runtime/gtd.py in real workerd (D1, a real object storage) against the real Tasks Worker: the daily
 read-only snapshot across alarms, its aggregates, failures and fallbacks, the shed guard, the Sunday
 review (exactly once per ISO week), review completion, retention and a privacy sweep. Synthetic tasks
-only; their titles and descriptions are sentinels that must never leave Todoist's answers.
+only, written straight into Tasks' D1; their titles and descriptions are sentinels that must never leave
+Tasks' answers.
 
 The probe (tests/runtime/reports_probe) runs the module with any ``now``; test_gtd_alarm.py covers the
 coordinator's alarm loop."""
@@ -12,8 +13,7 @@ from typing import Any
 
 import pytest
 
-from tests.fakes.server import Reply
-from tests.fakes.todoist_fake import COMPLETED_PATH, PROJECT_ID, TASKS_PATH, stamp
+from tests.runtime import tasks_support as tasks
 from tests.runtime.reports_support import (  # noqa: F401
     NOW,
     PUBLIC_HOST,
@@ -24,6 +24,7 @@ from tests.runtime.reports_support import (  # noqa: F401
 )
 from todofy.core import gtd
 from todofy.core.request_id import todoist_request_id
+from todofy.runtime.native_tasks import request_id
 
 DAY = 86_400
 HOUR = 3_600
@@ -34,6 +35,7 @@ SUNDAY = int(datetime(2026, 10, 4, 17, tzinfo=UTC).timestamp())  # ISO week 2026
 SENTINEL = "SENTINEL-标题-5e1f"
 SENTINEL_DESC = "SENTINEL-描述-a9c4"
 ENABLED = {"GTD_COLLECT_UTC": "13:00", "GTD_REVIEW_ENABLED": "true"}
+TASKS_ORIGIN = "https://tasks.example.test"
 
 
 @pytest.fixture(autouse=True)
@@ -41,8 +43,8 @@ def fresh_object(probe: Probe) -> None:
     probe.call("/gtd", op="reset")
 
 
-def tick(probe: Probe, now: int, *, wait: int | None = None, state: dict | None = None, **overrides: str) -> dict:
-    return probe.call("/gtd", op="tick", now=now, wait=wait, state=state, vars=ENABLED | overrides)
+def tick(probe: Probe, now: int, *, state: dict | None = None, fail: tuple[str, ...] = (), **overrides: str) -> dict:
+    return probe.call("/gtd", op="tick", now=now, state=state, fail_tasks=list(fail), vars=ENABLED | overrides)
 
 
 def only_review(now: int) -> dict[str, int]:
@@ -50,88 +52,92 @@ def only_review(now: int) -> dict[str, int]:
     return {"next_collect": now + 30 * DAY, "next_review": 0}
 
 
-def gets(probe: Probe) -> list[Any]:
-    return probe.todoist.received("GET")
+def seed(probe: Probe, *rows: dict[str, Any]) -> list[str]:
+    """Sentinel tasks in Tasks' D1 (tasks_support.seed); their IDs."""
+    sentinel = {"title": SENTINEL, "description": SENTINEL_DESC}
+    return tasks.seed(probe.worker, *(sentinel | row for row in rows), now=NOW)
 
 
-def seed(probe: Probe, content: str = SENTINEL, **fields: Any) -> Any:
-    return probe.todoist.add_task(content, SENTINEL_DESC, **fields)
+def bulk(probe: Probe, count: int) -> None:
+    """``count`` undated Inbox tasks in one statement."""
+    probe.worker.tasks_d1(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < "
+        f"{count}) INSERT INTO tasks (id, title, description, created_at, updated_at)"
+        f" SELECT printf('bulk-%05d', i), {tasks.text(SENTINEL)}, {tasks.text(SENTINEL_DESC)}, 1, 1 FROM n"
+    )
+
+
+def complete(probe: Probe, task_id: str, at: int) -> None:
+    tasks.complete(probe.worker, task_id, at)
+
+
+def steps(result: dict) -> list[list[Any]]:
+    return [call for call in result["calls"] if call[0] == "step"]
 
 
 # ---- the snapshot ----------------------------------------------------------------------------
 
 
-def test_a_snapshot_spans_alarms_with_at_most_five_gets_each(probe):
-    probe.todoist.max_page_size = 2
-    tasks = [seed(probe, project_id=PROJECT_ID if n % 2 else "work") for n in range(13)]
-
+def test_a_snapshot_spans_alarms_with_at_most_five_reads_each(probe):
+    bulk(probe, 650)
     first = tick(probe, NOW)
-    assert len(probe.todoist.lists()) == 5 and probe.todoist.completed_lists() == []
     assert (first["state"]["phase"], first["state"]["pages"], first["next_at"]) == ("tasks", 5, NOW + 1)
+    assert len(steps(first)) == 5
     assert probe.sql("SELECT status FROM gtd_snapshots") == [{"status": "collecting"}]
 
     second = tick(probe, NOW + 1)
-    assert len(probe.todoist.lists()) == 7 and len(probe.todoist.completed_lists()) == 1
     assert second["state"]["phase"] == "idle" and second["state"]["next_collect"] == TOMORROW_COLLECT
-    counts = [call for call in first["calls"] + second["calls"] if call[0] == "count"]
-    assert counts == [["count", 1, NOW]] * 5 + [["count", 1, NOW + 1]] * 3
-
+    assert len(steps(second)) == 3  # the last two task pages and the completions
     [snapshot] = probe.sql("SELECT status, task_count, skipped, pages, error_code FROM gtd_snapshots")
-    assert snapshot == {"status": "ok", "task_count": 13, "skipped": 0, "pages": 7, "error_code": ""}
-    stored = probe.sql("SELECT task_id FROM gtd_snapshot_tasks WHERE day = ? ORDER BY task_id", TODAY)
-    assert [row["task_id"] for row in stored] == sorted(task.id for task in tasks)
-    # Every project (no project filter), the maximum page size, the cursor carried across alarms.
-    listed = probe.todoist.lists()
-    assert all(request.param("project_id") is None and request.param("limit") == "200" for request in listed)
-    assert [request.param("cursor") for request in listed][:2] == [None, "fake-cursor-2"]
-    [completed] = probe.todoist.completed_lists()
-    assert (completed.param("since"), completed.param("until")) == (gtd.rfc3339(NOW - 7 * DAY), gtd.rfc3339(NOW))
-    assert all(request.headers["authorization"] == "Bearer fake-todoist-token" for request in gets(probe))
+    assert snapshot == {"status": "ok", "task_count": 650, "skipped": 0, "pages": 7, "error_code": ""}
+    stored = probe.sql("SELECT count(DISTINCT task_id) AS n FROM gtd_snapshot_tasks WHERE day = ?", TODAY)
+    assert stored == [{"n": 650}]
 
 
-def test_more_than_ten_pages_is_a_partial_snapshot_without_counters(probe):
-    probe.todoist.max_page_size = 2
-    for _ in range(21):
-        seed(probe)
-    tick(probe, NOW)
-    tick(probe, NOW + 1)
-    last = tick(probe, NOW + 2)
-    assert len(probe.todoist.lists()) == 10
+def test_more_than_twenty_pages_is_a_partial_snapshot_without_counters(probe):
+    bulk(probe, 2050)
+    for second in range(5):  # four of five pages each, then the completions
+        last = tick(probe, NOW + second)
     [snapshot] = probe.sql("SELECT status, task_count, pages, error_code FROM gtd_snapshots")
-    assert snapshot == {"status": "partial", "task_count": 20, "pages": 10, "error_code": "page_cap"}
+    assert snapshot == {"status": "partial", "task_count": 2000, "pages": 20, "error_code": "page_cap"}
     assert [row["complete"] for row in probe.sql("SELECT complete FROM gtd_daily")] == [0, 0]
     assert last["facts"]["counters"] == {} and last["facts"]["last_ok_at"] is None
     assert last["state"]["next_collect"] == TOMORROW_COLLECT
 
 
 def test_the_aggregates_count_ages_dues_scopes_completions_and_closed_tasks(probe):
-    def added(days: float) -> str:
-        return stamp(NOW - days * DAY)
-
-    a = seed(probe, added_at=added(1), due={"date": YESTERDAY}, labels=["waiting"])
-    b = seed(probe, added_at=added(10))
-    c = seed(probe, added_at=added(20), due={"date": f"{TODAY}T10:00:00Z", "timezone": "America/New_York"})
-    seed(probe, added_at=added(40), due={"date": gtd.shift(TODAY, 2)})
-    seed(probe, project_id="work", due={"date": f"{YESTERDAY}T09:00:00", "is_recurring": True})
-    seed(probe, project_id="work", added_at=added(2), deadline={"date": TODAY})
-    x = seed(probe, added_at=added(3))
-    y = seed(probe, project_id="work", added_at=added(30))
-    z = seed(probe, project_id="work")
-    probe.todoist.complete(x.id, NOW - DAY)
-    probe.todoist.complete(y.id, NOW - 2 * DAY)
-    probe.todoist.complete(z.id, NOW - 8 * DAY)  # outside the 7-day window
+    a, b, c, _, _, _, x, y, z = seed(
+        probe,
+        {"added": NOW - DAY, "due_date": YESTERDAY, "labels": ["errand"]},
+        {"added": NOW - 10 * DAY},
+        {
+            "added": NOW - 20 * DAY,
+            "due_date": TODAY,
+            "due_datetime": f"{TODAY}T10:00:00Z",
+            "due_timezone": "America/New_York",
+        },
+        {"added": NOW - 40 * DAY, "due_date": gtd.shift(TODAY, 2)},
+        {"project": "work", "due_date": YESTERDAY, "recurrence": "every day"},
+        {"project": "work", "added": NOW - 2 * DAY, "deadline": TODAY},
+        {"added": NOW - 3 * DAY},
+        {"project": "work", "added": NOW - 30 * DAY},
+        {"project": "work"},
+    )
+    complete(probe, x, NOW - DAY)
+    complete(probe, y, NOW - 2 * DAY)
+    complete(probe, z, NOW - 8 * DAY)  # outside the 7-day window
     # Yesterday's ok snapshot held a, b and a task that is gone now.
     probe.insert("gtd_snapshots", day=YESTERDAY, status="ok", task_count=3, started_at=NOW - DAY, finished_at=NOW - DAY)
-    for task_id in (a.id, b.id, "gone-1"):
+    for task_id in (a, b, "gone-1"):
         probe.insert(
             "gtd_snapshot_tasks", day=YESTERDAY, task_id=task_id, project_id="p", priority=1, content_hmac="0" * 64
         )
-    # Mail tasks of the last 14 days: a and b are still open (b arrived in the last 24 h, so it is not in
-    # the carryover pool), x was completed.
-    for event_id, created_at, task_id in (
-        ("m-a", NOW - 2 * DAY, a.id),
-        ("m-b", NOW - HOUR, b.id),
-        ("m-x", NOW - 3 * DAY, x.id),
+    # Mail of the last 14 days still pending in Mail: m-a; m-b arrived in the last 24 h, so it is not in the
+    # carryover pool, and m-x was converted.
+    for event_id, created_at, task_id, triaged_at in (
+        ("m-a", NOW - 2 * DAY, "", None),
+        ("m-b", NOW - HOUR, "", None),
+        ("m-x", NOW - 3 * DAY, x, NOW - 3 * DAY),
     ):
         probe.insert(
             "summaries",
@@ -141,6 +147,7 @@ def test_the_aggregates_count_ages_dues_scopes_completions_and_closed_tasks(prob
             summary="摘要",
             model="m",
             task_id=task_id,
+            triaged_at=triaged_at,
         )
 
     result = tick(probe, NOW)
@@ -153,8 +160,8 @@ def test_the_aggregates_count_ages_dues_scopes_completions_and_closed_tasks(prob
         "age_0_7": 2,
         "age_8_14": 1,
         "age_15_30": 1,
-        "age_31_plus": 1,
-        "oldest_days": 40,
+        "age_31_plus": 2,
+        "oldest_days": 400,
         "overdue": 3,
         "undated": 2,
         "created_7d": 3,
@@ -185,98 +192,62 @@ def test_the_aggregates_count_ages_dues_scopes_completions_and_closed_tasks(prob
         "completed_7d": 2,
     }
     assert result["facts"]["last_ok_at"] == NOW and result["facts"]["snapshot_age"] is None
-    [row] = probe.sql("SELECT labels, due_at, due_recurring FROM gtd_snapshot_tasks WHERE task_id = ?", c.id)
+    [row] = probe.sql("SELECT labels, due_at, due_recurring FROM gtd_snapshot_tasks WHERE task_id = ?", c)
     assert row == {
         "labels": "[]",
         "due_at": int(datetime.fromisoformat(f"{TODAY}T10:00:00+00:00").timestamp()),
         "due_recurring": 0,
     }
+    [labelled] = probe.sql("SELECT labels FROM gtd_snapshot_tasks WHERE day = ? AND task_id = ?", TODAY, a)
+    assert labelled == {"labels": '["errand"]'}
 
 
-def test_without_an_inbox_project_only_the_all_scope_is_written(probe):
-    seed(probe)
-    result = tick(probe, NOW, TODOIST_DEFAULT_PROJECT_ID="")
-    assert [row["scope"] for row in probe.sql("SELECT scope FROM gtd_daily")] == ["all"]
-    assert "inbox_open" not in result["facts"]["counters"]
-
-
-@pytest.mark.parametrize(
-    ("reply", "code"),
-    [
-        (Reply(503, {"error": "busy"}), "todoist_unavailable"),
-        (Reply(429, {"error": "slow down"}, {"retry-after": "1200"}), "todoist_rate_limited"),
-        (Reply(200, {"unexpected": True}), "malformed_page"),
-        (Reply(hang=True), "todoist_unavailable"),
-    ],
-    ids=["503", "429", "malformed", "timeout"],
-)
-def test_a_failed_list_is_retried_at_most_three_times_a_day(probe, reply, code):
-    seed(probe)
-    for _ in range(3):
-        probe.todoist.queue("GET", TASKS_PATH, reply)
-    retry = 1200 if "retry-after" in reply.headers else 600
-    fast = {"GTD_PAGE_TIMEOUT_MS": "1000"}
-    first = tick(probe, NOW, **fast)
-    assert first["state"]["next_collect"] == NOW + retry and first["state"]["attempts"] == 1
+def test_a_failed_list_is_retried_at_most_three_times_a_day(probe):
+    seed(probe, {})
+    first = tick(probe, NOW, fail=("ListTasks",))
+    assert first["state"]["next_collect"] == NOW + 600 and first["state"]["attempts"] == 1
     [snapshot] = probe.sql("SELECT status, error_code FROM gtd_snapshots")
-    assert snapshot == {"status": "failed", "error_code": code}
+    assert snapshot == {"status": "failed", "error_code": "todoist_unavailable"}
     assert probe.sql("SELECT count(*) AS n FROM gtd_daily") == [{"n": 0}]
-    assert first["facts"]["counters"] == {} and ["step", "gtd", "failed", code] in first["calls"]
-    tick(probe, NOW + retry, **fast)
-    third = tick(probe, NOW + 2 * retry, **fast)
+    assert first["facts"]["counters"] == {} and ["step", "gtd", "failed", "todoist_unavailable"] in first["calls"]
+    tick(probe, NOW + 600, fail=("ListTasks",))
+    third = tick(probe, NOW + 1200, fail=("ListTasks",))
     assert third["state"]["attempts"] == 3 and third["state"]["next_collect"] == TOMORROW_COLLECT
-    assert len(probe.todoist.lists()) == 3
     # Tomorrow starts over.
     tomorrow = tick(probe, TOMORROW_COLLECT)
     assert tomorrow["state"]["attempts"] == 1 and tomorrow["facts"]["last_ok_at"] == TOMORROW_COLLECT
 
 
-def test_an_auth_failure_blocks_todoist_for_six_hours(probe):
-    probe.todoist.queue("GET", TASKS_PATH, Reply(401, {"error": "Unauthorized"}))
-    result = tick(probe, NOW)
-    assert ["block", NOW] in result["calls"]
-    assert result["state"]["next_collect"] == NOW + 6 * HOUR
-    assert probe.sql("SELECT error_code FROM gtd_snapshots") == [{"error_code": "todoist_auth_blocked"}]
-
-
 @pytest.mark.parametrize(
-    ("overrides", "wait", "next_collect"),
+    ("overrides", "next_collect"),
     [
-        ({"PROCESSING_PAUSED": "true"}, None, NOW + 600),
-        ({"FORCE_PAUSE_TODOIST": "true"}, None, NOW + 600),
-        ({}, NOW + 5 * HOUR, NOW + 5 * HOUR),  # the auth block (or a full call window)
-        ({}, 0, NOW + 600),  # FORCE_PAUSE_TODOIST as the coordinator reports it
-        ({"GTD_COLLECT_UTC": "off"}, None, NOW + DAY),
+        ({"PROCESSING_PAUSED": "true"}, NOW + 600),
+        ({"FORCE_PAUSE_TODOIST": "true"}, NOW + 600),
+        ({"GTD_COLLECT_UTC": "off"}, NOW + DAY),
     ],
-    ids=["processing_paused", "force_pause_todoist", "blocked", "paused", "off"],
+    ids=["processing_paused", "force_pause_todoist", "off"],
 )
-def test_switches_and_blocks_make_no_todoist_call(probe, overrides, wait, next_collect):
-    seed(probe)
-    result = tick(probe, NOW, wait=wait, **overrides)
-    assert gets(probe) == [] and probe.sql("SELECT day FROM gtd_snapshots") == []
+def test_the_switches_read_nothing_from_tasks(probe, overrides, next_collect):
+    seed(probe, {})
+    result = tick(probe, NOW, **overrides)
+    assert steps(result) == [] and probe.sql("SELECT day FROM gtd_snapshots") == []
     assert result["state"]["next_collect"] == next_collect
 
 
 def test_a_pause_mid_way_resumes_from_the_cursor(probe):
-    probe.todoist.max_page_size = 1
-    tasks = [seed(probe) for _ in range(7)]
+    bulk(probe, 650)
     tick(probe, NOW)
     paused = tick(probe, NOW + 1, PROCESSING_PAUSED="true")
-    assert len(probe.todoist.lists()) == 5 and paused["state"]["next_collect"] == NOW + 1 + 600
-    assert paused["state"]["phase"] == "tasks" and paused["state"]["cursor"] == "fake-cursor-5"
-    tick(probe, NOW + 601)
-    assert len(probe.todoist.lists()) == 7
-    stored = probe.sql("SELECT task_id FROM gtd_snapshot_tasks ORDER BY task_id")
-    assert [row["task_id"] for row in stored] == sorted(task.id for task in tasks)
+    assert paused["state"]["next_collect"] == NOW + 1 + 600 and steps(paused) == []
+    assert paused["state"]["phase"] == "tasks" and paused["state"]["pages"] == 5 and paused["state"]["cursor"]
+    resumed = tick(probe, NOW + 601)
+    assert resumed["state"]["pages"] == 7 and resumed["state"]["phase"] == "idle"
+    assert probe.sql("SELECT count(DISTINCT task_id) AS n FROM gtd_snapshot_tasks") == [{"n": 650}]
 
 
-@pytest.mark.parametrize("status", [500, 401, 403])
-def test_a_failed_completed_list_keeps_the_snapshot_without_completions(probe, status):
-    seed(probe)
-    probe.todoist.queue("GET", COMPLETED_PATH, Reply(status, {"error": "boom"}))
-    result = tick(probe, NOW)
-    # Even a 401/403 on this optional read never blocks Todoist (mail tasks keep being created).
-    assert not any(call[0] == "block" for call in result["calls"])
+def test_a_failed_completion_read_keeps_the_snapshot_without_completions(probe):
+    seed(probe, {})
+    result = tick(probe, NOW, fail=("ListCompletions",))
     assert result["state"]["next_collect"] == TOMORROW_COLLECT
     assert probe.sql("SELECT status FROM gtd_snapshots") == [{"status": "ok"}]
     rows = probe.sql("SELECT scope, completed_7d, created_7d, completed_source FROM gtd_daily ORDER BY scope")
@@ -288,9 +259,7 @@ def test_a_failed_completed_list_keeps_the_snapshot_without_completions(probe, s
 
 
 def test_an_unfinished_collection_is_given_up_the_next_day(probe):
-    probe.todoist.max_page_size = 1
-    for _ in range(7):
-        seed(probe)
+    bulk(probe, 650)
     assert tick(probe, NOW)["state"]["phase"] == "tasks"
     result = tick(probe, TOMORROW_COLLECT)
     days = {row["day"]: row for row in probe.sql("SELECT day, status, error_code FROM gtd_snapshots")}
@@ -300,20 +269,20 @@ def test_an_unfinished_collection_is_given_up_the_next_day(probe):
 
 
 def test_a_rerun_the_same_day_replaces_the_snapshot(probe):
-    first, second = seed(probe), seed(probe)
+    first, second = seed(probe, {}, {})
     tick(probe, NOW)
-    probe.todoist.complete(first.id, NOW + 60)
+    complete(probe, first, NOW + 60)
     tick(probe, NOW + 120, state={"next_collect": 0, "attempts": 1})
-    assert [row["task_id"] for row in probe.sql("SELECT task_id FROM gtd_snapshot_tasks")] == [second.id]
+    assert [row["task_id"] for row in probe.sql("SELECT task_id FROM gtd_snapshot_tasks")] == [second]
     assert probe.sql("SELECT task_count FROM gtd_snapshots") == [{"task_count": 1}]
 
 
 def test_a_shed_guard_holds_the_snapshot_within_its_48_hour_bound(probe):
-    seed(probe)
+    seed(probe, {})
     guard = {"level": "shed", "reason": "d1_reads_high", "until": gtd.rfc3339(NOW + 10 * HOUR)}
     probe.call("/gtd", op="guard", now=NOW, guard=guard, ran=NOW - 20 * HOUR)
     held = tick(probe, NOW)
-    assert gets(probe) == [] and held["state"]["held"] is True
+    assert steps(held) == [] and held["state"]["held"] is True
     assert held["state"]["next_collect"] == NOW + 10 * HOUR
     # Ending the guard makes it due at once (the coordinator's ops_set_guard calls release).
     probe.call("/gtd", op="guard", now=NOW + 60, guard={"level": "normal", "reason": "quota_ok", "until": None})
@@ -324,7 +293,7 @@ def test_a_shed_guard_holds_the_snapshot_within_its_48_hour_bound(probe):
 
 
 def test_the_bound_runs_the_snapshot_despite_a_renewed_guard(probe):
-    seed(probe)
+    seed(probe, {})
     guard = {"level": "shed", "reason": "d1_reads_high", "until": gtd.rfc3339(NOW + 10 * HOUR)}
     probe.call("/gtd", op="guard", now=NOW, guard=guard, ran=NOW - 48 * HOUR)
     assert tick(probe, NOW)["facts"]["last_ok_at"] == NOW
@@ -377,6 +346,8 @@ OPS_REPORT = {
         },
     ],
 }
+# A project Tasks does not have: a review into it is refused (400), and nothing is created.
+MISSING = {"TODOIST_REVIEW_PROJECT_ID": "review-project"}
 
 
 def review(probe: Probe, now: int, **overrides: str) -> dict:
@@ -389,12 +360,12 @@ def test_the_review_is_one_task_per_iso_week_with_counts_only(probe):
     seed_days(probe, "2026-10-04", inbox_open=23, all_open=57)
     seed_days(probe, "2026-09-27", inbox_open=31, all_open=57)
     for task_id, project, added in (
-        ("old-2", PROJECT_ID, SUNDAY - 50 * DAY),
-        ("old-1", PROJECT_ID, SUNDAY - 60 * DAY),
+        ("old-2", "", SUNDAY - 50 * DAY),
+        ("old-1", "", SUNDAY - 60 * DAY),
         ("work-0", "work", SUNDAY - 90 * DAY),
-        ("undated", PROJECT_ID, None),
-        ("old-3", PROJECT_ID, SUNDAY - 40 * DAY),
-        ("young", PROJECT_ID, SUNDAY - DAY),
+        ("undated", "", None),
+        ("old-3", "", SUNDAY - 40 * DAY),
+        ("young", "", SUNDAY - DAY),
     ):
         probe.insert(
             "gtd_snapshot_tasks",
@@ -405,20 +376,18 @@ def test_the_review_is_one_task_per_iso_week_with_counts_only(probe):
             added_at=added,
             content_hmac="0" * 64,
         )
+    probe.project("review-project")
     result = review(probe, SUNDAY, TODOIST_REVIEW_PROJECT_ID="review-project")
-    [create] = probe.todoist.creates()
-    sent = create.json()
-    assert sent["content"] == "每周回顾 2026-W40" and sent["project_id"] == "review-project"
-    assert create.headers["x-request-id"] == todoist_request_id(
-        sent["content"], sent["description"], "todofy-review:2026-W40"
-    )
-    body = sent["description"]
-    assert body.startswith("快照 2026-10-04（Todoist 元数据，只含计数）\n收件箱：开放 23（上周 31，-8）")
+    [created] = probe.created()
+    assert created["title"] == "每周回顾 2026-W40" and created["project_id"] == "review-project"
+    body = created["description"]
+    assert probe.request_ids() == [request_id(todoist_request_id(created["title"], body, "todofy-review:2026-W40"))]
+    assert body.startswith("快照 2026-10-04（Tasks 元数据，只含计数）\n收件箱：开放 23（上周 31，-8）")
     assert "全部项目：开放 57（上周 57，持平） · 逾期 2（上周 2，持平） · 无日期 5（上周 5，持平）" in body
     assert "近 7 天：新建 7 · 完成 9（上周 9，持平）\n邮件任务：1–14 天前收到、仍开着 3（晨报最多带入 30 条）\n" in body
     # Title-free links to the snapshot day's three oldest inbox tasks, oldest first (other projects and
     # undated rows are not candidates).
-    oldest = [f"https://app.todoist.com/app/task/old-{n}" for n in (1, 2, 3)]
+    oldest = [f"{TASKS_ORIGIN}/?task=old-{n}" for n in (1, 2, 3)]
     assert f"收件箱最老的任务：{'  '.join(oldest)}\n" in body
     assert "本周重点：收件箱里超过 30 天的 1 项：逐个决定 做 / 委派 / 删除\n" in body
     assert "Todofy：需处理事件 0；运维：（仪表盘报告 2026-10-03 23:00 UTC）mail-hero parse_failed count=1\n" in body
@@ -429,7 +398,7 @@ def test_the_review_is_one_task_per_iso_week_with_counts_only(probe):
         "week": "2026-W40",
         "state": "created",
         "project_id": "review-project",
-        "task_id": probe.todoist.tasks[0].id,
+        "task_id": created["id"],
         "attempts": 1,
         "subject": "每周回顾 2026-W40",
     }
@@ -437,67 +406,82 @@ def test_the_review_is_one_task_per_iso_week_with_counts_only(probe):
     assert result["facts"]["first_review_at"] == SUNDAY
     # Later the same evening (a restarted schedule, say): still one task.
     again = review(probe, SUNDAY + 2 * HOUR)
-    assert len(probe.todoist.creates()) == 1 and again["state"]["next_review"] == SUNDAY + 7 * DAY
+    assert len(probe.created()) == 1 and again["state"]["next_review"] == SUNDAY + 7 * DAY
 
 
 # The deploy uploads an unset optional project as a single space (the secret must be overwritten,
 # not kept), so a blank value must read as unset.
 @pytest.mark.parametrize("unset", [{}, {"TODOIST_REVIEW_PROJECT_ID": " "}])
-def test_the_review_goes_to_the_default_project_without_a_review_project(probe, unset):
+def test_the_review_goes_to_the_inbox_without_a_review_project(probe, unset):
     review(probe, SUNDAY, **unset)
-    [create] = probe.todoist.creates()
-    assert create.json()["project_id"] == PROJECT_ID
-    assert create.json()["description"].startswith("快照：本周没有可用的 Todoist 快照")
+    [created] = probe.created()
+    assert created["project_id"] == ""
+    assert created["description"].startswith("快照：本周没有可用的 Tasks 快照")
 
 
-def test_the_review_links_the_plus_checklist_once_plus_is_set_up(probe):
+def test_the_review_links_plans_checklist_once_planning_is_set_up(probe):
     review(probe, SUNDAY)
-    assert "todoist-plus" not in probe.todoist.creates()[0].json()["description"]
+    assert "review=1" not in probe.created()[0]["description"]
     probe.insert("plus_settings", id=1, mapping="{}", timezone="UTC", week_start="2026-09-28", enabled=1)
     try:
         review(probe, SUNDAY + 7 * DAY)
     finally:
         probe.sql("DELETE FROM plus_settings")
-    [_, later] = probe.todoist.creates()
-    assert later.json()["description"].endswith(
-        "   Plus 周回顾：https://app.todoist.com/app/today?todoist-plus=review\n"
-    )
+    [_, later] = probe.created()
+    assert later["description"].endswith(f"   周回顾：{TASKS_ORIGIN}/?review=1#/plan\n")
 
 
-@pytest.mark.parametrize("status", [400, 401])
-def test_a_failed_review_is_retried_hourly_with_its_frozen_request(probe, status):
-    for _ in range(5):
-        probe.todoist.queue("POST", TASKS_PATH, Reply(status, {"error": "no"}))
+def test_a_failed_review_is_retried_hourly_then_stops(probe):
     now = SUNDAY
-    assert review(probe, now)["state"]["next_review"] == now + HOUR
-    seed_days(probe, "2026-10-04", inbox_open=1, all_open=1)  # a later body would differ: it must not be used
+    assert review(probe, now, **MISSING)["state"]["next_review"] == now + HOUR
     for attempt in range(2, 6):
         now += HOUR
         expected = now + HOUR if attempt < 5 else SUNDAY + 7 * DAY
         assert review(probe, now)["state"]["next_review"] == expected
-    creates = probe.todoist.creates()
-    assert len(creates) == 5 and len({(create.body, create.headers["x-request-id"]) for create in creates}) == 1
-    [row] = probe.sql("SELECT state, attempts, last_error_code FROM gtd_reviews")
-    assert row == {"state": "failed", "attempts": 5, "last_error_code": "review_create_failed"}
+    [row] = probe.sql("SELECT state, attempts, last_error_code, project_id FROM gtd_reviews")
+    assert row == {
+        "state": "failed",
+        "attempts": 5,
+        "last_error_code": "review_create_failed",
+        "project_id": "review-project",
+    }
     review(probe, now + HOUR)
-    assert len(probe.todoist.creates()) == 5
+    assert probe.created() == []
+
+
+def test_a_retried_review_sends_its_frozen_request(probe):
+    review(probe, SUNDAY, **MISSING)
+    [frozen] = probe.sql("SELECT subject, body FROM gtd_reviews")
+    seed_days(probe, "2026-10-04", inbox_open=1, all_open=1)  # a later body would differ: it must not be used
+    probe.project("review-project")
+    review(probe, SUNDAY + HOUR)
+    [created] = probe.created()
+    assert (created["title"], created["description"]) == (frozen["subject"], frozen["body"])
+    assert probe.request_ids() == [
+        request_id(todoist_request_id(frozen["subject"], frozen["body"], "todofy-review:2026-W40"))
+    ]
 
 
 def test_failed_retries_stop_when_the_iso_week_ends(probe):
-    probe.todoist.queue("POST", TASKS_PATH, Reply(400, {"error": "no"}))
     late = SUNDAY + 6 * HOUR + 30 * 60  # 23:30 UTC
-    assert review(probe, late)["state"]["next_review"] == SUNDAY + 7 * DAY
+    assert review(probe, late, **MISSING)["state"]["next_review"] == SUNDAY + 7 * DAY
 
 
-@pytest.mark.parametrize("reply", [Reply(500, {"error": "boom"}), Reply(200, {})], ids=["500", "no_id"])
-def test_an_unknown_review_is_never_resent(probe, reply):
-    probe.todoist.queue("POST", TASKS_PATH, reply)
-    review(probe, SUNDAY)
-    assert probe.sql("SELECT state, last_error_code FROM gtd_reviews") == [
-        {"state": "unknown", "last_error_code": "review_result_unknown"}
-    ]
+def test_an_unknown_review_is_never_resent(probe):
+    probe.insert(
+        "gtd_reviews",
+        week="2026-W40",
+        state="unknown",
+        subject="t",
+        body="b",
+        attempts=1,
+        last_error_code="review_result_unknown",
+        created_at=SUNDAY,
+        updated_at=SUNDAY,
+    )
+    review(probe, SUNDAY + 60)
     review(probe, SUNDAY + HOUR)
-    assert len(probe.todoist.creates()) == 1
+    assert probe.created() == []
 
 
 def test_a_week_left_sending_is_recorded_as_interrupted_and_not_resent(probe):
@@ -505,21 +489,19 @@ def test_a_week_left_sending_is_recorded_as_interrupted_and_not_resent(probe):
         "gtd_reviews", week="2026-W40", state="sending", subject="t", body="b", created_at=SUNDAY, updated_at=SUNDAY
     )
     review(probe, SUNDAY + 60)
-    assert probe.todoist.creates() == []
+    assert probe.created() == []
     assert probe.sql("SELECT state, attempts, last_error_code FROM gtd_reviews") == [
         {"state": "unknown", "attempts": 1, "last_error_code": "interrupted_review_call"}
     ]
 
 
 @pytest.mark.parametrize(
-    ("overrides", "wait"),
-    [({"GTD_REVIEW_ENABLED": "false"}, None), ({"FORCE_PAUSE_TODOIST": "true"}, None), ({}, SUNDAY + HOUR)],
-    ids=["disabled", "paused", "blocked"],
+    "overrides", [{"GTD_REVIEW_ENABLED": "false"}, {"FORCE_PAUSE_TODOIST": "true"}], ids=["disabled", "paused"]
 )
-def test_no_review_while_disabled_paused_or_blocked(probe, overrides, wait):
-    result = probe.call("/gtd", op="tick", now=SUNDAY, wait=wait, state=only_review(SUNDAY), vars=ENABLED | overrides)
-    assert probe.todoist.creates() == [] and probe.sql("SELECT week FROM gtd_reviews") == []
-    assert result["state"]["next_review"] == (wait or SUNDAY + 600)
+def test_no_review_while_disabled_or_paused(probe, overrides):
+    result = probe.call("/gtd", op="tick", now=SUNDAY, state=only_review(SUNDAY), vars=ENABLED | overrides)
+    assert probe.created() == [] and probe.sql("SELECT week FROM gtd_reviews") == []
+    assert result["state"]["next_review"] == SUNDAY + 600
 
 
 @pytest.mark.parametrize(
@@ -532,7 +514,7 @@ def test_no_review_while_disabled_paused_or_blocked(probe, overrides, wait):
 )
 def test_the_review_waits_for_sunday_17_utc(probe, moment, next_review):
     assert review(probe, moment)["state"]["next_review"] == next_review
-    assert probe.todoist.creates() == []
+    assert probe.created() == []
 
 
 def test_the_iso_week_crosses_the_year_end(probe):
@@ -540,16 +522,13 @@ def test_the_iso_week_crosses_the_year_end(probe):
     review(probe, new_year)
     review(probe, new_year + 7 * DAY)
     assert [row["week"] for row in probe.sql("SELECT week FROM gtd_reviews ORDER BY week")] == ["2026-W53", "2027-W01"]
-    assert [create.json()["content"] for create in probe.todoist.creates()] == [
-        "每周回顾 2026-W53",
-        "每周回顾 2027-W01",
-    ]
+    assert [task["title"] for task in probe.created()] == ["每周回顾 2026-W53", "每周回顾 2027-W01"]
 
 
 def test_a_completed_review_is_seen_by_the_next_snapshot(probe):
     review(probe, SUNDAY)
-    [task] = probe.todoist.tasks
-    probe.todoist.complete(task.id, SUNDAY + 3 * HOUR)
+    [task] = probe.created()
+    complete(probe, task["id"], SUNDAY + 3 * HOUR)
     monday = SUNDAY + 20 * HOUR  # Monday 13:00 UTC
     result = tick(probe, monday, state={"next_collect": 0, "next_review": monday + DAY})
     assert probe.sql("SELECT completed_at FROM gtd_reviews") == [{"completed_at": SUNDAY + 3 * HOUR}]
@@ -564,7 +543,8 @@ def test_a_completed_review_is_seen_by_the_next_snapshot(probe):
     assert paused["facts"]["review_age_days"] is None
     # A deleted review task never counts as done.
     review(probe, SUNDAY + 7 * DAY)
-    probe.todoist.delete(probe.todoist.tasks[-1].id)
+    second = probe.created()[-1]["id"]
+    probe.worker.tasks_d1(f"UPDATE tasks SET deleted_at = {(SUNDAY + 7 * DAY + HOUR) * 1000} WHERE id = '{second}'")
     tick(probe, SUNDAY + 7 * DAY + 20 * HOUR, state={"next_collect": 0, "next_review": SUNDAY + 14 * DAY})
     rows = probe.sql("SELECT week, completed_at FROM gtd_reviews ORDER BY week")
     assert rows == [{"week": "2026-W40", "completed_at": SUNDAY + 3 * HOUR}, {"week": "2026-W41", "completed_at": None}]
@@ -624,14 +604,15 @@ def test_retention_keeps_14_days_of_rows_and_120_of_aggregates(probe):
 
 
 def test_no_task_text_is_stored_logged_or_sent(probe):
-    """The privacy sweep: sentinel titles and descriptions reach the Worker in every Todoist answer and
+    """The privacy sweep: sentinel titles and descriptions reach the Worker in every Tasks answer and
     must appear nowhere it writes: D1, the object's state, the review task, the API, the log."""
-    probe.todoist.max_page_size = 2
-    for n in range(5):
-        seed(probe, f"{SENTINEL}-{n}", labels=["家"], project_id=PROJECT_ID if n % 2 else "work")
-    done = seed(probe, f"{SENTINEL}-done", added_at=stamp(NOW - DAY))
-    probe.todoist.complete(done.id, NOW - HOUR)
-    for event_id, task in (("m1", probe.todoist.tasks[0]), ("m2", probe.todoist.tasks[1])):
+    ids = seed(
+        probe,
+        *({"title": f"{SENTINEL}-{n}", "labels": ["家"], "project": "" if n % 2 else "work"} for n in range(5)),
+        {"title": f"{SENTINEL}-done", "added": NOW - DAY},
+    )
+    complete(probe, ids[-1], NOW - HOUR)
+    for event_id, task_id in (("m1", ids[0]), ("m2", ids[1])):
         probe.insert(
             "summaries",
             event_id=event_id,
@@ -639,7 +620,8 @@ def test_no_task_text_is_stored_logged_or_sent(probe):
             subject="s",
             summary="合成摘要",
             model="m",
-            task_id=task.id,
+            task_id=task_id,
+            triaged_at=NOW - 2 * DAY,
         )
     states = [tick(probe, NOW), tick(probe, NOW + 1)]
     sunday = review(probe, SUNDAY)
@@ -654,7 +636,7 @@ def test_no_task_text_is_stored_logged_or_sent(probe):
     written = [
         dump,
         json.dumps([*states, sunday], ensure_ascii=False),
-        json.dumps([create.json() for create in probe.todoist.creates()], ensure_ascii=False),
+        json.dumps([task for task in probe.created() if task["title"].startswith("每周回顾")], ensure_ascii=False),
         json.dumps(probe.call("/gtd/daily", days=7, now=NOW), ensure_ascii=False),
         (probe.worker.persist_to / "dev.log").read_text(errors="replace"),
     ]

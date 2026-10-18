@@ -1,4 +1,4 @@
-"""Actual Python -> TasksApi RPC -> D1 create and read, with no Todoist server."""
+"""Actual Python -> TasksApi RPC -> D1 create and read."""
 
 import json
 import shutil
@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from tests.runtime.harness import ROOT, Worker, _run, _wrangler
+from tests.runtime.harness import ROOT, Worker, _run, tasks_config
 from todofy.core.native_plan import CANONICAL_MAPPING
 from todofy.core.render import FOOTER_PREFIX
 
@@ -55,39 +55,9 @@ def native(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Worker]:
             }
         )
     )
-    storage = state / "storage.json"
-    storage.write_text(
-        json.dumps(
-            {
-                "name": "native-tasks-storage",
-                "main": str(ROOT.parent / "tasks/worker/src/index.ts"),
-                "compatibility_date": "2026-09-08",
-                "workers_dev": False,
-                "preview_urls": False,
-                "d1_databases": [
-                    {
-                        "binding": "DB",
-                        "database_name": "native-tasks-test",
-                        "database_id": "00000000-0000-4000-8000-000000000001",
-                        "migrations_dir": str(ROOT.parent / "tasks/migrations"),
-                    }
-                ],
-                "vars": {"TIME_ZONE": "America/Los_Angeles", "PUBLIC_HOST": "tasks.localhost"},
-            }
-        )
-    )
-    _wrangler("d1", "migrations", "apply", "DB", "--local", "--persist-to", str(state), "--config", str(storage))
+    storage = str(tasks_config(state / "storage.json", "native-tasks-storage", "00000000-0000-4000-8000-000000000001"))
     yield from _run(
-        Worker(
-            [str(caller), str(storage)],
-            str(caller),
-            state,
-            {
-                "TASK_SOURCE": "tasks",
-                "TODOIST_API_BASE": "http://127.0.0.1:1",
-                "TASKS_PUBLIC_URL": "https://tasks.example.test",
-            },
-        )
+        Worker([str(caller), storage], str(caller), state, {"TASKS_PUBLIC_URL": "https://tasks.example.test"}, storage)
     )
 
 
@@ -196,44 +166,48 @@ def test_native_plus_filing_and_decimal_order_use_real_sqlite_receipts_and_tasks
         "CreateTask",
         {"task": {"title": "Synthetic mail filing", "sort_order": 1.25}, "request_id": str(uuid.uuid4())},
     )
-    commands = [
+    filing = [
         {
-            "type": "item_update",
-            "uuid": str(uuid.uuid4()),
-            "args": {"id": value["id"], "labels": [label["title"]], "priority": 3},
-            "_native_etag": value["etag"],
-        },
-        {
-            "type": "item_move",
-            "uuid": str(uuid.uuid4()),
-            "args": {"id": value["id"], "project_id": project["id"]},
-            "_native_etag": value["etag"],
-        },
+            "method": "UpdateTask",
+            "body": {
+                "task": {"name": value["name"], "label_ids": [label["id"]], "priority": 2, "project_id": project["id"]},
+                "etag": value["etag"],
+                "update_mask": "label_ids,priority,project_id",
+                "request_id": str(uuid.uuid4()),
+            },
+        }
     ]
-    assert "error" not in call(native, "/native/plus", {"commands": commands})
+    assert "error" not in call(native, "/native/plus", {"commands": filing})
     filed = rpc(native, "GetTask", {"name": value["name"]})
     assert filed["project_id"] == project["id"] and filed["label_ids"] == [label["id"]] and filed["priority"] == 2
-    assert "error" not in call(native, "/native/plus", {"commands": commands})
+    assert "error" not in call(native, "/native/plus", {"commands": filing})  # the journal answers the replay
     assert rpc(native, "GetTask", {"name": value["name"]})["etag"] == filed["etag"]
     reorder = [
         {
-            "type": "item_reorder",
-            "uuid": str(uuid.uuid4()),
-            "args": {"items": [{"id": filed["id"], "child_order": 1.375}]},
-            "_native_etags": {filed["id"]: filed["etag"]},
+            "method": "ReorderTasks",
+            "body": {
+                "positions": [{"name": filed["name"], "etag": filed["etag"], "sort_order": 1.375}],
+                "request_id": str(uuid.uuid4()),
+            },
         }
     ]
     assert "error" not in call(native, "/native/plus", {"commands": reorder})
     assert rpc(native, "GetTask", {"name": value["name"]})["sort_order"] == 1.375
     stale = [
         {
-            "type": "item_update",
-            "uuid": str(uuid.uuid4()),
-            "args": {"id": value["id"], "priority": 4},
-            "_native_etag": value["etag"],
+            "method": "UpdateTask",
+            "body": {
+                "task": {"name": value["name"], "priority": 4},
+                "etag": value["etag"],
+                "update_mask": "priority",
+                "request_id": str(uuid.uuid4()),
+            },
         }
     ]
     assert call(native, "/native/plus", {"commands": stale}) == {"error": 409}
+    # A receipt started while Todoist was still a store holds a Sync command: refused, never converted.
+    envelope = [{"type": "item_update", "uuid": str(uuid.uuid4()), "args": {"id": value["id"], "priority": 4}}]
+    assert call(native, "/native/plus", {"commands": envelope}) == {"error": 400}
     assert rpc(native, "GetTask", {"name": value["name"]})["priority"] == 2
 
 
@@ -601,6 +575,48 @@ def test_native_weekly_bet_and_dependencies_persist_and_real_completion_releases
     assert rpc(native, "GetTask", {"name": waiter["name"]}) == waiter
 
 
+def test_native_bet_cas_lane_order_deleted_prerequisite_and_plan_store_check(native, ready_plan):
+    plan = planning(native, "ReadPlan")["plan"]
+    personal = {"week_start": plan["week_start"], "area": "personal"}
+    first = planning(native, "SetWeeklyBet", **personal, etag="", text="Synthetic personal outcome")["weekly_bet"]
+    # A second tab still showing no Bet cannot overwrite the saved one.
+    assert planning(native, "SetWeeklyBet", **personal, etag="", text="Stale tab") == {"error": "ETAG_MISMATCH"}
+    changed = planning(native, "SetWeeklyBet", **personal, etag=first["etag"], text="Synthetic changed")["weekly_bet"]
+    assert changed["etag"] != first["etag"] and changed["text"] == "Synthetic changed"
+
+    lane = [
+        rpc(native, "CreateTask", {"task": {"title": title}, "request_id": str(uuid.uuid4())})["id"]
+        for title in ("Synthetic lane one", "Synthetic lane two")
+    ]
+    order = list(reversed(lane))
+    answer = planning(
+        native, "ReorderTasks", task_ids=order, task_id=order[0], lane="waiting", request_id=str(uuid.uuid4())
+    )
+    assert answer["lane_order"] == {"lane": "waiting", "task_ids": order}
+    assert {"lane": "waiting", "task_ids": order} in planning(native, "ReadPlan")["plan"]["lane_orders"]
+
+    waiter, gone = [
+        rpc(native, "CreateTask", {"task": {"title": title}, "request_id": str(uuid.uuid4())})
+        for title in ("Synthetic waiter of a deleted task", "Synthetic deleted prerequisite")
+    ]
+    planning(
+        native,
+        "SetTaskDependency",
+        task_id=waiter["id"],
+        prerequisite_id=gone["id"],
+        waits=True,
+        request_id=str(uuid.uuid4()),
+    )
+    rpc(native, "DeleteTask", {"name": gone["name"], "etag": gone["etag"], "request_id": str(uuid.uuid4())})
+    resolved = planning(native, "ResolveDependencies", task_ids=[gone["id"]], request_id=str(uuid.uuid4()))
+    assert resolved["dropped_task_ids"] == [waiter["id"]]
+
+    store = planning(native, "VerifyPlanStore")
+    assert store["task_row_count"] >= 4 and store["note_row_count"] >= 1
+    for problem in ("orphan_mark_count", "orphan_edge_count", "orphan_state_count", "limit_violation_count"):
+        assert store.get(problem, 0) == 0, problem
+
+
 def test_native_planning_missing_task_reports_source_error(native, ready_plan):
     assert planning(
         native,
@@ -616,16 +632,7 @@ def test_native_hundred_siblings_reorder_through_one_atomic_tasks_operation(nati
     parent = rpc(
         native, "CreateTask", {"task": {"title": "Synthetic hundred-step parent"}, "request_id": str(uuid.uuid4())}
     )
-    _wrangler(
-        "d1",
-        "execute",
-        "DB",
-        "--local",
-        "--persist-to",
-        str(native.persist_to),
-        "--config",
-        native.configs[1],
-        "--command",
+    native.tasks_d1(
         "WITH RECURSIVE sequence(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM sequence WHERE i<99)"
         " INSERT INTO tasks(id,title,parent_id,sort_order,created_at,updated_at)"
         " SELECT 'synthetic-reorder-'||i,'Synthetic reorder step',"

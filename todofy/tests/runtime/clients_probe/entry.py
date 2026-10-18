@@ -14,9 +14,7 @@ import js
 from pyodide.ffi import create_proxy
 from workers import Response, WorkerEntrypoint
 
-from todofy.core.todoist_request import build_task_request
-from todofy.runtime import gemini, todoist
-from todofy.runtime.config import var
+from todofy.runtime import gemini
 from todofy.runtime.interop import now_ms, read_capped, to_js
 
 
@@ -87,23 +85,6 @@ class Default(WorkerEntrypoint):
                     "prompt_tokens": result.prompt_tokens,
                     "attempts": result.attempts,
                 }
-            case "/todoist/create":
-                task = build_task_request(
-                    args["content"],
-                    args["description"],
-                    args["project_id"],
-                    args["request_id"],
-                    var(env, "TODOIST_API_KEY"),
-                )
-                created = await todoist.create_task(env, task, budget_ms=args["budget_ms"])
-                data = {
-                    "result": created.verdict.result,
-                    "code": created.verdict.code,
-                    "retry_after": created.verdict.retry_after,
-                    "task_id": created.task_id,
-                }
-            case "/todoist/find":
-                data = {"ids": await todoist.find_footer_tasks(env, args["event_id"])}
             case "/read-capped":
                 data = await read_from_stub(args["chunk"], args["chunks"], args["limit"])
             case _:

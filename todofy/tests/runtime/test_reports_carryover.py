@@ -1,5 +1,5 @@
 """The morning brief that remembers (docs/gtd-features.md §3) in real workerd: the recommendation also
-sees mail tasks of the last 14 days that the day's Todoist snapshot still lists as open, tagged
+sees mail tasks of the last 14 days that the day's Tasks snapshot still lists as open, tagged
 "[N 天前]" and spread over the days they arrived; without today's scheduled snapshot (never yesterday's
 list), after a failed attempt that day, or when the token budget cannot take the carried lines, the model
 input, prompt and payload are exactly the 24 h report; and the [Todofy System] reminder goes to its own
@@ -13,8 +13,6 @@ import jsonschema
 import pytest
 
 from tests.fakes.gemini_fake import text_reply
-from tests.fakes.server import Reply
-from tests.fakes.todoist_fake import PROJECT_ID, TASKS_PATH
 from tests.runtime.reports_support import (  # noqa: F401
     NEWSLETTER,
     NOW,
@@ -44,9 +42,7 @@ def snapshot(
         finished_at=finished_at,
     )
     for task_id in task_ids:
-        probe.insert(
-            "gtd_snapshot_tasks", day=day, task_id=task_id, project_id=PROJECT_ID, priority=1, content_hmac="0" * 64
-        )
+        probe.insert("gtd_snapshot_tasks", day=day, task_id=task_id, project_id="", priority=1, content_hmac="0" * 64)
 
 
 def summary(probe: Probe, event_id: str, created_at: int, text: str, task_id: str = "") -> None:
@@ -275,34 +271,36 @@ def attention(probe: Probe) -> None:
 
 def test_the_reminder_goes_to_the_ops_project_when_one_is_set(probe):
     attention(probe)
+    probe.project("ops-project")
     probe.call("/reminder/tick", now=NOW, vars={"TODOIST_OPS_PROJECT_ID": "ops-project"})
-    [create] = probe.todoist.creates()
-    assert create.json()["project_id"] == "ops-project"
+    [created] = probe.created()
+    assert created["project_id"] == "ops-project"
     assert probe.sql("SELECT project_id FROM mail_reminders") == [{"project_id": "ops-project"}]
 
 
 # The deploy uploads an unset optional project as a single space (the secret must be overwritten,
 # not kept), so a blank value must read as unset.
 @pytest.mark.parametrize("unset", [{}, {"TODOIST_OPS_PROJECT_ID": " "}])
-def test_without_an_ops_project_the_reminder_keeps_the_default_project(probe, unset):
+def test_without_an_ops_project_the_reminder_goes_to_the_inbox(probe, unset):
     attention(probe)
     probe.call("/reminder/tick", now=NOW, vars=unset)
-    [create] = probe.todoist.creates()
-    assert create.json()["project_id"] == PROJECT_ID
-    assert probe.sql("SELECT project_id FROM mail_reminders") == [{"project_id": PROJECT_ID}]
+    [created] = probe.created()
+    assert created["project_id"] == ""
+    assert probe.sql("SELECT project_id FROM mail_reminders") == [{"project_id": ""}]
 
 
 def test_a_retry_keeps_the_frozen_project_after_the_setting_changed(probe):
     attention(probe)
-    probe.todoist.queue("POST", TASKS_PATH, Reply(400, {"error": "no"}))
-    probe.call("/reminder/tick", now=NOW, vars={"TODOIST_OPS_PROJECT_ID": "ops-project"})
+    probe.call("/reminder/tick", now=NOW, vars={"TODOIST_OPS_PROJECT_ID": "ops-project"})  # Tasks has none yet
+    assert probe.created() == []
+    probe.project("ops-project")
+    probe.project("another-project")
     probe.call("/reminder/tick", now=NOW + HOUR, vars={"TODOIST_OPS_PROJECT_ID": "another-project"})
-    first, second = probe.todoist.creates()
-    assert first.body == second.body and first.headers["x-request-id"] == second.headers["x-request-id"]
-    assert second.json()["project_id"] == "ops-project"
+    [created] = probe.created()
+    assert created["project_id"] == "ops-project"
 
 
-def test_a_day_claimed_before_the_migration_retries_into_the_default_project(probe):
+def test_a_day_claimed_before_the_migration_retries_into_the_inbox(probe):
     attention(probe)
     probe.insert(
         "mail_reminders",
@@ -317,5 +315,5 @@ def test_a_day_claimed_before_the_migration_retries_into_the_default_project(pro
         updated_at=NOW - HOUR,
     )
     probe.call("/reminder/tick", now=NOW, vars={"TODOIST_OPS_PROJECT_ID": "ops-project"})
-    [create] = probe.todoist.creates()
-    assert create.json() == {"content": "t", "description": "b", "project_id": PROJECT_ID}
+    [created] = probe.created()
+    assert (created["title"], created["description"], created["project_id"]) == ("t", "b", "")

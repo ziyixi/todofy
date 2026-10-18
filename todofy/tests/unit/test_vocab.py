@@ -11,12 +11,12 @@ from todofy.core.vocab import (
     current_codes,
 )
 
+# The codes the v2 plan added that the Worker still writes (todoist_auth_blocked only the Todoist release did).
 V2_EVENT_CODES = {
     "llm_quota",
     "llm_budget_exhausted",
     "llm_request_rejected",
     "todoist_rejected",
-    "todoist_auth_blocked",
     "lookup_not_found",
     "lookup_failed",
     "processing_interrupted_limit",
@@ -37,11 +37,12 @@ def test_every_code_is_in_some_table():
     assert set(Code) == set(EVENT_ERROR_CODES) | set(REMINDER_ERROR_CODES)
 
 
-def test_legacy_codes_are_exactly_those_only_the_go_service_wrote():
+def test_legacy_codes_are_exactly_those_only_a_retired_writer_wrote():
     legacy = {code for table in (EVENT_ERROR_CODES, REMINDER_ERROR_CODES) for code, i in table.items() if i.legacy}
     assert legacy == {
         "invalid_saved_event", "llm_client_unavailable", "summary_render_failed", "todo_client_unavailable",
         "database_client_unavailable", "cache_write_failed", "checkpoint_failed", "empty_task_id",
+        "todoist_auth_blocked",  # the release that still wrote Todoist
     }  # fmt: skip
     assert V2_EVENT_CODES.issubset(current_codes(EVENT_ERROR_CODES))
     # Go codes the Worker still writes, so imported and new rows read the same.

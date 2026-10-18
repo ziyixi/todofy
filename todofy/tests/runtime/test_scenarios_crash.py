@@ -1,23 +1,27 @@
 """Eviction mid-call: workerd is killed while an upstream call hangs, then restarted on the same storage.
 
-The cron tick after each restart stands in for the persisted watchdog alarm, so no
-test depends on how quickly local workerd replays an overdue alarm.
+A Tasks call cannot be made to hang, so its interrupted rows are seeded as an evicted run leaves them
+(``todo_sending``, a reminder day ``sending``). The cron tick after each restart stands in for the
+persisted watchdog alarm, so no test depends on how quickly local workerd replays an overdue alarm.
 """
 
 import time
+from datetime import UTC, datetime
 
 import pytest
 
 from tests.fakes.gemini_fake import GeminiFake
 from tests.fakes.server import Reply
-from tests.fakes.todoist_fake import TASKS_PATH, TodoistFake
+from tests.runtime import tasks_support as tasks
 from tests.runtime.conftest import Launch
-from tests.runtime.harness import Worker, mail_event, settled_reminder, transitions, wait_until
+from tests.runtime.harness import Worker, mail_event, settled_reminder, sha256_hex, transitions, wait_until
+from tests.runtime.owner_support import event_row, seed
 from todofy.core.backoff import SUMMARY_CRASH_LIMIT
 from todofy.core.reminder_text import TITLE_PREFIX
+from todofy.core.render import FOOTER_PREFIX
 
 # Long upstream deadlines keep every call in flight until the process dies.
-SLOW = {"GEMINI_TIMEOUT_MS": "60000", "TODOIST_ATTEMPT_TIMEOUT_MS": "60000"}
+SLOW = {"GEMINI_TIMEOUT_MS": "60000"}
 
 
 @pytest.fixture(scope="module")
@@ -53,30 +57,60 @@ def test_three_interrupted_summaries_stop_automatic_retries(worker: Worker, fres
 
 
 @pytest.mark.reaches("interrupted_todo_call")
-def test_an_interrupted_task_call_is_unknown_and_resolved_by_the_lookup(
-    worker: Worker, fresh_todoist: TodoistFake
-) -> None:
-    # Todoist commits the task but the answer never arrives before the isolate dies.
-    fresh_todoist.queue("POST", TASKS_PATH, Reply(hang=True, applied=True))
+def test_an_interrupted_task_call_is_unknown_and_resolved_by_the_lookup(worker: Worker) -> None:
+    """A row summarised before Mail stopped creating tasks was in its create when the isolate died, after Tasks
+    committed the task: the next run calls it unknown, and the footer lookup finds the task."""
     event_id, body = mail_event()
-    assert worker.post_event(body).status_code == 204
-    fresh_todoist.wait_for(lambda: fresh_todoist.creates_for(event_id), timeout_s=30)
+    now = int(time.time())
+    frozen = f"Frozen task body\n\n{FOOTER_PREFIX}{event_id}"
+    seed(
+        worker,
+        "mail_events",
+        [
+            event_row(
+                event_id,
+                "todo_sending",
+                now - 60,
+                payload=body.decode(),
+                payload_hash=sha256_hex(body),
+                summary="Frozen summary",
+                summary_model="older-model",
+                todo_body=frozen,
+                todoist_request_id="todofy-0123456789abcdef0123456789",
+            )
+        ],
+    )
+    [task_id] = tasks.seed(worker, {"title": "Frozen mail task", "description": frozen}, now=now)
 
     _restart_and_wake(worker)
 
     event = worker.wait_event(event_id, {"complete"})
     assert ("todo_sending", "todo_unknown", "interrupted_todo_call", "worker") in transitions(event)
-    [task] = fresh_todoist.tasks
-    assert event["task_id"] == task.id and len(fresh_todoist.creates_for(event_id)) == 1
+    assert event["task_id"] == task_id
+    assert [task["id"] for task in tasks.created(worker) if event_id in task["description"]] == [task_id]
 
 
 @pytest.mark.reaches("interrupted_reminder_call")
-def test_an_interrupted_reminder_is_unknown_and_not_resent_that_day(launch: Launch, fresh_todoist: TodoistFake) -> None:
+def test_an_interrupted_reminder_is_unknown_and_not_resent_that_day(launch: Launch) -> None:
     worker = launch(REMINDER_ENABLED="true", **SLOW)
-    fresh_todoist.queue("POST", TASKS_PATH, Reply(hang=True))
+    now = int(time.time())
+    seed(
+        worker,
+        "mail_reminders",
+        [
+            {
+                "day": datetime.now(UTC).date().isoformat(),
+                "state": "sending",
+                "subject": TITLE_PREFIX + " synthetic",
+                "body": "b",
+                "attention_count": 1,
+                "created_at": now - 60,
+                "updated_at": now - 60,
+            }
+        ],
+    )
     event_id, body = mail_event(needs_review=True)
     assert worker.post_event(body).status_code == 204
-    fresh_todoist.wait_for(lambda: fresh_todoist.creates(), timeout_s=30)
 
     _restart_and_wake(worker)
 
@@ -89,4 +123,4 @@ def test_an_interrupted_reminder_is_unknown_and_not_resent_that_day(launch: Laun
     )
     assert worker.trigger_cron().status_code == 200
     time.sleep(3)
-    assert [p.json()["content"].startswith(TITLE_PREFIX) for p in fresh_todoist.creates()] == [True]
+    assert tasks.created(worker) == []
