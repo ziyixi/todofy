@@ -100,7 +100,7 @@ export async function startHarness(
           name: `tasks-${access}`,
           modules: true,
           compatibilityDate: '2026-09-08',
-          script: `export default {async fetch(request,env){if(new URL(request.url).pathname==='/rpc'){const data=await request.json();return Response.json(await env.TASKS.call(data.method,data.body));}return env.TASKS.fetch(request);}}`,
+          script: `export default {async fetch(request,env){const path=new URL(request.url).pathname;if(path==='/rpc'){const data=await request.json();return Response.json(await env.TASKS.call(data.method,data.body));}if(path==='/backup')return Response.json(await env.TASKS.exportBackup(await request.text()));return env.TASKS.fetch(request);}}`,
           serviceBindings: { TASKS: { name: 'tasks', entrypoint: 'TasksApi', props: { access } } },
         })),
       ],
@@ -109,10 +109,17 @@ export async function startHarness(
   const url = await mf.ready;
   const db = await mf.getD1Database('DB', 'tasks');
   const migrations = resolve(ROOT, '../migrations');
+  // wrangler's own record of the applied migrations, which the backup plan reads.
+  await db
+    .prepare(
+      'CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)',
+    )
+    .run();
   for (const file of (await readdir(migrations)).filter((f) => f.endsWith('.sql')).sort()) {
     const sql = (await readFile(join(migrations, file), 'utf8')).replace(/--[^\n]*/g, '');
     for (const statement of sql.split(/;\s*(?=(?:ALTER|CREATE|DROP|PRAGMA)\b)/i))
       if (statement.trim()) await db.prepare(statement).run();
+    await db.prepare('INSERT INTO d1_migrations(name) VALUES(?)').bind(file).run();
   }
   const fetch = (path: string, init?: RequestInit) =>
     mf.dispatchFetch(new URL(path, url).href, {

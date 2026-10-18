@@ -1,6 +1,7 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { Code, RpcError } from '@ziyixi/proto/rpc-status';
 import type { Env } from './env.ts';
+import { backupCall } from './backup.ts';
 import { api, ownerRequest, serviceRequest } from './http.ts';
 import { serviceCall } from './service.ts';
 
@@ -22,6 +23,15 @@ export class TasksApi extends WorkerEntrypoint<Env, AccessProps> {
       return { status: response.status, body: await response.text() };
     }
     return serviceCall(method, body, this.env);
+  }
+
+  /** Machine-only: the weekly backup's export (backup.ts), for read-write bindings. It has no HTTP route. */
+  async exportBackup(body: string): Promise<{ status: number; body: string }> {
+    if (this.ctx.props.access !== 'read-write') {
+      const response = this.forbidden();
+      return { status: response.status, body: await response.text() };
+    }
+    return backupCall(body, this.env);
   }
 
   private forbidden(): Response {
