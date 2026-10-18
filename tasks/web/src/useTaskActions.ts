@@ -12,6 +12,7 @@ import { scheduledDate, scheduledTime } from "./task-schedule";
 import { clearTaskStartAhead, taskScheduleFromText } from "./task-date-actions";
 import { todayDate } from "./dates";
 import { settleCompletedTask } from "./task-completion-focus";
+import { taskDropOrder } from "./task-order";
 import type { useTaskView } from "./useTaskView";
 
 export function useTaskActions(
@@ -292,16 +293,12 @@ export function useTaskActions(
     }
     const siblings = peers.filter(
       (item) =>
-        item.id !== id &&
         item.parentId === before.parentId &&
         item.sectionId === before.sectionId &&
         item.projectId === before.projectId,
     );
-    const index = siblings.findIndex((item) => item.id === before.id);
-    const previous = siblings[index - 1];
-    const sortOrder = previous
-      ? ((previous.sortOrder ?? 0) + (before.sortOrder ?? 0)) / 2
-      : (before.sortOrder ?? 0) - 1;
+    const sortOrder = taskDropOrder(siblings, id, before.id);
+    if (sortOrder === undefined) return;
     setBusyIds(new Set([id]));
     try {
       await api.updateTask({

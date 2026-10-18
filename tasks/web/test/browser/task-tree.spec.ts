@@ -130,11 +130,9 @@ test("subtasks start folded and load only on expansion, with nested steps, editi
   await expect(
     list.getByText("Synthetic tree edited child", { exact: true }),
   ).toBeVisible();
-  const editedRow = list
-    .locator(".task-row")
-    .filter({
-      has: page.getByText("Synthetic tree edited child", { exact: true }),
-    });
+  const editedRow = list.locator(".task-row").filter({
+    has: page.getByText("Synthetic tree edited child", { exact: true }),
+  });
   const stepRow = list
     .locator(".task-row")
     .filter({ has: page.getByText(step.title, { exact: true }) });
@@ -296,4 +294,121 @@ test("expanded children use bounded pages and participate in selected-task actio
   await expect(
     list.getByText("Synthetic paged child 102", { exact: true }),
   ).toHaveCount(0);
+});
+
+test("task details reorder both subtasks and steps by dragging and keep the saved order after reopening", async ({
+  page,
+  request,
+}) => {
+  const create = await creator(request);
+  const parent = await create({
+    title: `Synthetic editor order ${crypto.randomUUID()}`,
+  });
+  const subtaskA = await create({
+    title: "Synthetic first outcome",
+    parent_id: parent.id,
+    sort_order: 1,
+  });
+  const subtaskB = await create({
+    title: "Synthetic second outcome",
+    parent_id: parent.id,
+    sort_order: 2,
+  });
+  const stepA = await create({
+    title: "Synthetic first step",
+    kind: "step",
+    parent_id: parent.id,
+    duration_minutes: 30,
+    sort_order: 3,
+  });
+  const stepB = await create({
+    title: "Synthetic second step",
+    kind: "step",
+    parent_id: parent.id,
+    duration_minutes: 45,
+    sort_order: 4,
+  });
+  await planning(page);
+  await page.goto("/#/inbox");
+  await page
+    .getByRole("combobox", { name: "Sort tasks", exact: true })
+    .selectOption({ label: "Name" });
+  await page.getByText(parent.title, { exact: true }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Task details",
+    exact: true,
+  });
+  const subtasks = dialog.getByRole("region", {
+    name: "Subtasks",
+    exact: true,
+  });
+  const steps = dialog.getByRole("region", { name: "Steps", exact: true });
+  await expect(
+    subtasks.getByRole("button", {
+      name: `Drag ${subtaskB.title}`,
+      exact: true,
+    }),
+  ).toBeVisible();
+  const beforeSubtask = page.waitForResponse(
+    (r) =>
+      r.request().method() === "PATCH" &&
+      r.url().includes(`/tasks/${subtaskB.id}`),
+  );
+  await subtasks
+    .getByRole("button", { name: `Drag ${subtaskB.title}`, exact: true })
+    .dragTo(
+      subtasks.locator(".task-child-row").filter({
+        has: page.getByRole("button", {
+          name: subtaskA.title,
+          exact: true,
+        }),
+      }),
+      { targetPosition: { x: 80, y: 3 } },
+    );
+  expect((await beforeSubtask).status()).toBe(200);
+  await expect(subtasks.locator(".task-child-title")).toHaveText([
+    subtaskB.title,
+    subtaskA.title,
+  ]);
+  const stepTarget = steps.locator(".task-child-row").filter({
+    has: page.getByRole("button", { name: stepB.title, exact: true }),
+  });
+  const stepBox = await stepTarget.boundingBox();
+  const afterStep = page.waitForResponse(
+    (r) =>
+      r.request().method() === "PATCH" &&
+      r.url().includes(`/tasks/${stepA.id}`),
+  );
+  await steps
+    .getByRole("button", { name: `Drag ${stepA.title}`, exact: true })
+    .dragTo(stepTarget, { targetPosition: { x: 80, y: stepBox!.height - 3 } });
+  expect((await afterStep).status()).toBe(200);
+  await expect(steps.locator(".task-child-title")).toHaveText([
+    stepB.title,
+    stepA.title,
+  ]);
+  await page.reload();
+  await page.getByText(parent.title, { exact: true }).click();
+  await expect(subtasks.locator(".task-child-title")).toHaveText([
+    subtaskB.title,
+    subtaskA.title,
+  ]);
+  await expect(steps.locator(".task-child-title")).toHaveText([
+    stepB.title,
+    stepA.title,
+  ]);
+  for (const [child, kind, duration] of [
+    [subtaskA, "task", 0],
+    [subtaskB, "task", 0],
+    [stepA, "step", 30],
+    [stepB, "step", 45],
+  ] as const) {
+    const saved = await (
+      await request.get(`/api/tasks/v1/tasks/${child.id}`)
+    ).json();
+    expect(saved.parent_id).toBe(parent.id);
+    expect(saved.kind).toBe(kind);
+    expect(saved.duration_minutes || 0).toBe(duration);
+    expect(saved.completed || false).toBe(false);
+  }
 });

@@ -14,6 +14,7 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 - Desktop Inbox, Today, Upcoming, search, nested projects, sections, labels and saved filters.
 - Task editing, separate Subtask and Step lists, priority, dates, deadlines, structured repeat and completion history.
 - Collapsed inline subtasks in main lists; expand to edit, complete or reorder children without opening their parent.
+- Drag Subtasks or Steps within their own list in the parent editor; the order is saved on drop.
 - Visible planning stage, context, task options, start-ahead window and Deep/Shallow effort in task details.
 - Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.
 - Installable desktop PWA; an explicit offline page, with task data available online.

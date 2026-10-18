@@ -4,12 +4,14 @@ import {
   Check,
   Circle,
   Flag,
+  GripVertical,
   Plus,
   Repeat2,
   Trash2,
 } from "lucide-react";
 import { api, describeError, type Task } from "../api";
 import { dateLabel, todayDate } from "../dates";
+import { taskDropOrder } from "../task-order";
 import "./task-children.css";
 
 export function TaskChildren({
@@ -42,6 +44,11 @@ export function TaskChildren({
   const [minutes, setMinutes] = useState(30);
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [deleting, setDeleting] = useState("");
+  const [draggedId, setDraggedId] = useState("");
+  const [dropTarget, setDropTarget] = useState<{
+    id: string;
+    after: boolean;
+  }>();
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -144,6 +151,37 @@ export function TaskChildren({
       onBusy(false);
     }
   }
+  async function reorder(target: Task, after: boolean) {
+    const moving = children.find((child) => child.id === draggedId);
+    setDraggedId("");
+    setDropTarget(undefined);
+    if (busy || loading || !moving || moving.kind !== target.kind) return;
+    const sortOrder = taskDropOrder(children, moving.id, target.id, after);
+    if (sortOrder === undefined || sortOrder === moving.sortOrder) return;
+    onBusy(true);
+    onError("");
+    try {
+      const saved = await api.updateTask({
+        requestId: crypto.randomUUID(),
+        etag: moving.etag,
+        task: { name: moving.name, sortOrder },
+        updateMask: { paths: ["sort_order"] },
+      });
+      setChildren((current) =>
+        current
+          .map((child) => (child.id === saved.id ? saved : child))
+          .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
+      );
+      onChanged();
+    } catch (reason) {
+      onError(describeError(reason));
+    } finally {
+      onBusy(false);
+    }
+  }
+  const dropPosition = dropTarget?.after
+    ? "child-drop-after"
+    : "child-drop-before";
   return (
     <section className="task-children" aria-label="Subtasks and steps">
       {loading && (
@@ -178,9 +216,61 @@ export function TaskChildren({
             )}
             {rows.map((child) => (
               <div
-                className={`task-child-row ${child.completed ? "is-completed" : ""}`}
+                className={`task-child-row ${child.completed ? "is-completed" : ""} ${dropTarget?.id === child.id ? dropPosition : ""}`}
                 key={child.id}
+                onDragOver={(event) => {
+                  const moving = children.find((item) => item.id === draggedId);
+                  if (
+                    busy ||
+                    !moving ||
+                    moving.id === child.id ||
+                    moving.kind !== child.kind
+                  )
+                    return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  setDropTarget({
+                    id: child.id,
+                    after: event.clientY > bounds.top + bounds.height / 2,
+                  });
+                }}
+                onDragLeave={(event) => {
+                  if (
+                    !event.currentTarget.contains(
+                      event.relatedTarget as Node | null,
+                    )
+                  )
+                    setDropTarget(undefined);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  void reorder(
+                    child,
+                    event.clientY > bounds.top + bounds.height / 2,
+                  );
+                }}
               >
+                <button
+                  type="button"
+                  className="child-drag"
+                  draggable={!busy && !loading}
+                  disabled={busy || loading}
+                  aria-label={`Drag ${child.title}`}
+                  title="Drag to reorder"
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", child.id);
+                    setDraggedId(child.id);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedId("");
+                    setDropTarget(undefined);
+                  }}
+                >
+                  <GripVertical size={14} />
+                </button>
                 <button
                   type="button"
                   className={`complete-button priority-${child.priority}`}

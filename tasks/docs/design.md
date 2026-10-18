@@ -35,6 +35,10 @@ pages; the same row actions work for children. Today/search children already pre
 are not duplicated. Completed visibility follows the current view. Child refreshes retain the rendered
 rows until their replacement arrives; collapsed branches make no background reads.
 
+The parent editor also saves Subtask and Step ordering on drag/drop within each group. The drop line
+supports insertion before or after another child and changes only `sort_order`. It uses custom child
+order independently of the main view's sort selection; dragging cannot convert a Subtask into a Step.
+
 Title, description and visible planning options stay in the main editor. Project, Date, Deadline, Start ahead,
 priority, labels and Effort occupy the narrow property rail. Start ahead accepts days or weeks before the
 Deadline and feeds Plan Review's Start now lane; it does not schedule a notification. `effort` is empty, `deep`

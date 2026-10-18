@@ -17,11 +17,14 @@ was recovered with the documented owner-run k3s restart. All three running Pod U
 were unchanged; the failed-job rerun passed. Fleet now reports a ready runtime and a clean reconcile plan.
 The separate Mail Hero stale-backup alert was traced to an expired native snapshot lease. The existing
 native retry verified 1,903 files / 66,221,731 bytes at 22:33:49 UTC and released its pause. No backup
-contents were read locally. Home's next due status refresh still needs checking before closure.
+contents were read locally. After the next due owner refresh, every Home app is normal and its attention
+list is empty; no alert was dismissed.
 The owner-approved legacy email project is archived through the owner UI. Its 192 incomplete and 2,115
 completed tasks remain intact; no filter or task was deleted. The original Todoist account was not changed.
 Inline child lists start collapsed, read bounded pages only when opened and reuse normal task actions.
 Schedule and priority icons now use the installed Base UI tooltip on hover/focus in both task menus.
+The owner also reported missing drag support in parent details. Both Subtasks and Steps now expose
+handles and before/after drop feedback, persisting only sibling sort order. Their kinds remain unchanged.
 Local lint/type/build, 55 unit checks and 55 Chromium/local-D1 journeys pass. Chrome preview, branch gate,
 same-SHA release and production read-only expansion checks remain before closure. No schema, API,
 dependency, new cache or background polling was added. See [acceptance](tasks/docs/inline-subtasks-verification.md).

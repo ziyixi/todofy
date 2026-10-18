@@ -12,6 +12,11 @@ The browser preserves rendered children during a refresh and ignores replies for
 branch. Opening a different view or reloading starts collapsed again. The Worker, schema and proto are
 unchanged. There is no new persistent cache, polling or dependency.
 
+The parent editor's Subtasks and Steps each support dragging within their own group. A visible line
+shows whether the item will move before or after its target; one existing task update saves the order
+on drop. Task kind, parent and all other fields stay intact. Main lists and the editor share the same
+small numeric-order calculation; the editor does not depend on the main view's current sort selection.
+
 Project Edit also waits for catalog metadata: an early click previously opened the Add project form
 because the selected project was still undefined. A browser regression reproduces that exact race.
 
@@ -22,10 +27,21 @@ against real local D1 passed, including folded first load, nested children and S
 dragging, completion/reopening, adding the first child, Today de-duplication, bounded pagination and
 selected-child actions. Existing cached-dialog and popup layout regressions also passed.
 
+The added detail-drag regression performs an upward Subtask move and a downward Step move while the
+main list uses Name order. It reloads/reopens the editor and verifies persisted ordering, unchanged
+parent/kind/estimate/completion fields through real D1 reads. Existing main-list dragging and warm/narrow
+dialog checks passed too. The final combined source is awaiting the branch's complete gate.
+
 Real owner Chrome also verified collapsed first load and nested expansion in the ephemeral preview.
 Only synthetic tasks appear in this screenshot. Release checks are pending.
 
 ![Expanded subtasks and a Step in the synthetic Chrome preview](images/inline-subtasks.png)
+
+![Subtasks and Steps in the synthetic parent editor](images/child-order-details.png)
+
+Owner Chrome confirmed the editor layout and draggable handles. The computer-use drag driver did not
+produce a drop, including in the unchanged main-list control, so that gesture is excluded as a success
+claim. Actual drag/drop and persisted order are covered by the Chromium/local-D1 regression above.
 
 The right-click and More menus use the installed Base UI tooltip for each schedule/priority icon,
 with the same visible names as their existing accessible labels. The browser check hovers all nine
@@ -55,5 +71,7 @@ Mail Hero's separate stale-backup alert came from `native_backup_lease_expired`.
 existing native R2 snapshot runner created snapshot `65cc4689-64b4-4d0e-9019-dd5ed88813c9`, fully verified
 at 2026-10-18 22:33:49.013 UTC: 1,903 files and 66,221,731 bytes, `native_readback_verified`.
 The copy and validation finished in about 28 minutes and the existing pause was released. No backup
-contents were downloaded or printed. Home's next due status refresh remains to be verified.
+contents were downloaded or printed. After the next due owner refresh, Home reports every app normal
+and no attention items. Its stale-backup warning recovered from the actual successful timestamp; no
+alert was dismissed.
 This incident does not establish a permanent fix for host address changes or future snapshot timeouts.
