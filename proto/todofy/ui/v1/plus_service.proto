@@ -155,49 +155,49 @@ service PlusService {
   }
 }
 
-// One known planning label, discovered from the owner's Todoist account.
+// A planning role bound to a label. Plan.labels is always empty: planning roles are facts in Todofy's
+// planning store, never task labels.
 message LabelMapping {
-  // Logical role: office, home, quarter, committed, focus, candiate or lead_*; bets only while a setup
-  // confirmed before the Bets became text still carries that binding, which is kept as saved.
+  // Logical role: office, home, quarter, committed, focus, candiate or lead_*.
   string role = 1;
-  // Exact Todoist label ID.
+  // The label's ID.
   string id = 2;
-  // Current Todoist label name.
+  // The label's current name.
   string label = 3;
 }
-// One current Todoist label available for an explicit column binding.
+// One of the owner's labels in Tasks, which a mail category can use.
 message AvailableLabel {
-  // Exact Todoist label ID.
+  // The Tasks label ID.
   string id = 1;
   // Exact current name; identity selection uses id.
   string label = 2;
 }
 // Account-local planning settings.
 message Plan {
-  // IANA timezone supplied by Todoist.
+  // The account's IANA time zone, from the Tasks catalog.
   // (-- api-linter: core::0143::standardized-codes=disabled
-  //     aip.dev/not-precedent: matches Todoist's timezone property and existing app naming. --)
+  //     aip.dev/not-precedent: the published field name, kept for existing clients. --)
   string timezone = 1;
   // Monday's account-local calendar date, YYYY-MM-DD.
   string week_start = 2;
-  // Whether the owner confirmed this mapping and enabled planning writes/reset.
+  // Whether the planning store is initialized, which enables planning writes and the weekly reset.
   bool enabled = 3;
-  // Discovered known labels. Missing roles are listed separately.
+  // Always empty: planning roles are not labels.
   repeated LabelMapping labels = 4;
-  // Exact filter IDs whose UI is replaced; unrelated favorites remain visible.
+  // Always empty: Tasks hides no filter for planning.
   repeated string hidden_filter_ids = 5;
-  // Label roles that must be created in Todoist before confirmation.
+  // Always empty: no label needs to be created.
   repeated string missing_labels = 6;
-  // Fingerprint of the discovered label IDs/names and timezone.
+  // Fingerprint of the planning mode and the time zone.
   string etag = 7;
   // Account-local YYYY-MM-DD for deadline calculations.
   string today = 8;
-  // Configured owner FlowDay URL for local tasks that have no native Todoist page.
+  // An owner FlowDay link for a Focus item that is not a Tasks task; Todofy sends none.
   string flowday_url = 9;
-  // At most 500 current labels. No credential or other account metadata.
+  // The owner's labels in Tasks, at most 500. No credential or other account metadata.
   repeated AvailableLabel available_labels = 10;
-  // Todoist project that receives Todofy's mail tasks, for the weekly review's inbox line.
-  // Empty when none is configured.
+  // The Tasks project of Todofy's mail tasks (TODOIST_DEFAULT_PROJECT_ID), for the weekly review's inbox
+  // line. Empty when none is configured.
   string inbox_project_id = 11;
   // Newest weekly review task Todofy created, for this or the previous ISO week; empty when
   // there is none. It may already be completed: only the active task list says it is open.
@@ -213,7 +213,7 @@ message Plan {
   // The Review lanes the owner arranged (ReorderTasks), each with its tasks first to last, at
   // most 100 each. A lane never arranged is absent. Left out of the BASIC view.
   repeated LaneOrder lane_orders = 16;
-  // Native Tasks stores planning facts independently of ordinary task labels.
+  // Always true: planning facts are kept apart from ordinary task labels.
   bool native_planning = 17;
   // Native Mail entries still awaiting a decision; present in the full planning view.
   optional int32 mailbox_pending_count = 18;
@@ -222,11 +222,11 @@ message Plan {
 message LaneOrder {
   // start, waiting, parked, quarterly, monthly, weekly or committed.
   string lane = 1;
-  // Todoist task IDs, at most 100; the extension skips one that is no longer in the lane.
+  // Tasks task IDs, at most 100; Plan skips one that is no longer in the lane.
   repeated string task_ids = 2;
 }
-// One task waits for another: task_id should not start before prerequisite_id is done. IDs are in the ID space
-// of the service that answers (PlusService: Todoist task IDs); Todofy stores the link by its own task IDs.
+// One task waits for another: task_id should not start before prerequisite_id is done. IDs are Tasks task IDs;
+// Todofy stores the link by its own task identities (plan_tasks).
 message TaskDependency {
   // The task that waits.
   string task_id = 1;
@@ -254,66 +254,64 @@ message WeeklyBet {
   // When the text was last saved.
   google.protobuf.Timestamp update_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
-// An active Todoist task with derived planning fields. No description is fetched for display.
+// An active task in Tasks with its planning fields from Todofy's planning store. No description.
 message PlanningTask {
-  // Todoist task ID; never a title match or temporary browser ID.
+  // The Tasks task ID; never a title match or temporary browser ID.
   string id = 1;
-  // Unmodified task title. Display-only marker cleanup belongs in the extension.
+  // Unmodified task title.
   string title = 2;
   // Empty for a root task.
   string parent_id = 3;
-  // Todoist project ID.
+  // The Tasks project ID; the Inbox's ID for a task in the Inbox.
   string project_id = 4;
-  // Existing labels, including labels the extension does not manage.
+  // The task's ordinary labels, by name; planning facts are never labels.
   repeated string labels = 5;
   // none, quarterly, monthly, weekly or committed. Explicit stages beat date fallback.
   string stage = 6;
   // work, personal or unassigned (including ambiguous office+home).
   string area = 7;
-  // Deprecated: the weekly Bets are WeeklyBet text now. Whether the task carries the retired
-  // Bets label, while a setup confirmed before then still binds it.
+  // Deprecated: the weekly Bets are WeeklyBet text now. Always false.
   bool bet = 8 [deprecated = true];
   // True deadline calendar date; empty when absent.
   string deadline = 9;
   // Scheduled date or date-time; independent of deadline.
   string due = 10;
-  // Native Tasks: 0 to 365 days before the deadline; zero when absent.
+  // Start-ahead days before the deadline, 0 to 365; zero when absent.
   int32 lead_days = 11;
   // Absent means unknown, not zero minutes.
   optional int32 estimated_minutes = 12;
   // Fingerprint checked before task mutations.
   string etag = 13;
-  // The existing Must Start filter's deadline/lead and exclusion semantics.
+  // The deadline has passed, or is within lead_days while the task is not waiting; never for an active or
+  // parked task.
   bool must_start = 14;
   // A true deadline has no lead and is neither active nor parked.
   bool missing_lead = 15;
-  // Todoist's API priority, 1 to 4: 4 is P1 (MailCategory.priority is the domain order).
+  // API priority, 1 to 4: 4 is P1, that is 5 minus the Tasks priority (MailCategory.priority is the domain
+  // order).
   int32 priority = 16;
-  // Todoist's last change to the task, in whole seconds; absent when Todoist does not say.
+  // The task's last change in Tasks, in whole seconds; absent when unknown.
   // Any edit resets it, so it means untouched since, not waiting since.
   google.protobuf.Timestamp update_time = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether the scheduled date repeats (Todoist's due.is_recurring): completing it advances the date and keeps
-  // the task and its ID.
+  // Whether the task repeats: completing it advances the date and keeps the task and its ID.
   bool recurring = 18;
-  // Todoist's completion counter, which counts every completed recurrence and goes down when one is undone;
-  // absent when Todoist does not say.
+  // Tasks' count of completed occurrences, every completed recurrence included.
   optional int32 completed_count = 19;
-  // Todoist's legacy position among the tasks with the same project, section and parent. Absent when
-  // Todoist does not say. Not part of etag.
+  // sort_order when it is a whole number in int32 range; absent when it is fractional. Not part of etag.
   optional int32 child_order = 20;
-  // Todoist's fractional order key among the same siblings, compared bytewise; absent for a task
-  // Todoist has not migrated. Not part of etag.
+  // Never set by Tasks: it was Todoist's fractional order key. Not part of etag.
   optional string order_key = 21;
-  // Native Tasks position, including fractional midpoint ordering; absent for Todoist.
+  // The Tasks position among the tasks with the same project, section and parent, fractional midpoints
+  // included.
   optional double sort_order = 22;
-  // Explicit saved stage for native Tasks, before the scheduled-date fallback.
+  // The stage saved in the planning store, before the scheduled-date fallback.
   optional string explicit_stage = 23;
-  // Native planning flags: quick, waiting, parked, active, onhold, routine or task.
-  // These are planning facts, not task labels. Absent for the retired Todoist adapter.
+  // Planning flags: quick, waiting, parked, active, onhold, routine or task.
+  // These are planning facts, not task labels.
   repeated string planning_flags = 24;
-  // Native Tasks kind: task or step. Empty for the retired Todoist adapter.
+  // The Tasks kind: task or step.
   string kind = 25;
-  // Native Tasks effort: deep, shallow or empty.
+  // The Tasks effort: deep, shallow or empty.
   string effort = 26;
 }
 // Reads the singleton plan.
@@ -346,7 +344,7 @@ message ListPlanningTasksResponse {
 }
 // A deliberate planning change. Omitted optional fields remain unchanged.
 message SetTaskPlanRequest {
-  // Task ID from the configured source.
+  // The Tasks task ID.
   string task_id = 1 [(google.api.field_behavior) = REQUIRED];
   // Fingerprint of the task shown to the user.
   string etag = 2 [(google.api.field_behavior) = REQUIRED];
@@ -362,23 +360,21 @@ message SetTaskPlanRequest {
   // Deprecated: the weekly Bets are text (SetWeeklyBet). A request that sets it is refused
   // (BAD_REQUEST) and writes nothing.
   optional bool bet = 6 [deprecated = true];
-  // Native planning's in-progress flag. The retired Todoist adapter changes the existing
-  // literal `active` label and refuses to add it if that label is missing.
+  // The in-progress flag.
   optional bool active = 7;
-  // Native planning's set-aside flag. The retired Todoist adapter adds the existing `parked`
-  // label and removes its other planning labels; false removes `parked`.
+  // The set-aside flag; setting it also clears the stage and the in-progress flag.
   optional bool parked = 8;
-  // Native Tasks: a short, independent action shown in the Quick row.
+  // A short, independent action shown in the Quick row.
   optional bool quick = 9;
-  // Native Tasks: waiting for something outside this task's dependencies.
+  // Waiting for something outside this task's dependencies.
   optional bool waiting = 10;
-  // Native Tasks: routine work, excluded from automatic date candidates.
+  // Routine work, excluded from automatic date candidates.
   optional bool routine = 11;
-  // Native Tasks: hold this task outside automatic date candidates.
+  // Hold this task outside automatic date candidates.
   optional bool on_hold = 12;
-  // Deprecated for native Tasks: blocked state comes from unresolved dependencies.
+  // True is refused (BAD_REQUEST): blocked state comes from unresolved dependencies.
   optional bool blocked = 13;
-  // Native Tasks: an ordinary task that can also be scheduled as a step.
+  // An ordinary task that can also be scheduled as a step.
   optional bool single_action = 14;
 }
 // The task after a successful planning change.
@@ -395,7 +391,7 @@ message TaskStep {
 }
 // Creates only explicitly submitted child tasks, with at most 20 per action.
 message AppendTaskStepsRequest {
-  // Existing parent task from the configured source.
+  // An existing Tasks task.
   string parent_id = 1 [(google.api.field_behavior) = REQUIRED];
   // Stable action UUID.
   string request_id = 2 [
@@ -405,14 +401,14 @@ message AppendTaskStepsRequest {
   // In entered order.
   repeated TaskStep steps = 3 [(google.api.field_behavior) = REQUIRED];
 }
-// IDs returned by the task source for this action, in entered order.
+// The Tasks IDs of the created steps, in entered order.
 message AppendTaskStepsResponse {
   // Created child IDs in entered order.
   repeated string task_ids = 1;
 }
 // Sets lead and deadline together; an empty deadline explicitly clears it.
 message SetTaskLeadRequest {
-  // Existing task from the configured source.
+  // An existing Tasks task.
   string task_id = 1 [(google.api.field_behavior) = REQUIRED];
   // Fingerprint of the task shown to the user.
   string etag = 2 [(google.api.field_behavior) = REQUIRED];
@@ -423,7 +419,7 @@ message SetTaskLeadRequest {
   ];
   // True calendar deadline YYYY-MM-DD, or empty to clear.
   string deadline = 4 [(google.api.field_behavior) = OPTIONAL];
-  // Native Tasks: 0 clears; any integer from 1 to 365 days. Legacy Todoist accepts its saved presets.
+  // 0 clears; any integer from 1 to 365 days.
   int32 lead_days = 5 [(google.api.field_behavior) = OPTIONAL];
 }
 // Updated deadline and planning values.
@@ -431,7 +427,7 @@ message SetTaskLeadResponse {
   // Current task values.
   PlanningTask task = 1;
 }
-// Completes one task using the configured source's recurrence behavior.
+// Completes one task in Tasks, with Tasks' recurrence behaviour.
 message CompleteTaskRequest {
   // Task ID, never a parent automatically chosen by the server.
   string task_id = 1 [(google.api.field_behavior) = REQUIRED];
@@ -440,18 +436,18 @@ message CompleteTaskRequest {
     (google.api.field_behavior) = OPTIONAL,
     (google.api.field_info).format = UUID4
   ];
-  // Focus day to settle after the task source confirms completion; empty outside Focus.
+  // Focus day to settle after Tasks confirms completion; empty outside Focus.
   // (-- api-linter: core::0142::time-field-type=disabled
   //     aip.dev/not-precedent: account-local calendar day, not an instant; same field as FlowDay. --)
   string flow_date = 3 [(google.api.field_behavior) = OPTIONAL];
-  // Native Tasks only: replay the generic completion's exact etag and request_id before settling Focus.
+  // Replay the generic completion's exact etag and request_id before settling Focus.
   string task_etag = 4 [(google.api.field_behavior) = OPTIONAL];
-  // Native Tasks only: the completed task or a completed descendant whose active timer must settle.
+  // The completed task or a completed descendant whose active timer must settle.
   string flow_task_id = 5 [(google.api.field_behavior) = OPTIONAL];
 }
-// Acknowledges the confirmed task-source command.
+// Acknowledges the completion Tasks confirmed.
 message CompleteTaskResponse {
-  // The task whose close command succeeded.
+  // The completed task.
   string task_id = 1;
 }
 // Adds or removes one dependency between two active tasks.
@@ -459,7 +455,7 @@ message SetTaskDependencyRequest {
   // The task that waits.
   string task_id = 1 [(google.api.field_behavior) = REQUIRED];
   // The task it waits for: another active task, not one that already waits for task_id, directly or through
-  // others, by dependencies that are not done. A recurring prerequisite needs Todoist's completed_count.
+  // others, by dependencies that are not done. A recurring prerequisite needs its completed_count from Tasks.
   string prerequisite_id = 2 [(google.api.field_behavior) = REQUIRED];
   // True adds the dependency, false (the default) removes it. A task waits for at most 5 tasks that are not
   // done, and there are at most 300 dependencies in all; at either limit, the task's oldest done dependency
@@ -483,7 +479,7 @@ message ResolveDependenciesRequest {
     (google.api.field_behavior) = OPTIONAL,
     (google.api.field_info).format = UUID4
   ];
-  // At most 20 Todoist task IDs.
+  // At most 20 Tasks task IDs.
   repeated string task_ids = 2 [(google.api.field_behavior) = REQUIRED];
 }
 // Every dependency after settling, and the tasks that no longer wait because what they waited for was deleted.
@@ -492,9 +488,8 @@ message ResolveDependenciesResponse {
   repeated TaskDependency dependencies = 1;
   // Tasks whose dependency on a deleted task was removed in this call, for a one-time notice.
   repeated string dropped_task_ids = 2;
-  // Tasks whose dependency was removed in this call because what they waited for is no longer active and
-  // Todoist's activity log does not say that it was completed or deleted (a task in an archived project, say,
-  // or an account whose plan has no activity log), for a one-time notice that says only that.
+  // Tasks whose dependency was removed in this call because what they waited for left the active list while
+  // Tasks still has it open (a task in an archived project, say), for a one-time notice that says only that.
   repeated string released_task_ids = 3;
 }
 // Reads the planning store's counts.
@@ -549,18 +544,19 @@ message SetWeeklyBetResponse {
   WeeklyBet weekly_bet = 1;
 }
 
-// A reference into the selected task store, by its own ID.
+// A reference into Tasks, by its own ID.
 message ExternalRef {
-  // The store: tasks, or todoist for the retired adapter.
+  // Always tasks; a request that names another store is refused.
   string provider = 1 [(google.api.field_behavior) = REQUIRED];
   // The store's ID of the task, label or project.
   string external_id = 2 [(google.api.field_behavior) = REQUIRED];
 }
-// One summarised mail: a Mail Hero event that created a task. Its title is the task's.
+// One summarised mail still awaiting a decision.
 message MailItem {
   // The Mail Hero event ID, Todofy's own ID of the mail.
   string id = 1;
-  // The mail's task.
+  // A task linked to the mail before the native cutover. Native mail has none: converting it creates the
+  // task, and the mail then leaves this list.
   ExternalRef task = 2;
   // One plain sentence about the mail, at most 60 characters; empty when it has none.
   string brief = 3;
@@ -605,11 +601,11 @@ message MailCategory {
   // P1 to P4.
   Priority priority = 3 [(google.api.field_behavior) = REQUIRED];
 }
-// Deprecated: not used for filing. The account Inbox, for extensions before planning protocol 6.
+// Deprecated: never sent. It named the Inbox for the retired extension's builds before planning protocol 6.
 message MailProject {
-  // Todoist project ID.
+  // The project's ID.
   string id = 1;
-  // Its current name, read from Todoist for this answer and never stored.
+  // Its current name.
   string display_name = 2;
   // Whether it is the account's Inbox.
   bool inbox = 3;
@@ -688,10 +684,9 @@ message ReadMailSettingsResponse {
   repeated MailCategory categories = 1;
   // Sent back by UpdateMailCategories.
   string etag = 2;
-  // Deprecated: the account Inbox only, for extensions before planning protocol 6; absent when
-  // Todoist lists none.
+  // Deprecated: never sent. The retired extension's builds before planning protocol 6 read the Inbox here.
   ExternalRef destination = 3;
-  // Deprecated: the account Inbox only, for extensions before planning protocol 6.
+  // Deprecated: never sent, for the same builds.
   repeated MailProject projects = 4;
 }
 // A new order of tasks: one Review lane's, or a parent's sub-tasks.
@@ -701,23 +696,23 @@ message ReorderTasksRequest {
     (google.api.field_behavior) = OPTIONAL,
     (google.api.field_info).format = UUID4
   ];
-  // 1 to 100 distinct Todoist task IDs in their new order.
+  // 1 to 100 distinct Tasks task IDs in their new order.
   repeated string task_ids = 2 [(google.api.field_behavior) = REQUIRED];
-  // A LaneOrder lane, or empty to change only Todoist's order.
+  // A LaneOrder lane, or empty to change only the order in Tasks.
   string lane = 3 [(google.api.field_behavior) = OPTIONAL];
   // The task the owner moved, one of task_ids.
   string task_id = 4 [(google.api.field_behavior) = REQUIRED];
 }
 // The tasks and the lane after the new order.
 message ReorderTasksResponse {
-  // The given tasks that are active, in the given order, as Todoist lists them now.
+  // The given tasks that are active, in the given order, as Tasks lists them now.
   repeated PlanningTask tasks = 1;
   // The lane's saved order; absent when lane is empty.
   LaneOrder lane_order = 2;
 }
 
-// A priority in the domain's order, P1 the most urgent. The Todoist adapter writes API priority
-// 5 - n (PlanningTask.priority).
+// A priority in the domain's order, P1 the most urgent, as in Tasks. PlanningTask.priority carries the API
+// order, 5 - n.
 enum Priority {
   // Never written.
   PRIORITY_UNSPECIFIED = 0;
@@ -727,17 +722,16 @@ enum Priority {
   PRIORITY_P2 = 2;
   // P3.
   PRIORITY_P3 = 3;
-  // P4, Todoist's default.
+  // P4, the default.
   PRIORITY_P4 = 4;
 }
 
 // How much of the plan an answer carries (AIP-157).
 enum PlanView {
-  // FULL, the answer before views existed (extension builds that send no view).
+  // FULL, the answer before views existed.
   PLAN_VIEW_UNSPECIFIED = 0;
-  // The mapping and dates only, for a native Todoist page: inbox_project_id, review_task_id,
-  // next_week_task_ids, dependencies and lane_orders are left out, which saves the weekly
-  // review's D1 read.
+  // The settings and dates only: inbox_project_id, review_task_id, next_week_task_ids,
+  // dependencies and lane_orders are left out, which saves the weekly review's D1 read.
   PLAN_VIEW_BASIC = 1;
   // Every field.
   PLAN_VIEW_FULL = 2;

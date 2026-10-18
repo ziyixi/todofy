@@ -1,5 +1,5 @@
 // A mail event of Todofy's ledger: one mail.received.v1 event Mail Hero delivered, and what Todofy did with it
-// (summary, Todoist task, the owner's reconcile actions). See todofy_ui_service.proto for the API.
+// (summary, task, the owner's reconcile actions). See todofy_ui_service.proto for the API.
 
 syntax = "proto3";
 
@@ -15,7 +15,7 @@ option java_package = "science.ziyixi.todofy.ui.v1";
 
 // One mail event, in one of two views (MailEventView, AIP-157): ListMailEvents answers BASIC, GetMailEvent FULL
 // unless asked otherwise, and ReconcileMailEvent and the MailEvent detail of an error always FULL. Never the
-// mail's body: only the summary, the frozen Todoist description and the first sender address while the event's
+// mail's body: only the summary, the frozen task description and the first sender address while the event's
 // body is still stored.
 message MailEvent {
   option (google.api.resource) = {
@@ -33,11 +33,12 @@ message MailEvent {
     STATE_PENDING = 1;
     // A summary call is in flight.
     STATE_SUMMARIZING = 2;
-    // Summarized; the Todoist task is next.
+    // Summarized; the frozen task is created next. Native mail completes after its summary (Tasks' Mail page
+    // converts it on request), so only rows frozen before the 2026-10-17 cutover wait here.
     STATE_SUMMARIZED = 3;
-    // A Todoist create call is in flight.
+    // A create call to Tasks is in flight.
     STATE_TODO_SENDING = 4;
-    // Todoist's answer was lost: a footer lookup, or the owner, decides whether the task exists.
+    // The create call's answer was lost: a footer lookup, or the owner, decides whether the task exists.
     STATE_TODO_UNKNOWN = 5;
     // The task exists; the event completes next.
     STATE_TODO_CREATED = 6;
@@ -57,7 +58,8 @@ message MailEvent {
   EventErrorCode error_code = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Attempts of the current step (summary, task creation or lookup).
   int32 attempt_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The Todoist task's ID once known (link it as https://app.todoist.com/app/task/<id>); empty before.
+  // The task's ID in Tasks once known (imported Todoist IDs included; the owner UI links `/task/<id>`, which
+  // opens it in Tasks); empty before.
   string task_id = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When Todofy stored the event.
   google.protobuf.Timestamp receive_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -85,9 +87,9 @@ message MailEvent {
   string summary = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The Gemini model that wrote `summary`.
   string summary_model = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The frozen Todoist description, footer included (plain text).
+  // The frozen task description, footer included (plain text).
   string todo_body = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The X-Request-Id of the frozen Todoist request.
+  // The frozen task request's identity (its X-Request-Id, from which the Tasks request_id derives).
   string todoist_request_id = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The reconcile actions the event takes now, most likely first; empty when it needs nothing.
   repeated ReconcileAction allowed_actions = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -100,7 +102,7 @@ message MailEvent {
     (google.api.resource_reference).type = "todofy.ziyixi.science/LegacyText"
   ];
   // A synthetic canary event of the dashboard's end-to-end check (contracts/ops-v1): summarized but never
-  // sent to Todoist, and never listed, counted or reminded of.
+  // turned into a task, and never listed, counted or reminded of.
   bool canary = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
@@ -163,21 +165,21 @@ enum MailEventView {
 enum ReconcileAction {
   // Never sent.
   RECONCILE_ACTION_UNSPECIFIED = 0;
-  // The owner found the Todoist task (`task_id` required); the event completes with it.
+  // The owner found the task in Tasks (`task_id` required); the event completes with it.
   RECONCILE_ACTION_TASK_CREATED = 1;
   // The owner found no task. A footer lookup runs first, then the frozen request is sent again, which can
   // duplicate a task.
   RECONCILE_ACTION_TASK_NOT_CREATED = 2;
   // Summarize again; not offered for mail_needs_review.
   RECONCILE_ACTION_RETRY_SUMMARY = 3;
-  // Give up without checking Todoist; the event becomes ignored. Offered for failed_summary, todo_unknown, and
-  // summarized events whose last Todoist request was refused (todoist_rejected).
+  // Give up without checking Tasks; the event becomes ignored. Offered for failed_summary, todo_unknown, and
+  // summarized events whose last task request was refused (todoist_rejected).
   RECONCILE_ACTION_DISMISS = 4;
 }
 
 // Why a mail event stopped or was retried (todofy/worker/todofy/core/vocab.py EVENT_ERROR_CODES). The values
 // after EVENT_ERROR_CODE_CANARY_SIDE_EFFECT_BLOCKED were written only by the retired Go service and appear only
-// on imported rows.
+// on imported rows. The TODOIST names are frozen: since the 2026-10-17 cutover they describe Tasks' answers.
 enum EventErrorCode {
   // No code.
   EVENT_ERROR_CODE_UNSPECIFIED = 0;
@@ -193,13 +195,13 @@ enum EventErrorCode {
   EVENT_ERROR_CODE_LLM_REQUEST_REJECTED = 5;
   // Three summary runs were interrupted mid-call.
   EVENT_ERROR_CODE_PROCESSING_INTERRUPTED_LIMIT = 6;
-  // Todoist refused the task request.
+  // Tasks refused the task request.
   EVENT_ERROR_CODE_TODOIST_REJECTED = 7;
-  // Todoist refused the key (401/403); task creation is paused.
+  // Before the cutover only: Todoist refused the key (401/403) and task creation paused.
   EVENT_ERROR_CODE_TODOIST_AUTH_BLOCKED = 8;
-  // Todoist answered 429.
+  // Before the cutover only: Todoist answered 429. Tasks has no rate limit.
   EVENT_ERROR_CODE_TODOIST_RATE_LIMITED = 9;
-  // Todoist did not answer usably.
+  // Tasks did not answer usably.
   EVENT_ERROR_CODE_TODOIST_UNAVAILABLE = 10;
   // The create call's answer was lost.
   EVENT_ERROR_CODE_TODO_RESULT_UNKNOWN = 11;
@@ -213,7 +215,7 @@ enum EventErrorCode {
   EVENT_ERROR_CODE_LOOKUP_AMBIGUOUS = 15;
   // The owner dismissed the event.
   EVENT_ERROR_CODE_DISMISSED_BY_OWNER = 16;
-  // A canary event reached a step that would call Todoist; it ended there.
+  // A canary event reached a step that would create a task; it ended there.
   EVENT_ERROR_CODE_CANARY_SIDE_EFFECT_BLOCKED = 17;
   // Go service only: a saved event the contract refuses.
   EVENT_ERROR_CODE_INVALID_SAVED_EVENT = 18;

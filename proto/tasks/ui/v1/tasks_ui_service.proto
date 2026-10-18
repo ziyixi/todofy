@@ -4,8 +4,10 @@
 //     aip.dev/not-precedent: existing planning commands use UUIDv5; runtime accepts UUIDv4 and UUIDv5,
 //     preserving frozen retry identities instead of replacing them with random IDs. --)
 // Native Tasks owner API. Access is verified before reading a body; mutations also require same-origin
-// Origin and the signed tasks_csrf token. The separate TasksEntrypoint service binding uses the same
-// protobuf messages without exposing a machine-auth route. Bodies are bounded to 64 KiB.
+// Origin and the signed tasks_csrf token. The TasksApi service binding uses the same protobuf messages
+// without exposing a machine-auth route: a `read` binding (FlowDay) may only read, and a `read-write`
+// binding (Todofy) may also write and call the machine-only exportBackup method that Todofy's weekly backup
+// pages every table through. Bodies are bounded to 64 KiB.
 // Every mutation requires a UUIDv4 or UUIDv5 request_id. Exact replays return the original response; reusing it for
 // different input is rejected. Updates require the current etag and an explicit update_mask.
 syntax = "proto3";

@@ -228,7 +228,7 @@ message ReconcileMailEventRequest {
   ReconcileAction action = 2 [(google.api.field_behavior) = REQUIRED];
   // The event's current etag (AIP-154; ETAG_MISMATCH otherwise).
   string etag = 3 [(google.api.field_behavior) = REQUIRED];
-  // With TASK_CREATED only, and then required: the Todoist task's ID, 1-64 characters of `0-9A-Za-z_-`.
+  // With TASK_CREATED only, and then required: the task's ID in Tasks, 1-64 characters of `0-9A-Za-z_-`.
   string task_id = 4 [(google.api.field_behavior) = OPTIONAL];
   // The idempotency key (AIP-155); see TodofyUiService.
   string request_id = 5 [

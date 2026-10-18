@@ -52,7 +52,7 @@ message ServiceStatus {
   google.protobuf.Timestamp oldest_due_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Today's Gemini budget.
   GeminiBudget gemini = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Todoist's rate window and auth block.
+  // Retired with Todoist: always unset. Tasks has no rate window or auth block.
   TodoistBudget todoist = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The weekly D1 backup.
   BackupStatus backup = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -64,7 +64,9 @@ message Switches {
   bool maintenance_mode = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // PROCESSING_PAUSED: mail is stored but not processed.
   bool processing_paused = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // FORCE_PAUSE_TODOIST: no Todoist call.
+  // FORCE_PAUSE_TODOIST (the name is kept from Todoist): the alarm's writes to Tasks wait (mail tasks,
+  // reminders, the GTD snapshot and review, task intents, the Monday reset); summaries and the owner's
+  // planning continue.
   bool force_pause_todoist = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // REMINDER_ENABLED: the daily reminder task.
   bool reminder_enabled = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -106,7 +108,7 @@ message GeminiBudget {
   repeated string email_models = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// Todoist's rate window and auth block.
+// Retired: Todoist's rate window and auth block, which nothing reports since Tasks replaced Todoist.
 message TodoistBudget {
   // Task creation is paused until then after a 401/403; unset when it is not.
   google.protobuf.Timestamp block_expire_time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -169,7 +171,7 @@ message BackupStatus {
   google.protobuf.Timestamp next_backup_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// The daily reminder of one UTC day: one Todoist task listing what needs the owner. IDs, states and codes
+// The daily reminder of one UTC day: one task in Tasks listing what needs the owner. IDs, states and codes
 // only, never the frozen text.
 message DailyReminder {
   option (google.api.resource) = {
@@ -179,7 +181,7 @@ message DailyReminder {
     plural: "dailyReminders"
   };
 
-  // The reminder's Todoist call.
+  // The reminder's create call to Tasks.
   enum State {
     // Never sent.
     STATE_UNSPECIFIED = 0;
@@ -197,7 +199,7 @@ message DailyReminder {
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
   // The state.
   State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The Todoist task's ID once created; empty before.
+  // The task's ID in Tasks once created; empty before.
   string task_id = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Events that needed the owner when the day was claimed.
   int32 attention_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -250,9 +252,9 @@ message ConfiguredSecrets {
   bool report_basic_auth = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // GEMINI_API_KEY (todofy-core).
   bool gemini_api_key = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // TODOIST_API_KEY (todofy-core).
+  // Retired: TODOIST_API_KEY is no longer read, so this is always false.
   bool todoist_api_key = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // TODOIST_DEFAULT_PROJECT_ID (todofy-core).
+  // TODOIST_DEFAULT_PROJECT_ID (todofy-core): the Tasks project of Todofy's mail tasks.
   bool todoist_project = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
@@ -261,7 +263,7 @@ message ConfiguredSecrets {
 enum ReminderErrorCode {
   // No code.
   REMINDER_ERROR_CODE_UNSPECIFIED = 0;
-  // Todoist refused the task.
+  // Tasks refused the task (Todoist, before the 2026-10-17 cutover).
   REMINDER_ERROR_CODE_REMINDER_CREATE_FAILED = 1;
   // The call's answer was lost.
   REMINDER_ERROR_CODE_REMINDER_RESULT_UNKNOWN = 2;
