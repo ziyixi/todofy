@@ -60,13 +60,13 @@ describe('Native Tasks planning transport', () => {
     }
     expect(core).toHaveLength(native.length);
   });
-  it('refuses a mail deletion on the Planning channel before reading its body', async () => {
+  it('answers a retired method path with NOT_FOUND before reading its body', async () => {
     const { env, core } = fakes({ TASK_SOURCE: 'tasks' }, () => uiOk({}));
     const response = await nativePlanning(new Request('https://planning.internal/api/plus/v1/mailItems:deleteMailItems', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: 'not json',
     }), env);
-    expect(response.status).toBe(400);
-    expect(await response.text()).toContain('ACTION_NOT_ALLOWED');
+    expect(response.status).toBe(404);
+    expect(await response.text()).toContain('NOT_FOUND');
     expect(core).toHaveLength(0);
   });
   it('uses the core entrypoint that verifies the native source itself', async () => {

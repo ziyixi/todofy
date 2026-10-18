@@ -116,7 +116,8 @@ case_ "add STORAGE_STATUS_EXPIRED to the closed StorageStatus (Todofy refuses it
 case_ "add an optional field to Mail (consumers skip what they do not know)" breaking pass 's/(  repeated Attachment attachments = 15 \[)/  \/\/ A newer flag.\n  optional bool newer_flag = 16;\n$1/' "$MAIL"
 case_ "change a binding of the test fixtures (prototest is ignored, as by buf)" breaking pass 's/\{get: "\/v1\/\{parent=shelves\/\*\}\/books"\}/{get: "\/v2\/{parent=shelves\/*}\/books"}/' prototest/v1/prototest.proto
 # Retiring an element (tools/retired.py, retired.json): a deletion breaks unless the copy's retired.json lists it, and
-# the listed element must stay deleted (an enum value with its number and name reserved). Nothing else is excused.
+# the listed element must stay deleted (an enum value with its number and name reserved; a message with every rpc and
+# field that uses it). Nothing else is excused.
 RETIRE_WATCH_UI='{"packages": [{"path": "watch/ui/v1/", "package": "watch.ui.v1"}]}'
 RETIRE_WATCH_SOURCE='{"enum_values": [{"enum": "todofy.taskintent.v1.Source", "name": "SOURCE_WATCH", "number": 2}]}'
 RETIRE_WATCH_GUARD='{"allowed_values": [{"field": "dashboard.ui.v1.OverrideGuardRequest.app", "value": "watch"}]}'
@@ -131,6 +132,11 @@ case_ "reuse a listed enum value's number (SOURCE_WATCH = 2 -> SOURCE_NEXT = 2)"
 case_ "remove an unlisted enum value (ERROR_CODE_DAILY_LIMIT) and reserve it" breaking fail 's/(enum ErrorCode \{\n)/$1  reserved 11;\n  reserved "ERROR_CODE_DAILY_LIMIT";\n/; s/  \/\/ [^\n]*\n  ERROR_CODE_DAILY_LIMIT = 11;\n//'
 case_ "remove a listed allowed value of an input (OverrideGuardRequest.app watch)" breaking pass 's/^      "watch",\n//m' "$GUARD" "$RETIRE_WATCH_GUARD"
 case_ "remove an unlisted allowed value of an input (OverrideGuardRequest.app watch)" breaking fail 's/^      "watch",\n//m' "$GUARD"
+RETIRE_WATCH_ACK='{"methods": [{"service": "watch.ui.v1.WatchUiService", "name": "AcknowledgeChange"}], "messages": [{"message": "watch.ui.v1.AcknowledgeChangeRequest"}]}'
+DROP_ACK='s/\n  \/\/ Marks a confirmed change as read.*?rpc AcknowledgeChange\(.*?\n  \}\n//s; s/\n\/\/ Input of AcknowledgeChange\.\n.*?\n\}\n//s'
+case_ "delete a listed rpc with its request (AcknowledgeChange)" breaking pass "$DROP_ACK" "$WATCH" "$RETIRE_WATCH_ACK"
+case_ "delete an unlisted rpc with its request (AcknowledgeChange)" breaking fail "$DROP_ACK" "$WATCH"
+case_ "list an rpc and its request as retired but keep them" breaking fail 's/(\/\/ Input of AcknowledgeChange\.)/$1 Kept./' "$WATCH" "$RETIRE_WATCH_ACK"
 case_ "zero value without _UNSPECIFIED (MODE_UNSPECIFIED -> MODE_NONE)" lint fail 's/MODE_UNSPECIFIED = 0/MODE_NONE = 0/'
 case_ "enum value without its prefix (SOURCE_WATCH -> WATCH)" lint fail 's/SOURCE_WATCH = 2/WATCH = 2/'
 case_ "lowerCamelCase field (intent_id -> intentId)" lint fail 's/string intent_id = 3;/string intentId = 3;/; s/string intent_id = 3 /string intentId = 3 /'

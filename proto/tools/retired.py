@@ -1,5 +1,5 @@
 """Retired IDL elements (proto/README.md, "Retiring an element"): the one reviewed way to delete a published
-package, enum value or allowed value without weakening the breaking gate for anything else.
+package, enum value, allowed value, method or message without weakening the breaking gate for anything else.
 
 Usage (scripts/breaking.sh and scripts/rules-selftest.sh run it)::
 
@@ -13,14 +13,17 @@ full name, with the date and the reason:
   and its name are reserved in the enum, so neither can be reused.
 - ``allowed_values``: ``{"field": "a.v1.Message.field", "value": "x"}``: the value left the field's
   ``(common.wire.v1.field).allowed`` list.
+- ``methods``: ``{"service": "a.v1.Service", "name": "DoThing"}``: the rpc left the service.
+- ``messages``: ``{"message": "a.v1.DoThingRequest"}``: the top-level message is gone.
 
 First the head must keep every promise: no file under a retired path or of a retired package, no retired enum value,
-its number and name reserved, no retired allowed value. Then OUT_IMAGE is the base without the listed elements, which
-``buf breaking`` and tools/profile_breaking.py compare the head with: a listed deletion is the base's state, every
-other change is checked exactly as before. An element the base no longer has (the base is after the retirement) is
-left alone, so an entry does nothing once every base CI compares with is newer; it may then be removed. A base file
-that still imports a retired file is an error. Output names elements only. Exit status 0 when every promise holds,
-1 otherwise, 2 on bad usage.
+its number and name reserved, no retired allowed value, method or message. Then OUT_IMAGE is the base without the
+listed elements, which ``buf breaking`` and tools/profile_breaking.py compare the head with: a listed deletion is the
+base's state, every other change is checked exactly as before. An element the base no longer has (the base is after
+the retirement) is left alone, so an entry does nothing once every base CI compares with is newer; it may then be
+removed. A base file that still imports a retired file is an error, and so is a kept field or method of the base that
+uses a retired message: a message is retired with everything that uses it. Output names elements only. Exit status 0
+when every promise holds, 1 otherwise, 2 on bad usage.
 """
 
 from __future__ import annotations
@@ -67,6 +70,26 @@ def fields(image: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
             yield from walk(file.get("package", ""), message)
 
 
+def services(image: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """(full name, descriptor) of every service in the image."""
+    for file in image.get("file", []):
+        for service in file.get("service", []):
+            yield f"{file.get('package', '')}.{service['name']}", service
+
+
+def messages(image: dict[str, Any]) -> Iterator[str]:
+    """The full name of every top-level message in the image."""
+    for file in image.get("file", []):
+        for message in file.get("messageType", []):
+            yield f"{file.get('package', '')}.{message['name']}"
+
+
+def uses(type_name: str, retired: set[str]) -> str | None:
+    """The retired message a field's or method's type is, or is nested in."""
+    name = type_name.lstrip(".")
+    return next((message for message in retired if name == message or name.startswith(f"{message}.")), None)
+
+
 def reserves(enum: dict[str, Any], name: str, number: int) -> bool:
     """Whether the enum reserves both the number (ranges are inclusive) and the name."""
     ranges = enum.get("reservedRange", [])
@@ -101,6 +124,15 @@ def head_problems(retired: dict[str, Any], head: dict[str, Any]) -> list[str]:
         field = head_fields.get(entry["field"])
         if field is not None and entry["value"] in allowed(field):
             problems.append(f"RETIRED_ALLOWED_VALUE_BACK {entry['field']}: {entry['value']!r} is allowed in the head")
+    head_services = dict(services(head))
+    for entry in retired.get("methods", []):
+        service = head_services.get(entry["service"], {})
+        if any(method["name"] == entry["name"] for method in service.get("method", [])):
+            problems.append(f"RETIRED_METHOD_BACK {entry['service']}.{entry['name']} is in the head")
+    head_messages = set(messages(head))
+    for entry in retired.get("messages", []):
+        if entry["message"] in head_messages:
+            problems.append(f"RETIRED_MESSAGE_BACK {entry['message']} is in the head")
     return problems
 
 
@@ -143,6 +175,30 @@ def without_retired(retired: dict[str, Any], base: dict[str, Any]) -> tuple[dict
         if field is not None and entry["value"] in allowed(field):
             field["options"][WIRE_FIELD]["allowed"] = [v for v in allowed(field) if v != entry["value"]]
             removed.append(f"allowed value {entry['field']} {entry['value']!r}")
+    base_services = dict(services(image))
+    for entry in retired.get("methods", []):
+        service = base_services.get(entry["service"])
+        methods = [] if service is None else service.get("method", [])
+        kept_methods = [method for method in methods if method["name"] != entry["name"]]
+        if service is not None and len(kept_methods) < len(methods):
+            service["method"] = kept_methods
+            removed.append(f"method {entry['service']}.{entry['name']}")
+    gone_messages = {entry["message"] for entry in retired.get("messages", [])} & set(messages(image))
+    for file in image["file"]:
+        listed = [m for m in file.get("messageType", []) if f"{file.get('package', '')}.{m['name']}" in gone_messages]
+        if listed:
+            file["messageType"] = [m for m in file["messageType"] if m not in listed]
+            removed += [f"message {file.get('package', '')}.{m['name']}" for m in listed]
+    for name, field in fields(image):
+        message = uses(field.get("typeName", ""), gone_messages)
+        if message is not None:
+            problems.append(f"RETIRED_MESSAGE_REFERENCED {name} uses the retired {message}")
+    for name, service in services(image):
+        for method in service.get("method", []):
+            for type_name in (method.get("inputType", ""), method.get("outputType", "")):
+                message = uses(type_name, gone_messages)
+                if message is not None:
+                    problems.append(f"RETIRED_MESSAGE_REFERENCED {name}.{method['name']} uses the retired {message}")
     return image, removed, problems
 
 

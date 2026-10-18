@@ -12,5 +12,38 @@
     {"field": "dashboard.ui.v1.FlowGroup.id", "value": "research", "since": "2026-10-05", "reason": "its one flow was the removed app's"},
     {"field": "dashboard.ui.v1.Flow.group", "value": "research", "since": "2026-10-05", "reason": "its one flow was the removed app's"},
     {"field": "dashboard.ui.v1.RegistryEntry.icon", "value": "flask-conical", "since": "2026-10-05", "reason": "only the removed app's tile used it"}
+  ],
+  "methods": [
+    {"service": "todofy.ui.v1.PlusService", "name": "IssueExtensionConnection", "since": "2026-10-18", "reason": "only the removed Todoist Plus extension and owner page called it; Tasks never did"},
+    {"service": "todofy.ui.v1.PlusService", "name": "ReadExtensionConnections", "since": "2026-10-18", "reason": "only the removed Todoist Plus extension and owner page called it; Tasks never did"},
+    {"service": "todofy.ui.v1.PlusService", "name": "RevokeExtensionConnection", "since": "2026-10-18", "reason": "only the removed Todoist Plus extension and owner page called it; Tasks never did"},
+    {"service": "todofy.ui.v1.PlusService", "name": "ConfirmPlanMapping", "since": "2026-10-18", "reason": "only the removed Todoist Plus extension and owner page called it; Tasks never did"},
+    {"service": "todofy.ui.v1.PlusService", "name": "UpdatePlanLabels", "since": "2026-10-18", "reason": "only the removed Todoist Plus extension and owner page called it; Tasks never did"},
+    {"service": "todofy.ui.v1.PlusService", "name": "LookupMailItems", "since": "2026-10-18", "reason": "only the removed Todoist Plus extension and owner page called it; Tasks never did"},
+    {"service": "todofy.ui.v1.PlusService", "name": "FileMailItem", "since": "2026-10-18", "reason": "only the removed Todoist Plus extension and owner page called it; Tasks never did"},
+    {"service": "todofy.ui.v1.PlusService", "name": "DeleteMailItems", "since": "2026-10-18", "reason": "only the removed Todoist Plus extension and owner page called it; Tasks never did"},
+    {"service": "todofy.ui.v1.PlusService", "name": "UpdateMailSettings", "since": "2026-10-18", "reason": "only the removed Todoist Plus extension and owner page called it; Tasks never did"}
+  ],
+  "messages": [
+    {"message": "todofy.ui.v1.IssueExtensionConnectionRequest", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.IssueExtensionConnectionResponse", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.ExtensionConnection", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.ReadExtensionConnectionsRequest", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.ReadExtensionConnectionsResponse", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.RevokeExtensionConnectionRequest", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.RevokeExtensionConnectionResponse", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.ConfirmPlanMappingRequest", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.ConfirmPlanMappingResponse", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.UpdatePlanLabelsRequest", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.UpdatePlanLabelsResponse", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.PlanningLabelBinding", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.LookupMailItemsRequest", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.LookupMailItemsResponse", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.FileMailItemRequest", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.FileMailItemResponse", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.DeleteMailItemsRequest", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.DeleteMailItemsResponse", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.UpdateMailSettingsRequest", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
+    {"message": "todofy.ui.v1.UpdateMailSettingsResponse", "since": "2026-10-18", "reason": "used only by a retired PlusService method"}
   ]
 }

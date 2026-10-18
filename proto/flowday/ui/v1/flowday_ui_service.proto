@@ -1,7 +1,7 @@
 // FlowDay's owner API: the HTTP/JSON interface between FlowDay's UI (flowday/web, a Next.js static export) and the
 // Worker "flowday" (flowday/worker), which keeps everything in D1 and reads Todoist (never writes it).
 //
-// Callers. FlowDay's own UI uses its owner routes. Todofy uses the narrow FocusEntrypoint service binding.
+// Callers. FlowDay's own UI uses its owner routes. Todofy uses the narrow NativeFocusEntrypoint service binding.
 //
 // Transport. google.api.http bindings under the prefix /api/v1, served by the shared transcoder
 // (proto/ts/http-transcoder.ts) and called through the shared client (proto/ts/http-client.ts). Bodies, query

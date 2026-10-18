@@ -1,5 +1,5 @@
-// Personal planning and Mail API. Tasks uses owner Access, same-origin and CSRF.
-// Retired Todoist clients retain their existing connection-token contract.
+// Tasks' planning and Mail API. Tasks checks owner Access, Origin and CSRF, then calls it on Todofy's private
+// Planning channel, which serves only these methods; no public host routes it.
 syntax = "proto3";
 package todofy.ui.v1;
 
@@ -13,117 +13,84 @@ option java_multiple_files = true;
 option java_outer_classname = "PlusServiceProto";
 option java_package = "science.ziyixi.todofy.ui.v1";
 
-// Personal planning backed by the configured task source and Todofy's planning facts.
+// Plan, Focus and Mail in Tasks: the tasks live in Tasks, and the facts Tasks does not keep (Bets, dependencies,
+// lane orders, next week's choices, mail summaries and categories) in Todofy's planning store. The name is kept
+// from the retired Todoist Plus extension: renaming a published service is a breaking change.
 service PlusService {
   option (google.api.default_host) = "todofy.ziyixi.science";
-  // Account week and planning metadata, without task content.
+  // The account week and the planning metadata, without task content.
   // (-- api-linter: core::0131::synonyms=disabled
-  //     aip.dev/not-precedent: returns a live external-account projection, not a resource in this service. --)
+  //     aip.dev/not-precedent: returns a projection of Tasks and the planning store, not a resource in this
+  //     service. --)
   rpc ReadPlan(ReadPlanRequest) returns (ReadPlanResponse) {
     option (google.api.http) = {get: "/api/plus/v1/plan:read"};
   }
-  // A bounded page of active Todoist tasks. Read all pages before showing counts.
+  // A bounded page of the active tasks in Tasks with their planning fields. Read all pages before showing counts.
   rpc ListPlanningTasks(ListPlanningTasksRequest) returns (ListPlanningTasksResponse) {
     option (google.api.http) = {get: "/api/plus/v1/tasks"};
   }
-  // Replaces the selected planning fields only; unrelated labels are retained.
+  // Changes only the given planning fields of one task: its saved stage, area and planning flags, which Tasks
+  // keeps apart from the task's tags.
   // (-- api-linter: core::0134::synonyms=disabled
-  //     aip.dev/not-precedent: this action changes external Todoist labels, not a stored Plan resource. --)
+  //     aip.dev/not-precedent: this action changes a task's planning facts, not a stored Plan resource. --)
   rpc SetTaskPlan(SetTaskPlanRequest) returns (SetTaskPlanResponse) {
     option (google.api.http) = {
       post: "/api/plus/v1/tasks:setTaskPlan"
       body: "*"
     };
   }
-  // Appends up to 20 child tasks using stable Todoist Sync command UUIDs.
+  // Appends up to 20 steps under one task, under a receipt, so a repeat creates none twice.
   rpc AppendTaskSteps(AppendTaskStepsRequest) returns (AppendTaskStepsResponse) {
     option (google.api.http) = {
       post: "/api/plus/v1/tasks:appendTaskSteps"
       body: "*"
     };
   }
-  // Updates the true deadline and lead window, leaving scheduled date unchanged.
+  // Sets the deadline and the start-ahead days together, leaving the scheduled date unchanged.
   // (-- api-linter: core::0134::synonyms=disabled
-  //     aip.dev/not-precedent: this action updates a Todoist deadline and labels together. --)
+  //     aip.dev/not-precedent: this action updates a task's deadline and lead together. --)
   rpc SetTaskLead(SetTaskLeadRequest) returns (SetTaskLeadResponse) {
     option (google.api.http) = {
       post: "/api/plus/v1/tasks:setTaskLead"
       body: "*"
     };
   }
-  // Todoist item_close: complete an ordinary task or advance one recurrence.
+  // Completes one task in Tasks, or advances one recurrence; with a flow_date, then settles FlowDay's Focus for
+  // it.
   rpc CompleteTask(CompleteTaskRequest) returns (CompleteTaskResponse) {
     option (google.api.http) = {
       post: "/api/plus/v1/tasks:completeTask"
       body: "*"
     };
   }
-  // Replaces the three planning-column bindings and optional Quarter binding.
-  // Configuration only: existing task labels and dates are not rewritten.
-  // (-- api-linter: core::0134=disabled
-  //     aip.dev/not-precedent: an atomic configuration action with etag and request identity,
-  //     rather than a field-mask update to a PlanLabels resource. --)
-  rpc UpdatePlanLabels(UpdatePlanLabelsRequest) returns (UpdatePlanLabelsResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/plan:updatePlanLabels"
-      body: "*"
-    };
-  }
-  // Owner-only: accept the current mapping and enable the weekly reset.
-  rpc ConfirmPlanMapping(ConfirmPlanMappingRequest) returns (ConfirmPlanMappingResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/plan:confirmPlanMapping"
-      body: "*"
-    };
-  }
-  // Owner-only: a token is returned once; only its digest is stored.
-  rpc IssueExtensionConnection(IssueExtensionConnectionRequest) returns (IssueExtensionConnectionResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/connections:issueExtensionConnection"
-      body: "*"
-    };
-  }
-  // Owner-only: connection names and IDs, never token values or digests.
-  // (-- api-linter: core::0131::synonyms=disabled
-  //     aip.dev/not-precedent: bounded credential settings, no paginated collection or individual Get. --)
-  rpc ReadExtensionConnections(ReadExtensionConnectionsRequest) returns (ReadExtensionConnectionsResponse) {
-    option (google.api.http) = {get: "/api/plus/v1/connections:read"};
-  }
-  // Owner-only: disables one token without changing task or planning history.
-  rpc RevokeExtensionConnection(RevokeExtensionConnectionRequest) returns (RevokeExtensionConnectionResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/connections:revokeExtensionConnection"
-      body: "*"
-    };
-  }
-  // Adds or removes one dependency between two tasks. Kept only in Todofy's planning store: Todoist is never
-  // written, so no title, description, comment, label or update time changes. A value write without a
-  // receipt: adding a dependency that still holds keeps it as it is, and adding one that is done starts it
-  // over from the prerequisite's current completed_count.
+  // Adds or removes one dependency between two tasks. Kept only in Todofy's planning store: no task in Tasks
+  // changes. A value write without a receipt: adding a dependency that still holds keeps it as it is, and adding
+  // one that is done starts it over from the prerequisite's current completed_count.
   // (-- api-linter: core::0134::synonyms=disabled
-  //     aip.dev/not-precedent: adds or removes one link between two external tasks, not a stored resource. --)
+  //     aip.dev/not-precedent: adds or removes one link between two tasks of Tasks, not a stored resource. --)
   rpc SetTaskDependency(SetTaskDependencyRequest) returns (SetTaskDependencyResponse) {
     option (google.api.http) = {
       post: "/api/plus/v1/tasks:setTaskDependency"
       body: "*"
     };
   }
-  // Settles the dependencies of tasks that a complete task read no longer lists, after Todoist confirms they
-  // are not active: a task that waited has its dependencies removed; a prerequisite is recorded as completed,
-  // or, when it was deleted or Todoist does not say how it closed, the dependencies on it are removed. A task
-  // recorded closed that Todoist lists again is open again. Todofy's store only; Todoist is only read.
+  // Settles the dependencies of tasks that a complete task read no longer lists, after Tasks confirms they are
+  // not active: a task that waited has its dependencies removed; a prerequisite is recorded as completed, or,
+  // when it was deleted or Tasks does not say how it closed, the dependencies on it are removed. A task recorded
+  // closed that Tasks lists again is open again. Todofy's store only; Tasks is only read.
   rpc ResolveDependencies(ResolveDependenciesRequest) returns (ResolveDependenciesResponse) {
     option (google.api.http) = {
       post: "/api/plus/v1/tasks:resolveDependencies"
       body: "*"
     };
   }
-  // Owner-only: counts that check the planning store after a restore or a migration, never its content.
+  // Counts that check the planning store after a restore or a migration, never its content. The restore
+  // runbook opens it on the Tasks host.
   rpc VerifyPlanStore(VerifyPlanStoreRequest) returns (VerifyPlanStoreResponse) {
     option (google.api.http) = {get: "/api/plus/v1/plan:verifyPlanStore"};
   }
   // Saves one week's Work or Personal Bet: the owner's own line of text, kept in Todofy's planning
-  // store and never written to Todoist. Only this account week and the next one take a write.
+  // store and never written to a task. Only this account week and the next one take a write.
   // (-- api-linter: core::0134::synonyms=disabled
   //     aip.dev/not-precedent: saves the whole one-line text by compare-and-set, with no update mask. --)
   rpc SetWeeklyBet(SetWeeklyBetRequest) returns (SetWeeklyBetResponse) {
@@ -132,11 +99,13 @@ service PlusService {
       body: "*"
     };
   }
-  // Native Mail inbox, independent of task creation. Full summary text is read on demand.
+  // The Mail inbox: summarised mail still awaiting a decision, newest first, independent of any task. The full
+  // summary is read on demand (ReadMailSummary).
   rpc ListMailItems(ListMailItemsRequest) returns (ListMailItemsResponse) {
     option (google.api.http) = {get: "/api/plus/v1/mailItems"};
   }
-  // Converts a pending native mail entry to a generic Inbox task on explicit owner action.
+  // Converts a pending mail entry to an Inbox task in Tasks on explicit owner action; a category adds its tag
+  // and priority.
   rpc ConvertMailItem(ConvertMailItemRequest) returns (ConvertMailItemResponse) {
     option (google.api.http) = {
       post: "/api/plus/v1/mailItems:convertMailItem"
@@ -152,7 +121,8 @@ service PlusService {
       body: "*"
     };
   }
-  // Replaces the optional native label/priority shortcuts; no legacy destination is needed.
+  // Replaces the mail categories, at most four tag and priority shortcuts, by etag. Sending the saved categories
+  // again answers them as saved, whatever the etag.
   // (-- api-linter: core::0134=disabled
   //     aip.dev/not-precedent: replaces a complete bounded set by etag, without a resource update mask. --)
   rpc UpdateMailCategories(UpdateMailCategoriesRequest) returns (UpdateMailCategoriesResponse) {
@@ -161,66 +131,22 @@ service PlusService {
       body: "*"
     };
   }
-  // The Mailbox rows among up to 200 of the mail project's tasks: those a Mail Hero event created, each
-  // with its brief and receive time, and the owner's mail categories. No summary text but the brief.
-  // (-- api-linter: core::0131::synonyms=disabled
-  //     aip.dev/not-precedent: a bounded batch read of mail by task ID, not a Get of one resource. --)
-  rpc LookupMailItems(LookupMailItemsRequest) returns (LookupMailItemsResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/mailItems:lookup"
-      body: "*"
-    };
-  }
-  // One mail's full Todofy summary, as plain text the extension shows and never interprets.
+  // One mail's full Todofy summary, as plain text Tasks shows and never interprets.
   // (-- api-linter: core::0131::synonyms=disabled
   //     aip.dev/not-precedent: reads one field of a mail Todofy keeps, not a resource of this service. --)
   rpc ReadMailSummary(ReadMailSummaryRequest) returns (ReadMailSummaryResponse) {
     option (google.api.http) = {get: "/api/plus/v1/mailItems:readMailSummary"};
   }
-  // Files one mail in one Todoist write: a move into the account's Todoist Inbox; with a category,
-  // its label (another area label goes) and its priority first; with category_id empty, the move
-  // alone. A repeat sends the same write again only while the task and the label still give it;
-  // otherwise it answers ETAG_MISMATCH.
-  rpc FileMailItem(FileMailItemRequest) returns (FileMailItemResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/mailItems:fileMailItem"
-      body: "*"
-    };
-  }
-  // Permanently deletes the listed mail tasks the owner has not touched, at most 200; Todofy reads
-  // them again first, and again on a repeat, and keeps every other one. Todoist cannot restore a
-  // deleted task; Todofy deletes the deleted mail's summaries with it.
-  // (-- api-linter: core::0135=disabled
-  //     aip.dev/not-precedent: a bounded batch action on external Todoist tasks with a request
-  //     identity and an answer per task, not the Delete of one resource of this service. --)
-  rpc DeleteMailItems(DeleteMailItemsRequest) returns (DeleteMailItemsResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/mailItems:deleteMailItems"
-      body: "*"
-    };
-  }
-  // The mail categories. Deprecated: it also answers the account Inbox as the destination and the
-  // only project, for extensions before planning protocol 6.
+  // The mail categories and their etag.
   // (-- api-linter: core::0131::synonyms=disabled
-  //     aip.dev/not-precedent: bounded settings read with a live project list, not a stored resource. --)
+  //     aip.dev/not-precedent: a bounded settings read, not a stored resource. --)
   rpc ReadMailSettings(ReadMailSettingsRequest) returns (ReadMailSettingsResponse) {
     option (google.api.http) = {get: "/api/plus/v1/mailSettings:read"};
   }
-  // Replaces the mail categories (at most four), by etag. Sending the saved categories answers them
-  // as saved, whatever the etag.
-  // (-- api-linter: core::0134=disabled
-  //     aip.dev/not-precedent: the complete bounded set is replaced atomically, with no update mask. --)
-  rpc UpdateMailSettings(UpdateMailSettingsRequest) returns (UpdateMailSettingsResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/mailSettings:updateMailSettings"
-      body: "*"
-    };
-  }
-  // Reorders tasks. The given order of one Review lane is kept in Todofy's planning store. In Todoist,
-  // the moved task's siblings among the given tasks (same project, section and parent) have their
-  // existing child_order values permuted into the given order (item_reorder); no other task changes,
-  // and Waiting and Parked never change Todoist. One Sync under a receipt, and none when nothing
-  // changes.
+  // Reorders tasks. The given order of one Review lane is kept in Todofy's planning store. In Tasks, the moved
+  // task's siblings among the given tasks (same project, section and parent) have their existing positions
+  // permuted into the given order in one atomic write; no other task changes, and Waiting and Parked never
+  // change Tasks. One write under a receipt, and none when nothing changes.
   rpc ReorderTasks(ReorderTasksRequest) returns (ReorderTasksResponse) {
     option (google.api.http) = {
       post: "/api/plus/v1/tasks:reorder"
@@ -571,96 +497,6 @@ message ResolveDependenciesResponse {
   // or an account whose plan has no activity log), for a one-time notice that says only that.
   repeated string released_task_ids = 3;
 }
-// Replaces this bounded role set. Quarter may be omitted to leave it unbound.
-// (-- api-linter: core::0134=disabled
-//     aip.dev/not-precedent: the complete bounded binding set is replaced atomically,
-//     with no partial resource fields or update mask. --)
-message UpdatePlanLabelsRequest {
-  // Exactly candiate, focus and committed, plus optional quarter; at most four.
-  // Each ID and name must match a current label and cannot reuse another role's ID.
-  repeated PlanningLabelBinding labels = 1 [(google.api.field_behavior) = REQUIRED];
-  // Fingerprint returned by ReadPlan, checked before configuration writes.
-  string etag = 2 [(google.api.field_behavior) = REQUIRED];
-  // Stable action UUID; a repeated request returns the stored configuration receipt.
-  string request_id = 3 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-}
-// An input binding for one planning column; every identity component is required.
-message PlanningLabelBinding {
-  // quarter, candiate, focus or committed.
-  string role = 1 [(google.api.field_behavior) = REQUIRED];
-  // Exact current Todoist label ID.
-  string id = 2 [(google.api.field_behavior) = REQUIRED];
-  // Exact current Todoist label name, checked together with id.
-  string label = 3 [(google.api.field_behavior) = REQUIRED];
-}
-// The verified mapping after a configuration-only update.
-message UpdatePlanLabelsResponse {
-  // Current account planning metadata.
-  Plan plan = 1;
-}
-// Owner confirmation binds the exact discovered labels/timezone.
-message ConfirmPlanMappingRequest {
-  // Fingerprint returned by ReadPlan.
-  string etag = 1 [(google.api.field_behavior) = REQUIRED];
-  // Stable action UUID.
-  string request_id = 2 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-}
-// The mapping after explicit confirmation.
-message ConfirmPlanMappingResponse {
-  // Current account planning metadata.
-  Plan plan = 1;
-}
-// Owner creates a named, independently revocable extension credential.
-message IssueExtensionConnectionRequest {
-  // Human readable device name, 1 to 60 characters.
-  string display_name = 1 [(google.api.field_behavior) = REQUIRED];
-  // Stable action UUID; a repeated create never returns the token again.
-  string request_id = 2 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-}
-// Metadata for one extension connection.
-message ExtensionConnection {
-  // Opaque ID.
-  string id = 1;
-  // Owner supplied device name.
-  string display_name = 2;
-  // Whether the credential has been revoked.
-  bool revoked = 3;
-}
-// The credential is present on the first successful create only.
-message IssueExtensionConnectionResponse {
-  // Connection metadata.
-  ExtensionConnection connection = 1;
-  // One-time plaintext credential; never logged or saved by the server.
-  string token = 2;
-}
-// Lists at most 30 connection records; revoked records are included.
-message ReadExtensionConnectionsRequest {}
-// Named connections without credentials.
-message ReadExtensionConnectionsResponse {
-  // Up to 30 named connections.
-  repeated ExtensionConnection connections = 1;
-}
-// Revokes precisely one connection.
-message RevokeExtensionConnectionRequest {
-  // ID returned at creation or in the list.
-  string connection_id = 1 [(google.api.field_behavior) = REQUIRED];
-  // Stable action UUID.
-  string request_id = 2 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-}
-// Revocation is idempotent.
-message RevokeExtensionConnectionResponse {}
 // Reads the planning store's counts.
 message VerifyPlanStoreRequest {}
 // Rows per planning table, to compare with a backup manifest, and the rows that break one of the store's rules.
@@ -747,7 +583,7 @@ message ListMailItemsRequest {
 // Pending mail and the optional label/priority shortcuts for creating a task.
 // (-- api-linter: core::0132::response-unknown-fields=disabled
 //     aip.dev/not-precedent: this bounded inbox view includes the same shortcuts and revision each row uses,
-//     matching LookupMailItems without another settings request. --)
+//     without another settings request. --)
 message ListMailItemsResponse {
   // Mail entries in received order, newest first.
   repeated MailItem mail_items = 1;
@@ -761,7 +597,7 @@ message ListMailItemsResponse {
 // One of the owner's mail categories: an existing label and a priority. Its name is generated
 // from them ("quick · P4"), so none is stored to rename.
 message MailCategory {
-  // Todofy's ID. Ignored by UpdateMailSettings, where a category with the label and priority of
+  // Todofy's ID. Ignored by UpdateMailCategories, where a category with the label and priority of
   // a saved one keeps that one's ID.
   string id = 1 [(google.api.field_behavior) = OPTIONAL];
   // The label, by ID.
@@ -778,22 +614,6 @@ message MailProject {
   // Whether it is the account's Inbox.
   bool inbox = 3;
 }
-// Mail project task IDs, at most 200.
-message LookupMailItemsRequest {
-  // Todoist task IDs; the ones no Mail Hero event created are left out of the answer.
-  repeated string task_ids = 1 [(google.api.field_behavior) = REQUIRED];
-}
-// The mail among the tasks asked for, and the categories to file it by.
-message LookupMailItemsResponse {
-  // In no particular order.
-  repeated MailItem items = 1;
-  // The owner's mail categories, in their order.
-  repeated MailCategory categories = 2;
-  // Sent back by FileMailItem: the categories it files by.
-  string categories_etag = 3;
-  // Deprecated: not used for filing. The project an extension before planning protocol 6 saved.
-  ExternalRef destination = 4;
-}
 // Reads one mail's summary.
 message ReadMailSummaryRequest {
   // The mail's ID (MailItem.id).
@@ -803,47 +623,6 @@ message ReadMailSummaryRequest {
 message ReadMailSummaryResponse {
   // Plain text, at most 64 KiB; empty when it is no longer available.
   string summary = 1;
-}
-// Files one mail.
-message FileMailItemRequest {
-  // The mail's Todoist task, still in the mail project.
-  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
-  // Fingerprint of the task shown to the user (PlanningTask.etag).
-  string etag = 2 [(google.api.field_behavior) = REQUIRED];
-  // UUID reused when repeating this action.
-  string request_id = 3 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-  // MailCategory.id, or empty to move to the Inbox only.
-  string category_id = 4 [(google.api.field_behavior) = REQUIRED];
-  // The categories_etag the category was shown with; ignored when category_id is empty.
-  string categories_etag = 5 [(google.api.field_behavior) = REQUIRED];
-}
-// The task after it was filed.
-message FileMailItemResponse {
-  // Current task values, now in the account's Todoist Inbox.
-  PlanningTask task = 1;
-}
-// The mail tasks the owner saw listed when asking to delete all.
-// (-- api-linter: core::0135=disabled
-//     aip.dev/not-precedent: a batch action on external tasks, not the Delete of one resource. --)
-message DeleteMailItemsRequest {
-  // UUID reused when repeating this action: a repeat finishes the rest, deletes nothing twice and
-  // keeps a task changed since.
-  string request_id = 1 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-  // 1 to 200 Todoist task IDs.
-  repeated string task_ids = 2 [(google.api.field_behavior) = REQUIRED];
-}
-// What happened to each task asked for.
-message DeleteMailItemsResponse {
-  // Permanently deleted, or already gone.
-  repeated string deleted_task_ids = 1;
-  // Kept: changed or planned, not mail, or no longer in the mail project.
-  repeated string kept_task_ids = 2;
 }
 // Converts one native MailItem to a generic task, without a preexisting task reference.
 message ConvertMailItemRequest {
@@ -907,36 +686,13 @@ message ReadMailSettingsRequest {}
 message ReadMailSettingsResponse {
   // The owner's mail categories, in their order.
   repeated MailCategory categories = 1;
-  // Sent back by UpdateMailSettings.
+  // Sent back by UpdateMailCategories.
   string etag = 2;
   // Deprecated: the account Inbox only, for extensions before planning protocol 6; absent when
   // Todoist lists none.
   ExternalRef destination = 3;
   // Deprecated: the account Inbox only, for extensions before planning protocol 6.
   repeated MailProject projects = 4;
-}
-// Replaces the mail settings.
-// (-- api-linter: core::0134=disabled
-//     aip.dev/not-precedent: the complete bounded set is replaced atomically, by etag,
-//     with no partial resource fields or update mask. --)
-message UpdateMailSettingsRequest {
-  // At most four, each a current label (not a planning, lead or in-progress one) and a priority,
-  // no two the same.
-  repeated MailCategory categories = 1 [(google.api.field_behavior) = OPTIONAL];
-  // Deprecated and ignored: filed mail always moves to the Inbox. Still REQUIRED on the wire;
-  // native callers use UpdateMailCategories instead.
-  ExternalRef destination = 2 [(google.api.field_behavior) = REQUIRED];
-  // The etag of the settings shown.
-  string etag = 3 [(google.api.field_behavior) = REQUIRED];
-}
-// The mail settings as saved.
-message UpdateMailSettingsResponse {
-  // The saved categories, in their order.
-  repeated MailCategory categories = 1;
-  // Sent back by the next UpdateMailSettings.
-  string etag = 2;
-  // Deprecated: not used for filing. The project an extension before planning protocol 6 saved.
-  ExternalRef destination = 3;
 }
 // A new order of tasks: one Review lane's, or a parent's sub-tasks.
 message ReorderTasksRequest {
