@@ -63,7 +63,8 @@ export function useTaskActions(
     taskChanged();
     if (original) list.replace(task);
     // Membership can change with date, labels or parent. Re-read this bounded view only.
-    if (!isPlanning(route.page) && route.page !== "catalog") await list.read();
+    if (!isPlanning(route.page) && route.page !== "catalog")
+      await list.refresh();
     setNotice(original ? "Task saved" : "Task added");
     return task;
   }
@@ -131,7 +132,7 @@ export function useTaskActions(
           );
       try {
         if (!isPlanning(route.page) && route.page !== "catalog")
-          await list.read();
+          await list.refresh();
       } catch {
         warning = `${warning || confirmedMessage}. The task list could not refresh. Refresh the view.`;
       }
@@ -163,7 +164,7 @@ export function useTaskActions(
       });
       taskChanged();
       list.replace(result);
-      await list.read();
+      await list.refresh();
       setNotice("Task updated");
     } catch (reason) {
       setNotice(describeError(reason));
@@ -246,7 +247,7 @@ export function useTaskActions(
       });
       duplicateRequests.current.delete(task.id);
       taskChanged();
-      await list.read();
+      await list.refresh();
       setNotice("Task duplicated");
     } catch (reason) {
       if (
@@ -306,7 +307,7 @@ export function useTaskActions(
         task: { name: task.name, sortOrder },
         updateMask: { paths: ["sort_order"] },
       });
-      await list.read();
+      await list.refresh();
     } catch (reason) {
       setNotice(describeError(reason));
     } finally {
@@ -358,7 +359,7 @@ export function useTaskActions(
       setBusyIds(new Set());
       taskChanged();
       try {
-        await list.read();
+        await list.refresh();
       } catch {
         setNotice((current) =>
           `${current} The task list could not refresh. Refresh the view.`.trim(),

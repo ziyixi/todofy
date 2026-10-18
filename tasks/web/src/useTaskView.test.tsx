@@ -95,3 +95,46 @@ it("ignores a pending search response after the search is cleared", async () => 
   expect(result.current.tasks).toEqual([]);
   expect(result.current.error).toBe("");
 });
+
+it("after a write, keeps the pages the owner loaded instead of collapsing to the first", async () => {
+  const page = (start: number, count: number) =>
+    Array.from({ length: count }, (_, index) =>
+      create(TaskSchema, { id: `task-${String(start + index)}` }),
+    );
+  const pages: Record<
+    string,
+    { tasks: ReturnType<typeof page>; next: string }
+  > = {
+    "": { tasks: page(0, 100), next: "second" },
+    second: { tasks: page(100, 100), next: "third" },
+    third: { tasks: page(200, 20), next: "" },
+  };
+  const requests = vi
+    .spyOn(api, "listTasks")
+    .mockImplementation(async (request) => {
+      const answer = pages[request?.pageToken ?? ""]!;
+      return create(ListTasksResponseSchema, {
+        tasks: answer.tasks,
+        nextPageToken: answer.next,
+      });
+    });
+  const { result } = renderHook(() =>
+    useTaskView({ page: "inbox", id: "" }, "", "", "sort_order", false),
+  );
+  await waitFor(() => expect(result.current.tasks).toHaveLength(100));
+  await result.current.refresh();
+  expect(requests.mock.calls.map(([request]) => request?.pageToken)).toEqual([
+    "",
+    "",
+  ]);
+  await result.current.read("second");
+  await waitFor(() => expect(result.current.tasks).toHaveLength(200));
+  requests.mockClear();
+  await result.current.refresh();
+  await waitFor(() => expect(result.current.nextPage).toBe("third"));
+  expect(requests.mock.calls.map(([request]) => request?.pageToken)).toEqual([
+    "",
+    "second",
+  ]);
+  expect(result.current.tasks).toHaveLength(200);
+});

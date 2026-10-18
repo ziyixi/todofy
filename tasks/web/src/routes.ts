@@ -40,3 +40,10 @@ export function routeHref(route: Route): string {
 export function isPlanning(page: Page): page is "plan" | "focus" | "mail" {
   return page === "plan" || page === "focus" || page === "mail";
 }
+/** A deep-link parameter acts once; removing it keeps a reload or a later visit from acting on it again. */
+export function removeQueryParameter(name: string): void {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has(name)) return;
+  url.searchParams.delete(name);
+  window.history.replaceState(window.history.state, "", url);
+}

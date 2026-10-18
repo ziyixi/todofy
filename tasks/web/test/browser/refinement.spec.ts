@@ -353,8 +353,8 @@ test("ordinary task planning, effort and deadline lead are visible and survive s
     leadDays: 14,
   });
   expect(planning.get(task.id)!.flags.has("task")).toBe(true);
-  await page.reload();
-  await expect(dialog).toBeVisible();
+  // Closing the editor removes its task link, so reopen the task from a fresh page.
+  await openTask(page, task.id);
   await expect(
     dialog.getByRole("combobox", { name: "Planning stage", exact: true }),
   ).toHaveValue("committed");
@@ -453,8 +453,8 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   expect((await savedTask(request, task.id)).recurrence).toBe(
     "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR",
   );
-  await page.reload();
-  await expect(dialog).toBeVisible();
+  // Closing the editor removes its task link, so reopen the task from a fresh page.
+  await openTask(page, task.id);
   await date.click();
   await expect(repeatOptions).toHaveAttribute("aria-expanded", "false");
   await expect(repeatOptions).toHaveText("Every 2 weeks");
@@ -486,7 +486,7 @@ test("repeat controls save calendar rules while only steps expose a clock time",
     .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).recurrence).toBe("every! 2 weeks");
-  await page.reload();
+  await openTask(page, task.id);
   await date.click();
   await expect(repeatOptions).toHaveText("Every 2 weeks · after completion");
   await repeatOptions.click();
@@ -720,7 +720,7 @@ test("clearing a deadline clears its lead and Parked stays exclusive with a chos
     leadDays: 0,
   });
   expect(planning.get(task.id)!.flags.has("parked")).toBe(false);
-  await page.reload();
+  await openTask(page, task.id);
   await expect(stage).toHaveValue("committed");
   await expect(amount).toBeDisabled();
   await expect(amount).toHaveValue("");
@@ -729,7 +729,7 @@ test("clearing a deadline clears its lead and Parked stays exclusive with a chos
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
   await expect(dialog).not.toBeVisible();
-  await page.reload();
+  await openTask(page, task.id);
   await expect(parked).toBeChecked();
   await expect(stage).toHaveValue("none");
   await expect(active).not.toBeChecked();

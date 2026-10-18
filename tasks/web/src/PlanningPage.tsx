@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   PlanningApp,
   createPlanningActions,
@@ -6,6 +6,7 @@ import {
 } from "@ziyixi/planning-ui";
 import "@ziyixi/planning-ui/styles.css";
 import { api, send } from "./api";
+import { removeQueryParameter } from "./routes";
 import { usePlanView } from "./usePlanView";
 
 export default function PlanningPage({
@@ -42,6 +43,11 @@ export default function PlanningPage({
       },
     };
   }, []);
+  // The weekly review link opens the checklist once; a reload or a later visit to Plan does not.
+  const [review] = useState(
+    () => new URLSearchParams(window.location.search).get("review") === "1",
+  );
+  useEffect(() => removeQueryParameter("review"), []);
   const [snapshot, setSnapshot] = useState<PlusSnapshot>();
   const [planView, updatePlanView] = usePlanView();
   return (
@@ -49,9 +55,7 @@ export default function PlanningPage({
       <PlanningApp
         actions={actions}
         refreshRevision={mutationRevision}
-        review={
-          new URLSearchParams(window.location.search).get("review") === "1"
-        }
+        review={review}
         view={page}
         language="en"
         onOpenTask={onOpenTask}

@@ -54,6 +54,39 @@ async function createTask(
   return result.json();
 }
 
+test("a task link opens once, and closing a dialog returns focus to its opener", async ({
+  page,
+  request,
+}) => {
+  const task = await createTask(
+    request,
+    `Synthetic linked task ${crypto.randomUUID()}`,
+  );
+  await page.goto(`/?task=${task.id}#/inbox`);
+  const dialog = page.getByRole("dialog", {
+    name: "Task details",
+    exact: true,
+  });
+  await expect(dialog).toBeVisible();
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
+  await expect(dialog).not.toBeVisible();
+  expect(new URL(page.url()).searchParams.has("task")).toBe(false);
+  await page.reload();
+  const open = page
+    .locator(".task-row")
+    .filter({ has: page.getByText(task.title, { exact: true }) })
+    .locator(".task-open");
+  await expect(open).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  await open.click();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(open).toBeFocused();
+});
+
 test("quick add, edit, complete and reopen persist through page reload", async ({
   page,
 }) => {
@@ -150,7 +183,7 @@ test("steps remain attached and date preview keeps deadline independent", async 
   ).toHaveText("Dec 31");
   await dialog.getByRole("button", { name: "Save changes" }).click();
   await expect(dialog).not.toBeVisible();
-  await page.reload();
+  await page.goto(`/?task=${parent.id}#/inbox`);
   await dialog
     .getByRole("button", {
       name: "Synthetic step under two hours",
@@ -412,43 +445,34 @@ test("dragging custom order persists and selected tasks complete as a group", as
   ).not.toBeVisible();
 });
 
-test("completing a parent with a recurring subtask shows the reason inside its open editor", async ({
+test("a completion that fails shows its reason inside the open editor", async ({
   page,
   request,
 }) => {
-  const parent = await createTask(
-    request,
-    "Synthetic parent with recurring work",
-  );
-  await createTask(request, "Synthetic daily recurring child", {
-    parent_id: parent.id,
-    due_date: "2030-01-01",
-    recurrence: "every day",
-  });
-  await page.goto(`/?task=${parent.id}#/inbox`);
+  const task = await createTask(request, "Synthetic task changed elsewhere");
+  await page.goto(`/?task=${task.id}#/inbox`);
   const dialog = page.getByRole("dialog", { name: "Task details" });
-  await expect(
-    dialog.getByRole("button", {
-      name: "Synthetic daily recurring child",
-      exact: true,
-    }),
-  ).toBeVisible();
-  await dialog
-    .getByRole("button", { name: "Complete task", exact: true })
-    .click();
-  await expect(
-    dialog
-      .getByRole("alert")
-      .filter({
-        hasText:
-          "Complete recurring subtasks separately before completing their parent",
-      }),
-  ).toHaveText(
-    "Complete recurring subtasks separately before completing their parent",
+  const complete = dialog.getByRole("button", {
+    name: "Complete task",
+    exact: true,
+  });
+  await expect(complete).toBeVisible();
+  // Another window edits the task after this editor read it.
+  const { token } = await (await request.get("/api/tasks/csrf")).json();
+  const changed = await request.patch(
+    `/api/tasks/v1/tasks/${task.id}?request_id=${crypto.randomUUID()}&update_mask=title&etag=${task.etag}`,
+    {
+      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
+      data: { title: "Synthetic title changed elsewhere" },
+    },
   );
+  expect(changed.status()).toBe(200);
+  await complete.click();
+  await expect(
+    dialog.getByRole("alert").filter({ hasText: "Resource changed" }),
+  ).toBeVisible();
   await expect(dialog).toBeVisible();
-  const saved = await request.get(`/api/tasks/v1/tasks/${parent.id}`);
-  expect(saved.status()).toBe(200);
+  const saved = await request.get(`/api/tasks/v1/tasks/${task.id}`);
   expect((await saved.json()).completed ?? false).toBe(false);
 });
 

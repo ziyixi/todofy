@@ -14,10 +14,15 @@ export function Dialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
+    // Closing returns focus to whatever opened the dialog, so the keyboard keeps its place.
+    const opener = document.activeElement;
     ref.current?.showModal();
     const dialog = ref.current;
     dialog?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
-    return () => dialog?.close();
+    return () => {
+      dialog?.close();
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
   }, []);
   return (
     <dialog

@@ -48,9 +48,9 @@ it("summarizes rules in words, including the month-end rule the Worker stores", 
   expect(
     repeatLabel("RRULE:FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=30,-1;BYSETPOS=1"),
   ).toBe("Every 3 months on the 30th (or last day)");
-  expect(repeatLabel("RRULE:FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=5,-1;BYSETPOS=1")).toBe(
-    "Monthly",
-  );
+  expect(
+    repeatLabel("RRULE:FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=5,-1;BYSETPOS=1"),
+  ).toBe("Monthly");
   expect(repeatLabel("RRULE:FREQ=MONTHLY;BYMONTHDAY=-1")).toBe(
     "Monthly on the last day",
   );
@@ -60,10 +60,18 @@ it("summarizes rules in words, including the month-end rule the Worker stores", 
 });
 
 it("edits a clamped Feb 29 yearly rule as yearly and keeps its last-day fallback", () => {
-  const rule = "RRULE:FREQ=YEARLY;INTERVAL=1;BYMONTH=2;BYMONTHDAY=29,-1;BYSETPOS=1";
+  const rule =
+    "RRULE:FREQ=YEARLY;INTERVAL=1;BYMONTH=2;BYMONTHDAY=29,-1;BYSETPOS=1";
   const value = readRepeat(rule, "2028-02-29");
-  expect([value.frequency, value.month, value.monthDay]).toEqual(["yearly", 2, 29]);
+  expect([value.frequency, value.month, value.monthDay]).toEqual([
+    "yearly",
+    2,
+    29,
+  ]);
   expect(writeRepeat(value)).toBe(rule);
   expect(repeatLabel(rule)).toBe("Yearly");
-  expect(readRepeat("RRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=5,-1", "2028-02-05").preserved).toBeTruthy();
+  expect(
+    readRepeat("RRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=5,-1", "2028-02-05")
+      .preserved,
+  ).toBeTruthy();
 });

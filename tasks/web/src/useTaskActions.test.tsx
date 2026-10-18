@@ -312,7 +312,7 @@ it("settles Focus after a confirmed completion even when the task list refresh f
     tasks: [task],
     replace: vi.fn(),
     remove: vi.fn(),
-    read: vi.fn(async () => {
+    refresh: vi.fn(async () => {
       expect(settled).toBe(true);
       throw new Error("Synthetic refresh failure");
     }),
@@ -342,7 +342,9 @@ it("keeps a confirmed batch completion successful when its final refresh fails",
   vi.spyOn(focus, "settleCompletedTask").mockResolvedValue(undefined);
   const list = {
     tasks: [task],
-    read: vi.fn().mockRejectedValue(new Error("Synthetic refresh failure")),
+    refresh: vi
+      .fn()
+      .mockRejectedValue(new Error("Synthetic refresh failure")),
   } as unknown as ReturnType<typeof useTaskView>;
   const { result } = renderHook(() =>
     useTaskActions({ page: "inbox", id: "" }, "sort_order", list),

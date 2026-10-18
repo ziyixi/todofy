@@ -8,6 +8,7 @@ import type {
 import { MailCategoriesDialog } from "@ziyixi/planning-ui/MailCategories";
 import { type Catalog, describeError } from "./api";
 import { categoryActions, mailApi } from "./mail-api";
+import { removeQueryParameter } from "./routes";
 import { Dialog } from "./components/Dialog";
 import { MailRow, type MailSummary } from "./components/MailRow";
 import "./mail.css";
@@ -144,9 +145,7 @@ export default function MailPage({
   }, [linkedMail, readSummary]);
   function closeLinkedSummary() {
     setLinkedMail("");
-    const url = new URL(window.location.href);
-    url.searchParams.delete("mail");
-    window.history.replaceState(window.history.state, "", url);
+    removeQueryParameter("mail");
   }
   async function file(item: MailItem, category?: MailCategory) {
     if (busy) return;

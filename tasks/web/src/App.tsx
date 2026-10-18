@@ -23,13 +23,20 @@ import {
   peekDetailRead,
   readDetail,
 } from "./detail-read-cache";
-import { isPlanning, readRoute, type Route } from "./routes";
+import {
+  isPlanning,
+  readRoute,
+  removeQueryParameter,
+  type Route,
+} from "./routes";
 import { useTaskView } from "./useTaskView";
 import { useTaskActions } from "./useTaskActions";
 import { Sidebar } from "./components/Sidebar";
 import { SidebarResize } from "./components/SidebarResize";
 import { TaskWorkspace } from "./components/TaskWorkspace";
 import { CatalogView } from "./components/CatalogView";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { useReturnRefresh } from "./useReturnRefresh";
 const PlanningPage = lazy(() => import("./PlanningPage"));
 const MailPage = lazy(() => import("./MailPage"));
 const TaskDialog = lazy(() =>
@@ -108,6 +115,11 @@ export function App() {
   useEffect(() => {
     if (actions.mutationRevision > 0) void loadCatalog();
   }, [actions.mutationRevision, loadCatalog]);
+  // A window left open overnight, or while Todofy added tasks, shows today's list and counts on return.
+  useReturnRefresh(() => {
+    void list.refresh();
+    void loadCatalog();
+  });
   useEffect(() => {
     const change = () => {
       taskOpenSequence.current++;
@@ -258,32 +270,36 @@ export function App() {
           </div>
         )}
         {route.page === "mail" ? (
-          <Suspense
-            fallback={
-              <p className="loading-state" role="status">
-                Loading Mail…
-              </p>
-            }
-          >
-            <MailPage catalog={catalog} onTaskCreated={actions.taskChanged} />
-          </Suspense>
+          <ErrorBoundary>
+            <Suspense
+              fallback={
+                <p className="loading-state" role="status">
+                  Loading Mail…
+                </p>
+              }
+            >
+              <MailPage catalog={catalog} onTaskCreated={actions.taskChanged} />
+            </Suspense>
+          </ErrorBoundary>
         ) : isPlanning(route.page) ? (
-          <Suspense
-            fallback={
-              <p className="loading-state" role="status">
-                Loading {title}…
-              </p>
-            }
-          >
-            <PlanningPage
-              page={route.page}
-              mutationRevision={actions.mutationRevision}
-              onOpenTask={(id) => void openTask(id)}
-              onSettings={() => {
-                window.location.hash = "/plan";
-              }}
-            />
-          </Suspense>
+          <ErrorBoundary>
+            <Suspense
+              fallback={
+                <p className="loading-state" role="status">
+                  Loading {title}…
+                </p>
+              }
+            >
+              <PlanningPage
+                page={route.page}
+                mutationRevision={actions.mutationRevision}
+                onOpenTask={(id) => void openTask(id)}
+                onSettings={() => {
+                  window.location.hash = "/plan";
+                }}
+              />
+            </Suspense>
+          </ErrorBoundary>
         ) : route.page === "catalog" ? (
           <CatalogView
             catalog={catalog}
@@ -315,47 +331,52 @@ export function App() {
         )}
       </main>
       {editor && catalog.timeZone && (
-        <Suspense
-          fallback={
-            <p className="loading-state" role="status">
-              Opening task…
-            </p>
-          }
-        >
-          <TaskDialog
-            onChildAdded={actions.taskChanged}
-            key={editor.task?.id || "new"}
-            task={editor.task}
-            defaults={editor.defaults}
-            catalog={catalog}
-            onClose={() => {
-              taskOpenSequence.current++;
-              setEditor(undefined);
-            }}
-            onSave={saveTask}
-            onDelete={deleteTask}
-            onComplete={complete}
-            onOpen={(id) => void openTask(id)}
-          />
-        </Suspense>
+        <ErrorBoundary>
+          <Suspense
+            fallback={
+              <p className="loading-state" role="status">
+                Opening task…
+              </p>
+            }
+          >
+            <TaskDialog
+              onChildAdded={actions.taskChanged}
+              key={editor.task?.id || "new"}
+              task={editor.task}
+              defaults={editor.defaults}
+              catalog={catalog}
+              onClose={() => {
+                taskOpenSequence.current++;
+                setEditor(undefined);
+                removeQueryParameter("task");
+              }}
+              onSave={saveTask}
+              onDelete={deleteTask}
+              onComplete={complete}
+              onOpen={(id) => void openTask(id)}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )}
       {catalogEditor && (
-        <Suspense
-          fallback={
-            <p className="loading-state" role="status">
-              Opening editor…
-            </p>
-          }
-        >
-          <CatalogEditor
-            kind={catalogEditor.kind}
-            item={catalogEditor.item}
-            catalog={catalog}
-            projectId={route.page === "project" ? route.id : ""}
-            onClose={() => setCatalogEditor(undefined)}
-            onSaved={refreshCatalog}
-          />
-        </Suspense>
+        <ErrorBoundary>
+          <Suspense
+            fallback={
+              <p className="loading-state" role="status">
+                Opening editor…
+              </p>
+            }
+          >
+            <CatalogEditor
+              kind={catalogEditor.kind}
+              item={catalogEditor.item}
+              catalog={catalog}
+              projectId={route.page === "project" ? route.id : ""}
+              onClose={() => setCatalogEditor(undefined)}
+              onSaved={refreshCatalog}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )}
     </div>
   );
