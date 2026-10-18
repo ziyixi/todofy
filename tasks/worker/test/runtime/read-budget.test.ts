@@ -3,7 +3,11 @@ import { stdout } from 'node:process';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
 import { ProjectSchema, SectionSchema } from '@ziyixi/proto/tasks/ui/v1/task_pb';
-import { ListTasksRequestSchema } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
+import {
+  ListTasksRequestSchema,
+  UpdateProjectRequestSchema,
+  UpdateSectionRequestSchema,
+} from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { saveCatalog } from '../../src/catalog.ts';
 import { getTask, listTasks } from '../../src/task-read.ts';
 import { measuredReads, startHarness, type Harness } from './harness.ts';
@@ -124,17 +128,18 @@ test('a later page and an ID lookup seek their index', async () => {
 });
 
 async function renameSection(db: D1Database, id: string) {
+  const section = create(SectionSchema, { name: `sections/${id}`, title: `Synthetic renamed ${id}` });
+  const request = create(UpdateSectionRequestSchema, {
+    requestId: randomUUID(),
+    etag: await revision('sections', id),
+    section,
+    updateMask: { paths: ['title'] },
+  });
   return saveCatalog(
     db,
     'sections',
     SectionSchema,
-    {
-      requestId: randomUUID(),
-      id: '',
-      etag: await revision('sections', id),
-      resource: create(SectionSchema, { name: `sections/${id}`, title: `Synthetic renamed ${id}` }),
-      updateMask: { paths: ['title'] },
-    },
+    { requestId: request.requestId, id: '', etag: request.etag, resource: section, updateMask: { paths: ['title'] }, request },
     false,
     NOW,
   );
@@ -153,18 +158,25 @@ test('renaming a section or recolouring a project leaves its tasks alone', async
   const before = await revisions();
   const empty = await measure((db) => renameSection(db, 'empty-section'));
   const rename = await measure((db) => renameSection(db, 'budget-section'));
-  const etag = await revision('projects', 'budget-project');
+  const project = create(ProjectSchema, { name: 'projects/budget-project', color: '#b8255f', favorite: true });
+  const request = create(UpdateProjectRequestSchema, {
+    requestId: randomUUID(),
+    etag: await revision('projects', 'budget-project'),
+    project,
+    updateMask: { paths: ['color', 'favorite'] },
+  });
   const recolour = await measure((db) =>
     saveCatalog(
       db,
       'projects',
       ProjectSchema,
       {
-        requestId: randomUUID(),
+        requestId: request.requestId,
         id: '',
-        etag,
-        resource: create(ProjectSchema, { name: 'projects/budget-project', color: '#b8255f', favorite: true }),
+        etag: request.etag,
+        resource: project,
         updateMask: { paths: ['color', 'favorite'] },
+        request,
       },
       false,
       NOW,

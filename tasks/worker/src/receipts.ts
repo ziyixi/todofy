@@ -1,4 +1,7 @@
+import type { Message } from '@ziyixi/proto/protobuf';
 import { RpcError, Code } from '@ziyixi/proto/rpc-status';
+import { TasksUiService } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
+import { toWire } from '@ziyixi/proto/wire-json';
 import { conflict, invalid, storage } from './errors.ts';
 import type { Table } from './model.ts';
 
@@ -6,19 +9,50 @@ interface Receipt {
   fingerprint: string;
   response: string;
 }
-export async function fingerprint(method: string, input: unknown): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify([method, input]));
+/** A request's identity: `wire` is stored with new receipts; `legacy` matches receipts stored before it. */
+export interface RequestHash {
+  wire: string;
+  legacy: string;
+}
+const requestSchemas = new Map(TasksUiService.methods.map((method) => [method.input.typeName, method.input]));
+
+async function sha256(value: unknown): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
-export async function replay(db: D1Database, id: string, hash: string): Promise<string | null> {
+function withoutEmpty(value: object, keys: readonly string[]): object {
+  return Object.fromEntries(Object.entries(value).filter(([key, field]) => !(keys.includes(key) && field === '')));
+}
+/** The decoded object older receipts hashed, without the fields added since then while they are still empty. */
+function legacyForm(method: string, input: object): object {
+  const { task, resource } = input as { task?: object; resource?: object };
+  if (task && (method === 'createTask' || method === 'updateTask'))
+    return { ...input, task: withoutEmpty(task, ['kind', 'effort']) };
+  if (resource && method.endsWith(':filters')) return { ...input, resource: withoutEmpty(resource, ['color']) };
+  return input;
+}
+/**
+ * A receipt hashes its request's wire JSON. The wire form leaves unset fields out, so adding a field never
+ * changes the hash of an older request. `legacyInput` is what receipts written before the wire form hashed.
+ */
+export async function fingerprint(method: string, request: Message, legacyInput: object = request): Promise<RequestHash> {
+  const schema = requestSchemas.get(request.$typeName);
+  if (!schema) throw new TypeError(`Not a Tasks request message: ${request.$typeName}`);
+  return {
+    wire: await sha256([method, toWire(schema, request)]),
+    legacy: await sha256([method, legacyForm(method, legacyInput)]),
+  };
+}
+export async function replay(db: D1Database, id: string, hash: RequestHash): Promise<string | null> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[45][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))
     invalid('A UUID request_id is required');
   const receipt = await storage(() =>
     db.prepare('SELECT fingerprint,response FROM requests WHERE id=?').bind(id).first<Receipt>(),
   );
   if (!receipt) return null;
-  if (receipt.fingerprint !== hash) invalid('Request ID was already used for different input');
+  if (receipt.fingerprint !== hash.wire && receipt.fingerprint !== hash.legacy)
+    invalid('Request ID was already used for different input');
   return receipt.response;
 }
 
@@ -27,7 +61,7 @@ export async function commit(
   db: D1Database,
   input: {
     requestId: string;
-    hash: string;
+    hash: RequestHash;
     table: Table;
     id: string;
     revision: number | null;
@@ -46,7 +80,7 @@ export async function commit(
     )
     .bind(
       input.requestId,
-      input.hash,
+      input.hash.wire,
       input.response,
       input.now,
       input.id,

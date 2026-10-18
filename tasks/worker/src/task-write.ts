@@ -28,23 +28,10 @@ function checkEtag(row: TaskRow, etag: string): void {
   if (!etag) invalid('An etag is required');
   if (String(row.revision) !== etag) conflict();
 }
-function taskFingerprint(method: string, input: CreateTaskRequest | UpdateTaskRequest): Promise<string> {
-  // Keep receipts created before kind and effort existed replayable with their original input shape.
-  const task = input.task;
-  const hashInput = task
-    ? {
-        ...input,
-        task: Object.fromEntries(
-          Object.entries(task).filter(([key, value]) => !((key === 'kind' || key === 'effort') && value === '')),
-        ),
-      }
-    : input;
-  return fingerprint(method, hashInput);
-}
 const subtree = `WITH RECURSIVE descendants(id) AS (SELECT id FROM tasks WHERE id=? AND deleted_at IS NULL UNION ALL SELECT t.id FROM tasks t JOIN descendants d ON t.parent_id=d.id WHERE t.deleted_at IS NULL)`;
 
 export async function createTask(db: D1Database, input: CreateTaskRequest, now: number) {
-  const hash = await taskFingerprint('createTask', input);
+  const hash = await fingerprint('createTask', input);
   const previous = await replay(db, input.requestId, hash);
   if (previous !== null) return result(previous);
   if (!input.task) invalid();
@@ -105,7 +92,7 @@ export async function createTask(db: D1Database, input: CreateTaskRequest, now: 
   return result(stored);
 }
 export async function updateTask(db: D1Database, input: UpdateTaskRequest, now: number) {
-  const hash = await taskFingerprint('updateTask', input);
+  const hash = await fingerprint('updateTask', input);
   const previous = await replay(db, input.requestId, hash);
   if (previous !== null) return result(previous);
   if (!input.task) invalid();

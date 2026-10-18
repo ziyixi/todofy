@@ -1,4 +1,4 @@
-import { create } from "@ziyixi/proto/protobuf";
+import { create, type Message } from "@ziyixi/proto/protobuf";
 import { EmptySchema } from "@ziyixi/proto/protobuf/wkt";
 import { conflict, missing, precondition, storage } from "./errors.ts";
 import { resourceId, type CatalogRow, type CatalogTable } from "./model.ts";
@@ -84,7 +84,7 @@ function containedWrites(
 export async function deleteCatalog(
   db: D1Database,
   table: CatalogTable,
-  input: { name: string; etag: string; requestId: string },
+  input: Message & { name: string; etag: string; requestId: string },
   now: number,
 ) {
   const hash = await fingerprint(`delete:${table}`, input);

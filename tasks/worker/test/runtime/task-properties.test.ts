@@ -8,8 +8,7 @@ import {
   CreateTaskRequestSchema,
   UpdateTaskRequestSchema,
 } from "@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb";
-import { fingerprint } from "../../src/receipts.ts";
-import { startHarness, type Harness } from "./harness.ts";
+import { objectReceiptHash, startHarness, type Harness } from "./harness.ts";
 
 let harness: Harness;
 beforeAll(async () => {
@@ -238,7 +237,7 @@ test("create and edit receipts from before task properties existed replay withou
   const oldShape = Object.fromEntries(
     Object.entries(typed).filter(([key]) => key !== "kind" && key !== "effort"),
   );
-  const hash = await fingerprint("createTask", {
+  const hash = await objectReceiptHash("createTask", {
     ...createInput,
     task: oldShape,
   });
@@ -285,7 +284,7 @@ test("create and edit receipts from before task properties existed replay withou
       ([key]) => key !== "kind" && key !== "effort",
     ),
   );
-  const updateHash = await fingerprint("updateTask", {
+  const updateHash = await objectReceiptHash("updateTask", {
     ...updateInput,
     task: oldUpdate,
   });

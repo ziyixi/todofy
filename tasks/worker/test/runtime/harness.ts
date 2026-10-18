@@ -157,6 +157,14 @@ export async function startHarness(
 }
 export type Harness = Awaited<ReturnType<typeof startHarness>>;
 
+/** The receipt hash releases before the wire form stored: SHA-256 of the decoded input object's JSON. */
+export async function objectReceiptHash(method: string, input: unknown): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([method, input]))),
+  );
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 /** D1's own row metrics, including first() and each statement executed by batch(). */
 export function measuredReads(binding: D1Database) {
   const metrics = { statements: 0, rowsRead: 0, rowsWritten: 0 };

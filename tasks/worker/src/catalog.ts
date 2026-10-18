@@ -1,6 +1,7 @@
 import {
   create,
   type DescMessage,
+  type Message,
   type MessageShape,
 } from "@ziyixi/proto/protobuf";
 import { updatePaths } from "@ziyixi/proto/field-mask";
@@ -125,6 +126,8 @@ interface SaveInput {
   id: string;
   resource: { name: string; etag: string };
   updateMask?: { paths: string[] };
+  /** The request message itself: its wire JSON identifies the receipt. */
+  request: Message;
 }
 export async function saveCatalog<S extends DescMessage>(
   db: D1Database,
@@ -135,19 +138,12 @@ export async function saveCatalog<S extends DescMessage>(
   now: number,
 ): Promise<MessageShape<S>> {
   const resource = input.resource as unknown as Record<string, unknown>;
-  // Preserve existing request receipts: old filter messages did not contain the default color field.
-  const hashInput =
-    table === "filters" && resource.color === ""
-      ? {
-          ...input,
-          resource: Object.fromEntries(
-            Object.entries(resource).filter(([key]) => key !== "color"),
-          ),
-        }
-      : input;
+  // Receipts written before the wire hash hashed this input object without the request.
+  const { request, ...saved } = input;
   const hash = await fingerprint(
     `${createNew ? "create" : "update"}:${table}`,
-    hashInput,
+    request,
+    saved,
   );
   const previous = await replay(db, input.requestId, hash);
   if (previous !== null) return fromWire(schema, JSON.parse(previous)).message;

@@ -5,8 +5,7 @@ import { URL } from 'node:url';
 import { expect, test } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
 import { SavedFilterSchema } from '@ziyixi/proto/tasks/ui/v1/task_pb';
-import { fingerprint } from '../../src/receipts.ts';
-import { startHarness } from './harness.ts';
+import { objectReceiptHash, startHarness } from './harness.ts';
 
 test('adding filter colors preserves existing filters, request receipts and completion history', () => {
   const db = new DatabaseSync(':memory:');
@@ -65,7 +64,7 @@ test('a request made before the color field was added replays its existing recei
     const requestId = randomUUID();
     const resource: Record<string, unknown> = { ...create(SavedFilterSchema, { title: 'Synthetic old filter', query: 'today' }) };
     delete resource.color; // Exact typed input shape used before SavedFilter.color existed.
-    const hash = await fingerprint('create:filters', { requestId, id: '', resource });
+    const hash = await objectReceiptHash('create:filters', { requestId, id: '', resource });
     const previous = { id: 'previous-filter', name: 'filters/previous-filter', title: 'Synthetic old filter', query: 'today', etag: '1' };
     await harness.db.prepare('INSERT INTO filters(id,title,query,created_at,updated_at) VALUES(?,?,?,?,?)')
       .bind(previous.id, previous.title, previous.query, 1, 1).run();
