@@ -178,7 +178,7 @@ describe('业务流程', () => {
     expect(days[13]).toHaveAccessibleName('9月29日（今天，UTC）：成功，用时 6 分钟')
     expect(within(canary).getByText('14 天：13 次成功 · 1 次跳过 · 0 次失败')).toBeInTheDocument()
     expect(
-      within(canary).getByText('覆盖范围：由 Mail Hero 直接创建合成邮件，验证投递与 Todofy 处理；不经过来源转发、收件和解析，也不创建 Todoist 任务。'),
+      within(canary).getByText('覆盖范围：由 Mail Hero 直接创建合成邮件，验证投递与 Todofy 处理；不经过来源转发、收件和解析，也不创建任务。'),
     ).toBeInTheDocument()
 
     const steps = within(within(canary).getByRole('list', { name: '运行阶段' })).getAllByRole('listitem')

@@ -183,7 +183,7 @@ describe('comparison', () => {
 
   it('wants every personal value as a deploy secret, so a live plain_text one is a bindings change', async () => {
     // Every wrapper writes its personal values with --secrets-file (Mail Hero's receive address, the owner addresses,
-    // Todofy's Todoist projects), so no Worker lists a `personal` --var.
+    // Todofy's task project IDs), so no Worker lists a `personal` --var.
     expect(Object.values(DESIRED.workers).flatMap((worker) => worker.personal)).toEqual([]);
     const core = new Map((DESIRED.workers['todofy-core']?.bindings ?? []).map((b) => [b.name, b]));
     for (const name of ['TODOIST_DEFAULT_PROJECT_ID', 'TODOIST_OPS_PROJECT_ID', 'TODOIST_REVIEW_PROJECT_ID']) {

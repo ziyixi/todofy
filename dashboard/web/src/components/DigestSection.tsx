@@ -7,7 +7,7 @@ export function DigestSection({ reg, digest, now }: { reg: Reg; digest: Digest; 
   return (
     <Card id="digest" title="运维摘要" level={2}>
       <p className="small muted">
-        每次定时检查汇总警告和严重项目；项目变化时或至少每 6 小时发给 Todofy，由 Todofy 的每日提醒最多创建一条 Todoist 任务。
+        每次定时检查汇总警告和严重项目；项目变化时或至少每 6 小时发给 Todofy，由 Todofy 的每日提醒在 Tasks 中最多创建一条任务。
       </p>
       {!digest.enabled ? (
         <Notice tone="warn">Todofy 当前没有提供运维摘要功能（ops_digest），摘要暂不发送。</Notice>

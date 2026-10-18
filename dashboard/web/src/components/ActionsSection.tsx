@@ -24,7 +24,7 @@ interface Result {
 
 /** The exact confirmation texts (docs/design.md §8); tests compare them verbatim. */
 export function canaryConfirmText(remaining: number): string {
-  return `调用 Mail Hero 直接创建一封固定内容的合成测试邮件（不经过来源转发、Email Routing 收件、原件保存与解析），经正常投递链路发给 Todofy；Todofy 按正常流程调用 Gemini 摘要并校验（暂时性失败最多尝试 3 次，计入 Gemini 预算），不创建 Todoist 任务、不进入列表或提醒。本 UTC 日还可手动运行 ${remaining} 次。`
+  return `调用 Mail Hero 直接创建一封固定内容的合成测试邮件（不经过来源转发、Email Routing 收件、原件保存与解析），经正常投递链路发给 Todofy；Todofy 按正常流程调用 Gemini 摘要并校验（暂时性失败最多尝试 3 次，计入 Gemini 预算），不创建任务、不进入列表或提醒。本 UTC 日还可手动运行 ${remaining} 次。`
 }
 function errorText(error: unknown): string {
   if (error instanceof ApiError) return error.requestId ? `${error.message}（请求 ${error.requestId}）` : error.message

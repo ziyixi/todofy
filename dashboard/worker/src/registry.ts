@@ -400,17 +400,17 @@ const FLOWS: readonly FlowDef[] = [
       runner: 'mail_todofy_v1',
       stage_map: { delivery: 'deliver', consumer: 'consume' },
       fresh_hours: 30,
-      scope_note: '由 Mail Hero 直接创建合成邮件，验证投递与 Todofy 处理；不经过来源转发、收件和解析，也不创建 Todoist 任务。',
+      scope_note: '由 Mail Hero 直接创建合成邮件，验证投递与 Todofy 处理；不经过来源转发、收件和解析，也不创建任务。',
     },
   },
   {
     // docs: todofy/docs/gtd-features.md §9. The GTD loop over what Todofy already measures: mail
-    // arrives (收集), the daily Todoist snapshot counts the inbox, overdue work and still-open mail
-    // tasks, and the Sunday review task closes the week. 理清 and 组织 stay manual in Todoist.
+    // arrives (收集), the daily snapshot of Tasks counts the Inbox, overdue work and still-open mail
+    // tasks, and the Sunday review task closes the week. 理清 and 组织 stay manual in Tasks.
     id: 'gtd',
     name: 'GTD 循环',
     group: 'mail',
-    description: '邮件成为 Todoist 任务后，每日快照计数、每周日生成回顾任务；理清与组织在 Todoist 中手动完成。',
+    description: '邮件在 Tasks 的 Mail 页转成任务后，每日快照计数、每周日生成回顾任务；理清与组织在 Tasks 中手动完成。',
     order: 2,
     stages: [
       { id: 'capture', name: '收集', entry: 'todofy', workers: ['todofy-core'], signals: [], counters: ['received_24h'] },
@@ -430,7 +430,7 @@ const FLOWS: readonly FlowDef[] = [
         workers: ['todofy-core'],
         signals: [],
         counters: ['overdue', 'carryover_open'],
-        note: '在 Todoist 中手动整理',
+        note: '在 Tasks 中手动整理',
       },
       {
         id: 'reflect',
@@ -440,7 +440,7 @@ const FLOWS: readonly FlowDef[] = [
         signals: ['review_overdue', 'gtd_snapshot_stale'],
         counters: ['review_age_days', 'completed_7d'],
       },
-      { id: 'engage', name: '执行', entry: null, signals: [], note: '在 Todoist 中完成，面板之外' },
+      { id: 'engage', name: '执行', entry: null, signals: [], note: '在 Tasks 中完成，面板之外' },
     ],
     canary: null,
   },

@@ -142,7 +142,7 @@ const SIGNALS: Readonly<Record<string, string>> = {
   attention: '有需要处理的事件',
   due_backlog: '到期事件积压',
   processing_paused: '处理已暂停',
-  todoist_paused: 'Todoist 已暂停',
+  todoist_paused: '任务写入已暂停',
   todoist_blocked: 'Todoist 调用被阻断',
   gemini_budget_80: 'Gemini 预算超过 80%',
   gemini_budget_95: 'Gemini 预算超过 95%',
@@ -357,7 +357,7 @@ const MODES: Readonly<Record<string, { label: string; normal: boolean }>> = {
   backup_active: { label: '备份进行中', normal: false },
   processing_paused: { label: '暂停处理', normal: false },
   deployment_paused: { label: 'Newsletter 发布已排空或冻结', normal: false },
-  force_pause_todoist: { label: '强制暂停 Todoist', normal: false },
+  force_pause_todoist: { label: '暂停写入任务', normal: false },
   reminder_enabled: { label: '每日提醒', normal: true },
   // the watch app: its reminders go to Todofy (the TODOFY binding)
   notifications: { label: '通知 Todofy', normal: true },
@@ -417,7 +417,7 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   todoist_window_calls: { label: 'Todoist 窗口内调用', kind: 'count' },
   todoist_window_limit: { label: 'Todoist 窗口上限', kind: 'count' },
   backup_age_seconds: { label: '距上次备份', kind: 'seconds' },
-  // Todofy's GTD ledger (daily Todoist snapshot, counts only)
+  // Todofy's GTD ledger (daily snapshot of Tasks, counts only)
   inbox_open: { label: '收件箱开放', kind: 'count' },
   inbox_oldest_days: { label: '收件箱最老', kind: 'days' },
   overdue: { label: '逾期', kind: 'count' },
