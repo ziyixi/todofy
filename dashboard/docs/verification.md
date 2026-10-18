@@ -384,7 +384,7 @@ Hero with ops-v1 are live) and, where stated, the owner in a browser.
 | Drift check | the first daily check after the deploy completes (配置漂移 shows 上次完成检查, not 检查失败); after a read-only token replaces the broad one (setup.md §4), the next day's check still completes | pending |
 | Quota numbers | spot-check the page's daily numbers against the Cloudflare dashboard's usage pages for the same UTC day | pending |
 | Workers AI neurons | once the account makes Workers AI calls, the `ai_neurons` row matches the Workers AI dashboard's Neurons for the same UTC day (only the empty `[]` answer has been seen live, 2026-09-30) | pending |
-| First scheduled canary | the day's run reaches `ok` (Mail Hero delivered, Todofy summarized it, no Todoist task, not listed as mail); this does not exercise Email Routing, raw storage or parsing | pending |
+| First scheduled canary | the day's run reaches `ok` (Mail Hero delivered, Todofy summarized it, no task, not listed as mail); this does not exercise Email Routing, raw storage or parsing | pending |
 | Guard round trip | only if a real ≥ 80 % day happens, or by the owner's 强制降载 then 解除降载: both apps report the guard in `status()` and clear it | pending |
 | Digest | Todofy's next daily reminder carries the dashboard's warning/critical items, or none | pending |
 | Canary switch | once, before or after the first canary: deploy with `DASHBOARD_CANARY_ENABLED=false`, check the banner item, the disabled button and that no run starts at the canary hour; deploy again with `true` (or unset) | pending |

@@ -82,7 +82,7 @@ HTML-only 过限或清理后无可读正文会进入人工检查。Todofy 对收
 重复但 payload 哈希不同        -> 409，交由人工排查
 ```
 
-`stable_authenticated_source` 是逻辑上的 Mail Hero 实例，不是发件人 From、token 值或某次 key ID。轮换认证值仍需映射到同一 source。消费端接管后的 LLM/Todoist 重试由消费端自行处理；webhook 的重复请求只能确认同一个 inbox 项。
+`stable_authenticated_source` 是逻辑上的 Mail Hero 实例，不是发件人 From、token 值或某次 key ID。轮换认证值仍需映射到同一 source。消费端接管后的 LLM/任务写入重试由消费端自行处理；webhook 的重复请求只能确认同一个 inbox 项。
 
 Mail Hero 创建 delivery 时冻结确切 JSON bytes、目标版本与 event ID。网络超时、连接断开、408、429、5xx 的重试均复用这些 bytes/ID。消费者应从首次接收起至少保留 90 天去重账本；Mail Hero 普通重放窗口是事件创建后 30 天。旧备份恢复或跨窗口重新执行必须先对账，不能把永久 exactly-once 当作保证。
 

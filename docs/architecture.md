@@ -122,8 +122,8 @@ uses the native Inbox, with an optional category's label and priority. The task 
 planning labels and favorites with those controls while retaining their underlying identities.
 
 Imported task IDs preserve mail and FlowDay references; planning identities change provider in place.
-The explicit source selection has no failure fallback or ongoing bidirectional Todoist sync. The original
-account remains intact. See [Tasks design](../tasks/docs/design.md), [import and cutover](../tasks/docs/import.md)
+Tasks is the only task store: no code reads or writes Todoist, and the original account remains intact as the
+migration source. See [Tasks design](../tasks/docs/design.md), [import and cutover](../tasks/docs/import.md)
 and [verification](../tasks/docs/verification.md).
 
 ## Home

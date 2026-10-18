@@ -39,7 +39,7 @@ The attention strip is on every view: one quiet line "● 全部正常 · 下次
 warning) and "还有 N 项"; each item links to its target (a flow stage opens with that stage selected).
 Held switches show as a small ‖ 已暂停 tag (`attention.held`), outside the level and the badges: every
 stage `hold_signals` code of an app's current status (force-paused or owner-paused delivery, forwarding
-off, paused processing, paused Todoist, reminder off) and an owner's forced shed (`home:owner_shed`,
+off, paused processing, paused task writes, reminder off) and an owner's forced shed (`home:owner_shed`,
 which then replaces the `dashboard:guard_shed` item); an automatic shed stays an item, and
 `maintenance_mode` stays critical. The item set is otherwise v1's (digest items, `tick_stale`, usage and
 canary items, `canary_disabled` info); v2 only adds a `target`, so the digest sent to Todofy does not
@@ -111,7 +111,7 @@ Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → We
 `scheduler_stale` and `watches_broken` at 检查, `notify_unsettled` at 交给 Todofy; `maintenance_mode` is app-only),
 运维摘要 (巡检 → 提交摘要 → 每日提醒), and GTD 循环
 (收集 → 理清 → 组织 → 回顾 → 执行 ○: Todofy's `received_24h`, then the counters of its daily read-only
-Todoist snapshot, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 is done in Todoist, outside the dashboard (FlowDay has its own tile but no stage: the work itself is not something the dashboard can see);
+snapshot of Tasks, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 is done in Tasks, outside the dashboard (FlowDay has its own tile but no stage: the work itself is not something the dashboard can see);
 todofy/docs/gtd-features.md §9).
 
 `validateRegistry` (`src/registry-check.ts`, run by test/registry.test.ts; apart from the registry's data, which the
@@ -365,7 +365,7 @@ real schedule; the TODO resource identifiers of §3. The full list of pending pr
 
 A private check, inside this Worker and never on GitHub, that the live Cloudflare account still matches
 what the repository commits, and that nothing changed it outside CI since the previous check. Nothing about it is published: the result lives in `HomeState`, is shown
-only on the Access-protected Cloudflare view, and reaches Todoist only as counts in the ops digest.
+only on the Access-protected Cloudflare view, and reaches Tasks only as counts in the ops digest's reminder.
 
 **Desired state.** [`.github/scripts/drift_desired.py`](../../.github/scripts/drift_desired.py) writes
 `worker/src/drift-desired.json` from every production `wrangler.toml` (Worker names, Custom Domains,
@@ -424,7 +424,7 @@ actor address, IP, token name, id or request body. Who did it and from where sta
 A personal value is reported whatever way its wrapper sends it today; a known difference is a finding
 until the live account or the committed state changes, never a special case. A personal value a wrapper
 writes with `--secrets-file` (the owner addresses of Mail Hero, Todofy and the dashboard, Mail Hero's
-receive address and Todofy's Todoist projects; since 2026-10 every personal value) is wanted as a
+receive address and Todofy's task project IDs; since 2026-10 every personal value) is wanted as a
 `secret_text` binding, so a live `plain_text` one is a `bindings` change and no Worker lists a `personal`
 value.
 

@@ -320,9 +320,9 @@ fixture carrying the new counters.
   | --- | --- | --- | --- | --- | --- |
   | `capture` | 收集 | todofy | – | `received_24h` | |
   | `clarify` | 理清 | todofy | – | `inbox_open`, `inbox_oldest_days` | 标题仍是邮件主题；理清靠人工 |
-  | `organize` | 组织 | todofy | – | `overdue`, `carryover_open` | 在 Todoist 中手动整理 |
+  | `organize` | 组织 | todofy | – | `overdue`, `carryover_open` | 在 Tasks 中手动整理 |
   | `reflect` | 回顾 | todofy | `review_overdue`, `gtd_snapshot_stale` | `review_age_days`, `completed_7d` | |
-  | `engage` | 执行 | – | – | – | 在 Todoist 中完成，面板之外 |
+  | `engage` | 执行 | – | – | – | 在 Tasks 中完成，面板之外 |
 
   The Todofy stages name `workers: ['todofy-core']`, so `flowsOfScript('todofy-core')` gains `gtd` (the
   gateway `todofy` is unchanged). A stage `note` is shown only while the stage is unmonitored, so only

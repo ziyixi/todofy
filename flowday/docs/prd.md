@@ -3,7 +3,9 @@
 > Imported from the standalone `ziyixi/FlowDay` repository. The product sections (1–5, 11–12) still
 > describe FlowDay; the tech stack, project structure, Docker deployment and build sessions (6–10)
 > describe the pre-monorepo app. Paths such as `PRD/`, `docs/` and the root config files now live in
-> `flowday/docs/` and `flowday/web/`; see [`../README.md`](../README.md) for the current state.
+> `flowday/docs/` and `flowday/web/`; see [`../README.md`](../README.md) for the current state. Since
+> 2026-10-18 FlowDay mirrors Tasks read-only and no longer reads Todoist: where this document says Todoist,
+> the current source is Tasks ([design](design.md)).
 
 **A visual daily task flow planner with Todoist integration**
 *Spiritual successor to HourStack, rebuilt for the modern solo productivity stack*

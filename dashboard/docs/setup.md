@@ -173,7 +173,7 @@ browser. [`verification.md`](verification.md) §1d records such a run.
   UTC day (立即运行金丝雀). Mail Hero creates one synthetic `mail.received.v1` event with the `canary`
   marker directly (no Email Routing, raw storage or parsing) and delivers it to Todofy; Todofy
   summarizes it through the normal path (one Gemini call, up to 3 when a transient failure is retried,
-  counted in the Gemini budget) and records the result, never a Todoist task, list entry or reminder.
+  counted in the Gemini budget) and records the result, never a task, list entry or reminder.
   A skipped run (sending paused, no endpoint, maintenance, a missing capability) is reported in the
   digest as `canary_skipped` with its reason.
 - **Canary switch** (`DASHBOARD_CANARY_ENABLED`, `true` or `false`; required). With `false` the dashboard starts no
@@ -194,8 +194,8 @@ browser. [`verification.md`](verification.md) §1d records such a run.
 - **Digest.** Warning and critical items go to `TODOFY.reportOps` when the set changes or every 6 h
   (not during 00:00–00:20 UTC while the last report is from the previous day, so that day's reminder
   still lists it);
-  Todofy's daily attention reminder (at most one Todoist task per UTC day) carries them. The dashboard
-  creates Todoist tasks in no other way. Mail Hero's own `ALERT_WEBHOOK_URL` stays unconfigured.
+  Todofy's daily attention reminder (at most one task in Tasks per UTC day) carries them. The dashboard
+  creates tasks in no other way. Mail Hero's own `ALERT_WEBHOOK_URL` stays unconfigured.
 
 ## 7. Rollback and removal
 

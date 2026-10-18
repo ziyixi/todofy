@@ -21,5 +21,6 @@ documents is `f6c08aaf` (`git show f6c08aaf:todoist-plus/README.md`); its releas
 | `docs/todoist-plus-verification.md`, `docs/todoist-plus-planning-prototype.md`, the extension's docs | Git history at `f6c08aaf` |
 
 The nine retired RPCs and the messages only they used are listed in `proto/retired.json`. The planning store
-(`plan_*`), the Bets, dependencies, lane orders and mail summaries are unchanged: Tasks uses them. D1's
-`plus_connections` and `plus_actions` are no longer written; their rows stay until a migration drops them.
+(`plan_*`), the Bets, dependencies, lane orders and mail summaries are unchanged: Tasks uses them. Todofy's
+migration `0012_drop_plus_idle.sql` drops the idle `plus_connections` and `plus_actions` tables, and the backup
+restore tool skips them in older backups.

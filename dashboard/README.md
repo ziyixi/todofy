@@ -22,7 +22,7 @@ bundle. It reads Mail Hero and Todofy only through their `Ops` entrypoints
 Besides the page it runs four jobs:
 
 - **Canary and digest.** A daily delivery-and-processing canary (one synthetic `mail.received.v1`
-  event that Mail Hero creates directly and delivers to Todofy, no Todoist side effects) and one
+  event that Mail Hero creates directly and delivers to Todofy, no task side effects) and one
   unified ops digest that Todofy's daily reminder carries. The canary covers Mail Hero delivery →
   Todofy intake, Gemini summary and verification; it does not cover source forwarding, Email Routing,
   raw storage or MIME parsing, so a green run says nothing about whether mail is being received.
