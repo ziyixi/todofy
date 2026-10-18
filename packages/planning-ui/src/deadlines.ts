@@ -239,7 +239,7 @@ export function detailStatus(
   if (inProgress(task)) return activeStatus(days, language);
   if (days < 0) return { text: "", danger: pastDeadlineText(days, language) };
   if (!leadDays) return undefined;
-  const start = startDate(deadline, leadDays);
+  const start = startDate(deadline, leadDays, Boolean(task.kind));
   if (today < start)
     return {
       text: `${words(language).starts}: ${readableDate(start, language)}`,

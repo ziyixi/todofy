@@ -25,7 +25,6 @@ import { Sidebar } from "./components/Sidebar";
 import { SidebarResize } from "./components/SidebarResize";
 import { TaskWorkspace } from "./components/TaskWorkspace";
 import { CatalogView } from "./components/CatalogView";
-import { PlanningSettings } from "./components/PlanningSettings";
 const PlanningPage = lazy(() => import("./PlanningPage"));
 const MailPage = lazy(() => import("./MailPage"));
 const TaskDialog = lazy(() =>
@@ -69,7 +68,7 @@ export function App() {
     orderBy,
     includeCompleted,
   );
-  const actions = useTaskActions(route, orderBy, list);
+  const actions = useTaskActions(route, orderBy, list, accountToday);
   const { saveTask, deleteTask, complete, setSelected, notice, setNotice } =
     actions;
   const loadCatalog = useCallback(async () => {
@@ -90,6 +89,9 @@ export function App() {
   useEffect(() => {
     void loadCatalog();
   }, [loadCatalog]);
+  useEffect(() => {
+    if (actions.mutationRevision > 0) void loadCatalog();
+  }, [actions.mutationRevision, loadCatalog]);
   useEffect(() => {
     const change = () => {
       setRoute(readRoute());
@@ -169,8 +171,7 @@ export function App() {
               plan: "Plan",
               focus: "Focus",
               mail: "Mail",
-              catalog: "Projects, labels & filters",
-              settings: "Planning settings",
+              catalog: "Labels & filters",
             }[route.page] || "Tasks";
   const editCatalog = (kind: CatalogKind, item?: CatalogItem) =>
     setCatalogEditor({ kind, item });
@@ -249,12 +250,10 @@ export function App() {
               mutationRevision={actions.mutationRevision}
               onOpenTask={(id) => void openTask(id)}
               onSettings={() => {
-                window.location.hash = "/settings";
+                window.location.hash = "/plan";
               }}
             />
           </Suspense>
-        ) : route.page === "settings" ? (
-          <PlanningSettings />
         ) : route.page === "catalog" ? (
           <CatalogView
             catalog={catalog}

@@ -9,7 +9,7 @@ import {
   Settings,
   Square,
 } from "lucide-react";
-import { displayedTitle, taskIndex } from "./domain";
+import { displayedTitle, elapsed, taskIndex } from "./domain";
 import { canMarkActive } from "./deadlines";
 import { droppedText, releasedText, unsettled } from "./dependencies";
 import { words } from "./i18n";
@@ -29,6 +29,7 @@ import { TaskEditor } from "./TaskEditor";
 import { BoardLabels } from "./BoardLabels";
 import { WeeklyGoals } from "./WeeklyGoals";
 import { Mailbox } from "./Mailbox";
+import { localDate } from "./mail";
 import type { PlanViewPatch, PlanViewState } from "./plan-view-state";
 import type {
   Language,
@@ -318,6 +319,86 @@ export function App({
     return () => document.removeEventListener("visibilitychange", visible);
   }, [revalidate]);
   useEffect(() => {
+    if (!confirmed || !actions.readTimer) return;
+    let pending = false;
+    let cancelled = false;
+    const refreshTimer = async () => {
+      if (
+        pending ||
+        reading ||
+        writes.current.queued ||
+        document.visibilityState !== "visible"
+      )
+        return;
+      if (
+        localDate(new Date().toISOString(), confirmed.plan.timezone) !==
+        confirmed.focus.date
+      ) {
+        await revalidate();
+        return;
+      }
+      pending = true;
+      const settled = writes.current.settled;
+      const planRead = reads.current.started;
+      try {
+        const timer = await actions.readTimer!();
+        if (
+          !cancelled &&
+          settled === writes.current.settled &&
+          planRead === reads.current.started &&
+          !writes.current.queued
+        )
+          setConfirmed((current) => current && applyConfirmed(current, timer));
+      } catch (failure) {
+        if (!cancelled)
+          setError(
+            (current) =>
+              current ||
+              (failure instanceof Error ? failure.message : text.lastError),
+          );
+      } finally {
+        pending = false;
+      }
+    };
+    const interval = window.setInterval(
+      () => void refreshTimer(),
+      REREAD_AFTER_MS,
+    );
+    window.addEventListener("focus", refreshTimer);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener("focus", refreshTimer);
+    };
+  }, [
+    actions,
+    confirmed?.plan.timezone,
+    confirmed?.focus.date,
+    reading,
+    revalidate,
+    text.lastError,
+  ]);
+  useEffect(() => {
+    const timer = confirmed?.focus.timer;
+    if (
+      !timer ||
+      timer.status !== "running" ||
+      timer.mode !== "pomodoro" ||
+      !timer.targetSeconds ||
+      busy ||
+      error
+    )
+      return;
+    const remaining = timer.targetSeconds - elapsed(confirmed.focus);
+    const timeout = window.setTimeout(
+      () => {
+        void run(() => actions.timer("finish", timer.taskId, confirmed.focus));
+      },
+      Math.max(0, remaining) * 1000 + 1000,
+    );
+    return () => clearTimeout(timeout);
+  }, [actions, confirmed?.focus.timer, busy, error, run]);
+  useEffect(() => {
     onSnapshot?.(confirmed && { data: confirmed, readAt: loadedAt.current });
   }, [confirmed, onSnapshot]);
   useEffect(() => {
@@ -356,11 +437,12 @@ export function App({
     );
   }
   function commandTimer(
-    action: "start" | "pause" | "resume" | "stop",
+    action: "start" | "pause" | "resume" | "stop" | "finish",
     taskId: string,
+    targetSeconds?: number,
   ) {
     if (!data) return;
-    void run(() => actions.timer(action, taskId, data.focus));
+    void run(() => actions.timer(action, taskId, data.focus, targetSeconds));
   }
   /** Completes in Focus by default; an empty day (the weekly review task) settles no FlowDay day. */
   function complete(

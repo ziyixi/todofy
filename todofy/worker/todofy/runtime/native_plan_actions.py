@@ -15,13 +15,32 @@ async def build(core: Any, method: str, request: dict[str, Any]) -> list[dict[st
     if method == "CompleteTask":
         if (flow_date := request.get("flow_date")) and date.fromisoformat(flow_date).isoformat() != flow_date:
             raise PlusError("BAD_REQUEST")
+        target = request.get("flow_task_id") or task_id
+        if target != task_id:
+            if not request.get("task_etag"):
+                raise PlusError("BAD_REQUEST")
+            child = await _native(native_tasks.call(core.env, "GetTask", {"name": f"tasks/{plus.check_id(target)}"}))
+            if not child.get("completed"):
+                raise PlusError("ACTION_NOT_ALLOWED")
+            seen = {target}
+            for _ in range(32):
+                parent_id = child.get("parent_id")
+                if parent_id == task_id:
+                    break
+                if not parent_id or parent_id in seen:
+                    raise PlusError("ACTION_NOT_ALLOWED")
+                seen.add(parent_id)
+                child = await _native(native_tasks.call(core.env, "GetTask", {"name": f"tasks/{parent_id}"}))
+            else:
+                raise PlusError("ACTION_NOT_ALLOWED")
         return [
             {
                 "method": "CompleteTask",
                 "body": {
                     "name": f"tasks/{task_id}",
-                    "etag": task["_native_etag"],
-                    "request_id": plus.command_id(request_id),
+                    "etag": request.get("task_etag") or task["_native_etag"],
+                    # Generic Tasks already confirmed this occurrence. Its exact request replays before CAS.
+                    "request_id": request_id if request.get("task_etag") else plus.command_id(request_id),
                 },
             }
         ]
@@ -35,7 +54,7 @@ async def build(core: Any, method: str, request: dict[str, Any]) -> list[dict[st
             if not 1 <= len(title) <= 500 or (estimate is not None and not 1 <= estimate <= 10080):
                 raise PlusError("BAD_REQUEST")
             # Tasks inherits the actual parent's project; no Inbox projection is written back as a project.
-            child = {"title": title, "parent_id": task_id}
+            child = {"title": title, "parent_id": task_id, "kind": "step"}
             if estimate is not None:
                 child["duration_minutes"] = estimate
             operations.append(

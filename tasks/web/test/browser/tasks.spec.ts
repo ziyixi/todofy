@@ -112,15 +112,16 @@ test("quick add, edit, complete and reopen persist through page reload", async (
   ).toBeVisible();
 });
 
-test("nested subtasks remain attached and natural-date preview keeps deadline independent", async ({
+test("steps remain attached and date preview keeps deadline independent", async ({
   page,
   request,
 }) => {
   const parent = await createTask(request, "Synthetic parent commitment");
   await page.goto(`/?task=${parent.id}#/inbox`);
-  const dialog = page.getByRole("dialog", { name: "Task details" });
+  const dialog = page.locator("dialog.task-dialog");
+  await dialog.getByRole("button", { name: "Step", exact: true }).click();
   await dialog
-    .getByRole("textbox", { name: "New subtask" })
+    .getByRole("textbox", { name: "New step" })
     .fill("Synthetic step under two hours");
   await dialog.getByRole("button", { name: "Add", exact: true }).click();
   await dialog
@@ -161,7 +162,7 @@ test("nested subtasks remain attached and natural-date preview keeps deadline in
   await dialog.getByRole("button", { name: "Date", exact: true }).click();
   await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("14:15");
   await expect(dialog.getByLabel("Repeat", { exact: true })).toHaveValue(
-    /Tuesday/i,
+    "weekly",
   );
 });
 
@@ -169,13 +170,16 @@ test("moving a timed date preserves the local clock time across daylight saving"
   page,
   request,
 }) => {
+  const parent = await createTask(request, "Synthetic parent for a timed step");
   const task = await createTask(request, "Synthetic timed date", {
+    kind: "step",
+    parent_id: parent.id,
     due_date: "2026-10-27",
     due_datetime: "2026-10-27T18:00:00Z",
     due_timezone: "America/Los_Angeles",
   });
   await page.goto(`/?task=${task.id}#/inbox`);
-  const dialog = page.getByRole("dialog", { name: "Task details" });
+  const dialog = page.getByRole("dialog", { name: "Step details" });
   await dialog.getByRole("button", { name: "Date", exact: true }).click();
   await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("11:00");
   await dialog
@@ -424,7 +428,14 @@ test("completing a parent with a recurring subtask shows the reason inside its o
   await dialog
     .getByRole("button", { name: "Complete task", exact: true })
     .click();
-  await expect(dialog.getByRole("alert")).toHaveText(
+  await expect(
+    dialog
+      .getByRole("alert")
+      .filter({
+        hasText:
+          "Complete recurring subtasks separately before completing their parent",
+      }),
+  ).toHaveText(
     "Complete recurring subtasks separately before completing their parent",
   );
   await expect(dialog).toBeVisible();
@@ -545,12 +556,16 @@ test.describe("account calendar", () => {
       await route.continue();
     });
     await page.goto("/#/today");
-    await expect(page.getByRole("heading", { name: "Today", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Today", exact: true }),
+    ).toBeVisible();
     await page.keyboard.press("q");
     releaseCatalog();
     const dialog = page.getByRole("dialog", { name: "Add task", exact: true });
     await expect(dialog).toBeVisible();
-    await expect(page.locator(".view-subtitle")).toHaveText("Saturday, October 17");
+    await expect(page.locator(".view-subtitle")).toHaveText(
+      "Saturday, October 17",
+    );
     await dialog
       .getByLabel("Task name", { exact: true })
       .fill("Synthetic account calendar task");
@@ -564,8 +579,9 @@ test.describe("account calendar", () => {
     expect(task.due_date).toBe("2026-10-17");
     const stored = await request.get(`/api/tasks/v1/${task.name}`);
     expect((await stored.json()).due_date).toBe("2026-10-17");
-    const upcoming = page.waitForRequest((request) =>
-      new URL(request.url()).searchParams.get("view") === "upcoming",
+    const upcoming = page.waitForRequest(
+      (request) =>
+        new URL(request.url()).searchParams.get("view") === "upcoming",
     );
     await page.getByRole("link", { name: "Upcoming", exact: true }).click();
     expect(new URL((await upcoming).url()).searchParams.get("date")).toBe(

@@ -15,6 +15,7 @@ import {
 import { api, describeError } from "../api";
 import { dateLabel, shiftDate, todayDate } from "../dates";
 import { DateCalendar } from "./DateCalendar";
+import { RecurrencePicker } from "./RecurrencePicker";
 import "./property-pickers.css";
 
 interface Props {
@@ -180,7 +181,7 @@ export function SchedulePicker({
                   placeholder={
                     isDeadline
                       ? "Type a deadline"
-                      : "Type a date or repeat rule"
+                      : "Type a date"
                   }
                   value={inputText}
                   disabled={busy}
@@ -274,19 +275,12 @@ export function SchedulePicker({
                     </label>
                   )}
                   {onRecurrenceChange && (
-                    <label>
-                      <Repeat2 size={15} />
-                      <span>Repeat</span>
-                      <input
-                        aria-label="Repeat"
-                        value={recurrence || ""}
-                        placeholder="Does not repeat"
-                        disabled={busy}
-                        onChange={(event) =>
-                          onRecurrenceChange?.(event.target.value)
-                        }
-                      />
-                    </label>
+                    <RecurrencePicker
+                      value={recurrence || ""}
+                      date={value || today}
+                      disabled={busy}
+                      onChange={onRecurrenceChange}
+                    />
                   )}
                   {timeZone && (
                     <span className="schedule-zone">

@@ -38,6 +38,8 @@ def labels_from_state(state: dict[str, Any]) -> list[str]:
 def apply_plan(state: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
     if "bet" in request:
         raise ValueError("BAD_REQUEST")
+    if request.get("blocked"):
+        raise ValueError("BAD_REQUEST")
     updated = {**state}
     for field, allowed in (("stage", plus.STAGES), ("area", plus.AREAS)):
         if field in request:
@@ -45,10 +47,11 @@ def apply_plan(state: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]
                 raise ValueError("BAD_REQUEST")
             updated[field] = request[field]
     for flag in FLAG_NAMES:
-        if flag in request:
-            if not isinstance(request[flag], bool):
+        field = {"onhold": "on_hold", "task": "single_action"}.get(flag, flag)
+        if field in request:
+            if not isinstance(request[field], bool):
                 raise ValueError("BAD_REQUEST")
-            updated[flag] = request[flag]
+            updated[flag] = request[field]
     if request.get("parked"):
         updated.update(stage="none", active=False)
     return updated
@@ -57,6 +60,6 @@ def apply_plan(state: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]
 def apply_lead(state: dict[str, Any], deadline: str, days: int) -> dict[str, Any]:
     if deadline and date.fromisoformat(deadline).isoformat() != deadline:
         raise ValueError("BAD_REQUEST")
-    if days not in (0, *plus.LEADS.values()) or (days and not deadline):
+    if isinstance(days, bool) or not isinstance(days, int) or not 0 <= days <= 365 or (days and not deadline):
         raise ValueError("BAD_REQUEST")
     return {**state, "lead_days": days}

@@ -165,6 +165,28 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.nav-item .category-count {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sidebar-group-toggle svg {
+  transition: transform 120ms ease;
+}
+.sidebar-group-toggle .collapsed {
+  transform: rotate(-90deg);
+}
 .nav-item svg {
   color: #7d8274;
   stroke-width: 1.65;
@@ -199,6 +221,14 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.sidebar-archive-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  color: var(--muted);
+  font-size: 11px;
 }
 .sidebar-bottom {
   margin-top: auto;
@@ -875,6 +905,11 @@ h1 {
   align-items: center;
   min-width: 0;
 }
+.catalog-row > a > .category-count {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
 .catalog-row > a > span {
   flex: 1;
   min-width: 0;
@@ -1300,20 +1335,4 @@ h1 {
 }
 .quick-add-dialog .task-edit-main .description-input {
   min-height: 40px;
-}
-
-.planning-settings section {
-  padding: 20px 0;
-  border-bottom: 1px solid var(--line);
-}
-.planning-settings h2 {
-  font-size: 16px;
-  margin-bottom: 8px;
-}
-.planning-settings section > p {
-  font-size: 13px;
-  color: var(--muted);
-  margin-bottom: 16px;
-  line-height: 1.65;
-  max-width: 650px;
 }

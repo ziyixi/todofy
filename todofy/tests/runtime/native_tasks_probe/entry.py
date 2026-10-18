@@ -3,11 +3,13 @@
 import json
 from urllib.parse import urlsplit
 
+import js
 from workers import Response, WorkerEntrypoint
 
 from todofy.core.todoist_request import build_task_request
 from todofy.runtime import gtd, intents, native_plan, native_plus, native_tasks, plus_week, reminder, todoist
 from todofy.runtime.coordinator import TodofyCore
+from todofy.runtime.interop import to_js
 
 
 class Default(WorkerEntrypoint):
@@ -16,6 +18,19 @@ class Default(WorkerEntrypoint):
         if path == "/health":
             return Response("ok")
         data = json.loads(await request.text())
+        if path == "/native/http":
+            source = js.Request.new(
+                "https://tasks.internal" + data["path"],
+                to_js(
+                    {
+                        "method": data["method"],
+                        "headers": {"content-type": "application/json"},
+                        "body": json.dumps(data["body"]),
+                    }
+                ),
+            )
+            answer = await self.env.TASKS.fetch(source)
+            return Response(await answer.text(), status=answer.status, headers={"content-type": "application/json"})
         if path == "/native/call":
             result = await native_tasks.call(self.env, data["method"], data["body"])
         elif path == "/native/producer":

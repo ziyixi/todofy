@@ -10,7 +10,7 @@ outside the approved scope.
 | Component | Owns | Interface |
 | --- | --- | --- |
 | Tasks web | Navigation, draft forms, selection and rendered views | Generated `TasksUiService` client, same-origin owner requests |
-| Tasks Worker and D1 | Tasks, projects, sections, labels, filters, dates and completion history | Root `proto/tasks/ui/v1`, named `TasksApi`, read-only `Ops` |
+| Tasks Worker and D1 | Task/Subtask and Step content, effort, catalog, dates and completion history | Root `proto/tasks/ui/v1`, named `TasksApi`, read-only `Ops` |
 | Todofy | Mail, weekly choices, Bets, task dependencies and operation receipts | Named `Planning` binding, explicitly selected task source |
 | FlowDay | Daily queues, time blocks, timers and time records | Named native Focus binding; read-only task mirror |
 | Shared planning UI | Plan, Focus and the optional Mail shortcut editor | Caller-supplied typed transport and navigation callbacks |
@@ -25,10 +25,23 @@ the native source is activated. Existing FlowDay task IDs and planning internal 
 
 ## Task interface
 
-The task editor keeps title, description and subtasks together. Project, date, deadline, priority and labels
-are in a narrow property rail. Label search opens on demand; additional time, duration and repeat controls
-sit under Schedule options. Completed subtasks remain visible. Moving a timed date retains the local
-clock time in the task's timezone, including daylight-saving changes.
+Task and Subtask share `kind=task`; their hierarchy describes outcomes. An executable Step is a generic Task
+resource with `kind=step` and a Task/Subtask parent. A Step cannot contain children. Only Steps and Tasks
+explicitly marked Standalone action enter the day calendar. Adding an ordinary Subtask does not make it a Step.
+The editor separates Subtasks and Steps, with completion, reopening, deletion and Step estimates in each list.
+
+Title, description and visible planning options stay in the main editor. Project, Date, Deadline, Start ahead,
+priority, labels and Effort occupy the narrow property rail. Start ahead accepts days or weeks before the
+Deadline and feeds Plan Review's Start now lane; it does not schedule a notification. `effort` is empty, `deep`
+or `shallow` in Tasks and does not change ordinary labels. Clock time and estimate controls appear only for
+executable items. Untouched imported timed values remain stored.
+
+Date's Repeat controls select frequency, interval, weekdays, month day, annual month/day and whether an interval
+counts from completion. They serialize into the existing recurrence field; the Worker still advances dates.
+An imported rule the controls cannot represent stays unchanged until the owner chooses a replacement.
+Completed children remain visible. Moving an existing timed date retains its clock time in the task's
+timezone, including daylight-saving changes. Context-menu date text saves ordinary Tasks as calendar dates
+and points to task details for explicit executable timing; Steps retain the entered time.
 
 Existing descriptions render Markdown and bare links; Edit description opens the draft and Done returns to
 the preview. Save changes persists the draft. The renderer loads in its own chunk, omits remote images and
@@ -40,12 +53,30 @@ order. A normal new task appends to its sibling list inside the D1 transaction; 
 available for planning writes. Cross-project moves preserve descendants and update parents before children.
 
 Native planning stages, areas, lead windows and status flags belong to Todofy’s `plan_task_state`. Ordinary
-labels remain content classifications in Tasks. The one-time private conversion keeps each imported choice,
+labels remain content classifications in Tasks. The ordinary editor saves generic task fields first, reads a
+fresh planning etag and then saves changed planning fields. These are separate service writes: a planning
+failure does not roll back saved task content. Dependencies name prerequisite task IDs and derive Blocked
+from their completion state; there is no independent Blocked checkbox.
+
+The one-time private conversion keeps each imported choice,
 removes its technical label membership and soft-retires the exact replaced labels and filters. Native planning
 does not require label mapping or an extension connection. The retired Todoist adapter keeps its frozen role
 projection internally; it does not define the native public label catalog.
 Dragging a task into a planning day changes the FlowDay queue, preserving its task date and real deadline.
 Native task edits invalidate the mounted planning snapshot through the existing refresh path.
+
+## Focus completion
+
+Focus uses FlowDay's existing persisted timer session, pause/resume and elapsed-time rules. Completing from
+an ordinary task list or parent detail first commits through the generic Tasks API. The same completion
+request ID and original task etag then prove that occurrence to Todofy, which reuses the existing FlowDay
+settlement path. A related running or paused descendant timer keeps its original flow day during settlement;
+an unrelated timer is left alone. Without a related timer, only an existing entry in today's queue is settled.
+Completing an unplanned task does not add it to the queue.
+
+If Focus cannot confirm settlement, the task stays completed and the UI warns the owner to open Focus and
+refresh. The failure does not repeat or undo the generic completion. Tasks owns the completion receipt;
+Todofy coordinates planning and settlement; FlowDay owns the timer and time records.
 
 ## Native Mail and planning calls
 

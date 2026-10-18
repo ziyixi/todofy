@@ -11,11 +11,11 @@ import {
   Mail,
   Plus,
   Search,
-  Settings,
   Tag,
   Target,
   Timer,
 } from "lucide-react";
+import { useState } from "react";
 import type { Catalog, CatalogItem, CatalogKind } from "../api";
 import { CatalogMenu } from "./CatalogMenu";
 import { routeHref, type Route } from "../routes";
@@ -47,14 +47,45 @@ export function Sidebar({
   onCatalogSaved: () => Promise<void>;
   onError: (message: string) => void;
 }) {
+  const [projectsOpen, setProjectsOpen] = useState(() => {
+    try {
+      return localStorage.getItem("tasks.projects-open") !== "false";
+    } catch {
+      return true;
+    }
+  });
+  function toggleProjects() {
+    const next = !projectsOpen;
+    setProjectsOpen(next);
+    try {
+      localStorage.setItem("tasks.projects-open", String(next));
+    } catch {
+      // The current window still collapses when browser storage is disabled.
+    }
+  }
+  function categoryCount(view: string, id = "") {
+    const count = catalog.taskCounts?.find(
+      (item) => item.view === view && item.id === id,
+    )?.count;
+    return count === undefined ? null : (
+      <span
+        className="category-count"
+        aria-hidden="true"
+        title={`${count} open tasks`}
+      >
+        {count}
+      </span>
+    );
+  }
+  const [showArchived, setShowArchived] = useState(false);
   const active = (page: Route["page"], id = "") =>
     route.page === page && route.id === id;
   const projects = catalog.projects.filter(
-    (project) => !project.archived && !project.inbox,
+    (project) => project.archived === showArchived && !project.inbox,
   );
   function projectRows(parentId = "", depth = 0): React.ReactNode {
     return projects
-      .filter((project) => project.parentId === parentId)
+      .filter((project) => showArchived || project.parentId === parentId)
       .map((project) => (
         <div key={project.id}>
           <CatalogMenu
@@ -72,6 +103,7 @@ export function Sidebar({
               >
                 <Hash size={18} style={{ color: project.color || undefined }} />
                 <span>{project.title}</span>
+                {categoryCount("project", project.id)}
               </a>
               <CatalogMenu
                 kind="project"
@@ -82,7 +114,7 @@ export function Sidebar({
               />
             </div>
           </CatalogMenu>
-          {depth < 8 && projectRows(project.id, depth + 1)}
+          {!showArchived && depth < 8 && projectRows(project.id, depth + 1)}
         </div>
       ));
   }
@@ -143,6 +175,7 @@ export function Sidebar({
           >
             <Icon size={19} />
             <span>{title}</span>
+            {categoryCount(page)}
           </a>
         ))}
       </nav>
@@ -165,6 +198,7 @@ export function Sidebar({
                 >
                   <Icon size={17} style={{ color: color || undefined }} />
                   <span>{title}</span>
+                  {categoryCount(page, id)}
                 </a>
                 <CatalogMenu
                   kind={page}
@@ -181,8 +215,17 @@ export function Sidebar({
       <section className="sidebar-section">
         <header>
           <h2>
-            <ChevronDown size={14} />
-            My projects
+            <button
+              className="sidebar-group-toggle"
+              aria-expanded={projectsOpen}
+              onClick={toggleProjects}
+            >
+              <ChevronDown
+                size={14}
+                className={projectsOpen ? "" : "collapsed"}
+              />
+              My projects
+            </button>
           </h2>
           <button
             className="icon-button"
@@ -192,22 +235,26 @@ export function Sidebar({
             <Plus size={17} />
           </button>
         </header>
-        {projectRows()}
+        {projectsOpen && (
+          <>
+            {projectRows()}
+            <button
+              className="sidebar-archive-toggle"
+              onClick={() => setShowArchived((current) => !current)}
+            >
+              <Archive size={14} />
+              {showArchived ? "Show active projects" : "Archived projects"}
+            </button>
+          </>
+        )}
       </section>
       <div className="sidebar-bottom">
-        <a
-          className={`nav-item ${route.page === "settings" ? "selected" : ""}`}
-          href="#/settings"
-        >
-          <Settings size={18} />
-          <span>Planning settings</span>
-        </a>
         <a
           className={`nav-item ${route.page === "catalog" ? "selected" : ""}`}
           href="#/catalog"
         >
           <LayoutGrid size={18} />
-          <span>Projects, labels & filters</span>
+          <span>Labels & filters</span>
         </a>
         <a
           className={`nav-item ${route.page === "completed" ? "selected" : ""}`}

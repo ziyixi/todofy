@@ -1,7 +1,12 @@
 import type { TaskDestination } from "./destination";
 import { useEffect, useRef, useState } from "react";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
-import { displayedTitle, formattedMinutes, hasPlanningFlag } from "./domain";
+import {
+  displayedTitle,
+  formattedMinutes,
+  hasPlanningFlag,
+  isSchedulable,
+} from "./domain";
 import { detailStatus } from "./deadlines";
 import { TaskDependencies } from "./TaskDependencies";
 import { words } from "./i18n";
@@ -18,13 +23,14 @@ import type {
   TaskDependency,
 } from "./model";
 
-/** The start-ahead choice: not set, or 1, 3, 7, 14 or 30 days. */
+/** Native start-ahead accepts a calendar-day count; legacy hosts retain their saved presets. */
 export function LeadSelect({
   value,
   language,
   disabled,
   label,
   onChange,
+  customAllowed = false,
 }: {
   value: number;
   language: Language;
@@ -32,7 +38,29 @@ export function LeadSelect({
   /** The accessible name where no visible label wraps it. */
   label?: string;
   onChange: (days: number) => void;
+  customAllowed?: boolean;
 }) {
+  if (customAllowed)
+    return (
+      <span className="plus-lead-custom">
+        <input
+          type="number"
+          min={0}
+          max={365}
+          step={1}
+          value={value || ""}
+          placeholder={words(language).noLead}
+          aria-label={label}
+          disabled={disabled}
+          onChange={(event) => {
+            const days = Number(event.target.value);
+            if (Number.isInteger(days) && days >= 0 && days <= 365)
+              onChange(days);
+          }}
+        />
+        <span>{language === "zh" ? "天" : "days"}</span>
+      </span>
+    );
   return (
     <select
       className="plus-lead-select"
@@ -117,14 +145,14 @@ export function TaskEditor({
   const timingChanged = deadline !== task.deadline || lead !== task.leadDays;
   const planningConflict = Boolean(
     planning &&
-      ((stage !== savedStage &&
-        (planning.base.explicitStage ?? planning.base.stage) !== savedStage) ||
-        (area !== task.area && planning.base.area !== task.area)),
+    ((stage !== savedStage &&
+      (planning.base.explicitStage ?? planning.base.stage) !== savedStage) ||
+      (area !== task.area && planning.base.area !== task.area)),
   );
   const timingConflict = Boolean(
     timing &&
-      ((deadline !== task.deadline && timing.base.deadline !== task.deadline) ||
-        (lead !== task.leadDays && timing.base.leadDays !== task.leadDays)),
+    ((deadline !== task.deadline && timing.base.deadline !== task.deadline) ||
+      (lead !== task.leadDays && timing.base.leadDays !== task.leadDays)),
   );
   // A read may already contain the owner's choice. Once confirmed, it is no longer a draft.
   useEffect(() => {
@@ -325,26 +353,28 @@ export function TaskEditor({
             ))}
           </select>
         </label>
-        <label>
-          {text.estimate}
-          <select
-            aria-label={`${text.estimate}: ${displayedTitle(task.title)}`}
-            value={task.estimatedMinutes ?? 0}
-            disabled={busy}
-            onChange={(event) => {
-              // Read now: a queued write runs after the select shows its saved value again.
-              const minutes = Number(event.target.value);
-              void run(() => actions.updateEstimate(task.id, minutes));
-            }}
-          >
-            <option value={0}>{text.unknown}</option>
-            {estimateValues.map((value) => (
-              <option key={value} value={value}>
-                {formattedMinutes(value)}
-              </option>
-            ))}
-          </select>
-        </label>
+        {isSchedulable(task) && (
+          <label>
+            {text.estimate}
+            <select
+              aria-label={`${text.estimate}: ${displayedTitle(task.title)}`}
+              value={task.estimatedMinutes ?? 0}
+              disabled={busy}
+              onChange={(event) => {
+                // Read now: a queued write runs after the select shows its saved value again.
+                const minutes = Number(event.target.value);
+                void run(() => actions.updateEstimate(task.id, minutes));
+              }}
+            >
+              <option value={0}>{text.unknown}</option>
+              {estimateValues.map((value) => (
+                <option key={value} value={value}>
+                  {formattedMinutes(value)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <button
           className="plus-button"
           disabled={busy || !planningChanged || planningConflict}
@@ -375,8 +405,11 @@ export function TaskEditor({
         </div>
       )}
       {task.planningFlags !== undefined && (
-        <details className="plus-task-options">
-          <summary>{language === "zh" ? "任务选项" : "Task options"}</summary>
+        <section
+          className="plus-task-options"
+          aria-label={language === "zh" ? "任务选项" : "Task options"}
+        >
+          <h3>{language === "zh" ? "任务选项" : "Task options"}</h3>
           <div>
             {(
               [
@@ -384,30 +417,44 @@ export function TaskEditor({
                 ["waiting", "waiting", "Waiting", "等待中"],
                 ["routine", "routine", "Routine", "日常事务"],
                 ["onHold", "onhold", "On hold", "暂缓"],
-                ["blocked", "blocked", "Blocked", "受阻"],
-                ["singleAction", "task", "Standalone action", "独立行动"],
+                [
+                  "singleAction",
+                  "task",
+                  "Schedule as a step",
+                  "可作为步骤安排",
+                ],
               ] as const
-            ).map(([field, flag, en, zh]) => (
-              <label key={field}>
-                <input
-                  type="checkbox"
-                  checked={hasPlanningFlag(task, flag)}
-                  disabled={busy}
-                  onChange={(event) => {
-                    const update: PlanUpdate = {
-                      [field]: event.target.checked,
-                    };
-                    void run(() => actions.updateTask(task, update));
-                  }}
-                />
-                {language === "zh" ? zh : en}
-              </label>
-            ))}
+            )
+              .filter(
+                ([field]) => field !== "singleAction" || task.kind !== "step",
+              )
+              .map(([field, flag, en, zh]) => (
+                <label key={field}>
+                  <input
+                    type="checkbox"
+                    checked={hasPlanningFlag(task, flag)}
+                    disabled={busy}
+                    onChange={(event) => {
+                      const update: PlanUpdate = {
+                        [field]: event.target.checked,
+                      };
+                      void run(() => actions.updateTask(task, update));
+                    }}
+                  />
+                  {language === "zh" ? zh : en}
+                </label>
+              ))}
           </div>
-        </details>
+        </section>
       )}
       <div className="plus-section-title">
-        <h3>{text.steps}</h3>
+        <h3>
+          {task.kind
+            ? language === "zh"
+              ? "子任务与步骤"
+              : "Subtasks & steps"
+            : text.steps}
+        </h3>
         <span>
           {children.length} {text.remaining}
         </span>
@@ -423,79 +470,90 @@ export function TaskEditor({
               {displayedTitle(child.title)}
             </button>
             <span className="plus-muted">
-              {child.estimatedMinutes
-                ? `${child.estimatedMinutes} ${text.minutes}`
-                : text.unknown}
+              {!isSchedulable(child) &&
+                (language === "zh" ? "子任务" : "Subtask")}
+              {isSchedulable(child) &&
+                (child.estimatedMinutes
+                  ? `${child.estimatedMinutes} ${text.minutes}`
+                  : text.unknown)}
             </span>
-            <button
-              className="plus-icon"
-              title={plannedToday.has(child.id) ? text.inToday : text.addFocus}
-              aria-label={`${plannedToday.has(child.id) ? text.inToday : text.addFocus}: ${displayedTitle(child.title)}`}
-              disabled={busy || plannedToday.has(child.id)}
-              onClick={() => addFocus(child.id)}
-            >
-              {plannedToday.has(child.id) ? (
-                <Check size={16} />
-              ) : (
-                <Plus size={16} />
-              )}
-            </button>
+            {isSchedulable(child) && (
+              <button
+                className="plus-icon"
+                title={
+                  plannedToday.has(child.id) ? text.inToday : text.addFocus
+                }
+                aria-label={`${plannedToday.has(child.id) ? text.inToday : text.addFocus}: ${displayedTitle(child.title)}`}
+                disabled={busy || plannedToday.has(child.id)}
+                onClick={() => addFocus(child.id)}
+              >
+                {plannedToday.has(child.id) ? (
+                  <Check size={16} />
+                ) : (
+                  <Plus size={16} />
+                )}
+              </button>
+            )}
           </li>
         ))}
       </ul>
-      <label className="plus-sr-only" htmlFor="plus-step-lines">
-        {text.addSteps}
-      </label>
-      <textarea
-        id="plus-step-lines"
-        value={lines}
-        onChange={(event) => setLines(event.target.value)}
-        placeholder={text.stepPlaceholder}
-        rows={3}
-        disabled={busy}
-      />
-      <div className="plus-estimate-presets">
-        <span>{text.estimate}</span>
-        {["", "15", "30", "60", "90"].map((value) => (
-          <button
-            key={value}
-            className={minutes === value ? "selected" : ""}
-            onClick={() => setMinutes(value)}
+      {task.kind !== "step" && (
+        <>
+          <label className="plus-sr-only" htmlFor="plus-step-lines">
+            {text.addSteps}
+          </label>
+          <textarea
+            id="plus-step-lines"
+            value={lines}
+            onChange={(event) => setLines(event.target.value)}
+            placeholder={text.stepPlaceholder}
+            rows={3}
             disabled={busy}
-          >
-            {value ? `${value} ${text.minutes}` : text.unknown}
-          </button>
-        ))}
-        <input
-          className="plus-custom-minutes"
-          type="number"
-          min="1"
-          max="1440"
-          value={minutes}
-          onChange={(event) => setMinutes(event.target.value)}
-          aria-label={text.estimate}
-        />
-      </div>
-      {Number(minutes) >= 120 && (
-        <p className="plus-warning">{text.longStep}</p>
+          />
+          <div className="plus-estimate-presets">
+            <span>{text.estimate}</span>
+            {["", "15", "30", "60", "90"].map((value) => (
+              <button
+                key={value}
+                className={minutes === value ? "selected" : ""}
+                onClick={() => setMinutes(value)}
+                disabled={busy}
+              >
+                {value ? `${value} ${text.minutes}` : text.unknown}
+              </button>
+            ))}
+            <input
+              className="plus-custom-minutes"
+              type="number"
+              min="1"
+              max="1440"
+              value={minutes}
+              onChange={(event) => setMinutes(event.target.value)}
+              aria-label={text.estimate}
+            />
+          </div>
+          {Number(minutes) >= 120 && (
+            <p className="plus-warning">{text.longStep}</p>
+          )}
+          <div className="plus-editor-actions">
+            <button
+              className="plus-button plus-primary"
+              disabled={
+                busy ||
+                !drafts.length ||
+                (minutes !== "" &&
+                  (!Number.isInteger(Number(minutes)) ||
+                    Number(minutes) < 1 ||
+                    Number(minutes) > 1440))
+              }
+              onClick={() => void addSteps()}
+            >
+              <Plus size={15} />
+              {text.addSteps}
+            </button>
+          </div>
+        </>
       )}
-      <div className="plus-editor-actions">
-        <button
-          className="plus-button plus-primary"
-          disabled={
-            busy ||
-            !drafts.length ||
-            (minutes !== "" &&
-              (!Number.isInteger(Number(minutes)) ||
-                Number(minutes) < 1 ||
-                Number(minutes) > 1440))
-          }
-          onClick={() => void addSteps()}
-        >
-          <Plus size={15} />
-          {text.addSteps}
-        </button>
-      </div>
       <div className="plus-section-title">
         <h3>{text.deadline}</h3>
       </div>
@@ -513,6 +571,7 @@ export function TaskEditor({
           {text.lead}
           <LeadSelect
             value={lead}
+            customAllowed={Boolean(task.kind)}
             language={language}
             disabled={busy}
             onChange={(leadDays) => changeTiming({ leadDays })}

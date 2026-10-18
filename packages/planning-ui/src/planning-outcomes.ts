@@ -1,4 +1,9 @@
-import { effectiveArea, hasPlanningFlag, taskAncestors } from "./domain";
+import {
+  effectiveArea,
+  hasPlanningFlag,
+  isSchedulable,
+  taskAncestors,
+} from "./domain";
 import type { LaneId, Language, PlanState, PlanningTask, Stage } from "./model";
 
 const childIndexes = new WeakMap<
@@ -178,8 +183,8 @@ export function outcomeSteps(
     )
       return;
     const next = children.get(task.id) ?? [];
-    if (!next.length) leaves.push(task);
-    else next.forEach(visit);
+    if (task.kind ? isSchedulable(task) : !next.length) leaves.push(task);
+    next.forEach(visit);
   }
   visit(outcome);
   return leaves;

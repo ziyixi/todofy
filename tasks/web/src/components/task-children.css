@@ -1,0 +1,126 @@
+.task-children {
+  margin-top: 16px;
+}
+.task-child-group + .task-child-group {
+  margin-top: 19px;
+}
+.task-child-group h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.task-child-group h3 > span {
+  font-size: 11px;
+  font-weight: 400;
+  color: #888;
+}
+.child-empty {
+  margin: 5px 0 8px;
+  font-size: 12px;
+}
+.task-child-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 37px;
+  border-bottom: 1px solid #f1f1f1;
+}
+.task-child-title {
+  flex: 1;
+  min-width: 80px;
+  padding: 8px 0;
+  text-align: left;
+  font-size: 13px;
+}
+.task-child-row.is-completed .task-child-title {
+  color: #999;
+  text-decoration: line-through;
+}
+.child-estimate {
+  font-size: 11px;
+  color: #888;
+}
+.child-delete {
+  opacity: 0.6;
+}
+.task-child-row:hover .child-delete,
+.child-delete:focus-visible {
+  opacity: 1;
+}
+.child-delete-confirm {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 7px;
+  background: #fff4f2;
+  font-size: 11px;
+}
+.child-delete-confirm span {
+  flex: 1;
+}
+.task-child-add {
+  margin-top: 14px;
+}
+.child-kind-tabs {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #e3e3e3;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+.child-kind-tabs button {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #777;
+}
+.child-kind-tabs button[aria-pressed="true"] {
+  background: #eee;
+  color: #333;
+}
+.task-child-add .inline-add {
+  padding: 4px 0;
+}
+.task-child-add .inline-add select {
+  padding: 4px;
+  max-width: 65px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.task-child-title {
+  display: grid;
+  gap: 4px;
+}
+.task-child-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  font-size: 10px;
+  color: #888;
+}
+.task-child-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.task-child-meta .child-overdue {
+  color: #bd493f;
+}
+.dependency-blocked {
+  margin-left: 6px;
+  border-radius: 4px;
+  padding: 2px 5px;
+  background: #fff3dd;
+  color: #956218;
+  font-size: 10px;
+  font-weight: 400;
+}

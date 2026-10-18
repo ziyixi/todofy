@@ -57,6 +57,15 @@ reads leniently and writes. Todofy's UI calls it through `ts/http-client.ts`; th
 (openapi-typescript) are gone, and `todofy/api/machine-api-v1.openapi.yaml` keeps only the machine routes
 (webhook, newsletter, health), whose callers keep their exact bytes ([Cost](#http-apis) has the numbers).
 
+`tasks/ui/v1` defines Tasks' owner API at `/api/tasks/v1` and the generic private `TasksApi` binding.
+`Task.kind` distinguishes ordinary Tasks/Subtasks (`task`, also the meaning of a missing value) from executable
+Steps (`step`), which require a Task/Subtask parent and cannot contain children. `Task.effort` is empty, `deep`
+or `shallow`. Both fields use the existing task CRUD, update masks, change feed and duplication contract.
+Recurrence remains the existing date-rule text on the wire; structured controls produce that value and the
+Tasks Worker advances it. Catalog counts describe the default task views. Todofy's `PlanningTask` projects
+kind and effort for Plan/Focus; planning state and dependency edges remain in Todofy's API, while FlowDay
+continues to own queues, timers and time records.
+
 `ops/v1/ops.proto` is the IDL of `contracts/ops-v1` (2026-10-01) and its single source of validation: the
 value rules are options in the IDL ([Value rules](#value-rules)), the contract's JSON Schema is generated from
 it (`tools/gen_schema.py`), and every side runs on the generated code: Mail Hero, the watch app and Todofy's gateway

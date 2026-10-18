@@ -351,7 +351,7 @@ message PlanningTask {
   string deadline = 9;
   // Scheduled date or date-time; independent of deadline.
   string due = 10;
-  // 0, 1, 3, 7, 14 or 30 days; zero when absent.
+  // Native Tasks: 0 to 365 days before the deadline; zero when absent.
   int32 lead_days = 11;
   // Absent means unknown, not zero minutes.
   optional int32 estimated_minutes = 12;
@@ -382,9 +382,13 @@ message PlanningTask {
   optional double sort_order = 22;
   // Explicit saved stage for native Tasks, before the scheduled-date fallback.
   optional string explicit_stage = 23;
-  // Native planning flags: quick, waiting, parked, active, onhold, routine, task or blocked.
+  // Native planning flags: quick, waiting, parked, active, onhold, routine or task.
   // These are planning facts, not task labels. Absent for the retired Todoist adapter.
   repeated string planning_flags = 24;
+  // Native Tasks kind: task or step. Empty for the retired Todoist adapter.
+  string kind = 25;
+  // Native Tasks effort: deep, shallow or empty.
+  string effort = 26;
 }
 // Reads the singleton plan.
 message ReadPlanRequest {
@@ -402,6 +406,10 @@ message ListPlanningTasksRequest {
   int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
   // Opaque cursor from the preceding response.
   string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Restrict the page to these exact task IDs, at most 100; empty lists active tasks normally.
+  // (-- api-linter: core::0132::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: bounded identity lookup lets the task editor read one planning projection. --)
+  repeated string task_ids = 3 [(google.api.field_behavior) = OPTIONAL];
 }
 // A page is never a complete task count when next_page_token is present.
 message ListPlanningTasksResponse {
@@ -442,9 +450,9 @@ message SetTaskPlanRequest {
   optional bool routine = 11;
   // Native Tasks: hold this task outside automatic date candidates.
   optional bool on_hold = 12;
-  // Native Tasks: explicitly blocked, independently of dependency edges.
+  // Deprecated for native Tasks: blocked state comes from unresolved dependencies.
   optional bool blocked = 13;
-  // Native Tasks: a standalone action, excluded from automatic date candidates.
+  // Native Tasks: an ordinary task that can also be scheduled as a step.
   optional bool single_action = 14;
 }
 // The task after a successful planning change.
@@ -489,7 +497,7 @@ message SetTaskLeadRequest {
   ];
   // True calendar deadline YYYY-MM-DD, or empty to clear.
   string deadline = 4 [(google.api.field_behavior) = OPTIONAL];
-  // 0 clears; allowed windows are 1, 3, 7, 14 and 30 days.
+  // Native Tasks: 0 clears; any integer from 1 to 365 days. Legacy Todoist accepts its saved presets.
   int32 lead_days = 5 [(google.api.field_behavior) = OPTIONAL];
 }
 // Updated deadline and planning values.
@@ -510,6 +518,10 @@ message CompleteTaskRequest {
   // (-- api-linter: core::0142::time-field-type=disabled
   //     aip.dev/not-precedent: account-local calendar day, not an instant; same field as FlowDay. --)
   string flow_date = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Native Tasks only: replay the generic completion's exact etag and request_id before settling Focus.
+  string task_etag = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Native Tasks only: the completed task or a completed descendant whose active timer must settle.
+  string flow_task_id = 5 [(google.api.field_behavior) = OPTIONAL];
 }
 // Acknowledges the confirmed task-source command.
 message CompleteTaskResponse {

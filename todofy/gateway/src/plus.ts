@@ -51,7 +51,8 @@ function handlers(): ServiceHandlers<ShapeOf<typeof PlusService>, PlusContext> {
       catch { throw uiError('UNAVAILABLE'); }
       if ('error' in answer) throw uiError(isReason(answer.error) ? answer.error : 'INTERNAL');
       if (method.name === 'CompleteTask' && typeof wire['flow_date'] === 'string' && wire['flow_date']) {
-        try { await settleCompleted(ctx.env, wire as { request_id: string; task_id: string; flow_date: string }, ctx.internal); }
+        const settlement = { ...wire, task_id: wire['flow_task_id'] || wire['task_id'] };
+        try { await settleCompleted(ctx.env, settlement as { request_id: string; task_id: string; flow_date: string }, ctx.internal); }
         catch (error) { throw error instanceof RpcError ? error : uiError('UNAVAILABLE'); }
       }
       if (method.name === 'ReadPlan' || method.name === 'ConfirmPlanMapping' || method.name === 'UpdatePlanLabels') {

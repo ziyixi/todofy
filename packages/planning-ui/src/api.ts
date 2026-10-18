@@ -22,6 +22,7 @@ import {
 } from "@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb";
 import {
   TimerSession_State,
+  TimerSession_Mode,
   type TimerSession,
 } from "@ziyixi/proto/flowday/ui/v1/time_entry_pb";
 import type { Flow } from "@ziyixi/proto/flowday/ui/v1/flow_pb";
@@ -76,6 +77,12 @@ export function planningTask(task: ApiPlanningTask): PlanningTask {
     parentId: task.parentId,
     projectId: task.projectId,
     labels: task.labels,
+    ...(task.kind
+      ? {
+          kind: task.kind as PlanningTask["kind"],
+          effort: task.effort as PlanningTask["effort"],
+        }
+      : {}),
     ...(task.explicitStage !== undefined
       ? {
           explicitStage: task.explicitStage as PlanningTask["stage"],
@@ -229,7 +236,18 @@ function timerSnapshot(session: TimerSession): TimerSnapshot {
     (session.state !== TimerSession_State.RUNNING &&
       session.state !== TimerSession_State.PAUSED)
   )
-    return { timerEtag };
+    return {
+      timerEtag,
+      ...(session.finishedPomodoroTaskId &&
+      session.finishedPomodoroTargetSeconds
+        ? {
+            finishedPomodoro: {
+              taskId: session.finishedPomodoroTaskId,
+              targetSeconds: session.finishedPomodoroTargetSeconds,
+            },
+          }
+        : {}),
+    };
   return {
     timerEtag,
     timer: {
@@ -238,6 +256,12 @@ function timerSnapshot(session: TimerSession): TimerSnapshot {
       status:
         session.state === TimerSession_State.RUNNING ? "running" : "paused",
       elapsedSeconds: session.savedSeconds,
+      ...(session.mode === TimerSession_Mode.POMODORO
+        ? {
+            mode: "pomodoro" as const,
+            targetSeconds: session.pomodoroTargetSeconds,
+          }
+        : {}),
       startedAt: session.segmentStartTime
         ? new Date(
             Number(session.segmentStartTime.seconds) * 1000,
@@ -402,6 +426,17 @@ export function createPlanningActions(
         (todayFlow && flowPlan(todayFlow));
       if (!today) throw new Error("Today's planning day is missing.");
       await remember(Object.keys(flowTasks), true);
+      if (provider === "tasks") {
+        // Task duration is canonical; FlowDay's change feed may still be catching up.
+        for (const task of tasks) {
+          estimates[task.id] = task.estimatedMinutes ?? 0;
+          if (flowTasks[task.id])
+            flowTasks[task.id] = {
+              ...flowTasks[task.id]!,
+              estimatedMinutes: task.estimatedMinutes,
+            };
+        }
+      }
       const focus: FocusState = {
         ...today,
         ...timerSnapshot(timer),
@@ -413,7 +448,7 @@ export function createPlanningActions(
           ...planMetadata(plan),
           tasks: tasks.map((task) => {
             const synced = flowTasks[task.id];
-            return synced
+            return synced && provider !== "tasks"
               ? { ...task, estimatedMinutes: synced.estimatedMinutes }
               : task;
           }),
@@ -573,14 +608,20 @@ export function createPlanningActions(
         updateMask: { paths: ["estimated_minutes"] },
       });
     },
-    async timer(action, taskId, focus) {
+    async readTimer() {
+      return timerSnapshot(
+        await flowday.getTimerSession({ name: "timerSession" }),
+      );
+    },
+    async timer(action, taskId, focus, targetSeconds) {
       const actions = {
         start: CommandTimerRequest_Action.START,
         pause: CommandTimerRequest_Action.PAUSE,
         resume: CommandTimerRequest_Action.RESUME,
         stop: CommandTimerRequest_Action.STOP,
+        finish: CommandTimerRequest_Action.FINISH_POMODORO,
       };
-      const key = `${action}:${taskId}:${focus.timerEtag}`;
+      const key = `${action}:${taskId}:${focus.timerEtag}:${targetSeconds ?? 0}`;
       const requestId = timerRequests.get(key) ?? crypto.randomUUID();
       timerRequests.set(key, requestId);
       const confirmed = await flowday.commandTimer({
@@ -588,6 +629,9 @@ export function createPlanningActions(
         requestId,
         etag: focus.timerEtag,
         action: actions[action],
+        ...(action === "start" && targetSeconds
+          ? { mode: TimerSession_Mode.POMODORO, targetSeconds }
+          : {}),
         taskId,
         flowDate:
           action === "start" ? focus.date : focus.timer?.flowDate || focus.date,

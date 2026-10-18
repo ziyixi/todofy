@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { formattedMinutes, taskIndex } from "./domain";
 import { unplannedDue, unplannedText } from "./deadlines";
@@ -31,6 +32,7 @@ interface Props {
   onTimer: (
     action: "start" | "pause" | "resume" | "stop",
     taskId: string,
+    targetSeconds?: number,
   ) => void;
 }
 
@@ -49,6 +51,9 @@ export function FocusView({
   onTimer,
 }: Props) {
   const text = words(language);
+  const [targetSeconds, setTargetSeconds] = useState(
+    plan.nativePlanning ? 25 * 60 : 0,
+  );
   const byId = taskIndex(plan.tasks);
   const queue = focus.taskIds.filter(
     (id) => !focus.completedTaskIds.includes(id),
@@ -82,8 +87,31 @@ export function FocusView({
             {unknown} {text.unknown.toLowerCase()}
           </span>
         )}
+        {queue.length > 0 && plan.nativePlanning && (
+          <label className="plus-focus-duration">
+            {language === "zh" ? "计时" : "Timer"}
+            <select
+              aria-label={language === "zh" ? "计时方式" : "Timer duration"}
+              value={targetSeconds}
+              disabled={busy || Boolean(focus.timer)}
+              onChange={(event) => setTargetSeconds(Number(event.target.value))}
+            >
+              <option value={25 * 60}>25 min</option>
+              <option value={50 * 60}>50 min</option>
+              <option value={0}>
+                {language === "zh" ? "正计时" : "Count up"}
+              </option>
+            </select>
+          </label>
+        )}
         {queue.length > 0 && openPlan}
       </div>
+      {focus.finishedPomodoro && (
+        <p className="plus-muted" role="status">
+          {formattedMinutes(focus.finishedPomodoro.targetSeconds / 60)}{" "}
+          {language === "zh" ? "专注已完成" : "focus completed"}
+        </p>
+      )}
       {due.past + due.window > 0 && (
         <button
           className="planning-runway plus-focus-runway"
@@ -111,7 +139,11 @@ export function FocusView({
                 completing?.has(id) ||
                 pending?.has(pendingStep(focus.date, id)),
               )}
-              onTimer={onTimer}
+              onTimer={(action, taskId) =>
+                action === "start" && plan.nativePlanning
+                  ? onTimer(action, taskId, targetSeconds)
+                  : onTimer(action, taskId)
+              }
               editTask={editTask}
               complete={complete}
               index={index}

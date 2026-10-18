@@ -489,6 +489,8 @@ async def build_commands(
     request_id = request["request_id"]
     task_id = plus.check_id(request.get("task_id") or request.get("parent_id", ""))
     if method == "CompleteTask":
+        if request.get("task_etag") or request.get("flow_task_id"):
+            raise todoist.PlusError("BAD_REQUEST")
         flow_date = request.get("flow_date", "")
         if flow_date and date.fromisoformat(flow_date).isoformat() != flow_date:
             raise todoist.PlusError("BAD_REQUEST")
@@ -716,9 +718,14 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
                 current = await plan(coordinator)
                 size = request.get("page_size", 0) or 100
                 cursor = request.get("page_token", "")
-                if not 1 <= size <= 200 or len(cursor) > 2048:
+                ids = request.get("task_ids", [])
+                if not 1 <= size <= 200 or len(cursor) > 2048 or len(ids) > 100 or len(set(ids)) != len(ids):
                     raise todoist.PlusError("BAD_REQUEST")
-                tasks, following = await todoist.tasks(coordinator, size, cursor)
+                for task_id in ids:
+                    plus.check_id(task_id)
+                tasks, following = await todoist.tasks(
+                    coordinator, size, cursor, **({"ids": ",".join(ids)} if ids else {})
+                )
                 if current["enabled"] and not backup.holds_ledger(env, coordinator.sql, now_s()):
                     await plus_week.remember_page(env, tasks, current["week_start"], current["labels"])
                 response = {

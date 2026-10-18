@@ -139,6 +139,7 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
         ...data.focus,
         timerEtag: confirmed.timerEtag,
         timer: confirmed.timer,
+        finishedPomodoro: confirmed.finishedPomodoro,
       },
     };
   if ("deletedTaskIds" in confirmed) {

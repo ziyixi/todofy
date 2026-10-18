@@ -9,17 +9,24 @@ import {
 } from "./api";
 import { isPlanning, type Route } from "./routes";
 import { scheduledDate, scheduledTime } from "./task-schedule";
+import { clearTaskStartAhead, taskScheduleFromText } from "./task-date-actions";
+import { todayDate } from "./dates";
+import { settleCompletedTask } from "./task-completion-focus";
 import type { useTaskView } from "./useTaskView";
 
 export function useTaskActions(
   route: Route,
   orderBy: string,
   list: ReturnType<typeof useTaskView>,
+  today = todayDate(),
 ) {
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [notice, setNotice] = useState("");
   const [mutationRevision, setMutationRevision] = useState(0);
+  const completionRequests = useRef(
+    new Map<string, { requestId: string; etag: string }>(),
+  );
   const duplicateRequests = useRef(
     new Map<string, { requestId: string; etag: string }>(),
   );
@@ -42,12 +49,9 @@ export function useTaskActions(
     taskChanged();
     if (original) list.replace(task);
     // Membership can change with date, labels or parent. Re-read this bounded view only.
-    if (
-      !isPlanning(route.page) &&
-      !["catalog", "settings"].includes(route.page)
-    )
-      await list.read();
+    if (!isPlanning(route.page) && route.page !== "catalog") await list.read();
     setNotice(original ? "Task saved" : "Task added");
+    return task;
   }
   async function deleteTask(
     task: Task,
@@ -62,29 +66,62 @@ export function useTaskActions(
     list.remove(task.id);
     setNotice("Task deleted");
   }
+  async function writeCompletion(task: Task, reopen = false) {
+    const key = `${reopen ? "reopen" : "complete"}:${task.id}`;
+    let completion = completionRequests.current.get(key);
+    if (!completion) {
+      completion = { requestId: crypto.randomUUID(), etag: task.etag };
+      completionRequests.current.set(key, completion);
+    }
+    try {
+      const result = await (reopen ? api.reopenTask : api.completeTask)({
+        name: task.name,
+        etag: completion.etag,
+        requestId: completion.requestId,
+      });
+      completionRequests.current.delete(key);
+      return { result, completion };
+    } catch (error) {
+      if (
+        error instanceof RpcStatusError &&
+        [400, 409].includes(error.status.httpStatus)
+      )
+        completionRequests.current.delete(key);
+      throw error;
+    }
+  }
   async function complete(task: Task): Promise<string | undefined> {
     setBusyIds((current) => new Set([...current, task.id]));
     setNotice("");
     try {
-      const result = await (task.completed ? api.reopenTask : api.completeTask)(
-        { name: task.name, etag: task.etag, requestId: crypto.randomUUID() },
+      const { result, completion } = await writeCompletion(
+        task,
+        task.completed,
       );
       taskChanged();
       if (result.completed === (route.page === "completed"))
         list.replace(result);
       else list.remove(task.id);
-      if (
-        !isPlanning(route.page) &&
-        !["catalog", "settings"].includes(route.page)
-      )
-        await list.read();
-      setNotice(
-        task.completed
-          ? "Task reopened"
-          : result.recurrence
-            ? "Occurrence completed · next date scheduled"
-            : "Task completed",
-      );
+      const confirmedMessage = task.completed
+        ? "Task reopened"
+        : result.recurrence
+          ? "Occurrence completed · next date scheduled"
+          : "Task completed";
+      let warning = task.completed
+        ? undefined
+        : await settleCompletedTask(
+            task,
+            completion.requestId,
+            completion.etag,
+            today,
+          );
+      try {
+        if (!isPlanning(route.page) && route.page !== "catalog")
+          await list.read();
+      } catch {
+        warning = `${warning || confirmedMessage}. The task list could not refresh. Refresh the view.`;
+      }
+      setNotice(warning || confirmedMessage);
       return undefined;
     } catch (reason) {
       const message = describeError(reason);
@@ -145,23 +182,28 @@ export function useTaskActions(
     );
   }
   async function parseTaskSchedule(task: Task, text: string, timeZone: string) {
-    const result = await api.previewDate({
-      text,
-      timeZone: task.dueTimezone || timeZone,
-    });
-    return patchTask(
-      task,
-      {
-        dueDate: result.dueDate,
-        dueDatetime: result.dueDatetime,
-        dueTimezone: result.dueTimezone,
-        recurrence: result.recurrence,
-      },
-      ["due_date", "due_datetime", "due_timezone", "recurrence"],
-    );
+    const result = await taskScheduleFromText(task, text, timeZone);
+    await patchTask(task, result.values, [
+      "due_date",
+      "due_datetime",
+      "due_timezone",
+      "recurrence",
+    ]);
+    if (result.ignoredClock)
+      setNotice(
+        "Date saved. Set a time on a Step or Standalone action in task details.",
+      );
   }
-  function setDeadline(task: Task, deadline: string) {
-    return patchTask(task, { deadline }, ["deadline"]);
+  async function setDeadline(task: Task, deadline: string) {
+    await patchTask(task, { deadline }, ["deadline"]);
+    if (deadline || task.completed) return;
+    try {
+      await clearTaskStartAhead(task.id);
+    } catch {
+      setNotice(
+        "Deadline saved. Start-ahead could not be cleared. Reopen the task to check it.",
+      );
+    }
   }
   function moveTask(task: Task, projectId: string, sectionId: string) {
     return patchTask(
@@ -261,15 +303,19 @@ export function useTaskActions(
     const targets = list.tasks.filter((task) => selected.has(task.id));
     setBusyIds(new Set(targets.map((task) => task.id)));
     setNotice("");
+    let focusWarning = "";
     try {
       for (const task of targets) {
-        if (action === "complete")
-          await api.completeTask({
-            name: task.name,
-            etag: task.etag,
-            requestId: crypto.randomUUID(),
-          });
-        else
+        if (action === "complete") {
+          const { completion } = await writeCompletion(task);
+          const warning = await settleCompletedTask(
+            task,
+            completion.requestId,
+            completion.etag,
+            today,
+          );
+          if (warning) focusWarning = warning;
+        } else
           await api.updateTask({
             etag: task.etag,
             task: {
@@ -287,15 +333,23 @@ export function useTaskActions(
         );
       }
       setNotice(
-        action === "complete"
-          ? "Selected tasks completed"
-          : "Selected tasks moved",
+        focusWarning ||
+          (action === "complete"
+            ? "Selected tasks completed"
+            : "Selected tasks moved"),
       );
     } catch (reason) {
       setNotice(describeError(reason));
     } finally {
       setBusyIds(new Set());
-      await list.read();
+      taskChanged();
+      try {
+        await list.read();
+      } catch {
+        setNotice((current) =>
+          `${current} The task list could not refresh. Refresh the view.`.trim(),
+        );
+      }
     }
   }
   return {

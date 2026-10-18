@@ -10,7 +10,7 @@ export type ActionMessage = {
     kind: "action";
     protocol: typeof PLANNING_PROTOCOL;
     method: Key;
-    args: Parameters<PlusActions[Key]>;
+    args: Parameters<NonNullable<PlusActions[Key]>>;
   };
 }[ActionName];
 export type BackgroundMessage =

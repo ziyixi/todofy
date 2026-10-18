@@ -38,6 +38,8 @@ export interface TaskRow extends BaseRow {
   deadline: string;
   duration_minutes: number;
   recurrence: string;
+  kind: string;
+  effort: string;
   completed: number;
   completed_at: number | null;
   project_archived?: number;
@@ -70,6 +72,8 @@ export const taskColumns = [
   'deadline',
   'duration_minutes',
   'recurrence',
+  'kind',
+  'effort',
 ] as const;
 export const catalogColumns = {
   projects: ['title', 'parent_id', 'color', 'favorite', 'archived', 'inbox', 'sort_order'],
@@ -137,6 +141,8 @@ export function taskMessage(row: TaskRow): Task {
     deadline: row.deadline,
     durationMinutes: row.duration_minutes,
     recurrence: row.recurrence,
+    kind: row.kind || 'task',
+    effort: row.effort || '',
     completed: row.completed === 1,
     archived: row.project_archived === 1,
     parentTitle: row.parent_title ?? '',

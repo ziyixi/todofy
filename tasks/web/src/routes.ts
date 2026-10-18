@@ -7,8 +7,7 @@ export type ListView =
   | "label"
   | "filter"
   | "completed";
-export type Page =
-  ListView | "plan" | "focus" | "mail" | "catalog" | "settings";
+export type Page = ListView | "plan" | "focus" | "mail" | "catalog";
 export interface Route {
   page: Page;
   id: string;
@@ -26,12 +25,12 @@ const pages: ReadonlySet<string> = new Set([
   "focus",
   "mail",
   "catalog",
-  "settings",
 ]);
 export function readRoute(hash = window.location.hash): Route {
   const [page = "today", id = ""] = hash.replace(/^#\/?/, "").split("/");
   return {
-    page: pages.has(page) ? (page as Page) : "today",
+    page:
+      page === "settings" ? "plan" : pages.has(page) ? (page as Page) : "today",
     id: decodeURIComponent(id),
   };
 }

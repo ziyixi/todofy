@@ -13,6 +13,7 @@ import {
 } from "@ziyixi/proto/tasks/ui/v1/task_pb";
 import { CatalogSchema } from "@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb";
 import { taskFilter } from "./filters.ts";
+import { catalogCounts } from "./catalog-counts.ts";
 import {
   catalogColumns,
   catalogMessage,
@@ -33,7 +34,7 @@ const schemas = {
   labels: LabelSchema,
   filters: SavedFilterSchema,
 } as const;
-export async function getCatalog(db: D1Database, zone: string) {
+export async function getCatalog(db: D1Database, zone: string, now = Date.now()) {
   const tables = Object.keys(schemas) as CatalogTable[];
   const results = await storage(() =>
     db.batch(
@@ -60,6 +61,7 @@ export async function getCatalog(db: D1Database, zone: string) {
     labels: labels.map((r) => catalogMessage("labels", r)),
     filters: filters.map((r) => catalogMessage("filters", r)),
     timeZone: zone,
+    taskCounts: await catalogCounts(db, { projects, labels, filters }, zone, now),
   });
 }
 export function validateCatalogFields(

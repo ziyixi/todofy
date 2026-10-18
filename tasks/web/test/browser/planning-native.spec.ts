@@ -9,6 +9,7 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
   const tasks: Record<string, unknown>[] = [
     {
       id: "native-outcome",
+      kind: "task",
       title: "Synthetic native weekly outcome",
       area: "work",
       stage: "committed",
@@ -19,6 +20,7 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
     },
     {
       id: "native-step",
+      kind: "step",
       title: "Synthetic native next step",
       parent_id: "native-outcome",
       area: "unassigned",
@@ -208,13 +210,9 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
   expect(writes[1]).toMatchObject({ task_id: "native-outcome", quick: true });
   expect(writes[1]).not.toHaveProperty("labels");
   await details.getByRole("button", { name: "Close", exact: true }).click();
-  await page
-    .getByRole("link", { name: "Planning settings", exact: true })
-    .click();
   await expect(
-    page.getByRole("link", { name: "Open Plan", exact: true }),
-  ).toBeVisible();
-  await expect(page.getByRole("combobox")).toHaveCount(0);
+    page.getByRole("link", { name: "Planning settings", exact: true }),
+  ).toHaveCount(0);
   await page.getByRole("link", { name: "Focus", exact: true }).click();
   const step = page.locator('.plus-focus-slot[data-task-id="native-step"]');
   await expect(step).toContainText("Synthetic native next step");

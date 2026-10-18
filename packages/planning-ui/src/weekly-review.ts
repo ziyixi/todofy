@@ -1,4 +1,4 @@
-import { addDays, hasPlanningFlag } from "./domain";
+import { addDays, hasPlanningFlag, isSchedulable } from "./domain";
 import { localDate } from "./mail";
 import {
   committedOutcomes,
@@ -164,7 +164,10 @@ export function quickTray(
   const shown = new Set(steps.map((task) => task.id));
   return quickTasks(plan, today).filter(
     (task) =>
-      !queued.has(task.id) && !shown.has(task.id) && !isParked(task, plan),
+      isSchedulable(task) &&
+      !queued.has(task.id) &&
+      !shown.has(task.id) &&
+      !isParked(task, plan),
   );
 }
 

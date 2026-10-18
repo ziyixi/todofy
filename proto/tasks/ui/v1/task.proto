@@ -79,6 +79,10 @@ message Task {
   string parent_title = 27 [(google.api.field_behavior) = OUTPUT_ONLY];
   // First 240 characters for list rows; GetTask returns the full description.
   string description_preview = 28 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // task or step; empty on create means task. A step belongs to a task and has no children.
+  string kind = 29 [(google.api.field_behavior) = OPTIONAL];
+  // deep or shallow; empty means no effort preference.
+  string effort = 30 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // The owner's project.

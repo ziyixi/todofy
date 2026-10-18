@@ -10,3 +10,5 @@ export {
   type PlanViewState,
   type PlanViewPatch,
 } from "./plan-view-state";
+
+export { TaskDependencies } from "./TaskDependencies";

@@ -8,7 +8,15 @@ import type {
 
 /** Native planning flags never derive from ordinary tags. Legacy hosts still use their labels. */
 export function hasPlanningFlag(task: PlanningTask, flag: string): boolean {
+  if (flag === "blocked" && task.kind) return false;
   return (task.planningFlags ?? task.labels).includes(flag);
+}
+
+/** Only explicit steps and ordinary tasks deliberately made standalone enter the day calendar. */
+export function isSchedulable(task: PlanningTask): boolean {
+  return task.kind
+    ? task.kind === "step" || hasPlanningFlag(task, "task")
+    : true;
 }
 
 const indexes = new WeakMap<
@@ -126,24 +134,30 @@ export function taskFamilyColor(
   return colors[hash % colors.length]!;
 }
 
-export function startDate(deadline: string, leadDays: number): string {
+export function startDate(
+  deadline: string,
+  leadDays: number,
+  native = false,
+): string {
   if (!deadline || leadDays <= 0) return "";
   const date = new Date(`${deadline}T12:00:00Z`);
   if (!Number.isFinite(date.getTime())) return "";
   // Todoist deadline-before filters use a strict upper bound.
-  date.setUTCDate(date.getUTCDate() - (leadDays - 1));
+  date.setUTCDate(date.getUTCDate() - (leadDays - (native ? 0 : 1)));
   return date.toISOString().slice(0, 10);
 }
 
 export function elapsed(focus: FocusState, now = Date.now()): number {
   const timer = focus.timer;
   if (!timer) return 0;
-  return (
+  const seconds =
     timer.elapsedSeconds +
     (timer.status === "running"
       ? Math.max(0, Math.floor((now - Date.parse(timer.startedAt)) / 1000))
-      : 0)
-  );
+      : 0);
+  return timer.mode === "pomodoro" && timer.targetSeconds
+    ? Math.min(seconds, timer.targetSeconds)
+    : seconds;
 }
 
 export function duration(seconds: number): string {

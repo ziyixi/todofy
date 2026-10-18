@@ -32,3 +32,14 @@ width and spacing.
 
 Run `npm ci`, `npm run typecheck`, and `npm test`. Todoist Plus's existing unit and packaged-browser
 suite continues to exercise these same extracted components through its compatibility entrypoints.
+
+Native Tasks distinguishes ordinary tasks/subtasks from executable steps. Only `kind=step` or a task explicitly
+marked **Schedule as a step** appears among calendar candidates. Dependencies determine blocked status;
+Waiting remains available for something outside the task graph. The native start-ahead field accepts 0–365
+calendar days and Start now opens exactly that many days before the deadline.
+
+Focus uses FlowDay's existing server session and command receipts for count-up and 25/50-minute timers.
+Reloads hydrate the same session; pause/resume keeps its original flow date. Visible pages read only the timer
+once per minute and refresh the task view at account midnight. Finishing a pomodoro uses the existing atomic
+FlowDay finish command, which caps recorded time even if the browser was closed when the countdown ended.
+Native estimates come from Tasks while FlowDay's cached task feed catches up.

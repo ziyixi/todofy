@@ -39,6 +39,8 @@ def task(row: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": row["id"],
         "content": row["title"],
+        "kind": row.get("kind") or "task",
+        "effort": row.get("effort", ""),
         "description": row.get("description", row.get("description_preview", "")),
         "project_id": row.get("project_id") or inbox,
         "section_id": row.get("section_id") or None,

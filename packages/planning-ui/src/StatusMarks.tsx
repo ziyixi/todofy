@@ -13,7 +13,12 @@ export function Elapsed({ focus }: { focus: FocusState }) {
     const id = window.setInterval(() => tick((value) => value + 1), 1000);
     return () => clearInterval(id);
   }, [running]);
-  return duration(elapsed(focus));
+  const seconds = elapsed(focus);
+  return duration(
+    focus.timer?.mode === "pomodoro" && focus.timer.targetSeconds
+      ? Math.max(0, focus.timer.targetSeconds - seconds)
+      : seconds,
+  );
 }
 
 /** Marks a card whose change is not yet confirmed, or not yet shown by a re-read. */

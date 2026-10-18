@@ -284,11 +284,11 @@ test("sidebar and catalog menus save favorite and archive changes without deleti
       .locator(".sidebar")
       .getByRole("link", { name: project.title, exact: true }),
   ).toHaveCount(0);
-  await page.goto("/#/catalog");
+  await page.goto("/#/inbox");
   await page
-    .getByRole("button", { name: "Show archived", exact: true })
+    .getByRole("button", { name: "Archived projects", exact: true })
     .click();
-  const archived = page.locator(".catalog-row").filter({
+  const archived = page.locator(".sidebar-context-row").filter({
     has: page.getByRole("link", { name: project.title, exact: true }),
   });
   await archived
@@ -298,6 +298,7 @@ test("sidebar and catalog menus save favorite and archive changes without deleti
     })
     .click();
   await page.getByRole("menuitem", { name: "Unarchive", exact: true }).click();
+  await page.getByRole("button", { name: "Show active projects", exact: true }).click();
   await expect(
     page
       .locator(".sidebar")

@@ -1,19 +1,13 @@
-import { useEffect, useState, type FormEvent } from "react";
-import {
-  CalendarDays,
-  Check,
-  ChevronRight,
-  Circle,
-  Flag,
-  Plus,
-  Repeat2,
-  Trash2,
-} from "lucide-react";
+import { useRef, useState, type FormEvent } from "react";
+import { Trash2 } from "lucide-react";
 import type { Catalog, Task, TaskDraft } from "../api";
 import { api, describeError } from "../api";
 import { Dialog } from "./Dialog";
 import { TaskFields } from "./TaskFields";
-import { dateLabel, todayDate } from "../dates";
+import { TaskChildren } from "./TaskChildren";
+import { TaskPlanningFields } from "./TaskPlanningFields";
+import { TaskDependencyFields } from "./TaskDependencyFields";
+import { useTaskPlanning } from "../useTaskPlanning";
 import { scheduledDate, scheduledTime } from "../task-schedule";
 import "./color-detail.css";
 
@@ -36,13 +30,13 @@ export function TaskDialog({
     draft: TaskDraft,
     original?: Task,
     requestId?: string,
-  ) => Promise<void>;
+  ) => Promise<Task>;
   onDelete: (task: Task) => Promise<void>;
   onOpen: (id: string) => void;
   onComplete: (task: Task) => Promise<string | undefined>;
   onChildAdded: () => void;
 }) {
-  const today = todayDate(new Date(), catalog.timeZone || undefined);
+  const [currentTask, setCurrentTask] = useState(task);
   const [draft, setDraft] = useState<TaskDraft>(() => ({
     title: task?.title ?? "",
     description: task?.description ?? "",
@@ -57,47 +51,28 @@ export function TaskDialog({
     deadline: task?.deadline ?? "",
     durationMinutes: task?.durationMinutes ?? 0,
     recurrence: task?.recurrence ?? "",
+    kind: task?.kind || "task",
+    effort: task?.effort || "",
     ...defaults,
   }));
+  const planning = useTaskPlanning(task);
   const [busy, setBusy] = useState(false);
-  const [saveRequestId] = useState(() => crypto.randomUUID());
-  const [childRequestId, setChildRequestId] = useState(() =>
-    crypto.randomUUID(),
-  );
+  const saveRequestId = useRef(crypto.randomUUID());
   const [error, setError] = useState("");
-  const [children, setChildren] = useState<Task[]>([]);
-  const [childTitle, setChildTitle] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [preview, setPreview] = useState("");
   const [dateText, setDateText] = useState("");
-  const [childPage, setChildPage] = useState("");
-  useEffect(() => {
-    if (!task) return;
-    let current = true;
-    void api
-      .listTasks({ parentId: task.id, pageSize: 100, includeCompleted: true })
-      .then((result) => {
-        if (current) {
-          setChildren(result.tasks);
-          setChildPage(result.nextPageToken);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (current) setError(describeError(reason));
-      });
-    return () => {
-      current = false;
-    };
-  }, [task]);
+  const isStep = draft.kind === "step";
+  const executable = isStep || planning.draft.singleAction;
   const patch = <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!draft.title.trim()) return;
+    if (!draft.title.trim() || busy) return;
     setBusy(true);
     setError("");
     try {
-      await onSave(
+      const saved = await onSave(
         {
           ...draft,
           title: draft.title.trim(),
@@ -105,57 +80,20 @@ export function TaskDialog({
             ? draft.dueTimezone || catalog.timeZone
             : "",
         },
-        task,
-        saveRequestId,
+        currentTask,
+        saveRequestId.current,
       );
+      setCurrentTask(saved);
+      saveRequestId.current = crypto.randomUUID();
+      if (!saved.completed) await planning.save(saved.id, draft.deadline);
+      onChildAdded();
       onClose();
     } catch (reason) {
-      setError(describeError(reason));
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function addChild() {
-    if (!task || !childTitle.trim()) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api.createTask({
-        requestId: childRequestId,
-        taskId: childRequestId,
-        task: {
-          title: childTitle.trim(),
-          parentId: task.id,
-          projectId: task.projectId,
-          sectionId: task.sectionId,
-          priority: 4,
-        },
-      });
-      setChildren((current) => [...current, result]);
-      onChildAdded();
-      setChildTitle("");
-      setChildRequestId(crypto.randomUUID());
-    } catch (reason) {
-      setError(describeError(reason));
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function finishChild(child: Task) {
-    setBusy(true);
-    setError("");
-    try {
-      const message = await onComplete(child);
-      if (message) {
-        setError(message);
-        return;
-      }
-      const refreshed = await api.getTask({ name: child.name });
-      setChildren((current) =>
-        current.map((item) => (item.id === child.id ? refreshed : item)),
+      setError(
+        reason instanceof Error && !("status" in reason)
+          ? reason.message
+          : describeError(reason),
       );
-    } catch (reason) {
-      setError(describeError(reason));
     } finally {
       setBusy(false);
     }
@@ -172,8 +110,8 @@ export function TaskDialog({
       setDraft((current) => ({
         ...current,
         dueDate: result.dueDate,
-        dueDatetime: result.dueDatetime,
-        dueTimezone: result.dueTimezone,
+        dueDatetime: executable ? result.dueDatetime : "",
+        dueTimezone: executable ? result.dueTimezone : "",
         recurrence: result.recurrence,
       }));
       setPreview(`Next: ${result.dueDate}`);
@@ -183,26 +121,8 @@ export function TaskDialog({
       setBusy(false);
     }
   }
-  async function moreChildren() {
-    if (!task || !childPage) return;
-    setBusy(true);
-    try {
-      const result = await api.listTasks({
-        parentId: task.id,
-        pageSize: 100,
-        pageToken: childPage,
-        includeCompleted: true,
-      });
-      setChildren((current) => [...current, ...result.tasks]);
-      setChildPage(result.nextPageToken);
-    } catch (reason) {
-      setError(describeError(reason));
-    } finally {
-      setBusy(false);
-    }
-  }
   async function setSchedule(date: string, time: string) {
-    if (!date || !time) {
+    if (!date || !time || !executable) {
       setDraft((current) => ({
         ...current,
         dueDate: date,
@@ -231,22 +151,23 @@ export function TaskDialog({
       setBusy(false);
     }
   }
-  function setDate(value: string) {
-    const time = scheduledTime(
-      draft.dueDatetime,
-      draft.dueTimezone || catalog.timeZone,
+  const setDate = (value: string) =>
+    setSchedule(
+      value,
+      executable
+        ? scheduledTime(
+            draft.dueDatetime,
+            draft.dueTimezone || catalog.timeZone,
+          )
+        : "",
     );
-    return setSchedule(value, time);
-  }
-  function setTime(value: string) {
-    return setSchedule(draft.dueDate, value);
-  }
+  const setTime = (value: string) => setSchedule(draft.dueDate, value);
   async function finish() {
-    if (!task) return;
+    if (!currentTask) return;
     setBusy(true);
     setError("");
     try {
-      const message = await onComplete(task);
+      const message = await onComplete(currentTask);
       if (message) setError(message);
       else onClose();
     } finally {
@@ -254,23 +175,24 @@ export function TaskDialog({
     }
   }
   async function remove() {
-    if (!task) return;
+    if (!currentTask) return;
     setBusy(true);
     setError("");
     try {
-      await onDelete(task);
+      await onDelete(currentTask);
       onClose();
     } catch (reason) {
       setError(describeError(reason));
       setBusy(false);
     }
   }
-
   return (
     <Dialog
-      title={task ? "Task details" : "Add task"}
+      title={
+        currentTask ? (isStep ? "Step details" : "Task details") : "Add task"
+      }
       onClose={onClose}
-      className={task ? "task-dialog" : "task-dialog quick-add-dialog"}
+      className={currentTask ? "task-dialog" : "task-dialog quick-add-dialog"}
     >
       {error && (
         <p className="error-message" role="alert">
@@ -291,7 +213,7 @@ export function TaskDialog({
         }}
       >
         <TaskFields
-          task={task}
+          task={currentTask}
           draft={draft}
           catalog={catalog}
           busy={busy}
@@ -302,126 +224,72 @@ export function TaskDialog({
           setDateText={setDateText}
           setPreview={setPreview}
           previewDate={previewDate}
-          setTime={setTime}
           setDate={setDate}
+          setTime={setTime}
           finish={finish}
           onOpen={onOpen}
+          executable={executable}
+          planningLoading={planning.loading || Boolean(planning.error)}
+          leadDays={planning.draft.leadDays}
+          onLeadChange={(value) => planning.patch("leadDays", value)}
         >
-          {task && (
-            <section className="subtasks">
-              <h3>
-                Subtasks{" "}
-                <span>
-                  {children.filter((child) => child.completed).length}/
-                  {children.length}
-                  {childPage ? "+" : ""}
-                </span>
-              </h3>
-              {children.map((child) => {
-                const due = child.dueDate || child.dueDatetime.slice(0, 10);
-                return (
-                  <div
-                    className={`subtask-row ${child.completed ? "is-completed" : ""}`}
-                    key={child.id}
-                  >
-                    <button
-                      type="button"
-                      className={`complete-button priority-${child.priority}`}
-                      aria-label={`${child.completed ? "Reopen" : "Complete"} ${child.title}`}
-                      disabled={busy}
-                      onClick={() => void finishChild(child)}
-                    >
-                      {child.completed ? (
-                        <Check size={13} />
-                      ) : (
-                        <Circle size={18} />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      className={`subtask-link ${child.completed ? "is-completed" : ""}`}
-                      aria-label={child.title}
-                      disabled={busy}
-                      onClick={() => onOpen(child.id)}
-                    >
-                      <span className="subtask-content">
-                        <span className="subtask-title">{child.title}</span>
-                        {(due || child.deadline || child.recurrence) && (
-                          <span className="subtask-meta">
-                            {due && (
-                              <span
-                                className={
-                                  due < today && !child.completed
-                                    ? "subtask-overdue"
-                                    : ""
-                                }
-                              >
-                                <CalendarDays size={11} />
-                                {dateLabel(due, today)}
-                              </span>
-                            )}
-                            {child.recurrence && (
-                              <span title={child.recurrence}>
-                                <Repeat2 size={11} />
-                                {child.recurrence}
-                              </span>
-                            )}
-                            {child.deadline && (
-                              <span className="subtask-deadline">
-                                <Flag size={11} />
-                                {dateLabel(child.deadline, today)}
-                              </span>
-                            )}
-                          </span>
-                        )}
-                      </span>
-                      <ChevronRight size={14} />
-                    </button>
-                  </div>
-                );
-              })}
-              {childPage && (
-                <button
-                  type="button"
-                  className="text-button"
-                  disabled={busy}
-                  onClick={() => void moreChildren()}
-                >
-                  Load more subtasks
-                </button>
+          {!isStep && (
+            <>
+              <TaskPlanningFields
+                value={planning.draft}
+                onChange={planning.patch}
+                disabled={
+                  busy ||
+                  planning.loading ||
+                  Boolean(planning.error) ||
+                  Boolean(currentTask?.completed)
+                }
+              />
+              {planning.loading && (
+                <p className="muted" role="status">
+                  Reading planning values…
+                </p>
               )}
-              <div className="inline-add">
-                <Plus size={16} />
-                <input
-                  aria-label="New subtask"
-                  placeholder="Add subtask"
-                  value={childTitle}
-                  onChange={(event) => setChildTitle(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (
-                      event.key === "Enter" &&
-                      !event.nativeEvent.isComposing
-                    ) {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      void addChild();
-                    }
-                  }}
+              {planning.error && (
+                <p className="error-message" role="alert">
+                  Planning unavailable. Other task fields can still be saved.
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={planning.retry}
+                  >
+                    Retry planning
+                  </button>
+                </p>
+              )}
+            </>
+          )}
+          {currentTask && (
+            <>
+              {!isStep && (
+                <TaskChildren
+                  task={currentTask}
+                  timeZone={catalog.timeZone}
+                  busy={busy}
+                  onBusy={setBusy}
+                  onError={setError}
+                  onChanged={onChildAdded}
+                  onOpen={onOpen}
+                  onDelete={onDelete}
+                  onComplete={onComplete}
                 />
-                <button
-                  type="button"
-                  onClick={() => void addChild()}
-                  className="text-button"
-                  disabled={busy || !childTitle.trim()}
-                >
-                  Add
-                </button>
-              </div>
-            </section>
+              )}
+              <TaskDependencyFields
+                task={currentTask}
+                busy={busy}
+                onOpen={onOpen}
+                onChanged={onChildAdded}
+              />
+            </>
           )}
         </TaskFields>
         <footer className="dialog-footer">
-          {task && (
+          {currentTask && (
             <button
               type="button"
               className="text-button danger"
@@ -438,15 +306,15 @@ export function TaskDialog({
           </button>
           <button
             className="primary-button"
-            disabled={busy || !draft.title.trim()}
+            disabled={busy || planning.loading || !draft.title.trim()}
           >
-            {busy ? "Saving…" : task ? "Save changes" : "Add task"}
+            {busy ? "Saving…" : currentTask ? "Save changes" : "Add task"}
           </button>
         </footer>
       </form>
       {confirmDelete && (
         <div className="delete-confirm" role="alert">
-          <p>Delete this task and its subtasks?</p>
+          <p>Delete this {isStep ? "step" : "task and its children"}?</p>
           <button
             className="secondary-button"
             onClick={() => setConfirmDelete(false)}

@@ -343,10 +343,10 @@ def test_actual_native_plan_actions_keep_gtd_state_out_of_task_labels(native, re
         "etag": planned["etag"],
         "request_id": str(uuid.uuid4()),
         "deadline": "2030-01-12",
-        "lead_days": 7,
+        "lead_days": 21,
     }
     updated = planning(native, "SetTaskLead", **lead)["task"]
-    assert updated["lead_days"] == 7 and updated["deadline"] == "2030-01-12"
+    assert updated["lead_days"] == 21 and updated["deadline"] == "2030-01-12"
     physical = rpc(native, "GetTask", {"name": task["name"]})
     assert physical["due_date"] == task["due_date"] and physical["label_ids"] == [label["id"]]
     assert physical["deadline"] == "2030-01-12"
@@ -367,6 +367,10 @@ def test_actual_native_plan_actions_keep_gtd_state_out_of_task_labels(native, re
     children = rpc(native, "ListTasks", {"parent_id": task["id"], "page_size": 100})["tasks"]
     assert [child["id"] for child in children] == created["task_ids"]
     assert [child["duration_minutes"] for child in children] == [45, 75]
+    assert all(child["kind"] == "step" for child in children)
+    subset = planning(native, "ListPlanningTasks", page_size=100, task_ids=created["task_ids"])["planning_tasks"]
+    assert {row["id"] for row in subset} == set(created["task_ids"])
+    assert all(row["kind"] == "step" for row in subset)
     assert all(child["project_id"] == project["id"] and not child.get("label_ids") for child in children)
     assert all(planning_task(native, child["id"])["parent_id"] == task["id"] for child in children)
 
@@ -721,3 +725,80 @@ def test_native_hundred_siblings_reorder_through_one_atomic_tasks_operation(nati
     assert [task["id"] for task in actual] == ids and all(task["etag"] == "2" for task in actual)
     assert planning(native, "ReorderTasks", **request) == answer
     assert rpc(native, "ListTasks", {"parent_id": parent["id"], "page_size": 100})["tasks"] == actual
+
+
+@pytest.mark.parametrize("recurring", [False, True])
+def test_generic_completion_replays_exactly_through_core_for_focus_without_advancing_again(
+    native, ready_plan, recurring
+):
+    task = rpc(
+        native,
+        "CreateTask",
+        {
+            "task": {
+                "title": "Synthetic independently completed task",
+                "due_date": "2030-01-01",
+                **({"recurrence": "every day"} if recurring else {}),
+            },
+            "request_id": str(uuid.uuid4()),
+        },
+    )
+    request_id = str(uuid.uuid4())
+    http_request = {
+        "method": "POST",
+        "path": f"/api/tasks/v1/{task['name']}:complete",
+        "body": {"etag": task["etag"], "request_id": request_id},
+    }
+    completed = call(native, "/native/http", http_request)
+    # The browser can lose this response and repeat the same HTTP completion safely.
+    assert call(native, "/native/http", http_request) == completed
+    proof = {
+        "task_id": task["id"],
+        "task_etag": task["etag"],
+        "request_id": request_id,
+        "flow_task_id": task["id"],
+        "flow_date": "2026-10-17",
+    }
+    assert planning(native, "CompleteTask", **proof) == {"task_id": task["id"]}
+    assert planning(native, "CompleteTask", **proof) == {"task_id": task["id"]}
+    current = rpc(native, "GetTask", {"name": task["name"]})
+    assert current == completed and current["completed_count"] == 1
+    if recurring:
+        assert not current.get("completed") and current["due_date"] == completed["due_date"]
+
+
+def test_completion_focus_target_must_be_a_completed_descendant(native, ready_plan):
+    parent = rpc(
+        native, "CreateTask", {"task": {"title": "Synthetic completed outcome"}, "request_id": str(uuid.uuid4())}
+    )
+    child = rpc(
+        native,
+        "CreateTask",
+        {
+            "task": {"title": "Synthetic timed step", "parent_id": parent["id"], "kind": "step"},
+            "request_id": str(uuid.uuid4()),
+        },
+    )
+    unrelated = rpc(
+        native, "CreateTask", {"task": {"title": "Synthetic unrelated action"}, "request_id": str(uuid.uuid4())}
+    )
+    request_id = str(uuid.uuid4())
+    rpc(native, "CompleteTask", {"name": parent["name"], "etag": parent["etag"], "request_id": request_id})
+    proof = {
+        "task_id": parent["id"],
+        "task_etag": parent["etag"],
+        "request_id": request_id,
+        "flow_task_id": child["id"],
+        "flow_date": "2026-10-16",
+    }
+    assert planning(native, "CompleteTask", **proof) == {"task_id": parent["id"]}
+    assert rpc(native, "GetTask", {"name": child["name"]})["completed"]
+    assert planning(
+        native, "CompleteTask", **{**proof, "request_id": str(uuid.uuid4()), "flow_task_id": unrelated["id"]}
+    ) == {"error": "ACTION_NOT_ALLOWED"}
+    assert not rpc(native, "GetTask", {"name": unrelated["name"]}).get("completed")
+    rpc(native, "CompleteTask", {"name": unrelated["name"], "etag": unrelated["etag"], "request_id": str(uuid.uuid4())})
+    assert planning(
+        native, "CompleteTask", **{**proof, "request_id": str(uuid.uuid4()), "flow_task_id": unrelated["id"]}
+    ) == {"error": "ACTION_NOT_ALLOWED"}
+    assert rpc(native, "GetTask", {"name": parent["name"]})["completed_count"] == 1

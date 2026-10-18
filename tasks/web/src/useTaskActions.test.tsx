@@ -5,9 +5,10 @@ import { TaskSchema } from "@ziyixi/proto/tasks/ui/v1/task_pb";
 import { ListTasksResponseSchema } from "@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb";
 import { RpcStatusError } from "@ziyixi/proto/http-client";
 import { parseStatus } from "@ziyixi/proto/rpc-status";
-import { api, type TaskDraft } from "./api";
+import { api, type Task, type TaskDraft } from "./api";
 import type { Route } from "./routes";
 import { useTaskActions } from "./useTaskActions";
+import * as focus from "./task-completion-focus";
 import { useTaskView } from "./useTaskView";
 
 afterEach(() => {
@@ -58,7 +59,7 @@ it("refreshes the current project after a save finishes in the view we left", as
     { initialProps: { page: "inbox", id: "" } as Route },
   );
   await waitFor(() => expect(result.current.list.tasks).toEqual([source]));
-  let saved!: Promise<void>;
+  let saved!: Promise<Task>;
   act(() => {
     saved = result.current.actions.saveTask(moved, source);
   });
@@ -143,6 +144,7 @@ it("replays the same duplicate after a lost response even if the source was then
 });
 
 it("invalidates planning only after confirmed native task changes", async () => {
+  vi.spyOn(focus, "settleCompletedTask").mockResolvedValue(undefined);
   const task = create(TaskSchema, {
     id: "synthetic",
     name: "tasks/synthetic",
@@ -177,4 +179,170 @@ it("invalidates planning only after confirmed native task changes", async () => 
   });
   expect(result.current.mutationRevision).toBe(3);
   expect(read).not.toHaveBeenCalled();
+});
+
+it("replays an uncertain recurring completion with its original source etag and UUID", async () => {
+  const task = create(TaskSchema, {
+    id: "recurring",
+    name: "tasks/recurring",
+    title: "Synthetic daily action",
+    etag: "1",
+    recurrence: "every day",
+  });
+  const receipts = new Set<string>();
+  let occurrences = 0;
+  const complete = vi
+    .spyOn(api, "completeTask")
+    .mockImplementation(async (request) => {
+      const requestId = request?.requestId || "";
+      if (!receipts.has(requestId)) {
+        receipts.add(requestId);
+        occurrences++;
+        throw new TypeError("Synthetic lost completion response");
+      }
+      return create(TaskSchema, { ...task, etag: "2", completedCount: 1 });
+    });
+  const settle = vi
+    .spyOn(focus, "settleCompletedTask")
+    .mockResolvedValue("Task completed. Focus is temporarily unavailable.");
+  const route = { page: "focus" as const, id: "" };
+  const { result } = renderHook(() =>
+    useTaskActions(
+      route,
+      "sort_order",
+      useTaskView(route, "", "", "sort_order", false),
+      "2026-10-17",
+    ),
+  );
+  await act(() => result.current.complete(task));
+  await act(() =>
+    result.current.complete(create(TaskSchema, { ...task, etag: "2" })),
+  );
+  expect(occurrences).toBe(1);
+  expect(complete.mock.calls[1]![0]).toEqual(complete.mock.calls[0]![0]);
+  expect(settle).toHaveBeenCalledWith(
+    expect.anything(),
+    complete.mock.calls[0]![0]!.requestId,
+    "1",
+    "2026-10-17",
+  );
+  expect(result.current.notice).toBe(
+    "Task completed. Focus is temporarily unavailable.",
+  );
+  expect(result.current.mutationRevision).toBe(1);
+});
+
+it("keeps an uncertain batch completion selected and replays it once before settling Focus", async () => {
+  const task = create(TaskSchema, {
+    id: "batch-step",
+    name: "tasks/batch-step",
+    title: "Synthetic selected step",
+    etag: "1",
+    recurrence: "every day",
+  });
+  vi.spyOn(api, "listTasks").mockResolvedValue(
+    create(ListTasksResponseSchema, { tasks: [task] }),
+  );
+  const receipts = new Set<string>();
+  let occurrences = 0;
+  const close = vi
+    .spyOn(api, "completeTask")
+    .mockImplementation(async (request) => {
+      const requestId = request?.requestId || "";
+      if (!receipts.has(requestId)) {
+        receipts.add(requestId);
+        occurrences++;
+        throw new TypeError("Synthetic lost batch reply");
+      }
+      return create(TaskSchema, { ...task, etag: "2", completedCount: 1 });
+    });
+  const settle = vi
+    .spyOn(focus, "settleCompletedTask")
+    .mockResolvedValue(undefined);
+  const route = { page: "inbox" as const, id: "" };
+  const { result } = renderHook(() =>
+    useTaskActions(
+      route,
+      "sort_order",
+      useTaskView(route, "", "", "sort_order", false),
+      "2026-10-17",
+    ),
+  );
+  await waitFor(() => expect(result.current.selected.size).toBe(0));
+  await waitFor(() => expect(api.listTasks).toHaveBeenCalled());
+  await act(() => result.current.setSelected(new Set([task.id])));
+  await act(() => result.current.batch("complete"));
+  expect(result.current.selected.has(task.id)).toBe(true);
+  await act(() => result.current.batch("complete"));
+  expect(occurrences).toBe(1);
+  expect(close.mock.calls[1]![0]).toEqual(close.mock.calls[0]![0]);
+  expect(settle).toHaveBeenCalledWith(
+    task,
+    close.mock.calls[0]![0]!.requestId,
+    "1",
+    "2026-10-17",
+  );
+  expect(result.current.selected.size).toBe(0);
+});
+
+it("settles Focus after a confirmed completion even when the task list refresh fails", async () => {
+  const task = create(TaskSchema, {
+    id: "refresh-failure",
+    name: "tasks/refresh-failure",
+    title: "Synthetic task",
+    etag: "1",
+  });
+  const source = vi
+    .spyOn(api, "completeTask")
+    .mockResolvedValue(create(TaskSchema, { ...task, completed: true }));
+  let settled = false;
+  vi.spyOn(focus, "settleCompletedTask").mockImplementation(async () => {
+    settled = true;
+    return undefined;
+  });
+  const list = {
+    tasks: [task],
+    replace: vi.fn(),
+    remove: vi.fn(),
+    read: vi.fn(async () => {
+      expect(settled).toBe(true);
+      throw new Error("Synthetic refresh failure");
+    }),
+  } as unknown as ReturnType<typeof useTaskView>;
+  const { result } = renderHook(() =>
+    useTaskActions({ page: "inbox", id: "" }, "sort_order", list),
+  );
+  await act(async () => {
+    expect(await result.current.complete(task)).toBeUndefined();
+  });
+  expect(source).toHaveBeenCalledOnce();
+  expect(result.current.notice).toMatch(
+    /^Task completed\. The task list could not refresh/,
+  );
+});
+
+it("keeps a confirmed batch completion successful when its final refresh fails", async () => {
+  const task = create(TaskSchema, {
+    id: "batch-refresh",
+    name: "tasks/batch-refresh",
+    title: "Synthetic task",
+    etag: "1",
+  });
+  vi.spyOn(api, "completeTask").mockResolvedValue(
+    create(TaskSchema, { ...task, completed: true }),
+  );
+  vi.spyOn(focus, "settleCompletedTask").mockResolvedValue(undefined);
+  const list = {
+    tasks: [task],
+    read: vi.fn().mockRejectedValue(new Error("Synthetic refresh failure")),
+  } as unknown as ReturnType<typeof useTaskView>;
+  const { result } = renderHook(() =>
+    useTaskActions({ page: "inbox", id: "" }, "sort_order", list),
+  );
+  await act(() => result.current.setSelected(new Set([task.id])));
+  await act(() => result.current.batch("complete"));
+  expect(result.current.selected.size).toBe(0);
+  expect(result.current.notice).toMatch(
+    /^Selected tasks completed.*could not refresh/,
+  );
 });

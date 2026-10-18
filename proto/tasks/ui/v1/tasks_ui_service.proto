@@ -267,6 +267,17 @@ message Catalog {
   repeated SavedFilter filters = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The account's calendar zone.
   string time_zone = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Open-task counts matching each category's default view, without task content.
+  repeated TaskCount task_counts = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// An exact count for a built-in view or catalog category.
+message TaskCount {
+  // inbox, today, upcoming, project, label or filter.
+  string view = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Catalog ID for a project, label or filter; empty for a built-in view.
+  string id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Number of matching open tasks. Inbox and project views count root tasks.
+  int32 count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 // (-- api-linter: core::0132::request-unknown-fields=disabled
 //     aip.dev/not-precedent: these indexed personal task views use explicit typed selectors, not an unbounded query language. --)

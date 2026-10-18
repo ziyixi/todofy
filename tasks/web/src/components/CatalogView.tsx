@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { Archive, Hash, ListFilter, Plus, Star, Tag } from "lucide-react";
+import { ListFilter, Plus, Star, Tag } from "lucide-react";
 import type { Catalog, CatalogItem, CatalogKind } from "../api";
 import { routeHref } from "../routes";
 import { CatalogMenu } from "./CatalogMenu";
@@ -15,14 +14,7 @@ export function CatalogView({
   onSaved: () => Promise<void>;
   onError: (message: string) => void;
 }) {
-  const [showArchived, setShowArchived] = useState(false);
   const groups = [
-    {
-      kind: "project" as const,
-      title: "Projects",
-      items: catalog.projects.filter((item) => item.archived === showArchived),
-      icon: Hash,
-    },
     {
       kind: "label" as const,
       title: "Labels",
@@ -39,21 +31,12 @@ export function CatalogView({
   return (
     <div className="catalog-view">
       <header className="view-header">
-        <h1>Projects, labels &amp; filters</h1>
+        <h1>Labels &amp; filters</h1>
       </header>
       {groups.map(({ kind, title, items, icon: Icon }) => (
         <section key={kind}>
           <header className="catalog-heading">
             <h2>{title}</h2>
-            {kind === "project" && (
-              <button
-                className={`text-button ${showArchived ? "active" : ""}`}
-                onClick={() => setShowArchived((value) => !value)}
-              >
-                <Archive size={14} />
-                {showArchived ? "Archived" : "Show archived"}
-              </button>
-            )}
             <button
               className="icon-button"
               onClick={() => onEdit(kind)}
@@ -64,47 +47,57 @@ export function CatalogView({
           </header>
           {items.length === 0 && (
             <p className="muted catalog-empty">
-              {showArchived && kind === "project"
-                ? "No archived projects."
-                : `No ${title.toLowerCase()} yet.`}
+              {`No ${title.toLowerCase()} yet.`}
             </p>
           )}
-          {items.map((item) => (
-            <CatalogMenu
-              key={item.id}
-              kind={kind}
-              item={item}
-              onEdit={() => onEdit(kind, item)}
-              onSaved={onSaved}
-              onError={onError}
-            >
-              <div className="catalog-row">
-                <a
-                  href={routeHref({
-                    page: kind === "project" ? "project" : kind,
-                    id: item.id,
-                  })}
-                >
-                  <Icon
-                    size={18}
-                    style={{ color: "color" in item ? item.color : undefined }}
+          {items.map((item) => {
+            const count = catalog.taskCounts?.find(
+              (entry) => entry.view === kind && entry.id === item.id,
+            )?.count;
+            return (
+              <CatalogMenu
+                key={item.id}
+                kind={kind}
+                item={item}
+                onEdit={() => onEdit(kind, item)}
+                onSaved={onSaved}
+                onError={onError}
+              >
+                <div className="catalog-row">
+                  <a
+                    href={routeHref({
+                      page: kind,
+                      id: item.id,
+                    })}
+                  >
+                    <Icon
+                      size={18}
+                      style={{
+                        color: "color" in item ? item.color : undefined,
+                      }}
+                    />
+                    <span>
+                      {item.title}
+                      {"query" in item && <small>{item.query}</small>}
+                    </span>
+                    {count !== undefined && (
+                      <span className="category-count" aria-hidden="true">
+                        {count}
+                      </span>
+                    )}
+                    {item.favorite && <Star size={13} />}
+                  </a>
+                  <CatalogMenu
+                    kind={kind}
+                    item={item}
+                    onEdit={() => onEdit(kind, item)}
+                    onSaved={onSaved}
+                    onError={onError}
                   />
-                  <span>
-                    {item.title}
-                    {"query" in item && <small>{item.query}</small>}
-                  </span>
-                  {item.favorite && <Star size={13} />}
-                </a>
-                <CatalogMenu
-                  kind={kind}
-                  item={item}
-                  onEdit={() => onEdit(kind, item)}
-                  onSaved={onSaved}
-                  onError={onError}
-                />
-              </div>
-            </CatalogMenu>
-          ))}
+                </div>
+              </CatalogMenu>
+            );
+          })}
         </section>
       ))}
     </div>

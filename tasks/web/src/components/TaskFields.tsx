@@ -6,8 +6,13 @@ import { TaskDescription } from "./TaskDescription";
 import { ProjectPicker } from "./ProjectPicker";
 import { PriorityPicker } from "./PriorityPicker";
 import { SchedulePicker } from "./SchedulePicker";
+import { StartAheadPicker } from "./StartAheadPicker";
 interface Props {
   children?: ReactNode;
+  executable: boolean;
+  planningLoading: boolean;
+  leadDays: number;
+  onLeadChange: (days: number) => void;
   task?: Task;
   draft: TaskDraft;
   catalog: Catalog;
@@ -26,6 +31,10 @@ interface Props {
 }
 export function TaskFields({
   children,
+  executable,
+  planningLoading,
+  leadDays,
+  onLeadChange,
   task,
   draft,
   catalog,
@@ -165,7 +174,7 @@ export function TaskFields({
                 })
               : ""
           }
-          onTimeChange={setTime}
+          onTimeChange={executable ? setTime : undefined}
           recurrence={draft.recurrence}
           onRecurrenceChange={(value) => {
             patch("recurrence", value);
@@ -179,7 +188,22 @@ export function TaskFields({
           value={draft.deadline}
           disabled={busy}
           timeZone={catalog.timeZone}
-          onChange={(value) => patch("deadline", value)}
+          onChange={(value) => {
+            patch("deadline", value);
+            if (!value) onLeadChange(0);
+          }}
+        />
+        <StartAheadPicker
+          key={planningLoading ? "loading" : "ready"}
+          days={leadDays}
+          deadline={draft.deadline}
+          disabled={
+            busy ||
+            planningLoading ||
+            Boolean(task?.completed) ||
+            !draft.deadline
+          }
+          onChange={onLeadChange}
         />
         <PriorityPicker
           value={draft.priority}
@@ -189,26 +213,37 @@ export function TaskFields({
           onChange={(value) => patch("priority", value)}
         />
         {labelsField}
-        <details className="advanced-properties">
-          <summary>More details</summary>
-          <div className="advanced-fields">
-            <label>
-              Duration (minutes)
-              <input
-                type="number"
-                min={0}
-                max={1440}
-                step={5}
-                value={draft.durationMinutes || ""}
-                placeholder="Not set"
-                disabled={busy}
-                onChange={(event) =>
-                  patch("durationMinutes", Number(event.target.value))
-                }
-              />
-            </label>
-          </div>
-        </details>
+        <label className="task-effort-field">
+          <span className="property-heading">Effort</span>
+          <select
+            aria-label="Effort"
+            value={draft.effort}
+            disabled={busy}
+            onChange={(event) => patch("effort", event.target.value)}
+          >
+            <option value="">Not set</option>
+            <option value="deep">Deep work</option>
+            <option value="shallow">Shallow work</option>
+          </select>
+        </label>
+        {executable && (
+          <label className="task-effort-field">
+            <span className="property-heading">Estimate</span>
+            <input
+              aria-label="Duration (minutes)"
+              type="number"
+              min={0}
+              max={1440}
+              step={5}
+              value={draft.durationMinutes || ""}
+              placeholder="Minutes"
+              disabled={busy}
+              onChange={(event) =>
+                patch("durationMinutes", Number(event.target.value))
+              }
+            />
+          </label>
+        )}
       </aside>
     </div>
   );

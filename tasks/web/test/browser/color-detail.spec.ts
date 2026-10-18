@@ -83,14 +83,16 @@ test("named colors persist on projects, labels and filters and keep their visual
       "color",
       choice.color,
     );
-    const catalogLink = page
-      .locator(".catalog-row")
-      .filter({ hasText: choice.title })
-      .getByRole("link");
-    await expect(catalogLink.locator("svg").first()).toHaveCSS(
-      "color",
-      choice.color,
-    );
+    if (choice.kind !== "project") {
+      const catalogLink = page
+        .locator(".catalog-row")
+        .filter({ hasText: choice.title })
+        .getByRole("link");
+      await expect(catalogLink.locator("svg").first()).toHaveCSS(
+        "color",
+        choice.color,
+      );
+    }
   }
   const catalogResponse = await request.get("/api/tasks/v1/catalog");
   const catalog = await catalogResponse.json();
@@ -187,8 +189,10 @@ test("subtasks complete and reopen inside their parent editor, with dates and a 
     name: "Task details",
     exact: true,
   });
-  const childRow = dialog.locator(".subtask-row");
-  await expect(childRow.locator(".subtask-meta")).toContainText("May 12");
+  const childRow = dialog
+    .getByRole("region", { name: "Subtasks", exact: true })
+    .locator(".task-child-row");
+  await expect(childRow.locator(".task-child-meta")).toContainText("May 12");
   await expect(
     childRow.getByRole("button", {
       name: "Complete Synthetic dated priority step",

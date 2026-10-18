@@ -6,10 +6,14 @@ Personal task management for the Todofy cloud. Tasks owns tasks, projects, secti
 
 Native Tasks, Todofy and FlowDay are live, with normal processing restored. Task/history import and native planning conversion are complete; the original Todoist account is unchanged. Plan and Focus need no extension connection. Mail holds summaries until you explicitly create a task. See the [verification record](docs/verification.md) for dated production evidence.
 
-## First release
+The current refinement separates Tasks/Subtasks from executable Steps and brings planning controls into the
+ordinary task editor. Its release and acceptance evidence is tracked in [refinement verification](docs/refinement-verification.md).
+
+## Interface
 
 - Desktop Inbox, Today, Upcoming, search, nested projects, sections, labels and saved filters.
-- Task editing, subtasks, priority, due dates, deadlines, duration, recurrence and completion history.
+- Task editing, separate Subtask and Step lists, priority, dates, deadlines, structured repeat and completion history.
+- Visible planning stage, context, task options, start-ahead window and Deep/Shallow effort in task details.
 - Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.
 - Installable desktop PWA; an explicit offline page, with task data available online.
 - Owner-only Cloudflare Worker and D1, using the repository's proto API and authentication conventions.
@@ -20,6 +24,15 @@ Comments, attachments, reminders, assignment, calendar integration and voice inp
 The [design](docs/design.md) explains service boundaries and the interface. [Verification](docs/verification.md)
 separates local results from the remaining release and migration work. [Import](docs/import.md) lists private
 export and identity-check commands.
+
+A Task or Subtask describes an outcome. Add a Step beneath it to arrange an executable action in the week,
+or select Standalone action to schedule the Task itself. Only these executable items expose a clock time
+and estimate. A Step cannot contain children. Task details can add, complete, reopen or delete either kind
+of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites.
+
+Repeat uses frequency, interval and calendar controls; imported custom rules remain intact until replaced.
+Start ahead uses days or weeks before the real Deadline and places the task in Plan Review's Start now lane.
+It does not send a timed notification. Effort is a task property, so it needs no technical label.
 
 ## Local development
 
@@ -42,6 +55,10 @@ the web app's `lint`, `typecheck`, `test`, `build` and `test:browser` from their
 ## Boundaries
 
 The web app depends on the public proto API, never database rows or another application's source. The Worker validates writes and owns recurrence advancement. Shared planning components take an explicit actions interface. A drag into a day changes the FlowDay queue, not the task's due date or deadline.
+
+Completing a task first saves its occurrence in Tasks, then uses the existing Todofy/FlowDay settlement
+path for a related timer or day-queue entry. A Focus failure leaves the completed task saved and shows a
+warning; an unrelated timer keeps running.
 
 Lists are bounded and indexed. Completion history is separate from active tasks. Consumers use a paged change feed; the browser does not poll to animate a timer. Imports run in batches. There is no new queue, scheduler or multi-provider framework.
 

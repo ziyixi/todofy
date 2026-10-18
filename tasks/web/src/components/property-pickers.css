@@ -254,7 +254,7 @@
   padding: 9px 13px;
   border-top: 1px solid #eee;
 }
-.schedule-extra label {
+.schedule-extra > label {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -262,10 +262,10 @@
   font-size: 12px;
   color: #666;
 }
-.schedule-extra label > span {
+.schedule-extra > label > span {
   width: 42px;
 }
-.schedule-extra input {
+.schedule-extra > label > input {
   width: 0;
   min-width: 0;
   flex: 1;

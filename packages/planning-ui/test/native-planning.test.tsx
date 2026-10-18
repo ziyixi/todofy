@@ -266,9 +266,80 @@ it("shows uncreated native Mail in weekly review and opens Mail without a task i
   );
   const line = screen.getByText("Mail to clarify").closest("li")!;
   expect(line.querySelector(".weekly-review-count")?.textContent).toBe("3");
-  fireEvent.click(
-    within(line).getByRole("button", { name: "Open" }),
-  );
+  fireEvent.click(within(line).getByRole("button", { name: "Open" }));
   expect(openMail).toHaveBeenCalledTimes(1);
   expect(updateTask).not.toHaveBeenCalled();
+});
+
+it("schedules only explicit native steps or tasks deliberately marked standalone", async () => {
+  const { outcomeSteps } = await import("../src/planning-outcomes");
+  const root = { ...task, kind: "task" as const, stage: "committed" as const };
+  const child = {
+    ...root,
+    id: "child",
+    parentId: root.id,
+    stage: "none" as const,
+  };
+  const step = {
+    ...child,
+    id: "step",
+    parentId: child.id,
+    kind: "step" as const,
+  };
+  expect(outcomeSteps(root, [root, child, step]).map((row) => row.id)).toEqual([
+    step.id,
+  ]);
+  expect(
+    outcomeSteps(root, [root, { ...child, planningFlags: ["task"] }, step]).map(
+      (row) => row.id,
+    ),
+  ).toEqual([child.id, step.id]);
+});
+
+it("exposes native options without an independent blocked checkbox and accepts a custom lead", async () => {
+  const { LeadSelect } = await import("../src/TaskEditor");
+  const update = vi.fn();
+  render(
+    <LeadSelect
+      value={21}
+      language="en"
+      disabled={false}
+      label="Start ahead"
+      customAllowed
+      onChange={update}
+    />,
+  );
+  fireEvent.change(screen.getByRole("spinbutton", { name: "Start ahead" }), {
+    target: { value: "42" },
+  });
+  expect(update).toHaveBeenCalledWith(42);
+  cleanup();
+  render(
+    <TaskEditor
+      destination={{
+        name: "Tasks",
+        taskHref: (id) => `/tasks/${id}`,
+        projectHref: (id) => `/projects/${id}`,
+      }}
+      task={{ ...task, kind: "task" }}
+      tasks={[task]}
+      dependencies={[]}
+      language="en"
+      busy={false}
+      actions={{} as PlusActions}
+      run={vi.fn()}
+      today="2026-10-17"
+      todayTaskIds={[]}
+      canMarkActive={false}
+      addFocus={vi.fn()}
+      onOpenTask={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("region", { name: "Task options" }).tagName).toBe(
+    "SECTION",
+  );
+  expect(screen.queryByRole("checkbox", { name: "Blocked" })).toBeNull();
+  expect(
+    screen.getByRole("checkbox", { name: "Schedule as a step" }),
+  ).toBeTruthy();
 });

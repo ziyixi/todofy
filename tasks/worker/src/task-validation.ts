@@ -22,9 +22,14 @@ export function taskValues(
     deadline: task.deadline,
     duration_minutes: task.durationMinutes,
     recurrence: task.recurrence.trim(),
+    kind: task.kind || 'task',
+    effort: task.effort || '',
   };
 }
 export function validateTaskFields(row: TaskRow): string[] {
+  if (!['task', 'step'].includes(row.kind || 'task') || !['', 'deep', 'shallow'].includes(row.effort || ''))
+    invalid('Choose a task or step and a valid effort preference');
+  if (row.kind === 'step' && !row.parent_id) invalid('A step needs a parent task');
   if (!row.title || row.title.length > 500 || row.description.length > 16000 || !Number.isFinite(row.sort_order))
     invalid();
   if (
@@ -81,7 +86,7 @@ export async function validateTask(db: D1Database, row: TaskRow): Promise<void> 
   if (row.parent_id)
     checks.push(
       db
-        .prepare('SELECT id FROM tasks WHERE id=? AND project_id=? AND deleted_at IS NULL AND completed=0')
+        .prepare("SELECT id FROM tasks WHERE id=? AND project_id=? AND deleted_at IS NULL AND completed=0 AND kind='task'")
         .bind(row.parent_id, row.project_id),
     );
   if (labels.length)
@@ -110,5 +115,11 @@ export async function validateTask(db: D1Database, row: TaskRow): Promise<void> 
     );
     if (ancestors.results.some((a) => a.id === row.id || a.depth >= 32))
       invalid('Task hierarchy would contain a cycle or exceed 32 levels');
+  }
+  if (row.kind === 'step') {
+    const child = await storage(() =>
+      db.prepare('SELECT id FROM tasks WHERE parent_id=? AND deleted_at IS NULL LIMIT 1').bind(row.id).first(),
+    );
+    if (child) precondition('A task with children cannot become a step');
   }
 }

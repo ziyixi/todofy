@@ -79,6 +79,29 @@ describe('Native Tasks planning transport', () => {
       if (method !== 'UpdateMailCategories') expect(parsed['request_id']).toMatch(/^[0-9a-f-]{36}$/);
     }
   });
+  it('settles only the descendant proven by a successful native completion replay', async () => {
+    let frozen: string | null = null;
+    const settlements: Record<string, unknown>[] = [];
+    const { env, core } = fakes({ TASK_SOURCE: 'tasks' }, call => {
+      if (call.method === 'plus_native_ui') return uiOk({ task_id: 'parent' });
+      if (call.method === 'plus_focus_claim') { frozen ??= call.args[1] as string | null; return frozen; }
+      throw Error('unexpected core operation');
+    });
+    const native: Env = { ...env, FLOWDAY_NATIVE_FOCUS: { fetch: async (request: Request) => {
+      if (request.method === 'GET') return Response.json({ name: 'timerSession', state: 'running', task_id: 'child', flow_date: '2026-10-12', etag: '7' });
+      settlements.push(await request.json<Record<string, unknown>>());
+      return Response.json({ name: 'timerSession', state: 'idle', etag: '8' });
+    } } as unknown as Fetcher };
+    const response = await nativePlanning(new Request('https://planning.internal/api/plus/v1/tasks:completeTask', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        task_id: 'parent', task_etag: 'original-task-etag', request_id: ID, flow_task_id: 'child', flow_date: '2026-10-12',
+      }),
+    }), native);
+    expect(response.status).toBe(200);
+    const sent = core.find(call => call.method === 'plus_native_ui');
+    expect(JSON.parse(String(sent?.args[1]))).toMatchObject({ task_id: 'parent', task_etag: 'original-task-etag', request_id: ID, flow_task_id: 'child' });
+    expect(settlements).toEqual([expect.objectContaining({ action: 'settle', task_id: 'child', flow_date: '2026-10-12' })]);
+  });
   it('does not fall back to the legacy FlowDay binding during a partial cutover', async () => {
     let calls = 0;
     const { env } = fakes();

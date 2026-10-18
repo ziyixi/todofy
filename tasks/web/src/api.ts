@@ -20,7 +20,7 @@ export type Task = ApiTask;
 export type Catalog = Pick<
   ApiCatalog,
   "projects" | "sections" | "labels" | "filters" | "timeZone"
->;
+> & Partial<Pick<ApiCatalog, "taskCounts">>;
 export type TaskDraft = Pick<
   Task,
   | "title"
@@ -36,6 +36,8 @@ export type TaskDraft = Pick<
   | "deadline"
   | "durationMinutes"
   | "recurrence"
+  | "kind"
+  | "effort"
 >;
 export type CatalogItem = Project | Section | Label | SavedFilter;
 export type CatalogKind = "project" | "section" | "label" | "filter";
@@ -117,4 +119,6 @@ export const TASK_EDIT_FIELDS = [
   "deadline",
   "duration_minutes",
   "recurrence",
+  "kind",
+  "effort",
 ];

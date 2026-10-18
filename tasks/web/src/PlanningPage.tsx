@@ -5,7 +5,7 @@ import {
   type PlusSnapshot,
 } from "@ziyixi/planning-ui";
 import "@ziyixi/planning-ui/styles.css";
-import { send } from "./api";
+import { api, send } from "./api";
 import { usePlanView } from "./usePlanView";
 
 export default function PlanningPage({
@@ -19,19 +19,29 @@ export default function PlanningPage({
   onOpenTask: (id: string) => void;
   onSettings: () => void;
 }) {
-  const actions = useMemo(
-    () =>
-      createPlanningActions(
-        {
-          plus: send,
-          flowday: (call) =>
-            send({ ...call, url: `/api/plus/flowday${call.url}` }),
-        },
-        undefined,
-        "tasks",
-      ),
-    [],
-  );
+  const actions = useMemo(() => {
+    const actions = createPlanningActions(
+      {
+        plus: send,
+        flowday: (call) =>
+          send({ ...call, url: `/api/plus/flowday${call.url}` }),
+      },
+      undefined,
+      "tasks",
+    );
+    return {
+      ...actions,
+      async updateEstimate(id: string, minutes: number) {
+        const task = await api.getTask({ name: `tasks/${id}` });
+        await api.updateTask({
+          requestId: crypto.randomUUID(),
+          etag: task.etag,
+          task: { name: task.name, durationMinutes: minutes },
+          updateMask: { paths: ["duration_minutes"] },
+        });
+      },
+    };
+  }, []);
   const [snapshot, setSnapshot] = useState<PlusSnapshot>();
   const [planView, updatePlanView] = usePlanView();
   return (

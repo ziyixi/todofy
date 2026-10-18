@@ -192,6 +192,8 @@ function taskRow(row: Source, labels: CatalogRow[], complete: boolean, zone: str
     deadline,
     duration_minutes: number(duration.amount) * (duration.unit === 'day' ? 1440 : 1),
     recurrence: due.is_recurring ? text(due.string) : '',
+    kind: 'task',
+    effort: '',
     completed: Number(complete),
     completed_at: complete ? timestamp(row.completed_at) : null,
     completed_base_count: completedCount,

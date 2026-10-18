@@ -269,14 +269,18 @@ export function TaskWorkspace({
             <Check size={26} />
             <h2>
               {route.page === "search"
-                ? "No matching tasks"
+                ? search.trim()
+                  ? "No matching tasks"
+                  : "Find a task"
                 : route.page === "today"
                   ? "Nothing scheduled for today"
                   : "No tasks here"}
             </h2>
             <p>
               {route.page === "search"
-                ? "Try a different title or description."
+                ? search.trim()
+                  ? "Try a different title or description."
+                  : "Search by title or description."
                 : "Add a task when you have something to capture."}
             </p>
           </div>

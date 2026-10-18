@@ -21,12 +21,17 @@ export function useTaskView(
   const [error, setError] = useState("");
   const generation = useRef(0);
   const visibleView = useRef("");
-  const isListView = !["plan", "focus", "mail", "catalog", "settings"].includes(
-    route.page,
-  );
+  const isListView = !["plan", "focus", "mail", "catalog"].includes(route.page);
   const read = useCallback(
     async (pageToken = "") => {
-      if (!isListView) return;
+      if (!isListView || (route.page === "search" && !search.trim())) {
+        generation.current += 1;
+        setTasks([]);
+        setNextPage("");
+        setError("");
+        setLoading(false);
+        return;
+      }
       const request = ++generation.current;
       setLoading(true);
       setError("");
@@ -74,6 +79,10 @@ export function useTaskView(
   );
   useEffect(() => {
     if (!isListView) return;
+    if (route.page === "search" && !search.trim()) {
+      void read();
+      return;
+    }
     const view = `${route.page}:${route.id || ""}`;
     if (visibleView.current !== view) {
       setTasks([]);

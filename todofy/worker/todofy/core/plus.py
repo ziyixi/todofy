@@ -280,6 +280,7 @@ def task_etag(task: dict[str, Any], mapping: list[dict[str, Any]] | None = None)
     values = {key: task.get(key) for key in ("id", "labels", "deadline", "parent_id", "content", "duration")}
     if task.get("_native_planning"):
         values["native_plan_rev"] = task["_native_plan_rev"]
+        values["native_content_etag"] = task.get("_native_etag")
     if mapping is not None:
         values["mapping"] = mapping
     return fingerprint(values)
@@ -379,7 +380,19 @@ def task_view(task: dict[str, Any], today: str, mapping: list[dict[str, Any]] | 
     if task.get("_native_planning"):
         result["labels"] = sorted(task.get("_native_content_labels", labels - NATIVE_ROLES))
         result["explicit_stage"] = label_stage(labels, names)
-        result["planning_flags"] = [name for name in NATIVE_FLAGS if name in labels]
+        result["planning_flags"] = [name for name in NATIVE_FLAGS if name in labels and name != "blocked"]
+        result["kind"] = task.get("kind", "task")
+        result["effort"] = task.get("effort", "")
+        state = task["_native_plan_state"]
+        lead_days = int(state.get("lead_days", 0))
+        result["lead_days"] = lead_days
+        excluded = any(state.get(flag) for flag in ("active", "parked"))
+        if deadline and not excluded:
+            delta = (datetime.strptime(deadline, "%Y-%m-%d").date() - datetime.strptime(today, "%Y-%m-%d").date()).days
+            result["must_start"] = delta < 0 or (not state.get("waiting") and lead_days > 0 and delta <= lead_days)
+        else:
+            result["must_start"] = False
+        result["missing_lead"] = bool(deadline and not lead_days and not excluded)
     count = completed_count(task)
     if count is not None:
         result["completed_count"] = count

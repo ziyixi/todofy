@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CheckCheck } from "lucide-react";
 import { api, describeError } from "../api";
+import { displayedTitle } from "@ziyixi/planning-ui/domain";
 import type { Completion } from "@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb";
 
 export function CompletedHistory({ onOpen }: { onOpen: (id: string) => void }) {
@@ -47,7 +48,7 @@ export function CompletedHistory({ onOpen }: { onOpen: (id: string) => void }) {
           onClick={() => onOpen(item.taskId)}
         >
           <CheckCheck size={17} />
-          <span>{item.title}</span>
+          <span>{displayedTitle(item.title)}</span>
           <time>
             {item.completeTime
               ? new Date(

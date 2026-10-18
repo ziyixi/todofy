@@ -9,6 +9,20 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+### Tasks workflow refinement (2026-10-18 UTC)
+
+Branch `codex/tasks-workflow-refinement` implements the owner's 22-item Tasks acceptance list.
+The scope is native counts/navigation, ordinary task editing with planning/dependencies/start windows,
+separate Task/Subtask and schedulable Step semantics, structured recurrence, native effort, legacy
+tag/title cleanup and Focus timing against FlowDay's existing timer. Production cleanup must preserve
+task IDs, dependencies, completed history and time/queue references. No VPS, Newsletter or Recall changes.
+Current status and item-by-item evidence are tracked in [the refinement record](tasks/docs/refinement-verification.md).
+Implementation includes guarded native task fields, exact calendar eligibility, visible planning/dependency controls,
+structured recurrence and Focus completion settlement through the existing server timer. Real D1 tests cover
+request replay without advancing recurring tasks twice. Synthetic Chrome found and verified a recurrence
+popup overflow fix; screenshots and local checks are in the refinement record. Branch gate, production
+cleanup and production UI/metadata acceptance remain pending. No production cleanup has occurred.
+
 ### VPS release recovery (2026-10-18 UTC)
 
 Branch `codex/vps-release-recovery` records host recovery only; no application, release-client or

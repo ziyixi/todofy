@@ -13,6 +13,9 @@ export interface PlanningTask {
   parentId: string;
   projectId: string;
   labels: string[];
+  /** Explicit native content type; absent for retired Todoist hosts. */
+  kind?: "task" | "step";
+  effort?: "" | "deep" | "shallow";
   /** Saved native stage, before date-based candidates; absent for the legacy source. */
   explicitStage?: Stage;
   /** Native planning state, separate from ordinary tags. */
@@ -165,6 +168,7 @@ export type RunOperation = (
   change?: PendingChange,
 ) => Promise<boolean>;
 export interface FocusState extends FlowDayPlan {
+  finishedPomodoro?: { taskId: string; targetSeconds: number };
   timerEtag: string;
   estimates: Record<string, number>;
   flowTasks: Record<
@@ -176,6 +180,8 @@ export interface FocusState extends FlowDayPlan {
     flowDate: string;
     status: "running" | "paused";
     elapsedSeconds: number;
+    mode?: "countup" | "pomodoro";
+    targetSeconds?: number;
     startedAt: string;
     etag: string;
   };
@@ -234,6 +240,7 @@ export interface PlusSnapshot {
 }
 export interface TimerSnapshot {
   timerEtag: string;
+  finishedPomodoro?: FocusState["finishedPomodoro"];
   timer?: FocusState["timer"];
 }
 export interface PlanUpdate {
@@ -300,10 +307,13 @@ export interface PlusActions {
     beforeId?: string,
   ): Promise<FlowDayPlan[]>;
   updateEstimate(taskId: string, minutes: number): Promise<void>;
+  /** The existing authoritative FlowDay timer, without rereading task lists. */
+  readTimer?(): Promise<TimerSnapshot>;
   timer(
-    action: "start" | "pause" | "resume" | "stop",
+    action: "start" | "pause" | "resume" | "stop" | "finish",
     taskId: string,
     focus: FocusState,
+    targetSeconds?: number,
   ): Promise<TimerSnapshot>;
   /** The mail among these mail project tasks, asked about 200 at a time, and the categories. */
   lookupMail(taskIds: string[]): Promise<MailLookup>;

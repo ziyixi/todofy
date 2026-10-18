@@ -58,7 +58,7 @@ async function asset(request: Request): Promise<Response> {
   }
 }
 export async function startHarness(
-  options: { port?: number; bypass?: boolean; inspectorPort?: number; jwks?: unknown; ownerToken?: string } = {},
+  options: { port?: number; bypass?: boolean; inspectorPort?: number; jwks?: unknown; ownerToken?: string; planning?: (request: Request) => Promise<Response> } = {},
 ) {
   const temp = await mkdtemp(join(tmpdir(), 'tasks-d1-'));
   const mf = new Miniflare(
@@ -74,7 +74,7 @@ export async function startHarness(
           script: await bundle(),
           compatibilityDate: '2026-09-08',
           d1Databases: { DB: 'tasks-test' },
-          serviceBindings: { ASSETS: asset },
+          serviceBindings: { ASSETS: asset, ...(options.planning ? { PLANNING: options.planning } : {}) },
           bindings: {
             PUBLIC_HOST: 'tasks.example.test',
             TIME_ZONE: 'America/Los_Angeles',
@@ -111,7 +111,7 @@ export async function startHarness(
   const migrations = resolve(ROOT, '../migrations');
   for (const file of (await readdir(migrations)).filter((f) => f.endsWith('.sql')).sort()) {
     const sql = (await readFile(join(migrations, file), 'utf8')).replace(/--[^\n]*/g, '');
-    for (const statement of sql.split(/;\s*(?=(?:CREATE|PRAGMA)\b)/i))
+    for (const statement of sql.split(/;\s*(?=(?:ALTER|CREATE|PRAGMA)\b)/i))
       if (statement.trim()) await db.prepare(statement).run();
   }
   const fetch = (path: string, init?: RequestInit) =>
