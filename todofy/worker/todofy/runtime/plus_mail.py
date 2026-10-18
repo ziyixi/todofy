@@ -310,6 +310,17 @@ async def file(core: Any, request: dict[str, Any], current: dict[str, Any]) -> d
     return {"task": plus.task_view(task, current["today"], current["labels"])}
 
 
+async def _open_linked_task(core: Any, task_id: str) -> dict[str, Any] | None:
+    """The task an older Mail row links to while it is still open; None once it was deleted or completed."""
+    try:
+        task = await todoist.task(core, task_id)
+    except todoist.PlusError as error:
+        if error.reason == "NOT_FOUND":
+            return None
+        raise
+    return None if task.get("checked") else task
+
+
 async def _file_event(core: Any, request: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
     """Create the first generic Inbox task on owner action; then consume the Mail entry."""
     if not native_tasks.enabled(core.env) or request.get("task_id"):
@@ -330,8 +341,9 @@ async def _file_event(core: Any, request: dict[str, Any], current: dict[str, Any
         if request.get("etag") != mailbox.item_etag(row):
             raise todoist.PlusError("ETAG_MISMATCH")
         filed = await _category(core, request, current)
-        if row["task_id"]:
-            task = await todoist.task(core, row["task_id"])
+        # A linked task the owner deleted or completed is not moved back: the mail becomes a new Inbox task.
+        task = await _open_linked_task(core, row["task_id"]) if row["task_id"] else None
+        if task is not None:
             if task.get("parent_id"):
                 raise todoist.PlusError("ACTION_NOT_ALLOWED")
             fields: dict[str, Any] = {"project_id": "", "section_id": "", "parent_id": ""}

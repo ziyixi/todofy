@@ -603,6 +603,32 @@ def test_native_mail_exists_before_task_and_explicit_conversion_creates_only_one
     assert planning(native, "ReadMailSummary", id=event_id) == {"summary": summary}
 
 
+@pytest.mark.parametrize("gone", ["deleted", "completed"])
+def test_mail_whose_linked_task_is_gone_becomes_a_new_inbox_task(native, ready_plan, gone):
+    old = rpc(
+        native,
+        "CreateTask",
+        {"task": {"title": f"Synthetic {gone} mail task"}, "request_id": str(uuid.uuid4())},
+    )
+    method = "DeleteTask" if gone == "deleted" else "CompleteTask"
+    rpc(native, method, {"name": old["name"], "etag": old["etag"], "request_id": str(uuid.uuid4())})
+    event_id = str(uuid.uuid4())
+    native.d1(
+        "INSERT INTO summaries(event_id,created_at,subject,summary,model,task_id)"
+        f" VALUES('{event_id}',102,'Synthetic linked mail','Synthetic summary','synthetic','{old['id']}')"
+    )
+    listed = planning(native, "ListMailItems", page_size=50)
+    mail = next(item for item in listed["mail_items"] if item["id"] == event_id)
+    filed = planning(native, "ConvertMailItem", event_id=event_id, etag=mail["etag"], request_id=str(uuid.uuid4()))
+    assert "task" in filed, filed
+    task = rpc(native, "GetTask", {"name": f"tasks/{filed['task']['id']}"})
+    assert task["id"] != old["id"] and not task.get("completed") and task.get("project_id", "") == ""
+    [saved] = native.d1(f"SELECT task_id FROM summaries WHERE event_id='{event_id}'")
+    assert saved["task_id"] == task["id"]
+    if gone == "completed":
+        assert rpc(native, "GetTask", {"name": old["name"]})["completed"] is True
+
+
 def test_native_mail_summary_delete_never_deletes_a_linked_task(native, ready_plan):
     task = rpc(
         native,
