@@ -40,6 +40,18 @@ BUCKET = "todofy-backups"
 TOOL = ROOT / "tools" / "backup_restore.py"
 EVENTS, TRANSITIONS, LEGACY_TEXTS = 30, 1100, 4
 TASKS = ROOT.parent / "tasks"
+TASKS_TOOL = TASKS / "tools" / "backup-restore.ts"
+# Every Tasks table a restore writes, with its order, and task_labels, which its triggers rebuild.
+TASKS_TABLES = {
+    "projects": "id",
+    "sections": "id",
+    "labels": "id",
+    "filters": "id",
+    "tasks": "id",
+    "completions": "sequence",
+    "requests": "id",
+    "task_labels": "task_id, label_id",
+}
 # Seeded Tasks rows (seed_tasks): 3 projects, a section, a label, a filter, 252 tasks, 2 completions, a receipt.
 TASK_ROWS, TASKS_ROWS = 252, 3 + 1 + 1 + 1 + 252 + 2 + 1
 # Seeded prefixes: six complete ones and an incomplete one, all older than the jobs' own.
@@ -142,6 +154,10 @@ def r2_exists(worker: Worker, key: str, tmp_path: Path) -> bool:
 def restore_tool(*args: str) -> subprocess.CompletedProcess[str]:
     command = [sys.executable, str(TOOL), *args]
     return subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=600)
+
+
+def tasks_tool(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["node", str(TASKS_TOOL), *args], cwd=TASKS, capture_output=True, text=True, timeout=600)
 
 
 def seed(worker: Worker, now: int) -> None:
@@ -248,6 +264,13 @@ def dump(worker: Worker, persist_to: Path) -> dict[str, list[dict[str, Any]]]:
     return {table.name: entry["results"] for table, entry in zip(tables, results, strict=True)}
 
 
+def tasks_dump(worker: Worker, persist_to: Path | None = None, config: str = "") -> dict[str, list[dict[str, Any]]]:
+    """Every Tasks table in key order (one `d1 execute`): the server's, or a restored one."""
+    statements = " ".join(f"SELECT * FROM {name} ORDER BY {key};" for name, key in TASKS_TABLES.items())
+    results = tasks_d1(worker, statements, persist_to, config)
+    return {name: entry["results"] for name, entry in zip(TASKS_TABLES, results, strict=True)}
+
+
 def next_sunday_ten(now: datetime) -> str:
     """After a backup: the next Sunday 10:00 UTC on a later day (a Sunday's own slot is skipped)."""
     at = (now + timedelta(days=(6 - now.weekday()) % 7 or 7)).replace(hour=10, minute=0, second=0, microsecond=0)
@@ -323,6 +346,27 @@ def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tm
     source = dump(worker, worker.persist_to)
     assert dump(worker, target) == source
     assert len(source["legacy_mail_text"]) == LEGACY_TEXTS
+
+    # The same download restores Tasks into a new local D1 of its own (tasks/docs/backup.md).
+    tasks_target, tasks_config = tmp_path / "tasks-target", tmp_path / "tasks-restore.toml"
+    configured = tasks_tool(
+        "config", "--database-name", "tasks-restore", "--database-id", str(uuid.uuid4()), "--out", str(tasks_config)
+    )
+    assert configured.returncode == 0, configured.stdout + configured.stderr
+    tasks_flags = [*local(worker, tasks_target), "--config", str(tasks_config)]
+    applied = wrangler("d1", "migrations", "apply", "DB", *tasks_flags)
+    assert applied.returncode == 0, applied.stderr[-2000:]
+    written = tasks_tool("sql", "--in", str(out), "--out", str(tmp_path / "tasks-restore.sql"))
+    assert written.returncode == 0, written.stdout + written.stderr
+    assert f"PASS tasks rows={TASK_ROWS}" in written.stdout and "WARN" not in written.stdout
+    loaded = wrangler("d1", "execute", "DB", *tasks_flags, "--file", str(tmp_path / "tasks-restore.sql"))
+    assert loaded.returncode == 0, loaded.stderr[-2000:]
+    verified = tasks_tool("verify", "--in", str(out), *tasks_flags, "--wrangler", str(WRANGLER))
+    assert verified.returncode == 0, verified.stdout + verified.stderr
+    assert verified.stdout.splitlines()[-1] == "verify PASS"
+    restored = tasks_dump(worker, tasks_target, str(tasks_config))
+    assert restored == tasks_dump(worker)
+    assert len(restored["tasks"]) == TASK_ROWS and restored["task_labels"]
 
     # A second job on the same day (here: the object lost its state) writes a new prefix and leaves
     # the complete one alone, byte for byte. It copies the legacy text afresh, so a row that retention

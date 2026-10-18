@@ -1,4 +1,7 @@
 /** Native source over the real FlowDay D1 store; only synthetic task metadata crosses the fake binding. */
+import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
 import { toWire } from '@ziyixi/proto/wire-json';
@@ -184,4 +187,28 @@ it('a task without a project is in the Inbox, and rows mirrored before are heale
     { id: 'mirrored-before', project_name: 'Inbox', todoist_project_id: 'inbox' },
     { id: 'quick-add', project_name: 'Inbox', todoist_project_id: 'inbox' },
   ]);
+});
+it('after a Tasks restore the reset replays the new feed: tasks it holds return, the rest stay hidden', async () => {
+  changes = [task('kept'), task('dropped'), task('deleted-here')];
+  await sync();
+  await h.sql("UPDATE tasks SET deleted_at='2026-10-17T11:00:00.000Z', deleted_source='local' WHERE id='deleted-here'");
+  await h.sql("INSERT INTO flow_tasks(id,flow_date,task_id,sort_order) VALUES ('planned','2026-10-17','kept',0)");
+  await h.sql("INSERT INTO tasks(id,title,labels,priority,is_completed) VALUES ('local','Synthetic local task','[]',1,0)");
+  const reset = await readFile(join(dirname(fileURLToPath(import.meta.url)), '../../../deploy/reset-tasks-mirror.sql'), 'utf8');
+  for (const statement of reset.replace(/--[^\n]*/g, '').split(';')) if (statement.trim()) await h.sql(statement);
+  expect(await h.sql("SELECT key FROM settings WHERE key LIKE 'tasks_sync_%'")).toEqual([]);
+  expect((await getAllTasks(h.db())).map((row) => row.id)).toEqual(['local']);
+  // The restored database's feed starts again at 1 and no longer holds 'dropped'.
+  changes = [task('kept', { title: 'Restored' }), task('deleted-here')];
+  expect((await sync(at + AUTO_SYNC_MIN_INTERVAL_MS)).result).toMatchObject({
+    kind: 'ok',
+    response: { status: 'synced', fullSync: true },
+  });
+  expect((await getAllTasks(h.db())).map((row) => [row.id, row.title])).toEqual([
+    ['kept', 'Restored'],
+    ['local', 'Synthetic local task'],
+  ]);
+  expect((await getDeletedTasks(h.db())).map((row) => row.id)).toEqual(['deleted-here']);
+  expect(await h.sql("SELECT deleted_source FROM tasks WHERE id='dropped'")).toEqual([{ deleted_source: 'sync' }]);
+  expect(await h.sql('SELECT task_id FROM flow_tasks')).toEqual([{ task_id: 'kept' }]);
 });
