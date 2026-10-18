@@ -125,3 +125,29 @@ def test_a_reorder_waits_for_setup_and_stops_in_maintenance_and_during_a_backup(
     assert stack.reorder("b", "a") == {"error": "ACTION_NOT_ALLOWED"}
     assert "sync" not in stack.todoist.calls
     assert stack.call("ReorderTasks", task_ids=["a"], task_id="a") == {"error": "BAD_REQUEST"}  # no request ID
+
+
+def test_native_hundred_task_reorder_is_one_generic_rpc_and_keeps_original_position_slots(monkeypatch):
+    with stubbed_pyodide(monkeypatch):
+        from todofy.runtime.plus_order import _native_updates
+
+        found = {
+            str(index): {
+                "id": str(index),
+                "sort_order": index + 0.25,
+                "_native_etag": "1",
+                "project_id": "project",
+                "parent_id": "parent",
+                "section_id": "section",
+            }
+            for index in range(100)
+        }
+        ids = list(reversed(found))
+        commands = _native_updates(found, ids, ids[0], str(uuid.uuid4()))
+        [operation] = commands
+        assert operation["method"] == "ReorderTasks"
+        positions = operation["body"]["positions"]
+        assert len(positions) == 100
+        assert [row["name"] for row in positions] == [f"tasks/{task_id}" for task_id in ids]
+        assert [row["sort_order"] for row in positions] == [index + 0.25 for index in range(100)]
+        assert _native_updates(found, list(found), "0", str(uuid.uuid4())) == []

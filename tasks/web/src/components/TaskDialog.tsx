@@ -1,9 +1,21 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { ChevronRight, Plus, Trash2 } from "lucide-react";
+import {
+  CalendarDays,
+  Check,
+  ChevronRight,
+  Circle,
+  Flag,
+  Plus,
+  Repeat2,
+  Trash2,
+} from "lucide-react";
 import type { Catalog, Task, TaskDraft } from "../api";
 import { api, describeError } from "../api";
 import { Dialog } from "./Dialog";
 import { TaskFields } from "./TaskFields";
+import { dateLabel, todayDate } from "../dates";
+import { scheduledDate, scheduledTime } from "../task-schedule";
+import "./color-detail.css";
 
 export function TaskDialog({
   task,
@@ -20,7 +32,11 @@ export function TaskDialog({
   catalog: Catalog;
   defaults?: Partial<TaskDraft>;
   onClose: () => void;
-  onSave: (draft: TaskDraft, original?: Task, requestId?: string) => Promise<void>;
+  onSave: (
+    draft: TaskDraft,
+    original?: Task,
+    requestId?: string,
+  ) => Promise<void>;
   onDelete: (task: Task) => Promise<void>;
   onOpen: (id: string) => void;
   onComplete: (task: Task) => Promise<string | undefined>;
@@ -44,7 +60,9 @@ export function TaskDialog({
   }));
   const [busy, setBusy] = useState(false);
   const [saveRequestId] = useState(() => crypto.randomUUID());
-  const [childRequestId, setChildRequestId] = useState(() => crypto.randomUUID());
+  const [childRequestId, setChildRequestId] = useState(() =>
+    crypto.randomUUID(),
+  );
   const [error, setError] = useState("");
   const [children, setChildren] = useState<Task[]>([]);
   const [childTitle, setChildTitle] = useState("");
@@ -122,6 +140,25 @@ export function TaskDialog({
       setBusy(false);
     }
   }
+  async function finishChild(child: Task) {
+    setBusy(true);
+    setError("");
+    try {
+      const message = await onComplete(child);
+      if (message) {
+        setError(message);
+        return;
+      }
+      const refreshed = await api.getTask({ name: child.name });
+      setChildren((current) =>
+        current.map((item) => (item.id === child.id ? refreshed : item)),
+      );
+    } catch (reason) {
+      setError(describeError(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
   async function previewDate() {
     if (!dateText.trim()) return;
     setBusy(true);
@@ -165,16 +202,22 @@ export function TaskDialog({
   }
   async function setSchedule(date: string, time: string) {
     if (!date || !time) {
-      setDraft((current) => ({ ...current, dueDate: date, dueDatetime: "", dueTimezone: "" }));
+      setDraft((current) => ({
+        ...current,
+        dueDate: date,
+        dueDatetime: "",
+        dueTimezone: "",
+      }));
       return;
     }
     setBusy(true);
     setError("");
     try {
-      const result = await api.previewDate({
-        text: `${date} at ${time}`,
-        timeZone: draft.dueTimezone || catalog.timeZone,
-      });
+      const result = await scheduledDate(
+        date,
+        time,
+        draft.dueTimezone || catalog.timeZone,
+      );
       setDraft((current) => ({
         ...current,
         dueDate: result.dueDate,
@@ -188,11 +231,10 @@ export function TaskDialog({
     }
   }
   function setDate(value: string) {
-    const time = draft.dueDatetime
-      ? new Date(draft.dueDatetime).toLocaleTimeString("sv-SE", {
-          hour: "2-digit", minute: "2-digit", timeZone: draft.dueTimezone || catalog.timeZone,
-        })
-      : "";
+    const time = scheduledTime(
+      draft.dueDatetime,
+      draft.dueTimezone || catalog.timeZone,
+    );
     return setSchedule(value, time);
   }
   function setTime(value: string) {
@@ -274,17 +316,69 @@ export function TaskDialog({
                   {childPage ? "+" : ""}
                 </span>
               </h3>
-              {children.map((child) => (
-                <button
-                  type="button"
-                  className={`subtask-link ${child.completed ? "is-completed" : ""}`}
-                  key={child.id}
-                  onClick={() => onOpen(child.id)}
-                >
-                  {child.title}
-                  <ChevronRight size={14} />
-                </button>
-              ))}
+              {children.map((child) => {
+                const due = child.dueDate || child.dueDatetime.slice(0, 10);
+                return (
+                  <div
+                    className={`subtask-row ${child.completed ? "is-completed" : ""}`}
+                    key={child.id}
+                  >
+                    <button
+                      type="button"
+                      className={`complete-button priority-${child.priority}`}
+                      aria-label={`${child.completed ? "Reopen" : "Complete"} ${child.title}`}
+                      disabled={busy}
+                      onClick={() => void finishChild(child)}
+                    >
+                      {child.completed ? (
+                        <Check size={13} />
+                      ) : (
+                        <Circle size={18} />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      className={`subtask-link ${child.completed ? "is-completed" : ""}`}
+                      aria-label={child.title}
+                      disabled={busy}
+                      onClick={() => onOpen(child.id)}
+                    >
+                      <span className="subtask-content">
+                        <span className="subtask-title">{child.title}</span>
+                        {(due || child.deadline || child.recurrence) && (
+                          <span className="subtask-meta">
+                            {due && (
+                              <span
+                                className={
+                                  due < todayDate() && !child.completed
+                                    ? "subtask-overdue"
+                                    : ""
+                                }
+                              >
+                                <CalendarDays size={11} />
+                                {dateLabel(due)}
+                              </span>
+                            )}
+                            {child.recurrence && (
+                              <span title={child.recurrence}>
+                                <Repeat2 size={11} />
+                                {child.recurrence}
+                              </span>
+                            )}
+                            {child.deadline && (
+                              <span className="subtask-deadline">
+                                <Flag size={11} />
+                                {dateLabel(child.deadline)}
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </span>
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                );
+              })}
               {childPage && (
                 <button
                   type="button"

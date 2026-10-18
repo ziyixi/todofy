@@ -1,9 +1,14 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
-test("retrying Quick Add after a lost response keeps one persisted task", async ({ page, request }) => {
+test("retrying Quick Add after a lost response keeps one persisted task", async ({
+  page,
+  request,
+}) => {
   const title = "Synthetic retry keeps one task";
   await page.goto("/#/inbox");
-  await expect(page.getByRole("heading", { name: "Inbox", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Inbox", exact: true }),
+  ).toBeVisible();
   let dropped = false;
   await page.route("**/api/tasks/v1/tasks?*", async (route) => {
     if (route.request().method() !== "POST" || dropped) return route.continue();
@@ -14,15 +19,21 @@ test("retrying Quick Add after a lost response keeps one persisted task", async 
   });
   await page.keyboard.press("q");
   const dialog = page.getByRole("dialog", { name: "Add task" });
-  await dialog.getByRole("textbox", { name: "Task name", exact: true }).fill(title);
+  await dialog
+    .getByRole("textbox", { name: "Task name", exact: true })
+    .fill(title);
   await dialog.getByRole("button", { name: "Add task", exact: true }).click();
   await expect(dialog.getByRole("alert")).toBeVisible();
   await dialog.getByRole("button", { name: "Add task", exact: true }).click();
   await expect(dialog).not.toBeVisible();
-  const result = await request.get(`/api/tasks/v1/tasks?view=search&query=${encodeURIComponent(title)}`);
+  const result = await request.get(
+    `/api/tasks/v1/tasks?view=search&query=${encodeURIComponent(title)}`,
+  );
   expect(result.status()).toBe(200);
   const body = await result.json();
-  expect(body.tasks.filter((task: { title: string }) => task.title === title)).toHaveLength(1);
+  expect(
+    body.tasks.filter((task: { title: string }) => task.title === title),
+  ).toHaveLength(1);
 });
 
 async function createTask(
@@ -59,9 +70,8 @@ test("quick add, edit, complete and reopen persist through page reload", async (
   await dialog
     .getByRole("textbox", { name: "Description", exact: true })
     .fill("Check the saved fields after a reload.");
-  await dialog
-    .getByRole("combobox", { name: "Priority", exact: true })
-    .selectOption("1");
+  await dialog.getByRole("combobox", { name: "Priority", exact: true }).click();
+  await dialog.getByRole("option", { name: "Priority 1", exact: true }).click();
   await dialog.getByRole("button", { name: "Add task", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await page.reload();
@@ -73,7 +83,7 @@ test("quick add, edit, complete and reopen persist through page reload", async (
   const details = page.getByRole("dialog", { name: "Task details" });
   await expect(
     details.getByRole("combobox", { name: "Priority", exact: true }),
-  ).toHaveValue("1");
+  ).toHaveText("Priority 1");
   await details
     .getByRole("textbox", { name: "Task name", exact: true })
     .fill("Synthetic edited review task");
@@ -122,12 +132,20 @@ test("nested subtasks remain attached and natural-date preview keeps deadline in
   await expect(
     dialog.getByRole("button", { name: "Open parent task" }),
   ).toBeVisible();
-  await dialog.getByText("Schedule options", { exact: true }).click();
+  await dialog.getByRole("button", { name: "Date", exact: true }).click();
   await dialog.getByLabel("Schedule", { exact: true }).fill("every Tuesday");
-  await dialog.getByRole("button", { name: "Preview date" }).click();
-  await expect(dialog.getByLabel("Date", { exact: true })).not.toHaveValue("");
-  await dialog.getByLabel("Deadline", { exact: true }).fill("2026-12-31");
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(dialog.getByRole("status")).toHaveText(/Next:/);
   await dialog.getByLabel("Time", { exact: true }).fill("14:15");
+  await dialog.getByRole("button", { name: "Deadline", exact: true }).click();
+  await dialog.getByLabel("Deadline text", { exact: true }).fill("2026-12-31");
+  await dialog
+    .getByRole("dialog", { name: "Deadline picker", exact: true })
+    .getByRole("button", { name: "Apply", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("button", { name: "Deadline", exact: true }),
+  ).toHaveText("Dec 31");
   await dialog.getByRole("button", { name: "Save changes" }).click();
   await expect(dialog).not.toBeVisible();
   await page.reload();
@@ -137,30 +155,131 @@ test("nested subtasks remain attached and natural-date preview keeps deadline in
       exact: true,
     })
     .click();
-  await expect(dialog.getByLabel("Deadline", { exact: true })).toHaveValue(
-    "2026-12-31",
-  );
+  await expect(
+    dialog.getByRole("button", { name: "Deadline", exact: true }),
+  ).toHaveText("Dec 31");
+  await dialog.getByRole("button", { name: "Date", exact: true }).click();
   await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("14:15");
   await expect(dialog.getByLabel("Repeat", { exact: true })).toHaveValue(
     /Tuesday/i,
   );
 });
 
-test("moving a timed date preserves the local clock time across daylight saving", async ({page, request}) => {
+test("moving a timed date preserves the local clock time across daylight saving", async ({
+  page,
+  request,
+}) => {
   const task = await createTask(request, "Synthetic timed date", {
-    due_date: "2026-10-27", due_datetime: "2026-10-27T18:00:00Z", due_timezone: "America/Los_Angeles",
+    due_date: "2026-10-27",
+    due_datetime: "2026-10-27T18:00:00Z",
+    due_timezone: "America/Los_Angeles",
   });
   await page.goto(`/?task=${task.id}#/inbox`);
-  const dialog = page.getByRole("dialog", {name: "Task details"});
-  await expect(dialog.getByLabel("Time", {exact: true})).toHaveValue("11:00");
-  await dialog.getByLabel("Date", {exact: true}).fill("2026-11-03");
-  await expect(dialog.getByRole("button", {name: "Save changes"})).toBeEnabled();
-  await dialog.getByRole("button", {name: "Save changes"}).click();
+  const dialog = page.getByRole("dialog", { name: "Task details" });
+  await dialog.getByRole("button", { name: "Date", exact: true }).click();
+  await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("11:00");
+  await dialog
+    .getByRole("gridcell", { name: "Tuesday, November 3, 2026" })
+    .click();
+  await expect(
+    dialog.getByRole("button", { name: "Save changes" }),
+  ).toBeEnabled();
+  await dialog.getByRole("button", { name: "Save changes" }).click();
   await expect(dialog).not.toBeVisible();
   const saved = await (await request.get(`/api/tasks/v1/${task.name}`)).json();
   expect(saved.due_date).toBe("2026-11-03");
   expect(saved.due_datetime).toBe("2026-11-03T19:00:00.000Z");
   expect(saved.due_timezone).toBe("America/Los_Angeles");
+});
+
+test("property menus search colored project sections, support keyboard choices and dismiss inside the task dialog", async ({
+  page,
+  request,
+}) => {
+  const { token } = await (await request.get("/api/tasks/csrf")).json();
+  const headers = { "x-csrf-token": token, origin: "http://127.0.0.1:8798" };
+  const projectResponse = await request.post(
+    `/api/tasks/v1/projects?request_id=${crypto.randomUUID()}`,
+    {
+      headers,
+      data: { title: "Synthetic menu studio", color: "#db4035" },
+    },
+  );
+  expect(projectResponse.status()).toBe(200);
+  const project = await projectResponse.json();
+  const sectionResponse = await request.post(
+    `/api/tasks/v1/sections?request_id=${crypto.randomUUID()}`,
+    {
+      headers,
+      data: { title: "Synthetic next steps", project_id: project.id },
+    },
+  );
+  expect(sectionResponse.status()).toBe(200);
+  const section = await sectionResponse.json();
+  await page.goto("/#/inbox");
+  await expect(
+    page.getByRole("heading", { name: "Inbox", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("q");
+  const dialog = page.getByRole("dialog", { name: "Add task", exact: true });
+  await dialog
+    .getByLabel("Task name", { exact: true })
+    .fill("Synthetic selected properties");
+  await dialog.getByRole("combobox", { name: "Project", exact: true }).click();
+  const search = dialog.getByRole("combobox", {
+    name: "Search projects and sections",
+  });
+  await expect(search).toBeFocused();
+  await expect(search).toHaveValue("");
+  await search.fill("next steps");
+  await search.press("ArrowDown");
+  await search.press("Enter");
+  await expect(
+    dialog.getByRole("combobox", { name: "Project", exact: true }),
+  ).toHaveText("Synthetic menu studio / Synthetic next steps");
+  await dialog.getByRole("combobox", { name: "Priority", exact: true }).click();
+  const redFlag = dialog
+    .getByRole("option", { name: "Priority 1", exact: true })
+    .locator("svg")
+    .first();
+  await expect(redFlag).toHaveAttribute("fill", "#d1453b");
+  await dialog.getByRole("option", { name: "Priority 2", exact: true }).click();
+  await dialog.getByRole("button", { name: "Date", exact: true }).click();
+  await expect(
+    dialog.getByRole("dialog", { name: "Date picker", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(
+    dialog.getByRole("dialog", { name: "Date picker", exact: true }),
+  ).not.toBeVisible();
+  await dialog.getByRole("button", { name: "Deadline", exact: true }).click();
+  await expect(
+    dialog.getByRole("dialog", { name: "Date picker", exact: true }),
+  ).not.toBeVisible();
+  await expect(
+    dialog.getByRole("dialog", { name: "Deadline picker", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(
+    dialog.getByRole("dialog", { name: "Deadline picker", exact: true }),
+  ).not.toBeVisible();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Date", exact: true }).click();
+  await dialog.getByText("Date", { exact: true }).click();
+  await expect(
+    dialog.getByRole("dialog", { name: "Date picker", exact: true }),
+  ).not.toBeVisible();
+  await dialog.getByRole("button", { name: "Add task", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  const response = await request.get(
+    `/api/tasks/v1/tasks?view=search&query=${encodeURIComponent("Synthetic selected properties")}`,
+  );
+  const saved = (await response.json()).tasks.find(
+    (task: { title: string }) => task.title === "Synthetic selected properties",
+  );
+  expect(saved.project_id).toBe(project.id);
+  expect(saved.section_id).toBe(section.id);
+  expect(saved.priority).toBe(2);
 });
 
 test("project and label edits appear in task picker and filter views", async ({
@@ -190,7 +309,6 @@ test("project and label edits appear in task picker and filter views", async ({
   await dialog
     .getByLabel("Task name", { exact: true })
     .fill("Synthetic labelled task");
-  await dialog.getByText("More details", { exact: false }).click();
   await dialog.getByText("Add labels", { exact: true }).click();
   await dialog.getByLabel("SyntheticFocus", { exact: true }).check();
   await dialog.getByRole("button", { name: "Add task", exact: true }).click();
@@ -282,8 +400,14 @@ test("dragging custom order persists and selected tasks complete as a group", as
   ).not.toBeVisible();
 });
 
-test("completing a parent with a recurring subtask shows the reason inside its open editor", async ({ page, request }) => {
-  const parent = await createTask(request, "Synthetic parent with recurring work");
+test("completing a parent with a recurring subtask shows the reason inside its open editor", async ({
+  page,
+  request,
+}) => {
+  const parent = await createTask(
+    request,
+    "Synthetic parent with recurring work",
+  );
   await createTask(request, "Synthetic daily recurring child", {
     parent_id: parent.id,
     due_date: "2030-01-01",
@@ -291,56 +415,103 @@ test("completing a parent with a recurring subtask shows the reason inside its o
   });
   await page.goto(`/?task=${parent.id}#/inbox`);
   const dialog = page.getByRole("dialog", { name: "Task details" });
-  await expect(dialog.getByRole("button", { name: "Synthetic daily recurring child", exact: true })).toBeVisible();
-  await dialog.getByRole("button", { name: "Complete task", exact: true }).click();
-  await expect(dialog.getByRole("alert")).toHaveText("Complete recurring subtasks separately before completing their parent");
+  await expect(
+    dialog.getByRole("button", {
+      name: "Synthetic daily recurring child",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await dialog
+    .getByRole("button", { name: "Complete task", exact: true })
+    .click();
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "Complete recurring subtasks separately before completing their parent",
+  );
   await expect(dialog).toBeVisible();
   const saved = await request.get(`/api/tasks/v1/tasks/${parent.id}`);
   expect(saved.status()).toBe(200);
   expect((await saved.json()).completed ?? false).toBe(false);
 });
 
-
-test("task descriptions render Markdown, edit and persist without loading remote images", async ({ page, request }) => {
+test("task descriptions render Markdown, edit and persist without loading remote images", async ({
+  page,
+  request,
+}) => {
   const parent = await createTask(request, "Synthetic formatted description", {
-    description: "Read [the guide](https://example.org/guide). Plain source: https://example.org/source?id=123&view=full.\n\n- First step\n- Second step\n\n![Reference image](https://example.org/private-image.png)\n\n<script>window.descriptionUnsafe = true</script>",
+    description:
+      "Read [the guide](https://example.org/guide). Plain source: https://example.org/source?id=123&view=full.\n\n- First step\n- Second step\n\n![Reference image](https://example.org/private-image.png)\n\n<script>window.descriptionUnsafe = true</script>",
   });
   const remoteRequests: string[] = [];
   page.on("request", (incoming) => {
-    if (incoming.url().startsWith("https://example.org/")) remoteRequests.push(incoming.url());
+    if (incoming.url().startsWith("https://example.org/"))
+      remoteRequests.push(incoming.url());
   });
   await page.goto(`/?task=${parent.id}#/inbox`);
   const dialog = page.getByRole("dialog", { name: "Task details" });
   const description = dialog.getByRole("region", { name: "Task description" });
-  const guide = description.getByRole("link", { name: "the guide", exact: true });
+  const guide = description.getByRole("link", {
+    name: "the guide",
+    exact: true,
+  });
   await expect(guide).toHaveAttribute("href", "https://example.org/guide");
   await expect(guide).toHaveAttribute("target", "_blank");
-  const bareLink = description.getByRole("link", { name: "https://example.org/source?id=123&view=full", exact: true });
-  await expect(bareLink).toHaveAttribute("href", "https://example.org/source?id=123&view=full");
+  const bareLink = description.getByRole("link", {
+    name: "https://example.org/source?id=123&view=full",
+    exact: true,
+  });
+  await expect(bareLink).toHaveAttribute(
+    "href",
+    "https://example.org/source?id=123&view=full",
+  );
   await expect(bareLink).toHaveAttribute("target", "_blank");
   expect(remoteRequests).toEqual([]);
   await expect(description.getByRole("listitem")).toHaveCount(2);
   await expect(description.locator("img, script")).toHaveCount(0);
   await expect(description.getByRole("textbox")).toHaveCount(0);
-  await description.getByRole("button", { name: "Edit description", exact: true }).click();
-  const editor = description.getByRole("textbox", { name: "Description", exact: true });
+  await description
+    .getByRole("button", { name: "Edit description", exact: true })
+    .click();
+  const editor = description.getByRole("textbox", {
+    name: "Description",
+    exact: true,
+  });
   await expect(editor).toHaveValue(/\[the guide\]/);
-  await editor.fill("Updated [the guide](https://example.org/updated).\n\n- Saved step");
+  await editor.fill(
+    "Updated [the guide](https://example.org/updated).\n\n- Saved step",
+  );
   await description.getByRole("button", { name: "Done", exact: true }).click();
-  await expect(description.getByRole("link", { name: "the guide", exact: true })).toHaveAttribute("href", "https://example.org/updated");
-  await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(
+    description.getByRole("link", { name: "the guide", exact: true }),
+  ).toHaveAttribute("href", "https://example.org/updated");
+  await dialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   await page.goto(`/?task=${parent.id}#/inbox`);
   await page.reload();
-  await expect(description.getByRole("link", { name: "the guide", exact: true })).toHaveAttribute("href", "https://example.org/updated");
+  await expect(
+    description.getByRole("link", { name: "the guide", exact: true }),
+  ).toHaveAttribute("href", "https://example.org/updated");
   await expect(description.getByRole("listitem")).toHaveText(["Saved step"]);
   expect(remoteRequests).toEqual([]);
 });
 
-test("Upcoming keeps dates chronological while preserving each day's custom task order", async ({ page, request }) => {
-  await createTask(request, "Synthetic later day first in custom order", { due_date: "2040-06-07", sort_order: 10 });
-  await createTask(request, "Synthetic earlier day second task", { due_date: "2040-06-05", sort_order: 40 });
-  await createTask(request, "Synthetic earlier day first task", { due_date: "2040-06-05", sort_order: 20 });
+test("Upcoming keeps dates chronological while preserving each day's custom task order", async ({
+  page,
+  request,
+}) => {
+  await createTask(request, "Synthetic later day first in custom order", {
+    due_date: "2040-06-07",
+    sort_order: 10,
+  });
+  await createTask(request, "Synthetic earlier day second task", {
+    due_date: "2040-06-05",
+    sort_order: 40,
+  });
+  await createTask(request, "Synthetic earlier day first task", {
+    due_date: "2040-06-05",
+    sort_order: 20,
+  });
   await page.clock.setFixedTime(new Date("2040-06-04T12:00:00"));
   await page.goto("/#/upcoming");
   const headings = page.locator(".task-group-heading");
@@ -352,5 +523,7 @@ test("Upcoming keeps dates chronological while preserving each day's custom task
     "Synthetic earlier day first task",
     "Synthetic earlier day second task",
   ]);
-  await expect(days.nth(1).locator(".task-title")).toHaveText(["Synthetic later day first in custom order"]);
+  await expect(days.nth(1).locator(".task-title")).toHaveText([
+    "Synthetic later day first in custom order",
+  ]);
 });

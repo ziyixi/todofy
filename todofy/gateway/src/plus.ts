@@ -27,12 +27,18 @@ const PREFIX = '/api/plus/v1/';
 const FLOW_PREFIX = '/api/plus/flowday';
 const DOMAIN = API_DOMAIN;
 
+function retiredExtension(env: Env): RpcError {
+  return new RpcError(Code.FAILED_PRECONDITION, 'ACTION_NOT_ALLOWED',
+    `Todoist Plus has moved to Tasks. Open ${variable(env, 'TASKS_PUBLIC_URL')} to continue.`);
+}
+
 function handlers(): ServiceHandlers<ShapeOf<typeof PlusService>, PlusContext> {
   const result: Record<string, unknown> = {};
   for (const method of PlusService.methods) {
     const idempotent = method.input.fields.some(field => field.name === 'request_id');
     result[method.localName] = async (input: Parameters<typeof toWire>[1], ctx: PlusContext) => {
       if (ctx.owner === null && OWNER_METHODS.has(method.name)) throw uiError('UNAUTHORIZED');
+      if (method.name === 'IssueExtensionConnection' && variable(ctx.env, 'TASK_SOURCE') === 'tasks') throw retiredExtension(ctx.env);
       const wire = toWire(method.input, input);
       if (idempotent && wire['request_id'] === undefined) wire['request_id'] = crypto.randomUUID();
       if (method.name === 'CompleteTask' && wire['flow_date'] && !validDay(wire['flow_date'])) throw uiError('BAD_REQUEST');
@@ -82,8 +88,7 @@ export async function plusOwner(ctx: Context, owner: string | null, digest: stri
 export async function plusExtension(ctx: Context): Promise<Response> {
   try {
     if (variable(ctx.env, 'TASK_SOURCE') === 'tasks') {
-      throw new RpcError(Code.FAILED_PRECONDITION, 'ACTION_NOT_ALLOWED',
-        `Todoist Plus has moved to Tasks. Open ${variable(ctx.env, 'TASKS_PUBLIC_URL')} to continue.`);
+      throw retiredExtension(ctx.env);
     }
     // Browsers call through the extension background's host permission. We do not grant page CORS.
     const match = /^Bearer (todofy_plus_[A-Za-z0-9_-]{43})$/.exec(ctx.request.headers.get('authorization') ?? '');

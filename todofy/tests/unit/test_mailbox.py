@@ -188,6 +188,7 @@ UNTOUCHED = {"id": "t", "labels": [], "priority": 1, "due": None, "deadline": No
     "change",
     [
         pytest.param({"labels": ["context"]}, id="label"),
+        pytest.param({"_native_content_labels": ["active"]}, id="ordinary_native_label"),
         pytest.param({"priority": 2}, id="priority"),
         pytest.param({"due": {"date": "2026-10-20"}}, id="date"),
         pytest.param({"deadline": {"date": "2026-10-20"}}, id="deadline"),
@@ -200,3 +201,8 @@ def test_any_owner_change_keeps_a_mail(change):
     assert plus.untouched(UNTOUCHED, set())
     assert not plus.untouched({**UNTOUCHED, **change}, set())
     assert not plus.untouched(UNTOUCHED, {"t"})  # it has a sub-task
+
+
+def test_task_text_limit_preserves_whole_non_bmp_characters():
+    assert mailbox.task_text("A😀B", 3) == "A😀"
+    assert mailbox.task_text("A😀B", 2) == "A"

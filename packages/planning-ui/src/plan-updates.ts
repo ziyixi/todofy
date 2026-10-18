@@ -231,12 +231,33 @@ export function withStage(
     added.includes(label) ||
     (parked !== undefined && label === PARKED_LABEL) ||
     (parked === true && label === ACTIVE_LABEL);
-  const predicted = (task: PlanningTask): PlanningTask => ({
-    ...task,
-    stage: parked ? "none" : stage,
-    labels: [...task.labels.filter((label) => !removed(label)), ...added],
-    ...(active && !parked ? { mustStart: false, missingLead: false } : {}),
-  });
+  const predicted = (task: PlanningTask): PlanningTask => {
+    const nextStage = parked ? "none" : stage;
+    const status =
+      active && !parked ? { mustStart: false, missingLead: false } : {};
+    if (task.explicitStage !== undefined) {
+      const flags = new Set(task.planningFlags);
+      if (parked !== undefined) {
+        if (parked) flags.add(PARKED_LABEL);
+        else flags.delete(PARKED_LABEL);
+      }
+      if (parked) flags.delete(ACTIVE_LABEL);
+      else if (active) flags.add(ACTIVE_LABEL);
+      return {
+        ...task,
+        stage: nextStage,
+        explicitStage: nextStage,
+        planningFlags: [...flags],
+        ...status,
+      };
+    }
+    return {
+      ...task,
+      stage: nextStage,
+      labels: [...task.labels.filter((label) => !removed(label)), ...added],
+      ...status,
+    };
+  };
   return {
     ...plan,
     tasks: plan.tasks.map((task) =>

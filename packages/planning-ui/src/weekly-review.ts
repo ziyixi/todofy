@@ -1,4 +1,4 @@
-import { addDays } from "./domain";
+import { addDays, hasPlanningFlag } from "./domain";
 import { localDate } from "./mail";
 import {
   committedOutcomes,
@@ -18,9 +18,9 @@ export const QUICK_LABEL = "quick";
 const CLARIFIED_LABELS = [...WAITING_LABELS, ...SOMEDAY_LABELS, QUICK_LABEL];
 const DAY_MS = 86_400_000;
 
-/** A task that waits: it has a `waiting` or `blocked` label. */
+/** A task explicitly marked waiting or blocked. */
 export function waits(task: PlanningTask): boolean {
-  return task.labels.some((label) => WAITING_LABELS.includes(label));
+  return WAITING_LABELS.some((flag) => hasPlanningFlag(task, flag));
 }
 
 /** Whole days since Todoist last changed the task; undefined when that is unknown. */
@@ -60,7 +60,7 @@ export function oldestUntouched(
   labels: readonly string[],
 ): PlanningTask[] {
   return byUntouched(
-    tasks.filter((task) => task.labels.some((label) => labels.includes(label))),
+    tasks.filter((task) => labels.some((flag) => hasPlanningFlag(task, flag))),
   );
 }
 
@@ -76,7 +76,7 @@ export function inboxToClarify(plan: PlanState): PlanningTask[] {
       !task.parentId &&
       task.stage === "none" &&
       task.id !== plan.reviewTaskId &&
-      !task.labels.some((label) => CLARIFIED_LABELS.includes(label)),
+      !CLARIFIED_LABELS.some((flag) => hasPlanningFlag(task, flag)),
   );
 }
 
@@ -128,7 +128,7 @@ export function quickTasks(
   return plan.tasks
     .filter(
       (task) =>
-        task.labels.includes(QUICK_LABEL) &&
+        hasPlanningFlag(task, QUICK_LABEL) &&
         (!task.due ||
           dueDay(task.due) <= last ||
           (Boolean(task.deadline) && task.deadline <= last)),
@@ -148,7 +148,10 @@ export function quickTasks(
  * next steps shown above, or set aside (Review's Parked lane has it).
  */
 export function quickTray(
-  plan: Pick<PlanState, "tasks" | "timezone" | "availableLabels">,
+  plan: Pick<
+    PlanState,
+    "tasks" | "timezone" | "availableLabels" | "nativePlanning"
+  >,
   today: string,
   days: readonly FlowDayPlan[],
   steps: readonly PlanningTask[],

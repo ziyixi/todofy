@@ -10,6 +10,41 @@ const ID = '80a84747-6794-442a-8fb0-82c2910b54ab';
 const COMPLETE = { task_id: 'task-one', request_id: ID, flow_date: '2026-10-13' };
 
 describe('Native Tasks planning transport', () => {
+  it('redirects old owner setup to native planning settings without loading token setup', async () => {
+    const { env, assets, core } = fakes({ TASK_SOURCE: 'tasks', TASKS_PUBLIC_URL: 'https://tasks.example.test' });
+    for (const method of ['GET', 'HEAD']) {
+      const response = await owner(env, '/plus', { method });
+      expect(response.status).toBe(302);
+      expect(response.headers.get('location')).toBe('https://tasks.example.test/#/settings');
+      expect(response.headers.get('cache-control')).toBe('no-store');
+    }
+    expect(assets).toHaveLength(0);
+    expect(core).toHaveLength(0);
+    const legacy = fakes({ TASK_SOURCE: 'todoist' });
+    expect((await owner(legacy.env, '/plus')).status).toBe(200);
+    const unsigned = fakes({ TASK_SOURCE: 'tasks', TASKS_PUBLIC_URL: 'https://tasks.example.test', DEV_AUTH_BYPASS: undefined });
+    const response = await owner(unsigned.env, '/plus');
+    expect(response.status).toBe(503);
+    expect(response.headers.get('location')).toBeNull();
+  });
+  it('refuses new extension credentials through both the owner and private native paths', async () => {
+    const { env, core } = fakes({ TASK_SOURCE: 'tasks', TASKS_PUBLIC_URL: 'https://tasks.example.test' });
+    const issued = await owner(env, '/api/csrf');
+    const { token } = await issued.json<{ token: string }>();
+    const path = '/api/plus/v1/connections:issueExtensionConnection';
+    const body = JSON.stringify({ display_name: 'Synthetic legacy connection', request_id: ID });
+    const response = await owner(env, path, {
+      method: 'POST', body,
+      headers: { origin: 'http://todofy.localhost:8787', 'content-type': 'application/json', 'x-csrf-token': token, cookie: `todofy_csrf=${token}` },
+    });
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('https://tasks.example.test');
+    const internal = await nativePlanning(new Request(`https://planning.internal${path}`, {
+      method: 'POST', body, headers: { 'content-type': 'application/json' },
+    }), env);
+    expect(internal.status).toBe(400);
+    expect(core).toHaveLength(0);
+  });
   it('refuses the retired extension after cutover before reaching either task source', async () => {
     const { env, core } = fakes({ TASK_SOURCE: 'tasks', TASKS_PUBLIC_URL: 'https://tasks.example.test' });
     const response = await hooks(env, '/api/plus/v1/plan:read', { headers: HEADERS });

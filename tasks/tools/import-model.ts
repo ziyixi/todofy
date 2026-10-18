@@ -4,6 +4,7 @@ import { validDate, validTimezone, localDate, zonedInstant } from '../../package
 import { validateTaskFields } from '../worker/src/task-validation.ts';
 import { validateCatalogFields } from '../worker/src/catalog.ts';
 import { checkedId, type CatalogRow, type CatalogTable, type TaskRow } from '../worker/src/model.ts';
+import { TASK_COLORS } from '../shared/colors.ts';
 
 export class ImportError extends Error {}
 type Source = Record<string, unknown>;
@@ -74,34 +75,12 @@ function unique(rows: Source[]): Source[] {
   }
   return [...found.values()];
 }
-// Todoist's documented named colors, normalized once during import; source snapshots retain the originals.
-const colors: Record<string, string> = {
-  berry_red: '#b8255f',
-  red: '#db4035',
-  orange: '#ff9933',
-  yellow: '#fad000',
-  olive_green: '#afb83b',
-  lime_green: '#7ecc49',
-  green: '#299438',
-  mint_green: '#6accbc',
-  teal: '#158fad',
-  sky_blue: '#14aaf5',
-  light_blue: '#96c3eb',
-  blue: '#4073ff',
-  grape: '#884dff',
-  violet: '#af38eb',
-  lavender: '#eb96eb',
-  magenta: '#e05194',
-  salmon: '#ff8d85',
-  charcoal: '#808080',
-  grey: '#b8b8b8',
-  taupe: '#ccac93',
-};
 function color(value: unknown): string {
   const name = text(value);
   if (!name || /^#[a-f0-9]{6}$/i.test(name)) return name;
-  if (!colors[name]) throw new ImportError('COLOR_UNSUPPORTED');
-  return colors[name];
+  const match = TASK_COLORS.find((value) => value.key === name);
+  if (!match) throw new ImportError('COLOR_UNSUPPORTED');
+  return match.hex;
 }
 function catalogRow(row: Source, table: CatalogTable, exportedAt: number): CatalogRow {
   const common: CatalogRow = {
@@ -126,7 +105,7 @@ function catalogRow(row: Source, table: CatalogTable, exportedAt: number): Catal
   if (table === 'labels')
     Object.assign(common, { color: color(row.color), favorite: Number(Boolean(row.is_favorite)) });
   if (table === 'filters')
-    Object.assign(common, { query: text(row.query), favorite: Number(Boolean(row.is_favorite)) });
+    Object.assign(common, { query: text(row.query), color: color(row.color), favorite: Number(Boolean(row.is_favorite)) });
   return common;
 }
 function topological<T extends { id: string; parent_id?: string }>(rows: T[]): T[] {

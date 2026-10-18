@@ -23,6 +23,7 @@ import { issueCsrf, verifyCsrf } from './csrf.ts';
 import { errorEnvelope, HttpError, MESSAGES, withPrivateHeaders, type Context } from './http.ts';
 import { maintenance, REASONS, transcoder, uiError, type Reason, type UiContext } from './ui.ts';
 import { warmCodec } from './warm.ts';
+import { variable } from './env.ts';
 
 const API_PREFIX = '/api/v1/';
 const CSRF_PATH = '/api/csrf';
@@ -88,6 +89,10 @@ async function route(ctx: Context): Promise<Response> {
     // An old tab keeps reading its envelope; everything else gets the API's Status.
     if (legacyPath(path)) return errorEnvelope(ctx.requestId, error.status, error.code, MESSAGES[error.code]);
     return statusResponse(ctx, uiError(ACCESS_REASONS[error.code] ?? 'UNAUTHORIZED'));
+  }
+  if ((path === '/plus' || path === '/plus/') && ['GET', 'HEAD'].includes(ctx.request.method) && variable(ctx.env, 'TASK_SOURCE') === 'tasks') {
+    const tasksUrl = variable(ctx.env, 'TASKS_PUBLIC_URL');
+    return tasksUrl ? Response.redirect(`${tasksUrl}/#/settings`, 302) : statusResponse(ctx, uiError('UNAVAILABLE'));
   }
   if (path.startsWith('/api/plus/v1/')) return plusOwner(ctx, owner);
   if (legacyPath(path)) return errorEnvelope(ctx.requestId, 410, 'reload_required', RELOAD_MESSAGE);

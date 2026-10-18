@@ -512,3 +512,11 @@ def test_the_api_series_has_every_day_oldest_first():
     ]
     assert series[1]["all"]["complete"] is False and series[1]["inbox"]["open"] == 23
     assert series[0]["all"] is None and series[0]["inbox"] is None
+
+
+def test_empty_native_inbox_is_a_real_scope_while_none_means_no_scope():
+    item = {"task_id": "native-inbox", "project_id": ""}
+    counted = gtd.tally_completed(gtd.CompletedTally(), [item], since=0, inbox="", review_ids=[])
+    absent = gtd.tally_completed(gtd.CompletedTally(), [item], since=0, inbox=None, review_ids=[])
+    assert (counted.total, counted.inbox) == (1, 1)
+    assert (absent.total, absent.inbox) == (1, 0)

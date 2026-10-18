@@ -10,6 +10,8 @@ import { accountZone, type Env } from './env.ts';
 import { taskMessage, resourceId } from './model.ts';
 import { getTask, listTasks } from './task-read.ts';
 import { createTask, updateTask, deleteTask, completeTask, reopenTask } from './task-write.ts';
+import { duplicateTask } from './task-copy.ts';
+import { reorderTasks } from './task-order.ts';
 
 export interface ApiContext {
   env: Env;
@@ -27,6 +29,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof TasksUiService>, ApiContex
   deleteTask: (input, { env, now }) => deleteTask(env.DB, input, now),
   completeTask: (input, { env, now }) => completeTask(env.DB, input, now, accountZone(env)),
   reopenTask: (input, { env, now }) => reopenTask(env.DB, input, now),
+  duplicateTask: (input, { env, now }) => duplicateTask(env.DB, input, now),
+  reorderTasks: (input, { env, now }) => reorderTasks(env.DB, input, now),
   listChanges: (input, { env }) => listChanges(env.DB, input),
   listCompletions: (input, { env }) => listCompletions(env.DB, input),
   previewDate(input, { env, now }) {

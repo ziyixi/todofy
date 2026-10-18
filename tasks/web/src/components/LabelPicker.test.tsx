@@ -15,7 +15,13 @@ it("filters labels and changes selection without losing other selected labels", 
   ];
   function Harness() {
     const [selectedIds, setSelectedIds] = useState(["focus"]);
-    return <LabelPicker labels={labels} selectedIds={selectedIds} onChange={setSelectedIds} />;
+    return (
+      <LabelPicker
+        labels={labels}
+        selectedIds={selectedIds}
+        onChange={setSelectedIds}
+      />
+    );
   }
   render(<Harness />);
   const picker = screen.getByText("Edit labels").closest("details");
@@ -26,21 +32,37 @@ it("filters labels and changes selection without losing other selected labels", 
   });
   expect(screen.queryByRole("checkbox", { name: "Home" })).toBeNull();
   fireEvent.click(screen.getByRole("checkbox", { name: "This Week" }));
-  expect(screen.getByText("Focus", { selector: ".selected-label" })).toBeTruthy();
-  expect(screen.getByText("This Week", { selector: ".selected-label" })).toBeTruthy();
+  expect(
+    screen.getByText("Focus", { selector: ".selected-label" }),
+  ).toBeTruthy();
+  expect(
+    screen.getByText("This Week", { selector: ".selected-label" }),
+  ).toBeTruthy();
   fireEvent.change(screen.getByRole("textbox", { name: "Search labels" }), {
     target: { value: "focus" },
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Focus" }));
-  expect(screen.queryByText("Focus", { selector: ".selected-label" })).toBeNull();
-  expect(screen.getByText("This Week", { selector: ".selected-label" })).toBeTruthy();
+  expect(
+    screen.queryByText("Focus", { selector: ".selected-label" }),
+  ).toBeNull();
+  expect(
+    screen.getByText("This Week", { selector: ".selected-label" }),
+  ).toBeTruthy();
 });
 
 it("distinguishes no labels from no search matches", () => {
-  const { rerender } = render(<LabelPicker labels={[]} selectedIds={[]} onChange={() => {}} />);
+  const { rerender } = render(
+    <LabelPicker labels={[]} selectedIds={[]} onChange={() => {}} />,
+  );
   fireEvent.click(screen.getByText("Add labels"));
   expect(screen.getByText("No labels yet")).toBeTruthy();
-  rerender(<LabelPicker labels={[create(LabelSchema, { id: "home", title: "Home" })]} selectedIds={[]} onChange={() => {}} />);
+  rerender(
+    <LabelPicker
+      labels={[create(LabelSchema, { id: "home", title: "Home" })]}
+      selectedIds={[]}
+      onChange={() => {}}
+    />,
+  );
   fireEvent.change(screen.getByRole("textbox", { name: "Search labels" }), {
     target: { value: "missing" },
   });

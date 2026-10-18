@@ -12,10 +12,13 @@ it("keeps the undated group after dated tasks even when it arrives first", () =>
     <TaskList
       tasks={[
         create(TaskSchema, { id: "undated", title: "Synthetic undated task" }),
-        create(TaskSchema, { id: "dated", title: "Synthetic dated task", dueDate: "2040-06-07" }),
+        create(TaskSchema, {
+          id: "dated",
+          title: "Synthetic dated task",
+          dueDate: "2040-06-07",
+        }),
       ]}
       catalog={EMPTY_CATALOG}
-      managedRoles={new Map()}
       busyIds={new Set()}
       selected={new Set()}
       onSelect={() => {}}

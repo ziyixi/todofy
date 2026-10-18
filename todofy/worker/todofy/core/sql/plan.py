@@ -102,6 +102,8 @@ VERIFY_COUNTS = (
     "orphan_edge_count",
     "unknown_value_count",
     "limit_violation_count",
+    "state_row_count",
+    "orphan_state_count",
 )
 VERIFY = (
     "SELECT (SELECT count(*) FROM plan_settings) AS settings_row_count,"
@@ -128,7 +130,10 @@ VERIFY = (
     f" HAVING count(*) > {MAX_EDGES_PER_TASK}))"
     f" + ((SELECT count(*) FROM plan_edges) > {MAX_EDGES})"
     " + (SELECT count(*) FROM (SELECT scheme FROM plan_categories WHERE archived_at IS NULL GROUP BY scheme"
-    f" HAVING count(*) > {MAX_ACTIVE_CATEGORIES})) AS limit_violation_count"
+    f" HAVING count(*) > {MAX_ACTIVE_CATEGORIES})) AS limit_violation_count,"
+    " (SELECT count(*) FROM plan_task_state) AS state_row_count,"
+    " (SELECT count(*) FROM plan_task_state WHERE task_id NOT IN"
+    " (SELECT id FROM plan_tasks WHERE provider='tasks')) AS orphan_state_count"
 )
 
 # A dependency as PlusService answers it: the two tasks' external IDs, the baseline, and whether the prerequisite

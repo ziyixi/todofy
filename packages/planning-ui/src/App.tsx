@@ -532,13 +532,15 @@ export function App({
               className={waiting || weekLoading || reading ? "plus-spin" : ""}
             />
           </button>
-          <button
-            className="plus-icon"
-            aria-label={text.boardLabels}
-            onClick={() => setSelectedId("board-labels")}
-          >
-            <Settings size={17} />
-          </button>
+          {data && !data.plan.nativePlanning && (
+            <button
+              className="plus-icon"
+              aria-label={text.boardLabels}
+              onClick={() => setSelectedId("board-labels")}
+            >
+              <Settings size={17} />
+            </button>
+          )}
         </div>
       </header>
       {notices}
@@ -574,7 +576,11 @@ export function App({
                 run={run}
                 actions={planActions}
                 editTask={openTask}
-                onLabels={() => setSelectedId("board-labels")}
+                onLabels={
+                  data.plan.nativePlanning
+                    ? undefined
+                    : () => setSelectedId("board-labels")
+                }
                 completeReview={(task) => complete(task, "")}
                 dependencyNotices={dependencyNotices}
                 onReviewShown={onReviewShown}
@@ -623,7 +629,7 @@ export function App({
           }
         }}
       >
-        {selectedId === "board-labels" && data && (
+        {selectedId === "board-labels" && data && !data.plan.nativePlanning && (
           <BoardLabels
             taskAppName={destination.name}
             plan={data.plan}

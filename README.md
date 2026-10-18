@@ -12,9 +12,9 @@ Home is the daily starting point. Services run and release independently, sharin
 | --- | --- | --- | --- |
 | Home | 查看服务、业务链路和配额 / Service health, flows and quotas | Cloudflare Worker + DO | [dashboard/](dashboard/README.md) |
 | Mail Hero | 收件箱与可靠 webhook / Inbox and reliable webhooks | Cloudflare Worker + D1 + R2 + DO | [mail-hero/](mail-hero/README.md) |
-| Todofy | 邮件转任务、摘要和提醒 / Mail to tasks, summaries and reminders | Cloudflare TS gateway + Python core + D1/DO | [todofy/](todofy/README.md) |
-| Tasks | 原生任务、子任务与规划，迁移中 / Native tasks and planning, migration in progress | Cloudflare Worker + D1, desktop PWA | [tasks/](tasks/README.md) |
-| Todoist Plus | Todoist 内的周计划、拆步骤和执行 / Weekly choices, task steps and focus inside Todoist | Chrome extension; existing Todofy + FlowDay | [todoist-plus/](todoist-plus/README.md) |
+| Todofy | 邮件转任务、摘要与规划 / Mail to tasks, summaries and planning | Cloudflare TS gateway + Python core + D1/DO | [todofy/](todofy/README.md) |
+| Tasks | 主任务库、子任务与 Plan/Focus / Primary task store, subtasks and Plan/Focus | Cloudflare Worker + D1, desktop PWA | [tasks/](tasks/README.md) |
+| Todoist Plus | 历史插件，功能已内置 Tasks / Legacy extension; its features are built into Tasks | Chrome extension | [todoist-plus/](todoist-plus/README.md) |
 | FlowDay | 时间块、计时与回顾 / Time blocks, timers and reviews | Cloudflare Worker + D1 | [flowday/](flowday/README.md) |
 | Links | 私人短链接 / Personal short links | Cloudflare Worker + D1 | [links/](links/README.md) |
 | Watch | 网页变化收件箱 / Web change inbox | Cloudflare Worker + DO | [watch/](watch/README.md) |
@@ -24,6 +24,11 @@ Home is the daily starting point. Services run and release independently, sharin
 | Website | Notion 驱动的个人网站 / Personal website from Notion | Cloudflare static assets + relay | [website/](website/README.md) |
 | Newsletter | 生成并发送简报 / Build and send the newsletter | VPS k3s, separate image | [newsletter/](newsletter/README.md) |
 | Fleet | VPS、daemon 与发布状态 / VPS, daemons and release status | Cloudflare Worker + DO | [fleet/](fleet/README.md) |
+
+Tasks 是任务与规划入口，Todofy 处理邮件和规划规则，FlowDay 保存每日队列与计时。原 Todoist 保留为历史迁移来源，不持续双向同步。
+
+Tasks is the task and planning app. Todofy handles mail and planning rules; FlowDay owns daily queues and timers.
+The original Todoist account remains a migration source, without ongoing two-way sync.
 
 Cloudflare 托管日常应用；VPS 的 k3s 运行 Newsletter 和独立的部署 daemon。
 GitHub Actions 主动通过鉴权 API 更新经测试的镜像，Fleet 和 Home 查看实际运行状态。
@@ -43,7 +48,7 @@ Release progress, business health and observation freshness stay separate. See [
    Work in the application's directory; follow its commands and use local bindings and synthetic data.
 
 ```sh
-cd mail-hero    # 或 / or todofy, dashboard, flowday, todoist-plus, links, watch, mailsort, recall, brief, website, newsletter, fleet, platform
+cd mail-hero    # 或 / or todofy, tasks, dashboard, flowday, todoist-plus, links, watch, mailsort, recall, brief, website, newsletter, fleet, platform
 ```
 
 仓库没有“一条命令启动所有服务”的要求。Cloudflare TypeScript 应用安装时生成 proto；Todofy 的 Python 代码由 `uv` 构建时生成。
@@ -58,7 +63,7 @@ Todofy's Python build generates it through `uv`. Generated code is not committed
 | --- | --- |
 | [proto/](proto/README.md) | 接口定义、固定工具链、JSON 编解码与 HTTP 客户端 / IDL, pinned tooling, JSON codecs and HTTP runtime |
 | [contracts/](contracts/README.md) | 跨服务语义、Schema、固定字节测试样本 / Cross-service semantics, schemas and golden payloads |
-| [packages/edge-auth/](packages/edge-auth/README.md) | 编译进应用的共享鉴权 / Shared authentication compiled into applications |
+| [packages/](packages/) | 共享鉴权、规划 UI 与日期规则 / Shared authentication, planning UI and date rules |
 | [infra/](infra/README.md) | Cloudflare 资源与权限 / Cloudflare resources and permissions |
 | [platform/](platform/README.md) | VPS 发布 daemon、k3s 清单和监控 / VPS deployment daemon, k3s manifests and monitoring |
 | [config/](config/README.md) | 可迁移的公开配置 / Portable public configuration |

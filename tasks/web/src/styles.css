@@ -1,22 +1,22 @@
 :root {
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", sans-serif;
-  color: #252820;
+  color: #202020;
   background: #fff;
   font-synthesis: none;
   font-size: 14px;
   line-height: 1.45;
-  --accent: #50743b;
-  --accent-fill: #567c42;
-  --selected: #eaf0e4;
-  --sidebar: #f7f7f3;
+  --accent: #2d8302;
+  --accent-fill: #4c7a45;
+  --selected: #f0f6df;
+  --sidebar: #fcfcf8;
   --line: #e8e9e3;
   --muted: #74786e;
   --danger: #b64336;
-  --product-library-actionable-primary-idle-fill: #567c42;
-  --product-library-actionable-tertiary-idle-tint: #50743b;
-  --product-library-selectable-secondary-selected-fill: #eaf0e4;
-  --product-library-selectable-secondary-on-selected-tint: #365c29;
+  --product-library-actionable-primary-idle-fill: #4c7a45;
+  --product-library-actionable-tertiary-idle-tint: #2d8302;
+  --product-library-selectable-secondary-selected-fill: #f0f6df;
+  --product-library-selectable-secondary-on-selected-tint: #3e6737;
 }
 * {
   box-sizing: border-box;
@@ -90,11 +90,13 @@ svg {
   flex-shrink: 0;
 }
 .app-shell {
+  --sidebar-width: 245px;
   display: grid;
-  grid-template-columns: 245px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   min-height: 100vh;
 }
 .sidebar {
+  font-size: 13px;
   position: sticky;
   top: 0;
   height: 100vh;
@@ -172,11 +174,11 @@ kbd {
 }
 .nav-item.selected {
   background: var(--selected);
-  color: #35592a;
+  color: var(--product-library-selectable-secondary-on-selected-tint);
   font-weight: 550;
 }
 .nav-item.selected svg {
-  color: #50743b;
+  color: var(--accent);
 }
 .sidebar-section {
   padding-top: 6px;
@@ -970,6 +972,9 @@ h1 {
   --plus-accent: #50743b;
   --plus-accent-fill: #567c42;
 }
+.planning-ui .planning-commitment-heading {
+  flex-wrap: wrap;
+}
 .mobile-bar {
   display: none;
 }
@@ -978,7 +983,7 @@ h1 {
 }
 @media (max-width: 1100px) {
   .app-shell {
-    grid-template-columns: 218px minmax(0, 1fr);
+    --sidebar-width: 218px;
   }
   .main-content {
     padding: 28px 35px;
@@ -1080,13 +1085,12 @@ h1 {
   max-width: 105px;
 }
 .planning-ui {
-  --plus-content-center: calc(50vw + 122.5px);
-  --plus-content-width: calc(100vw - 293px);
+  --plus-content-center: calc(50vw + var(--sidebar-width) / 2);
+  --plus-content-width: calc(100vw - var(--sidebar-width) - 48px);
 }
 @media (max-width: 1100px) {
   .planning-ui {
-    --plus-content-center: calc(50vw + 109px);
-    --plus-content-width: calc(100vw - 246px);
+    --plus-content-width: calc(100vw - var(--sidebar-width) - 28px);
   }
 }
 @media (max-width: 760px) {
@@ -1312,47 +1316,4 @@ h1 {
   margin-bottom: 16px;
   line-height: 1.65;
   max-width: 650px;
-}
-.mapping-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 30px;
-  margin: 20px 0;
-}
-.mapping-list > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  border-bottom: 1px solid var(--line);
-  padding: 6px 0;
-  font-size: 12px;
-}
-.mapping-list dt {
-  color: var(--muted);
-}
-.mapping-list dd {
-  margin: 0;
-}
-.planning-columns {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 20px;
-  margin-bottom: 18px;
-  max-width: 580px;
-}
-.planning-columns label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-}
-.settings-message {
-  padding: 12px 0;
-  color: var(--accent);
-}
-.planning-chip {
-  color: #5c724d;
-  background: #edf2e7;
-  border-radius: 3px;
-  padding: 1px 5px;
 }

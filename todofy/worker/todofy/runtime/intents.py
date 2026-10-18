@@ -33,7 +33,7 @@ from todofy.core.ops import InvalidInput
 from todofy.core.sql import intents as sql
 from todofy.core.todoist_request import RequestTooLarge, build_task_request
 from todofy.deployment import WATCH_HOST
-from todofy.runtime import metrics, todoist
+from todofy.runtime import metrics, native_tasks, todoist
 from todofy.runtime.config import csv, var
 from todofy.runtime.interop import now_ms, now_s
 
@@ -229,7 +229,7 @@ class _Step:
             request = build_task_request(
                 content,
                 description,
-                var(env, "TODOIST_DEFAULT_PROJECT_ID"),
+                "" if native_tasks.enabled(env) else var(env, "TODOIST_DEFAULT_PROJECT_ID"),
                 task.request_id,
                 var(env, "TODOIST_API_KEY"),
                 parent_id=parent or "",

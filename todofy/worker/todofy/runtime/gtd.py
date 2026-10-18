@@ -254,6 +254,13 @@ async def _collect(env: Any, coordinator: Any, state: State, now: int) -> State:
     return state
 
 
+async def _inbox_project(env: Any) -> str:
+    if not native_tasks.enabled(env):
+        return var(env, "TODOIST_DEFAULT_PROJECT_ID")
+    catalog = await native_tasks.catalog(env)
+    return next((project["id"] for project in catalog.get("projects", []) if project.get("inbox")), "")
+
+
 async def _task_page(env: Any, coordinator: Any, state: State, now: int, offset: int) -> None:
     query: dict[str, Any] = {"limit": rules.PAGE_SIZE}
     if state.cursor:
@@ -314,8 +321,10 @@ async def _completed_page(env: Any, coordinator: Any, state: State, now: int) ->
     started = now_ms()
     items: list[dict[str, Any]] = []
     cursor, code = "", ""
+    inbox = var(env, "TODOIST_DEFAULT_PROJECT_ID") or None
     if native_tasks.enabled(env):
         try:
+            inbox = await _inbox_project(env)
             page = await native_tasks.call(env, "ListCompletions", {"page_token": state.cursor, "page_size": 100})
             older = False
             for item in page.get("completions", []):
@@ -328,7 +337,7 @@ async def _completed_page(env: Any, coordinator: Any, state: State, now: int) ->
                     items.append(
                         {
                             "task_id": item["task_id"],
-                            "project_id": item.get("project_id", ""),
+                            "project_id": item.get("project_id") or inbox,
                             "completed_at": item["complete_time"],
                             "added_at": item.get("task_create_time"),
                         }
@@ -356,7 +365,6 @@ async def _completed_page(env: Any, coordinator: Any, state: State, now: int) ->
         state.tally, state.phase, state.cursor = None, AGGREGATE, ""
         _log(collect="completed_failed", day=state.day, code=code)
         return
-    inbox = var(env, "TODOIST_DEFAULT_PROJECT_ID")
     review_ids = [task_id for _, task_id in state.watched]
     tally = rules.tally_completed(tally, items, since=since, inbox=inbox, review_ids=review_ids)
     state.completed_pages += 1
@@ -372,13 +380,19 @@ async def _aggregate(env: Any, coordinator: Any, state: State, now: int, offset:
     db, day = env.DB, state.day
     yesterday = rules.shift(day, -1)
     first_week = rules.week_shift(rules.iso_week(now), -HISTORY_WEEKS)
+    mail_window = (now - rules.MAX_CARRYOVER_DAYS * DAY, now - DAY)
+    open_mail = (
+        db.prepare(sql.NATIVE_MAIL_OPEN.sql).bind(*mail_window)
+        if native_tasks.enabled(env)
+        else db.prepare(sql.MAIL_OPEN.sql).bind(*mail_window, day)
+    )
     rows, before, closed, mail, history = await db.batch(
         [
             db.prepare(sql.SNAPSHOT_ROWS.sql).bind(day, rules.MAX_SNAPSHOT_ROWS),
             db.prepare(sql.SNAPSHOT_DAY.sql).bind(yesterday),
             db.prepare(sql.CLOSED_SINCE.sql).bind(yesterday, day),
             # The brief's carryover pool, uncapped: mail of the 14 days before the last 24 h.
-            db.prepare(sql.MAIL_OPEN.sql).bind(now - rules.MAX_CARRYOVER_DAYS * DAY, now - DAY, day),
+            open_mail,
             db.prepare(sql.REVIEW_HISTORY.sql).bind(first_week, HISTORY_WEEKS + 1),
         ]
     )
@@ -397,9 +411,9 @@ async def _aggregate(env: Any, coordinator: Any, state: State, now: int, offset:
         closed_1d=closed_1d,
         mail_open=mail_open,
     )
-    inbox_project = var(env, "TODOIST_DEFAULT_PROJECT_ID")
+    inbox_project = await _inbox_project(env)
     inbox = None
-    if inbox_project:
+    if native_tasks.enabled(env) or inbox_project:
         inbox = rules.aggregate(snapshot, now=now, scope_project=inbox_project, completed=tally, complete=complete)
     status = SnapshotStatus.OK if complete else SnapshotStatus.PARTIAL
     statements = [db.prepare(sql.WRITE_DAILY.sql).bind(*_daily_values(day, Scope.ALL, every, now))]
@@ -514,7 +528,9 @@ async def _review(env: Any, coordinator: Any, state: State, now: int) -> int:
     else:
         attempts, subject = 0, rules.review_title(week)
         body = await _review_body(env, coordinator, state, week, now)
-        project = var(env, "TODOIST_REVIEW_PROJECT_ID") or var(env, "TODOIST_DEFAULT_PROJECT_ID")
+        project = var(env, "TODOIST_REVIEW_PROJECT_ID") or (
+            "" if native_tasks.enabled(env) else var(env, "TODOIST_DEFAULT_PROJECT_ID")
+        )
         claim = await db.prepare(sql.CLAIM_REVIEW.sql).bind(week, project, subject, body, now, now).run()
     if claim.meta.changes != 1:
         return later(now + REMINDER_CHECK_INTERVAL)
@@ -567,8 +583,8 @@ async def _review_body(env: Any, coordinator: Any, state: State, week: str, now:
     _refresh_reviews(state, [dict(row) for row in history.results], {})
     picked = rules.pick_days([dict(row) for row in days.results], today)
     oldest: tuple[str, ...] = ()
-    inbox_project = var(env, "TODOIST_DEFAULT_PROJECT_ID")
-    if picked["day"] is not None and inbox_project:
+    inbox_project = await _inbox_project(env)
+    if picked["day"] is not None and (native_tasks.enabled(env) or inbox_project):
         found = await (
             db.prepare(sql.OLDEST_TASKS.sql).bind(picked["day"], inbox_project, rules.REVIEW_OLDEST_LINKS).all()
         )

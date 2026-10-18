@@ -26,7 +26,7 @@ function fixture() {
     ],
     sections: [],
     labels: [{ id: 'label-next', name: 'next', color: 'blue' }],
-    filters: [{ id: 'filter-next', name: 'Next', query: '@next' }],
+    filters: [{ id: 'filter-next', name: 'Next', query: '@next', color: 'lavender' }],
     tasks: [
       {
         ...base,
@@ -74,6 +74,8 @@ test('imports a frozen snapshot into real D1, preserves histories and IDs, and r
     assert.equal(task.create_time, '2020-01-01T00:00:00Z');
     assert.equal(task.description, fixture().tasks[0].description);
     assert.equal(task.priority, 4);
+    const catalog = await (await harness.fetch('/api/tasks/v1/catalog')).json();
+    assert.equal(catalog.filters.find((filter) => filter.id === 'filter-next').color, '#eb96eb');
     const archived = await (await harness.fetch('/api/tasks/v1/tasks/archived-task')).json();
     assert.equal(archived.archived, true);
     const history = await (await harness.fetch('/api/tasks/v1/completions?task_id=repeat')).json();

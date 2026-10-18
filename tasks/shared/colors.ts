@@ -1,0 +1,23 @@
+/** Todoist's named palette, shared by task editors and the explicit source importer. */
+export const TASK_COLORS = [
+  { key: 'berry_red', name: 'Berry Red', hex: '#b8255f' },
+  { key: 'red', name: 'Red', hex: '#db4035' },
+  { key: 'orange', name: 'Orange', hex: '#ff9933' },
+  { key: 'yellow', name: 'Yellow', hex: '#fad000' },
+  { key: 'olive_green', name: 'Olive Green', hex: '#afb83b' },
+  { key: 'lime_green', name: 'Lime Green', hex: '#7ecc49' },
+  { key: 'green', name: 'Green', hex: '#299438' },
+  { key: 'mint_green', name: 'Mint Green', hex: '#6accbc' },
+  { key: 'teal', name: 'Teal', hex: '#158fad' },
+  { key: 'sky_blue', name: 'Sky Blue', hex: '#14aaf5' },
+  { key: 'light_blue', name: 'Light Blue', hex: '#96c3eb' },
+  { key: 'blue', name: 'Blue', hex: '#4073ff' },
+  { key: 'grape', name: 'Grape', hex: '#884dff' },
+  { key: 'violet', name: 'Violet', hex: '#af38eb' },
+  { key: 'lavender', name: 'Lavender', hex: '#eb96eb' },
+  { key: 'magenta', name: 'Magenta', hex: '#e05194' },
+  { key: 'salmon', name: 'Salmon', hex: '#ff8d85' },
+  { key: 'charcoal', name: 'Charcoal', hex: '#808080' },
+  { key: 'grey', name: 'Grey', hex: '#b8b8b8' },
+  { key: 'taupe', name: 'Taupe', hex: '#ccac93' },
+] as const;

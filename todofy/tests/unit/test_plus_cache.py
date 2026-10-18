@@ -314,6 +314,14 @@ REVOKE = {"connection_id": TOKEN_DIGEST[:8], "request_id": "8f3b1c2e-5d4a-4b6c-9
 ISSUE = {"display_name": "Synthetic Chrome", "request_id": "6c2f4e1a-3b5d-4a7c-8e9f-1a2b3c4d5e6f"}
 
 
+def test_native_source_refuses_new_extension_keys_without_changing_existing_connections(stack):
+    stack.connect(TOKEN_DIGEST)
+    before = stack.handle("ReadExtensionConnections", {}, owner=True)
+    stack.core.env.TASK_SOURCE = "tasks"
+    assert stack.handle("IssueExtensionConnection", ISSUE, owner=True) == {"error": "ACTION_NOT_ALLOWED"}
+    assert stack.handle("ReadExtensionConnections", {}, owner=True) == before
+
+
 async def during_a_token_check(stack: Stack, digest: str, method: str, request: dict[str, Any]) -> dict[str, Any]:
     """Run ``method`` while a token check's D1 read of the digests is in flight (it has read, not yet answered)."""
     stack.d1.release = release = asyncio.Event()

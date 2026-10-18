@@ -228,13 +228,16 @@ def test_a_backup_from_before_the_briefs_restores_them_as_never_derived(tmp_path
     old = database(migrations=before)
     seed(old)
     then = [
-        table._replace(columns=table.columns[:-1]) if table is sql.SUMMARIES else table for table in sql.TABLES.values()
+        table._replace(columns=table.columns[:-1]) if table is sql.SUMMARIES else table
+        for table in sql.TABLES.values()
+        if table is not sql.PLAN_TASK_STATE
     ]
     backup_of(old, tmp_path, schema_version=before[-1].name, release=then)
     write_sql(tmp_path, tmp_path / "restore.sql", legacy_text=True)
     target = database()
     target.executescript((tmp_path / "restore.sql").read_text())
     assert target.execute("SELECT event_id, summary, brief FROM summaries").fetchall() == [("e01", "摘要", None)]
+    assert target.execute("SELECT count(*) FROM plan_task_state").fetchone() == (0,)
 
 
 def test_retired_tables_restore_until_a_migration_drops_them(source, tmp_path, monkeypatch):

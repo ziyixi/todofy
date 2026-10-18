@@ -111,6 +111,7 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "plan_edges",
         "plan_notes",
         "plan_categories",
+        "plan_task_state",
     }
     assert {name for name, kind in objects.items() if kind == "index"} == {
         "mail_events_due",
@@ -134,6 +135,7 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "plan_edges_prerequisite",
         "plan_categories_name",
         "summaries_task",
+        "summaries_pending",
     }
 
 

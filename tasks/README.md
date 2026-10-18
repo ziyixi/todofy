@@ -4,16 +4,16 @@ Personal task management for the Todofy cloud. Tasks owns tasks, projects, secti
 
 ## Development status
 
-Implementation is on `codex/tasks-native`. Full branch CI passed and the staged Worker is deployed behind owner Access. The final private source snapshot has been imported into Tasks D1; all imported IDs and the frozen digest match. Todofy remains paused on the original source until the activation configuration passes CI and is released. Native Plan/Focus, FlowDay synchronization and PWA acceptance are still pending. See the [verification record](docs/verification.md) for the failed first deployment-record check and its correction.
+Native Tasks, Todofy and FlowDay are live at `86bb9786`; the private task/history import, identity checks and bounded FlowDay sync are complete. The original Todoist account is unchanged. A refinement pass is in progress for closer native menus/editing, fast refreshes and explicit planning state in place of technical labels. See the [verification record](docs/verification.md) for completed checks and remaining acceptance.
 
 ## First release
 
 - Desktop Inbox, Today, Upcoming, search, nested projects, sections, labels and saved filters.
 - Task editing, subtasks, priority, due dates, deadlines, duration, recurrence and completion history.
-- Existing Plan, Focus and Mail interfaces, shared with Todoist Plus during the transition.
+- Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.
 - Installable desktop PWA; an explicit offline page, with task data available online.
 - Owner-only Cloudflare Worker and D1, using the repository's proto API and authentication conventions.
-- An explicit Todoist import and a coordinated switch of Todofy and FlowDay after data verification.
+- A verified Todoist import and coordinated native source for Todofy and FlowDay.
 
 Comments, attachments, reminders, assignment, calendar integration and voice input are excluded. Mobile-specific layouts and offline writes are not part of this release.
 

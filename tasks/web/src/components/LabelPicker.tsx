@@ -22,8 +22,15 @@ export function LabelPicker({
       {selected.length > 0 && (
         <div className="selected-labels">
           {selected.map((label) => (
-            <span className="selected-label" key={label.id}>
-              <Tag size={12} />
+            <span
+              className="selected-label"
+              key={label.id}
+              style={{
+                color: "#4a4a4a",
+                background: label.color ? `${label.color}14` : "#f0f0ee",
+              }}
+            >
+              <Tag size={12} style={{ color: label.color || undefined }} />
               {label.title}
             </span>
           ))}
@@ -51,6 +58,7 @@ export function LabelPicker({
               <label key={label.id}>
                 <input
                   type="checkbox"
+                  style={{ accentColor: label.color || undefined }}
                   checked={selectedIds.includes(label.id)}
                   onChange={(event) =>
                     onChange(
@@ -60,6 +68,7 @@ export function LabelPicker({
                     )
                   }
                 />
+                <Tag size={13} style={{ color: label.color || undefined }} />
                 {label.title}
               </label>
             ))}

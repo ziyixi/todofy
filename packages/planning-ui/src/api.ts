@@ -76,6 +76,12 @@ export function planningTask(task: ApiPlanningTask): PlanningTask {
     parentId: task.parentId,
     projectId: task.projectId,
     labels: task.labels,
+    ...(task.explicitStage !== undefined
+      ? {
+          explicitStage: task.explicitStage as PlanningTask["stage"],
+          planningFlags: task.planningFlags,
+        }
+      : {}),
     area: ["work", "personal"].includes(task.area)
       ? (task.area as PlanningTask["area"])
       : "unassigned",
@@ -186,6 +192,10 @@ function planMetadata(plan: ApiPlan): PlanMetadata {
     week: plan.weekStart,
     timezone: plan.timezone,
     configured: plan.enabled,
+    ...(plan.nativePlanning ? { nativePlanning: true } : {}),
+    ...(plan.mailboxPendingCount !== undefined
+      ? { mailboxPendingCount: plan.mailboxPendingCount }
+      : {}),
     hiddenFilterIds: plan.hiddenFilterIds,
     flowdayUrl: plan.flowdayUrl,
     managedLabelNames: plan.labels.map((label) => label.label),
@@ -631,7 +641,11 @@ export function createPlanningActions(
           label: { provider, externalId: category.labelId },
           priority: category.priority as Priority,
         })),
-        destination: { provider, externalId: IGNORED_DESTINATION },
+        ...(provider === "tasks"
+          ? {}
+          : {
+              destination: { provider, externalId: IGNORED_DESTINATION },
+            }),
         etag,
       });
       return { ...mailCategories(result, provider), etag: result.etag };

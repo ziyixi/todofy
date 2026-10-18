@@ -75,7 +75,7 @@ export const catalogColumns = {
   projects: ['title', 'parent_id', 'color', 'favorite', 'archived', 'inbox', 'sort_order'],
   sections: ['title', 'project_id', 'archived', 'sort_order'],
   labels: ['title', 'color', 'favorite', 'sort_order'],
-  filters: ['title', 'query', 'favorite', 'sort_order'],
+  filters: ['title', 'query', 'color', 'favorite', 'sort_order'],
 } as const;
 export function taskProjection(includeDescription: boolean, prefix = 't.'): string {
   const columns = [
@@ -179,6 +179,7 @@ export function catalogMessage(table: CatalogTable, row: CatalogRow) {
       return create(SavedFilterSchema, {
         ...common,
         query: row.query ?? '',
+        color: row.color ?? '',
         favorite: row.favorite === 1,
       });
   }

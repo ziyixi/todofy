@@ -21,7 +21,7 @@ export async function serviceCall(method: string, body: string, env: Env): Promi
     const context: ApiContext = {
       env,
       now: Date.now(),
-      owner: 'todofy',
+      owner: 'service-binding',
       bypassed: false,
       internal: true,
     };

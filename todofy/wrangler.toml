@@ -57,7 +57,7 @@ dataset = "todofy_metrics"
 binding = "TASKS"
 service = "tasks"
 entrypoint = "TasksApi"
-props = { consumer = "todofy" }
+props = { access = "read-write" }
 
 [vars]
 TASK_SOURCE = "tasks"

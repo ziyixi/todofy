@@ -14,8 +14,20 @@ from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
 from todofy.core import plan as planning
 from todofy.core import plus
 from todofy.core.sql import gtd as gtd_sql
+from todofy.core.sql import mailbox as mailbox_sql
 from todofy.core.sql import plus as sql
-from todofy.runtime import backup, native_plus, native_tasks, plan_store, plus_cache, plus_mail, plus_order, plus_week
+from todofy.runtime import (
+    backup,
+    native_plan,
+    native_plan_actions,
+    native_plus,
+    native_tasks,
+    plan_store,
+    plus_cache,
+    plus_mail,
+    plus_order,
+    plus_week,
+)
 from todofy.runtime import plus_receipts as receipts
 from todofy.runtime import plus_store as store
 from todofy.runtime import plus_todoist as todoist
@@ -38,6 +50,7 @@ READ_METHODS = frozenset(
         "ReadExtensionConnections",
         "VerifyPlanStore",
         "LookupMailItems",
+        "ListMailItems",
         "ReadMailSummary",
         "ReadMailSettings",
     }
@@ -82,6 +95,20 @@ def account_day(timezone: str) -> str:
 async def plan(core: Any, metadata: dict[str, Any] | None = None, *, fresh: bool = False) -> dict[str, Any]:
     env = core.env
     metadata = metadata if metadata is not None else await todoist.metadata(core, fresh=fresh)
+    if native_tasks.enabled(env):
+        today = account_day(metadata["timezone"])
+        return {
+            "native_planning": True,
+            "enabled": await native_plan.ready(env),
+            "timezone": metadata["timezone"],
+            "today": today,
+            "week_start": plus.week_start(today),
+            "labels": native_plan.CANONICAL_MAPPING,
+            "available_labels": [{"id": item["id"], "label": item["name"]} for item in metadata["labels"]],
+            "missing_labels": [],
+            "hidden_filter_ids": [],
+            "etag": plus.fingerprint(["native-planning", metadata["timezone"]]),
+        }
     current = await store.settings(env.DB)
     saved = json.loads(current["mapping"]) if current else None
     discovered = plus.discover(metadata["labels"], metadata["timezone"], saved["labels"] if saved else None)
@@ -112,15 +139,21 @@ async def review_targets(env: Any, week: str) -> dict[str, Any]:
         env.DB.prepare(gtd_sql.REVIEW_WEEK.sql).bind("{:04d}-W{:02d}".format(*day.isocalendar()[:2]))
         for day in (monday, monday - timedelta(days=7))
     ]
-    *reviews, chosen, edges, bets, lanes = await env.DB.batch(
-        [
-            *statements,
-            env.DB.prepare(sql.NEXT_WEEK).bind(week),
-            plan_store.edges(env.DB),
-            plan_store.bets_statement(env.DB, week),
-            plan_store.lane_orders_statement(env.DB),
-        ]
+    native = native_tasks.enabled(env)
+    results = list(
+        await env.DB.batch(
+            [
+                *statements,
+                env.DB.prepare(sql.NEXT_WEEK).bind(week),
+                plan_store.edges(env.DB),
+                plan_store.bets_statement(env.DB, week),
+                plan_store.lane_orders_statement(env.DB),
+                *([env.DB.prepare(mailbox_sql.NATIVE_COUNT.sql)] if native else []),
+            ]
+        )
     )
+    pending = int(dict(results.pop().results[0])["n"]) if native else None
+    *reviews, chosen, edges, bets, lanes = results
     created = [
         str(row["task_id"])
         for result in reviews
@@ -134,6 +167,7 @@ async def review_targets(env: Any, week: str) -> dict[str, Any]:
         "dependencies": plan_store.dependency_rows(edges),
         "weekly_bets": plan_store.weekly_bets(dict(row) for row in bets.results),
         "lane_orders": plan_store.lane_orders(lanes),
+        **({"mailbox_pending_count": pending} if native else {}),
     }
 
 
@@ -160,6 +194,8 @@ async def require_ready(core: Any, current: dict[str, Any] | None = None, *, syn
 
 async def confirm(core: Any, request: dict[str, Any]) -> dict[str, Any]:
     env = core.env
+    if native_tasks.enabled(env):
+        raise todoist.PlusError("ACTION_NOT_ALLOWED")
     current = await plan(core, fresh=True)
     if current["etag"] != request["etag"]:
         raise todoist.PlusError("ETAG_MISMATCH")
@@ -203,6 +239,8 @@ async def update_labels(core: Any, request: dict[str, Any]) -> dict[str, Any]:
     """Only the binding in D1 changes, no Todoist task, so there is no receipt: a request whose etag is outdated
     is a replay when the binding it asks for is the saved one, and answers the saved plan."""
     env = core.env
+    if native_tasks.enabled(env):
+        raise todoist.PlusError("ACTION_NOT_ALLOWED")
     metadata = await todoist.metadata(core, fresh=True)
     current = await plan(core, metadata)
     if request["etag"] != current["etag"]:
@@ -292,6 +330,8 @@ async def _change_connections(core: Any, statement: str, *args: Any) -> None:
 
 async def connections(core: Any, method: str, request: dict[str, Any]) -> dict[str, Any]:
     env = core.env
+    if method == "IssueExtensionConnection" and native_tasks.enabled(env):
+        raise todoist.PlusError("ACTION_NOT_ALLOWED")
     if method == "ReadExtensionConnections":
         rows = await store.rows(env.DB, sql.CONNECTIONS)
         return {"connections": [{**row, "revoked": bool(row["revoked"])} for row in rows]}
@@ -435,19 +475,19 @@ async def resolve_dependencies(core: Any, request: dict[str, Any]) -> dict[str, 
 async def build_commands(
     core: Any, method: str, request: dict[str, Any], mapping: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    if native_tasks.enabled(core.env):
+        return await native_plan_actions.build(core, method, request)
     request_id = request["request_id"]
     task_id = plus.check_id(request.get("task_id") or request.get("parent_id", ""))
     if method == "CompleteTask":
         flow_date = request.get("flow_date", "")
         if flow_date and date.fromisoformat(flow_date).isoformat() != flow_date:
             raise todoist.PlusError("BAD_REQUEST")
-        source = await todoist.task(core, task_id) if native_tasks.enabled(core.env) else {}
         return [
             {
                 "type": "item_close",
                 "uuid": plus.command_id(request_id),
                 "args": {"id": task_id},
-                **native_plus.etag(source),
             }
         ]
     task = await todoist.task(core, task_id)
@@ -490,7 +530,6 @@ async def build_commands(
             "type": "item_update",
             "uuid": plus.command_id(request_id),
             "args": {"id": task_id, **args},
-            **native_plus.etag(task),
         }
     ]
 
@@ -526,21 +565,34 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
         commands = previous.commands
     else:
         available = {label["label"] for label in current["available_labels"]}
-        if any(request.get(field) and label not in available for field, label in LITERAL_LABELS.items()):
+        if not native_tasks.enabled(env) and any(
+            request.get(field) and label not in available for field, label in LITERAL_LABELS.items()
+        ):
             # Todoist would create a label for an unknown name; Plus never creates one.
             raise todoist.PlusError("ACTION_NOT_ALLOWED")
         commands = await build_commands(core, method, request, current["labels"])
     await receipts.start(core, request_id, method, digest, commands, current["etag"] if synced else None)
-    result = await todoist.commands(core, commands)
+    result = (
+        await todoist._native(native_plus.resume(core, commands))
+        if native_tasks.enabled(env) and previous is not None
+        else await todoist.commands(core, commands)
+    )
     if method in ("SetTaskPlan", "SetTaskLead"):
         # Every explicit new-week write replaces the membership; old resets cannot select it. A commitment
         # chosen on the week's last day is recorded for the next week, so Monday's reset keeps it.
         # Recorded from the labels just written, before the confirming read: if that read fails, the next
         # page scan would remember a Sunday choice under the ending week.
-        written = commands[0]["args"]["labels"]
-        names = plus.role_labels(current["labels"])
-        # A task still carrying the retired Bets label keeps that mark, so Monday's reset still removes it.
-        marks = int(names["committed"] in written), int(names.get("bets") in written)
+        if native_tasks.enabled(env):
+            state = (
+                commands[0]["planning"]["state"]
+                if "planning" in commands[0]
+                else native_plan.state_from_labels(commands[0]["args"]["labels"])
+            )
+            marks = int(state["stage"] == "committed"), 0
+        else:
+            written = commands[0]["args"]["labels"]
+            names = plus.role_labels(current["labels"])
+            marks = int(names["committed"] in written), int(names.get("bets") in written)
         if any(marks):
             week = plus.membership_week(current["today"], current["week_start"], request)
             await store.run(env.DB, sql.REMEMBER_WEEK, request["task_id"], week, *marks)
@@ -560,7 +612,12 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
         response = kept = {"task_id": request["task_id"]}
     elif method == "AppendTaskSteps":
         ids = result.get("temp_id_mapping", {})
-        response = kept = {"task_ids": [str(ids.get(command["temp_id"], "")) for command in commands]}
+        created = result.get("task_ids")
+        response = kept = {
+            "task_ids": created
+            if created is not None
+            else [str(ids.get(command["temp_id"], "")) for command in commands]
+        }
         if not all(response["task_ids"]):
             raise todoist.PlusError("UNAVAILABLE")
     else:
@@ -615,6 +672,8 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
                 response = await set_weekly_bet(coordinator, request)
             elif method == "LookupMailItems":
                 response = await plus_mail.lookup(coordinator, request)
+            elif method == "ListMailItems":
+                response = await plus_mail.list_items(coordinator, request)
             elif method == "ReadMailSummary":
                 response = await plus_mail.read_summary(coordinator, request)
             elif method == "ReadMailSettings":
@@ -625,10 +684,13 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
             elif method == "FileMailItem":
                 # Only a category writes a label: a move to the Inbox alone uses the cached metadata.
                 fresh = bool(request.get("category_id"))
-                current = await require_ready(coordinator, await plan(coordinator, fresh=fresh), synced=fresh)
+                current = await plan(coordinator, fresh=fresh)
+                if not (native_tasks.enabled(env) and request.get("event_id")):
+                    current = await require_ready(coordinator, current, synced=fresh)
                 response = await plus_mail.file(coordinator, request, current)
             elif method == "DeleteMailItems":
-                await require_ready(coordinator)
+                if not (native_tasks.enabled(env) and request.get("event_ids")):
+                    await require_ready(coordinator)
                 response = await plus_mail.delete(coordinator, request)
             elif method == "ReorderTasks":
                 # The order writes no label: the cached metadata.
@@ -651,6 +713,9 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
             # A native Todoist page asks for the BASIC view: the mapping without the weekly review's batch.
             if method in PLAN_METHODS and not (method == "ReadPlan" and message.view == pb.PlanView.BASIC):
                 response = {"plan": {**response["plan"], **await review_targets(env, response["plan"]["week_start"])}}
+            if method in PLAN_METHODS and native_tasks.enabled(env):
+                # Pure rules use a local role projection; native clients see ordinary labels only.
+                response = {"plan": {**response["plan"], "labels": []}}
             message = from_wire(response_type, response, strict=True).message
             return {"ok": json.dumps(to_wire(message), separators=(",", ":")), "next_cursor": None}
     except todoist.PlusError as error:

@@ -77,6 +77,9 @@ export interface PlanContext {
 export function touched(task: PlanningTask, context: PlanContext): boolean {
   return (
     task.labels.length > 0 ||
+    Boolean(task.planningFlags?.length) ||
+    (task.explicitStage !== undefined &&
+      (task.explicitStage !== "none" || task.area !== "unassigned")) ||
     task.priority !== apiPriority(4) ||
     Boolean(task.due || task.deadline || task.estimatedMinutes) ||
     context.tasks.some((other) => other.parentId === task.id) ||
@@ -231,9 +234,14 @@ export function summaryParagraphs(text: string): string[][] {
  * the retired Bets', a lead window's and the in-progress one, which Plus writes by other means.
  */
 export function categoryLabels(
-  plan: Pick<PlanState, "availableLabels" | "managedLabels">,
+  plan: Pick<PlanState, "availableLabels" | "managedLabels" | "nativePlanning">,
   names: { work: string; personal: string },
 ): { id: string; name: string }[] {
+  if (plan.nativePlanning)
+    return plan.availableLabels.map((label) => ({
+      id: label.id,
+      name: label.label,
+    }));
   const areas = new Map(
     plan.managedLabels
       .filter((binding) => binding.role === "office" || binding.role === "home")

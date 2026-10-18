@@ -14,7 +14,7 @@ from typing import Any
 # category's label, and a project no longer used for filing (runtime/plan_store.py mail_settings). 'board' is
 # {"lanes": {"<lane>": [<plan_tasks.id>, …]}}: the Review lanes the owner arranged, at most MAX_LANE_TASKS each, each
 # ID in one lane at most (arrange_lane).
-SETTING_KEYS = ("account", "week", "todoist", "todoist.mail", "board")
+SETTING_KEYS = ("account", "week", "todoist", "todoist.mail", "board", "native")
 # plan_tasks.provider: the task store an external_id belongs to.
 PROVIDERS = ("todoist", "tasks")
 # plan_marks.kind: committed and bet are a week's last-day choices, kept a someday task kept in a weekly review.

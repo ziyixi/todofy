@@ -236,7 +236,10 @@ export function words(language: Language, taskAppName = "Todoist"): typeof en {
         ? "在任务详情中编辑日期、描述和项目。"
         : "Edit dates, descriptions and projects in task details.",
     manage: language === "zh" ? "规划设置" : "Planning settings",
-    setup: language === "zh" ? "请先在规划设置中确认标签对应关系。" : "Confirm your label mappings in Planning settings before making changes.",
+    setup:
+      language === "zh"
+        ? "原生规划尚未启用，请检查规划设置。"
+        : "Native planning is not ready. Check Planning settings.",
   };
 }
 

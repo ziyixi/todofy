@@ -96,12 +96,12 @@ export async function startHarness(
           script: `export default {async fetch(request,env){try{return Response.json(await (new URL(request.url).pathname==='/guard'?env.OPS.setGuard({level:'shed'}):env.OPS.status()));}catch(error){return Response.json({error:error.message},{status:400});}}}`,
           serviceBindings: { OPS: { name: 'tasks', entrypoint: 'Ops' } },
         },
-        ...['todofy', 'flowday', 'unknown'].map((consumer) => ({
-          name: `tasks-${consumer}`,
+        ...['read-write', 'read', 'unknown'].map((access) => ({
+          name: `tasks-${access}`,
           modules: true,
           compatibilityDate: '2026-09-08',
           script: `export default {async fetch(request,env){if(new URL(request.url).pathname==='/rpc'){const data=await request.json();return Response.json(await env.TASKS.call(data.method,data.body));}return env.TASKS.fetch(request);}}`,
-          serviceBindings: { TASKS: { name: 'tasks', entrypoint: 'TasksApi', props: { consumer } } },
+          serviceBindings: { TASKS: { name: 'tasks', entrypoint: 'TasksApi', props: { access } } },
         })),
       ],
     }),

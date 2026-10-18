@@ -1,8 +1,11 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Check, ChevronRight } from "lucide-react";
 import type { Catalog, Task, TaskDraft } from "../api";
 import { LabelPicker } from "./LabelPicker";
 import { TaskDescription } from "./TaskDescription";
+import { ProjectPicker } from "./ProjectPicker";
+import { PriorityPicker } from "./PriorityPicker";
+import { SchedulePicker } from "./SchedulePicker";
 interface Props {
   children?: ReactNode;
   task?: Task;
@@ -39,30 +42,11 @@ export function TaskFields({
   finish,
   onOpen,
 }: Props) {
-  const sections = catalog.sections.filter(
-    (section) => section.projectId === draft.projectId,
-  );
-  const dateField = (
-    <label>
-      Date
-      <input
-        type="date"
-        value={draft.dueDate}
-        disabled={busy}
-        onChange={(event) => void setDate(event.target.value)}
-      />
-    </label>
-  );
-  const deadlineField = (
-    <label>
-      Deadline
-      <input
-        type="date"
-        value={draft.deadline}
-        onChange={(event) => patch("deadline", event.target.value)}
-      />
-    </label>
-  );
+  const [openProperty, setOpenProperty] = useState<string | null>(null);
+  const propertyOpenChange = (name: string) => (open: boolean) =>
+    setOpenProperty((current) =>
+      open ? name : current === name ? null : current,
+    );
   const labelsField = (
     <LabelPicker
       labels={catalog.labels}
@@ -77,9 +61,10 @@ export function TaskFields({
           <button
             type="button"
             className="text-button parent-link"
+            aria-label="Open parent task"
             onClick={() => onOpen(task.parentId)}
           >
-            Open parent task
+            {task.parentTitle || "Parent task"}
             <ChevronRight size={14} />
           </button>
         )}
@@ -136,108 +121,77 @@ export function TaskFields({
         {children}
       </div>
       <aside className="task-properties">
-        <label>
-          Project
-          <select
-            value={draft.projectId}
-            onChange={(event) =>
-              setDraft((current) => ({
-                ...current,
-                projectId: event.target.value,
-                sectionId: "",
-                parentId: "",
-              }))
+        <ProjectPicker
+          catalog={catalog}
+          projectId={draft.projectId}
+          sectionId={draft.sectionId}
+          disabled={busy}
+          open={openProperty === "project"}
+          onOpenChange={propertyOpenChange("project")}
+          onChange={(projectId, sectionId) =>
+            setDraft((current) => ({
+              ...current,
+              projectId,
+              sectionId,
+              parentId: current.projectId === projectId ? current.parentId : "",
+            }))
+          }
+        />
+        <SchedulePicker
+          label="Date"
+          open={openProperty === "date"}
+          onOpenChange={propertyOpenChange("date")}
+          value={draft.dueDate}
+          disabled={busy}
+          timeZone={draft.dueTimezone || catalog.timeZone}
+          onChange={(value) => {
+            if (!value) {
+              patch("recurrence", "");
+              setDateText("");
+              setPreview("");
             }
-          >
-            <option value="">Inbox</option>
-            {catalog.projects
-              .filter((project) => !project.archived && !project.inbox)
-              .map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.title}
-                </option>
-              ))}
-          </select>
-        </label>
-        {sections.length > 0 && (
-          <label>
-            Section
-            <select
-              value={draft.sectionId}
-              onChange={(event) => patch("sectionId", event.target.value)}
-            >
-              <option value="">No section</option>
-              {sections.map((section) => (
-                <option key={section.id} value={section.id}>
-                  {section.title}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {task && dateField}
-        {task && deadlineField}
-        <label>
-          Priority
-          <select
-            value={draft.priority}
-            onChange={(event) => patch("priority", Number(event.target.value))}
-          >
-            {[1, 2, 3, 4].map((priority) => (
-              <option key={priority} value={priority}>
-                Priority {priority}
-                {priority === 4 ? " · Normal" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        {task && labelsField}
-        <details
-          className="advanced-properties"
-          open={task && (draft.dueDatetime || draft.recurrence) ? true : undefined}
-        >
-          <summary>
-            {task ? "Schedule options" : "More details"}
-            {!task && draft.dueDate ? ` · ${draft.dueDate}` : ""}
-            {!task && draft.labelIds.length ? ` · ${draft.labelIds.length} labels` : ""}
-          </summary>
+            return setDate(value);
+          }}
+          text={dateText}
+          onTextChange={setDateText}
+          onParse={previewDate}
+          preview={preview}
+          time={
+            draft.dueDatetime
+              ? new Date(draft.dueDatetime).toLocaleTimeString("sv-SE", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  timeZone: draft.dueTimezone || catalog.timeZone || undefined,
+                })
+              : ""
+          }
+          onTimeChange={setTime}
+          recurrence={draft.recurrence}
+          onRecurrenceChange={(value) => {
+            patch("recurrence", value);
+            setPreview("");
+          }}
+        />
+        <SchedulePicker
+          label="Deadline"
+          open={openProperty === "deadline"}
+          onOpenChange={propertyOpenChange("deadline")}
+          value={draft.deadline}
+          disabled={busy}
+          timeZone={catalog.timeZone}
+          onChange={(value) => patch("deadline", value)}
+        />
+        <PriorityPicker
+          value={draft.priority}
+          disabled={busy}
+          open={openProperty === "priority"}
+          onOpenChange={propertyOpenChange("priority")}
+          onChange={(value) => patch("priority", value)}
+        />
+        {labelsField}
+        <details className="advanced-properties">
+          <summary>More details</summary>
           <div className="advanced-fields">
-            <label>
-              Schedule
-              <input
-                value={dateText}
-                placeholder="Tomorrow or every Tuesday"
-                onChange={(event) => setDateText(event.target.value)}
-              />
-            </label>
-            <button
-              type="button"
-              className="text-button date-preview"
-              disabled={busy || !dateText.trim()}
-              onClick={() => void previewDate()}
-            >
-              Preview date
-            </button>
-            {!task && dateField}
-            <label>
-              Time
-              <input
-                type="time"
-                value={
-                  draft.dueDatetime
-                    ? new Date(draft.dueDatetime).toLocaleTimeString("sv-SE", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        timeZone:
-                          draft.dueTimezone || catalog.timeZone || undefined,
-                      })
-                    : ""
-                }
-                onChange={(event) => void setTime(event.target.value)}
-                disabled={!draft.dueDate || busy}
-              />
-            </label>
-            {!task && deadlineField}
             <label>
               Duration (minutes)
               <input
@@ -247,29 +201,12 @@ export function TaskFields({
                 step={5}
                 value={draft.durationMinutes || ""}
                 placeholder="Not set"
+                disabled={busy}
                 onChange={(event) =>
                   patch("durationMinutes", Number(event.target.value))
                 }
               />
             </label>
-            <label>
-              Repeat
-              <input
-                value={draft.recurrence}
-                placeholder="e.g. every Tuesday"
-                onChange={(event) => {
-                  patch("recurrence", event.target.value);
-                  setPreview("");
-                }}
-              />
-            </label>
-            {draft.recurrence && (
-              <p className="field-hint">
-                {preview ||
-                  "The server validates the repeat rule when you save."}
-              </p>
-            )}
-            {!task && labelsField}
           </div>
         </details>
       </aside>

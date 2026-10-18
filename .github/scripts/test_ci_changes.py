@@ -139,7 +139,7 @@ ALL = {**DASH}
 # Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, FlowDay, the links app,
 # the watch app, Fleet, mailsort, recall and the brief, each checked and deployed.
 EDGE_AUTH = {"tasks_check": True, "tasks_deploy": True, **ALL, **FLOWDAY, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF}
-EVERY = {"tasks_check": True, "tasks_deploy": True, **ALL, "todoist_plus_check": True, "todoist_plus_publish": True, "website_check": True, "website_deploy": True, **FLOWDAY, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
+EVERY = {"tasks_check": True, "tasks_deploy": True, **ALL, "todoist_plus_check": True, "todoist_plus_publish": False, "website_check": True, "website_deploy": True, **FLOWDAY, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -307,7 +307,7 @@ class Classify(unittest.TestCase):
         try:
             ci_changes.CHECK_ONLY = {"fleet"}
             result = ci_changes.everything()
-            self.assertEqual({key for key, value in result.items() if not value}, {"fleet_deploy", "dashboard_deploy"})
+            self.assertEqual({key for key, value in result.items() if not value}, {"fleet_deploy", "dashboard_deploy", "todoist_plus_publish"})
             for result in (result, ci_changes.dispatched("all"), push(["fleet/worker/src/index.ts", "dashboard/worker/src/index.ts"])):
                 self.assertTrue(result["fleet_check"])
                 self.assertTrue(result["dashboard_check"])
@@ -390,7 +390,7 @@ class Classify(unittest.TestCase):
         self.assertTrue(result["mailsort_deploy"])
         self.assertFalse(result["dashboard_deploy"])
         self.assertFalse(push(["mailsort/app.toml"])["mailsort_deploy"])
-        self.assertEqual({key for key, value in ci_changes.everything().items() if not value}, {f"{ci_changes.PREFIX[app]}_deploy" for app in ci_changes.CHECK_ONLY})
+        self.assertEqual({key for key, value in ci_changes.everything().items() if not value}, {f"{ci_changes.PREFIX[app]}_deploy" for app in ci_changes.CHECK_ONLY} | {"todoist_plus_publish"})
         saved = ci_changes.CHECK_ONLY
         try:
             ci_changes.CHECK_ONLY = {"mailsort"}
@@ -724,7 +724,7 @@ class Classify(unittest.TestCase):
                 tasks_check=T,
                 tasks_deploy="tasks" in deployed,
                 todoist_plus_check=T,
-                todoist_plus_publish="todoist-plus" in deployed,
+                todoist_plus_publish=False,
             )
 
         for path, deployed in cases.items():
@@ -1392,8 +1392,6 @@ class DeployConditions(unittest.TestCase):
         ("watch-deploy", "todofy-deploy"),
         ("todofy-deploy", "flowday-deploy"),
         ("flowday-deploy", "tasks-deploy"),
-        ("todoist-plus-release", "todofy-deploy"),
-        ("todoist-plus-release", "flowday-deploy"),
     }
 
     # Check jobs a deploy may also find skipped, but only when this push to main reuses a green branch run of
@@ -1450,7 +1448,6 @@ class DeployConditions(unittest.TestCase):
                 "mailsort-deploy",
                 "recall-deploy",
                 "recall-extension-release",
-                "todoist-plus-release",
                 "brief-deploy",
                 "platform-image",
                 "vps-deploy",
@@ -1591,13 +1588,16 @@ class DeployConditions(unittest.TestCase):
                 self.assertIsNotNone(variable, need)
                 self.assertRegex(gate, rf'"[^"=]+=\${variable.group(1)}"')
 
-    def test_changes_exports_every_output_and_each_is_used(self):
+    def test_changes_exports_every_output_and_each_is_used_or_retired(self):
         blocks = self.jobs()
         for key in ci_changes.KEYS:
             with self.subTest(output=key):
                 self.assertIn(f"{key}: ${{{{ steps.decide.outputs.{key} }}}}", blocks["changes"])
                 users = [name for name, block in blocks.items() if f"needs.changes.outputs.{key} == 'true'" in block]
-                self.assertTrue(users, key)
+                if key == "todoist_plus_publish":
+                    self.assertEqual((users, ci_changes.everything()[key]), ([], False))
+                else:
+                    self.assertTrue(users, key)
 
     def test_changes_exports_the_reuse_outputs_and_the_gate_prints_them(self):
         blocks = self.jobs()
@@ -1649,7 +1649,7 @@ class RecallExtensionRelease(unittest.TestCase):
         self.assertIn("    permissions:\n      # ", block)
         self.assertEqual(re.findall(r"^      (\w+): (\w+)$", block.split("    permissions:\n", 1)[1].split("    steps:", 1)[0], re.M),
                          [("contents", "write"), ("actions", "read")])
-        self.assertEqual([name for name, other in blocks.items() if "contents: write" in other], [self.JOB, "todoist-plus-release"])
+        self.assertEqual([name for name, other in blocks.items() if "contents: write" in other], [self.JOB])
         self.assertRegex(effective_ci(), r"\npermissions:\n  contents: read\n")
         # GITHUB_TOKEN only: no secret, no deployment environment.
         self.assertNotIn("secrets", block)

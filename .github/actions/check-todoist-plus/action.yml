@@ -1,5 +1,5 @@
 name: check-todoist-plus
-description: Typecheck, test and build the isolated Todoist browser extension.
+description: Preserve shared Plan, Focus and Mail regressions in the retired extension test host.
 runs:
   using: composite
   steps:
@@ -17,7 +17,7 @@ runs:
       run: |
         npm ci --prefix ../packages/planning-ui --no-audit --no-fund
         npm ci --no-audit --no-fund
-    - name: Verify and build Todoist Plus
+    - name: Verify shared planning and build the disposable test host
       working-directory: todoist-plus
       shell: bash -e {0}
       run: |
@@ -33,9 +33,3 @@ runs:
       working-directory: todoist-plus
       shell: bash -e {0}
       run: npm run test:browser
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-      with:
-        name: todoist-plus-${{ github.sha }}
-        path: todoist-plus/.output/chrome-mv3/
-        if-no-files-found: error
-        retention-days: 30

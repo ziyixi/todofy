@@ -132,6 +132,10 @@ service PlusService {
       body: "*"
     };
   }
+  // Native Mail inbox, independent of task creation. Full summary text is read on demand.
+  rpc ListMailItems(ListMailItemsRequest) returns (ListMailItemsResponse) {
+    option (google.api.http) = {get: "/api/plus/v1/mailItems"};
+  }
   // The Mailbox rows among up to 200 of the mail project's tasks: those a Mail Hero event created, each
   // with its brief and receive time, and the owner's mail categories. No summary text but the brief.
   // (-- api-linter: core::0131::synonyms=disabled
@@ -258,6 +262,10 @@ message Plan {
   // The Review lanes the owner arranged (ReorderTasks), each with its tasks first to last, at
   // most 100 each. A lane never arranged is absent. Left out of the BASIC view.
   repeated LaneOrder lane_orders = 16;
+  // Native Tasks stores planning facts independently of ordinary task labels.
+  bool native_planning = 17;
+  // Native Mail entries still awaiting a decision; present in the full planning view.
+  optional int32 mailbox_pending_count = 18;
 }
 // The owner's order of one Review lane.
 message LaneOrder {
@@ -347,6 +355,11 @@ message PlanningTask {
   optional string order_key = 21;
   // Native Tasks position, including fractional midpoint ordering; absent for Todoist.
   optional double sort_order = 22;
+  // Explicit saved stage for native Tasks, before the scheduled-date fallback.
+  optional string explicit_stage = 23;
+  // Native planning flags: quick, waiting, parked, active, onhold, routine, task or blocked.
+  // These are planning facts, not task labels. Absent for the retired Todoist adapter.
+  repeated string planning_flags = 24;
 }
 // Reads the singleton plan.
 message ReadPlanRequest {
@@ -397,6 +410,18 @@ message SetTaskPlanRequest {
   // false removes `parked`. It is never created: adding it fails while the account has no label
   // of that exact name.
   optional bool parked = 8;
+  // Native Tasks: a short, independent action shown in the Quick row.
+  optional bool quick = 9;
+  // Native Tasks: waiting for something outside this task's dependencies.
+  optional bool waiting = 10;
+  // Native Tasks: routine work, excluded from automatic date candidates.
+  optional bool routine = 11;
+  // Native Tasks: hold this task outside automatic date candidates.
+  optional bool on_hold = 12;
+  // Native Tasks: explicitly blocked, independently of dependency edges.
+  optional bool blocked = 13;
+  // Native Tasks: a standalone action, excluded from automatic date candidates.
+  optional bool single_action = 14;
 }
 // The task after a successful planning change.
 message SetTaskPlanResponse {
@@ -626,6 +651,10 @@ message VerifyPlanStoreResponse {
   int32 unknown_value_count = 9;
   // Tasks over the dependency limit, a dependency total over its limit, and schemes over the active category limit.
   int32 limit_violation_count = 10;
+  // Rows of native plan_task_state.
+  int32 state_row_count = 11;
+  // Native planning state whose task identity is missing.
+  int32 orphan_state_count = 12;
 }
 // Saves the text of one week's Bet. Sending the text already saved answers it as saved,
 // whatever the etag, so a repeated request is safe without a request ID.
@@ -648,9 +677,9 @@ message SetWeeklyBetResponse {
   WeeklyBet weekly_bet = 1;
 }
 
-// A reference into the task store, by its own ID: provider todoist today.
+// A reference into the selected task store, by its own ID.
 message ExternalRef {
-  // The store: todoist.
+  // The store: tasks, or todoist for the retired adapter.
   string provider = 1 [(google.api.field_behavior) = REQUIRED];
   // The store's ID of the task, label or project.
   string external_id = 2 [(google.api.field_behavior) = REQUIRED];
@@ -667,6 +696,31 @@ message MailItem {
   google.protobuf.Timestamp receive_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Whether ReadMailSummary has its full summary.
   bool has_summary = 5;
+  // Mail subject, available before any task exists.
+  string title = 6;
+  // Version of the mailbox entry, checked when converting it to a task.
+  string etag = 7;
+}
+// Reads a bounded page of the native Mail inbox.
+message ListMailItemsRequest {
+  // Default 25, maximum 50.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Opaque cursor from the preceding page.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+// Pending mail and the optional label/priority shortcuts for creating a task.
+// (-- api-linter: core::0132::response-unknown-fields=disabled
+//     aip.dev/not-precedent: this bounded inbox view includes the same shortcuts and revision each row uses,
+//     matching LookupMailItems without another settings request. --)
+message ListMailItemsResponse {
+  // Mail entries in received order, newest first.
+  repeated MailItem mail_items = 1;
+  // Empty when the complete inbox has been read.
+  string next_page_token = 2;
+  // Optional shortcuts; no category is needed to create an Inbox task.
+  repeated MailCategory categories = 3;
+  // Version used when an optional shortcut is chosen.
+  string categories_etag = 4;
 }
 // One of the owner's mail categories: an existing label and a priority. Its name is generated
 // from them ("quick · P4"), so none is stored to rename.
@@ -717,8 +771,8 @@ message ReadMailSummaryResponse {
 // Files one mail.
 message FileMailItemRequest {
   // The mail's Todoist task, still in the mail project.
-  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
-  // Fingerprint of the task shown to the user (PlanningTask.etag).
+  string task_id = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Native MailItem.etag when event_id is supplied; otherwise the legacy PlanningTask.etag.
   string etag = 2 [(google.api.field_behavior) = REQUIRED];
   // UUID reused when repeating this action.
   string request_id = 3 [
@@ -726,9 +780,11 @@ message FileMailItemRequest {
     (google.api.field_info).format = UUID4
   ];
   // MailCategory.id, or empty to move to the Inbox only.
-  string category_id = 4 [(google.api.field_behavior) = REQUIRED];
+  string category_id = 4 [(google.api.field_behavior) = OPTIONAL];
   // The categories_etag the category was shown with; ignored when category_id is empty.
-  string categories_etag = 5 [(google.api.field_behavior) = REQUIRED];
+  string categories_etag = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Native MailItem.id. Creates a generic Inbox task only when the owner files this entry.
+  string event_id = 6 [(google.api.field_behavior) = OPTIONAL];
 }
 // The task after it was filed.
 message FileMailItemResponse {
@@ -746,7 +802,9 @@ message DeleteMailItemsRequest {
     (google.api.field_info).format = UUID4
   ];
   // 1 to 200 Todoist task IDs.
-  repeated string task_ids = 2 [(google.api.field_behavior) = REQUIRED];
+  repeated string task_ids = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Native MailItem IDs, at most 200. Deletes their summaries without deleting any linked tasks.
+  repeated string event_ids = 3 [(google.api.field_behavior) = OPTIONAL];
 }
 // What happened to each task asked for.
 message DeleteMailItemsResponse {
@@ -754,6 +812,10 @@ message DeleteMailItemsResponse {
   repeated string deleted_task_ids = 1;
   // Kept: changed or planned, not mail, or no longer in the mail project.
   repeated string kept_task_ids = 2;
+  // Native mail summaries deleted or already absent.
+  repeated string deleted_event_ids = 3;
+  // Native entries retained because their state changed.
+  repeated string kept_event_ids = 4;
 }
 // Reads the mail settings.
 message ReadMailSettingsRequest {}
@@ -777,9 +839,9 @@ message UpdateMailSettingsRequest {
   // At most four, each a current label (not a planning, lead or in-progress one) and a priority,
   // no two the same.
   repeated MailCategory categories = 1 [(google.api.field_behavior) = OPTIONAL];
-  // Deprecated and ignored: filed mail always moves to the Inbox. Still REQUIRED on the wire; send
-  // any well-formed reference.
-  ExternalRef destination = 2 [(google.api.field_behavior) = REQUIRED];
+  // Deprecated and ignored: filed mail always moves to the Inbox. Native Tasks omits this field;
+  // the retired Todoist adapter still requires a well-formed reference for its frozen contract.
+  ExternalRef destination = 2 [(google.api.field_behavior) = OPTIONAL];
   // The etag of the settings shown.
   string etag = 3 [(google.api.field_behavior) = REQUIRED];
 }

@@ -36,7 +36,7 @@ from todofy.core.request_id import todoist_request_id
 from todofy.core.sql import reminders as sql
 from todofy.core.todoist_request import TaskRequest, build_task_request
 from todofy.core.vocab import ATTENTION_AGE_SECONDS, Code, ReminderState
-from todofy.runtime import metrics, todoist
+from todofy.runtime import metrics, native_tasks, todoist
 from todofy.runtime.config import flag, source_id, var
 from todofy.runtime.interop import now_ms
 
@@ -94,7 +94,7 @@ async def tick(env: Any, coordinator: Any, now: int) -> int:
             return now + REMINDER_CHECK_INTERVAL
         attempts, subject, body = row.attempts, row.subject, row.body
         # A row claimed before migration 0004 has no project: it went to the default project.
-        project = row.project_id or var(env, "TODOIST_DEFAULT_PROJECT_ID")
+        project = row.project_id or ("" if native_tasks.enabled(env) else var(env, "TODOIST_DEFAULT_PROJECT_ID"))
         claim = await db.prepare(sql.CLAIM_RETRY.sql).bind(now, day, attempts, now).run()
     if claim.meta.changes != 1:
         return now + REMINDER_CHECK_INTERVAL
@@ -136,7 +136,9 @@ async def _ops_due(db: Any, report: Report, day: str, now: int, attention: bool)
 
 def reminder_project(env: Any) -> str:
     """The project of a new day's reminder: TODOIST_OPS_PROJECT_ID when set, else the default project."""
-    return var(env, "TODOIST_OPS_PROJECT_ID") or var(env, "TODOIST_DEFAULT_PROJECT_ID")
+    return var(env, "TODOIST_OPS_PROJECT_ID") or (
+        "" if native_tasks.enabled(env) else var(env, "TODOIST_DEFAULT_PROJECT_ID")
+    )
 
 
 def _request(env: Any, subject: str, body: str, project: str) -> TaskRequest:

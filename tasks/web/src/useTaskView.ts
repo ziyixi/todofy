@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { api, describeError, type Task } from "./api";
 import type { Route } from "./routes";
 
@@ -14,8 +20,13 @@ export function useTaskView(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const visibleView = useRef("");
+  const isListView = !["plan", "focus", "mail", "catalog", "settings"].includes(
+    route.page,
+  );
   const read = useCallback(
     async (pageToken = "") => {
+      if (!isListView) return;
       const request = ++generation.current;
       setLoading(true);
       setError("");
@@ -50,13 +61,28 @@ export function useTaskView(
         if (generation.current === request) setLoading(false);
       }
     },
-    [route.page, route.id, search, date, orderBy, includeCompleted],
+    [route.page, route.id, search, date, orderBy, includeCompleted, isListView],
+  );
+  const latestRead = useRef(read);
+  useLayoutEffect(() => {
+    latestRead.current = read;
+  }, [read]);
+  // A mutation may finish after navigation; refresh the visible view, not its old closure.
+  const readCurrent = useCallback(
+    (pageToken = "") => latestRead.current(pageToken),
+    [],
   );
   useEffect(() => {
-    if (["plan", "focus", "mail", "catalog", "settings"].includes(route.page))
-      return;
-    setTasks([]);
+    if (!isListView) return;
+    const view = `${route.page}:${route.id || ""}`;
+    if (visibleView.current !== view) {
+      setTasks([]);
+      setNextPage("");
+      visibleView.current = view;
+    }
     setNextPage("");
+    setLoading(true);
+    setError("");
     const timer = window.setTimeout(
       () => void read(),
       route.page === "search" ? 220 : 0,
@@ -65,7 +91,7 @@ export function useTaskView(
       window.clearTimeout(timer);
       generation.current += 1;
     };
-  }, [read, route.page]);
+  }, [read, route.page, route.id, isListView]);
   const replace = useCallback(
     (task: Task) =>
       setTasks((current) =>
@@ -85,7 +111,7 @@ export function useTaskView(
     loading,
     error,
     setError,
-    read,
+    read: readCurrent,
     replace,
     remove,
   };

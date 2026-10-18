@@ -27,7 +27,6 @@ interface Props {
   title: string;
   route: Route;
   catalog: Catalog;
-  managedRoles: ReadonlyMap<string, string>;
   catalogLoading: boolean;
   list: ReturnType<typeof useTaskView>;
   actions: ReturnType<typeof useTaskActions>;
@@ -48,7 +47,6 @@ export function TaskWorkspace({
   title,
   route,
   catalog,
-  managedRoles,
   catalogLoading,
   list,
   actions,
@@ -234,9 +232,9 @@ export function TaskWorkspace({
         </p>
       )}
       <TaskList
+        menuActions={actions}
         tasks={list.tasks}
         catalog={catalog}
-        managedRoles={managedRoles}
         busyIds={busyIds}
         selected={selected}
         onSelect={(id) =>

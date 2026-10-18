@@ -911,21 +911,36 @@ class TodofyCore(DurableObject):
             await self._finish_canary(running, event, result, done)
         elif verdict.ok:
             summary = clean_summary(_utf8_prefix(result.text, MAX_SUMMARY_BYTES), event)
-            body = render_todo_body(event, summary)
-            sender = event.from_addresses[0].address if event.from_addresses else ""
-            await ledger.transition(
-                db,
-                running,
-                EventState.SUMMARIZED,
-                actor=WORKER,
-                now=done,
-                summary=summary,
-                summary_model=result.model,
-                todo_body=body,
-                todoist_request_id=todoist_request_id(task_title(event), body, sender),
-                attempt_count=0,
-                next_attempt_at=done,
-            )
+            if native_tasks.enabled(self.env):
+                # Mail is content until the owner converts it to a task from the native Mail view.
+                # The existing terminal CAS stores its summary atomically; no Tasks call is made.
+                await ledger.transition(
+                    db,
+                    running,
+                    EventState.COMPLETE,
+                    actor=WORKER,
+                    now=done,
+                    completed=CompletedSummary(event.subject, summary, result.model, ""),
+                    summary_model=result.model,
+                    attempt_count=0,
+                    next_attempt_at=0,
+                )
+            else:
+                body = render_todo_body(event, summary)
+                sender = event.from_addresses[0].address if event.from_addresses else ""
+                await ledger.transition(
+                    db,
+                    running,
+                    EventState.SUMMARIZED,
+                    actor=WORKER,
+                    now=done,
+                    summary=summary,
+                    summary_model=result.model,
+                    todo_body=body,
+                    todoist_request_id=todoist_request_id(task_title(event), body, sender),
+                    attempt_count=0,
+                    next_attempt_at=done,
+                )
         else:
             code, attempts = verdict.code or Code.SUMMARY_FAILED, running.attempt_count
             if summary_gives_up(attempts, code, done - row.created_at):

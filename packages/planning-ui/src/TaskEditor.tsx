@@ -1,7 +1,7 @@
 import type { TaskDestination } from "./destination";
 import { useEffect, useRef, useState } from "react";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
-import { displayedTitle, formattedMinutes } from "./domain";
+import { displayedTitle, formattedMinutes, hasPlanningFlag } from "./domain";
 import { detailStatus } from "./deadlines";
 import { TaskDependencies } from "./TaskDependencies";
 import { words } from "./i18n";
@@ -12,12 +12,13 @@ import type {
   Language,
   PlanningTask,
   PlusActions,
+  PlanUpdate,
   RunOperation,
   StepDraft,
   TaskDependency,
 } from "./model";
 
-/** The start-ahead choice: not set, or 1, 3, 7, 14 or 30 days (Todofy's lead labels). */
+/** The start-ahead choice: not set, or 1, 3, 7, 14 or 30 days. */
 export function LeadSelect({
   value,
   language,
@@ -66,7 +67,7 @@ export interface TaskEditorProps {
   todayTaskIds: readonly string[];
   /** The account's today, for the deadline's status. */
   today: string;
-  /** Whether the account has the literal `active` label that "Mark in progress" writes. */
+  /** Whether this source supports marking a task in progress. */
   canMarkActive: boolean;
   addFocus: (id: string) => void;
   onOpenTask: (id: string) => void;
@@ -107,27 +108,29 @@ export function TaskEditor({
     deadline?: string;
     leadDays?: number;
   }>();
-  const stage = planning?.stage ?? task.stage;
+  const savedStage = task.explicitStage ?? task.stage;
+  const stage = planning?.stage ?? savedStage;
   const area = planning?.area ?? task.area;
   const deadline = timing?.deadline ?? task.deadline;
   const lead = timing?.leadDays ?? task.leadDays;
-  const planningChanged = stage !== task.stage || area !== task.area;
+  const planningChanged = stage !== savedStage || area !== task.area;
   const timingChanged = deadline !== task.deadline || lead !== task.leadDays;
   const planningConflict = Boolean(
     planning &&
-    ((stage !== task.stage && planning.base.stage !== task.stage) ||
-      (area !== task.area && planning.base.area !== task.area)),
+      ((stage !== savedStage &&
+        (planning.base.explicitStage ?? planning.base.stage) !== savedStage) ||
+        (area !== task.area && planning.base.area !== task.area)),
   );
   const timingConflict = Boolean(
     timing &&
-    ((deadline !== task.deadline && timing.base.deadline !== task.deadline) ||
-      (lead !== task.leadDays && timing.base.leadDays !== task.leadDays)),
+      ((deadline !== task.deadline && timing.base.deadline !== task.deadline) ||
+        (lead !== task.leadDays && timing.base.leadDays !== task.leadDays)),
   );
   // A read may already contain the owner's choice. Once confirmed, it is no longer a draft.
   useEffect(() => {
     setPlanning((current) => {
       if (!current || current.base.id !== task.id) return undefined;
-      const stage = current.stage === task.stage ? undefined : current.stage;
+      const stage = current.stage === savedStage ? undefined : current.stage;
       const area = current.area === task.area ? undefined : current.area;
       if (stage === current.stage && area === current.area) return current;
       return stage === undefined && area === undefined
@@ -146,7 +149,7 @@ export function TaskEditor({
         ? undefined
         : { ...current, deadline, leadDays };
     });
-  }, [task.id, task.stage, task.area, task.deadline, task.leadDays]);
+  }, [task.id, savedStage, task.area, task.deadline, task.leadDays]);
   const [announcement, setAnnouncement] = useState("");
   const requestId = useRef(crypto.randomUUID());
   const children = tasks.filter((item) => item.parentId === task.id);
@@ -161,10 +164,10 @@ export function TaskEditor({
     }));
   // From the fields as shown, so a date being chosen already says where it stands.
   const status = detailStatus(task, deadline, lead, today, language);
-  const active = task.labels.includes(ACTIVE_LABEL);
+  const active = hasPlanningFlag(task, ACTIVE_LABEL);
   // Set aside: a stage or "in progress" chosen here takes it out of Parked too, as a drag out of
   // that lane does; otherwise the card would stay there, whatever its stage.
-  const parked = task.labels.includes(PARKED_LABEL);
+  const parked = hasPlanningFlag(task, PARKED_LABEL);
   const estimateValues = [
     ...new Set([
       15,
@@ -186,12 +189,14 @@ export function TaskEditor({
       base: {
         ...(planning?.base ?? task),
         // A field first edited after a refresh starts from what the owner now sees.
-        ...(planning?.stage === undefined ? { stage: task.stage } : {}),
+        ...(planning?.stage === undefined
+          ? { stage: task.stage, explicitStage: task.explicitStage }
+          : {}),
         ...(planning?.area === undefined ? { area: task.area } : {}),
       },
       ...change,
     };
-    if (next.stage === task.stage) delete next.stage;
+    if (next.stage === savedStage) delete next.stage;
     if (next.area === task.area) delete next.area;
     setPlanning(
       next.stage === undefined && next.area === undefined ? undefined : next,
@@ -220,8 +225,8 @@ export function TaskEditor({
     if (
       await run(() =>
         actions.updateTask(task, {
-          ...(stage !== task.stage ? { stage } : {}),
-          ...(stage !== task.stage && stage !== "none" && parked
+          ...(stage !== savedStage ? { stage } : {}),
+          ...(stage !== savedStage && stage !== "none" && parked
             ? { parked: false }
             : {}),
           ...(area !== task.area ? { area } : {}),
@@ -369,6 +374,38 @@ export function TaskEditor({
           </button>
         </div>
       )}
+      {task.planningFlags !== undefined && (
+        <details className="plus-task-options">
+          <summary>{language === "zh" ? "任务选项" : "Task options"}</summary>
+          <div>
+            {(
+              [
+                ["quick", "quick", "Quick action", "快速行动"],
+                ["waiting", "waiting", "Waiting", "等待中"],
+                ["routine", "routine", "Routine", "日常事务"],
+                ["onHold", "onhold", "On hold", "暂缓"],
+                ["blocked", "blocked", "Blocked", "受阻"],
+                ["singleAction", "task", "Standalone action", "独立行动"],
+              ] as const
+            ).map(([field, flag, en, zh]) => (
+              <label key={field}>
+                <input
+                  type="checkbox"
+                  checked={hasPlanningFlag(task, flag)}
+                  disabled={busy}
+                  onChange={(event) => {
+                    const update: PlanUpdate = {
+                      [field]: event.target.checked,
+                    };
+                    void run(() => actions.updateTask(task, update));
+                  }}
+                />
+                {language === "zh" ? zh : en}
+              </label>
+            ))}
+          </div>
+        </details>
+      )}
       <div className="plus-section-title">
         <h3>{text.steps}</h3>
         <span>
@@ -488,7 +525,7 @@ export function TaskEditor({
         >
           {text.save}
         </button>
-        {/* Each click is one write of the literal label, which Plus never creates. */}
+        {/* Each click saves the progress choice through the current source. */}
         {task.deadline && canMarkActive && (
           <button
             className="plus-button"

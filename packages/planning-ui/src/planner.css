@@ -26,3 +26,31 @@
     width: calc(100% - 40px);
   }
 }
+
+.plus-task-options {
+  margin: 12px 0 20px;
+  color: var(--plus-text);
+}
+.plus-task-options summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.plus-task-options > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px 16px;
+  padding-top: 12px;
+}
+.plus-task-options label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+}
+.plus-task-options input[type="checkbox"] {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--plus-accent);
+}

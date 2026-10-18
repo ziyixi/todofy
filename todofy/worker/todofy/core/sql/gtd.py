@@ -5,6 +5,7 @@ bounded by the primary key's ``day`` prefix. Nothing here selects task text: the
 """
 
 from . import Query
+from .mailbox import NATIVE_PENDING
 
 SNAPSHOT_INDEX = "sqlite_autoindex_gtd_snapshots_1"
 TASKS_INDEX = "sqlite_autoindex_gtd_snapshot_tasks_1"
@@ -64,6 +65,12 @@ MAIL_OPEN = Query(
     "SELECT count(*) AS n FROM summaries WHERE created_at > ? AND created_at <= ? AND task_id <> ''"
     " AND EXISTS (SELECT 1 FROM gtd_snapshot_tasks g WHERE g.day = ? AND g.task_id = summaries.task_id)",
     "summaries_created",
+)
+# Native Mail remains content until conversion; it does not need a task snapshot to remain open.
+NATIVE_MAIL_OPEN = Query(
+    f"SELECT count(*) AS n FROM summaries INDEXED BY summaries_pending"
+    f" WHERE created_at > ? AND created_at <= ? AND {NATIVE_PENDING}",
+    "summaries_pending",
 )
 # The review's links: a day's oldest tasks of one project (bind the day, the project and a cap), IDs only.
 # The sort sees at most one day's rows (MAX_SNAPSHOT_ROWS), bounded by the primary key's day prefix.

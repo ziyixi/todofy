@@ -11,126 +11,50 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ### Native Tasks replacement (2026-10-17)
 
-Branch `codex/tasks-native`, isolated checkout `/private/tmp/todofy-tasks-impl`. The desktop app includes a
-Todoist-style task editor, installable PWA, generated task/history API, shared Plan/Focus/Mail, Home status
-and inactive native adapters for Todofy/FlowDay. See [Tasks](tasks/README.md), [design](tasks/docs/design.md)
-and [verification](tasks/docs/verification.md). The staged implementation is `7eae7465` on main; the activation diff is still on `codex/tasks-native`.
+Branch `codex/tasks-native`, working checkout `/private/tmp/todofy-tasks-impl`. Native task ownership is live
+at `86bb978621c81ce09b1355c4fd931b4f7e8e028e`. The full branch gate
+[39076491784](https://github.com/ziyixi/todofy/actions/runs/39076491784) passed. Main
+[39077273261](https://github.com/ziyixi/todofy/actions/runs/39077273261) successfully released Tasks → FlowDay →
+Todofy → Home; only the unrelated VPS job failed `UNAVAILABLE`. The subsequent Todofy-only
+[39078766543](https://github.com/ziyixi/todofy/actions/runs/39078766543) passed in full and restored all three
+original processing/maintenance/source-write switches to false. Do not disable VPS deployment to hide its failure.
 
-Private source export, reference/filter/recurrence preflight and a local SQLite import/replay pass. FlowDay's
-active external IDs are all included; its queue and time rows remain untouched. The owner chose February's
-last day for `every 30th`, returning to day 30 in other months; this is implemented and tested. Private files
-and temporary tools stay outside GitHub. No real tasks were imported into production or changed in Todoist.
+The final private, read-only source snapshot and empty post-export Sync delta were verified. Tasks contains
+22 projects, 3 sections, 27 labels, 12 filters, 2,644 task resources and 2,824 completion occurrences with exact
+ID/digest matches and no orphan parent/project references. No original Todoist task was changed. Planning's
+identity preflight matched zero rows; no provider SQL was executed. FlowDay completed its native cursor sync;
+all existing queue/time reference multisets stayed unchanged, including preexisting historical cache gaps.
+The authorized synthetic owner task was created, edited, reloaded and immediately soft-deleted in Tasks.
 
-Tasks' D1 and owner Access app are registered. Full branch CI [39074838356](https://github.com/ziyixi/todofy/actions/runs/39074838356)
-passed on `7eae7465`. Same-SHA main [39075576241](https://github.com/ziyixi/todofy/actions/runs/39075576241)
-uploaded Tasks `734fd419-398f-4d70-8feb-4e08e42636f0`; D1 migrations, build and Access probes passed.
-The final declaration check failed because Tasks' deploy wrapper was omitted from the drift generator,
-leaving four standard deployed fields undeclared. Independent comparison with these declarations has zero
-differences; fix the generator and let the next normal Actions release record success. That main run also
-reported VPS `UNAVAILABLE`; do not describe the entire run as green or change Newsletter to fix this task.
+The current uncommitted refinement pass adds native color/property/context menus, sidebar resizing, responsive
+editing, atomic family duplication and search refreshes without blanking rows. The owner explicitly expanded
+the goal: GTD workaround labels must become planning facts, not merely hidden labels. Work is now replacing
+those memberships with Todofy's explicit `plan_task_state`, keeping task content in Tasks and queues/timers in
+FlowDay. The native UI will have no label mapping or extension key; legacy Plus ZIP publication is removed,
+with its shared synthetic browser regressions retained. Mail now saves a taskless summary; the owner explicitly
+creates an Inbox task from the independent Mail page. Historical linked tasks are retained, and deleting Mail
+does not delete Tasks. New native writes use generic protobuf Tasks requests, including atomic reorder, rather
+than Todoist Sync commands. See [planning parity](tasks/docs/planning-parity.md).
 
-Migration is in progress: production Todofy is `7eae7465`, and its existing maintenance, processing and source
-write pauses are all true. Live active counts and reserved tokens are zero. Original values are in the
-private operator file outside GitHub. The final read-only export completed and its post-read Sync delta was empty. Production import now has
-2,644 task resources and 2,824 completion occurrences, with exact ID/digest matches and no orphan parent or
-project references. Fresh planning identity preflight matches zero rows, so no provider SQL was run. Todoist
-data is unchanged. Resume original pause values only after checked import,
-consumer activation and bounded FlowDay synchronization.
+Next: finish native-state integration and the private one-time cutover preparation; run affected checks and
+full branch CI; release the same green SHA. Pause existing writers for the state conversion, capture only IDs
+and memberships, seed planning facts, retire only exact replaced native labels/filters, adopt the matched
+pending legacy Mail summaries, activate native state, then restore the recorded switches and verify live
+Plan/Focus/Mail. Backfill the 12 imported filter colors only after migration 0002, without overwriting nonempty
+colors. New code has not yet been published. Sync the original checkout safely after final release; it was
+clean at `ca5c309e` when last checked.
 
-Next: complete final private export/preflight/import and identity checks; pass the activation branch gate;
-release that same SHA through Actions. Bind in order Tasks → FlowDay → Todofy → Home, with source pauses
-retained. Prime FlowDay to `SYNCED`, restore the previous pause values and redeploy Todofy, then verify native
-UI/PWA/Plan/Focus/Mail. No Todoist fallback. Sync the original checkout after release; it was clean at
-`ca5c309e` when last checked.
+The staged-release declaration failure was the missing Tasks wrapper enrollment, specifically BUILD_SHA:
+release inputs already merge the secret fields. The corrected independent live comparison had zero differences.
 
 The owner requested stopping both old acceptance reminders. The app confirmed deletion of heartbeat IDs
 `automation` (website cron evidence) and `todofy` (email-model scheduler evidence) on 2026-10-17. Their missing
 historical log evidence is not treated as a successful verification.
 
-Todoist Plus UI refinement is released at `b79180283db375757f2cc8d29e481e55a6935c40`.
-[Full branch CI 39013842528](https://github.com/ziyixi/todofy/actions/runs/39013842528) and
-[same-SHA main 39014147662](https://github.com/ziyixi/todofy/actions/runs/39014147662) pass. Only the Plus
-extension published; backend, other apps, images and VPS releases skipped. Version `2026.1017.449.46993`
-was downloaded from its public release; all seven files match the green CI artifact and the owner's existing
-`~/Documents/chrome_extensions/todoist-plus` folder. Two obsolete generated files were removed. Permissions
-and Chrome-stored connection state were unchanged. Owner step: Reload Todoist Plus, then refresh Todoist.
-
-The repair covers refreshed TaskEditor drafts, IME-safe dependency selection, desktop seven-day Week,
-flat priority-flag cards and category backdrop dismissal. Local types/lint/build, 307 units and 62 actual
-extension browser cases pass. Chrome synthetic checks confirm eight commitments and seven date targets
-at 1440×900, pointer scheduling into Friday, and no horizontal overflow at 1024×800. No real tasks or account
-settings changed. `codex/plus-ui-refinement-verification` only closes root docs, without another ZIP release.
-[Evidence](docs/todoist-plus-verification.md#ui-refinement-october-17).
-
-Todoist Plus work of October 15-17 is all released. Each row passed full branch CI and the same-SHA main
-release (Todofy deploy first, then the extension ZIP); the latest ZIP is installed in the owner's unpacked
-folder with its digest checked and its manifest permissions unchanged. The backend is described in
-[todoist-plus.md](todofy/docs/todoist-plus.md), the interface in
-[planning-interface.md](todoist-plus/docs/planning-interface.md).
-
-| Extension release | Main | Contents | Local evidence |
-| --- | --- | --- | --- |
-| `todoist-plus-v2026.1015.1250.22672` | `58908f64` | Board performance (research items 1-5), the Waiting row, the weekly review checklist, Sunday commitments kept for next week | [perf](docs/todoist-plus-verification.md#board-performance-branch-local-checks-october-15), [GTD](docs/todoist-plus-verification.md#waiting-list-weekly-review-and-sunday-commitments-local-checks-october-15) |
-| `todoist-plus-v2026.1016.234.24624` | `60309fac` | Colours from Todoist's theme tokens, native Todoist never left hidden, Options page check | [theme](docs/todoist-plus-verification.md#ui-theme-safety-and-polish-local-checks-october-15) |
-| `todoist-plus-v2026.1016.808.36337` | `8df1a99d` | Review board lanes Start now, Waiting, Quarter, Month, Week, Committed (first two hidden while empty), the `active` label, the FlowDay task page capped at 100 | [lanes](docs/todoist-plus-verification.md#start-now-and-waiting-lanes-local-checks-october-16) |
-| `todoist-plus-v2026.1016.834.7822` | `1e8e6863` | Planning store M1-M3: migration `0007`, Todoist metadata cached in the core, write receipts in the object | [store](docs/todoist-plus-verification.md#planning-store-caches-and-receipts-local-checks-october-16) |
-| `todoist-plus-v2026.1016.1027.27206` | `6a465bee` | Task dependencies as `plan_edges`, never in Todoist text or labels | [dependencies](docs/todoist-plus-verification.md#dependencies-local-checks-october-16) |
-| `todoist-plus-v2026.1016.1224.9770` | `262ad007` | Text Work and Personal Bets in `plan_notes`, the Mailbox, migration `0008` and the one-time brief backfill | [Bets](docs/todoist-plus-verification.md#text-weekly-bets-local-checks-october-16), [Mailbox](docs/todoist-plus-verification.md#mailbox-review-fixes-local-checks-october-16) |
-| `todoist-plus-v2026.1017.254.57066` | `deea01c9` | The owner's eight fixes D1-D8: the mail favourite hidden on every page, one-click filing into the Todoist Inbox, Add steps, Plan's view remembered, Week's Quick line and the Parked lane, reordering inside Review lanes and Next steps, Committed folds; planning protocol 6, no migration | [owner fixes](docs/todoist-plus-verification.md#owner-fixes-d1-d8-local-checks-october-17), [final](docs/todoist-plus-verification.md#final-local-verification-october-17) |
-| `todoist-plus-v2026.1017.449.46993` | `b7918028` | TaskEditor refresh and IME correctness, desktop seven-day Week, flat cards with priority flags, category backdrop dismissal | [UI refinement](docs/todoist-plus-verification.md#ui-refinement-october-17) |
-
-Constraints that stay in force:
-
-- GitHub variable `TODOFY_PLUS_METADATA` must stay set in `production` (now `cache`); `full` is the
-  rollback of both caches ([caches](todofy/docs/todoist-plus.md#caches)). An unset value fails the deploy.
-- Receipts are never deleted (the owner's no-automatic-deletion rule; a 30-day expiry is a small change if
-  the owner wants one). D1 `plus_actions` is read only, for request IDs of the last 30 days.
-- The daily retention no longer deletes summaries; Delete all in the Mailbox deletes the summaries of the mail
-  it deletes and keeps a mail a dependency names.
-- The Bets label is a legacy role: old `@bets` tasks are not converted, the Monday reset still removes the
-  label while the binding remains, and the Bets filter stays hidden. The three replaced deadline and waiting
-  filters are hidden by exact query, behind a consistency test.
-
-Owner steps: Reload Todoist Plus in Chrome's extension manager and refresh Todoist (planning protocol 6; a
-page left open asks for the reload); type this week's two Bets in Plan; mail categories are optional and
-filing always moves to the Todoist Inbox; confirm the account has `active` and `parked` labels; the Quick/Ops
-and Parked favourite filters disappear after Todofy's first full Sync; then the ten checks in
-[the extension's verification](todoist-plus/docs/verification.md#owner-反馈修正2026-10-17本地).
-Owner decisions: confirm that Delete all should delete summaries (built that way); M8/M9 of the data-layer
-design drop the legacy `plus_*` tables and are irreversible, so they wait for the owner; a deleted bound
-Quarter label still disables Plus with no in-product recovery.
-
-Real-account checks still open (metadata only, no task content): `VerifyPlanStore` answers `{}`, the next
-Sunday manifest lists the six `plan_*` tables and `plus_actions` stops growing; a Plus choice made on Sunday
-survives the natural Monday rollover after 2026-10-19 07:00 UTC; a recurring task's `completed_count` reaches
-the extension and the activity log answers for a completed and a deleted task; the brief backfill writes
-briefs; drag feel. The unverified Todoist answers are listed in the
-[Mailbox evidence](docs/todoist-plus-verification.md#mailbox-briefs-and-summary-retention-local-checks-october-16).
-
-Not done: data-layer steps M4-M6 and M10, the extension sending `ReadPlanRequest.view: BASIC` (until then
-every native page's `ReadPlan` costs the FULL answer), the native popup's collapsed Steps & timing suffix
-(plus-next §4 v2), and research items 6 (backend metadata reads) and 7 (native observer).
-
-### Notes on the owner fixes D1-D8 (released 2026-10-17)
-
-Branch CI [39001803330](https://github.com/ziyixi/todofy/actions/runs/39001803330) and same-SHA main
-[39002425165](https://github.com/ziyixi/todofy/actions/runs/39002425165) passed; Todofy deployed (no
-migration), then `todoist-plus-v2026.1017.254.57066` was published and installed in the owner's folder. The
-lane order lives in `plan_settings` `board`; `ReorderTasks` (`tasks:reorder`) permutes only the moved task's
-Todoist siblings, and Waiting and Parked keep their order in Todofy only. The first branch run failed one
-browser case that measured cards while a language switch remounted the board; the measure now polls.
-Interface: [planning-interface.md](todoist-plus/docs/planning-interface.md); backend:
-[reordering](todofy/docs/todoist-plus.md#reordering).
-
-Follow-ups:
-
-- `item_reorder` is deprecated by Todoist. If the owner's check shows it does not move tasks that have an
-  `order_key`, switch `core/plus.reorder_command` to `item_update` with `order_key`.
-- If the owner's check shows `item_reorder` does not bump `updated_at`, Waiting and Parked may mirror their order
-  to Todoist too (`core/plus.UNTOUCHED_LANES`).
-- Next Plus release: `ReadMailSettings` stops answering the compatibility Inbox, kept only for extensions before
-  planning protocol 6.
-- Optional: retake `todoist-plus/docs/images/mailbox-file-menu.jpg`, which still shows the removed File menu.
+Todoist Plus is retired in the current refinement: Tasks hosts Plan, Focus and Mail, with native planning
+facts and owner Access. Historical extension releases, pending old-source observations and owner Reload
+steps are preserved in [the retired handoff](docs/history/todoist-plus-handoff-2026-10-17.md); they are not
+new work or installation instructions. Shared synthetic regression coverage remains in CI.
 
 Recall's mobile queue correction is released at `eb2c9187095f22eeac4ef2ae1e7e886b2e9076f3`.
 [Full branch CI 38683400263](https://github.com/ziyixi/todofy/actions/runs/38683400263) and
@@ -159,37 +83,6 @@ Pending: renew phone acceptance; the latest phone report still declares 337.
 The independent `page_probe_invalid_reply_type` cause is not established by this queue correction. Do not claim
 all native reply anomalies are fixed. [Diagnostic evidence](docs/recall-diagnostic-verification.md#october-14-recurrence-and-repeated-installation-delay).
 
-
-Todoist Plus's approved planning board is released at `bcd1d1426f7dcf16198d2e71aefddc62cd7a8a87`.
-[Full branch CI 38546241155](https://github.com/ziyixi/todofy/actions/runs/38546241155) and
-[same-SHA main 38547547283](https://github.com/ziyixi/todofy/actions/runs/38547547283) pass. Todofy and the
-Plus ZIP published; other applications, images, VPS and Recall publication skipped. Deployment `7062548541`
-verified core `8e11f818-526f-4613-ac05-2c8eff61b223` and gateway `6113d2c3-e6d6-4c22-96d8-c72bbc07d139`;
-public hooks health independently serves the same SHA.
-
-Bets are actual weekly-goal task marks above Review/Week. Stage drag changes only the selected planning
-label; day drag writes only FlowDay queues; Focus runs today's confirmed queue/timer. UpdatePlanLabels binds
-existing label IDs, keeps other roles and does not relabel tasks. Quarter is explicitly bound in the owner UI.
-Date-only child candidates stay with their parent; explicitly different-stage children remain independent.
-The obsolete WeekPlanner/TaskFamily and unused CSS are removed. [Internal design and six synthetic screenshots](todoist-plus/docs/planning-interface.md)
-cover current behavior and API boundaries; [full verification](docs/todoist-plus-verification.md#approved-board-promoted-to-production-october-14)
-separates tests, Chrome synthetic checks, actual deployment and remaining owner acceptance.
-
-Version `2026.1014.598.48337` was downloaded from the actual public release. All seven files match the green
-artifact, ZIP and existing `~/Documents/chrome_extensions/todoist-plus` directory. Two obsolete generated
-assets were removed; directory identity, permissions and Chrome-stored connection remain. The only new
-real task is one owner-authorized task; no existing task or real timer was manually changed. No other
-credential, service or budget was altered.
-
-**Pending:** owner Reload in Chrome's extension manager and Refresh Todoist. Tooling blocks that internal
-page and alternate methods are forbidden. Do not ask for reinstall, folder changes or token rotation.
-PWA and natural Monday rollover remain separate observations. Legacy FlowDay timer replace/clear stays
-`RELOAD_REQUIRED` until at least 2026-11-13. `codex/plus-production-verification` only closes root docs and
-HANDOFF; application files must remain unchanged so this closure does not publish another ZIP.
-
-The earlier approved synthetic prototype is preserved in
-[prototype verification](docs/todoist-plus-planning-prototype.md); its local goal text and stopwatch are
-historical design evidence, while production uses Todoist/FlowDay APIs.
 
 Recall cleanup is released at `bc0adffdc1d8ee018b0663737c77e8de701de0aa`, extension `2026.1013.654`.
 [Full branch CI](https://github.com/ziyixi/todofy/actions/runs/38359057094) and the

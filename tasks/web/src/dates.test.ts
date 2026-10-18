@@ -14,4 +14,14 @@ describe("display dates and navigation", () => {
     expect(readRoute(routeHref(route))).toEqual(route);
     expect(readRoute("#/unknown/private").page).toBe("today");
   });
+  it("uses the account calendar day for schedule shortcuts around midnight and DST", () => {
+    expect(
+      todayDate(new Date("2026-11-01T06:30:00Z"), "America/Los_Angeles"),
+    ).toBe("2026-10-31");
+    expect(
+      todayDate(new Date("2026-11-01T09:30:00Z"), "America/Los_Angeles"),
+    ).toBe("2026-11-01");
+    expect(shiftDate("2026-10-31", 1)).toBe("2026-11-01");
+    expect(shiftDate("2026-11-01", 1)).toBe("2026-11-02");
+  });
 });

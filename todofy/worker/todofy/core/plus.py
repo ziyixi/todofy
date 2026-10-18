@@ -26,6 +26,8 @@ ROLES = (
 # checked against Todoist, so renaming or deleting the label changes no etag and never disables Plus; a new setup
 # binds none. The weekly Bets are text now (core/plan.py); a task still labelled Bets loses it at Monday's reset.
 LEGACY_ROLES = ("bets",)
+NATIVE_FLAGS = ("quick", "waiting", "blocked", "parked", "active", "onhold", "routine", "task")
+NATIVE_ROLES = frozenset((*ROLES, *LEGACY_ROLES, "quarter", *NATIVE_FLAGS))
 LEADS = {"lead_1d": 1, "lead_3d": 3, "lead_1w": 7, "lead_2w": 14, "lead_1m": 30}
 PLANNING_ROLES = ("quarter", "candiate", "focus", "committed")
 STAGES = {"none": None, "quarterly": "quarter", "monthly": "candiate", "weekly": "focus", "committed": "committed"}
@@ -276,6 +278,8 @@ def replace_planning_labels(
 
 def task_etag(task: dict[str, Any], mapping: list[dict[str, Any]] | None = None) -> str:
     values = {key: task.get(key) for key in ("id", "labels", "deadline", "parent_id", "content", "duration")}
+    if task.get("_native_planning"):
+        values["native_plan_rev"] = task["_native_plan_rev"]
     if mapping is not None:
         values["mapping"] = mapping
     return fingerprint(values)
@@ -372,6 +376,10 @@ def task_view(task: dict[str, Any], today: str, mapping: list[dict[str, Any]] | 
         "priority": int(task.get("priority", 1)),
         "recurring": recurring(task),
     }
+    if task.get("_native_planning"):
+        result["labels"] = sorted(task.get("_native_content_labels", labels - NATIVE_ROLES))
+        result["explicit_stage"] = label_stage(labels, names)
+        result["planning_flags"] = [name for name in NATIVE_FLAGS if name in labels]
     count = completed_count(task)
     if count is not None:
         result["completed_count"] = count
@@ -415,6 +423,20 @@ def plan_labels(
         labels -= {names[role] for role in ("office", "home") if role in names}
         if AREAS[area]:
             labels.add(names[AREAS[area]])
+    for field, name in (
+        ("quick", "quick"),
+        ("waiting", "waiting"),
+        ("routine", "routine"),
+        ("on_hold", "onhold"),
+        ("blocked", "blocked"),
+        ("single_action", "task"),
+    ):
+        if field in request:
+            if not task.get("_native_planning"):
+                raise ValueError("BAD_REQUEST")
+            labels.discard(name)
+            if request[field]:
+                labels.add(name)
     if "bet" in request:
         # Retired: the weekly Bets are text (SetWeeklyBet), and Plus never writes the Bets label again.
         raise ValueError("BAD_REQUEST")
@@ -537,6 +559,7 @@ def untouched(task: dict[str, Any], parents: set[str]) -> bool:
     comment. A task whose comment count Todoist does not give is not untouched."""
     return (
         not task.get("labels")
+        and not task.get("_native_content_labels")
         and int(task.get("priority") or 1) == 1
         and not task.get("due")
         and not task.get("deadline")

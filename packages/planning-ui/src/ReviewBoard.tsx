@@ -291,8 +291,8 @@ export function ReviewBoard({
     lanes[id].filter(
       (task) => area === "all" || effectiveArea(task, plan.tasks) === area,
     );
-  // A lane takes drops when it writes a label: Parked's, or a stage lane's bound one. Start now
-  // and Waiting take none and show only with cards; every other lane always shows.
+  // Stage and Parked lanes accept a planning change; legacy hosts need a bound label.
+  // Start now and Waiting take no stage changes and show only with cards.
   const columns: {
     id: LaneId;
     title: string;
@@ -421,7 +421,12 @@ export function ReviewBoard({
           return;
         }
         const column = columns.find((item) => item.id === to);
-        if (!column?.label) return;
+        if (
+          !column ||
+          (!column.stage && to !== "parked") ||
+          (!plan.nativePlanning && !column.label)
+        )
+          return;
         const parking = to === "parked";
         const stage: Stage = column.stage ?? "none";
         // Start now is acknowledged by the drag: the stage and the in-progress label in one write.
@@ -563,7 +568,7 @@ function ReviewLane({
     accept: "review-outcome",
     // Start now and Waiting catch a drop without a label, which changes nothing, so that a card
     // let go over them goes back instead of into the lane its preview overlaps.
-    disabled: busy || Boolean(stage && !label),
+    disabled: busy || Boolean(stage && !label && !plan.nativePlanning),
     // Below its cards, which are the targets wherever the pointer is on one.
     collisionPriority: 1,
     data: { stage, lane },
@@ -573,7 +578,10 @@ function ReviewLane({
   const { source, target } = useDragOperation();
   const over = target?.data?.lane === lane;
   const ownCard = source?.data?.lane === lane;
-  const lit = over && !ownCard && Boolean(label);
+  const lit =
+    over &&
+    !ownCard &&
+    Boolean(label || (plan.nativePlanning && (stage || lane === "parked")));
   const from = source?.data?.position as number | undefined;
   const to = target?.data?.position as number | undefined;
   const insert = (task: PlanningTask) =>
@@ -602,7 +610,7 @@ function ReviewLane({
       <header className="review-lane-header">
         <h2>{title}</h2>
         <span>{tasks.length}</span>
-        {label && (
+        {label && !plan.nativePlanning && (
           <small
             title={`${language === "zh" ? "Todoist 标签" : "Todoist label"}: ${label}`}
           >
@@ -610,7 +618,7 @@ function ReviewLane({
           </small>
         )}
       </header>
-      {stage && !label && (
+      {stage && !label && !plan.nativePlanning && (
         <div className="review-missing-label">
           <p>
             {language === "zh"

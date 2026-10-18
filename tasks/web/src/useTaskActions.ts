@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { RpcStatusError } from "@ziyixi/proto/http-client";
 import {
   api,
   describeError,
@@ -7,6 +8,7 @@ import {
   type TaskDraft,
 } from "./api";
 import { isPlanning, type Route } from "./routes";
+import { scheduledDate, scheduledTime } from "./task-schedule";
 import type { useTaskView } from "./useTaskView";
 
 export function useTaskActions(
@@ -18,10 +20,17 @@ export function useTaskActions(
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [notice, setNotice] = useState("");
   const [mutationRevision, setMutationRevision] = useState(0);
+  const duplicateRequests = useRef(
+    new Map<string, { requestId: string; etag: string }>(),
+  );
   function taskChanged() {
     setMutationRevision((revision) => revision + 1);
   }
-  async function saveTask(draft: TaskDraft, original?: Task, requestId: string = crypto.randomUUID()) {
+  async function saveTask(
+    draft: TaskDraft,
+    original?: Task,
+    requestId: string = crypto.randomUUID(),
+  ) {
     const task = original
       ? await api.updateTask({
           requestId,
@@ -40,11 +49,14 @@ export function useTaskActions(
       await list.read();
     setNotice(original ? "Task saved" : "Task added");
   }
-  async function deleteTask(task: Task) {
+  async function deleteTask(
+    task: Task,
+    requestId: string = crypto.randomUUID(),
+  ) {
     await api.deleteTask({
       name: task.name,
       etag: task.etag,
-      requestId: crypto.randomUUID(),
+      requestId,
     });
     taskChanged();
     list.remove(task.id);
@@ -82,6 +94,125 @@ export function useTaskActions(
       setBusyIds(
         (current) => new Set([...current].filter((id) => id !== task.id)),
       );
+    }
+  }
+  async function patchTask(
+    task: Task,
+    values: Partial<TaskDraft>,
+    fields: string[],
+  ) {
+    setBusyIds((current) => new Set([...current, task.id]));
+    setNotice("");
+    try {
+      const result = await api.updateTask({
+        requestId: crypto.randomUUID(),
+        etag: task.etag,
+        task: { name: task.name, ...values },
+        updateMask: { paths: fields },
+      });
+      taskChanged();
+      list.replace(result);
+      await list.read();
+      setNotice("Task updated");
+    } catch (reason) {
+      setNotice(describeError(reason));
+      throw reason;
+    } finally {
+      setBusyIds(
+        (current) => new Set([...current].filter((id) => id !== task.id)),
+      );
+    }
+  }
+  function setPriority(task: Task, priority: number) {
+    return patchTask(task, { priority }, ["priority"]);
+  }
+  async function scheduleTask(task: Task, date: string, timeZone: string) {
+    const zone = task.dueTimezone || timeZone;
+    const schedule = await scheduledDate(
+      date,
+      scheduledTime(task.dueDatetime, zone),
+      zone,
+    );
+    return patchTask(
+      task,
+      { ...schedule, ...(!date ? { recurrence: "" } : {}) },
+      [
+        "due_date",
+        "due_datetime",
+        "due_timezone",
+        ...(!date ? ["recurrence"] : []),
+      ],
+    );
+  }
+  async function parseTaskSchedule(task: Task, text: string, timeZone: string) {
+    const result = await api.previewDate({
+      text,
+      timeZone: task.dueTimezone || timeZone,
+    });
+    return patchTask(
+      task,
+      {
+        dueDate: result.dueDate,
+        dueDatetime: result.dueDatetime,
+        dueTimezone: result.dueTimezone,
+        recurrence: result.recurrence,
+      },
+      ["due_date", "due_datetime", "due_timezone", "recurrence"],
+    );
+  }
+  function setDeadline(task: Task, deadline: string) {
+    return patchTask(task, { deadline }, ["deadline"]);
+  }
+  function moveTask(task: Task, projectId: string, sectionId: string) {
+    return patchTask(
+      task,
+      {
+        projectId,
+        sectionId,
+        parentId: task.projectId === projectId ? task.parentId : "",
+      },
+      ["project_id", "section_id", "parent_id"],
+    );
+  }
+  async function duplicateTask(task: Task) {
+    setBusyIds((current) => new Set([...current, task.id]));
+    setNotice("");
+    try {
+      let request = duplicateRequests.current.get(task.id);
+      if (!request) {
+        request = { requestId: crypto.randomUUID(), etag: task.etag };
+        duplicateRequests.current.set(task.id, request);
+      }
+      await api.duplicateTask({
+        name: task.name,
+        etag: request.etag,
+        requestId: request.requestId,
+      });
+      duplicateRequests.current.delete(task.id);
+      taskChanged();
+      await list.read();
+      setNotice("Task duplicated");
+    } catch (reason) {
+      if (
+        reason instanceof RpcStatusError &&
+        [400, 409].includes(reason.status.httpStatus)
+      )
+        duplicateRequests.current.delete(task.id);
+      setNotice(describeError(reason));
+    } finally {
+      setBusyIds(
+        (current) => new Set([...current].filter((id) => id !== task.id)),
+      );
+    }
+  }
+  async function copyTaskLink(task: Task) {
+    try {
+      await navigator.clipboard.writeText(
+        `${window.location.origin}/?task=${encodeURIComponent(task.id)}`,
+      );
+      setNotice("Task link copied");
+    } catch {
+      setNotice("Could not copy the link. Open the task and copy its address.");
     }
   }
   async function reorder(id: string, before: Task) {
@@ -180,5 +311,12 @@ export function useTaskActions(
     setNotice,
     mutationRevision,
     taskChanged,
+    setPriority,
+    scheduleTask,
+    parseTaskSchedule,
+    setDeadline,
+    moveTask,
+    duplicateTask,
+    copyTaskLink,
   };
 }

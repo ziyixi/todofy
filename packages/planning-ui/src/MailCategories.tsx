@@ -16,11 +16,11 @@ interface Props {
   labels: readonly { id: string; name: string }[];
   language: Language;
   busy: boolean;
-  actions: PlusActions;
+  actions: Pick<PlusActions, "readMailSettings" | "updateMailSettings">;
   /** The saved set: the Mailbox closes the dialog and says so. */
   onSaved: (saved: MailCategories) => void;
   onClose: () => void;
-  onConnection: () => void;
+  onConnection?: () => void;
 }
 
 type Draft = Omit<MailCategory, "id"> & { key: number };
@@ -224,14 +224,16 @@ export function MailCategoriesDialog({
             </p>
           )}
           <footer>
-            <button
-              type="button"
-              className="plus-text-button"
-              onClick={onConnection}
-            >
-              <Settings size={13} />
-              {text.manage}
-            </button>
+            {onConnection && (
+              <button
+                type="button"
+                className="plus-text-button"
+                onClick={onConnection}
+              >
+                <Settings size={13} />
+                {text.manage}
+              </button>
+            )}
             <button
               className="plus-button plus-primary"
               disabled={busy || saving}

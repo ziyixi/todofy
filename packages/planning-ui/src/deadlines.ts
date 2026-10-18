@@ -1,5 +1,5 @@
 import { dependencyIndex, isWaiting } from "./dependencies";
-import { startDate, taskIndex } from "./domain";
+import { hasPlanningFlag, startDate, taskIndex } from "./domain";
 import { words } from "./i18n";
 import { monthDay, readableDate, shortDay } from "./PlanningCalendar";
 import { ACTIVE_LABEL } from "./weekly-review";
@@ -31,7 +31,7 @@ function daysUntil(date: string, today: string): number {
 }
 
 const inProgress = (task: PlanningTask) =>
-  task.labels.includes(ACTIVE_LABEL) && !task.labels.includes("blocked");
+  hasPlanningFlag(task, ACTIVE_LABEL) && !hasPlanningFlag(task, "blocked");
 
 /**
  * The first matching rule (design §1.1): undefined for no deadline, a parked task, or one whose
@@ -41,7 +41,7 @@ export function deadlineState(
   task: PlanningTask,
   today: string,
 ): DeadlineState | undefined {
-  if (!task.deadline || task.labels.includes("parked")) return undefined;
+  if (!task.deadline || hasPlanningFlag(task, "parked")) return undefined;
   const days = daysUntil(task.deadline, today);
   if (inProgress(task)) return { kind: "active", days };
   if (task.mustStart) return { kind: days < 0 ? "past" : "window", days };
@@ -54,9 +54,14 @@ export function isDue(state: DeadlineState): boolean {
   return state.kind === "past" || state.kind === "window";
 }
 
-/** "Mark in progress" writes the literal label only where the account already has it. */
-export function canMarkActive(plan: Pick<PlanState, "availableLabels">) {
-  return plan.availableLabels.some((label) => label.label === ACTIVE_LABEL);
+/** Native planning supports progress directly; legacy accounts need their existing label. */
+export function canMarkActive(
+  plan: Pick<PlanState, "availableLabels" | "nativePlanning">,
+) {
+  return (
+    Boolean(plan.nativePlanning) ||
+    plan.availableLabels.some((label) => label.label === ACTIVE_LABEL)
+  );
 }
 
 /**

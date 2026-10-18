@@ -446,7 +446,7 @@ class Files(unittest.TestCase):
             [{"binding": "TODOFY", "service": "todofy", "entrypoint": "Intents", "props": {"source": "watch"}}],
         )
 
-    def test_native_task_bindings_select_the_matching_source_and_consumer(self):
+    def test_native_task_bindings_select_the_matching_source_and_access(self):
         tasks = load(PRODUCTION["tasks"])
         core = load(PRODUCTION["todofy-core"])
         gateway = load(PRODUCTION["todofy"])
@@ -455,10 +455,10 @@ class Files(unittest.TestCase):
             "binding": "PLANNING", "service": "todofy", "entrypoint": "Planning", "props": {"source": "tasks"},
         }])
         self.assertEqual(core["services"], [{
-            "binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"consumer": "todofy"},
+            "binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"access": "read-write"},
         }])
         self.assertEqual(flowday["services"], [{
-            "binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"consumer": "flowday"},
+            "binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"access": "read"},
         }])
         self.assertIn({
             "binding": "FLOWDAY_NATIVE_FOCUS", "service": "flowday", "entrypoint": "NativeFocusEntrypoint",

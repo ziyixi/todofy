@@ -268,6 +268,28 @@ PLAN_CATEGORIES = Table(
 PLAN_TASKS = Table(
     "plan_tasks", ("id", "provider", "external_id", "created_at", "closed_at", "closed_as"), ("id",), 500
 )
+PLAN_TASK_STATE = Table(
+    "plan_task_state",
+    (
+        "task_id",
+        "stage",
+        "area",
+        "lead_days",
+        "quick",
+        "waiting",
+        "blocked",
+        "parked",
+        "active",
+        "onhold",
+        "routine",
+        "task",
+        "rev",
+        "request_id",
+        "updated_at",
+    ),
+    ("task_id",),
+    500,
+)
 
 TABLES = {
     table.name: table
@@ -296,6 +318,7 @@ TABLES = {
         PLAN_EDGES,
         PLAN_NOTES,
         PLAN_CATEGORIES,
+        PLAN_TASK_STATE,
         PLAN_TASKS,
     )
 }

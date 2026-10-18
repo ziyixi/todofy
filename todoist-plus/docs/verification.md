@@ -1,5 +1,7 @@
 # Todoist Plus 验收
 
+扩展已退役。本文件保留历史设计或验收；当前入口是 [Tasks](../../tasks/README.md)，原生功能验收见[对照表](../../tasks/docs/planning-parity.md)。Tasks 不需要扩展或连接口令。
+
 ## 本地检查
 
 2026-10-13 的交互修正工作树已通过：TypeScript、ESLint、35 个单元／交互／API 检查、生产构建，以及 9 个实际 MV3 Chromium 浏览器检查。发布 SHA 和真实账户验收由根 HANDOFF 单独记录。

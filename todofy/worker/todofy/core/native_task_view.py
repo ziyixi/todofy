@@ -48,6 +48,7 @@ def task(row: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
         "child_order": int(position) if position.is_integer() else None,
         "sort_order": row.get("sort_order", 0),
         "_native_etag": row["etag"],
+        "_native_label_ids": list(row.get("label_ids", [])),
         "due": {
             "date": due,
             "datetime": row.get("due_datetime") or None,
@@ -64,6 +65,7 @@ def task(row: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
         "is_archived": row.get("archived", False),
         "archived": row.get("archived", False),
         "completed_count": row.get("completed_count", 0),
+        "note_count": 0,  # Tasks has no comments; keep the existing untouched-mail rule explicit.
         "added_at": row.get("create_time"),
         "updated_at": row.get("update_time"),
     }

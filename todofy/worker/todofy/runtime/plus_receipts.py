@@ -60,11 +60,15 @@ FINISH = (
 # Of the tasks bound (a JSON array), those a started receipt of the last MAX_AGE changes: an item_update,
 # item_move or item_close names its task, an item_add (a step) its parent. A started deletion changes nothing a
 # later deletion must keep, so it is not counted.
+_WRITING_TASK = (
+    "coalesce(nullif(c.value ->> '$.body.task.parent_id',''),substr(c.value ->> '$.body.task.name',7),"
+    "substr(c.value ->> '$.body.name',7),c.value ->> '$.args.parent_id',c.value ->> '$.args.id')"
+)
 WRITING = (
-    "SELECT DISTINCT coalesce(c.value ->> '$.args.parent_id', c.value ->> '$.args.id') AS task_id"
+    f"SELECT DISTINCT {_WRITING_TASK} AS task_id"
     " FROM plus_receipts AS r, json_each(r.commands) AS c"
     " WHERE r.state = 'started' AND r.created_at >= ? AND r.method <> 'DeleteMailItems'"
-    " AND coalesce(c.value ->> '$.args.parent_id', c.value ->> '$.args.id') IN (SELECT value FROM json_each(?))"
+    f" AND {_WRITING_TASK} IN (SELECT value FROM json_each(?))"
 )
 # A CompleteTask receipt from D1, done there, with the settlement the release before froze (if any).
 IMPORT = (

@@ -59,6 +59,7 @@ export function boardLanes(
     | "dependencies"
     | "availableLabels"
     | "laneOrders"
+    | "nativePlanning"
   >,
   today: string,
 ): BoardLanes {

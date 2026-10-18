@@ -156,7 +156,6 @@ async def _find_native_tasks(env: Any, matches: Callable[[str], bool], *, query:
                     env,
                     cursor=cursor,
                     limit=20,
-                    project_id=var(env, "TODOIST_DEFAULT_PROJECT_ID"),
                     metadata=metadata,
                     include_description=True,
                     query=query,

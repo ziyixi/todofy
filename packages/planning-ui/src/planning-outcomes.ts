@@ -1,4 +1,4 @@
-import { effectiveArea, taskAncestors } from "./domain";
+import { effectiveArea, hasPlanningFlag, taskAncestors } from "./domain";
 import type { LaneId, Language, PlanState, PlanningTask, Stage } from "./model";
 
 const childIndexes = new WeakMap<
@@ -48,17 +48,22 @@ export function stepSiblings(
 /** The literal set-aside label, as the native @parked filter names it; never created here. */
 export const PARKED_LABEL = "parked";
 
-/** Review's Parked lane exists only while the account has a label named exactly `parked`. */
-export function canPark(plan: Pick<PlanState, "availableLabels">): boolean {
-  return plan.availableLabels.some((label) => label.label === PARKED_LABEL);
+/** Native planning always supports Parked; legacy accounts need their existing label. */
+export function canPark(
+  plan: Pick<PlanState, "availableLabels" | "nativePlanning">,
+): boolean {
+  return (
+    Boolean(plan.nativePlanning) ||
+    plan.availableLabels.some((label) => label.label === PARKED_LABEL)
+  );
 }
 
 /** Set aside: in Review's Parked lane, and on no list of commitments or steps. */
 export function isParked(
   task: PlanningTask,
-  plan: Pick<PlanState, "availableLabels">,
+  plan: Pick<PlanState, "availableLabels" | "nativePlanning">,
 ): boolean {
-  return task.labels.includes(PARKED_LABEL) && canPark(plan);
+  return hasPlanningFlag(task, PARKED_LABEL) && canPark(plan);
 }
 
 /** Todofy keeps at most this many tasks of one lane's order (core/plan.py MAX_LANE_TASKS). */
@@ -87,6 +92,12 @@ export function isDateCandidate(
   task: PlanningTask,
   labels: PlanState["managedLabels"],
 ): boolean {
+  if (task.explicitStage !== undefined)
+    return (
+      task.stage === "weekly" &&
+      task.explicitStage === "none" &&
+      Boolean(task.due || task.deadline)
+    );
   const weeklyLabel = labels.find((label) => label.role === "focus")?.label;
   return (
     task.stage === "weekly" &&
@@ -132,7 +143,11 @@ export function planningOutcomes(
 export function committedOutcomes(
   plan: Pick<
     PlanState,
-    "tasks" | "managedLabels" | "availableLabels" | "laneOrders"
+    | "tasks"
+    | "managedLabels"
+    | "availableLabels"
+    | "laneOrders"
+    | "nativePlanning"
   >,
 ): PlanningTask[] {
   return inLaneOrder(

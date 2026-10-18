@@ -34,6 +34,6 @@ props = { source = "tasks" }
 
 [vars]
 PUBLIC_HOST = "tasks.ziyixi.science"
-TIME_ZONE = "America/Los_Angeles"
+TIME_ZONE = "US/Pacific"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
 ACCESS_AUDIENCE = "8c191368e27dd57284cb03fafb1aee15abca24864ee2f5df5335655dfb08ef4b"

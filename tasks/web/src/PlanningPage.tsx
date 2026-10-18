@@ -3,7 +3,6 @@ import {
   PlanningApp,
   createPlanningActions,
   type PlusSnapshot,
-  type PlanState,
 } from "@ziyixi/planning-ui";
 import "@ziyixi/planning-ui/styles.css";
 import { send } from "./api";
@@ -14,13 +13,11 @@ export default function PlanningPage({
   mutationRevision,
   onOpenTask,
   onSettings,
-  onReady,
 }: {
-  page: "plan" | "focus" | "mail";
+  page: "plan" | "focus";
   mutationRevision: number;
   onOpenTask: (id: string) => void;
   onSettings: () => void;
-  onReady: (plan?: PlanState) => void;
 }) {
   const actions = useMemo(
     () =>
@@ -45,11 +42,10 @@ export default function PlanningPage({
         review={
           new URLSearchParams(window.location.search).get("review") === "1"
         }
-        view={page === "mail" ? "mailbox" : page}
+        view={page}
         language="en"
         onOpenTask={onOpenTask}
         onSettings={onSettings}
-        onReady={onReady}
         onViewChange={(view) => {
           window.location.hash = `/${view === "mailbox" ? "mail" : view}`;
         }}

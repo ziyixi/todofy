@@ -16,7 +16,8 @@ import {
   Target,
   Timer,
 } from "lucide-react";
-import type { Catalog } from "../api";
+import type { Catalog, CatalogItem, CatalogKind } from "../api";
+import { CatalogMenu } from "./CatalogMenu";
 import { routeHref, type Route } from "../routes";
 
 const navigation = [
@@ -32,17 +33,19 @@ const navigation = [
 export function Sidebar({
   route,
   catalog,
-  managedRoles,
-  hiddenFilters,
   onAddTask,
   onAddProject,
+  onEditCatalog,
+  onCatalogSaved,
+  onError,
 }: {
   route: Route;
   catalog: Catalog;
-  managedRoles: ReadonlyMap<string, string>;
-  hiddenFilters: ReadonlySet<string>;
   onAddTask: () => void;
   onAddProject: () => void;
+  onEditCatalog: (kind: CatalogKind, item?: CatalogItem) => void;
+  onCatalogSaved: () => Promise<void>;
+  onError: (message: string) => void;
 }) {
   const active = (page: Route["page"], id = "") =>
     route.page === page && route.id === id;
@@ -54,14 +57,31 @@ export function Sidebar({
       .filter((project) => project.parentId === parentId)
       .map((project) => (
         <div key={project.id}>
-          <a
-            className={`nav-item ${active("project", project.id) ? "selected" : ""}`}
-            style={{ paddingInlineStart: `${12 + depth * 14}px` }}
-            href={routeHref({ page: "project", id: project.id })}
+          <CatalogMenu
+            kind="project"
+            item={project}
+            onEdit={() => onEditCatalog("project", project)}
+            onSaved={onCatalogSaved}
+            onError={onError}
           >
-            <Hash size={18} style={{ color: project.color || undefined }} />
-            <span>{project.title}</span>
-          </a>
+            <div className="sidebar-context-row">
+              <a
+                className={`nav-item ${active("project", project.id) ? "selected" : ""}`}
+                style={{ paddingInlineStart: `${12 + depth * 14}px` }}
+                href={routeHref({ page: "project", id: project.id })}
+              >
+                <Hash size={18} style={{ color: project.color || undefined }} />
+                <span>{project.title}</span>
+              </a>
+              <CatalogMenu
+                kind="project"
+                item={project}
+                onEdit={() => onEditCatalog("project", project)}
+                onSaved={onCatalogSaved}
+                onError={onError}
+              />
+            </div>
+          </CatalogMenu>
           {depth < 8 && projectRows(project.id, depth + 1)}
         </div>
       ));
@@ -75,22 +95,28 @@ export function Sidebar({
         page: "project" as const,
         id: project.id,
         title: project.title,
+        item: project,
+        color: project.color,
         icon: Hash,
       })),
     ...catalog.filters
-      .filter((filter) => filter.favorite && !hiddenFilters.has(filter.id))
+      .filter((filter) => filter.favorite)
       .map((filter) => ({
         page: "filter" as const,
         id: filter.id,
         title: filter.title,
+        item: filter,
+        color: filter.color,
         icon: ListFilter,
       })),
     ...catalog.labels
-      .filter((label) => label.favorite && !managedRoles.has(label.id))
+      .filter((label) => label.favorite)
       .map((label) => ({
         page: "label" as const,
         id: label.id,
         title: label.title,
+        item: label,
+        color: label.color,
         icon: Tag,
       })),
   ];
@@ -123,15 +149,32 @@ export function Sidebar({
       {favorites.length > 0 && (
         <section className="sidebar-section">
           <h2>Favorites</h2>
-          {favorites.map(({ page, id, title, icon: Icon }) => (
-            <a
-              className={`nav-item ${active(page, id) ? "selected" : ""}`}
-              href={routeHref({ page, id })}
+          {favorites.map(({ page, id, title, color, item, icon: Icon }) => (
+            <CatalogMenu
               key={`${page}-${id}`}
+              kind={page}
+              item={item}
+              onEdit={() => onEditCatalog(page, item)}
+              onSaved={onCatalogSaved}
+              onError={onError}
             >
-              <Icon size={17} />
-              <span>{title}</span>
-            </a>
+              <div className="sidebar-context-row">
+                <a
+                  className={`nav-item ${active(page, id) ? "selected" : ""}`}
+                  href={routeHref({ page, id })}
+                >
+                  <Icon size={17} style={{ color: color || undefined }} />
+                  <span>{title}</span>
+                </a>
+                <CatalogMenu
+                  kind={page}
+                  item={item}
+                  onEdit={() => onEditCatalog(page, item)}
+                  onSaved={onCatalogSaved}
+                  onError={onError}
+                />
+              </div>
+            </CatalogMenu>
           ))}
         </section>
       )}

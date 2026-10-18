@@ -1,5 +1,7 @@
 # Todoist Plus 设计
 
+扩展已退役。本文件保留历史设计或验收；当前入口是 [Tasks](../../tasks/README.md)，原生功能验收见[对照表](../../tasks/docs/planning-parity.md)。Tasks 不需要扩展或连接口令。
+
 扩展负责 Todoist 中的界面和显式用户操作。Todoist 保存任务、父子关系、标签、计划日期与 Deadline；Todofy 是唯一 Todoist 写入者，保存标签映射、周重置、操作去重、任务之间的依赖、用户自己写的本周目标和邮件归类；FlowDay 保存按日队列、手动估时和计时记录。详细布局和交互合同见[界面与接口说明](planning-interface.md)。
 
 正式 React 组件、样式和现有操作映射已提取到 [planning-ui](../../packages/planning-ui/README.md)。宿主注入 API 传输、任务／项目链接和打开任务回调；扩展的 WXT、口令和 storage 仍留在本目录。独立 Tasks 复用该界面，不导入扩展代码。

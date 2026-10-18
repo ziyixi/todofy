@@ -1,0 +1,34 @@
+.app-shell > .sidebar-resize {
+  position: fixed;
+  z-index: 5;
+  inset-block: 0;
+  inset-inline-start: calc(var(--sidebar-width) - 4px);
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.app-shell > .sidebar-resize::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 3px;
+  width: 2px;
+  background: var(--muted);
+  opacity: 0;
+  transition: opacity 100ms;
+}
+.app-shell > .sidebar-resize:hover::after,
+.app-shell > .sidebar-resize:focus-visible::after,
+.app-shell.sidebar-resizing > .sidebar-resize::after {
+  opacity: 0.65;
+}
+.app-shell.sidebar-resizing,
+.app-shell.sidebar-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+@media (max-width: 760px) {
+  .app-shell > .sidebar-resize {
+    display: none;
+  }
+}

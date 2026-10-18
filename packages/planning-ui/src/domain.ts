@@ -6,6 +6,11 @@ import type {
   PlanningTask,
 } from "./model";
 
+/** Native planning flags never derive from ordinary tags. Legacy hosts still use their labels. */
+export function hasPlanningFlag(task: PlanningTask, flag: string): boolean {
+  return (task.planningFlags ?? task.labels).includes(flag);
+}
+
 const indexes = new WeakMap<
   readonly PlanningTask[],
   Map<string, PlanningTask>

@@ -356,7 +356,12 @@ class CompletedTally:
 
 
 def tally_completed(
-    tally: CompletedTally, items: Iterable[Mapping[str, Any]], *, since: int, inbox: str, review_ids: Iterable[str]
+    tally: CompletedTally,
+    items: Iterable[Mapping[str, Any]],
+    *,
+    since: int,
+    inbox: str | None,
+    review_ids: Iterable[str],
 ) -> CompletedTally:
     """Add one page of completed items to ``tally``. ``review_ids`` are open review tasks to watch for."""
     watched = set(review_ids)
@@ -364,7 +369,7 @@ def tally_completed(
     reviews = dict(tally.reviews)
     for item in items:
         task_id = item.get("id") if isinstance(item.get("id"), str) else item.get("task_id")
-        is_inbox = bool(inbox) and item.get("project_id") == inbox
+        is_inbox = inbox is not None and item.get("project_id") == inbox
         total += 1
         in_inbox += is_inbox
         added = parse_instant(item.get("added_at"))

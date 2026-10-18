@@ -136,7 +136,7 @@ PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
 CHECK_ONLY: set[str] = set()
-BROWSER_APPS = {"todoist-plus"}  # Published as tested ZIPs; no cloud deployment.
+BROWSER_APPS = {"todoist-plus"}  # Retired extension: regression checks only; no deployment or publication.
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
 HOME_BOUND = {"fleet", "mailsort", "recall", "brief", "tasks"}
@@ -176,7 +176,7 @@ KEYS = (
     "recall_deploy",
     "recall_extension_publish",
     "brief_deploy",
-    "todoist_plus_publish",
+    "todoist_plus_publish",  # Retired output stays false; it must have no publishing consumer.
     "tasks_deploy",
 )
 DISPATCH = {
@@ -418,7 +418,7 @@ def outputs(
         "proto": proto,
         "website_relay_deploy": relay,
         "recall_extension_publish": extension,
-        "todoist_plus_publish": "todoist-plus" in deployed,
+        "todoist_plus_publish": False,
     }
     for app in APPS:
         result[f"{PREFIX[app]}_check"] = app in checked
@@ -642,8 +642,6 @@ def find_reusable(
                 tested_artifacts.append(f"newsletter-image-{sha}")
             if result["platform_publish"]:
                 tested_artifacts.append(f"platform-image-{sha}")
-            if result["todoist_plus_publish"]:
-                tested_artifacts.append(f"todoist-plus-{sha}")
             if result["recall_extension_publish"]:
                 tested_artifacts.extend([f"recall-extension-{sha}", f"recall-orion-{sha}"])
             if tested_artifacts:

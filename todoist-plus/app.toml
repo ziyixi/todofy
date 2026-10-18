@@ -1,4 +1,4 @@
-# Local browser extension; it owns no cloud resources or Home service entry.
+# Retired extension retained as a shared planning test host; no cloud resources, Home entry or ZIP publication.
 version = 1
 id = "todoist-plus"
 target = "browser"

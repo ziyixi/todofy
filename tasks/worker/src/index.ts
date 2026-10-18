@@ -4,20 +4,20 @@ import type { Env } from './env.ts';
 import { api, ownerRequest, serviceRequest } from './http.ts';
 import { serviceCall } from './service.ts';
 
-interface ConsumerProps {
-  consumer?: unknown;
+interface AccessProps {
+  access?: unknown;
 }
-/** Internal consumers are provisioned explicitly; FlowDay remains a read-only mirror. */
-export class TasksApi extends WorkerEntrypoint<Env, ConsumerProps> {
+/** Bindings grant read or read/write access without depending on an application's identity. */
+export class TasksApi extends WorkerEntrypoint<Env, AccessProps> {
   override fetch(request: Request): Promise<Response> {
-    const consumer = this.ctx.props.consumer;
-    if (consumer !== 'todofy' && consumer !== 'flowday') return Promise.resolve(this.forbidden());
-    if (consumer === 'flowday' && request.method !== 'GET') return Promise.resolve(this.forbidden());
+    const access = this.ctx.props.access;
+    if (access !== 'read' && access !== 'read-write') return Promise.resolve(this.forbidden());
+    if (access === 'read' && request.method !== 'GET') return Promise.resolve(this.forbidden());
     return serviceRequest(request, this.env);
   }
 
   async call(method: string, body: string): Promise<{ status: number; body: string }> {
-    if (this.ctx.props.consumer !== 'todofy') {
+    if (this.ctx.props.access !== 'read-write') {
       const response = this.forbidden();
       return { status: response.status, body: await response.text() };
     }

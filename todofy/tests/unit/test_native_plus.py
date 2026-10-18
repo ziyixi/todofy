@@ -7,7 +7,8 @@ import uuid
 
 import pytest
 
-from tests.unit.plus_support import Storage, stubbed_pyodide
+from tests.unit.plus_support import D1, Storage, stubbed_pyodide
+from todofy.core import native_plan as plan_rules
 
 
 class NativeStore:
@@ -73,15 +74,56 @@ def update(**fields):
     return {"type": "item_update", "uuid": str(uuid.uuid4()), "args": {"id": "a", **fields}, "_native_etag": "1"}
 
 
+def test_direct_native_request_replays_frozen_body_after_a_lost_response(stack):
+    native, errors, core, store, _ = stack
+    operation = {
+        "method": "UpdateTask",
+        "body": {
+            "task": {"name": "tasks/a", "title": "Synthetic direct edit"},
+            "etag": "1",
+            "update_mask": "title",
+            "request_id": str(uuid.uuid4()),
+        },
+    }
+    store.lost = True
+    with pytest.raises(errors.NativeTasksError):
+        asyncio.run(native.commands(core, [operation]))
+    store.revision = "3"
+    assert asyncio.run(native.commands(core, [operation])) == {"task_ids": ["a"]}
+    assert store.applied == 1 and store.sent[0] == store.sent[1]
+
+
+def test_stale_pending_state_stops_before_its_task_content_write(stack):
+    native, errors, core, store, _ = stack
+    from todofy.runtime import native_plan
+
+    core.env.DB = D1()
+    state = plan_rules.state_from_labels(["committed"])
+    asyncio.run(native_plan.save_fields(core.env, "a", state, 0, str(uuid.uuid4())))
+    operation = {
+        "method": "UpdateTask",
+        "body": {
+            "task": {"name": "tasks/a", "deadline": "2030-01-01"},
+            "etag": "1",
+            "update_mask": "deadline",
+            "request_id": str(uuid.uuid4()),
+        },
+        "planning": {"state": state, "expected_rev": 0},
+    }
+    with pytest.raises(errors.NativeTasksError) as failure:
+        asyncio.run(native.commands(core, [operation]))
+    assert failure.value.status == 409 and not store.sent
+
+
 def test_lost_response_replays_exact_frozen_etag_after_another_edit(stack):
     native, errors, core, store, journal = stack
     command = update(labels=["work"])
     store.lost = True
     with pytest.raises(errors.NativeTasksError):
-        asyncio.run(native.commands(core, [command]))
+        asyncio.run(native.resume(core, [command]))
     assert journal.index("storage.sync") < journal.index("native.call", journal.index("storage.sync"))
     store.revision = "3"  # an unrelated task edit after the first write landed
-    asyncio.run(native.commands(core, [command]))
+    asyncio.run(native.resume(core, [command]))
     assert store.applied == 1
     assert store.sent[0] == store.sent[1]
     saved = core.sql.exec("SELECT body,finished FROM native_task_requests").toArray()[0]
@@ -92,7 +134,7 @@ def test_concurrent_edit_is_rejected_without_freshening_the_original_etag(stack)
     native, errors, core, store, _ = stack
     store.revision = "2"
     with pytest.raises(errors.NativeTasksError) as failure:
-        asyncio.run(native.commands(core, [update(deadline={"date": "2026-11-01"})]))
+        asyncio.run(native.resume(core, [update(deadline={"date": "2026-11-01"})]))
     assert failure.value.status == 409
     assert store.applied == 0
     assert store.sent[0][1]["etag"] == "1"
@@ -107,7 +149,7 @@ def test_mail_filing_updates_labels_priority_and_project_in_one_native_request(s
         "args": {"id": "a", "project_id": "inbox"},
         "_native_etag": "1",
     }
-    asyncio.run(native.commands(core, [command, move]))
+    asyncio.run(native.resume(core, [command, move]))
     assert store.applied == 1
     method, body = store.sent[0]
     assert method == "UpdateTask"
@@ -137,19 +179,19 @@ def test_step_replay_keeps_new_identity_and_skips_a_confirmed_native_call(stack)
             "duration": {"amount": 45, "unit": "minute"},
         },
     }
-    assert asyncio.run(native.commands(core, [command])) == {"temp_id_mapping": {task_id: task_id}}
-    assert asyncio.run(native.commands(core, [command])) == {"temp_id_mapping": {task_id: task_id}}
+    assert asyncio.run(native.resume(core, [command])) == {"temp_id_mapping": {task_id: task_id}}
+    assert asyncio.run(native.resume(core, [command])) == {"temp_id_mapping": {task_id: task_id}}
     assert store.applied == 1 and len(store.sent) == 1
 
 
 def test_oversized_operation_and_old_receipt_stop_before_any_write(stack):
     native, errors, core, store, _ = stack
     with pytest.raises(errors.NativeTasksError):
-        asyncio.run(native.commands(core, [update(deadline=None) for _ in range(201)]))
+        asyncio.run(native.resume(core, [update(deadline=None) for _ in range(201)]))
     old = update(deadline=None)
     del old["_native_etag"]
     with pytest.raises(errors.NativeTasksError):
-        asyncio.run(native.commands(core, [old]))
+        asyncio.run(native.resume(core, [old]))
     assert not store.sent
 
 
@@ -198,11 +240,14 @@ def test_native_completion_page_counts_only_the_window_and_preserves_project_and
 
         async def completions(env, method, body):
             seen.append((method, body))
+            if method == "GetCatalog":
+                return {"projects": [{"id": "account-inbox", "title": "Inbox", "inbox": True}]}
+            assert method == "ListCompletions"
             return {
                 "completions": [
                     {
                         "task_id": "a",
-                        "project_id": "mail",
+                        "project_id": "",
                         "complete_time": rules.rfc3339(now - 10),
                         "task_create_time": rules.rfc3339(now - 100),
                     },
@@ -218,7 +263,7 @@ def test_native_completion_page_counts_only_the_window_and_preserves_project_and
             }
 
         monkeypatch.setattr(native_tasks, "call", completions)
-        env = types.SimpleNamespace(TASK_SOURCE="tasks", TODOIST_DEFAULT_PROJECT_ID="mail", DB=D1())
+        env = types.SimpleNamespace(TASK_SOURCE="tasks", TODOIST_DEFAULT_PROJECT_ID="retired-mail-project", DB=D1())
         state = gtd.State()
         state.started = now
         state.tally = rules.CompletedTally().dumps()
@@ -227,4 +272,7 @@ def test_native_completion_page_counts_only_the_window_and_preserves_project_and
         tally = rules.CompletedTally.loads(state.tally)
         assert tally.total == 2 and tally.inbox == 1 and tally.added_recent_total == tally.added_recent_inbox == 1
         assert state.phase == gtd.AGGREGATE and not state.cursor
-        assert seen == [("ListCompletions", {"page_token": "", "page_size": 100})]
+        assert seen == [
+            ("GetCatalog", {"name": "catalog"}),
+            ("ListCompletions", {"page_token": "", "page_size": 100}),
+        ]

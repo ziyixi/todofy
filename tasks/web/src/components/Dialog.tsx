@@ -25,6 +25,15 @@ export function Dialog({
       className={`dialog ${className}`}
       aria-label={title}
       onCancel={onClose}
+      onKeyDownCapture={(event) => {
+        // Escape dismisses the popup first, without cancelling its native parent dialog.
+        if (
+          event.key === "Escape" &&
+          !event.nativeEvent.isComposing &&
+          event.currentTarget.querySelector("[data-popup-open]")
+        )
+          event.preventDefault();
+      }}
       onClick={(event) => {
         if (event.target === ref.current) onClose();
       }}

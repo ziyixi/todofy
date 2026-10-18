@@ -3,6 +3,8 @@
 Read the root rules, [README](README.md), [design](docs/design.md) and [verification](docs/verification.md).
 
 - The web app uses the generated Tasks UI client. The Worker owns D1, validation and recurrence advancement.
+- Ordinary labels carry no GTD semantics. Native stages, areas, lead windows and flags live in Todofy’s planning store.
+- TasksApi grants generic `read` or `read-write` binding access; do not hardcode caller app names or mail/category behavior.
 - Tasks owns task content; Todofy owns planning/mail and FlowDay owns queues/timing. Share code only through
   `packages/` and contracts through root `proto/`. Never import another app's implementation.
 - The installed PWA uses online task data. Do not add offline writes or private-data caching without a real need.

@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from tests.unit.plus_support import stubbed_pyodide
+from tests.unit.plus_support import D1, stubbed_pyodide
 from todofy.core import native_task_view
 from todofy.core.classify import TaskResult
 from todofy.core.render import FOOTER_PREFIX
@@ -114,6 +114,19 @@ def test_existing_uuid_and_parent_identity_are_not_replaced(runtime):
     assert "project_id" not in sent["task"]
 
 
+def test_native_delete_acknowledges_generated_empty_response_without_repeating_the_write(runtime):
+    service = Service()
+    service.body = "{}"
+    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service)
+    body = {"name": "tasks/native-one", "etag": "3", "request_id": str(uuid.uuid4())}
+    assert asyncio.run(runtime.native.call(env, "DeleteTask", body)) == {}
+    assert len(service.calls) == 1
+    service.body = '{"unexpected":"value"}'
+    with pytest.raises(runtime.native.NativeTasksError) as refused:
+        asyncio.run(runtime.native.call(env, "DeleteTask", body))
+    assert refused.value.status == 502
+
+
 @pytest.mark.parametrize("failure", ["transport", "invalid_response", "timeout"])
 def test_uncertain_native_writes_never_fall_back_or_become_safe_retries(runtime, failure):
     service = Service()
@@ -154,7 +167,7 @@ def test_footer_search_reads_complete_descriptions_and_verifies_original_predica
             ]
         }
     ]
-    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service, TODOIST_DEFAULT_PROJECT_ID="project-one")
+    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service, TODOIST_DEFAULT_PROJECT_ID="project-one", DB=D1())
     assert asyncio.run(runtime.todoist.find_footer_tasks(env, EVENT)) == ["match"]
     assert service.calls[0] == ("GetCatalog", {"name": "catalog"})
     method, request = service.calls[1]

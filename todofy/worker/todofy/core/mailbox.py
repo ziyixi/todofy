@@ -10,6 +10,7 @@ categories are an existing label and a priority each (P1-P4, 1 the most urgent);
 import hashlib
 import json
 import re
+from base64 import b64decode, urlsafe_b64encode
 from dataclasses import dataclass
 
 # What a read takes of a summary to find its brief: substr(summary, 1, 600).
@@ -30,6 +31,37 @@ MAX_MAIL_CATEGORIES = 4
 PRIORITIES = (1, 2, 3, 4)
 # plan_categories.name is at most 40 characters.
 MAX_CATEGORY_NAME = 40
+
+
+def item_etag(row: dict) -> str:
+    """The immutable summary identity and its mutable task/triage link, without reading the full text."""
+    values = [row[key] for key in ("event_id", "created_at", "subject", "task_id", "triaged_at")]
+    return hashlib.sha256(json.dumps(values, separators=(",", ":")).encode()).hexdigest()
+
+
+def page_cursor(token: str) -> tuple[int, str]:
+    """One bounded, opaque keyset cursor; empty starts before the newest row."""
+    if not token:
+        return 2**52, ""
+    try:
+        if len(token) > 256:
+            raise ValueError
+        at, event_id = json.loads(b64decode(token, altchars=b"-_", validate=True))
+        if type(at) is not int or not 0 <= at < 2**52 or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", event_id):
+            raise ValueError
+        return at, event_id
+    except (ValueError, TypeError):
+        raise ValueError("BAD_REQUEST") from None
+
+
+def next_page(row: dict) -> str:
+    value = json.dumps([row["created_at"], row["event_id"]], separators=(",", ":")).encode()
+    return urlsafe_b64encode(value).decode()
+
+
+def task_text(text: str, units: int) -> str:
+    """Tasks validates JavaScript string lengths, so a non-BMP character occupies two units."""
+    return text.encode("utf-16-le")[: units * 2].decode("utf-16-le", errors="ignore")
 
 
 def _heading(line: str) -> bool:

@@ -3,7 +3,7 @@ import { ListChecks, X } from "lucide-react";
 import { useAnnouncement } from "./announce";
 import { BET_AREAS, saveBet, weeklyBet } from "./bets";
 import { BetText } from "./BetText";
-import { addDays, displayedTitle, taskIndex } from "./domain";
+import { addDays, displayedTitle, hasPlanningFlag, taskIndex } from "./domain";
 import { deadlineStatus } from "./deadlines";
 import { waitingTasks } from "./dependencies";
 import { betWords, words } from "./i18n";
@@ -96,7 +96,9 @@ export function WeeklyReview({
   const waits = (task: PlanningTask) =>
     busy || (pending?.has(pendingTask(task.id)) ?? false);
 
-  const inbox = inboxToClarify(plan);
+  const inboxCount = plan.nativePlanning
+    ? plan.mailboxPendingCount
+    : inboxToClarify(plan).length;
   // As Review's Waiting lane: a task set aside is in Parked.
   const waiting = waitingTasks(plan).filter((task) => !isParked(task, plan));
   const oldestWait = waiting[0] && untouchedDays(waiting[0]);
@@ -219,9 +221,9 @@ export function WeeklyReview({
         {line(
           1,
           zh ? "邮件待理清" : "Mail to clarify",
-          plan.inboxProjectId ? (
+          plan.nativePlanning || plan.inboxProjectId ? (
             <>
-              <span className="weekly-review-count">{inbox.length}</span>
+              <span className="weekly-review-count">{inboxCount ?? "—"}</span>
               <button className="weekly-review-jump" onClick={onOpenMailbox}>
                 {zh ? "打开" : "Open"}
               </button>
@@ -355,7 +357,7 @@ export function WeeklyReview({
                         aria-label={`${move}: ${title}`}
                         onClick={async () => {
                           // Into this month takes a parked task out of Parked too.
-                          const update = task.labels.includes(PARKED_LABEL)
+                          const update = hasPlanningFlag(task, PARKED_LABEL)
                             ? { stage: "monthly" as const, parked: false }
                             : { stage: "monthly" as const };
                           if (await run(() => actions.updateTask(task, update)))

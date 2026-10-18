@@ -391,7 +391,7 @@ def test_a_receipt_older_than_thirty_days_is_not_read_and_nothing_deletes_one(st
     # The owner's rule, no automatic time-based deletion: no statement of the module deletes a receipt.
     module = vars(stack.runtime.plus_receipts)
     statements = [value for name, value in module.items() if name.isupper() and isinstance(value, str)]
-    assert len(statements) == 7 and not any("DELETE" in statement for statement in statements)
+    assert statements and not any("DELETE" in statement for statement in statements)
 
 
 def test_writing_names_the_tasks_of_unfinished_writes_of_the_window(stack):

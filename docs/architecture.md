@@ -13,13 +13,14 @@ flowchart LR
   Mail[Forwarded mail] --> MH[Mail Hero]
   MH -->|mail.received.v1 HTTPS| Todo[Todofy]
   Watch[Watch] -->|task-intent-v1 binding| Todo
-  Todo --> Todoist[Todoist]
+  Todo -->|private TasksApi binding| Tasks[Tasks: native task store and PWA]
   Todo -->|reports, HTTPS Basic auth| News[Newsletter on VPS]
-  Todoist -->|read only| Flow[FlowDay]
-  Plus[Todoist Plus extension] -->|scoped extension token| Todo
-  Todo -->|private FocusEntrypoint binding| Flow
+  Tasks -->|read-only change feed binding| Flow[FlowDay]
+  Tasks -->|private Planning binding| Todo
+  Todo -->|private NativeFocusEntrypoint binding| Flow
   Home[Home] -->|Ops bindings| MH
   Home -->|Ops bindings| Todo
+  Home -->|Ops binding| Tasks
   Home -->|Ops bindings| Watch
   Gmail[Owner's Gmail] <-->|own labels only, OAuth| Sort[Mailsort]
   Home -->|Ops bindings| Sort
@@ -37,13 +38,15 @@ flowchart LR
   Notion[Notion] -->|GitHub build and relay| Site[Static website]
 ```
 
-No application imports another application's code, configuration or test tools. Shared code has four homes:
+No application imports another application's code, configuration or test tools. Shared code follows these boundaries:
 
 | Home | Responsibility | Production boundary |
 | --- | --- | --- |
 | `proto/` | IDL, generated types, wire JSON codecs, HTTP transcoder/client | Compiled into each actual user; generated directories are not committed |
 | `contracts/` | Consumer semantics, schemas, golden fixtures and dependency-free value rules | Only explicitly mapped runtime files are bundled |
 | `packages/edge-auth/` | Access JWT, signed double-submit CSRF, private headers | Compiled via `file:` dependency; Web Crypto, no runtime dependencies |
+| `packages/planning-ui/` | Existing Plan, Focus and Mail components | Compiled into Tasks and the legacy extension; typed transports and navigation callbacks |
+| `packages/task-dates/` | Date previews and recurrence advancement | Compiled into Tasks; reused by its explicit import tool |
 | `tools/` | Tests, builds and deployment checks | Never imported by production application source |
 
 `PACKAGE_USERS`, `PROTO_USERS`, `PROTO_PACKAGES` and `BUNDLED_BY` in
@@ -59,6 +62,7 @@ runtime. Newsletter keeps its own locked container dependencies and existing ext
 | --- | --- | --- |
 | Mail Hero | `mailhero.ui.v2` | `/api/v2/` |
 | Todofy | `todofy.ui.v1` | `/api/v1/` |
+| Tasks | `tasks.ui.v1` | `/api/tasks/v1/` |
 | Home | `dashboard.ui.v1` | `/api/v1/` |
 | FlowDay | `flowday.ui.v1` | `/api/v1/` |
 | Links | `links.ui.v1` | `/_/api/v1/` |
@@ -99,33 +103,40 @@ published bytes, while legacy fixtures/schemas prove compatibility with persiste
 still has handwritten value rules/schema checked against generated codecs. Do not delete these because
 the owner APIs moved to proto. Dated old-owner routes are listed in [history](history.md#owner-api-compatibility).
 
-## Todoist Plus
+## Tasks and planning
 
-`todoist-plus/` is a Chrome Manifest V3 extension for the Todoist web app and its Chrome-installed PWA.
-It renders Plan and Focus inside the existing page. Todoist owns tasks, labels, dates and deadlines;
-only Todofy writes those values. FlowDay owns daily order, estimates, timers and recorded work.
-The extension has no Worker, database or new model calls.
+`tasks/` owns the native task store and installable desktop PWA: tasks, project hierarchy, sections, labels,
+filters, scheduled dates, deadlines, recurrence and completion history live in its D1 database. The web app
+uses the generated `TasksUiService`; full task details load on demand and lists use bounded indexed pages.
+The PWA provides an offline notice and uses task data online.
 
-The content script mounts native-style controls and maps visible task IDs. The extension background
-holds a separate revocable credential and calls `todofy.ui.v1.PlusService` on Todofy's hooks host. Owner setup
-keeps Access, Origin and CSRF; extension authentication does not grant access to the mail owner API.
-Todofy reaches FlowDay's restricted `FocusEntrypoint` by a same-account service binding. A confirmed
-Todoist close precedes FlowDay settlement, with a stable request identity across a lost response.
+Plan, Focus and Mail reuse `packages/planning-ui`. Their same-origin requests cross the private `Planning`
+binding to Todofy; Todofy writes task changes through Tasks' provisioned `TasksApi`. FlowDay reads the
+native change feed through a separate read-only binding and keeps its own queues, estimate overrides,
+timers and work records. Todofy reaches FlowDay's existing `NativeFocusEntrypoint` through a service binding. A day
+drag changes only FlowDay's queue; a confirmed task completion precedes timer settlement.
 
-The first mapping confirmation enables weekly rollover in the existing coordinator. Unfinished
-previous-week commitments return to weekly candidates (and the retired Bets label leaves the tasks that
-still carry it). The weekly Work and Personal Bets are text in Todofy's D1 planning store, kept per week
-and never reset. The owner's order of each Review lane is planning-store data too; a reorder in Start now,
-a stage lane or Week's Next steps also writes Todoist's own sibling order (`item_reorder`). The Mailbox page
-lists the mail tasks still to clarify from Todofy's own ledger and summaries, files one into the account's
-Todoist Inbox, with an optional owner category's label and priority, in one Todoist write, and can
-permanently delete the untouched ones, with their summaries. Counts remain soft limits. Native labels/filters remain available without the extension, and their UI is hidden only
-where a connected replacement is present. See the [extension guide](../todoist-plus/README.md).
+Todofy retains weekly rollover, text Work/Personal Bets, dependencies, Review lane order and mail receipts.
+Unfinished previous-week commitments return to weekly candidates; counts stay soft limits. Mail filing
+uses the native Inbox, with an optional category's label and priority. The task UI replaces technical
+planning labels and favorites with those controls while retaining their underlying identities.
+
+Imported task IDs preserve mail and FlowDay references; planning identities change provider in place.
+The explicit source selection has no failure fallback or ongoing bidirectional Todoist sync. The original
+account remains intact. See [Tasks design](../tasks/docs/design.md), [import and cutover](../tasks/docs/import.md)
+and [verification](../tasks/docs/verification.md).
+
+### Legacy Todoist Plus
+
+`todoist-plus/` retains the earlier Chrome extension and its transition documentation. It has no separate
+Worker or database; its shared planning components now run in Tasks. Native source activation rejects old
+extension writes so a Todoist page cannot change the new task store. The former token-authenticated path
+is described in the [extension guide](../todoist-plus/README.md).
 
 ## Home
 
 Home is the owner launcher and operations console, not a second administrator of each application's storage.
-It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `WATCH`, `MAILSORT`, `RECALL`, `BRIEF`, `FLEET`,
+It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `TASKS`, `WATCH`, `MAILSORT`, `RECALL`, `BRIEF`, `FLEET`,
 `NEWSLETTER` and `WEBSITE_SYNC` bindings. `FLEET` targets Fleet's `Ops`; `NEWSLETTER` targets its `NewsletterOps` projection of the latest
 bounded host report. Home does not call the VPS directly or read an application's D1, R2, private
 configuration or source. The four views are Home, Flows, Cloudflare and Ops.
@@ -156,7 +167,7 @@ Bounded work remains mandatory:
   Quota numbers cite Cloudflare and match [limits](../dashboard/docs/limits.md).
 
 The synthetic mail canary covers Mail Hero intake/delivery and Todofy model processing. It does not create
-Todoist tasks, newsletters, summaries or reminders and does not count as real mail. Mail Hero's delivered state
+tasks, newsletters, summaries or reminders and does not count as real mail. Mail Hero's delivered state
 means consumer durable acceptance; Todofy's later task success is a separate stage.
 
 Fleet's receipt API uses the versioned [fleet-report-v1 contract](../contracts/fleet-report-v1/README.md)
@@ -173,9 +184,12 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   [AGENTS](../mail-hero/AGENTS.md) and [setup](../mail-hero/docs/cloudflare-setup.md) govern storage, budget,
   backup leases, deletion and recovery. The backup collector image is separate from the Worker.
 - **Todofy:** TypeScript gateway plus Python SQLite DO core, the ledger's only writer/scheduler. Mail receipts,
-  summary work, Todoist outcomes and reconciliation use distinct durable states. See the
+  summary work, native task outcomes and reconciliation use distinct durable states. See the
   [development invariants](../todofy/docs/dev-notes.md) and [gateway contract](../todofy/docs/gateway-contract.md).
-- **FlowDay:** read-only Todoist data plus local blocks/timers/reviews on D1. Keyset pages read about one page of
+- **Tasks:** primary task content and completion history in D1, with the owner-only desktop PWA and private
+  consumer bindings. Planning and date code are shared packages, not additional services. See the
+  [design](../tasks/docs/design.md) and [migration runbook](../tasks/docs/import.md).
+- **FlowDay:** a read-only native Tasks mirror plus local blocks/timers/reviews on D1. Keyset pages read about one page of
   rows, and write budgets stay small. Historical container rollback material and production retirement
   evidence belong in HANDOFF/history; staging removal and Access changes go through reviewed infra.
   See [AGENTS](../flowday/AGENTS.md) and [rollout design](../flowday/docs/design.md).

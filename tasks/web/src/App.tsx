@@ -22,18 +22,24 @@ import { isPlanning, readRoute, type Route } from "./routes";
 import { useTaskView } from "./useTaskView";
 import { useTaskActions } from "./useTaskActions";
 import { Sidebar } from "./components/Sidebar";
+import { SidebarResize } from "./components/SidebarResize";
 import { TaskWorkspace } from "./components/TaskWorkspace";
-import { TaskDialog } from "./components/TaskDialog";
 import { CatalogView } from "./components/CatalogView";
 import { PlanningSettings } from "./components/PlanningSettings";
-import { usePlanningSettings } from "./usePlanningSettings";
-import { planningPresentation } from "./planning-presentation";
-import { CatalogEditor } from "./components/CatalogEditor";
 const PlanningPage = lazy(() => import("./PlanningPage"));
+const MailPage = lazy(() => import("./MailPage"));
+const TaskDialog = lazy(() =>
+  import("./components/TaskDialog").then((module) => ({
+    default: module.TaskDialog,
+  })),
+);
+const CatalogEditor = lazy(() =>
+  import("./components/CatalogEditor").then((module) => ({
+    default: module.CatalogEditor,
+  })),
+);
 
 export function App() {
-  const planning = usePlanningSettings();
-  const presentation = planningPresentation(planning.plan);
   const [route, setRoute] = useState<Route>(readRoute);
   const [catalog, setCatalog] = useState<Catalog>(EMPTY_CATALOG);
   const [catalogError, setCatalogError] = useState("");
@@ -161,11 +167,13 @@ export function App() {
       <Sidebar
         route={route}
         catalog={catalog}
-        managedRoles={presentation.roles}
-        hiddenFilters={presentation.hiddenFilters}
         onAddTask={addTask}
         onAddProject={() => editCatalog("project")}
+        onEditCatalog={editCatalog}
+        onCatalogSaved={loadCatalog}
+        onError={actions.setNotice}
       />
+      <SidebarResize />
       {showSidebar && (
         <button
           className="sidebar-backdrop"
@@ -175,7 +183,7 @@ export function App() {
       )}
       <main
         className={
-          isPlanning(route.page)
+          route.page !== "mail" && isPlanning(route.page)
             ? "main-content planning-content"
             : "main-content"
         }
@@ -206,7 +214,17 @@ export function App() {
             </button>
           </div>
         )}
-        {isPlanning(route.page) ? (
+        {route.page === "mail" ? (
+          <Suspense
+            fallback={
+              <p className="loading-state" role="status">
+                Loading Mail…
+              </p>
+            }
+          >
+            <MailPage catalog={catalog} onTaskCreated={actions.taskChanged} />
+          </Suspense>
+        ) : isPlanning(route.page) ? (
           <Suspense
             fallback={
               <p className="loading-state" role="status">
@@ -217,7 +235,6 @@ export function App() {
             <PlanningPage
               page={route.page}
               mutationRevision={actions.mutationRevision}
-              onReady={planning.accept}
               onOpenTask={(id) => void openTask(id)}
               onSettings={() => {
                 window.location.hash = "/settings";
@@ -225,15 +242,19 @@ export function App() {
             />
           </Suspense>
         ) : route.page === "settings" ? (
-          <PlanningSettings state={planning} />
+          <PlanningSettings />
         ) : route.page === "catalog" ? (
-          <CatalogView catalog={catalog} onEdit={editCatalog} />
+          <CatalogView
+            catalog={catalog}
+            onEdit={editCatalog}
+            onSaved={loadCatalog}
+            onError={actions.setNotice}
+          />
         ) : (
           <TaskWorkspace
             title={title}
             route={route}
             catalog={catalog}
-            managedRoles={presentation.roles}
             catalogLoading={catalogLoading}
             list={list}
             actions={actions}
@@ -253,30 +274,44 @@ export function App() {
         )}
       </main>
       {editor && (
-        <TaskDialog
-          onChildAdded={actions.taskChanged}
-          key={editor.task?.id || "new"}
-          task={editor.task}
-          defaults={editor.defaults}
-          catalog={catalog}
-          onClose={() => setEditor(undefined)}
-          onSave={saveTask}
-          onDelete={deleteTask}
-          onComplete={complete}
-          onOpen={(id) => void openTask(id)}
-        />
+        <Suspense
+          fallback={
+            <p className="loading-state" role="status">
+              Opening task…
+            </p>
+          }
+        >
+          <TaskDialog
+            onChildAdded={actions.taskChanged}
+            key={editor.task?.id || "new"}
+            task={editor.task}
+            defaults={editor.defaults}
+            catalog={catalog}
+            onClose={() => setEditor(undefined)}
+            onSave={saveTask}
+            onDelete={deleteTask}
+            onComplete={complete}
+            onOpen={(id) => void openTask(id)}
+          />
+        </Suspense>
       )}
       {catalogEditor && (
-        <CatalogEditor
-          kind={catalogEditor.kind}
-          item={catalogEditor.item}
-          catalog={catalog}
-          projectId={route.page === "project" ? route.id : ""}
-          onClose={() => setCatalogEditor(undefined)}
-          onSaved={async () => {
-            await Promise.all([loadCatalog(), planning.load()]);
-          }}
-        />
+        <Suspense
+          fallback={
+            <p className="loading-state" role="status">
+              Opening editor…
+            </p>
+          }
+        >
+          <CatalogEditor
+            kind={catalogEditor.kind}
+            item={catalogEditor.item}
+            catalog={catalog}
+            projectId={route.page === "project" ? route.id : ""}
+            onClose={() => setCatalogEditor(undefined)}
+            onSaved={loadCatalog}
+          />
+        </Suspense>
       )}
     </div>
   );

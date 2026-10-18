@@ -69,5 +69,22 @@ it("sends category edits through the host transport with the selected store", as
     ],
     etag: "1",
   });
+  expect(JSON.parse(calls[0]!.body!).destination ?? undefined).toBeUndefined();
   expect(result.categories[0]?.labelId).toBe("work");
+});
+
+it("reads the native pending Mail count even when no mail task exists", async () => {
+  const send: HttpSend = async () =>
+    Response.json({
+      plan: { enabled: true, native_planning: true, mailbox_pending_count: 0 },
+    });
+  const actions = createPlanningActions(
+    { plus: send, flowday: send },
+    undefined,
+    "tasks",
+  );
+  expect(await actions.readPlan()).toMatchObject({
+    nativePlanning: true,
+    mailboxPendingCount: 0,
+  });
 });

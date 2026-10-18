@@ -1,0 +1,119 @@
+.catalog-color-field {
+  margin: 16px 20px;
+}
+.catalog-color-field .property-heading {
+  margin-bottom: 5px;
+}
+.color-picker-trigger {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid #d9ddd2;
+  background: white;
+  font-size: 13px;
+  text-align: left;
+}
+.color-picker-trigger > svg:last-child {
+  margin-left: auto;
+  color: var(--muted);
+}
+.color-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex: 0 0 12px;
+  box-shadow: inset 0 0 0 1px #0000000a;
+}
+.color-picker-positioner {
+  z-index: 30;
+}
+.color-picker-popup {
+  width: var(--anchor-width);
+  min-width: 210px;
+  max-width: calc(100vw - 32px);
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 5px 24px #17220c22;
+  padding: 4px;
+  overflow: hidden;
+}
+.color-picker-list {
+  max-height: min(272px, calc(var(--available-height) - 8px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.color-picker-option {
+  display: grid;
+  grid-template-columns: 20px 12px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+  padding: 5px 8px;
+  font-size: 13px;
+  border-radius: 4px;
+  cursor: pointer;
+  outline: 0;
+}
+.color-picker-option[data-highlighted],
+.color-picker-option[data-selected] {
+  background: #f1f1f1;
+}
+.color-picker-check {
+  display: flex;
+  justify-content: center;
+  color: #333;
+}
+.color-picker-check:not([data-selected]) {
+  visibility: hidden;
+}
+.subtask-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-bottom: 1px solid var(--line);
+}
+.subtask-row .subtask-link {
+  min-width: 0;
+  flex: 1;
+  border-bottom: 0;
+}
+.subtask-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+.subtask-title {
+  overflow-wrap: anywhere;
+}
+.subtask-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+.subtask-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.subtask-meta .subtask-overdue {
+  color: #b04a3c;
+}
+.subtask-meta .subtask-deadline {
+  color: #916c32;
+}
+.subtask-row.is-completed .subtask-title {
+  color: #8c9385;
+  text-decoration: line-through;
+}
+.subtask-row .subtask-link.is-completed {
+  text-decoration: none;
+}

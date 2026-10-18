@@ -22,6 +22,7 @@ async function main() {
   console.log(
     JSON.stringify({
       event: 'tasks_import_plan',
+      time_zone: plan.timeZone,
       mode: outputIndex < 0 ? 'dry_run' : 'private_sql_prepared',
       counts: {
         projects: plan.projects.length,

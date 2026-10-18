@@ -7,6 +7,7 @@ import {
   type CatalogKind,
 } from "../api";
 import { Dialog } from "./Dialog";
+import { ColorPicker } from "./ColorPicker";
 
 const names: Record<CatalogKind, string> = {
   project: "project",
@@ -37,7 +38,7 @@ export function CatalogEditor({
 }) {
   const [title, setTitle] = useState(item?.title || "");
   const [color, setColor] = useState(
-    item && "color" in item ? item.color || "#808b73" : "#808b73",
+    item && "color" in item ? item.color || "#808080" : "#808080",
   );
   const [favorite, setFavorite] = useState(
     item && "favorite" in item ? item.favorite : false,
@@ -95,13 +96,13 @@ export function CatalogEditor({
           });
         else await api.createLabel({ requestId, labelId: requestId, label });
       } else {
-        const savedFilter = { ...base, query, favorite };
+        const savedFilter = { ...base, query, favorite, color };
         if (item)
           await api.updateSavedFilter({
             etag: item.etag,
             requestId,
             savedFilter,
-            updateMask: { paths: ["title", "query", "favorite"] },
+            updateMask: { paths: ["title", "query", "favorite", "color"] },
           });
         else await api.createSavedFilter({ requestId, savedFilterId: requestId, savedFilter });
       }
@@ -158,15 +159,8 @@ export function CatalogEditor({
             onChange={(event) => setTitle(event.target.value)}
           />
         </label>
-        {(kind === "project" || kind === "label") && (
-          <label>
-            Color
-            <input
-              type="color"
-              value={color}
-              onChange={(event) => setColor(event.target.value)}
-            />
-          </label>
+        {kind !== "section" && (
+          <ColorPicker value={color} onChange={setColor} disabled={busy} />
         )}
         {kind === "project" && (
           <>

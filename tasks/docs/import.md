@@ -49,6 +49,8 @@ node tasks/tools/prepare-import.ts \
 
 This dry run checks task values using the same validator as the Worker, resolves label identities, validates parent/project/section relationships and checks supported date and filter expressions. It prints resource counts, issue counts and coverage gaps.
 
+Set `TIME_ZONE` in `tasks/wrangler.toml` to the dry run's `time_zone` before release so date-only tasks and weekly planning keep the source calendar. Native planning does not depend on a confirmed label mapping.
+
 Missing parents, unknown labels on current tasks and invalid fields stop the import. Unsupported recurrence or filter input remains in the private source snapshot for review.
 
 The account's `N days` filters cover today through day `N-1`; overdue tasks require an explicit `overdue` term. Unprefixed `today`, `overdue` and these ranges use the scheduled date, falling back to the deadline when the task has no scheduled date. `no date` checks only the scheduled date. Built-in Today and Upcoming also follow scheduled dates, as [Todoist documents](https://www.todoist.com/help/todoist/get-started/plan-your-day-with-the-today-view-UVUXaiSs); a deadline alone does not place a task in those views.
@@ -195,3 +197,57 @@ node tasks/tools/prepare-planning-cutover.ts \
 After import coverage and the identity check pass, add `--output "$PRIVATE_DIR/planning-cutover.sql"` to prepare one atomic SQL statement. It updates only `provider` from `todoist` to `tasks` on the matched existing rows. Internal IDs, dependency edges, baseline counts, marks, creation times and closed states stay unchanged. Unreferenced closed identities absent from the imported history remain under their original provider.
 
 Duplicate Todoist/native identities, missing open or referenced tasks, changed metadata or changed edges stop the operation. The SQL checks the captured state again when it runs. Repeating the same accepted statement preserves the same identities. The operator must compare returned IDs/counts with the dry-run result before switching consumers. Frozen mail events, summary ledgers and FlowDay history are not rewritten by this tool.
+
+## Convert the old planning labels once
+
+Use this phase after the original task import. It is not an ongoing sync. Task bodies, ordinary labels, dates,
+completion history and the old Todoist account remain unchanged. Keep the same three pauses active and avoid
+editing Tasks during the short conversion window.
+
+Prepare private JSON from the paused native databases, containing only these fields:
+
+| Key | Source |
+| --- | --- |
+| `tasks` | Tasks `tasks`: `id`, `label_ids` (include historical rows) |
+| `labels` | Tasks live `labels`: `id`, `title` |
+| `filters` | Tasks live `filters`: `id`, `query` |
+| `mapping` | Todofy `plus_settings.mapping`, decoded as JSON |
+| `timezone`, `week_start` | The same saved settings row; retain the source calendar |
+| `now` | Capture time as Unix seconds |
+| `mailbox_task_ids` | Optional IDs of still-pending old Mail tasks that have a matching non-imported summary |
+
+For the last field, use the existing Mail eligibility rules: active, unplanned top-level tasks in the saved mail
+project, excluding review/clarified items. Intersect them with actual `summaries.task_id` values. Do not treat
+every old summary as pending. Omit the field when no legacy Mail adoption is needed.
+
+From the repository root, with Todofy's Python environment prepared:
+
+```sh
+cd todofy
+PYTHONPATH=worker .venv/bin/python tools/prepare_native_plan.py \
+  --input "$PRIVATE_DIR/native-metadata.json" --output "$PRIVATE_DIR/native-cutover"
+cd ..
+```
+
+The tool validates exact label identities and prints counts. It writes four owner-only SQL files. Keep and
+resume these exact files if interrupted; do not capture new metadata after retiring the old memberships.
+
+After branch CI passes, release that SHA with the pauses retained. Actions applies Tasks migration `0002` and
+Todofy migrations `0009`/`0010`. Execute the files in this order, using each application's explicit D1 config:
+
+1. `state.sql` → Todofy: seed stage, area, lead and flags while preserving internal planning IDs.
+2. Backfill imported filter colors from the private source snapshot only where `color=''`; leave existing
+   nonempty colors alone. Then `retire.sql` → Tasks: remove only replaced technical memberships and soft-delete
+   their exact label/filter resources.
+3. `mailbox.sql` → Todofy: keep matched pending legacy items visible; mark already handled old summaries as
+   triaged. New taskless summaries are untouched. Existing tasks are retained.
+4. Compare prepared counts with stored native state and retired IDs. Then `activate.sql` → Todofy enables
+   native planning and creates a missing account/week settings row without overwriting existing settings.
+
+Use the same `wrangler d1 execute DB --remote --file …` file-import path above for each application's config;
+write output to private logs. State and Mail preparation refuse to run after initialization, so activation is
+last. An empty new installation needs only the initialization statement with its own timezone/week start.
+
+Drain FlowDay's paged native feed, verify queue/time references and restore the recorded switches through
+Actions. Confirm Plan is configured without a label mapping and Mail lists summaries independently. New mail
+must not create Tasks automatically. Do not convert or delete real mail merely for acceptance.

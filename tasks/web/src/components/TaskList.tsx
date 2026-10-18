@@ -1,23 +1,12 @@
 import { useMemo, useState } from "react";
-import {
-  CalendarDays,
-  Check,
-  ChevronRight,
-  Circle,
-  Flag,
-  GripVertical,
-  Repeat2,
-  Tag,
-  Timer,
-} from "lucide-react";
 import type { Catalog, Task } from "../api";
-import { planningChips } from "../planning-presentation";
 import { dateLabel, todayDate } from "../dates";
+import { TaskRow } from "./TaskRow";
+import type { TaskMenuActions } from "./TaskMenu";
 
 export function TaskList({
   tasks,
   catalog,
-  managedRoles,
   busyIds,
   selected,
   onSelect,
@@ -25,10 +14,10 @@ export function TaskList({
   onComplete,
   onReorder,
   groupBy = "none",
+  menuActions,
 }: {
   tasks: Task[];
   catalog: Catalog;
-  managedRoles: ReadonlyMap<string, string>;
   busyIds: ReadonlySet<string>;
   selected: ReadonlySet<string>;
   onSelect: (id: string) => void;
@@ -36,6 +25,7 @@ export function TaskList({
   onComplete: (task: Task) => void;
   onReorder: (id: string, before: Task) => void;
   groupBy?: "none" | "date" | "section";
+  menuActions?: TaskMenuActions;
 }) {
   const [draggedId, setDraggedId] = useState("");
   const [overId, setOverId] = useState("");
@@ -87,152 +77,27 @@ export function TaskList({
             </h2>
           )}
           <ul className="task-list">
-            {items.map((task) => {
-              const project = catalog.projects.find(
-                (item) => item.id === task.projectId,
-              );
-              const parentTitle =
-                task.parentTitle || taskIndex.get(task.parentId)?.title;
-              const due = task.dueDate || task.dueDatetime.slice(0, 10);
-              return (
-                <li
-                  key={task.id}
-                  className={`task-row ${task.completed ? "is-completed" : ""} ${selected.has(task.id) ? "is-selected" : ""} ${overId === task.id ? "drop-before" : ""}`}
-                  onDragOver={(event) => {
-                    if (draggedId && draggedId !== task.id) {
-                      event.preventDefault();
-                      setOverId(task.id);
-                    }
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    if (draggedId && draggedId !== task.id)
-                      onReorder(draggedId, task);
-                    setDraggedId("");
-                    setOverId("");
-                  }}
-                >
-                  <button
-                    className="drag-handle"
-                    aria-label={`Drag ${task.title}`}
-                    draggable
-                    onDragStart={(event) => {
-                      setDraggedId(task.id);
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", task.id);
-                    }}
-                    onDragEnd={() => {
-                      setDraggedId("");
-                      setOverId("");
-                    }}
-                  >
-                    <GripVertical size={15} />
-                  </button>
-                  <input
-                    className="task-select"
-                    type="checkbox"
-                    aria-label={`Select ${task.title}`}
-                    checked={selected.has(task.id)}
-                    onChange={() => onSelect(task.id)}
-                  />
-                  <button
-                    className={`complete-button priority-${task.priority}`}
-                    aria-label={`${task.completed ? "Reopen" : "Complete"} ${task.title}`}
-                    disabled={busyIds.has(task.id)}
-                    onClick={() => onComplete(task)}
-                  >
-                    {task.completed ? (
-                      <Check size={12} />
-                    ) : (
-                      <Circle size={18} />
-                    )}
-                  </button>
-                  <button className="task-open" onClick={() => onOpen(task.id)}>
-                    <span className="task-title">{task.title}</span>
-                    {task.descriptionPreview && (
-                      <span className="task-description">
-                        {task.descriptionPreview}
-                      </span>
-                    )}
-                    <span className="task-meta">
-                      {due && (
-                        <span
-                          className={
-                            due < todayDate() && !task.completed
-                              ? "overdue"
-                              : ""
-                          }
-                        >
-                          <CalendarDays size={12} />
-                          {dateLabel(due)}
-                          {task.dueDatetime &&
-                            ` ${new Date(task.dueDatetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
-                        </span>
-                      )}
-                      {task.recurrence && (
-                        <span title={task.recurrence}>
-                          <Repeat2 size={12} />
-                          {task.recurrence}
-                        </span>
-                      )}
-                      {task.deadline && (
-                        <span className="deadline">
-                          <Flag size={12} />
-                          {dateLabel(task.deadline)}
-                        </span>
-                      )}
-                      {task.childCount > 0 && (
-                        <span>
-                          <ChevronRight size={12} />
-                          {task.completedChildCount}/{task.childCount}
-                        </span>
-                      )}
-                      {task.durationMinutes > 0 && (
-                        <span>
-                          <Timer size={12} />
-                          {task.durationMinutes}m
-                        </span>
-                      )}
-                      {planningChips(task.labelIds, managedRoles).map(
-                        (title) => (
-                          <span className="planning-chip" key={title}>
-                            {title}
-                          </span>
-                        ),
-                      )}
-                      {task.labelIds
-                        .filter((id) => !managedRoles.has(id))
-                        .map((id) => {
-                          const label = catalog.labels.find(
-                            (item) => item.id === id,
-                          );
-                          return label ? (
-                            <span key={id}>
-                              <Tag size={11} />
-                              {label.title}
-                            </span>
-                          ) : null;
-                        })}
-                    </span>
-                  </button>
-                  <span className="task-context">
-                    {parentTitle && (
-                      <span title={`Parent: ${parentTitle}`}>
-                        {parentTitle}
-                        <ChevronRight size={11} />
-                      </span>
-                    )}
-                    <span>
-                      {project?.title || "Inbox"}
-                      <span
-                        className="project-dot"
-                        style={{ background: project?.color || "#9a9a92" }}
-                      />
-                    </span>
-                  </span>
-                </li>
-              );
-            })}
+            {items.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                catalog={catalog}
+                parentTitle={
+                  task.parentTitle || taskIndex.get(task.parentId)?.title
+                }
+                busyIds={busyIds}
+                selected={selected}
+                onSelect={onSelect}
+                onOpen={onOpen}
+                onComplete={onComplete}
+                onReorder={onReorder}
+                draggedId={draggedId}
+                overId={overId}
+                setDraggedId={setDraggedId}
+                setOverId={setOverId}
+                menuActions={menuActions}
+              />
+            ))}
           </ul>
         </section>
       ))}

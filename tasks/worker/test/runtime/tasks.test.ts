@@ -181,9 +181,9 @@ test('simultaneous replay creates one task and uuid5 command identities remain a
   expect(rows?.total).toBe(1);
 });
 
-test('named bindings enforce read-only FlowDay and validate Python RPC bodies', async () => {
-  const reader = await harness.mf.getWorker('tasks-flowday');
-  const writer = await harness.mf.getWorker('tasks-todofy');
+test('named bindings enforce generic read-only access and validate RPC bodies', async () => {
+  const reader = await harness.mf.getWorker('tasks-read');
+  const writer = await harness.mf.getWorker('tasks-read-write');
   const unknown = await harness.mf.getWorker('tasks-unknown');
   expect((await reader.fetch('https://tasks.internal/api/tasks/v1/catalog')).status).toBe(200);
   expect((await reader.fetch('https://tasks.internal/api/tasks/v1/tasks', { method: 'POST', body: '{}' })).status).toBe(

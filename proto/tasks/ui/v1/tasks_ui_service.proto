@@ -203,6 +203,23 @@ service TasksUiService {
       body: "*"
     };
   }
+  // Copies the task and its active descendants below the original; at most 100 tasks and 32 levels.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DuplicateTask(DuplicateTaskRequest) returns (Task) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/{name=tasks/*}:duplicate"
+      body: "*"
+    };
+  }
+  // Atomically changes only the listed tasks' positions, at most 100, under one request receipt.
+  // The caller keeps its list and reads confirmed rows afterwards; no full task bodies are returned.
+  rpc ReorderTasks(ReorderTasksRequest) returns (ReorderTasksResponse) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/tasks:reorder"
+      body: "*"
+    };
+  }
   // A bounded incremental feed. Catalog changes tell readers to refresh GetCatalog.
   rpc ListChanges(ListChangesRequest) returns (ListChangesResponse) {
     option (google.api.http) = {get: "/api/tasks/v1/changes"};
@@ -518,6 +535,18 @@ message ReopenTaskRequest {
   // Stable identity for this action.
   string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
 }
+// Input to DuplicateTask. Completion counts and history are not copied.
+message DuplicateTaskRequest {
+  // tasks/{id} of the original task.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/Task"
+  ];
+  // Current etag of the original task.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // Stable identity for this copy, including all descendant IDs.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
 // Read changes after a previously acknowledged cursor; empty starts at the beginning.
 message ListChangesRequest {
   // Opaque cursor.
@@ -595,6 +624,29 @@ message PreviewDateRequest {
   // IANA zone; absent uses the account zone.
   string time_zone = 3 [(google.api.field_behavior) = OPTIONAL];
 }
+// One exact task position. Tasks not named by the request remain unchanged.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: an input-only reference and position, not an independently addressable resource. --)
+message TaskPosition {
+  // Resource name tasks/{id}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/Task"
+  ];
+  // Current task revision.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // Finite list position, including zero and fractional positions.
+  double sort_order = 3 [(google.api.field_behavior) = REQUIRED];
+}
+// A bounded atomic order update, with every task's revision checked together.
+message ReorderTasksRequest {
+  // One to 100 distinct task names and their positions.
+  repeated TaskPosition positions = 1 [(google.api.field_behavior) = REQUIRED];
+  // UUIDv4 or UUIDv5 reused for an exact retry.
+  string request_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+// The order update was persisted. Read the affected tasks for their new revisions.
+message ReorderTasksResponse {}
 // Parsed date shown to the owner before saving.
 message PreviewDateResponse {
   // YYYY-MM-DD.

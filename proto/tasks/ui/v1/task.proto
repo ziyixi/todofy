@@ -201,4 +201,6 @@ message SavedFilter {
   google.protobuf.Timestamp create_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Last modification time.
   google.protobuf.Timestamp update_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Hex color, empty means the default.
+  string color = 10 [(google.api.field_behavior) = OPTIONAL];
 }

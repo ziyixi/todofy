@@ -156,7 +156,8 @@ gh workflow run ci.yml --ref main -R "$cloud_repo" -f app=platform
 成功结果：实际 namespace 已核验并登记，精确收信规则已创建，清单 PR 已启动分支检查。
 合入同一通过检查的清单 SHA。保留环境用 `adopt`；已有 DO 身份不匹配会停止。
 核对 Access、Fleet/Home、Mail Hero 后，按应用开启初始暂停开关，最后设置源邮箱转发。
-真实收信、Todoist 写入、Newsletter 发送和网站内容分别验收。
+真实收信、配置的任务来源写入（当前为 Tasks）、Newsletter 发送和网站内容分别验收。
+Tasks 的服务与数据边界见 [设计](../tasks/docs/design.md)；已有任务迁移按 [导入与切换](../tasks/docs/import.md)核对后再启用写入。
 
 新环境的邮件链路准备好后，关闭 bootstrap 创建的三个暂停变量，并发布使其生效：
 
@@ -224,4 +225,5 @@ sudo /usr/bin/python3 -E -s <新 bundle>/installer/recover.py \
 
 空环境 bootstrap 创建空业务状态。恢复历史时先停旧写入，保留原事件、密钥、SQL/R2/DO、Newsletter 登录/状态和 daemon 账本，
 按各应用恢复说明核对后激活。Mail Hero 每日副本在私有 R2，见 [原生备份](../mail-hero/docs/native-backup.md)。
+Tasks 先恢复自己的 D1，或从保留的 Todoist 来源按 [导入说明](../tasks/docs/import.md)迁移；核对任务 ID、完成次数以及 Todofy 规划和 FlowDay 引用后，再恢复任务写入。
 Watch/Home 等 DO 完整跨账户数据恢复、真实空账户与干净 VPS 演练留待后续。PVC Retain 和镜像 artifact 都不能替代业务备份。

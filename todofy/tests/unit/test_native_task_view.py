@@ -38,6 +38,13 @@ def test_native_metadata_uses_imported_timezone_and_label_ids():
     assert view.projects(CATALOG)[0]["inbox_project"] is True
 
 
+def test_native_mail_without_comments_is_eligible_for_explicit_untouched_deletion():
+    from todofy.core import plus
+
+    projected = view.task({"id": "native-mail", "etag": "1", "title": "Synthetic untouched mail"}, CATALOG)
+    assert plus.untouched(projected, set())
+
+
 def test_evening_timed_task_keeps_local_plan_day_and_exact_overdue_instant():
     from datetime import UTC, datetime
 

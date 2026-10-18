@@ -1,4 +1,8 @@
-# Todoist Plus
+# Todoist Plus（已退役）
+
+日常使用请打开 [Tasks](../tasks/README.md)。Plan、Focus 和邮件由 Tasks 内置，沿用 owner Access 登录，不安装扩展，也不生成连接口令。原生模式下旧 `/plus` 书签会转到 Tasks 规划设置，旧扩展连接不能再访问任务。
+
+本目录保留历史实现和共享规划界面的合成回归；CI 不再上传或发布新的 Todoist Plus ZIP。下面的功能说明是旧扩展行为参考，Tasks 验收逐项记录在[功能对照表](../tasks/docs/planning-parity.md)。
 
 把周计划和 FlowDay 放进 Todoist 的 Chrome 扩展。支持普通网页与同一 Chrome profile 安装的 PWA；Todoist 原生桌面、手机应用不能安装它。
 
@@ -17,17 +21,9 @@
 
 现有标签和筛选器保留。替代的规划项在本地隐藏，Quick / Ops 和 `@parked` 的筛选器（分别由“快速事项”和“搁置”承接）也按精确查询隐藏；其他筛选器和标签收藏收进“Other views”；项目收藏保持可见，只有 Todofy 的邮件项目在 Plus 已挂载并连接时在所有 Todoist 页面隐藏（“我的项目”里照常显示）。颜色跟随 Todoist 当前的浅色主题；Plus 没有深色模式。停用或重新加载扩展后，回到 Todoist 标签页即恢复原界面，无需刷新；Plus 显示出错时只留一行“返回 Todoist / 重新加载”。FlowDay 的本地任务和杂项时间仍保留。
 
-## 安装和连接
+## 旧安装与连接
 
-1. 下载 GitHub Release 的 `todoist-plus-*.zip`，解压到固定的专用目录，例如 macOS 的 `~/Documents/chrome_extensions/todoist-plus`。不要混用 Recall 的目录。
-2. 打开 `chrome://extensions`，启用开发者模式，选择“加载已解压的扩展程序”，选中包含 `manifest.json` 的目录。
-3. 打开 Todofy owner 页面 `/plus`，核对标签映射并确认；生成一个命名的扩展连接。
-4. 打开 Todoist Plus 扩展设置，粘贴该页面给出的 API origin 和一次性口令。只授权这个 API origin，然后连接。
-5. 刷新 Todoist，侧边栏出现 **Plan / Focus**。
-
-更新时把新版本解压覆盖同一个目录，在 `chrome://extensions` 点击该扩展的重新加载，再刷新已经打开的 Todoist 页面才加载新版本；连接保存在扩展本地存储中。扩展设置页底部的“Todoist 页面检测”一行显示最近一次页面检查：全部正常，或哪项增强已关闭及原因；它只含固定的键，不含任务内容，也不离开浏览器。旧页面提示扩展已更新时，其“刷新”会重新加载整页。换目录或卸载可能改变扩展身份，需要重新连接。口令可在 Todofy 的 `/plus` 单独撤销。从旧目录切换时先停用旧扩展，避免两个版本同时运行。
-
-扩展只用一个连接口令。FlowDay 仍需其原有的 Todoist 只读连接；如果缓存旧或无法加入新步骤，在 FlowDay 设置检查同步状态。Todoist API key 不进入扩展。
+不再使用扩展作为入口。已有连接记录保留，不影响任务、规划、队列或计时历史；不需要重新生成口令。原生模式拒绝创建新的扩展连接，Tasks 通过同源 API 和私有 service binding 使用规划与 FlowDay。
 
 ## 本地开发
 
@@ -43,9 +39,8 @@ npm test
 npm run build
 npx --no-install playwright install chromium
 npm run test:browser  # 实际 MV3 包，临时 Chromium profile，合成 Todoist 页面
-npm run zip
 ```
 
-构建目录为 `.output/chrome-mv3`。浏览器测试不会访问个人 Chrome profile 或真实 Todoist 数据。发布与后端复用 monorepo 的 CI，详情见[架构](docs/design.md)、[界面与接口说明](docs/planning-interface.md)和[验收记录](docs/verification.md)。
+构建目录为 `.output/chrome-mv3`。浏览器测试不会访问个人 Chrome profile 或真实 Todoist 数据。CI 保留这些隔离回归，不再发布扩展；历史说明见[架构](docs/design.md)、[界面与接口说明](docs/planning-interface.md)和[验收记录](docs/verification.md)。
 
 正式 Plan／Focus／邮件组件和确认状态处理位于 [planning-ui](../packages/planning-ui/README.md)，扩展保留 WXT 挂载、连接和传输；与独立 Tasks 共用界面，不共用浏览器凭据。

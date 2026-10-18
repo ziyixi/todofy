@@ -56,7 +56,7 @@ migrations_dir = "migrations"
 binding = "TASKS"
 service = "tasks"
 entrypoint = "TasksApi"
-props = { consumer = "flowday" }
+props = { access = "read" }
 
 [vars]
 # The only origin a mutation may come from (CSRF): the production host since the F4 cutover.

@@ -16,7 +16,15 @@ MIGRATIONS = sorted((Path(__file__).parents[2] / "migrations").glob("*.sql"))
 PLAN_MIGRATION = Path(__file__).parents[2] / "migrations" / "0007_plan_store.sql"
 NOW = 1_760_000_000
 WEEK = "2026-10-12"
-PLAN_TABLES = {"plan_settings", "plan_tasks", "plan_marks", "plan_edges", "plan_notes", "plan_categories"}
+PLAN_TABLES = {
+    "plan_settings",
+    "plan_tasks",
+    "plan_marks",
+    "plan_edges",
+    "plan_notes",
+    "plan_categories",
+    "plan_task_state",
+}
 
 
 @pytest.fixture
@@ -137,6 +145,18 @@ def test_verify_reads_only_the_plan_tables(db):
 
 def test_verify_of_an_empty_store_is_all_zero(db):
     assert counts(db) == dict.fromkeys(sql.VERIFY_COUNTS, 0)
+
+
+def test_verify_counts_native_state_and_missing_or_wrong_provider_identity(db):
+    native = add_task(db, "native", provider="tasks")
+    legacy = add_task(db, "legacy")
+    db.executemany(
+        "INSERT INTO plan_task_state(task_id,request_id,updated_at) VALUES (?,'synthetic',1)",
+        [(native,), (legacy,), (99,)],
+    )
+    result = counts(db)
+    assert result["state_row_count"] == 3
+    assert result["orphan_state_count"] == 2
 
 
 def test_verify_counts_rows_and_every_broken_rule(db):

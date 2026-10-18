@@ -125,9 +125,14 @@ export async function saveCatalog<S extends DescMessage>(
   createNew: boolean,
   now: number,
 ): Promise<MessageShape<S>> {
+  const resource = input.resource as unknown as Record<string, unknown>;
+  // Preserve existing request receipts: old filter messages did not contain the default color field.
+  const hashInput = table === "filters" && resource.color === ""
+    ? { ...input, resource: Object.fromEntries(Object.entries(resource).filter(([key]) => key !== "color")) }
+    : input;
   const hash = await fingerprint(
     `${createNew ? "create" : "update"}:${table}`,
-    input,
+    hashInput,
   );
   const previous = await replay(db, input.requestId, hash);
   if (previous !== null) return fromWire(schema, JSON.parse(previous)).message;
@@ -162,7 +167,6 @@ export async function saveCatalog<S extends DescMessage>(
         updated_at: now,
         deleted_at: null,
       };
-  const resource = input.resource as unknown as Record<string, unknown>;
   for (const field of paths) {
     if (!(fields as readonly string[]).includes(field))
       invalid("Unsupported catalog field");

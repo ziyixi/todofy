@@ -13,6 +13,10 @@ export interface PlanningTask {
   parentId: string;
   projectId: string;
   labels: string[];
+  /** Saved native stage, before date-based candidates; absent for the legacy source. */
+  explicitStage?: Stage;
+  /** Native planning state, separate from ordinary tags. */
+  planningFlags?: string[];
   area: Area;
   stage: Stage;
   priority: number;
@@ -55,6 +59,9 @@ export interface PlanState {
   week: string;
   timezone: string;
   configured: boolean;
+  nativePlanning?: boolean;
+  /** Pending native Mail entries, supplied by a complete planning read. */
+  mailboxPendingCount?: number;
   hiddenFilterIds: string[];
   flowdayUrl: string;
   managedLabelNames: string[];
@@ -229,18 +236,24 @@ export interface TimerSnapshot {
   timerEtag: string;
   timer?: FocusState["timer"];
 }
+export interface PlanUpdate {
+  stage?: Stage;
+  area?: Area;
+  active?: boolean;
+  parked?: boolean;
+  quick?: boolean;
+  waiting?: boolean;
+  routine?: boolean;
+  onHold?: boolean;
+  blocked?: boolean;
+  singleAction?: boolean;
+}
 export interface PlusActions {
   load(weekStart?: string): Promise<PlusData>;
   readPlan(): Promise<PlanMetadata>;
   loadDays(weekStart: string): Promise<FlowDayPlan[]>;
-  /**
-   * `active` adds or removes the literal in-progress label, and `parked` the literal set-aside
-   * label (adding it removes every planning label and `active`); the account must have the label.
-   */
-  updateTask(
-    task: PlanningTask,
-    update: { stage?: Stage; area?: Area; active?: boolean; parked?: boolean },
-  ): Promise<PlanningTask>;
+  /** Saves native planning state; legacy hosts update the corresponding existing labels. */
+  updateTask(task: PlanningTask, update: PlanUpdate): Promise<PlanningTask>;
   /**
    * Saves a Bet's text over the one with `bet.etag`. Rejects with BetNotSaved when Todofy says it
    * changed elsewhere or its week has ended.

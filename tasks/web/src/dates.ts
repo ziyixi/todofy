@@ -1,4 +1,15 @@
-export function todayDate(now = new Date()): string {
+export function todayDate(now = new Date(), timeZone?: string): string {
+  if (timeZone) {
+    const parts = new Intl.DateTimeFormat("en", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now);
+    return ["year", "month", "day"]
+      .map((kind) => parts.find((part) => part.type === kind)?.value)
+      .join("-");
+  }
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 export function dateLabel(value: string, today = todayDate()): string {

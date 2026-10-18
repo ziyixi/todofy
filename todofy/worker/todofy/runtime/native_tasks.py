@@ -8,6 +8,7 @@ from ziyixi_proto.tasks.ui.v1 import tasks_ui_service_pb as pb
 from ziyixi_proto.wire_json import from_wire, to_wire
 
 from todofy.core import native_task_view
+from todofy.runtime import native_plan
 from todofy.runtime.config import var
 
 
@@ -51,7 +52,12 @@ async def call(env: Any, method: str, body: dict[str, Any]) -> dict[str, Any]:
     if result.status >= 400:
         raise NativeTasksError(result.status)
     try:
-        response = from_wire(binding.response, json.loads(result.body), strict=False).message
+        value = json.loads(result.body)
+        if binding.response is type(None):
+            if value != {}:
+                raise ValueError("Invalid Empty response")
+            return {}
+        response = from_wire(binding.response, value, strict=False).message
     except (TypeError, ValueError) as error:
         raise NativeTasksError(502, uncertain=True) from error
     return to_wire(response)
@@ -64,7 +70,7 @@ async def catalog(env: Any) -> dict[str, Any]:
 async def task(env: Any, task_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     source = metadata if metadata is not None else await catalog(env)
     row = await call(env, "GetTask", {"name": f"tasks/{task_id}"})
-    return native_task_view.task(row, source)
+    return (await native_plan.read_overlay(env, [native_task_view.task(row, source)]))[0]
 
 
 async def page(
@@ -93,6 +99,6 @@ async def page(
     if query:
         request["query"] = query
     response = await call(env, "ListTasks", request)
-    return [native_task_view.task(row, source) for row in response.get("tasks", [])], response.get(
-        "next_page_token", ""
-    )
+    return await native_plan.read_overlay(
+        env, [native_task_view.task(row, source) for row in response.get("tasks", [])]
+    ), response.get("next_page_token", "")
