@@ -12,7 +12,7 @@ Home is the daily starting point. Services run and release independently, sharin
 | --- | --- | --- | --- |
 | Home | 查看服务、业务链路和配额 / Service health, flows and quotas | Cloudflare Worker + DO | [dashboard/](dashboard/README.md) |
 | Mail Hero | 收件箱与可靠 webhook / Inbox and reliable webhooks | Cloudflare Worker + D1 + R2 + DO | [mail-hero/](mail-hero/README.md) |
-| Todofy | 邮件转任务、摘要与规划 / Mail to tasks, summaries and planning | Cloudflare TS gateway + Python core + D1/DO | [todofy/](todofy/README.md) |
+| Todofy | 邮件摘要、规划与每日提醒 / Mail summaries, planning and daily reminders | Cloudflare TS gateway + Python core + D1/DO | [todofy/](todofy/README.md) |
 | Tasks | 主任务库、子任务与 Plan/Focus / Primary task store, subtasks and Plan/Focus | Cloudflare Worker + D1, desktop PWA | [tasks/](tasks/README.md) |
 | FlowDay | 时间块、计时与回顾 / Time blocks, timers and reviews | Cloudflare Worker + D1 | [flowday/](flowday/README.md) |
 | Links | 私人短链接 / Personal short links | Cloudflare Worker + D1 | [links/](links/README.md) |
@@ -24,10 +24,10 @@ Home is the daily starting point. Services run and release independently, sharin
 | Newsletter | 生成并发送简报 / Build and send the newsletter | VPS k3s, separate image | [newsletter/](newsletter/README.md) |
 | Fleet | VPS、daemon 与发布状态 / VPS, daemons and release status | Cloudflare Worker + DO | [fleet/](fleet/README.md) |
 
-Tasks 是任务与规划入口，Todofy 处理邮件和规划规则，FlowDay 保存每日队列与计时。原 Todoist 保留为历史迁移来源，不持续双向同步。
+Tasks 是任务与规划入口，Todofy 处理邮件和规划规则，FlowDay 保存每日队列与计时。Todoist 只是 2026-10-17 的一次性迁移来源，现在没有代码读写它。
 
 Tasks is the task and planning app. Todofy handles mail and planning rules; FlowDay owns daily queues and timers.
-The original Todoist account remains a migration source, without ongoing two-way sync.
+Todoist was the one-time migration source of 2026-10-17; no code reads or writes it now.
 
 Cloudflare 托管日常应用；VPS 的 k3s 运行 Newsletter 和独立的部署 daemon。
 GitHub Actions 主动通过鉴权 API 更新经测试的镜像，Fleet 和 Home 查看实际运行状态。
@@ -65,7 +65,7 @@ Todofy's Python build generates it through `uv`. Generated code is not committed
 | [packages/](packages/) | 共享鉴权、规划 UI 与日期规则 / Shared authentication, planning UI and date rules |
 | [infra/](infra/README.md) | Cloudflare 资源与权限 / Cloudflare resources and permissions |
 | [platform/](platform/README.md) | VPS 发布 daemon、k3s 清单和监控 / VPS deployment daemon, k3s manifests and monitoring |
-| [config/](config/README.md) | 可迁移的公开配置 / Portable public configuration |
+| [config/](config/) | 可迁移的公开配置 / Portable public configuration |
 | [tools/](tools/) | 测试、构建和部署工具 / Test, build and deployment tools |
 | [.github/workflows/](.github/workflows/) | 检查、独立发布与基础设施流程 / Checks, independent releases and infrastructure workflows |
 
