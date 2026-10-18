@@ -11,7 +11,6 @@ import { MorePage } from './pages/MorePage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { RemindersPage } from './pages/RemindersPage'
 import { RouteError } from './pages/RouteError'
-import { PlusPage } from './pages/PlusPage'
 import { SetupPage } from './pages/SetupPage'
 
 export const routes: RouteObject[] = [
@@ -30,7 +29,6 @@ export const routes: RouteObject[] = [
       { path: 'gtd', element: <GtdPage /> },
       { path: 'health', element: <HealthPage /> },
       { path: 'setup', element: <SetupPage /> },
-      { path: 'plus', element: <PlusPage /> },
       { path: 'more', element: <MorePage /> },
       { path: '*', element: <NotFoundPage /> },
     ],

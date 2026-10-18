@@ -212,20 +212,9 @@ class TodofyCore(DurableObject):
             # The platform logs carry the details.
             return failed(503, ApiError.UNAVAILABLE).wire()
 
-    async def plus_auth(self, digest: str) -> bool:
-        """The FlowDay proxy's check of an extension token. Only hashed credentials cross this RPC boundary."""
-        return await plus_api.connected(self, digest)
-
-    async def plus_ui(self, method: str, request: str, owner: bool, digest: str | None = None) -> dict[str, Any]:
-        """One PlusService rpc: for the Access owner, or for the extension token whose SHA-256 is ``digest``,
-        which this checks (plus_api.handle). The gateway before this release sent no digest."""
-        if not owner and native_tasks.enabled(self.env):
-            # An old gateway/extension must not write Tasks while displaying the old Todoist account.
-            return {"error": "ACTION_NOT_ALLOWED"}
-        return await plus_api.handle(self, method, request, owner=owner, digest=digest)
-
     async def plus_native_ui(self, method: str, request: str) -> dict[str, Any]:
-        """Tasks' private owner entrypoint refuses a partially deployed source switch."""
+        """One PlusService rpc from Tasks' private Planning channel (the gateway's allowlist); refuses a partially
+        deployed source switch."""
         if not native_tasks.enabled(self.env) or getattr(self.env, "TASKS", None) is None:
             return {"error": "UNAVAILABLE"}
         return await plus_api.handle(self, method, request, owner=True)

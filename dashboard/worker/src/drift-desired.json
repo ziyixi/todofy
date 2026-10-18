@@ -870,11 +870,6 @@
           "source": "manual"
         },
         {
-          "name": "FLOWDAY_FOCUS",
-          "type": "service",
-          "source": "config"
-        },
-        {
           "name": "FLOWDAY_NATIVE_FOCUS",
           "type": "service",
           "source": "config"

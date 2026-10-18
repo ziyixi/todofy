@@ -168,18 +168,19 @@ export function reminderPage(size: number): Record<string, unknown> {
 
 /** The Mailbox's largest answers to the extension: a lookup of 200 mail tasks (briefs at their 60 characters and four
  * categories) and one mail's whole summary (MAX_SUMMARY_BYTES). */
-export function mailLookup(count: number): Record<string, unknown> {
+/** A full ListMailItems page: pending mail, newest first, and the category shortcuts. */
+export function mailItems(count: number): Record<string, unknown> {
   return {
-    items: Array.from({ length: count }, (_, n) => ({
+    mail_items: Array.from({ length: count }, (_, n) => ({
       id: UUID(n),
-      task: { provider: 'todoist', external_id: `6X7rM8997g3RQ${String(n).padStart(3, '0')}` },
+      title: text(120, n),
+      etag: 'f'.repeat(64),
       brief: text(60, n),
       receive_time: AT,
       has_summary: true,
     })),
-    categories: [1, 2, 3, 4].map(n => ({ id: String(n), label: { provider: 'todoist', external_id: `2${String(n).padStart(9, '0')}` }, priority: `p${String(n)}` })),
+    categories: [1, 2, 3, 4].map(n => ({ id: String(n), label: { provider: 'tasks', external_id: `label-${String(n)}` }, priority: `p${String(n)}` })),
     categories_etag: 'f'.repeat(64),
-    destination: { provider: 'todoist', external_id: '6X7rM8997g3RQ999' },
   };
 }
 

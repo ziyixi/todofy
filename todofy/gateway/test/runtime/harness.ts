@@ -1,7 +1,8 @@
 /**
  * workerd harness of the gateway alone: bundles src/index.ts with esbuild and runs it in Miniflare as the Worker
  * "todofy", next to a stand-in "todofy-core" whose TodofyCore object answers every RPC method from canned values
- * (the gateway cannot tell it from the Python object: it sees the same method names and answers). With it the
+ * (the gateway cannot tell it from the Python object: it sees the same method names and answers), and a stand-in
+ * "tasks" that only forwards to the gateway's Planning entrypoint, as Tasks' PLANNING binding does. With it the
  * gateway's own CPU per request is measured in workerd (./cpu.test.ts), Access verified as in production (a
  * synthetic issuer whose keys the outbound handler serves), the CSRF check included. The whole pair, with the real
  * Python core, D1 and the UI, is the runtime suite in ../../../tests/runtime. All data is synthetic; nothing leaves
@@ -45,8 +46,7 @@ export class TodofyCore extends DurableObject {
   owner_ui(owner, method, request, cursor) { count('owner_ui'); return ANSWERS.owner_ui[method] ?? { error: 'NOT_FOUND', detail: null, retry_after: null }; }
   owner_api(owner, method, path) { count('owner_api'); return ANSWERS.owner_api[path] ?? { status: 404, body: null, error: { code: 'not_found', message: 'x' }, retry_after: null }; }
   setup() { count('setup'); return ANSWERS.setup; }
-  plus_auth() { count('plus_auth'); return true; }
-  plus_ui(method) { count('plus_ui'); return ANSWERS.plus_ui[method] ?? { error: 'NOT_FOUND', detail: null, retry_after: null }; }
+  plus_native_ui(method) { count('plus_native_ui'); return ANSWERS.plus_native_ui[method] ?? { error: 'NOT_FOUND', detail: null, retry_after: null }; }
   calls() { return calls; }
 }
 export default { fetch() { return new Response('not found', { status: 404 }); } };
@@ -59,7 +59,8 @@ export interface CoreAnswers {
   /** By path (`/api/v1/events`): a CoreResult. */
   readonly owner_api?: Readonly<Record<string, unknown>>;
   readonly setup?: unknown;
-  readonly plus_ui?: Readonly<Record<string, unknown>>;
+  /** By PlusService rpc name, what Tasks' Planning channel reaches. */
+  readonly plus_native_ui?: Readonly<Record<string, unknown>>;
 }
 
 let bundle: Promise<string> | undefined;
@@ -87,6 +88,8 @@ export interface Harness {
   readonly mf: Miniflare;
   /** A request to the owner host. */
   fetch(path: string, init?: RequestInit): Promise<Response>;
+  /** A request on Tasks' private Planning channel, as Tasks forwards it after its own owner checks. */
+  planning(path: string, init?: RequestInit): Promise<Response>;
   dispose(): Promise<void>;
 }
 
@@ -104,7 +107,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
   const temp = await mkdtemp(join(tmpdir(), 'todofy-gateway-runtime-'));
   const outbound = (request: Request): Response => options.routes?.get(request.url)?.() ?? new Response('no outbound fetch expected', { status: 599 });
   const assets = (): Response => new Response('<!doctype html>', { headers: { 'content-type': 'text/html; charset=utf-8' } });
-  const answers = { owner_ui: {}, owner_api: {}, plus_ui: {}, setup: null, ...options.answers };
+  const answers = { owner_ui: {}, owner_api: {}, plus_native_ui: {}, setup: null, ...options.answers };
   const mf = new Miniflare(
     convertV4MiniflareOptions({
       host: '127.0.0.1',
@@ -121,8 +124,8 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
           script: await gatewayBundle(),
           compatibilityDate: '2026-09-08',
           durableObjects: { COORDINATOR: { className: 'TodofyCore', scriptName: 'todofy-core' } },
-          serviceBindings: { ASSETS: () => assets(), FLOWDAY_FOCUS: () => Response.json(options.focusTasks ?? {}) },
-          bindings: { ...SYNTHETIC_BINDINGS, ...options.bindings },
+          serviceBindings: { ASSETS: () => assets(), FLOWDAY_NATIVE_FOCUS: () => Response.json(options.focusTasks ?? {}) },
+          bindings: { ...SYNTHETIC_BINDINGS, TASK_SOURCE: 'tasks', ...options.bindings },
           outboundService: (request: Request) => outbound(request),
         },
         {
@@ -132,6 +135,13 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
           compatibilityDate: '2026-09-08',
           durableObjects: { CORE: 'TodofyCore' },
         },
+        {
+          name: 'tasks',
+          modules: true,
+          script: 'export default { fetch(request, env) { return env.PLANNING.fetch(request); } };',
+          compatibilityDate: '2026-09-08',
+          serviceBindings: { PLANNING: { name: 'todofy', entrypoint: 'Planning', props: { source: 'tasks' } } },
+        },
       ],
     }),
   );
@@ -139,6 +149,10 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
   return {
     mf,
     fetch: (path, init) => mf.dispatchFetch(`${ORIGIN}${path}`, { redirect: 'manual', ...init } as never) as unknown as Promise<Response>,
+    async planning(path, init) {
+      const tasks = await mf.getWorker('tasks');
+      return tasks.fetch(`https://planning.internal${path}`, init as never) as unknown as Promise<Response>;
+    },
     async dispose() {
       await mf.dispose();
       await rm(temp, { recursive: true, force: true });

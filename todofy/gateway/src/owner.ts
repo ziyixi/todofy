@@ -15,7 +15,6 @@
  * Errors of the API are google.rpc.Status bodies (proto/todofy/ui/v1/errors.proto, common/errors/v1), logged as
  * one line with the request ID, status and reason only. Every response leaves with the private headers.
  */
-import { plusOwner } from './plus.ts';
 import type { RouteInfo } from '@ziyixi/proto/http-transcoder';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { authenticate } from './access.ts';
@@ -23,7 +22,6 @@ import { issueCsrf, verifyCsrf } from './csrf.ts';
 import { errorEnvelope, HttpError, MESSAGES, withPrivateHeaders, type Context } from './http.ts';
 import { maintenance, REASONS, transcoder, uiError, type Reason, type UiContext } from './ui.ts';
 import { warmCodec } from './warm.ts';
-import { variable } from './env.ts';
 
 const API_PREFIX = '/api/v1/';
 const CSRF_PATH = '/api/csrf';
@@ -90,11 +88,6 @@ async function route(ctx: Context): Promise<Response> {
     if (legacyPath(path)) return errorEnvelope(ctx.requestId, error.status, error.code, MESSAGES[error.code]);
     return statusResponse(ctx, uiError(ACCESS_REASONS[error.code] ?? 'UNAUTHORIZED'));
   }
-  if ((path === '/plus' || path === '/plus/') && ['GET', 'HEAD'].includes(ctx.request.method) && variable(ctx.env, 'TASK_SOURCE') === 'tasks') {
-    const tasksUrl = variable(ctx.env, 'TASKS_PUBLIC_URL');
-    return tasksUrl ? Response.redirect(`${tasksUrl}/#/settings`, 302) : statusResponse(ctx, uiError('UNAVAILABLE'));
-  }
-  if (path.startsWith('/api/plus/v1/')) return plusOwner(ctx, owner);
   if (legacyPath(path)) return errorEnvelope(ctx.requestId, 410, 'reload_required', RELOAD_MESSAGE);
   if (path === CSRF_PATH) {
     if (ctx.request.method !== 'GET') return statusResponse(ctx, methodNotAllowed('GET'));

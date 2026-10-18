@@ -58,11 +58,6 @@ binding = "METRICS"
 dataset = "todofy_metrics"
 
 [[services]]
-binding = "FLOWDAY_FOCUS"
-service = "flowday"
-entrypoint = "FocusEntrypoint"
-
-[[services]]
 binding = "FLOWDAY_NATIVE_FOCUS"
 service = "flowday"
 entrypoint = "NativeFocusEntrypoint"

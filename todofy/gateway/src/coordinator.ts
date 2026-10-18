@@ -68,14 +68,7 @@ export interface Coordinator extends Rpc.DurableObjectBranded {
    */
   owner_ui(owner: string, method: string, request: string, cursor: string | null): Promise<UiAnswer>;
   setup(): Promise<CoreSetup>;
-  /** Whether `digest` is the SHA-256 of a non-revoked extension token (the FlowDay proxy's check). */
-  plus_auth(digest: string): Promise<boolean>;
-  /**
-   * One PlusService rpc for the Access owner (`owner`, `digest` null) or for the extension token whose SHA-256 is
-   * `digest`, which the core checks.
-   */
-  plus_ui(method: string, request: string, owner: boolean, digest: string | null): Promise<UiAnswer>;
-  /** Refuses before dispatch unless the core itself uses native Tasks. */
+  /** One PlusService rpc from Tasks' Planning channel; refuses before dispatch unless the core uses Tasks. */
   plus_native_ui(method: string, request: string): Promise<UiAnswer>;
   plus_focus_claim(actionId: string, value: string | null, replaceEtag: string | null): Promise<string | null>;
   // ops-v1 (the Ops entrypoint, src/ops.ts). Structured inputs travel as JSON text; the core reads them strictly and

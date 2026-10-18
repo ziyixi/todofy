@@ -221,11 +221,6 @@ def test_native_owner_entrypoint_refuses_partial_source_deploy_before_dispatch(m
         core = types.SimpleNamespace(env=types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=object()))
         assert asyncio.run(TodofyCore.plus_native_ui(core, "ReadPlan", "{}")) == {"ok": "{}"}
         assert calls == [("ReadPlan", "{}", True)]
-        calls.clear()
-        assert asyncio.run(TodofyCore.plus_ui(core, "CompleteTask", "not-json", False, "synthetic-digest")) == {
-            "error": "ACTION_NOT_ALLOWED"
-        }
-        assert not calls
 
 
 def test_native_completion_page_counts_only_the_window_and_preserves_project_and_created_time(monkeypatch):

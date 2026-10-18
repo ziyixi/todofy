@@ -460,12 +460,9 @@ class Files(unittest.TestCase):
         self.assertEqual(flowday["services"], [{
             "binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"access": "read"},
         }])
-        self.assertIn({
+        self.assertEqual(gateway["services"], [{
             "binding": "FLOWDAY_NATIVE_FOCUS", "service": "flowday", "entrypoint": "NativeFocusEntrypoint",
-        }, gateway["services"])
-        self.assertIn({
-            "binding": "FLOWDAY_FOCUS", "service": "flowday", "entrypoint": "FocusEntrypoint",
-        }, gateway["services"])
+        }])
         for config in (core, gateway):
             self.assertEqual(config["vars"]["TASK_SOURCE"], "tasks")
             self.assertEqual(config["vars"]["TASKS_PUBLIC_URL"], "https://" + tasks["vars"]["PUBLIC_HOST"])
