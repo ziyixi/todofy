@@ -33,10 +33,10 @@ export interface TaskRowProps {
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onComplete: (task: Task) => void;
-  onReorder: (id: string, before: Task, peers?: readonly Task[]) => void;
-  draggedId: string;
+  onReorder: (task: Task, before: Task, peers?: readonly Task[]) => void;
+  draggedTask?: Task;
   overId: string;
-  setDraggedId: (id: string) => void;
+  setDraggedTask: (task?: Task) => void;
   setOverId: (id: string) => void;
   menuActions?: TaskMenuActions;
   expanded?: boolean;
@@ -57,9 +57,9 @@ export function TaskRow({
   onOpen,
   onComplete,
   onReorder,
-  draggedId,
+  draggedTask,
   overId,
-  setDraggedId,
+  setDraggedTask,
   setOverId,
   menuActions,
   expanded,
@@ -119,16 +119,16 @@ export function TaskRow({
         origin.current = "context";
       }}
       onDragOver={(event) => {
-        if (draggedId && draggedId !== task.id) {
+        if (draggedTask && draggedTask.id !== task.id) {
           event.preventDefault();
           setOverId(task.id);
         }
       }}
       onDrop={(event) => {
         event.preventDefault();
-        if (draggedId && draggedId !== task.id)
-          onReorder(draggedId, task, peers);
-        setDraggedId("");
+        if (draggedTask && draggedTask.id !== task.id)
+          onReorder(draggedTask, task, peers);
+        setDraggedTask(undefined);
         setOverId("");
       }}
     >
@@ -150,12 +150,12 @@ export function TaskRow({
         aria-label={`Drag ${task.title}`}
         draggable
         onDragStart={(event) => {
-          setDraggedId(task.id);
+          setDraggedTask(task);
           event.dataTransfer.effectAllowed = "move";
           event.dataTransfer.setData("text/plain", task.id);
         }}
         onDragEnd={() => {
-          setDraggedId("");
+          setDraggedTask(undefined);
           setOverId("");
         }}
       >
@@ -182,7 +182,6 @@ export function TaskRow({
           <span className="task-description">{task.descriptionPreview}</span>
         )}
         <span className="task-meta">
-          {task.kind === "step" && <span>Step</span>}
           {due && (
             <span className={due < today && !task.completed ? "overdue" : ""}>
               <CalendarDays size={12} />

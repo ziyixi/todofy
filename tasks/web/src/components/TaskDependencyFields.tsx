@@ -88,7 +88,7 @@ export function TaskDependencyFields({
     let active = true;
     const timer = window.setTimeout(() => {
       void api
-        .listTasks({ view: "search", query: query.trim(), pageSize: 20 })
+        .listTasks({ view: "all", query: query.trim(), pageSize: 20 })
         .then((value) => {
           if (active)
             setResults(

@@ -25,9 +25,18 @@ Inline child lists start collapsed, read bounded pages only when opened and reus
 Schedule and priority icons now use the installed Base UI tooltip on hover/focus in both task menus.
 The owner also reported missing drag support in parent details. Both Subtasks and Steps now expose
 handles and before/after drop feedback, persisting only sibling sort order. Their kinds remain unchanged.
-Local lint/type/build, 55 unit checks and 55 Chromium/local-D1 journeys pass. Chrome preview, branch gate,
-same-SHA release and production read-only expansion checks remain before closure. No schema, API,
-dependency, new cache or background polling was added. See [acceptance](tasks/docs/inline-subtasks-verification.md).
+Initial SHA `81dbf79f4da8b419cef40c57ea5fb615c3ad75bb` passed branch
+[39174037014](https://github.com/ziyixi/todofy/actions/runs/39174037014) and same-SHA main
+[39174359695](https://github.com/ziyixi/todofy/actions/runs/39174359695). Independent provider reads verify
+version `062d24b5-7bc5-4b7f-8223-de64429dcdb4`, source SHA, database and Planning binding.
+Owner follow-ups keep existing editors open after Save, hide Steps from ordinary views/counts, detach
+subtasks through main-list dragging, and show years outside the current account year. Those changes pass
+56 web units, 58 Chromium/local-D1 journeys and 41 Worker runtime checks. Actual Chrome confirms Save
+retains the frame, a future deadline includes its year, and expanded main lists omit Steps.
+Still implementing the newer requests: native property tags, sidebar category drops, completion from
+Plan, and a full-width Committed region below other stages. Final combined gate and production checks
+remain. No schema, wire format, dependency or persistent cache was added.
+See [acceptance](tasks/docs/inline-subtasks-verification.md).
 
 ### Tasks workflow refinement (2026-10-18 UTC)
 

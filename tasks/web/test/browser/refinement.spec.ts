@@ -343,6 +343,10 @@ test("ordinary task planning, effort and deadline lead are visible and survive s
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   const saved = await savedTask(request, task.id);
   expect(saved.effort).toBe("deep");
@@ -449,6 +453,10 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).recurrence).toBe(
     "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR",
@@ -484,6 +492,10 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).recurrence).toBe("every! 2 weeks");
   await page.reload();
@@ -511,6 +523,10 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await date.click();
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
     .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).recurrence).toBe(
@@ -545,7 +561,9 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await expect(stepDialog.getByLabel("Time", { exact: true })).toHaveCount(0);
   await expect(timeOptions).toHaveText("Time · 09:30");
   await timeOptions.click();
-  await expect(stepDialog.getByLabel("Time", { exact: true })).toHaveValue("09:30");
+  await expect(stepDialog.getByLabel("Time", { exact: true })).toHaveValue(
+    "09:30",
+  );
   const closeGeometry = await stepDate.evaluate(async (button) => {
     if (!(button instanceof HTMLButtonElement))
       throw new Error("Date trigger is not a button");
@@ -558,7 +576,9 @@ test("repeat controls save calendar rules while only steps expose a clock time",
       extraHeight: extra.clientHeight,
     };
     button.click();
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
     return {
       before,
       after: {
@@ -576,6 +596,10 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await stepDate.click();
   await stepDialog
     .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(stepDialog.locator(".task-save-status")).toHaveText("Saved");
+  await stepDialog
+    .getByRole("button", { name: "Close dialog", exact: true })
     .click();
   await expect(stepDialog).not.toBeVisible();
   const timed = await savedTask(request, step.id);
@@ -707,6 +731,10 @@ test("clearing a deadline clears its lead and Parked stays exclusive with a chos
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).deadline || "").toBe("");
   expect(planning.get(task.id)).toMatchObject({
@@ -721,6 +749,10 @@ test("clearing a deadline clears its lead and Parked stays exclusive with a chos
   await parked.check();
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
     .click();
   await expect(dialog).not.toBeVisible();
   await page.reload();

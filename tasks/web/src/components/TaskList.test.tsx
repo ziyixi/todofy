@@ -25,6 +25,7 @@ it("keeps the undated group after dated tasks even when it arrives first", () =>
       onOpen={() => {}}
       onComplete={() => {}}
       onReorder={() => {}}
+      onDetach={() => {}}
       groupBy="date"
     />,
   );

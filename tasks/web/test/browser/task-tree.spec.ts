@@ -5,11 +5,11 @@ import {
   type Page,
 } from "@playwright/test";
 
-async function creator(request: APIRequestContext) {
+async function creator(request: APIRequestContext, resource = "tasks") {
   const { token } = await (await request.get("/api/tasks/csrf")).json();
   return async (task: Record<string, unknown>) => {
     const response = await request.post(
-      `/api/tasks/v1/tasks?request_id=${crypto.randomUUID()}`,
+      `/api/tasks/v1/${resource}?request_id=${crypto.randomUUID()}`,
       {
         headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
         data: task,
@@ -60,8 +60,12 @@ test("subtasks start folded and load only on expansion, with nested steps, editi
     title: "Synthetic tree child",
     parent_id: parent.id,
   });
+  const sibling = await create({
+    title: "Synthetic tree sibling",
+    parent_id: parent.id,
+  });
   const step = await create({
-    title: "Synthetic tree step",
+    title: "Synthetic hidden step",
     parent_id: parent.id,
     kind: "step",
     duration_minutes: 30,
@@ -87,7 +91,8 @@ test("subtasks start folded and load only on expansion, with nested steps, editi
     exact: true,
   });
   await expect(list.getByText(child.title, { exact: true })).toBeVisible();
-  await expect(list.getByText(step.title, { exact: true })).toBeVisible();
+  await expect(list.getByText(sibling.title, { exact: true })).toBeVisible();
+  await expect(list.getByText(step.title, { exact: true })).toHaveCount(0);
   await expect(
     list.getByText("Synthetic tree grandchild", { exact: true }),
   ).toHaveCount(0);
@@ -126,6 +131,10 @@ test("subtasks start folded and load only on expansion, with nested steps, editi
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   await expect(
     list.getByText("Synthetic tree edited child", { exact: true }),
@@ -133,33 +142,33 @@ test("subtasks start folded and load only on expansion, with nested steps, editi
   const editedRow = list.locator(".task-row").filter({
     has: page.getByText("Synthetic tree edited child", { exact: true }),
   });
-  const stepRow = list
+  const siblingRow = list
     .locator(".task-row")
-    .filter({ has: page.getByText(step.title, { exact: true }) });
+    .filter({ has: page.getByText(sibling.title, { exact: true }) });
   const ordered = page.waitForResponse(
     (response) =>
       response.request().method() === "PATCH" &&
-      response.url().includes(`/tasks/${step.id}`),
+      response.url().includes(`/tasks/${sibling.id}`),
   );
-  await stepRow
-    .getByRole("button", { name: `Drag ${step.title}`, exact: true })
+  await siblingRow
+    .getByRole("button", { name: `Drag ${sibling.title}`, exact: true })
     .dragTo(editedRow);
   expect((await ordered).status()).toBe(200);
   await expect
     .poll(() => list.locator(".task-title").allTextContents())
-    .toEqual([step.title, "Synthetic tree edited child"]);
+    .toEqual([sibling.title, "Synthetic tree edited child"]);
   await list
-    .getByRole("button", { name: `Complete ${step.title}`, exact: true })
+    .getByRole("button", { name: `Complete ${sibling.title}`, exact: true })
     .click();
-  await expect(list.getByText(step.title, { exact: true })).toHaveCount(0);
+  await expect(list.getByText(sibling.title, { exact: true })).toHaveCount(0);
   expect(
-    (await (await request.get(`/api/tasks/v1/tasks/${step.id}`)).json())
+    (await (await request.get(`/api/tasks/v1/tasks/${sibling.id}`)).json())
       .completed,
   ).toBe(true);
   await page.getByRole("checkbox", { name: "Completed", exact: true }).check();
-  await expect(list.getByText(step.title, { exact: true })).toBeVisible();
+  await expect(list.getByText(sibling.title, { exact: true })).toBeVisible();
   await expect(
-    list.getByRole("button", { name: `Reopen ${step.title}`, exact: true }),
+    list.getByRole("button", { name: `Reopen ${sibling.title}`, exact: true }),
   ).toBeVisible();
   await page.reload();
   await expect(expand).toBeVisible();
@@ -411,4 +420,202 @@ test("task details reorder both subtasks and steps by dragging and keep the save
     expect(saved.duration_minutes || 0).toBe(duration);
     expect(saved.completed || false).toBe(false);
   }
+});
+
+test("saving existing tasks, subtasks and steps preserves the editor, scroll and fresh write baseline", async ({
+  page,
+  request,
+}) => {
+  const create = await creator(request);
+  const parent = await create({
+    title: `Synthetic persistent editor ${crypto.randomUUID()}`,
+  });
+  const child = await create({
+    title: "Synthetic editable subtask",
+    parent_id: parent.id,
+  });
+  const step = await create({
+    title: "Synthetic editable step",
+    parent_id: parent.id,
+    kind: "step",
+    duration_minutes: 30,
+  });
+  await planning(page);
+  await page.setViewportSize({ width: 1280, height: 620 });
+  let patches = 0;
+  page.on("request", (r) => {
+    if (
+      r.method() === "PATCH" &&
+      new URL(r.url()).pathname.startsWith("/api/tasks/")
+    )
+      patches++;
+  });
+  for (const [task, role] of [
+    [parent, "Task details"],
+    [child, "Task details"],
+    [step, "Step details"],
+  ] as const) {
+    await page.goto(`/?task=${task.id}#/inbox`);
+    const dialog = page.getByRole("dialog", { name: role, exact: true });
+    const title = dialog.getByRole("textbox", {
+      name: "Task name",
+      exact: true,
+    });
+    await title.fill(`${task.title} edited`);
+    const body = dialog.locator(".task-edit-body");
+    const scroll = await body.evaluate((el) => {
+      el.scrollTop = 90;
+      return el.scrollTop;
+    });
+    const frame = await dialog.boundingBox();
+    const save = dialog.getByRole("button", {
+      name: "Save changes",
+      exact: true,
+    });
+    const saveFrame = await save.boundingBox();
+    await save.click();
+    await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+    expect(await dialog.boundingBox()).toEqual(frame);
+    expect(await save.boundingBox()).toEqual(saveFrame);
+    expect(await body.evaluate((el) => el.scrollTop)).toBe(scroll);
+    await title.fill(`${task.title} edited twice`);
+    await expect(dialog.locator(".task-save-status")).toHaveText("");
+    await save.click();
+    await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+    const before = await (
+      await request.get(`/api/tasks/v1/tasks/${task.id}`)
+    ).json();
+    expect(before.title).toBe(`${task.title} edited twice`);
+    const writes = patches;
+    await save.click();
+    await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+    expect(patches).toBe(writes);
+    const after = await (
+      await request.get(`/api/tasks/v1/tasks/${task.id}`)
+    ).json();
+    expect(after.etag).toBe(before.etag);
+    await dialog
+      .getByRole("button", { name: "Close dialog", exact: true })
+      .click();
+    await expect(dialog).not.toBeVisible();
+  }
+});
+
+test("main-list dragging can detach a subtask without changing its dates, project or descendants", async ({
+  page,
+  request,
+}) => {
+  const project = await (
+    await creator(request, "projects")
+  )({ title: `Synthetic detach project ${crypto.randomUUID()}` });
+  const create = await creator(request);
+  const parent = await create({
+    title: `Synthetic detach parent ${crypto.randomUUID()}`,
+    project_id: project.id,
+  });
+  const child = await create({
+    title: "Synthetic detach child",
+    parent_id: parent.id,
+    due_date: "2040-03-04",
+    deadline: "2040-04-05",
+    priority: 2,
+  });
+  const other = await create({
+    title: "Synthetic detach by drop zone",
+    parent_id: parent.id,
+  });
+  const grandchild = await create({
+    title: "Synthetic retained grandchild",
+    parent_id: child.id,
+  });
+  const step = await create({
+    title: "Synthetic retained hidden step",
+    parent_id: child.id,
+    kind: "step",
+    duration_minutes: 45,
+  });
+  const before = await (
+    await request.get(`/api/tasks/v1/tasks/${child.id}`)
+  ).json();
+  await page.goto(`/#/project/${project.id}`);
+  await page
+    .getByRole("button", {
+      name: `Expand subtasks for ${parent.title}`,
+      exact: true,
+    })
+    .click();
+  const nested = page.getByRole("list", {
+    name: `Subtasks of ${parent.title}`,
+    exact: true,
+  });
+  const rootRow = page.locator(".task-row").filter({
+    has: page.getByRole("button", {
+      name: `Drag ${parent.title}`,
+      exact: true,
+    }),
+  });
+  const detached = page.waitForResponse(
+    (r) =>
+      r.request().method() === "PATCH" &&
+      r.url().includes(`/tasks/${child.id}`),
+  );
+  await nested
+    .getByRole("button", { name: `Drag ${child.title}`, exact: true })
+    .dragTo(rootRow, { targetPosition: { x: 80, y: 5 } });
+  expect((await detached).status()).toBe(200);
+  await expect(nested.getByText(child.title, { exact: true })).toHaveCount(0);
+  const secondDetach = page.waitForResponse(
+    (r) =>
+      r.request().method() === "PATCH" &&
+      r.url().includes(`/tasks/${other.id}`),
+  );
+  const grip = nested.getByRole("button", {
+    name: `Drag ${other.title}`,
+    exact: true,
+  });
+  const gripBox = await grip.boundingBox();
+  await page.mouse.move(gripBox!.x + 8, gripBox!.y + 7);
+  await page.mouse.down();
+  await page.mouse.move(gripBox!.x + 20, gripBox!.y + 7, { steps: 4 });
+  const zone = page.getByRole("region", {
+    name: "Make independent task",
+    exact: true,
+  });
+  await zone.scrollIntoViewIfNeeded();
+  const zoneBox = await zone.boundingBox();
+  await page.mouse.move(zoneBox!.x + 40, zoneBox!.y + 20, { steps: 5 });
+  await page.mouse.move(zoneBox!.x + 42, zoneBox!.y + 21);
+  await page.mouse.up();
+  expect((await secondDetach).status()).toBe(200);
+  await page.reload();
+  await expect(
+    page.locator(".task-list > .task-branch > .task-row .task-title"),
+  ).toHaveText([child.title, parent.title, other.title]);
+  const after = await (
+    await request.get(`/api/tasks/v1/tasks/${child.id}`)
+  ).json();
+  expect(after.parent_id || "").toBe("");
+  for (const key of [
+    "id",
+    "kind",
+    "project_id",
+    "section_id",
+    "due_date",
+    "deadline",
+    "priority",
+  ])
+    expect(after[key]).toEqual(before[key]);
+  for (const descendant of [grandchild, step])
+    expect(
+      (await (await request.get(`/api/tasks/v1/tasks/${descendant.id}`)).json())
+        .parent_id,
+    ).toBe(child.id);
+  await page
+    .getByRole("button", {
+      name: `Expand subtasks for ${child.title}`,
+      exact: true,
+    })
+    .click();
+  await expect(page.getByText(grandchild.title, { exact: true })).toBeVisible();
+  await expect(page.getByText(step.title, { exact: true })).toHaveCount(0);
 });

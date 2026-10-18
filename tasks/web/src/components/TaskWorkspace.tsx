@@ -256,7 +256,8 @@ export function TaskWorkspace({
         }
         onOpen={(id) => void openTask(id)}
         onComplete={(task) => void complete(task)}
-        onReorder={(id, before, peers) => void reorder(id, before, peers)}
+        onReorder={(task, before, peers) => void reorder(task, before, peers)}
+        onDetach={(task) => void actions.detach(task)}
         groupBy={
           route.page === "upcoming"
             ? "date"

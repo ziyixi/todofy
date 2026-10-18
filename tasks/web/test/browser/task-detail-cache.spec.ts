@@ -137,6 +137,10 @@ test("only a full detail reply seeds reopening; own writes and focus invalidate 
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   await open(page, ownTitle);
   expect(reads).toBe(2);

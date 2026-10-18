@@ -273,17 +273,24 @@ export function useTaskActions(
     }
   }
   async function reorder(
-    id: string,
+    task: Task,
     before: Task,
     peers: readonly Task[] = list.tasks,
   ) {
+    if (
+      task.parentId &&
+      !before.parentId &&
+      task.projectId === before.projectId &&
+      task.sectionId === before.sectionId
+    ) {
+      await detach(task, orderBy === "sort_order" ? before : undefined);
+      return;
+    }
     if (orderBy !== "sort_order") {
       setNotice("Choose Custom order before dragging tasks.");
       return;
     }
-    const task = peers.find((item) => item.id === id);
     if (
-      !task ||
       task.parentId !== before.parentId ||
       task.projectId !== before.projectId ||
       task.sectionId !== before.sectionId
@@ -297,9 +304,9 @@ export function useTaskActions(
         item.sectionId === before.sectionId &&
         item.projectId === before.projectId,
     );
-    const sortOrder = taskDropOrder(siblings, id, before.id);
+    const sortOrder = taskDropOrder(siblings, task.id, before.id);
     if (sortOrder === undefined) return;
-    setBusyIds(new Set([id]));
+    setBusyIds(new Set([task.id]));
     try {
       await api.updateTask({
         requestId: crypto.randomUUID(),
@@ -308,6 +315,36 @@ export function useTaskActions(
         updateMask: { paths: ["sort_order"] },
       });
       await list.read();
+    } catch (reason) {
+      setNotice(describeError(reason));
+    } finally {
+      setBusyIds(new Set());
+    }
+  }
+  async function detach(task: Task, before?: Task) {
+    if (!task.parentId || task.kind === "step") return;
+    const siblings = list.tasks.filter(
+      (other) =>
+        !other.parentId &&
+        other.projectId === task.projectId &&
+        other.sectionId === task.sectionId,
+    );
+    const sortOrder = before
+      ? taskDropOrder(siblings, task.id, before.id)
+      : Math.max(0, ...siblings.map((other) => other.sortOrder ?? 0)) + 1;
+    if (sortOrder === undefined) return;
+    setBusyIds(new Set([task.id]));
+    setNotice("");
+    try {
+      await api.updateTask({
+        requestId: crypto.randomUUID(),
+        etag: task.etag,
+        task: { name: task.name, parentId: "", sortOrder },
+        updateMask: { paths: ["parent_id", "sort_order"] },
+      });
+      taskChanged();
+      await list.read();
+      setNotice("Task moved out of its parent");
     } catch (reason) {
       setNotice(describeError(reason));
     } finally {
@@ -379,6 +416,7 @@ export function useTaskActions(
     deleteTask,
     complete,
     reorder,
+    detach,
     batch,
     busyIds,
     selected,

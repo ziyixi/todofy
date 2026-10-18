@@ -28,7 +28,7 @@ export async function catalogCounts(
       .filter((project) => project.inbox)
       .map((project) => project.id),
   ];
-  const active = "t.deleted_at IS NULL AND t.completed=0";
+  const active = "t.deleted_at IS NULL AND t.completed=0 AND t.kind='task'";
   const visible = `${active} AND t.project_archived=0`;
   const results = await storage(() =>
     db.batch<CountRow>([

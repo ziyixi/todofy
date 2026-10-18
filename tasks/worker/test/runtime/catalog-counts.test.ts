@@ -214,3 +214,58 @@ test("catalog metadata-only reads preserve organization while legacy and explici
   expect((task_counts as unknown[]).length).toBeGreaterThan(0);
   expect(await metadata.json()).toEqual(organization);
 });
+
+test("ordinary views and badges exclude Steps while children and all-view searches retain them", async () => {
+  const today = localDate(Date.now(), "America/Los_Angeles");
+  const baseline = (await (
+    await harness.fetch("/api/tasks/v1/catalog")
+  ).json()) as { task_counts: { view: string; count?: number }[] };
+  const before =
+    baseline.task_counts.find((x) => x.view === "today")?.count ?? 0;
+  await harness.db.batch([
+    harness.db
+      .prepare(
+        "INSERT INTO tasks(id,title,due_date,created_at,updated_at) VALUES('view-parent','Synthetic kind-view parent',?,1,1)",
+      )
+      .bind(today),
+    harness.db
+      .prepare(
+        "INSERT INTO tasks(id,title,parent_id,due_date,created_at,updated_at) VALUES('view-child','Synthetic kind-view child','view-parent',?,1,1)",
+      )
+      .bind(today),
+    harness.db
+      .prepare(
+        "INSERT INTO tasks(id,title,parent_id,kind,due_date,created_at,updated_at) VALUES('view-step','Synthetic kind-view only-step','view-parent','step',?,1,1)",
+      )
+      .bind(today),
+  ]);
+  const list = (await (
+    await harness.fetch("/api/tasks/v1/tasks?view=today")
+  ).json()) as { tasks: { id: string; kind: string }[] };
+  expect(list.tasks.some((x) => x.id === "view-step")).toBe(false);
+  expect(
+    list.tasks
+      .filter((x) => x.id.startsWith("view-"))
+      .map((x) => x.id)
+      .sort(),
+  ).toEqual(["view-child", "view-parent"]);
+  const catalog = (await (
+    await harness.fetch("/api/tasks/v1/catalog")
+  ).json()) as { task_counts: { view: string; count?: number }[] };
+  expect(catalog.task_counts.find((x) => x.view === "today")?.count).toBe(
+    before + 2,
+  );
+  const children = (await (
+    await harness.fetch("/api/tasks/v1/tasks?parent_id=view-parent")
+  ).json()) as { tasks: { id: string }[] };
+  expect(children.tasks.map((x) => x.id).sort()).toEqual([
+    "view-child",
+    "view-step",
+  ]);
+  const search = (await (
+    await harness.fetch(
+      "/api/tasks/v1/tasks?view=all&query=Synthetic%20kind-view%20only-step",
+    )
+  ).json()) as { tasks: { id: string }[] };
+  expect(search.tasks.map((x) => x.id)).toEqual(["view-step"]);
+});

@@ -88,6 +88,10 @@ test("quick add, edit, complete and reopen persist through page reload", async (
     .getByRole("textbox", { name: "Task name", exact: true })
     .fill("Synthetic edited review task");
   await details.getByRole("button", { name: "Save changes" }).click();
+  await expect(details.locator(".task-save-status")).toHaveText("Saved");
+  await details
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await page
     .getByRole("button", {
       name: "Complete Synthetic edited review task",
@@ -136,8 +140,12 @@ test("steps remain attached and date preview keeps deadline independent", async 
   await dialog.getByRole("button", { name: "Date", exact: true }).click();
   await dialog.getByLabel("Schedule", { exact: true }).fill("every Tuesday");
   await dialog.getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(dialog.getByRole("status")).toHaveText(/Next:/);
-  await dialog.getByRole("button", { name: "Time options", exact: true }).click();
+  await expect(
+    dialog.getByRole("status").filter({ hasText: /^Next:/ }),
+  ).toHaveText(/Next:/);
+  await dialog
+    .getByRole("button", { name: "Time options", exact: true })
+    .click();
   await dialog.getByLabel("Time", { exact: true }).fill("14:15");
   await dialog.getByRole("button", { name: "Deadline", exact: true }).click();
   await dialog.getByLabel("Deadline text", { exact: true }).fill("2026-12-31");
@@ -149,6 +157,10 @@ test("steps remain attached and date preview keeps deadline independent", async 
     dialog.getByRole("button", { name: "Deadline", exact: true }),
   ).toHaveText("Dec 31");
   await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   await page.reload();
   await dialog
@@ -161,9 +173,13 @@ test("steps remain attached and date preview keeps deadline independent", async 
     dialog.getByRole("button", { name: "Deadline", exact: true }),
   ).toHaveText("Dec 31");
   await dialog.getByRole("button", { name: "Date", exact: true }).click();
-  await dialog.getByRole("button", { name: "Time options", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Time options", exact: true })
+    .click();
   await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("14:15");
-  await dialog.getByRole("button", { name: "Repeat options", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Repeat options", exact: true })
+    .click();
   await expect(dialog.getByLabel("Repeat", { exact: true })).toHaveValue(
     "weekly",
   );
@@ -188,7 +204,9 @@ test("moving a timed date preserves the local clock time across daylight saving"
   await expect(
     dialog.getByRole("button", { name: "Time options", exact: true }),
   ).toHaveText("Time · 11:00");
-  await dialog.getByRole("button", { name: "Time options", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Time options", exact: true })
+    .click();
   await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("11:00");
   await dialog
     .getByRole("gridcell", { name: "Tuesday, November 3, 2026" })
@@ -197,6 +215,10 @@ test("moving a timed date preserves the local clock time across daylight saving"
     dialog.getByRole("button", { name: "Save changes" }),
   ).toBeEnabled();
   await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   const saved = await (await request.get(`/api/tasks/v1/${task.name}`)).json();
   expect(saved.due_date).toBe("2026-11-03");
@@ -437,12 +459,10 @@ test("completing a parent with a recurring subtask shows the reason inside its o
     .getByRole("button", { name: "Complete task", exact: true })
     .click();
   await expect(
-    dialog
-      .getByRole("alert")
-      .filter({
-        hasText:
-          "Complete recurring subtasks separately before completing their parent",
-      }),
+    dialog.getByRole("alert").filter({
+      hasText:
+        "Complete recurring subtasks separately before completing their parent",
+    }),
   ).toHaveText(
     "Complete recurring subtasks separately before completing their parent",
   );
@@ -504,6 +524,10 @@ test("task descriptions render Markdown, edit and persist without loading remote
   ).toHaveAttribute("href", "https://example.org/updated");
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
     .click();
   await expect(dialog).not.toBeVisible();
   await page.goto(`/?task=${parent.id}#/inbox`);

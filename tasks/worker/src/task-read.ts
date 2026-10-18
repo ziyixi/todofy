@@ -34,6 +34,8 @@ export async function listTasks(db: D1Database, request: ListTasksRequest, zone:
     conditions.push('t.parent_id=?');
     values.push(checkedId(request.parentId));
   } else {
+    // Ordinary views are outcomes. Explicit IDs, parent reads and all preserve executable Steps.
+    if (view !== 'all' && !request.taskIds.length) conditions.push("t.kind='task'");
     if (view === 'completed' || !request.includeCompleted)
       conditions.push(`t.completed=${view === 'completed' ? '1' : '0'}`);
     if (view !== 'completed' && view !== 'project') conditions.push('t.project_archived=0');
@@ -87,6 +89,11 @@ export async function listTasks(db: D1Database, request: ListTasksRequest, zone:
       }
       case 'all':
       case 'completed':
+        if (view === 'all' && request.query.trim()) {
+          if (request.query.length > 200) invalid('Search needs 1–200 characters');
+          conditions.push('(instr(lower(t.title),lower(?))>0 OR instr(lower(t.description),lower(?))>0)');
+          values.push(request.query, request.query);
+        }
         if (request.projectId) {
           conditions.push('t.project_id=?');
           values.push(checkedId(request.projectId));

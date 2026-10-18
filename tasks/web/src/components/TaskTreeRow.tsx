@@ -99,7 +99,8 @@ export function TaskTreeRow({
     }
   }
   const path = [...ancestors, task.id];
-  const eligible = children.filter(
+  const taskChildren = children.filter((child) => child.kind !== "step");
+  const eligible = taskChildren.filter(
     (child) => (showCompleted || !child.completed) && !path.includes(child.id),
   );
   // Today/search may already list a dated or matching child independently. Keep that view intact.
@@ -107,7 +108,7 @@ export function TaskTreeRow({
   let emptyMessage = "No subtasks.";
   if (eligible.length)
     emptyMessage = "Subtasks are already listed in this view.";
-  else if (children.length) emptyMessage = "All subtasks are completed.";
+  else if (taskChildren.length) emptyMessage = "All subtasks are completed.";
   return (
     <TaskRow
       {...row}
@@ -157,7 +158,7 @@ export function TaskTreeRow({
                 </button>
               </li>
             )}
-            {loaded && !pending && !error && !visible.length && (
+            {loaded && !pending && !error && !visible.length && !nextPage && (
               <li className="task-tree-status">{emptyMessage}</li>
             )}
             {nextPage && (

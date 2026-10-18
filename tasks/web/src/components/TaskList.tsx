@@ -13,6 +13,7 @@ export function TaskList({
   onOpen,
   onComplete,
   onReorder,
+  onDetach,
   groupBy = "none",
   menuActions,
   showCompleted = false,
@@ -25,13 +26,14 @@ export function TaskList({
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onComplete: (task: Task) => void;
-  onReorder: (id: string, before: Task, peers?: readonly Task[]) => void;
+  onReorder: (task: Task, before: Task, peers?: readonly Task[]) => void;
+  onDetach: (task: Task) => void;
   groupBy?: "none" | "date" | "section";
   menuActions?: TaskMenuActions;
   showCompleted?: boolean;
   orderBy?: string;
 }) {
-  const [draggedId, setDraggedId] = useState("");
+  const [draggedTask, setDraggedTask] = useState<Task>();
   const [overId, setOverId] = useState("");
   const taskIndex = useMemo(
     () => new Map(tasks.map((task) => [task.id, task])),
@@ -73,9 +75,9 @@ export function TaskList({
     onOpen,
     onComplete,
     onReorder,
-    draggedId,
+    draggedTask,
     overId,
-    setDraggedId,
+    setDraggedTask,
     setOverId,
     menuActions,
   };
@@ -117,6 +119,28 @@ export function TaskList({
           </ul>
         </section>
       ))}
+      {draggedTask?.parentId && draggedTask.kind !== "step" && (
+        <div
+          role="region"
+          aria-label="Make independent task"
+          className={`task-detach-zone ${overId === "detach" ? "is-over" : ""}`}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            setOverId("detach");
+          }}
+          onDragLeave={() => setOverId("")}
+          onDrop={(event) => {
+            event.preventDefault();
+            onDetach(draggedTask);
+            setDraggedTask(undefined);
+            setOverId("");
+          }}
+        >
+          Make independent task
+          <span>Keep its project and dates.</span>
+        </div>
+      )}
     </div>
   );
 }
