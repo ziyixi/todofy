@@ -139,7 +139,7 @@ describe('业务流程', () => {
       '阶段 3 解析：正常，待处理任务 0',
       '阶段 4 Webhook 投递：正常，投递失败 0，金丝雀已验证',
       '阶段 5 Todofy 摘要：需关注，24 小时 41 封，金丝雀已验证',
-      '阶段 6 Todoist 与提醒：正常，需处理事件 0',
+      '阶段 6 任务与提醒：正常，需处理事件 0',
     ])
     expect(nodes[4]).toHaveAttribute('aria-pressed', 'true')
 
