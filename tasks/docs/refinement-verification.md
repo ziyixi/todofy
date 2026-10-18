@@ -23,19 +23,19 @@ The release receipt for items 27–28 is in [the October 18 handoff archive](../
 | 4 | Projects managed from sidebar | Catalog contains Labels & filters; archived projects remain accessible. |
 | 5 | Dependencies are native; obsolete DAG status tags removed | Empty derived-status tags retired. Existing metadata contained no dependency declarations; no edges were invented. Named native dependencies and completion/unblocking pass browser checks. |
 | 6 | Obsolete reminder/test labels removed | Memberships removed and exact obsolete labels retired. |
-| 7 | Native Deep/Shallow effort | Additive Tasks schema, copy/write/read and real D1 checks. 163 Deep, 119 Shallow and the one conflict left unspecified are verified in production. |
+| 7 | Native Deep/Shallow effort | Additive Tasks schema, copy/write/read and real D1 checks. Every Deep and Shallow fact, with the conflicting one left unspecified, is verified in production. |
 | 8 | My projects collapse works | Browser/UI checks include persisted collapse and restored projects. |
 | 9 | Empty search has no API error | Empty requests are skipped; clearing a pending query prevents stale results. |
-| 10 | Stored legacy key suffixes removed | 222 task titles cleaned, including the embedded key in the same target set; zero markers remain. Completion snapshots are unchanged. |
+| 10 | Stored legacy key suffixes removed | Every targeted task title cleaned, including the embedded key in the same target set; zero markers remain. Completion snapshots are unchanged. |
 | 11 | Structured Repeat controls | Real D1/browser save/reload covers weekly intervals, weekdays, completion-relative and monthly rules; unit checks include yearly month/day. |
 | 12 | Clock belongs to Steps or explicitly standalone actions | Ordinary editor hides Time; Step local time persists with the account zone. Context-menu browser checks also save only the date for ordinary Tasks. |
 | 13 | Deadline minus selected days/weeks controls Start now | Native custom 0–365-day window, real Core/Tasks D1 test; ordinary dialog save/reopen retains it. |
-| 14 | Standalone action makes a Task schedulable | Native flag mapping fixed; only explicit action/Step eligibility is used. The two existing queued ordinary tasks now have explicit Standalone facts; all queues are unchanged. |
+| 14 | Standalone action makes a Task schedulable | Native flag mapping fixed; only explicit action/Step eligibility is used. The already-queued ordinary tasks now have explicit Standalone facts; all queues are unchanged. |
 | 15 | Blocked names prerequisites | Editor shows named dependencies and current completion state. |
 | 16 | Compact visible Plan options | No collapsed Task options section; native controls share existing planning actions. |
 | 17 | Ordinary task editor exposes options, children and Deadline | Synthetic Chrome check and real D1 browser journeys. |
 | 18 | Delete child from parent | Inline confirmation removes only the selected child; parent/sibling survive reload. |
-| 19 | Separate Subtasks and Steps | New kind is explicit; only verified old AppendSteps receipts qualify for backfill. Four receipt-proven children were backfilled; plain descendants were not inferred to be Steps. |
+| 19 | Separate Subtasks and Steps | New kind is explicit; only verified old AppendSteps receipts qualify for backfill. Only receipt-proven children were backfilled; plain descendants were not inferred to be Steps. |
 | 20 | Start ahead always visible | In the normal properties rail, beside Deadline; no More details click. |
 | 21 | Dependencies drive Blocked | Separate Blocked checkbox removed. Unknown/deleted and reopened prerequisites are distinguished. |
 | 22 | Focus uses FlowDay timer | Shared count-up/25/50-minute mode, server settlement and wall-clock rendering; completion replay, parent-cascade and unrelated-timer checks pass against existing APIs. |
@@ -81,7 +81,7 @@ The release independently verified Worker versions and persistent identities bef
 | FlowDay | 7150757426 | `5ad78e1e-7aae-49a6-a0fb-7a4909902679` |
 | Todofy Core / Gateway | 7150769623 | `242ef20c-4ed8-4f4f-94ce-a2bcff79540a` / `8f61bf0e-9db2-4ef3-b7d6-24ee5819b747` |
 
-Owner Chrome confirmed 21 actual category badges, no empty-search error, the Labels & filters destination,
+Owner Chrome confirmed every actual category badge, no empty-search error, the Labels & filters destination,
 no Planning settings link, and My projects toggling true → false → true. A newly created, explicitly
 synthetic ordinary task saved and reopened with Committed, Personal, Standalone action, Deep work,
 tomorrow's Deadline and a one-week start window. Independent limited D1 reads confirmed `kind=task`,
@@ -95,15 +95,15 @@ completion replay through Core. No production timer mutation is claimed.
 
 ## Production cleanup (2026-10-18)
 
-The owner confirmed the concrete full scope. A fresh private plan matched 312 task rows: 222 task titles,
-163 Deep and 119 Shallow facts, one conflict set to unspecified, and four receipt-proven Steps. Eight
-obsolete labels were retired, the exact redundant Mail project was unfavorited, the separator filter
-was retired, and two already-queued ordinary tasks gained Standalone action. Remaining legacy labels
+The owner confirmed the concrete full scope. A fresh private plan matched exactly the frozen task rows: cleaned
+titles, Deep and Shallow facts, a conflicting one set to unspecified, and receipt-proven Steps. The obsolete
+labels were retired, the exact redundant Mail project was unfavorited, the separator filter was retired, and
+the already-queued ordinary tasks gained Standalone action. Remaining legacy labels
 and key markers are zero; no source Todoist data was changed.
 
-The final comparison preserves every task ID, parent/project identity, business date, estimate and all
-2,824 completion occurrences. Owner API reads of 25 FlowDay flows, 103 queue references, 15 completed
-queue references and 80 time entries are identical before and after cleanup. The native dependency
+The final comparison preserves every task ID, parent/project identity, business date, estimate and
+completion occurrence. Owner API reads of every FlowDay flow, queue reference, completed queue reference and
+time entry are identical before and after cleanup. The native dependency
 set is unchanged. Production Chrome shows no obsolete Favorites section, label or filter.
 
 The operator initially wrote Tasks update/delete metadata in Core's seconds. The exact frozen target

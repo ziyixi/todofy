@@ -13,16 +13,16 @@ completed before final metadata capture. All three live pause switches were true
 write count was zero. Actual Tasks, FlowDay, Core and gateway build identities and migrations were checked
 before applying the private conversion files.
 
-- All 310 planning-state rows match the frozen original choices, field by field. There are no orphan state rows.
-- Exactly 19 technical labels and 11 replaced filters were soft-retired. Their task memberships were removed;
-  8 ordinary labels and 1 ordinary filter remain. Task resources stayed at 2,653 across conversion.
-- All 12 imported filter colors were filled only where empty, including the retained historical filter rows.
-- 188 matched, still-pending legacy Mail entries remain visible. Already handled legacy summaries were marked
+- Every planning-state row matches the frozen original choices, field by field. There are no orphan state rows.
+- Exactly the planned technical labels and replaced filters were soft-retired. Their task memberships were
+  removed; the ordinary labels and filter remain. The task count was unchanged across conversion.
+- Imported filter colors were filled only where empty, including the retained historical filter rows.
+- Every matched, still-pending legacy Mail entry remains visible. Already handled legacy summaries were marked
   triaged; existing task IDs were retained. New native processing saves a taskless summary; conversion is an
   explicit owner action. No real Mail was converted or deleted for acceptance.
 - In actual owner Chrome, FlowDay showed **Tasks connected**, **no API key needed** and **Sync complete**.
-  The native pending-feed marker was absent and its cursor present. All 103 queue rows, 15 completed-queue
-  rows and 80 time references match the private pre-conversion baseline, including ordering and timestamps.
+  The native pending-feed marker was absent and its cursor present. Every queue row, completed-queue row
+  and time reference matches the private pre-conversion baseline, including ordering and timestamps.
 - Actual Tasks settings show an enabled native plan with no connection inputs or mapping confirmation. Plan
   and Focus load without errors. Mail loads its first 50 rows, offers pagination and has no task checkboxes.
   These checks did not edit real tasks, move cards, start timers or open real mail summaries.
@@ -31,7 +31,7 @@ before applying the private conversion files.
 Deployment `7148606156`. The three actual switches are back to their recorded false values. Independent
 provider comparison verified the declarations and persistent resources of all five Workers. Owner
 `serviceStatus` returned build `77edb469`, zero active jobs and an armed future Alarm; `VerifyPlanStore` returned
-310 state rows and zero orphans. The authenticated old `/plus` bookmark redirects to Tasks settings.
+the expected state rows and zero orphans. The authenticated old `/plus` bookmark redirects to Tasks settings.
 
 | Worker | Verified version after restoration |
 | --- | --- |
@@ -58,12 +58,12 @@ The original Todoist account was read for migration and UI comparison, without m
   FlowDay → Todofy → Home successfully. Its unrelated VPS job failed `UNAVAILABLE`; the whole run is not green.
 - [Todofy-only 39078766543](https://github.com/ziyixi/todofy/actions/runs/39078766543) succeeded and restored the
   original maintenance, processing and source-write pauses to false. Live status independently confirmed them.
-- The final private source snapshot has an empty post-export Sync delta. Production identities/digest match:
-  22 projects, 3 sections, 27 labels, 12 filters, 2,644 task resources and 2,824 completion occurrences.
-  Parent/project orphan counts are zero. Two historical label names have recovered native identities.
+- The final private source snapshot has an empty post-export Sync delta. Every project, section, label, filter,
+  task resource and completion occurrence matches it by identity and digest. Parent/project orphan counts are
+  zero. Historical label names no longer in the source catalog have recovered native identities.
 - Planning's final identity preflight matched zero rows, so no provider SQL was executed. FlowDay completed
   its bounded native sync. Queue and time-reference multisets are unchanged, including preexisting historical
-  cache gaps. Initial cache size was 836; all 106 active external IDs were included.
+  cache gaps. The initial cache included every active external ID.
 - With owner permission, one synthetic production task was created, edited, reloaded and soft-deleted.
   Readback confirms exactly one such row and its soft-delete. Imported tasks were not edited for acceptance.
 - The desktop PWA manifest is served behind owner Access. Disposable Chromium installability APIs pass;
@@ -130,10 +130,10 @@ Tasks labels stay separate. The native settings UI no longer offers label mappin
 
 The operator sequence was: pause existing writers; capture final private metadata and conversion SQL; publish the same green
 SHA; seed planning state, retire only exact replaced native label/filter IDs, then mark initialization and
-restore the recorded switches after verification. The read-only preview found 310 saved planning states, 19 technical labels and
-11 replaced filters. The remaining filter does not reference those labels. Of the legacy Mail candidates,
-186 have matching summaries and can stay visible for owner triage; unrelated or previously handled items are
-not reopened. Final capture found 188 matched entries; the verified result is recorded above. Existing tasks
+restore the recorded switches after verification. The read-only preview listed the saved planning states, the technical
+labels and the replaced filters. The remaining filter does not reference those labels. Legacy Mail candidates
+with matching summaries stay visible for owner triage; unrelated or previously handled items are not reopened.
+The final capture's matched entries are verified above. Existing tasks
 are retained. New mail remains taskless until the owner converts it. Old Todoist is unchanged.
 
 After migration 0002, source colors were copied into imported filters only where the new color was empty.
