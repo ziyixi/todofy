@@ -313,7 +313,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           bindings: { ...SYNTHETIC_BINDINGS, ...options.bindings },
           outboundService: (request: Request) => outbound(request),
         },
-        { name: 'focus-client', modules: true, script: 'export default {fetch(request, env) { return env.FOCUS.fetch(request); }}', compatibilityDate: '2026-09-08', serviceBindings: { FOCUS: { name: 'flowday', entrypoint: 'FocusEntrypoint' } } },
+        { name: 'focus-client', modules: true, script: 'export default {fetch(request, env) { return env.FOCUS.fetch(request); }}', compatibilityDate: '2026-09-08', serviceBindings: { FOCUS: { name: 'flowday', entrypoint: 'NativeFocusEntrypoint' } } },
       ],
     }),
   );

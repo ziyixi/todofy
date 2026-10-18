@@ -1,4 +1,4 @@
-/** Private service-binding surface for Todofy's authenticated extension gateway. */
+/** Private service-binding surface for Tasks' Plan and Focus, reached through Todofy's Planning channel. */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { FlowDayUiService } from '@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb';
 import { HttpTranscoder, type ShapeOf } from '@ziyixi/proto/http-transcoder';
@@ -27,21 +27,15 @@ const focusApi = new HttpTranscoder<ShapeOf<typeof FlowDayUiService>, ApiContext
   onUnexpected: (error) => flowdayError(isStorageError(error) ? 'UNAVAILABLE' : 'INTERNAL'),
 });
 
-/** Only same-account bindings can reach this entrypoint; default fetch keeps owner authentication. */
-export class FocusEntrypoint extends WorkerEntrypoint<Env> {
+/**
+ * Tasks' Plan and Focus, through Todofy's private Planning channel. Only same-account bindings reach it; the default
+ * fetch keeps owner authentication. It needs TASKS: FlowDay's tasks are a mirror of Tasks.
+ */
+export class NativeFocusEntrypoint extends WorkerEntrypoint<Env> {
   override async fetch(request: Request): Promise<Response> {
+    if (!this.env.TASKS) return focusApi.errorResponse(flowdayError('TASKS_UNAVAILABLE'), crypto.randomUUID());
     const context = { env: this.env, db: openDb(this.env.DB, new Meter()), fetcher: fetch, now: () => new Date() };
     const result = await focusApi.handle(request, context, crypto.randomUUID());
     return result?.response ?? focusApi.errorResponse(flowdayError('NOT_FOUND'), crypto.randomUUID());
-  }
-}
-
-/** Native Tasks must never synchronize against the legacy Todoist source during a staged deployment. */
-export class NativeFocusEntrypoint extends FocusEntrypoint {
-  override async fetch(request: Request): Promise<Response> {
-    if (!this.env.TASKS) {
-      return focusApi.errorResponse(flowdayError('TASKS_UNAVAILABLE'), crypto.randomUUID());
-    }
-    return super.fetch(request);
   }
 }

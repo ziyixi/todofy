@@ -514,18 +514,18 @@ first (`cd ../web && npm run build`), and apply the migrations locally:
     and a confirmed "Infra apply" (`infra/README.md` "FlowDay", F6), never by a dashboard delete, which the next
     plan would turn into a `create`. Keep the Worker's PWA exceptions only if the narrow bypass is kept.
 
-## Todoist Plus integration
+## Plan and Focus in Tasks
 
-`FocusEntrypoint` is a same-account service binding used by Todofy after its extension authentication. It permits
-paged task reads, daily flow reads, queue order changes, day moves and timer commands (ListTasks, GetFlow,
-UpdateFlow, RolloverFlow, GetTimerSession, CommandTimer: what Tasks' Plan and Focus call through Todofy). Every
-other method is NOT_FOUND there; estimates are Tasks durations, and FlowDay's own page runs the sync.
-It does not expose settings, credentials, local-task creation/deletion or the public owner authentication bypass.
-The normal Worker fetch still checks Access, Origin and CSRF.
+`NativeFocusEntrypoint` is a same-account service binding that Todofy's private Planning channel uses for Tasks'
+Plan and Focus. It permits paged task reads, daily flow reads, queue order changes, day moves and timer commands
+(ListTasks, GetFlow, UpdateFlow, RolloverFlow, GetTimerSession, CommandTimer). Every other method is NOT_FOUND
+there; estimates are Tasks durations, and FlowDay's own page runs the sync. Without the `TASKS` binding it answers
+TASKS_UNAVAILABLE. It does not expose settings, credentials, local-task creation/deletion or the public owner
+authentication bypass. The normal Worker fetch still checks Access, Origin and CSRF.
 
-Todofy completes the Todoist task first, then sends `SETTLE` with a stable request ID and the observed timer etag.
+Todofy completes the task in Tasks first, then sends `SETTLE` with a stable request ID and the observed timer etag.
 FlowDay records local completion and saves a matching timer segment; an unrelated active task keeps running.
-A failed settlement does not authorize another Todoist completion. Todofy keeps that success and retries settlement.
+A failed settlement does not authorize another completion. Todofy keeps that success and retries settlement.
 `STOP` and `PAUSE` never complete tasks. Ordinary FlowDay completion remains local to its day flow.
 
 Migration `0004` adds Todoist parent and actual deadline fields, distinct from due/scheduled dates. It also added

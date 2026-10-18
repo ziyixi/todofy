@@ -12,4 +12,4 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-export { FocusEntrypoint, NativeFocusEntrypoint } from './focus.ts';
+export { NativeFocusEntrypoint } from './focus.ts';

@@ -2,7 +2,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { startHarness, type Harness } from './harness.ts';
 import { setFlowTaskIds } from '../../src/store/flows.ts';
 let h: Harness;
-beforeAll(async () => { h = await startHarness({ bindings: { DEV_AUTH_BYPASS: 'false' } }); });
+// The focus methods read FlowDay's own tables; Tasks itself is never called.
+const tasks = () => Promise.resolve(Response.json({ error: { code: 500, message: 'Tasks is not called' } }, { status: 500 }));
+beforeAll(async () => { h = await startHarness({ bindings: { DEV_AUTH_BYPASS: 'false' }, tasks }); });
 afterAll(async () => { await h.dispose(); });
 beforeEach(async () => { await h.reset(); });
 
@@ -47,5 +49,16 @@ describe('private Focus entrypoint', () => {
     expect(result.flow.task_ids).toEqual(['local-one']);
     expect(result.destination_flow.task_ids).toEqual(['step', 'local-two', 'other-step']);
     expect((await h.focusFetch('/api/v1/settings')).status).toBe(404);
+  });
+
+  it('answers unavailable without the TASKS binding', async () => {
+    const alone = await startHarness({ bindings: { DEV_AUTH_BYPASS: 'false' } });
+    try {
+      const response = await alone.focusFetch('/api/v1/timerSession');
+      expect(response.status).toBe(503);
+      expect(await response.text()).toContain('TASKS_UNAVAILABLE');
+    } finally {
+      await alone.dispose();
+    }
   });
 });
