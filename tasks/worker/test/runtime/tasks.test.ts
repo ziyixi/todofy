@@ -126,7 +126,7 @@ test('a parent completes its recurring subtask, ending that repetition', async (
   expect(await completions(child)).toHaveLength(1);
 });
 
-test('a recurring deadline moves with its occurrence', async () => {
+test('a recurring deadline moves with its occurrence and a month-end rule is stored as the clamped rule', async () => {
   const task = await createTask('Synthetic deadline routine', {
     due_date: '2030-10-22',
     deadline: '2030-10-23',
@@ -135,6 +135,9 @@ test('a recurring deadline moves with its occurrence', async () => {
   const next = await complete(task);
   expect([next.due_date, next.deadline]).toEqual(['2030-10-29', '2030-10-30']);
   expect((await readTask(task)).deadline).toBe('2030-10-30');
+  const monthEnd = await createTask('Synthetic month-end bill', { due_date: '2030-01-31', recurrence: 'every month' });
+  expect(monthEnd.recurrence).toBe('RRULE:FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=31,-1;BYSETPOS=1');
+  expect((await complete(monthEnd)).due_date).toBe('2030-02-28');
 });
 
 test('reopening a child reopens its completed parents, and children of a completed parent stay editable', async () => {

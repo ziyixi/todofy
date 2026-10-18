@@ -160,6 +160,24 @@ export function recurrenceRule(text: string, start: string): { rule: RecurrenceR
   };
 }
 
+/**
+ * A monthly or yearly interval rule anchored after the 28th would skip every month without that day (RFC 5545),
+ * so it becomes the rule the Repeat picker writes: that day, or the month's last day when it has none. Every
+ * other rule, including completion-based `every!` rules, is returned unchanged.
+ */
+export function clampMonthEnd(recurrence: string, dueDate: string): string {
+  if (!validDate(dueDate) || Number(dueDate.slice(8)) <= 28) return recurrence;
+  const aliases: Record<string, string> = { monthly: 'every month', quarterly: 'every 3 months', yearly: 'every year' };
+  const text = recurrence.trim().toLowerCase();
+  const interval = /^every (?:(\d{1,3}) )?(month|year)s?$/.exec(aliases[text] ?? text);
+  if (!interval) return recurrence;
+  const day = Number(dueDate.slice(8));
+  const every = `INTERVAL=${interval[1] ?? '1'}`;
+  return interval[2] === 'month'
+    ? `RRULE:FREQ=MONTHLY;${every};BYMONTHDAY=${day},-1;BYSETPOS=1`
+    : `RRULE:FREQ=YEARLY;${every};BYMONTH=${Number(dueDate.slice(5, 7))};BYMONTHDAY=${day},-1;BYSETPOS=1`;
+}
+
 function wallParts(instant: Date, zone: string): string {
   const parts = formatter(zone).formatToParts(instant);
   const part = (key: string) => parts.find((p) => p.type === key)?.value ?? '';

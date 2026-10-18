@@ -516,6 +516,12 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   expect((await savedTask(request, task.id)).recurrence).toBe(
     "RRULE:FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=30,-1;BYSETPOS=1",
   );
+  // The row reads the rule in words and keeps the stored rule in its title.
+  await expect(
+    page
+      .locator(".task-row", { hasText: task.title })
+      .getByTitle("RRULE:FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=30,-1;BYSETPOS=1"),
+  ).toHaveText("Monthly on the 30th (or last day)");
   const step = await createTask(
     request,
     `Synthetic timed step ${crypto.randomUUID()}`,

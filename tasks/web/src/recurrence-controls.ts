@@ -60,9 +60,10 @@ export function readRepeat(value: string, date: string): RepeatOptions {
       (frequency === "monthly" && (fields.BYDAY || fields.BYMONTH)) ||
       (frequency === "yearly" &&
         (fields.BYDAY ||
-          fields.BYSETPOS ||
           fields.BYMONTH?.includes(",") ||
-          (monthDays && monthDays.length !== 1)))
+          (monthDays &&
+            monthDays.length !== 1 &&
+            !(monthDays.length === 2 && monthDays[1] === -1 && fields.BYSETPOS))))
     )
       return { ...base, preserved: value };
     if (
@@ -161,7 +162,45 @@ export function writeRepeat(value: RepeatOptions): string {
       value.monthDay === -1
         ? ";BYMONTHDAY=-1"
         : `;BYMONTHDAY=${value.monthDay},-1;BYSETPOS=1`;
+  // After the 28th, the month's last day stands in when the date does not exist (Feb 29), as monthly does.
   if (value.frequency === "yearly")
-    result += `;BYMONTH=${value.month};BYMONTHDAY=${value.monthDay}`;
+    result += `;BYMONTH=${value.month};BYMONTHDAY=${value.monthDay}${value.monthDay > 28 ? ",-1;BYSETPOS=1" : ""}`;
   return result;
+}
+
+/** The short summary the date picker and task rows show; the rule itself stays in their title. */
+export function repeatLabel(rule: string): string {
+  if (!rule) return "Repeat";
+  const repeat = readRepeat(rule, "");
+  if (repeat.preserved) return "Custom repeat";
+  const summary =
+    repeat.interval === 1
+      ? {
+          none: "Repeat",
+          daily: "Daily",
+          weekdays: "Weekdays",
+          weekly: "Weekly",
+          monthly: "Monthly",
+          yearly: "Yearly",
+        }[repeat.frequency]
+      : `Every ${repeat.interval} ${
+          {
+            none: "days",
+            daily: "days",
+            weekdays: "weekdays",
+            weekly: "weeks",
+            monthly: "months",
+            yearly: "years",
+          }[repeat.frequency]
+        }`;
+  // Only a rule that names its day says it: an interval rule takes the day from the task's date.
+  const day =
+    repeat.frequency !== "monthly"
+      ? ""
+      : repeat.monthDay === -1
+        ? " on the last day"
+        : repeat.monthDay > 28
+          ? ` on the ${repeat.monthDay}${repeat.monthDay === 31 ? "st" : "th"} (or last day)`
+          : "";
+  return `${summary}${day}${repeat.afterCompletion ? " · after completion" : ""}`;
 }

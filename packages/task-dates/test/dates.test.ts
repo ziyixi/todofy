@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { daysBetween, nextOccurrence, previewDate, recurrenceRule, validDate } from '../src/index.ts';
+import { clampMonthEnd, daysBetween, nextOccurrence, previewDate, recurrenceRule, validDate } from '../src/index.ts';
 
 test('plain dates remain calendar dates and timed input resolves the account timezone', () => {
   expect(previewDate('tomorrow', '2026-10-17', 'America/Los_Angeles')).toEqual({
@@ -78,6 +78,38 @@ test('the 30th clamps to February month-end and then returns to March 30', () =>
     expect(nextOccurrence(next, Date.parse(`${february}T12:00:00Z`), 'UTC').dueDate).toBe(`${year}-03-30`);
     expect(nextOccurrence(january, Date.parse(`${year}-03-01T12:00:00Z`), 'UTC').dueDate).toBe(`${year}-03-30`);
   }
+});
+
+/** Completes each occurrence on its due day and lists the dates it advances to. */
+function occurrences(recurrence: string, dueDate: string, count: number): string[] {
+  const dates: string[] = [];
+  let current = { dueDate, dueDatetime: '', dueTimezone: '', recurrence: clampMonthEnd(recurrence, dueDate) };
+  for (let index = 0; index < count; index++) {
+    current = nextOccurrence(current, Date.parse(`${current.dueDate}T12:00:00Z`), 'UTC');
+    dates.push(current.dueDate);
+  }
+  return dates;
+}
+
+test('month-end interval rules keep the last day instead of skipping short months', () => {
+  expect(clampMonthEnd('every month', '2026-01-31')).toBe('RRULE:FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=31,-1;BYSETPOS=1');
+  expect(occurrences('every month', '2026-01-31', 2)).toEqual(['2026-02-28', '2026-03-31']);
+  expect(occurrences('Monthly', '2026-01-31', 1)).toEqual(['2026-02-28']);
+  expect(occurrences('every 3 months', '2026-11-30', 2)).toEqual(['2027-02-28', '2027-05-30']);
+  expect(occurrences('quarterly', '2026-11-30', 1)).toEqual(['2027-02-28']);
+  expect(occurrences('every year', '2028-02-29', 4)).toEqual(['2029-02-28', '2030-02-28', '2031-02-28', '2032-02-29']);
+  expect(occurrences('yearly', '2028-02-29', 1)).toEqual(['2029-02-28']);
+});
+
+test('other rules and earlier anchor days keep their text', () => {
+  expect(clampMonthEnd('every month', '2026-01-28')).toBe('every month');
+  expect(clampMonthEnd('every! month', '2026-01-31')).toBe('every! month');
+  expect(clampMonthEnd('every week', '2026-01-31')).toBe('every week');
+  expect(clampMonthEnd('every 30th', '2026-01-30')).toBe('every 30th');
+  expect(clampMonthEnd('RRULE:FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=31', '2026-01-31')).toBe(
+    'RRULE:FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=31',
+  );
+  expect(clampMonthEnd('every month', '')).toBe('every month');
 });
 
 test('days between calendar dates count across months and backwards', () => {

@@ -10,7 +10,7 @@ import type {
   ReopenTaskRequest,
 } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
-import { addDays, daysBetween, nextOccurrence } from '@ziyixi/task-dates';
+import { addDays, clampMonthEnd, daysBetween, nextOccurrence } from '@ziyixi/task-dates';
 import { checkedId, resourceId, taskColumns, taskMessage, type TaskRow } from './model.ts';
 import { conflict, invalid, precondition } from './errors.ts';
 import { commit, fingerprint, replay } from './receipts.ts';
@@ -64,6 +64,7 @@ export async function createTask(db: D1Database, input: CreateTaskRequest, now: 
     row.project_id = parent.project_id;
     if (!row.section_id) row.section_id = parent.section_id;
   }
+  row.recurrence = clampMonthEnd(row.recurrence, row.due_date);
   await validateTask(db, row);
   const columns = ['id', ...taskColumns, 'created_at', 'updated_at'];
   const append = input.task.sortOrder === undefined;
@@ -131,6 +132,7 @@ export async function updateTask(db: D1Database, input: UpdateTaskRequest, now: 
     if (!paths.includes('parent_id')) updated.parent_id = '';
   }
   const row = { ...updated, revision: old.revision + 1, updated_at: now };
+  row.recurrence = clampMonthEnd(row.recurrence, row.due_date);
   await validateTask(db, row, old);
   row.project_archived = 0;
   const writes = [
@@ -206,12 +208,9 @@ export async function completeTask(db: D1Database, input: CompleteTaskRequest, n
   };
   let writes: D1PreparedStatement[];
   if (old.recurrence) {
-    let dates = {
-      dueDate: old.due_date,
-      dueDatetime: old.due_datetime,
-      dueTimezone: old.due_timezone,
-      recurrence: old.recurrence,
-    };
+    // An imported month-end rule heals here, so this and every later occurrence keep the month's last day.
+    const recurrence = clampMonthEnd(old.recurrence, old.due_date);
+    let dates = { dueDate: old.due_date, dueDatetime: old.due_datetime, dueTimezone: old.due_timezone, recurrence };
     try {
       dates = nextOccurrence(dates, now, zone);
     } catch {
@@ -220,6 +219,7 @@ export async function completeTask(db: D1Database, input: CompleteTaskRequest, n
     row = {
       ...row,
       completed: 0,
+      recurrence,
       due_date: dates.dueDate,
       due_datetime: dates.dueDatetime,
       deadline: old.deadline && addDays(old.deadline, daysBetween(old.due_date, dates.dueDate)),
@@ -256,9 +256,9 @@ export async function completeTask(db: D1Database, input: CompleteTaskRequest, n
   writes.push(
     db
       .prepare(
-        'UPDATE tasks SET completed=?,completed_at=?,due_date=?,due_datetime=?,deadline=?,revision=revision+1,updated_at=? WHERE id=?',
+        'UPDATE tasks SET completed=?,completed_at=?,due_date=?,due_datetime=?,deadline=?,recurrence=?,revision=revision+1,updated_at=? WHERE id=?',
       )
-      .bind(row.completed, now, row.due_date, row.due_datetime, row.deadline, now, id),
+      .bind(row.completed, now, row.due_date, row.due_datetime, row.deadline, row.recurrence, now, id),
   );
   return result(
     await commit(

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { type Catalog, type Task, describeError } from "../api";
 import { dateLabel } from "../dates";
+import { repeatLabel } from "../recurrence-controls";
 import { Dialog } from "./Dialog";
 import {
   TaskMenuChooser,
@@ -169,7 +170,7 @@ export function TaskRow({
           {task.recurrence && (
             <span title={task.recurrence}>
               <Repeat2 size={12} />
-              {task.recurrence}
+              {repeatLabel(task.recurrence)}
             </span>
           )}
           {task.deadline && (

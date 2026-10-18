@@ -9,5 +9,7 @@ that schedule after completion. Unsupported rules reject instead of silently cha
 The imported rules include fixed annual dates such as `every 1st Jan` and named biweekly dates such as
 `every 2 weeks Tue`. Per the owner's choice, `every 30th` uses February's last day (28 or 29), then returns
 to the 30th in March; completing it late skips past occurrences and keeps the fixed monthly schedule.
-`daysBetween` lets the Worker move a deadline with its occurrence.
+`clampMonthEnd` gives typed or imported monthly and yearly interval rules (`every month`, `quarterly`,
+`every year`) anchored after the 28th the same last-day behaviour, so a rule on the 31st or on Feb 29 never
+skips a month or a year. `daysBetween` lets the Worker move a deadline with its occurrence.
 Run `npm ci`, `npm run typecheck` and `npm test` in this directory.

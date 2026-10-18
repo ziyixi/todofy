@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { api, describeError } from "../api";
 import { dateLabel, shiftDate, todayDate } from "../dates";
-import { readRepeat } from "../recurrence-controls";
+import { repeatLabel } from "../recurrence-controls";
 import { DateCalendar } from "./DateCalendar";
 import { RecurrencePicker } from "./RecurrencePicker";
 import "./property-pickers.css";
@@ -71,30 +71,7 @@ export function SchedulePicker({
   const isDeadline = label === "Deadline";
   const inputText = isDeadline ? deadlineText : text || "";
   const busy = disabled || parsing;
-  const repeat = readRepeat(recurrence || "", value || today);
-  const repeatUnit = {
-    none: "days",
-    daily: "days",
-    weekdays: "weekdays",
-    weekly: "weeks",
-    monthly: "months",
-    yearly: "years",
-  }[repeat.frequency];
-  const repeatSummary = !recurrence
-    ? "Repeat"
-    : repeat.preserved
-      ? "Custom repeat"
-      : repeat.interval === 1
-        ? {
-            none: "Repeat",
-            daily: "Daily",
-            weekdays: "Weekdays",
-            weekly: "Weekly",
-            monthly: "Monthly",
-            yearly: "Yearly",
-          }[repeat.frequency]
-        : `Every ${repeat.interval} ${repeatUnit}`;
-  const repeatText = `${repeatSummary}${recurrence && repeat.afterCompletion ? " · after completion" : ""}`;
+  const repeatText = repeatLabel(recurrence || "");
   async function choose(date: string) {
     setError("");
     try {
