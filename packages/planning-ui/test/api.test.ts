@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
-import { createApi, publicError, validOrigin } from "../src/api";
+import { publicError } from "../src/api";
 import { Code, RpcError, statusBody } from "@ziyixi/proto/rpc-status";
+import { fakeActions } from "./transport";
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), {
     headers: { "Content-Type": "application/json" },
@@ -9,10 +10,6 @@ it("loads complete pages and uses the authoritative timer etag for subsequent ac
   const calls: { path: string; body: Record<string, unknown> }[] = [];
   const fetcher = vi.fn<typeof fetch>(async (input, init) => {
     const url = new URL(String(input));
-    expect(new Headers(init?.headers).get("authorization")).toBe(
-      "Bearer synthetic-token",
-    );
-    expect(init?.credentials).toBe("omit");
     const body = init?.body
       ? (JSON.parse(String(init.body)) as Record<string, unknown>)
       : {};
@@ -82,10 +79,7 @@ it("loads complete pages and uses the authoritative timer etag for subsequent ac
       return json({ task_id: "child" });
     throw new Error("Unexpected request " + url.pathname);
   });
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic-token" },
-    fetcher,
-  );
+  const api = fakeActions(fetcher);
   const { plan, focus, days } = await api.load();
   expect(days.map((day) => day.date)).toEqual([
     "2026-10-12",
@@ -152,8 +146,7 @@ it("loads complete pages and uses the authoritative timer etag for subsequent ac
 });
 it("reads only the selected week's seven queues when changing weeks", async () => {
   const paths: string[] = [];
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
+  const api = fakeActions(
     vi.fn<typeof fetch>(async (input) => {
       const path = new URL(String(input)).pathname;
       paths.push(path);
@@ -191,10 +184,7 @@ it("returns a confirmed stopped timer without reloading the task lists", async (
     );
     return json({ name: "timerSession", state: "idle", etag: "44" });
   });
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
-    fetcher,
-  );
+  const api = fakeActions(fetcher);
   const confirmed = await api.timer("stop", "child", {
     date: "2026-10-13",
     timerEtag: "43",
@@ -207,19 +197,8 @@ it("returns a confirmed stopped timer without reloading the task lists", async (
   expect(confirmed.timer).toBeUndefined();
   expect(fetcher).toHaveBeenCalledOnce();
 });
-it("rejects connection origins with paths, credentials or insecure protocols", () => {
-  for (const value of [
-    "http://example.test",
-    "https://user:password@example.test",
-    "https://example.test/api",
-    "https://example.test/?token=x",
-  ])
-    expect(() => validOrigin(value)).toThrow();
-  expect(validOrigin("https://example.test/")).toBe("https://example.test");
-});
 it("does not present partial task pages as a complete plan", async () => {
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
+  const api = fakeActions(
     vi.fn<typeof fetch>(async (input) =>
       String(input).includes("/plan:read")
         ? json({ plan: { today: "2026-10-13" } })
@@ -235,8 +214,7 @@ it("manually finishes a partial sync before queueing new Todoist children", asyn
     mask: string | null;
     body: Record<string, unknown>;
   }[] = [];
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
+  const api = fakeActions(
     vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(String(input));
       calls.push({
@@ -257,6 +235,7 @@ it("manually finishes a partial sync before queueing new Todoist children", asyn
         });
       return json({ name: "tasks/new-child", title: "New synthetic child" });
     }),
+    "todoist",
   );
   await api.addToDay("new-child", "2026-10-13");
   expect(calls[0]?.path).toBe("/api/plus/flowday/api/v1/tasks:sync");
@@ -266,17 +245,10 @@ it("manually finishes a partial sync before queueing new Todoist children", asyn
     mask: "task_ids",
     body: { task_ids: ["new-child"] },
   });
-  // An estimate is the task's duration in Tasks, so this host has none to write.
-  const writes = calls.length;
-  await expect(api.updateEstimate("new-child", 45)).rejects.toThrow(
-    "Edit estimates in Tasks.",
-  );
-  expect(calls).toHaveLength(writes);
 });
 it("replays an uncertain timer command with the same UUID until acknowledged", async () => {
   const ids: string[] = [];
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
+  const api = fakeActions(
     vi.fn<typeof fetch>(async (_input, init) => {
       ids.push(
         (JSON.parse(String(init?.body)) as { request_id: string }).request_id,
@@ -299,8 +271,7 @@ it("replays an uncertain timer command with the same UUID until acknowledged", a
 });
 it("takes the estimate from the task list over FlowDay's and resumes a timer on its original day", async () => {
   let command: Record<string, unknown> = {};
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
+  const api = fakeActions(
     vi.fn<typeof fetch>(async (input, init) => {
       const path = new URL(String(input)).pathname;
       if (path.endsWith("/plan:read"))
@@ -353,12 +324,12 @@ it("takes the estimate from the task list over FlowDay's and resumes a timer on 
 
 it("shows an actionable throttled sync and does not attempt the following write", async () => {
   const paths: string[] = [];
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
+  const api = fakeActions(
     vi.fn<typeof fetch>(async (input) => {
       paths.push(new URL(String(input)).pathname);
       return json({ state: "throttled" });
     }),
+    "todoist",
   );
   let failure: unknown;
   try {
@@ -382,8 +353,7 @@ it("names a token the gateway refuses as an expired connection, so the cached si
     ),
     { domain: "todofy.ziyixi.science" },
   );
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
+  const api = fakeActions(
     vi.fn<typeof fetch>(async () => Response.json(body, { status: 401 })),
   );
   const failure = await api.readPlan().catch((error: unknown) => error);
@@ -394,8 +364,7 @@ it("names a token the gateway refuses as an expired connection, so the cached si
 
 it("returns the confirmed lead task and label plan instead of requiring a full reload", async () => {
   const paths: string[] = [];
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
+  const api = fakeActions(
     vi.fn<typeof fetch>(async (input) => {
       const path = new URL(String(input)).pathname;
       paths.push(path);
@@ -503,11 +472,7 @@ it("remembers synced FlowDay tasks across writes and worker restarts, storing ID
     estimates: {},
     flowTasks: {},
   };
-  const connection = {
-    apiOrigin: "https://api.example.test",
-    token: "synthetic",
-  };
-  const api = createApi(connection, fetcher, store);
+  const api = fakeActions(fetcher, "todoist", store);
   await api.addToDay("new-child", focus.date);
   await api.moveTaskToDay("new-child", undefined, focus);
   expect(requests.filter((request) => request.endsWith(":sync"))).toHaveLength(
@@ -516,7 +481,7 @@ it("remembers synced FlowDay tasks across writes and worker restarts, storing ID
   expect(saved).toEqual(["new-child"]);
 
   // A restarted worker creates a new client; the session copy still skips the sync.
-  const restarted = createApi(connection, fetcher, store);
+  const restarted = fakeActions(fetcher, "todoist", store);
   const start = requests.length;
   await restarted.addToDay("new-child", focus.date);
   expect(requests.slice(start)).toEqual([
@@ -526,8 +491,7 @@ it("remembers synced FlowDay tasks across writes and worker restarts, storing ID
 
 it("replaces the remembered tasks with the complete FlowDay list on each load", async () => {
   let saved = ["deleted-task"];
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
+  const api = fakeActions(
     vi.fn<typeof fetch>(async (input) => {
       const path = new URL(String(input)).pathname;
       if (path.endsWith("/plan:read"))
@@ -545,6 +509,7 @@ it("replaces the remembered tasks with the complete FlowDay list on each load", 
         return json({ name: "timerSession", etag: "1" });
       return json({ name: `flows/${path.split("/").at(-1)}` });
     }),
+    "todoist",
     {
       read: async () => saved,
       write: async (ids) => {

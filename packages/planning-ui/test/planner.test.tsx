@@ -13,7 +13,7 @@ import {
   type PlanViewPatch,
   type PlanViewState,
 } from "../src/plan-view-state";
-import { createPrototype } from "../design/fixture";
+import { createPrototype } from "./fixture";
 
 afterEach(cleanup);
 async function props(): Promise<PlanViewProps> {

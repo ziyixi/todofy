@@ -1,25 +1,23 @@
 import { expect, it } from "vitest";
-import { createApi, planningTask, publicError } from "../src/api";
+import { planningTask, publicError } from "../src/api";
+import { fakeActions } from "./transport";
 import type { PlanningTask as ApiPlanningTask } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 
 /** A Todofy stub: the synthetic answers by path, with every request it received. */
 function todofy(answers: Record<string, () => Response>) {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
-    async (input, init) => {
-      const path = new URL(String(input)).pathname;
-      requests.push({
-        path,
-        body: init?.body
-          ? (JSON.parse(String(init.body)) as Record<string, unknown>)
-          : {},
-      });
-      const answer = answers[path];
-      if (!answer) throw new Error(`Unexpected request: ${path}`);
-      return answer();
-    },
-  );
+  const api = fakeActions(async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    requests.push({
+      path,
+      body: init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : {},
+    });
+    const answer = answers[path];
+    if (!answer) throw new Error(`Unexpected request: ${path}`);
+    return answer();
+  });
   return { api, requests };
 }
 const refused = (reason: string, status: number) =>

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { createPrototype } from "../design/fixture";
+import { createPrototype } from "./fixture";
 import {
   applyConfirmed,
   moved,

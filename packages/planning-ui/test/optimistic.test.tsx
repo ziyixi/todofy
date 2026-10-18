@@ -10,7 +10,7 @@ import {
 import type { ReactNode } from "react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import { createPrototype } from "../design/fixture";
+import { TEST_DESTINATION, createPrototype } from "./fixture";
 import { predictMove, predictStage } from "../src/plan-updates";
 import type { PlanningTask, PlusActions, PlusData } from "../src/model";
 
@@ -107,6 +107,7 @@ function hold<
 async function mountPlan(actions: PlusActions) {
   render(
     <App
+      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"

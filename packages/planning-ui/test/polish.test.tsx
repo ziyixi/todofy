@@ -6,7 +6,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { createPrototype } from "../design/fixture";
+import { createPrototype } from "./fixture";
 import { FocusView } from "../src/FocusView";
 import { PlanView, type PlanViewProps } from "../src/PlanView";
 import { readableDate, weekLabel } from "../src/PlanningCalendar";

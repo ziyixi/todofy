@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import { createPrototype } from "../design/fixture";
+import { TEST_DESTINATION, createPrototype } from "./fixture";
 import type { PlusActions, TaskDependency } from "../src/model";
 
 // The fixture's tasks are synthetic; today is Tuesday 2026-10-13.
@@ -28,6 +28,7 @@ afterEach(() => {
 async function details(actions: PlusActions, taskId: string) {
   render(
     <App
+      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"
@@ -222,6 +223,7 @@ it("settles only while the Review board is shown, and tells it under the lanes",
   // Focus shows no notice, so it never asks: the one-time answer is kept for the board.
   render(
     <App
+      destination={TEST_DESTINATION}
       actions={actions}
       view="focus"
       language="zh"
@@ -235,6 +237,7 @@ it("settles only while the Review board is shown, and tells it under the lanes",
   cleanup();
   render(
     <App
+      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="zh"
@@ -278,6 +281,7 @@ it("asks about every unsettled task in turn, when the first twenty stay unsettle
     .mockResolvedValue({ dependencies: stuck });
   render(
     <App
+      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"
@@ -306,6 +310,7 @@ it("settles what a complete read misses once per visit and tells a deletion once
   const load = vi.spyOn(actions, "load");
   render(
     <App
+      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="zh"

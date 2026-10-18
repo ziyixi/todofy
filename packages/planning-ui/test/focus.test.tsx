@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { createPrototype } from "../design/fixture";
+import { createPrototype } from "./fixture";
 import { FocusView } from "../src/FocusView";
 
 afterEach(() => {

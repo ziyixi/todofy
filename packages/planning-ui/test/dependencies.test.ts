@@ -21,7 +21,7 @@ import {
   cardStatus,
   statusLine,
 } from "../src/review-lanes";
-import { createPrototype } from "../design/fixture";
+import { createPrototype } from "./fixture";
 import type { PlanningTask, TaskDependency } from "../src/model";
 
 // A synthetic Thursday; "now" is its noon.

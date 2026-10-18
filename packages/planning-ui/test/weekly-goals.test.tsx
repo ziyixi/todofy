@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
-import { createPrototype } from "../design/fixture";
+import { TEST_DESTINATION, createPrototype } from "./fixture";
 import { App } from "../src/App";
 import { BetNotSaved } from "../src/bets";
 import { WeeklyGoals } from "../src/WeeklyGoals";
@@ -35,6 +35,7 @@ async function renderPlan(
 ) {
   const view = render(
     <App
+      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language={language}

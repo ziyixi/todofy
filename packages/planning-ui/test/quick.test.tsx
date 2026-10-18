@@ -9,7 +9,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { PlanView } from "../src/PlanView";
 import { addDays } from "../src/domain";
 import { quickTasks, quickTray } from "../src/weekly-review";
-import { createPrototype } from "../design/fixture";
+import { createPrototype } from "./fixture";
 import type { PlanningTask } from "../src/model";
 
 afterEach(cleanup);

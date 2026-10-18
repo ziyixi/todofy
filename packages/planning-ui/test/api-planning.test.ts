@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { createApi } from "../src/api";
+import { fakeActions } from "./transport";
 
 it("persists same-day sorting, cross-day movement and pool placement only in FlowDay queues", async () => {
   const flows = new Map([
@@ -18,73 +18,70 @@ it("persists same-day sorting, cross-day movement and pool placement only in Flo
     task_ids: read(date).taskIds,
     completed_task_ids: read(date).completed,
   });
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
-    async (input, init) => {
-      const path = new URL(String(input)).pathname;
-      requests.push({ path, method: init?.method ?? "GET" });
-      const body = init?.body
-        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
-        : {};
-      const reply = (value: unknown) => Response.json(value);
-      if (path === "/api/plus/v1/plan:read")
-        return reply({
-          plan: {
-            week_start: "2026-10-12",
-            today: "2026-10-13",
-            timezone: "UTC",
-            enabled: true,
-          },
-        });
-      if (path === "/api/plus/v1/tasks")
-        return reply({
-          planning_tasks: ["a", "b", "c", "d"].map((id) => ({
-            id,
+  const api = fakeActions(async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    requests.push({ path, method: init?.method ?? "GET" });
+    const body = init?.body
+      ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+      : {};
+    const reply = (value: unknown) => Response.json(value);
+    if (path === "/api/plus/v1/plan:read")
+      return reply({
+        plan: {
+          week_start: "2026-10-12",
+          today: "2026-10-13",
+          timezone: "UTC",
+          enabled: true,
+        },
+      });
+    if (path === "/api/plus/v1/tasks")
+      return reply({
+        planning_tasks: ["a", "b", "c", "d"].map((id) => ({
+          id,
+          title: `Synthetic ${id}`,
+          deadline: "2026-10-30",
+          due: "2026-10-20",
+        })),
+      });
+    if (path.endsWith("/timerSession"))
+      return reply({ name: "timerSession", etag: "0" });
+    if (path.endsWith("/tasks"))
+      return reply({
+        tasks: ["a", "b", "c", "d", "done", "local-one", "local-two"].map(
+          (id) => ({
+            name: `tasks/${id}`,
+            todoist_id: id,
             title: `Synthetic ${id}`,
-            deadline: "2026-10-30",
-            due: "2026-10-20",
-          })),
-        });
-      if (path.endsWith("/timerSession"))
-        return reply({ name: "timerSession", etag: "0" });
-      if (path.endsWith("/tasks"))
-        return reply({
-          tasks: ["a", "b", "c", "d", "done", "local-one", "local-two"].map(
-            (id) => ({
-              name: `tasks/${id}`,
-              todoist_id: id,
-              title: `Synthetic ${id}`,
-            }),
-          ),
-        });
-      const day = path.match(/\/flows\/(\d{4}-\d{2}-\d{2})/u)?.[1];
-      if (!day) throw new Error(`Unexpected request: ${path}`);
-      if (init?.method === "PATCH") {
-        writes.push({ path, body });
-        flows.set(day, { ...read(day), taskIds: body.task_ids as string[] });
-        return reply(wire(day));
-      }
-      if (path.endsWith(":rollover")) {
-        writes.push({ path, body });
-        const destination = String(body.destination).slice("flows/".length);
-        const requested = body.task_ids as string[];
-        const moving = read(day).taskIds.filter((id) => requested.includes(id));
-        flows.set(day, {
-          ...read(day),
-          taskIds: read(day).taskIds.filter((id) => !moving.includes(id)),
-        });
-        flows.set(destination, {
-          ...read(destination),
-          taskIds: [
-            ...moving,
-            ...read(destination).taskIds.filter((id) => !moving.includes(id)),
-          ],
-        });
-        return reply({ flow: wire(day), destination_flow: wire(destination) });
-      }
+          }),
+        ),
+      });
+    const day = path.match(/\/flows\/(\d{4}-\d{2}-\d{2})/u)?.[1];
+    if (!day) throw new Error(`Unexpected request: ${path}`);
+    if (init?.method === "PATCH") {
+      writes.push({ path, body });
+      flows.set(day, { ...read(day), taskIds: body.task_ids as string[] });
       return reply(wire(day));
-    },
-  );
+    }
+    if (path.endsWith(":rollover")) {
+      writes.push({ path, body });
+      const destination = String(body.destination).slice("flows/".length);
+      const requested = body.task_ids as string[];
+      const moving = read(day).taskIds.filter((id) => requested.includes(id));
+      flows.set(day, {
+        ...read(day),
+        taskIds: read(day).taskIds.filter((id) => !moving.includes(id)),
+      });
+      flows.set(destination, {
+        ...read(destination),
+        taskIds: [
+          ...moving,
+          ...read(destination).taskIds.filter((id) => !moving.includes(id)),
+        ],
+      });
+      return reply({ flow: wire(day), destination_flow: wire(destination) });
+    }
+    return reply(wire(day));
+  });
   const initial = await api.load();
   const tuesday = initial.days.find((day) => day.date === "2026-10-13")!;
   const wednesday = initial.days.find((day) => day.date === "2026-10-14")!;
@@ -212,21 +209,18 @@ it("persists same-day sorting, cross-day movement and pool placement only in Flo
 
 it("reads the FULL plan for the sidebar, which names the mail project to hide", async () => {
   const urls: URL[] = [];
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
-    async (input) => {
-      urls.push(new URL(String(input)));
-      return Response.json({
-        plan: {
-          week_start: "2026-10-12",
-          today: "2026-10-13",
-          timezone: "UTC",
-          enabled: true,
-          inbox_project_id: "mail-project",
-        },
-      });
-    },
-  );
+  const api = fakeActions(async (input) => {
+    urls.push(new URL(String(input)));
+    return Response.json({
+      plan: {
+        week_start: "2026-10-12",
+        today: "2026-10-13",
+        timezone: "UTC",
+        enabled: true,
+        inbox_project_id: "mail-project",
+      },
+    });
+  });
   // The mail project's ID comes only with the FULL view, which a request without `view` asks for.
   expect((await api.readPlan()).inboxProjectId).toBe("mail-project");
   expect(urls.map((url) => [url.pathname, url.search])).toEqual([
@@ -239,49 +233,46 @@ it("answers the new steps' IDs, and after one FlowDay sync knows every task the 
   // Todoist lists two new steps; FlowDay has neither yet and throttles a second manual sync.
   let listed = ["outcome", "step-1", "step-2"];
   let syncs = 0;
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
-    async (input, init) => {
-      const path = new URL(String(input)).pathname;
-      const body = init?.body
-        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
-        : {};
-      requests.push({ path, body });
-      const reply = (value: unknown) => Response.json(value);
-      if (path === "/api/plus/v1/plan:read")
-        return reply({
-          plan: {
-            week_start: "2026-10-12",
-            today: "2026-10-13",
-            timezone: "UTC",
-            enabled: true,
-          },
-        });
-      if (path === "/api/plus/v1/tasks:appendTaskSteps")
-        return reply({ task_ids: ["step-1"] });
-      if (path === "/api/plus/v1/tasks")
-        return reply({
-          planning_tasks: listed.map((id) => ({
-            id,
-            title: `Synthetic ${id}`,
-          })),
-        });
-      if (path.endsWith("/tasks:sync"))
-        return reply({ state: syncs++ ? "throttled" : "synced" });
-      if (path.endsWith("/timerSession"))
-        return reply({ name: "timerSession", etag: "0" });
-      if (path.endsWith("/api/v1/tasks"))
-        return reply({
-          tasks: [{ name: "tasks/outcome", todoist_id: "outcome", title: "x" }],
-        });
-      const day = path.match(/\/flows\/(\d{4}-\d{2}-\d{2})/u)?.[1];
-      if (!day) throw new Error(`Unexpected request: ${path}`);
+  const api = fakeActions(async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    const body = init?.body
+      ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+      : {};
+    requests.push({ path, body });
+    const reply = (value: unknown) => Response.json(value);
+    if (path === "/api/plus/v1/plan:read")
       return reply({
-        name: `flows/${day}`,
-        task_ids: (body.task_ids as string[] | undefined) ?? [],
+        plan: {
+          week_start: "2026-10-12",
+          today: "2026-10-13",
+          timezone: "UTC",
+          enabled: true,
+        },
       });
-    },
-  );
+    if (path === "/api/plus/v1/tasks:appendTaskSteps")
+      return reply({ task_ids: ["step-1"] });
+    if (path === "/api/plus/v1/tasks")
+      return reply({
+        planning_tasks: listed.map((id) => ({
+          id,
+          title: `Synthetic ${id}`,
+        })),
+      });
+    if (path.endsWith("/tasks:sync"))
+      return reply({ state: syncs++ ? "throttled" : "synced" });
+    if (path.endsWith("/timerSession"))
+      return reply({ name: "timerSession", etag: "0" });
+    if (path.endsWith("/api/v1/tasks"))
+      return reply({
+        tasks: [{ name: "tasks/outcome", todoist_id: "outcome", title: "x" }],
+      });
+    const day = path.match(/\/flows\/(\d{4}-\d{2}-\d{2})/u)?.[1];
+    if (!day) throw new Error(`Unexpected request: ${path}`);
+    return reply({
+      name: `flows/${day}`,
+      task_ids: (body.task_ids as string[] | undefined) ?? [],
+    });
+  }, "todoist");
   const outcome = (await api.load()).plan.tasks[0]!;
   expect(
     await api.createSteps(
@@ -314,45 +305,42 @@ it("answers the new steps' IDs, and after one FlowDay sync knows every task the 
 
 it("maps Todoist's sibling order and the saved lane orders, and sends a reorder with the moved task", async () => {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
-    async (input, init) => {
-      const path = new URL(String(input)).pathname;
-      const body = init?.body
-        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
-        : {};
-      requests.push({ path, body });
-      if (path === "/api/plus/v1/plan:read")
-        return Response.json({
-          plan: {
-            week_start: "2026-10-12",
-            today: "2026-10-13",
-            timezone: "UTC",
-            enabled: true,
-            // A lane a later Todofy might add is not this build's.
-            lane_orders: [
-              { lane: "committed", task_ids: ["b", "a"] },
-              { lane: "someday", task_ids: ["c"] },
-            ],
-          },
-        });
-      if (path === "/api/plus/v1/tasks:reorder")
-        return Response.json({
-          tasks: [
-            {
-              id: "b",
-              title: "Synthetic b",
-              child_order: -3,
-              order_key: "a0",
-              update_time: "2026-10-13T08:00:00Z",
-            },
-            { id: "a", title: "Synthetic a", child_order: 4 },
+  const api = fakeActions(async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    const body = init?.body
+      ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+      : {};
+    requests.push({ path, body });
+    if (path === "/api/plus/v1/plan:read")
+      return Response.json({
+        plan: {
+          week_start: "2026-10-12",
+          today: "2026-10-13",
+          timezone: "UTC",
+          enabled: true,
+          // A lane a later Todofy might add is not this build's.
+          lane_orders: [
+            { lane: "committed", task_ids: ["b", "a"] },
+            { lane: "someday", task_ids: ["c"] },
           ],
-          lane_order: { lane: "committed", task_ids: ["b", "a"] },
-        });
-      throw new Error(`Unexpected request: ${path}`);
-    },
-  );
+        },
+      });
+    if (path === "/api/plus/v1/tasks:reorder")
+      return Response.json({
+        tasks: [
+          {
+            id: "b",
+            title: "Synthetic b",
+            child_order: -3,
+            order_key: "a0",
+            update_time: "2026-10-13T08:00:00Z",
+          },
+          { id: "a", title: "Synthetic a", child_order: 4 },
+        ],
+        lane_order: { lane: "committed", task_ids: ["b", "a"] },
+      });
+    throw new Error(`Unexpected request: ${path}`);
+  });
   expect((await api.readPlan()).laneOrders).toEqual({ committed: ["b", "a"] });
   const result = await api.reorderTasks(
     ["b", "a"],
@@ -390,13 +378,10 @@ it("maps Todoist's sibling order and the saved lane orders, and sends a reorder 
 
 it("sends a parked change as SetTaskPlan's parked field", async () => {
   const bodies: Record<string, unknown>[] = [];
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
-    async (_input, init) => {
-      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-      return Response.json({ task: { id: "a", title: "Synthetic a" } });
-    },
-  );
+  const api = fakeActions(async (_input, init) => {
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return Response.json({ task: { id: "a", title: "Synthetic a" } });
+  });
   const task = { id: "a", etag: "a-1" } as Parameters<typeof api.updateTask>[0];
   await api.updateTask(task, { parked: true });
   await api.updateTask(task, { stage: "monthly", parked: false });

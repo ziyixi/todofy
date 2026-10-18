@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { Code, RpcError, statusBody } from "@ziyixi/proto/rpc-status";
-import { createApi } from "../src/api";
+import { fakeActions } from "./transport";
 import {
   BET_MAX_LENGTH,
   BetNotSaved,
@@ -9,7 +9,7 @@ import {
   weeklyBet,
   withBets,
 } from "../src/bets";
-import { createPrototype } from "../design/fixture";
+import { createPrototype } from "./fixture";
 import type { Confirmed, WeeklyBet } from "../src/model";
 
 const WORK: WeeklyBet = {
@@ -108,8 +108,7 @@ it("sends SetWeeklyBet with no request ID and maps Todofy's refusals", async () 
     refusal(Code.FAILED_PRECONDITION, "ACTION_NOT_ALLOWED"),
     refusal(Code.INVALID_ARGUMENT, "BAD_REQUEST"),
   ];
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic-token" },
+  const api = fakeActions(
     vi.fn<typeof fetch>(async (input, init) => {
       expect(new URL(String(input)).pathname).toBe(
         "/api/plus/v1/weeklyBets:setWeeklyBet",
@@ -136,8 +135,7 @@ it("sends SetWeeklyBet with no request ID and maps Todofy's refusals", async () 
 });
 
 it("reads the plan's Bets and leaves out an area this build does not know", async () => {
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic-token" },
+  const api = fakeActions(
     vi.fn<typeof fetch>(async () =>
       json({
         plan: {

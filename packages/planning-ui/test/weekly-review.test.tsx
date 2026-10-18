@@ -9,7 +9,7 @@ import {
 import { useState } from "react";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import { createApi } from "../src/api";
+import { fakeActions } from "./transport";
 import { PlanView, type PlanViewProps } from "../src/PlanView";
 import {
   inboxToClarify,
@@ -25,7 +25,7 @@ import {
   type PlanViewPatch,
   type PlanViewState,
 } from "../src/plan-view-state";
-import { createPrototype } from "../design/fixture";
+import { TEST_DESTINATION, createPrototype } from "./fixture";
 import type { PlanningTask, PlusActions } from "../src/model";
 
 // The fixture's week is 2026-10-12 (ISO 2026-W42); "now" is its Tuesday.
@@ -79,6 +79,7 @@ function renderApp(
 ) {
   render(
     <App
+      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"
@@ -680,6 +681,7 @@ it("completes the review task only when Finish review is clicked, outside Focus"
   const complete = vi.spyOn(actions, "completeTask");
   render(
     <App
+      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"
@@ -713,39 +715,36 @@ it("completes the review task only when Finish review is clicked, outside Focus"
 });
 
 it("maps Todoist's last change and the review IDs from the API", async () => {
-  const api = createApi(
-    { apiOrigin: "https://api.example.test", token: "synthetic" },
-    async (input) => {
-      const path = new URL(String(input)).pathname;
-      if (path === "/api/plus/v1/plan:read")
-        return Response.json({
-          plan: {
-            week_start: "2026-10-12",
-            today: "2026-10-13",
-            timezone: "UTC",
-            enabled: true,
-            inbox_project_id: "mail",
-            review_task_id: "review",
-            next_week_task_ids: ["kept"],
+  const api = fakeActions(async (input) => {
+    const path = new URL(String(input)).pathname;
+    if (path === "/api/plus/v1/plan:read")
+      return Response.json({
+        plan: {
+          week_start: "2026-10-12",
+          today: "2026-10-13",
+          timezone: "UTC",
+          enabled: true,
+          inbox_project_id: "mail",
+          review_task_id: "review",
+          next_week_task_ids: ["kept"],
+        },
+      });
+    if (path === "/api/plus/v1/tasks")
+      return Response.json({
+        planning_tasks: [
+          {
+            id: "a",
+            title: "Synthetic a",
+            update_time: "2026-10-01T16:00:00Z",
           },
-        });
-      if (path === "/api/plus/v1/tasks")
-        return Response.json({
-          planning_tasks: [
-            {
-              id: "a",
-              title: "Synthetic a",
-              update_time: "2026-10-01T16:00:00Z",
-            },
-            { id: "b", title: "Synthetic b" },
-          ],
-        });
-      if (path.endsWith("/timerSession"))
-        return Response.json({ name: "timerSession", etag: "0" });
-      if (path.endsWith("/tasks")) return Response.json({ tasks: [] });
-      return Response.json({ name: path.slice(path.indexOf("flows/")) });
-    },
-  );
+          { id: "b", title: "Synthetic b" },
+        ],
+      });
+    if (path.endsWith("/timerSession"))
+      return Response.json({ name: "timerSession", etag: "0" });
+    if (path.endsWith("/tasks")) return Response.json({ tasks: [] });
+    return Response.json({ name: path.slice(path.indexOf("flows/")) });
+  });
   const { plan } = await api.load();
   expect([
     plan.inboxProjectId,

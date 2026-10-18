@@ -14,7 +14,7 @@ import { FocusView } from "../src/FocusView";
 import { PlanView, type PlanViewProps } from "../src/PlanView";
 import { TaskEditor } from "../src/TaskEditor";
 import { addDays } from "../src/domain";
-import { createPrototype } from "../design/fixture";
+import { TEST_DESTINATION, createPrototype } from "./fixture";
 import type { PlanningTask, PlusActions, PlusData, View } from "../src/model";
 
 // The fixture's today is Tuesday 2026-10-13.
@@ -515,6 +515,7 @@ it("takes Focus's line to Plan's Review with Start now focused", async () => {
     const [view, setView] = useState<View>("focus");
     return (
       <App
+        destination={TEST_DESTINATION}
         actions={actions}
         view={view}
         language="en"
@@ -562,6 +563,7 @@ it("says where a deadline stands in task details and marks it in progress there"
   });
   const editor = (task: PlanningTask, canMarkActive = true) => (
     <TaskEditor
+      destination={TEST_DESTINATION}
       key={task.labels.join()}
       task={task}
       tasks={data.plan.tasks}
@@ -627,6 +629,7 @@ it("takes a parked task out of Parked when its details save a stage or mark it i
   });
   const editor = (task: PlanningTask) => (
     <TaskEditor
+      destination={TEST_DESTINATION}
       key={task.id}
       task={task}
       tasks={data.plan.tasks}
@@ -757,6 +760,7 @@ async function refreshedEditor() {
   };
   const editor = (value: PlanningTask) => (
     <TaskEditor
+      destination={TEST_DESTINATION}
       task={value}
       tasks={data.plan.tasks}
       dependencies={[]}

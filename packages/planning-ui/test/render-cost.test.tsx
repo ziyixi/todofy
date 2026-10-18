@@ -24,7 +24,7 @@ import {
   WAITING_LABELS,
   withoutLead,
 } from "../src/weekly-review";
-import { createPrototype } from "../design/fixture";
+import { TEST_DESTINATION, createPrototype } from "./fixture";
 import type { PlanState, PlanningTask } from "../src/model";
 
 const planViewRenders = vi.hoisted(() => ({ count: 0 }));
@@ -190,6 +190,7 @@ it("ticks a running timer without re-rendering the planning board", async () => 
   const actions = createPrototype();
   const props = {
     actions,
+    destination: TEST_DESTINATION,
     language: "en" as const,
     onOpenTask: () => {},
     onSettings: () => {},

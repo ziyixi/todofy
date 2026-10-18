@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import { createPrototype } from "../design/fixture";
+import { TEST_DESTINATION, createPrototype } from "./fixture";
 import type { PlusActions, PlusData, PlusSnapshot, View } from "../src/model";
 
 beforeAll(() => {
@@ -30,6 +30,7 @@ function mount(
 ) {
   return render(
     <App
+      destination={TEST_DESTINATION}
       actions={actions}
       view={view}
       language="en"
@@ -210,6 +211,7 @@ it("paints remembered data at once on re-entry and re-reads it in the background
   const { reads, original } = held(actions);
   render(
     <App
+      destination={TEST_DESTINATION}
       actions={actions}
       view="plan"
       language="en"
@@ -259,6 +261,7 @@ it("keeps a remembered other week but follows the server's current week after a 
   ] as const) {
     render(
       <App
+        destination={TEST_DESTINATION}
         actions={actions}
         view="plan"
         language="en"

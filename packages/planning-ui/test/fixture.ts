@@ -1,4 +1,5 @@
 import { holds } from "../src/dependencies";
+import type { TaskDestination } from "../src/destination";
 import { BetNotSaved, betText, weeklyBet, withBets } from "../src/bets";
 import { addDays } from "../src/domain";
 import { apiPriority } from "../src/mail";
@@ -14,6 +15,12 @@ import type {
   PlanningTask,
   PlusActions,
 } from "../src/model";
+/** Where the components link a task or project; each host supplies its own. */
+export const TEST_DESTINATION: TaskDestination = {
+  name: "Tasks",
+  taskHref: (id) => `/?task=${encodeURIComponent(id)}`,
+  projectHref: (id) => `#/project/${encodeURIComponent(id)}`,
+};
 const task = (
   id: string,
   title: string,
