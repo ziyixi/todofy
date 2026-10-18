@@ -95,7 +95,7 @@ vars, as is `BUILD_SHA`):
 | `TODOFY_PROCESSING_PAUSED` | `true` / `false` (required); core |
 | `TODOFY_FORCE_PAUSE_TODOIST` | `true` / `false` (required); core |
 | `TODOFY_GTD_REVIEW_ENABLED` | `true` / `false` (required); core. The Sunday review task ([gtd-features.md](gtd-features.md) §7); `false` stops it without a code change. The daily snapshot itself is committed (`GTD_COLLECT_UTC`) |
-| `TODOFY_PLUS_METADATA` | `cache` / `full` (set like every switch; bootstrap sets `cache`, and a deploy refuses it unset); core. `full` is the rollback of Todoist Plus's caches ([todoist-plus.md](todoist-plus.md#caches)) |
+| `TODOFY_PLUS_METADATA` | `cache` / `full` (set like every switch; bootstrap sets `cache`, and a deploy refuses it unset); core. `full` turns the Todoist adapter's planning caches off (`runtime/plus_cache.py`) |
 
 Every other setting is committed in the two production configs (top level = production; the repository
 is public, so nothing personal or secret goes there), and changing one is a commit:
@@ -301,12 +301,12 @@ Rows that D1 retention deletes (legacy text by `expires_at` or `TODOFY_LEGACY_TE
 reports after 90 days, owner actions after 180; since 2026-10 no summary, which only the owner deletes) stay in the backups made before the deletion until those
 rotate out: about 6 weeks while backups succeed, longer while they fail. A restore brings such rows back;
 the next daily retention tick deletes the ones whose time has passed again. The same holds for the summaries
-the owner's Delete all removes (todoist-plus.md, "Mailbox"); a restore brings those back too.
+the owner deletes in Tasks' Mail ([planning-api.md](planning-api.md#mail)); a restore brings those back too.
 
 Summaries are the one table that now only grows by itself: about 100 rows a day of a few KB (the subject, a
 summary of up to 64 KiB, usually 1-3 KB, and the brief) is roughly 40-70 MB a year in the database's 500 MB,
-which it shares with `mail_events` and the rest. Delete all deletes the summaries of the mail it deletes;
-mail filed or deleted in Todoist itself keeps its row. Watch the database size in the dashboard once a year;
+which it shares with `mail_events` and the rest. Deleting a mail in Tasks' Mail deletes its summary; a mail
+converted to a task, or whose task is deleted, keeps its row. Watch the database size in the dashboard once a year;
 the unused partial index `summaries_expiring` (the old 90-day sweep's) still costs one index write a row,
 and a later migration may drop it.
 
@@ -368,7 +368,7 @@ coordinator may use a database at a time):
    `https://tasks.ziyixi.science/api/plus/v1/plan:verifyPlanStore` (Tasks' Access login; Tasks forwards it on its
    private Planning channel, and it is a read, so maintenance mode lets it through): every `*_row_count`
    equals its `plan_*` table's rows in the manifest, and no other count is present
-   ([todoist-plus.md](todoist-plus.md#planning-store)).
+   ([planning-api.md](planning-api.md#verifyplanstore)).
 4. Set `TODOFY_MAINTENANCE_MODE=false` and run the workflow on `main`. Mail Hero redelivers what it
    held during maintenance. Events Todofy acknowledged after the backup was taken are not in the
    restored database, and Mail Hero does not send an acknowledged event again: compare with Mail Hero's

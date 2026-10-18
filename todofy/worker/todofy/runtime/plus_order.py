@@ -1,4 +1,4 @@
-"""ReorderTasks, run by plus_api.handle inside plus_lock (docs/todoist-plus.md, "Planning and completion").
+"""ReorderTasks, run by plus_api.handle inside plus_lock (docs/planning-api.md, "Bets, dependencies and reordering").
 
 A new order of up to MAX_LANE_TASKS tasks: one Review lane's, kept in the planning store (plan_store.save_lane_order),
 or a parent's sub-tasks (no lane). In Todoist only the moved task's siblings among them change, and only in a lane

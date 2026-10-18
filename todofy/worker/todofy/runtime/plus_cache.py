@@ -1,4 +1,4 @@
-"""TodofyCore's own SQLite for Plus: values rebuilt from Todoist or D1 (docs/todoist-plus.md, "Caches").
+"""TodofyCore's own SQLite for Plus: values rebuilt from Todoist or D1.
 
 Everything here may be lost, as the coordinator's rule says: a lost value is read again from where it came
 from. The rollback switch PLUS_METADATA=full turns every cache off, so each call reads Todoist and D1 as

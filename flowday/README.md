@@ -191,7 +191,8 @@ Review the day or the week:
 
 ![FlowDay analytics dialog showing daily review metrics and task breakdowns](docs/readme/flowday-analytics.png)
 
-Todoist Plus uses the same daily queue and server-owned timer through Todofy's private service binding. Timer
-changes are checked against the current version so another window cannot overwrite a newer session. Reload any
-FlowDay tab that was open before this update. FlowDay still never writes Todoist; task completion from the extension
-is performed by Todofy. A mirrored task's estimate is its Tasks duration; only a local task's is edited here.
+Focus in Tasks uses the same daily queue and server-owned timer through Todofy's private service binding to
+FlowDay's `NativeFocusEntrypoint`. Timer changes are checked against the current version so another window cannot
+overwrite a newer session. Reload any FlowDay tab that was open before this update. FlowDay still never writes
+Todoist; completing a task from Focus is performed by Todofy. A mirrored task's estimate is its Tasks duration; only
+a local task's is edited here.

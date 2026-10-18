@@ -30,9 +30,10 @@ cron */10 ----------> scheduled() -------------------------> wake() (RPC)
 | Host | Serves | Auth |
 |---|---|---|
 | `TODOFY_PUBLIC_HOST` (`todofy.ziyixi.science`) | owner UI and its API todofy.ui.v1 under `/api/v1/*` ([`proto/todofy/ui/v1`](../proto/todofy/ui/v1), served by the shared transcoder) | Cloudflare Access app on the whole host, and the gateway verifies the Access JWT itself (RS256 signature, issuer, audience, expiry, not-before, subject, owner or alias); writes also need Origin, the CSRF token and a `request_id` |
-| each of `TODOFY_HOOKS_HOSTS` (`todofy-hooks.ziyixi.science`; `daily.ziyixi.science` is added at cutover so Mail Hero's and the newsletter's existing URLs keep working) | `POST /hooks/mail`, newsletter reports, `/health`, and the narrow `/api/plus/*` extension API | webhook: Bearer; newsletter: Basic; Plus: its own revocable connection token; `/health` returns the build SHA without the Durable Object |
+| each of `TODOFY_HOOKS_HOSTS` (`todofy-hooks.ziyixi.science`; `daily.ziyixi.science` is added at cutover so Mail Hero's and the newsletter's existing URLs keep working) | `POST /hooks/mail`, newsletter reports and `/health` | webhook: Bearer; newsletter: Basic; `/health` returns the build SHA without the Durable Object |
 
-Any other host or path is a 404. `workers.dev` and preview URLs are off.
+Any other host or path is a 404. `workers.dev` and preview URLs are off. Tasks reaches the planning API only
+through the private Planning service binding ([planning API](#planning-api)).
 
 ## Gemini model order
 
@@ -45,7 +46,7 @@ both orders, and each result records the model that answered. Token budget and f
 remain shared; completed email summaries are not recomputed when the config changes.
 
 Since 2026-10 the email summary starts with a one-sentence brief on its own line (one deliberate prompt line,
-read back by a pure function, no new call); Todoist Plus's Mailbox shows it. Mail summarised before that line
+read back by a pure function, no new call); Tasks' Mail shows it. Mail summarised before that line
 gets a model-written brief once, in the background, within half of the day's token budget.
 
 To restore Flash as the preferred email model, set `GEMINI_EMAIL_MODELS` to the same order as
@@ -95,9 +96,8 @@ Set as GitHub variables on the `production` environment and applied by a deploy 
 | `TODOFY_REMINDER_ENABLED` | the daily attention reminder task is on |
 | `TODOFY_GTD_REVIEW_ENABLED` | the Sunday review task is on (one Todoist task per ISO week, [docs/gtd-features.md](docs/gtd-features.md)) |
 
-`TODOFY_PLUS_METADATA` takes `cache` (the default while unset) or `full`: `full` turns Todoist Plus's caches
-off, so every Plus call syncs Todoist's labels in full and checks the extension token in D1, as before them
-([docs/todoist-plus.md](docs/todoist-plus.md#caches)).
+`TODOFY_PLUS_METADATA` takes `cache` (the default while unset) or `full`: `full` turns the Todoist adapter's
+planning caches off (`runtime/plus_cache.py`), so each of its calls syncs Todoist's labels in full.
 
 Optional environment secrets `TODOFY_TODOIST_OPS_PROJECT_ID` and `TODOFY_TODOIST_REVIEW_PROJECT_ID` send the
 `[Todofy System]` reminder and the Sunday review to their own Todoist projects; unset, both go to the
@@ -115,27 +115,20 @@ carries the week's counts, trends and links. The owner UI's GTD page shows the t
 carries the counters and the dashboard shows them as the "GTD 循环" flow
 ([docs/gtd-features.md](docs/gtd-features.md)).
 
-## Todoist Plus
+## Planning API
 
-[Todoist Plus](../todoist-plus/) adds Plan and Focus inside Todoist's Chrome website/PWA.
-Open the owner's `/plus` page to check the discovered label mapping, explicitly enable weekly
-rollover, and issue a named extension connection token. Opening the page or issuing a token does not
-enable task writes. The extension never receives the Todoist API key.
+Plan, Focus and Mail in [Tasks](../tasks/README.md) use Todofy's planning API (`PlusService`), which Tasks reaches
+only through Todofy's private Planning service binding. Tasks keeps the tasks; Todofy keeps the planning facts
+(each task's saved stage and planning flags, the weekly Work and Personal Bets, dependencies and lane orders) and
+the mail summaries in D1. FlowDay owns the day queue and the shared timer. The alarm returns recorded
+previous-week commitments to weekly candidates after Monday 00:00 in the account timezone.
 
-Todoist remains the task store. Todofy is the only Todoist writer: planning labels, true deadlines,
-explicit child creation and task completion use replay-safe Sync commands. The weekly Work and Personal
-Bets are the owner's own lines of text in Todofy's planning store (D1), never written to Todoist.
-FlowDay owns the day queue, estimates and shared timer, reached through a private service binding. The
-existing ten-minute cron returns recorded previous-week commitments to weekly candidates after Monday
-00:00 in the account timezone, and removes the retired Bets label from tasks while a setup still binds
-it. This continues when the browser is closed.
+Mail lists the summarised mail still awaiting a decision, each with its one-sentence brief. Converting one makes
+an Inbox task in Tasks, with its category's tag and priority when one is chosen; deleting one deletes its summary
+and keeps the ledger row. Nothing else deletes a summary.
 
-Plus's Mailbox lists the mail tasks still to clarify, each with its one-sentence brief. Filing one moves it
-to the account's Todoist Inbox in one Sync, with its category's label and priority when one is chosen;
-Delete all permanently deletes the listed mail the owner left untouched, after Todofy has read it again (and
-again on a retry), with its summary. Nothing else deletes a summary.
-
-The [backend contract](docs/todoist-plus.md) covers setup, pause controls and retry behavior.
+The [planning API](docs/planning-api.md) covers the channel, receipts, pause controls and retry behavior; the
+retired Todoist Plus extension is in [its history](../docs/history/todoist-plus.md).
 
 ## Backups
 

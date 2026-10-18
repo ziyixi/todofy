@@ -25,7 +25,7 @@ DO's bytes.
 |---|---|---|
 | Language | TypeScript (strict, ES modules), `gateway/` | Python (Pyodide), `worker/`, pywrangler |
 | Public entry | custom domains: owner host + every `TODOFY_HOOKS_HOSTS` name; cron `*/10 * * * *` | none (`workers_dev = false`, `preview_urls = false`, no routes); the object's RPC methods (§3) for the gateway's binding; every `fetch` answers 404 `not_found` (for the RPC release only, the previous gateway's calls get 503, §6.4) |
-| Bindings | `ASSETS` (`uiassets/dist`), `COORDINATOR` → class `TodofyCore` in script `todofy-core`, `FLOWDAY_FOCUS` → FlowDay's private `FocusEntrypoint`, `METRICS` (Analytics Engine `todofy_metrics`, one point per request and cron; dev-notes.md §6) | `DB` (D1 `todofy`), `BACKUPS` (private R2 bucket `todofy-backups`, weekly D1 backups; it holds mail content), `METRICS` (the same dataset, one point per upstream step). No DO binding: nothing in core calls the DO through a stub any more |
+| Bindings | `ASSETS` (`uiassets/dist`), `COORDINATOR` → class `TodofyCore` in script `todofy-core`, `FLOWDAY_NATIVE_FOCUS` → FlowDay's private `NativeFocusEntrypoint`, `METRICS` (Analytics Engine `todofy_metrics`, one point per request and cron; dev-notes.md §6) | `DB` (D1 `todofy`), `BACKUPS` (private R2 bucket `todofy-backups`, weekly D1 backups; it holds mail content), `METRICS` (the same dataset, one point per upstream step). No DO binding: nothing in core calls the DO through a stub any more |
 | Vars | `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`, `BUILD_SHA`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `MAINTENANCE_MODE`; dev/test only: `DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`, `JWKS_REFRESH_COOLDOWN_MS` | `BUILD_SHA`, `MAINTENANCE_MODE`, `TODOFY_PUBLIC_HOST` (the reminder's link), `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, `REMINDER_ENABLED`, `GTD_REVIEW_ENABLED`, `PLUS_METADATA` (`cache`, or `full`: Todoist Plus without its caches), `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_TIMEOUT_MS`, `GEMINI_DAILY_TOKEN_BUDGET`, `TODOIST_API_BASE`, `TODOIST_DEFAULT_PROJECT_ID`, `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional), `TODOIST_ATTEMPT_TIMEOUT_MS`, `LOOKUP_DELAY_MS`, `BACKOFF_BASE_MS`, `WATCHDOG_MS`, `REPORT_DEFAULT_TOP`, `REPORT_PRECOMPUTE_UTC`, `REPORT_CARRYOVER_DAYS`, `GTD_COLLECT_UTC`, `GTD_PAGE_TIMEOUT_MS` (tests), `LEGACY_TEXT_RETENTION_DAYS`; optional, unset in production: `TASK_INTENT_SOURCES` (§3.8) |
 | Secrets | `MAIL_WEBHOOK_TOKEN_SHA256`, `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the last two from `--secrets-file` on every deploy) | `GEMINI_API_KEY`, `TODOIST_API_KEY` |
 | DO class | none: migration `v2` deleted the Python-era `TodofyCoordinator` in a gateway-only release (§6.6) | `TodofyCore` (renamed from `TodofyCoordinator` by core migration `v2`), instance name `inbox-v1`, SQLite-backed |
@@ -734,9 +734,9 @@ Since 2026-10-05 the gateway passes every answer but a list's page through as To
 measured the same way: an event's detail 2.0 → 0.8-1.5 first and 1.7 → 0.7 warm, a reconcile 2.1 → 1.2-1.5 and
 1.6 → 0.8, the legacy text 6.0-6.4 → 1.0-1.3 and 5.3-5.7 → 1.1, the reports 4.6-5.2 → 1.2-1.6 and 4.7-5.0 → 1.1-1.2
 (bound 3, so a decode again fails it); the lists and the isolate's first request are unchanged. `src/warm.ts` warms
-only what the gateway still reads (the lists' messages and a refusal's MailEvent). The Todoist Plus Mailbox's two
-largest answers, measured with the extension token since 2026-10-16, are passed through under the same bound: a
-lookup of 200 task IDs and items 0.9-1.1 first and 0.9 warm, one mail's 64 KiB summary 0.2-0.7 and 0.6.
+only what the gateway still reads (the lists' messages and a refusal's MailEvent). The planning API's largest Mail
+answers pass through under the same bound; the CPU suite measures a page of 50 mail items and one mail's 64 KiB
+summary on Tasks' Planning channel ([planning-api.md](planning-api.md)).
 
 Before that, the cost was the generated code reading and writing every answer again: a few tenths of a millisecond per
 small message, about 2 ms for a page of 100 events, the codec's text rules over a report's 230,000

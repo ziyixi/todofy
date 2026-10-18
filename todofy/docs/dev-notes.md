@@ -127,7 +127,7 @@ migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the ow
                                gtd_reviews) and mail_reminders.project_id (gtd-features.md);
                                0005_task_intents.sql adds task_intents and task_intent_tasks (§5, task-intent-v1);
                                0006_todoist_plus.sql the Todoist Plus tables and 0007_plan_store.sql the planning
-                               store (todoist-plus.md)
+                               store (planning-api.md)
 api/                           machine-api-v1.openapi.yaml (the hooks hosts' routes: webhook, newsletter,
                                health; the owner API is ../proto/todofy/ui/v1), newsletter report
                                schemas; the webhook body references ../contracts/mail-received-v1 (shared,
@@ -375,7 +375,7 @@ Vars (plain, with defaults): `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS
 `BUILD_SHA`, `TODOFY_PUBLIC_HOST` (the reminder's link); the GTD ledger's `GTD_COLLECT_UTC` ("13:00", `off`
 in the test config), `GTD_REVIEW_ENABLED`, `REPORT_CARRYOVER_DAYS` (14; 0 turns the carryover off),
 `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional; unset = the default project),
-`PLUS_METADATA` (`cache`; `full` turns Todoist Plus's caches off, todoist-plus.md "Caches") and the
+`PLUS_METADATA` (`cache`; `full` turns the Todoist adapter's caches off, runtime/plus_cache.py) and the
 test knobs `GTD_PAGE_TIMEOUT_MS` (20000), `PLUS_METADATA_MAX_AGE_MS` (300000) and `MAIL_BRIEFS_PACE_MS` (30000, between the brief backfill's model calls). Core secrets set by the owner: `GEMINI_API_KEY`,
 `TODOIST_API_KEY`. The gateway's vars and secrets (`ACCESS_*`, `TODOFY_HOOKS_HOSTS`,
 `MAIL_WEBHOOK_TOKEN_SHA256(_PREVIOUS)`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`) are listed in
@@ -487,7 +487,7 @@ token budget. A completed email keeps its frozen summary and model through a con
 one-sentence brief, which `core/mailbox.brief_of` reads back and `COMPLETE_SUMMARY` stores in
 `summaries.brief`. The one-time brief backfill (`runtime/mail_briefs.py`, `system=prompts.BRIEF_EMAIL`,
 the stored subject and summary as `user`) reserves against at most half of the day's budget
-(`reserve_tokens(share=0.5)`); see `docs/todoist-plus.md`, "Briefs".
+(`reserve_tokens(share=0.5)`); see `runtime/mail_briefs.py`.
 
 ### todoist.py (P; used by R)
 ```python

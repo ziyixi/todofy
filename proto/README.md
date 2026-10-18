@@ -124,13 +124,12 @@ within its noise; todofy-core's upload 542.7 → 554.0 KiB (gzip 151.2 → 153.5
 0.01 → 0.04 ms for a small one, 0.2 → 0.7 ms with 100 attachments, 0.9 ms either way for the largest; Todofy's UI
 bundle is unchanged (its types come from the OpenAPI document).
 
-Todoist Plus uses a separate `PlusService` in `todofy/ui/v1/plus_service.proto`, alongside
-Todofy's owner API. Sharing a package reuses its existing Python generation; the service has
-its own narrow `/api/plus/v1/` routes and extension authentication. Owner setup still uses
-Access and CSRF. Todofy's gateway also consumes FlowDay's generated UI service through its
-restricted `FocusEntrypoint`; the extension consumes both services. The extension is published
-as a browser artifact and owns no cloud resource. Its public operation guide is in
-[`todoist-plus/README.md`](../todoist-plus/README.md).
+Tasks' planning and Mail API is the separate `PlusService` in `todofy/ui/v1/plus_service.proto`,
+alongside Todofy's owner API; it keeps the retired Todoist Plus extension's name. Sharing a package
+reuses its existing Python generation. Tasks serves its `/api/plus/v1/` routes behind Access and
+CSRF and forwards them on Todofy's private Planning binding, which allows only the methods Tasks
+calls. Todofy's gateway also consumes FlowDay's generated UI service through FlowDay's restricted
+`NativeFocusEntrypoint`. See [`todofy/docs/planning-api.md`](../todofy/docs/planning-api.md).
 
 ## Rules
 

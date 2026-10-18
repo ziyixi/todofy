@@ -209,7 +209,9 @@ historical log evidence is not treated as a successful verification.
 Todoist Plus is retired in the current refinement: Tasks hosts Plan, Focus and Mail, with native planning
 facts and owner Access. Historical extension releases, pending old-source observations and owner Reload
 steps are preserved in [the retired handoff](docs/history/todoist-plus-handoff-2026-10-17.md); they are not
-new work or installation instructions. Shared synthetic regression coverage remains in CI.
+new work or installation instructions. The extension was removed on 2026-10-18
+([history](docs/history/todoist-plus.md)); its shared Plan, Focus and Mail coverage runs in `packages/planning-ui`
+and Tasks' browser journeys.
 
 Recall's mobile queue correction is released at `eb2c9187095f22eeac4ef2ae1e7e886b2e9076f3`.
 [Full branch CI 38683400263](https://github.com/ziyixi/todofy/actions/runs/38683400263) and
@@ -326,7 +328,7 @@ and do not imply natural scheduler provenance was established.
 Answered in chat; do not re-ask.
 
 - The FlowDay Todoist key restoration recorded in the Plus verification was owner-authorized
-  ([dated note](docs/todoist-plus-verification.md#installed-version-audit-and-weekly-planner-revision)).
+  ([dated note](https://github.com/ziyixi/todofy/blob/f6c08aaf/docs/todoist-plus-verification.md#installed-version-audit-and-weekly-planner-revision)).
 - Recall keeps its seven-day cloud file window. `de4d561` deployed at `2026-10-11T23:55Z`; after about 2026-10-18,
   verify the first production file removal and one Dropbox cold read, recording metadata only, never page content.
 - GTD additions: the Waiting list, the weekly review checklist and the Sunday-commit fix. The one-card
@@ -334,7 +336,7 @@ Answered in chat; do not re-ask.
 - Todoist Plus's weekly rollover stays on. Its first natural run is the ten-minute cron after Monday 2026-10-19
   00:00 US/Pacific (07:00 UTC). Afterwards observe it by metadata only (old-week batch drained, week start
   advanced, no error code), never task content.
-  Controls: [weekly rollover and controls](todofy/docs/todoist-plus.md#weekly-rollover-and-controls).
+  Controls: [weekly rollover and controls](todofy/docs/planning-api.md#weekly-rollover-and-controls).
 - The 48 merged `codex/*` branches were pruned from origin after a local bundle backup, so branch names cited
   above as closing documentation no longer exist. The three unmerged Recall experiment branches remain:
   `codex/recall-permission-setup`, `codex/recall-startup-diagnostic` and `codex/recall-orion-permission-verification`.
@@ -379,8 +381,6 @@ Answered in chat; do not re-ask.
   FlowDay's owner setup/device check before F6 retirement, and Newsletter's natural provider/send acceptance after
   its last business change. Use the app runbooks and fresh status before treating an old waiting item as still open;
   do not restart Compose, replay a send or request credentials solely from an archived note.
-- Todoist Plus: review which planning-configuration methods belong with `ConfirmPlanMapping` among the
-  owner-only methods.
 - Recall: the free-tier storage and request cost estimates in [design §5.3](recall/docs/design.md#53-budgets)
   predate minute snapshots with screenshots and have not been redone.
 

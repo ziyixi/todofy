@@ -1,4 +1,4 @@
-"""Replay receipts of the Plus writes that change Todoist, in TodofyCore's own SQLite (docs/todoist-plus.md,
+"""Replay receipts of the Plus writes that change the task store, in TodofyCore's own SQLite (docs/planning-api.md,
 "Receipts").
 
 SetTaskPlan, SetTaskLead, CompleteTask, AppendTaskSteps and each label update of the Monday reset record a

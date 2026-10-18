@@ -1,4 +1,4 @@
-"""The one-time brief backfill (docs/todoist-plus.md, "Mailbox"): a model-written brief for each mail that was in
+"""The one-time brief backfill (docs/planning-api.md, "Mail"): a model-written brief for each mail that was in
 the Mailbox when this release first ran and was summarised before the summary prompt asked for one.
 
 It runs by itself after the deploy, in the alarm loop, one step per alarm and only when the ledger had no work:

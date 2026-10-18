@@ -1,10 +1,10 @@
 """The planning store in D1 (migrations/0007_plan_store.sql): the only module that reads or writes plan_*.
 
-Owner-authored planning facts and Todofy's own task identities; never task content. Dependencies
-(docs/todoist-plus.md, "Dependencies"), the weekly Bets (plan_notes of kind 'bets'), the Mailbox's categories
-(plan_categories of scheme 'mail', with the Todoist adapter's binding in plan_settings 'todoist.mail') and the order
-of the Review lanes (plan_settings 'board') are the facts it keeps so far; the other tables wait for later steps
-(docs/todoist-plus.md, "Planning store"). Callers name tasks by the task store's own IDs, with its provider
+Owner-authored planning facts and Todofy's own task identities; never task content. Dependencies, the weekly
+Bets (plan_notes of kind 'bets'), the Mailbox's categories (plan_categories of scheme 'mail', with the Todoist
+adapter's binding in plan_settings 'todoist.mail') and the order of the Review lanes (plan_settings 'board') are
+the facts it keeps so far; the other tables wait for later steps (docs/planning-api.md, "Planning store" and
+"Bets, dependencies and reordering"). Callers name tasks by the task store's own IDs, with its provider
 (core/plan.py PROVIDERS).
 """
 

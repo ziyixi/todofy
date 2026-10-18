@@ -1,4 +1,4 @@
-"""D1 statements of the Mailbox (runtime/plus_mail.py, runtime/mail_briefs.py; docs/todoist-plus.md, "Mailbox").
+"""D1 statements of the Mailbox (runtime/plus_mail.py, runtime/mail_briefs.py; docs/planning-api.md, "Mail").
 
 Native entries are pending summaries, indexed by created_at and event_id. A task link is optional until explicit
 conversion. List pages return only the brief and its 600-character fallback; full text is read for one chosen

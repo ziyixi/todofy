@@ -1,4 +1,4 @@
-"""The Mailbox's domain rules, independent of any task provider (docs/todoist-plus.md, "Mailbox").
+"""The Mailbox's domain rules, independent of any task provider (docs/planning-api.md, "Mail").
 
 A mail item is a Mail Hero event Todofy summarised (its ``summaries`` row): its ID is the event ID, its task an
 external reference. Its brief is one plain sentence, the first line the summary prompt asks for

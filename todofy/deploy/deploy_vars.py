@@ -104,7 +104,7 @@ INJECTED: dict[str, tuple[Injected, ...]] = {
         Injected("PROCESSING_PAUSED", "TODOFY_PROCESSING_PAUSED", "toggle", FLAG),
         Injected("FORCE_PAUSE_TODOIST", "TODOFY_FORCE_PAUSE_TODOIST", "toggle", FLAG),
         Injected("GTD_REVIEW_ENABLED", "TODOFY_GTD_REVIEW_ENABLED", "toggle", FLAG),
-        # docs/todoist-plus.md "Caches": `full` turns the Plus caches off (the reads before them).
+        # runtime/plus_cache.py: `full` turns the Todoist adapter's planning caches off (the reads before them).
         Injected("PLUS_METADATA", "TODOFY_PLUS_METADATA", "toggle", PLUS_METADATA, default="cache"),
     ),
     "gateway": _shared(),
