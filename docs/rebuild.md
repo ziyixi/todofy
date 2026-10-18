@@ -208,6 +208,29 @@ gh workflow run ci.yml --ref main -R "$cloud_repo" \
 
 ## Host recovery
 
+### 主机地址变化
+
+如果业务 Pod 仍然 Ready，但 daemon 的运行观测变成 unknown，发布在 `suspend` 阶段报
+`UNAVAILABLE`，先核对主机网卡地址、Node InternalIP 和 `default/kubernetes` 的 EndpointSlice。
+Node 和 API 端点仍指向已不属于主机的地址时，正确的 Service/NAT 规则也会把请求送往旧地址。
+这类问题先恢复节点网络，再继续原发布；重复创建发布不会解除 `RELEASE_HELD`。
+
+确认实际 k3s 配置没有固定旧的 `node-ip`、`node-external-ip` 或 `advertise-address` 后，在宿主运行：
+
+```sh
+sudo systemctl restart k3s
+```
+
+控制面会短暂不可用。项目的 unit 使用 `KillMode=process`；[K3s 停止规则](https://docs.k3s.io/upgrades/killall)
+保留现有容器运行，不需要 `k3s-killall.sh`、重启整机或手改 EndpointSlice。
+重启后核对 API Service 可访问、daemon 能读到真实运行状态，以及原业务 Pod 的 UID、重启次数和健康状态。
+这些检查通过后，使用上节的 CI resume 命令继续原 SHA 的发布；正式发布仍按正常流程排空和替换其目标容器。
+
+节点地址可能变化；不要将当前 DHCP 地址写进应用或依赖路由器固定租约。
+本次验证的是地址变化后的恢复；当前部署没有自动刷新节点地址的钩子，不能将上述步骤当作已经实现的自动修复。
+
+### 宿主入口或运行资源损坏
+
 保留原安装包和每次接受版本的 bundle。下载与当前接受发布一致且 **VPS bootstrap bundle** job 成功的 artifact，传入 VPS 后执行：
 
 ```sh

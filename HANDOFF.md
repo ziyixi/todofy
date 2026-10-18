@@ -9,6 +9,37 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+### VPS release recovery (2026-10-18 UTC)
+
+Branch `codex/vps-release-recovery` records host recovery only; no application, release-client or
+bootstrap code changes. The host address changed while K3s still advertised its previous Node IP.
+The API EndpointSlice and NAT agreed with that obsolete address. Pod API connections failed with
+EHOSTUNREACH; release `99305435-d841-4481-86b8-08a6348052fa`, source `7eae74653b37333f278a5894ec3f6dcc36ce6447`,
+held at `suspend / UNAVAILABLE` before closing Newsletter admission or replacing an image.
+
+The owner verified the installed config against the retained bundle and restarted only `k3s`.
+At `2026-10-18T04:11:23Z`, API Service TLS passed and daemon observations were ready, with Newsletter
+healthy/accepting, zero active work and zero unknown outcomes. All three running Pod UIDs and zero
+restart counts were retained through host recovery. The original-target resume passed in
+[Actions 39096240942](https://github.com/ziyixi/todofy/actions/runs/39096240942). The daemon recorded ready
+at `2026-10-18T04:20:33Z`; actual source, both frozen digests, request IDs and generations match, and
+Newsletter is healthy/accepting with zero active work and zero unknown outcomes. Deployment `7149842106`
+records that ready receipt. Only the failed VPS job of
+[latest main 39089092378, attempt 3](https://github.com/ziyixi/todofy/actions/runs/39089092378) was rerun;
+the whole run now succeeds, with successful Cloudflare jobs retained. Deployment `7149857702` records
+release `63d0dfb5-64fc-4eb6-89ba-cbb872b95471` ready at `2026-10-18T04:22:25Z`, source
+`5d6461f4cd49a6aebb325dad88fe5efa3d3bd551`. All three Deployments are ready at generation 21 and both
+CronJobs are unsuspended. The natural Fleet report observed `2026-10-18T04:25:10Z`, received at
+`04:25:11Z`, confirms this source, ready release and clean reconciliation. Owner Chrome shows Fleet
+ready/configuration consistent and Home all normal, including Newsletter. No reminder was dismissed.
+The recovery is complete; this branch only records the evidence and minimal runbook, through branch
+CI followed by the same green SHA on main. Root-document classification selects no application release.
+See [host recovery](docs/rebuild.md#主机地址变化).
+
+The owner excludes fixed DHCP leases as a requirement. No NetworkManager hook, timer, daemon, static
+node address or new network layer was installed. Automatic address-change recovery remains unimplemented;
+do not describe this verified manual recovery as preventing every recurrence.
+
 ### Native Tasks replacement (2026-10-18)
 
 Branch `codex/tasks-native`, working checkout `/private/tmp/todofy-tasks-impl`. The native Tasks cutover was
@@ -16,8 +47,8 @@ verified at `77edb46915f6939675fa98e011dd21516738fdff`. Complete branch gate
 [39086347716](https://github.com/ziyixi/todofy/actions/runs/39086347716) passed. The
 [same-SHA main 39086983750](https://github.com/ziyixi/todofy/actions/runs/39086983750) verified Tasks → FlowDay →
 Todofy → Home, with Deployments `7148421922`, `7148434459`, `7148449126`, `7148465493`. Its separate VPS job
-stopped at `RELEASE_HELD` after the earlier `UNAVAILABLE`; it did not update the server. Do not disable or resume
-that held release to hide the failure.
+stopped at `RELEASE_HELD` after the earlier `UNAVAILABLE`; it did not update the server. The host network
+cause and original-release recovery are recorded above; the historical failure was not hidden or bypassed.
 
 The final private, read-only source snapshot and empty post-export Sync delta were verified. Tasks contains
 22 projects, 3 sections, 27 labels, 12 filters, 2,644 task resources and 2,824 completion occurrences with exact
