@@ -11,6 +11,17 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ### Tasks workflow refinement (2026-10-18 UTC)
 
+Follow-up `codex/tasks-dependency-layout` is in progress after the owner reported a warm-open inward flash.
+Real Chromium/local-D1 reproduction identified two independent shifts: the dependency loading paragraph
+removed about 17px above its heading, and empty child placeholders removed another 27px. Same-height
+dependency status and stable empty child instructions now keep that heading still across both replies.
+The owner also requested optional Time/Repeat panels and a quieter sidebar resize affordance. Browser
+regressions now cover warm inner geometry and the common property popups; release evidence remains pending.
+The combined local suite passes lint/type/build, 55 unit checks and 50 real Chromium/local-D1 journeys.
+Actual owner Chrome with the synthetic preview confirms cached reopening and the default collapsed Date
+panel; its screenshot is in the refinement record. No real task was edited. Full branch gate and same-SHA
+main release remain before production acceptance.
+
 All 28 items in the owner's acceptance list are implemented and released. The original branch was
 `codex/tasks-workflow-refinement`; `codex/tasks-read-efficiency` completes the read/DB work.
 Closing branch `codex/tasks-read-verification` records the production evidence only.

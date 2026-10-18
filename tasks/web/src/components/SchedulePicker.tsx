@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { api, describeError } from "../api";
 import { dateLabel, shiftDate, todayDate } from "../dates";
+import { readRepeat } from "../recurrence-controls";
 import { DateCalendar } from "./DateCalendar";
 import { RecurrencePicker } from "./RecurrencePicker";
 import "./property-pickers.css";
@@ -58,14 +59,42 @@ export function SchedulePicker({
   const [deadlineText, setDeadlineText] = useState("");
   const [parsing, setParsing] = useState(false);
   const [error, setError] = useState("");
+  const [timeExpanded, setTimeExpanded] = useState(false);
+  const [repeatExpanded, setRepeatExpanded] = useState(false);
   const portal = useRef<HTMLElement | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const inputHelpId = useId();
+  const timePanelId = useId();
+  const repeatPanelId = useId();
   const today = todayDate(new Date(), timeZone || undefined);
   const weekday = new Date(`${today}T12:00:00`).getDay();
   const isDeadline = label === "Deadline";
   const inputText = isDeadline ? deadlineText : text || "";
   const busy = disabled || parsing;
+  const repeat = readRepeat(recurrence || "", value || today);
+  const repeatUnit = {
+    none: "days",
+    daily: "days",
+    weekdays: "weekdays",
+    weekly: "weeks",
+    monthly: "months",
+    yearly: "years",
+  }[repeat.frequency];
+  const repeatSummary = !recurrence
+    ? "Repeat"
+    : repeat.preserved
+      ? "Custom repeat"
+      : repeat.interval === 1
+        ? {
+            none: "Repeat",
+            daily: "Daily",
+            weekdays: "Weekdays",
+            weekly: "Weekly",
+            monthly: "Monthly",
+            yearly: "Yearly",
+          }[repeat.frequency]
+        : `Every ${repeat.interval} ${repeatUnit}`;
+  const repeatText = `${repeatSummary}${recurrence && repeat.afterCompletion ? " · after completion" : ""}`;
   async function choose(date: string) {
     setError("");
     try {
@@ -122,7 +151,16 @@ export function SchedulePicker({
   return (
     <div className="task-property">
       {!anchor && <span className="property-heading">{label}</span>}
-      <Popover.Root open={open} onOpenChange={onOpenChange}>
+      <Popover.Root
+        open={open}
+        onOpenChange={(next) => {
+          if (next) {
+            setTimeExpanded(false);
+            setRepeatExpanded(false);
+          }
+          onOpenChange(next);
+        }}
+      >
         {!anchor && (
           <Popover.Trigger
             className={`property-trigger${value ? " has-date" : ""}`}
@@ -261,32 +299,69 @@ export function SchedulePicker({
               {!isDeadline && (onTimeChange || onRecurrenceChange) && (
                 <div className="schedule-extra">
                   {onTimeChange && (
-                    <label>
-                      <Clock size={15} />
-                      <span>Time</span>
-                      <input
-                        aria-label="Time"
-                        type="time"
-                        value={time}
-                        disabled={!value || busy}
-                        onChange={(event) =>
-                          void onTimeChange?.(event.target.value)
-                        }
-                      />
-                    </label>
+                    <>
+                      <button
+                        type="button"
+                        className="schedule-disclosure"
+                        aria-label="Time options"
+                        aria-expanded={timeExpanded}
+                        aria-controls={timePanelId}
+                        disabled={busy}
+                        onClick={() => setTimeExpanded(!timeExpanded)}
+                      >
+                        <Clock size={15} />
+                        <span>{time ? `Time · ${time}` : "Add time"}</span>
+                        <ChevronDown size={13} />
+                      </button>
+                      {timeExpanded && (
+                        <div className="schedule-time" id={timePanelId}>
+                          <label>
+                            <span>Time</span>
+                            <input
+                              aria-label="Time"
+                              type="time"
+                              value={time}
+                              disabled={!value || busy}
+                              onChange={(event) =>
+                                void onTimeChange?.(event.target.value)
+                              }
+                            />
+                          </label>
+                          {timeZone && (
+                            <span className="schedule-zone">
+                              {timeZone.replaceAll("_", " ")}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
                   {onRecurrenceChange && (
-                    <RecurrencePicker
-                      value={recurrence || ""}
-                      date={value || today}
-                      disabled={busy}
-                      onChange={onRecurrenceChange}
-                    />
-                  )}
-                  {timeZone && (
-                    <span className="schedule-zone">
-                      {timeZone.replaceAll("_", " ")}
-                    </span>
+                    <>
+                      <button
+                        type="button"
+                        className="schedule-disclosure"
+                        aria-label="Repeat options"
+                        aria-expanded={repeatExpanded}
+                        aria-controls={repeatPanelId}
+                        disabled={busy}
+                        onClick={() => setRepeatExpanded(!repeatExpanded)}
+                      >
+                        <Repeat2 size={15} />
+                        <span title={repeatText}>{repeatText}</span>
+                        <ChevronDown size={13} />
+                      </button>
+                      {repeatExpanded && (
+                        <div className="schedule-repeat" id={repeatPanelId}>
+                          <RecurrencePicker
+                            value={recurrence || ""}
+                            date={value || today}
+                            disabled={busy}
+                            onChange={onRecurrenceChange}
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}

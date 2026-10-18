@@ -10,7 +10,9 @@
 .app-shell > .sidebar-resize::after {
   content: "";
   position: absolute;
-  inset-block: 0;
+  top: calc(50% - 22px);
+  height: 44px;
+  border-radius: 2px;
   inset-inline-start: 3px;
   width: 2px;
   background: var(--muted);

@@ -135,6 +135,98 @@ test("details show no guessed planning flags and keep their frame fixed as plann
   await expect(status.getByRole("checkbox")).toHaveCount(4);
 });
 
+test("reopening a cached task keeps the dependency heading and empty section still while checking fresh edges", async ({
+  page,
+  request,
+}) => {
+  const title = `Synthetic warm dependency layout ${crypto.randomUUID()}`;
+  const parent = await createResource(request, "tasks", { title });
+  await mockPlan(page);
+  let reads = 0;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let childReads = 0;
+  let releaseChildren!: () => void;
+  const childrenPending = new Promise<void>((resolve) => {
+    releaseChildren = resolve;
+  });
+  await page.route("**/api/tasks/v1/tasks?**", async (route) => {
+    if (
+      new URL(route.request().url()).searchParams.get("parent_id") ===
+        parent.id &&
+      ++childReads === 2
+    )
+      await childrenPending;
+    await route.continue();
+  });
+  await page.route("**/api/plus/v1/plan:read", async (route) => {
+    if (++reads === 2) await pending;
+    await route.fulfill({
+      json: { plan: { native_planning: true, dependencies: [] } },
+    });
+  });
+  await page.goto("/#/inbox");
+  const dialog = page.getByRole("dialog", {
+    name: "Task details",
+    exact: true,
+  });
+  const dependencies = dialog.getByRole("region", {
+    name: "Task dependencies",
+    exact: true,
+  });
+  const children = dialog.getByRole("region", {
+    name: "Subtasks and steps",
+    exact: true,
+  });
+  const open = () => page.getByText(title, { exact: true }).click();
+  await open();
+  await expect(
+    dependencies.getByRole("button", { name: "Add dependency", exact: true }),
+  ).toBeEnabled();
+  await expect(
+    dialog.getByRole("combobox", { name: "Planning stage", exact: true }),
+  ).toBeVisible();
+  await expect(children.getByRole("status")).toHaveCount(0);
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
+  await open();
+  await expect(dependencies.getByRole("status")).toBeVisible();
+  await expect(children.getByRole("status")).toHaveCount(1);
+  const before = {
+    heading: await dependencies.locator("h3").boundingBox(),
+    section: await dependencies.boundingBox(),
+  };
+  releaseChildren();
+  await expect(children.getByRole("status")).toHaveCount(0);
+  const afterChildren = {
+    heading: await dependencies.locator("h3").boundingBox(),
+    section: await dependencies.boundingBox(),
+  };
+  release();
+  await expect(dependencies.getByRole("status")).toHaveCount(0);
+  const after = {
+    heading: await dependencies.locator("h3").boundingBox(),
+    section: await dependencies.boundingBox(),
+  };
+  console.log(
+    JSON.stringify({
+      event: "warm_dependency_geometry",
+      before,
+      afterChildren,
+      after,
+      reads,
+      childReads,
+    }),
+  );
+  expect(reads).toBe(2);
+  expect(afterChildren.heading?.y).toBe(before.heading?.y);
+  expect(after.heading?.y).toBe(before.heading?.y);
+  expect(after.section?.height).toBe(before.section?.height);
+});
+
 test("label selection floats above details and quick add without expanding either form", async ({
   page,
   request,
@@ -231,6 +323,103 @@ test("label selection floats above details and quick add without expanding eithe
     )
   ).json();
   expect(created.tasks[0].label_ids).toEqual([labels[2]!.id]);
+});
+
+test("property popups keep both task editors still on first open and reopen", async ({
+  page,
+  request,
+}) => {
+  const title = `Synthetic property geometry ${crypto.randomUUID()}`;
+  await createResource(request, "tasks", { title });
+  await createResource(request, "labels", {
+    title: "Synthetic geometry label",
+  });
+  await mockPlan(page);
+  await page.goto("/#/inbox");
+  await expect(page.locator(".category-count").first()).toBeVisible();
+  for (const name of ["Task details", "Add task"]) {
+    if (name === "Task details")
+      await page.getByText(title, { exact: true }).click();
+    else await page.keyboard.press("q");
+    const dialog = page.getByRole("dialog", { name, exact: true });
+    await expect(dialog).toBeVisible();
+    if (name === "Task details") {
+      await expect(
+        dialog.getByRole("combobox", { name: "Planning stage", exact: true }),
+      ).toBeVisible();
+      await expect(
+        dialog
+          .getByRole("region", { name: "Subtasks and steps", exact: true })
+          .getByRole("status"),
+      ).toHaveCount(0);
+      await expect(
+        dialog
+          .getByRole("region", { name: "Task dependencies", exact: true })
+          .getByRole("status"),
+      ).toHaveCount(0);
+    }
+    const before = await dialog.boundingBox();
+    const contentBefore = await dialog.locator(".dialog-content").boundingBox();
+    const bodyBefore = await dialog
+      .locator(".task-edit-body")
+      .evaluate((body) => ({
+        height: body.clientHeight,
+        scroll: body.scrollHeight,
+        top: body.scrollTop,
+      }));
+    const fields = [
+      { role: "combobox", name: "Project", popup: ".destination-popup" },
+      { role: "combobox", name: "Priority", popup: ".priority-popup" },
+      { role: "button", name: "Date", popup: '[aria-label="Date picker"]' },
+      {
+        role: "button",
+        name: "Deadline",
+        popup: '[aria-label="Deadline picker"]',
+      },
+      { role: "button", name: "Add labels", popup: ".label-picker-popup" },
+    ] as const;
+    for (const field of fields) {
+      for (let opening = 0; opening < 2; opening++) {
+        await dialog
+          .getByRole(field.role, { name: field.name, exact: true })
+          .click();
+        const popup = dialog.locator(field.popup);
+        await expect(popup).toBeVisible();
+        const sizes = await popup.evaluate(async (element) => {
+          const frames: string[] = [];
+          for (let frame = 0; frame < 10; frame++) {
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => resolve()),
+            );
+            frames.push(`${element.clientWidth}x${element.clientHeight}`);
+          }
+          return frames;
+        });
+        expect(
+          new Set(sizes).size,
+          `${name}: ${field.name} opening ${opening}`,
+        ).toBe(1);
+        expect(await dialog.boundingBox()).toEqual(before);
+        expect(await dialog.locator(".dialog-content").boundingBox()).toEqual(
+          contentBefore,
+        );
+        expect(
+          await dialog.locator(".task-edit-body").evaluate((body) => ({
+            height: body.clientHeight,
+            scroll: body.scrollHeight,
+            top: body.scrollTop,
+          })),
+        ).toEqual(bodyBefore);
+        await popup.press("Escape");
+        await expect(popup).not.toBeVisible();
+        await expect(dialog).toBeVisible();
+        expect(await dialog.boundingBox()).toEqual(before);
+      }
+    }
+    await dialog
+      .getByRole("button", { name: "Close dialog", exact: true })
+      .click();
+  }
 });
 
 test("quick add keeps its compact frame while the saved task's planning write is pending", async ({

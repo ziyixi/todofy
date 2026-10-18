@@ -149,13 +149,13 @@ export function TaskDependencyFields({
   }
   return (
     <section className="task-dependencies" aria-label="Task dependencies">
-      {loading && (
-        <p className="muted" role="status">
-          Reading dependencies…
-        </p>
-      )}
       <h3>
         <Link2 size={13} /> Depends on{" "}
+        {loading && (
+          <span className="dependency-loading" role="status">
+            Checking…
+          </span>
+        )}
         {blocked && <span className="dependency-blocked">Blocked</span>}
       </h3>
       {dependencies.map((edge) => (

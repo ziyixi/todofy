@@ -13,5 +13,8 @@ Read the root rules, [README](README.md), [design](docs/design.md) and [verifica
 - Preserve imported IDs, archived state, history and source completion counts. API access and a green build
   do not prove complete migration. Keep private snapshots outside the public repository.
 - Use synthetic tasks for tests/screenshots. The local preview has ephemeral D1; do not use `--remote` for development.
+- Dialog/popover changes need browser checks for first open, cached reopen and asynchronous data arrival.
+  Check internal control positions, parent geometry and scroll position, not only the outer dialog height.
+  User-requested expansion is intentional; loading and closing transitions must not cause a second layout jump.
 - Follow the existing independent Actions release. Branch checks do not deploy. Record actual evidence and
   remaining cutover work in HANDOFF.

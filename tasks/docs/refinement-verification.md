@@ -194,3 +194,36 @@ During this work the owner reported an approximately 20-second refresh stall. Pu
 in about 0.1 seconds; authenticated Chrome inspection also stalled, then the same tab recovered without
 cookie clearing or an application restart. The cause was not established. These read optimizations are
 not evidence that the separate stall has been fixed.
+
+## Warm-open layout follow-up
+
+The owner subsequently reported an inward flash on a cached second open, localized to Depends on.
+A real Chromium/local-D1 test reproduced two independent movements: child loading placeholders replaced
+by empty instructions shifted the dependency heading upward 27.2px; removing the separate dependency
+loading paragraph shifted it another 17.4px. The outer dialog stayed fixed, so the previous outer-frame
+assertions did not detect this. Both response boundaries now preserve the heading position and section
+height. Dependency reads remain fresh; there is no new graph cache or retry.
+
+The same review found that cold task deep links could render before project/label metadata arrived,
+temporarily showing Inbox and missing selected labels. The detail dialog now waits for the existing
+Catalog readiness condition. A regression holds Catalog independently from the full task response and
+checks the correct project and selected labels on the first visible editor.
+
+Date opens with its calendar and compact Time/Repeat entries. The controls expand only when requested;
+existing time/recurrence summaries and stored values remain. Closing an expanded popup keeps its contents
+until its fade completes, then the next open starts collapsed. The previous close-time state reset was
+observed to shrink the popup by about 67px during the fade; its browser regression now checks that boundary.
+
+Layout checks cover task details and Quick Add, Project/Priority/Date/Deadline/Labels on first/repeated
+open, and the catalog color picker. They compare internal geometry and scroll position as well as the
+parent frame; static popups are sampled across successive rendered frames. Existing interaction checks
+still verify real saves, date rules and recurrence. The Tasks agent rules now require these checks for
+future dialog/popover changes. Intentional expansion is distinct from loading-induced movement.
+
+The sidebar resize hit area stays unchanged; its hover/focus feedback is a short central line instead
+of a full-height rail. Application/backend contracts, database rows and installed extensions are unchanged.
+Local combined checks, same-SHA branch/main release and production inspection are recorded in HANDOFF.
+
+Actual Chrome with a synthetic local task shows the default collapsed date controls:
+
+![Date picker with optional Time and Repeat entries](images/compact-date.png)

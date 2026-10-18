@@ -314,7 +314,7 @@ export function App() {
           />
         )}
       </main>
-      {editor && (
+      {editor && catalog.timeZone && (
         <Suspense
           fallback={
             <p className="loading-state" role="status">

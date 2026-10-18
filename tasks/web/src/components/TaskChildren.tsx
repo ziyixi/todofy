@@ -169,10 +169,7 @@ export function TaskChildren({
                   : `${rows.filter((child) => child.completed).length}/${rows.length}`}
               </span>
             </h3>
-            {loading && (
-              <div className="child-loading-placeholder" aria-hidden />
-            )}
-            {!loading && !rows.length && (
+            {(loading || !rows.length) && (
               <p className="muted child-empty">
                 {kind === "step"
                   ? "Add a small action to arrange in your week."

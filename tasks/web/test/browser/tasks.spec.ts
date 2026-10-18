@@ -137,6 +137,7 @@ test("steps remain attached and date preview keeps deadline independent", async 
   await dialog.getByLabel("Schedule", { exact: true }).fill("every Tuesday");
   await dialog.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(dialog.getByRole("status")).toHaveText(/Next:/);
+  await dialog.getByRole("button", { name: "Time options", exact: true }).click();
   await dialog.getByLabel("Time", { exact: true }).fill("14:15");
   await dialog.getByRole("button", { name: "Deadline", exact: true }).click();
   await dialog.getByLabel("Deadline text", { exact: true }).fill("2026-12-31");
@@ -160,7 +161,9 @@ test("steps remain attached and date preview keeps deadline independent", async 
     dialog.getByRole("button", { name: "Deadline", exact: true }),
   ).toHaveText("Dec 31");
   await dialog.getByRole("button", { name: "Date", exact: true }).click();
+  await dialog.getByRole("button", { name: "Time options", exact: true }).click();
   await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("14:15");
+  await dialog.getByRole("button", { name: "Repeat options", exact: true }).click();
   await expect(dialog.getByLabel("Repeat", { exact: true })).toHaveValue(
     "weekly",
   );
@@ -181,6 +184,11 @@ test("moving a timed date preserves the local clock time across daylight saving"
   await page.goto(`/?task=${task.id}#/inbox`);
   const dialog = page.getByRole("dialog", { name: "Step details" });
   await dialog.getByRole("button", { name: "Date", exact: true }).click();
+  await expect(dialog.getByLabel("Time", { exact: true })).toHaveCount(0);
+  await expect(
+    dialog.getByRole("button", { name: "Time options", exact: true }),
+  ).toHaveText("Time · 11:00");
+  await dialog.getByRole("button", { name: "Time options", exact: true }).click();
   await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("11:00");
   await dialog
     .getByRole("gridcell", { name: "Tuesday, November 3, 2026" })

@@ -390,6 +390,19 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   const date = dialog.getByRole("button", { name: "Date", exact: true });
   await date.click();
   await expect(dialog.getByLabel("Time", { exact: true })).toHaveCount(0);
+  await expect(
+    dialog.getByRole("button", { name: "Time options", exact: true }),
+  ).toHaveCount(0);
+  const repeatOptions = dialog.getByRole("button", {
+    name: "Repeat options",
+    exact: true,
+  });
+  await expect(repeatOptions).toHaveAttribute("aria-expanded", "false");
+  await expect(repeatOptions).toHaveText("Repeat");
+  await expect(
+    dialog.getByRole("combobox", { name: "Repeat", exact: true }),
+  ).toHaveCount(0);
+  await repeatOptions.click();
   await dialog
     .getByRole("combobox", { name: "Repeat", exact: true })
     .selectOption("weekly");
@@ -443,6 +456,12 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await page.reload();
   await expect(dialog).toBeVisible();
   await date.click();
+  await expect(repeatOptions).toHaveAttribute("aria-expanded", "false");
+  await expect(repeatOptions).toHaveText("Every 2 weeks");
+  await expect(
+    dialog.getByRole("combobox", { name: "Repeat", exact: true }),
+  ).toHaveCount(0);
+  await repeatOptions.click();
   await expect(
     dialog.getByRole("combobox", { name: "Repeat", exact: true }),
   ).toHaveValue("weekly");
@@ -469,6 +488,8 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   expect((await savedTask(request, task.id)).recurrence).toBe("every! 2 weeks");
   await page.reload();
   await date.click();
+  await expect(repeatOptions).toHaveText("Every 2 weeks · after completion");
+  await repeatOptions.click();
   await expect(
     dialog.getByRole("checkbox", {
       name: "Count from completion",
@@ -511,7 +532,47 @@ test("repeat controls save calendar rules while only steps expose a clock time",
     exact: true,
   });
   await stepDate.click();
+  const timeOptions = stepDialog.getByRole("button", {
+    name: "Time options",
+    exact: true,
+  });
+  await expect(timeOptions).toHaveAttribute("aria-expanded", "false");
+  await expect(timeOptions).toHaveText("Add time");
+  await expect(stepDialog.getByLabel("Time", { exact: true })).toHaveCount(0);
+  await timeOptions.click();
   await stepDialog.getByLabel("Time", { exact: true }).fill("09:30");
+  await timeOptions.click();
+  await expect(stepDialog.getByLabel("Time", { exact: true })).toHaveCount(0);
+  await expect(timeOptions).toHaveText("Time · 09:30");
+  await timeOptions.click();
+  await expect(stepDialog.getByLabel("Time", { exact: true })).toHaveValue("09:30");
+  const closeGeometry = await stepDate.evaluate(async (button) => {
+    if (!(button instanceof HTMLButtonElement))
+      throw new Error("Date trigger is not a button");
+    const popup = document.querySelector<HTMLElement>(".schedule-popup");
+    const extra = popup?.querySelector<HTMLElement>(".schedule-extra");
+    if (!popup || !extra) throw new Error("Date picker is not open");
+    const before = {
+      width: popup.clientWidth,
+      height: popup.clientHeight,
+      extraHeight: extra.clientHeight,
+    };
+    button.click();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    return {
+      before,
+      after: {
+        width: popup.clientWidth,
+        height: popup.clientHeight,
+        extraHeight: extra.clientHeight,
+      },
+    };
+  });
+  expect(closeGeometry.after).toEqual(closeGeometry.before);
+  await stepDate.click();
+  await expect(timeOptions).toHaveAttribute("aria-expanded", "false");
+  await expect(timeOptions).toHaveText("Time · 09:30");
+  await expect(stepDialog.getByLabel("Time", { exact: true })).toHaveCount(0);
   await stepDate.click();
   await stepDialog
     .getByRole("button", { name: "Save changes", exact: true })

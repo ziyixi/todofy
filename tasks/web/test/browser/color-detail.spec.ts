@@ -246,12 +246,22 @@ test("the color menu uses its full native height when the viewport has room", as
     .last()
     .click();
   const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
+  const editorBounds = await dialog.boundingBox();
+  const formBounds = await dialog.locator("form").boundingBox();
   await dialog.getByRole("combobox", { name: "Color", exact: true }).click();
   const menu = page.getByRole("listbox", { name: "Colors", exact: true });
   const bounds = (await menu.boundingBox())!;
   expect(bounds.height).toBeGreaterThanOrEqual(270);
   expect(bounds.y).toBeGreaterThanOrEqual(0);
   expect(bounds.y + bounds.height).toBeLessThanOrEqual(874);
+  expect(await dialog.boundingBox()).toEqual(editorBounds);
+  expect(await dialog.locator("form").boundingBox()).toEqual(formBounds);
+  await menu.press("Escape");
+  await expect(menu).not.toBeVisible();
+  await dialog.getByRole("combobox", { name: "Color", exact: true }).click();
+  await expect(menu).toBeVisible();
+  expect(await dialog.boundingBox()).toEqual(editorBounds);
+  expect(await dialog.locator("form").boundingBox()).toEqual(formBounds);
   await menu.getByRole("option", { name: "Charcoal", exact: true }).click();
   await expect(
     dialog.getByRole("combobox", { name: "Color", exact: true }),

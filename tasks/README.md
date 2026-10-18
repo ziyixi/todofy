@@ -31,6 +31,7 @@ and estimate. A Step cannot contain children. Task details can add, complete, re
 of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites.
 
 Repeat uses frequency, interval and calendar controls; imported custom rules remain intact until replaced.
+Date keeps Time and Repeat collapsed until selected; existing settings remain visible as compact summaries.
 Start ahead uses days or weeks before the real Deadline and places the task in Plan Review's Start now lane.
 It does not send a timed notification. Effort is a task property, so it needs no technical label.
 
