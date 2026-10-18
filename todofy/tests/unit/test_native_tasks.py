@@ -229,3 +229,80 @@ def test_planning_page_reuses_one_metadata_read_and_refreshes_it_for_the_next_re
         for method, request in service.calls
         if method == "GetCatalog"
     )
+
+
+def test_a_planning_page_of_two_hundred_reads_two_task_pages_with_one_catalog(runtime, monkeypatch):
+    from todofy.runtime import plus_api
+
+    service = Service()
+    first = [native_row(f"first-{index}") for index in range(100)]
+    second = [native_row(f"second-{index}") for index in range(60)]
+    service.pages = [{"tasks": first, "next_page_token": "after-first"}, {"tasks": second}]
+    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service, DB=D1())
+    core = types.SimpleNamespace(env=env, plus_lock=asyncio.Lock())
+    monkeypatch.setattr(plus_api, "account_day", lambda _timezone: "2026-10-17")
+    answer = asyncio.run(plus_api.handle(core, "ListPlanningTasks", json.dumps({"page_size": 200}), owner=True))
+    assert "error" not in answer
+    page = json.loads(answer["ok"])
+    assert len(page["planning_tasks"]) == 160 and not page.get("next_page_token")
+    assert [method for method, _request in service.calls] == ["GetCatalog", "ListTasks", "ListTasks"]
+    assert service.calls[2][1]["page_token"] == "after-first" and service.calls[2][1]["page_size"] == 100
+
+
+def test_a_planning_write_reads_the_tasks_catalog_once(runtime, monkeypatch):
+    from tests.unit.plus_support import Storage
+    from todofy.core import native_plan as plan_rules
+    from todofy.core import plus
+    from todofy.runtime import plus_api, plus_receipts
+
+    service = Service()
+    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service, DB=D1())
+    storage = Storage([])
+    for statement in plus_receipts.DO_SCHEMA:
+        storage.sql.exec(statement)
+    core = types.SimpleNamespace(env=env, sql=storage.sql, ctx=types.SimpleNamespace(storage=storage))
+    monkeypatch.setattr(plus_api, "account_day", lambda _timezone: "2026-10-17")
+    env.DB.db.execute("INSERT INTO plan_settings VALUES ('native', '{\"initialized\":true}', 1)")
+    env.DB.db.execute(
+        "INSERT INTO plus_settings(id,mapping,timezone,week_start,enabled) VALUES(1,'{}','America/Los_Angeles',?,1)",
+        (plus.week_start("2026-10-17"),),
+    )
+    shown = asyncio.run(runtime.native.task(env, "native-one"))
+    service.calls.clear()
+    request = {
+        "task_id": "native-one",
+        "stage": "committed",
+        "etag": plus.task_etag(shown, plan_rules.CANONICAL_MAPPING),
+        "request_id": str(uuid.uuid4()),
+    }
+    answer = asyncio.run(plus_api.mutate(core, "SetTaskPlan", request))
+    assert answer["task"]["id"] == "native-one"
+    assert [method for method, _request in service.calls] == ["GetCatalog", "GetTask", "GetTask"]
+
+
+@pytest.mark.parametrize(
+    ("status", "tasks_reason", "plus_reason"),
+    [
+        (400, "BAD_REQUEST", "BAD_REQUEST"),
+        (400, "PRECONDITION_FAILED", "ACTION_NOT_ALLOWED"),
+        (409, "ALREADY_EXISTS", "ACTION_NOT_ALLOWED"),
+        (409, "ETAG_MISMATCH", "ETAG_MISMATCH"),
+        (404, "NOT_FOUND", "NOT_FOUND"),
+        (503, "UNAVAILABLE", "UNAVAILABLE"),
+        (403, "", "ACTION_NOT_ALLOWED"),
+    ],
+)
+def test_tasks_error_reasons_reach_plan_and_mail(runtime, status, tasks_reason, plus_reason):
+    from todofy.runtime import plus_todoist
+
+    service = Service()
+    service.status = status
+    details = [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": tasks_reason}] if tasks_reason else []
+    service.body = json.dumps({"error": {"code": status, "message": "Synthetic", "details": details}})
+    env = types.SimpleNamespace(TASK_SOURCE="tasks", TASKS=service)
+    with pytest.raises(runtime.native.NativeTasksError) as failure:
+        asyncio.run(runtime.native.call(env, "GetTask", {"name": "tasks/native-one"}))
+    assert failure.value.reason == tasks_reason
+    with pytest.raises(plus_todoist.PlusError) as mapped:
+        asyncio.run(plus_todoist._native(runtime.native.call(env, "GetTask", {"name": "tasks/native-one"})))
+    assert mapped.value.reason == plus_reason

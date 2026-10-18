@@ -8,9 +8,12 @@ from todofy.runtime import native_tasks
 from todofy.runtime.plus_todoist import PlusError, _native
 
 
-async def build(core: Any, method: str, request: dict[str, Any]) -> list[dict[str, Any]]:
+async def build(
+    core: Any, method: str, request: dict[str, Any], catalog: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """``catalog``: the Tasks catalog the caller already read for this request, if any."""
     task_id = plus.check_id(request.get("task_id") or request.get("parent_id", ""))
-    task = await _native(native_tasks.task(core.env, task_id))
+    task = await _native(native_tasks.task(core.env, task_id, catalog))
     request_id = request["request_id"]
     if method == "CompleteTask":
         if (flow_date := request.get("flow_date")) and date.fromisoformat(flow_date).isoformat() != flow_date:

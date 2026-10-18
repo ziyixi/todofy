@@ -13,10 +13,23 @@ from todofy.runtime.config import var
 
 
 class NativeTasksError(Exception):
-    def __init__(self, status: int, *, uncertain: bool = False) -> None:
+    def __init__(self, status: int, *, uncertain: bool = False, reason: str = "") -> None:
         self.status = status
         self.uncertain = uncertain
+        self.reason = reason  # Tasks' ErrorInfo reason, when its answer named one
         super().__init__("NATIVE_TASKS_UNAVAILABLE" if status >= 500 else "NATIVE_TASKS_REJECTED")
+
+
+def _error_reason(body: str) -> str:
+    """The ErrorInfo reason of a Google RPC Status body; empty when it names none."""
+    try:
+        details = json.loads(body)["error"]["details"]
+        return next(
+            (str(item["reason"]) for item in details if str(item.get("@type", "")).endswith("google.rpc.ErrorInfo")),
+            "",
+        )
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return ""
 
 
 def enabled(env: Any) -> bool:
@@ -50,7 +63,7 @@ async def call(env: Any, method: str, body: dict[str, Any]) -> dict[str, Any]:
     except Exception as error:
         raise NativeTasksError(503, uncertain=True) from error
     if result.status >= 400:
-        raise NativeTasksError(result.status)
+        raise NativeTasksError(result.status, reason=_error_reason(result.body))
     try:
         value = json.loads(result.body)
         if binding.response is type(None):

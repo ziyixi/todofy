@@ -24,6 +24,15 @@ CLOSING_EVENTS = ("completed", "uncompleted", "deleted")
 ACTIVE_READ = 200
 
 
+# Tasks' own reasons that Plan and Mail can explain better than the HTTP status alone. Tasks answers 400 for
+# both BAD_REQUEST and PRECONDITION_FAILED, and 409 for both ETAG_MISMATCH and ALREADY_EXISTS (a reused ID).
+NATIVE_REASONS = {
+    "BAD_REQUEST": "BAD_REQUEST",
+    "PRECONDITION_FAILED": "ACTION_NOT_ALLOWED",
+    "ALREADY_EXISTS": "ACTION_NOT_ALLOWED",
+}
+
+
 class PlusError(Exception):
     def __init__(self, reason: str, status: int | None = None) -> None:
         self.reason = reason
@@ -42,7 +51,8 @@ async def _native(awaitable: Any) -> Any:
         reason = (
             "UNAVAILABLE"
             if error.status >= 500
-            else {404: "NOT_FOUND", 409: "ETAG_MISMATCH"}.get(error.status, "ACTION_NOT_ALLOWED")
+            else NATIVE_REASONS.get(error.reason)
+            or {404: "NOT_FOUND", 409: "ETAG_MISMATCH"}.get(error.status, "ACTION_NOT_ALLOWED")
         )
         raise PlusError(reason, error.status) from error
 

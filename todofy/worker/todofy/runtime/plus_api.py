@@ -482,10 +482,14 @@ async def resolve_dependencies(core: Any, request: dict[str, Any]) -> dict[str, 
 
 
 async def build_commands(
-    core: Any, method: str, request: dict[str, Any], mapping: list[dict[str, Any]]
+    core: Any,
+    method: str,
+    request: dict[str, Any],
+    mapping: list[dict[str, Any]],
+    catalog: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     if native_tasks.enabled(core.env):
-        return await native_plan_actions.build(core, method, request)
+        return await native_plan_actions.build(core, method, request, catalog)
     request_id = request["request_id"]
     task_id = plus.check_id(request.get("task_id") or request.get("parent_id", ""))
     if method == "CompleteTask":
@@ -567,7 +571,10 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
             # A D1 receipt of the release before kept the whole answer.
             return previous.result if previous.legacy else await replayed(core, method, previous.result)
     synced = method in LABEL_WRITES
-    current = await require_ready(core, await plan(core, fresh=synced), synced=synced)
+    # One Tasks catalog serves the plan, the action and the confirming read of this write.
+    catalog = await todoist._native(native_tasks.catalog(env)) if native_tasks.enabled(env) else None
+    metadata = native_task_view.metadata(catalog) if catalog is not None else None
+    current = await require_ready(core, await plan(core, metadata, fresh=synced), synced=synced)
     if previous and previous.plan_etag is not None and previous.plan_etag != current["etag"]:
         # Its frozen labels were chosen under another binding: resending them could attach a label by a name
         # that no longer has its role. The extension reads the task again.
@@ -581,7 +588,7 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
         ):
             # Todoist would create a label for an unknown name; Plus never creates one.
             raise todoist.PlusError("ACTION_NOT_ALLOWED")
-        commands = await build_commands(core, method, request, current["labels"])
+        commands = await build_commands(core, method, request, current["labels"], catalog)
     await receipts.start(core, request_id, method, digest, commands, current["etag"] if synced else None)
     result = (
         await todoist._native(native_plus.resume(core, commands))
@@ -632,7 +639,11 @@ async def mutate(core: Any, method: str, request: dict[str, Any]) -> dict[str, A
         if not all(response["task_ids"]):
             raise todoist.PlusError("UNAVAILABLE")
     else:
-        task = await todoist.task(core, request["task_id"])
+        task = await (
+            todoist._native(native_tasks.task(env, request["task_id"], catalog))
+            if catalog is not None
+            else todoist.task(core, request["task_id"])
+        )
         response = {"task": plus.task_view(task, current["today"], current["labels"])}
         kept = {"task_id": request["task_id"]}  # the task's title stays out of the receipt
     receipts.finish(core.sql, request_id, kept)
@@ -724,11 +735,20 @@ async def handle(coordinator: Any, method: str, text: str, *, owner: bool, diges
                     raise todoist.PlusError("BAD_REQUEST")
                 for task_id in ids:
                     plus.check_id(task_id)
-                tasks, following = (
-                    await todoist._native(native_tasks.page(env, cursor=cursor, limit=size, ids=ids, metadata=catalog))
-                    if catalog is not None
-                    else await todoist.tasks(coordinator, size, cursor, **({"ids": ",".join(ids)} if ids else {}))
-                )
+                if catalog is not None:
+                    tasks, following = await todoist._native(
+                        native_tasks.page(env, cursor=cursor, limit=size, ids=ids, metadata=catalog)
+                    )
+                    if following and len(tasks) < size:
+                        # Tasks pages hold at most 100: a larger request reads one more page with the same catalog.
+                        more, following = await todoist._native(
+                            native_tasks.page(env, cursor=following, limit=size - len(tasks), ids=ids, metadata=catalog)
+                        )
+                        tasks = [*tasks, *more]
+                else:
+                    tasks, following = await todoist.tasks(
+                        coordinator, size, cursor, **({"ids": ",".join(ids)} if ids else {})
+                    )
                 if current["enabled"] and not backup.holds_ledger(env, coordinator.sql, now_s()):
                     await plus_week.remember_page(env, tasks, current["week_start"], current["labels"])
                 response = {
