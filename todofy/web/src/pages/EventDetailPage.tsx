@@ -6,7 +6,7 @@ import { keys, useEvent, useLegacyText } from '../api/queries'
 import { actors, eventErrors, eventStates, idOf, iso, reconcileActions, type MailEvent, type ReconcileActionName, type Transition } from '../api/types'
 import { eventError, StateBadge } from '../components/EventList'
 import { Badge, Button, CopyButton, ErrorPanel, Facts, Loading, PageHeader, Section, Time } from '../components/ui'
-import { shortId, todoistTaskUrl } from '../lib/format'
+import { shortId, taskUrl } from '../lib/format'
 import { EVENT_ERRORS, EVENT_STATES, RECONCILE_ACTIONS, type Label } from '../lib/labels'
 import { ReconcileDialog } from './ReconcileDialog'
 
@@ -44,8 +44,8 @@ function StatusSection({ event }: { event: MailEvent }) {
       {event.canary ? (
         <div className="hint-box">
           <p>
-            <strong>金丝雀事件</strong>：运维面板发出的合成端到端检查，只验证接收与摘要，不会创建 Todoist
-            任务，也不计入列表、统计和提醒。
+            <strong>金丝雀事件</strong>：运维面板发出的合成端到端检查，只验证接收与摘要，不会创建任务，
+            也不计入列表、统计和提醒。
           </p>
         </div>
       ) : null}
@@ -88,7 +88,7 @@ function ActionsSection({ event, onPick }: { event: MailEvent; onPick: (action: 
     <Section title="需要你处理">
       {lookup ? (
         <div className="hint-box">
-          <p>先在 Todoist 默认项目里搜索这段页脚，确认任务是否已经建成：</p>
+          <p>先在 Tasks 里搜索这段页脚，确认任务是否已经建成：</p>
           <p className="inline-copy">
             <code className="wrap">{footer}</code>
             <CopyButton value={footer} label="页脚" />
@@ -107,19 +107,19 @@ function ActionsSection({ event, onPick }: { event: MailEvent; onPick: (action: 
   )
 }
 
-function TodoistSection({ event }: { event: MailEvent }) {
+function TaskSection({ event }: { event: MailEvent }) {
   if (!event.taskId && !event.todoistRequestId) return null
   return (
-    <Section title="Todoist">
+    <Section title="任务">
       <Facts
         items={[
           [
             '任务',
             event.taskId ? (
-              <a key="t" href={todoistTaskUrl(event.taskId)} target="_blank" rel="noopener noreferrer" className="link">
+              <a key="t" href={taskUrl(event.taskId)} target="_blank" rel="noopener noreferrer" className="link">
                 {event.taskId}
                 <ExternalLink size={14} aria-hidden="true" />
-                <span className="visually-hidden">（在新窗口打开 Todoist）</span>
+                <span className="visually-hidden">（在新窗口打开 Tasks）</span>
               </a>
             ) : (
               <span key="t" className="muted">
@@ -154,7 +154,7 @@ function ContentSection({ event }: { event: MailEvent }) {
       ) : null}
       {event.todoBody ? (
         <div className="content-block">
-          <h3>Todoist 描述（已冻结）</h3>
+          <h3>任务描述（已冻结）</h3>
           <pre className="pre">{event.todoBody}</pre>
         </div>
       ) : null}
@@ -292,7 +292,7 @@ export function EventDetailPage() {
             }}
           />
           <StatusSection event={event} />
-          <TodoistSection event={event} />
+          <TaskSection event={event} />
           <ContentSection event={event} />
           {event.legacyText ? <LegacyTextSection name={event.legacyText} /> : null}
         </div>

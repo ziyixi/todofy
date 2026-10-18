@@ -155,7 +155,6 @@ async function getIntegration(_request: Message, ctx: UiContext): Promise<Messag
       mailWebhookToken: Boolean(variable(env, 'MAIL_WEBHOOK_TOKEN_SHA256')),
       reportBasicAuth: Boolean(variable(env, 'REPORT_BASIC_AUTH_SHA256')),
       geminiApiKey: core.configured['gemini_api_key'] === true,
-      todoistApiKey: core.configured['todoist_api_key'] === true,
       todoistProject: core.configured['todoist_project'] === true,
     }),
   });

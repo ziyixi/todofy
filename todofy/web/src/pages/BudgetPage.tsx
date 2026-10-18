@@ -135,8 +135,8 @@ function DailyTrends() {
           format={formatNumber}
           series={[
             { label: 'Gemini', color: 1, values: counts(days, (day) => day.geminiCallCount) },
-            { label: 'Todoist 创建', color: 2, values: counts(days, (day) => day.todoistCreateCount) },
-            { label: 'Todoist 查找', color: 3, values: counts(days, (day) => day.todoistLookupCount) },
+            { label: 'Tasks 创建', color: 2, values: counts(days, (day) => day.todoistCreateCount) },
+            { label: 'Tasks 查找', color: 3, values: counts(days, (day) => day.todoistLookupCount) },
           ]}
         />
       </div>
@@ -161,8 +161,6 @@ function ModelOrder({ models }: { models: readonly string[] | undefined }) {
 export function BudgetPage() {
   const overview = useOverview()
   const gemini = overview.data?.gemini
-  const todoist = overview.data?.todoist
-  const blocked = iso(todoist?.blockExpireTime)
 
   return (
     <>
@@ -186,28 +184,6 @@ export function BudgetPage() {
                   ['调用次数', formatNumber(gemini?.callCount ?? 0)],
                   ['逐封邮件摘要模型顺序', <ModelOrder key="email" models={gemini?.emailModels} />],
                   ['日报与推荐模型顺序', <ModelOrder key="reports" models={gemini?.models} />],
-                ]}
-              />
-            </Section>
-            <Section title="Todoist">
-              <Meter
-                label={`${Math.round((todoist?.windowSeconds ?? 0) / 60)} 分钟窗口`}
-                value={todoist?.windowCallCount ?? 0}
-                max={todoist?.windowCallLimit ?? 0}
-                detail={`${formatNumber(todoist?.windowCallCount ?? 0)} / ${formatNumber(todoist?.windowCallLimit ?? 0)} 次`}
-              />
-              <Facts
-                items={[
-                  [
-                    '认证阻断',
-                    blocked ? (
-                      <span key="b">
-                        阻断到 <Time value={blocked} />
-                      </span>
-                    ) : (
-                      '无'
-                    ),
-                  ],
                 ]}
               />
             </Section>

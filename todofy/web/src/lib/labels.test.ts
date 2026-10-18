@@ -73,12 +73,12 @@ describe('every value of the IDL has exactly one Chinese label', () => {
 })
 
 describe('reconcile copy states the consequences', () => {
-  it('task_not_created warns about a second Todoist call', () => {
-    expect(RECONCILE_ACTIONS.task_not_created.consequence).toContain('会再次调用 Todoist，可能重复建任务')
+  it('task_not_created warns about a second create in Tasks', () => {
+    expect(RECONCILE_ACTIONS.task_not_created.consequence).toContain('再次在 Tasks 建任务，可能重复建任务')
   })
 
-  it('dismiss says Todoist is not checked', () => {
-    expect(RECONCILE_ACTIONS.dismiss.consequence).toContain('不会检查 Todoist')
+  it('dismiss says Tasks is not checked', () => {
+    expect(RECONCILE_ACTIONS.dismiss.consequence).toContain('不会检查 Tasks')
   })
 })
 

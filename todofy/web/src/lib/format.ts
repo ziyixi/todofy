@@ -63,8 +63,9 @@ export function formatRelative(iso: string, now: Date = new Date()): string {
   return '现在'
 }
 
-export function todoistTaskUrl(taskId: string): string {
-  return `https://app.todoist.com/app/task/${encodeURIComponent(taskId)}`
+/** The owner route that redirects to the task in Tasks (the gateway's GET /task/<id>). */
+export function taskUrl(taskId: string): string {
+  return `/task/${encodeURIComponent(taskId)}`
 }
 
 /** Today's UTC day as YYYY-MM-DD, the key of reminder rows. */

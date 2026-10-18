@@ -275,10 +275,39 @@ describe('the owner API before todofy.ui.v1', () => {
   });
 });
 
+describe('task links', () => {
+  it('redirects /task/<id> to the task in Tasks, with the private headers and without calling the core', async () => {
+    const { env, core: calls } = fakes({ TASKS_PUBLIC_URL: 'https://tasks.example.test/' });
+    for (const id of ['6Jf8VQXxpwv56VQ7', 't0a1b2c3-d4_e5']) {
+      const response = await owner(env, `/task/${id}`);
+      expect(response.status, id).toBe(302);
+      expect(response.headers.get('location')).toBe(`https://tasks.example.test/?task=${id}`);
+      expectPrivate(response);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses another ID or method, a missing Tasks URL, and anyone the Access gate does not pass', async () => {
+    const { env } = fakes({ TASKS_PUBLIC_URL: 'https://tasks.example.test' });
+    for (const path of ['/task/', '/task/a/b', '/task/a%2Fb', '/task/<x>', `/task/${'a'.repeat(129)}`]) {
+      const response = await owner(env, path);
+      expect(response.status, path).toBe(404);
+      expect(await statusReason(response)).toBe('NOT_FOUND');
+    }
+    const post = await owner(env, '/task/abc', { method: 'POST' });
+    expect(post.status).toBe(405);
+    expect(post.headers.get('allow')).toBe('GET, HEAD');
+    expect(await statusReason(await owner(fakes().env, '/task/abc'))).toBe('NOT_CONFIGURED');
+    const gated = await owner(fakes({ DEV_AUTH_BYPASS: undefined, TASKS_PUBLIC_URL: 'https://tasks.example.test' }).env, '/task/abc');
+    expect(gated.status).toBe(503);
+    expect(gated.headers.get('location')).toBeNull();
+  });
+});
+
 describe('GetIntegration', () => {
   const coreSetup = {
     mail_source_id: 'mail-hero-personal',
-    configured: { gemini_api_key: true, todoist_api_key: false, todoist_project: true },
+    configured: { gemini_api_key: true, todoist_project: true },
   };
 
   it('merges the gateway facts with the core facts', async () => {

@@ -29,7 +29,7 @@ function Flags({ switches }: { switches: Switches | undefined }) {
     <div className="badge-row">
       <Flag on={switches?.maintenanceMode ?? false} label="维护模式" />
       <Flag on={switches?.processingPaused ?? false} label="暂停处理" />
-      <Flag on={switches?.forcePauseTodoist ?? false} label="暂停 Todoist" />
+      <Flag on={switches?.forcePauseTodoist ?? false} label="暂停写入任务" />
       <Badge tone={switches?.reminderEnabled ? 'ok' : 'neutral'}>{switches?.reminderEnabled ? '每日提醒：开' : '每日提醒：关'}</Badge>
     </div>
   )

@@ -1,9 +1,8 @@
-import { CirclePause, Coins, KeyRound, Wrench } from 'lucide-react'
+import { CirclePause, Coins, Wrench } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { iso, type ServiceStatus } from '../api/types'
-import { formatTime } from '../lib/format'
+import type { ServiceStatus } from '../api/types'
 
-export type NoticeKind = 'maintenance' | 'processing_paused' | 'todoist_paused' | 'gemini_budget' | 'todoist_auth'
+export type NoticeKind = 'maintenance' | 'processing_paused' | 'todoist_paused' | 'gemini_budget'
 
 export interface Notice {
   kind: NoticeKind
@@ -11,10 +10,10 @@ export interface Notice {
   consequence: string
 }
 
-/** The five abnormal states, each with one sentence on what it means for incoming mail. */
+/** The four abnormal states, each with one sentence on what it means for incoming mail. */
 export function bannerNotices(overview: ServiceStatus): Notice[] {
   const notices: Notice[] = []
-  const { switches, gemini, todoist } = overview
+  const { switches, gemini } = overview
   if (switches?.maintenanceMode) {
     notices.push({
       kind: 'maintenance',
@@ -32,8 +31,8 @@ export function bannerNotices(overview: ServiceStatus): Notice[] {
   if (switches?.forcePauseTodoist) {
     notices.push({
       kind: 'todoist_paused',
-      title: 'Todoist 已暂停',
-      consequence: '摘要照常生成，事件停在“待建任务”，解除暂停后再创建 Todoist 任务。',
+      title: '任务写入已暂停',
+      consequence: '摘要照常生成；提醒、回顾、快照和任务意图暂停写入 Tasks，解除后恢复。',
     })
   }
   if (gemini && gemini.tokenBudget > 0 && gemini.usedTokens + gemini.reservedTokens >= gemini.tokenBudget) {
@@ -41,15 +40,6 @@ export function bannerNotices(overview: ServiceStatus): Notice[] {
       kind: 'gemini_budget',
       title: '今日 Gemini 预算已用完',
       consequence: '新的摘要推迟到 UTC 次日预算恢复后继续，事件不会丢弃。',
-    })
-  }
-  const blocked = iso(todoist?.blockExpireTime)
-  const now = iso(overview.readTime)
-  if (blocked !== null && now !== null && Date.parse(blocked) > Date.parse(now)) {
-    notices.push({
-      kind: 'todoist_auth',
-      title: 'Todoist 认证被拒',
-      consequence: `建任务暂停到 ${formatTime(blocked)}；请检查 TODOIST_API_KEY。`,
     })
   }
   return notices
@@ -60,10 +50,9 @@ const ICONS: Record<NoticeKind, ReactNode> = {
   processing_paused: <CirclePause size={18} aria-hidden="true" />,
   todoist_paused: <CirclePause size={18} aria-hidden="true" />,
   gemini_budget: <Coins size={18} aria-hidden="true" />,
-  todoist_auth: <KeyRound size={18} aria-hidden="true" />,
 }
 
-const SEVERE = new Set<NoticeKind>(['maintenance', 'todoist_auth'])
+const SEVERE = new Set<NoticeKind>(['maintenance'])
 
 export function StatusBanner({ overview }: { overview: ServiceStatus | undefined }) {
   if (!overview) return null

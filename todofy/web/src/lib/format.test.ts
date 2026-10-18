@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCompact, formatDuration, formatRelative, shortDay, shortId, todoistTaskUrl, utcDay } from './format'
+import { formatCompact, formatDuration, formatRelative, shortDay, shortId, taskUrl, utcDay } from './format'
 
 describe('format', () => {
   it('shortens event IDs to the lowercase first group', () => {
@@ -13,8 +13,8 @@ describe('format', () => {
     expect(formatRelative('2026-09-28T12:00:20Z', now)).toBe('现在')
   })
 
-  it('builds Todoist links and UTC days', () => {
-    expect(todoistTaskUrl('6X7rM8997g3RQmvh')).toBe('https://app.todoist.com/app/task/6X7rM8997g3RQmvh')
+  it('builds task links and UTC days', () => {
+    expect(taskUrl('6X7rM8997g3RQmvh')).toBe('/task/6X7rM8997g3RQmvh')
     expect(utcDay(new Date('2026-09-28T23:59:59-07:00'))).toBe('2026-09-29')
   })
 

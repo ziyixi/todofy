@@ -4,14 +4,13 @@ import { useSetup } from '../api/queries'
 import type { Integration } from '../api/types'
 import { CopyButton, ErrorPanel, Facts, Loading, PageHeader, Section } from '../components/ui'
 
-type Secret = 'mailWebhookToken' | 'reportBasicAuth' | 'geminiApiKey' | 'todoistApiKey' | 'todoistProject'
+type Secret = 'mailWebhookToken' | 'reportBasicAuth' | 'geminiApiKey' | 'todoistProject'
 
 const SECRETS: [Secret, string, string][] = [
   ['mailWebhookToken', 'MAIL_WEBHOOK_TOKEN_SHA256', 'Mail Hero webhook 的 Bearer token 摘要'],
   ['reportBasicAuth', 'REPORT_BASIC_AUTH_SHA256', 'newsletter Basic 认证的摘要'],
   ['geminiApiKey', 'GEMINI_API_KEY', '生成摘要与日报'],
-  ['todoistApiKey', 'TODOIST_API_KEY', '建任务与只读页脚查找'],
-  ['todoistProject', 'TODOIST_DEFAULT_PROJECT_ID', '任务所在的 Todoist 项目'],
+  ['todoistProject', 'TODOIST_DEFAULT_PROJECT_ID', '邮件任务所在的 Tasks 项目'],
 ]
 
 function configured(integration: Integration, secret: Secret): boolean {
@@ -99,8 +98,7 @@ export function SetupPage() {
               </li>
               <li>在 Mail Hero 新建 HTTPS 目标：URL 填 webhook 地址，认证选 Bearer，填入 token。</li>
               <li>
-                Mail Hero 的“测试”会真的投递一条合成事件：Todofy 会为它生成摘要并在 Todoist 建一条任务，确认后可在 Todoist
-                删除。
+                Mail Hero 的“测试”会真的投递一条合成事件：Todofy 会为它生成摘要，出现在 Tasks 的 Mail 页；确认后可在那里删除。
               </li>
             </Steps>
           </Section>

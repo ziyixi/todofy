@@ -61,7 +61,7 @@ export function useEventList(view: EventView, state: EventState | null = null) {
 /**
  * Poll an event only while the Worker is about to move it: a call in flight, or a next step
  * due within a minute or overdue by at most EVENT_POLL_GRACE_MS (a healthy Worker takes a due row
- * within seconds). A row that stays overdue is held by a switch, a Todoist block or a backlog,
+ * within seconds). A row that stays overdue is held by a switch, a Tasks outage or a backlog,
  * and polling it every 3 s would only spend the Free plan's shared request quota; the same goes
  * for any row that has not changed for EVENT_POLL_MAX_MS. Focus or a manual refresh picks it up.
  */
@@ -129,7 +129,7 @@ export function useDailyMetrics(days: number = METRICS_DAYS) {
   })
 }
 
-/** The GTD ledger's daily aggregates change once a day (the 13:00 UTC Todoist snapshot). */
+/** The GTD ledger's daily aggregates change once a day (the 13:00 UTC Tasks snapshot). */
 export const GTD_DAYS = 30
 
 /** The last `days` UTC days up to today, oldest first (ListGtdDays answers the newest first). */

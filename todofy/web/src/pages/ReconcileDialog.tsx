@@ -97,7 +97,7 @@ export function ReconcileDialog({ event, action, onClose, onDone }: Props) {
         </p>
         {action === 'task_created' ? (
           <div className="field">
-            <label htmlFor={inputId}>Todoist 任务 ID</label>
+            <label htmlFor={inputId}>Tasks 任务 ID</label>
             <input
               id={inputId}
               data-autofocus
@@ -110,7 +110,7 @@ export function ReconcileDialog({ event, action, onClose, onDone }: Props) {
               aria-describedby={`${inputId}-hint`}
             />
             <p id={`${inputId}-hint`} className="field-hint">
-              在任务链接 app.todoist.com/app/task/… 的最后一段；只含字母、数字、- 和 _。
+              在 Tasks 任务链接 ?task= 之后；只含字母、数字、- 和 _。
             </p>
           </div>
         ) : null}

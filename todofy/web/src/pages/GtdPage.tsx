@@ -28,8 +28,8 @@ function orUnknown(value: number | null | undefined): string {
 }
 
 /**
- * The GTD ledger (docs/gtd-features.md): counts from the daily read-only Todoist snapshot, never a
- * task title. The Sunday review task in Todoist is where the owner acts; this page shows the trend.
+ * The GTD ledger (docs/gtd-features.md): counts from the daily read-only Tasks snapshot, never a
+ * task title. The Sunday review task in Tasks is where the owner acts; this page shows the trend.
  */
 export function GtdPage() {
   const daily = useGtdDays()
@@ -37,7 +37,7 @@ export function GtdPage() {
   const header = (
     <PageHeader
       title="GTD"
-      description="每天 13:00 UTC 只读 Todoist 一次，只记录计数；每周日 17:00 UTC 创建一个回顾任务。"
+      description="每天 13:00 UTC 只读 Tasks 一次，只记录计数；每周日 17:00 UTC 创建一个回顾任务。"
     />
   )
   if (daily.isPending) {
@@ -75,8 +75,8 @@ export function GtdPage() {
           <Section title="每周回顾">
             <Facts items={reviewFacts} />
           </Section>
-          <EmptyState icon={<ListChecks size={24} />} title="还没有 Todoist 快照">
-            快照每天 13:00 UTC 采集；未设置、暂停 Todoist 或采集失败时这里为空。
+          <EmptyState icon={<ListChecks size={24} />} title="还没有 Tasks 快照">
+            快照每天 13:00 UTC 采集；未设置、暂停写入任务或采集失败时这里为空。
           </EmptyState>
         </div>
       </>

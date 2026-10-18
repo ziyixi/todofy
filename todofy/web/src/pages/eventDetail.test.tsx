@@ -26,11 +26,11 @@ describe('event detail', () => {
     expect(screen.getByText(`Mail Hero event: ${EVENT_ID}`, { selector: 'code' })).toBeInTheDocument()
   })
 
-  it('links a known Todoist task without leaking the referrer', async () => {
+  it('links a known task through the Tasks redirect without leaking the referrer', async () => {
     mockApi({ [DETAIL]: eventDetail({ state: 'complete', error_code: undefined, task_id: '6X7rM8997g3RQmvh', allowed_actions: [] }) })
     renderApp(`/events/${EVENT_ID}`)
     const link = await screen.findByRole('link', { name: /6X7rM8997g3RQmvh/ })
-    expect(link).toHaveAttribute('href', 'https://app.todoist.com/app/task/6X7rM8997g3RQmvh')
+    expect(link).toHaveAttribute('href', '/task/6X7rM8997g3RQmvh')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     expect(screen.queryByRole('region', { name: '需要你处理' })).not.toBeInTheDocument()
   })
@@ -54,7 +54,7 @@ describe('event detail', () => {
     renderApp(`/events/${EVENT_ID}`)
     const status = await screen.findByRole('region', { name: '状态' })
     expect(status).toHaveTextContent('金丝雀事件')
-    expect(status).toHaveTextContent('不会创建 Todoist')
+    expect(status).toHaveTextContent('不会创建任务')
     expect(status).toHaveTextContent('金丝雀（合成检查）')
     expect(screen.queryByRole('region', { name: '需要你处理' })).not.toBeInTheDocument()
   })
@@ -79,7 +79,7 @@ describe('reconcile dialogs', () => {
     await user.click(await screen.findByRole('button', { name: '任务没有建成' }))
 
     const dialog = screen.getByRole('dialog', { name: '确认没有建任务' })
-    expect(dialog).toHaveTextContent('会再次调用 Todoist，可能重复建任务')
+    expect(dialog).toHaveTextContent('再次在 Tasks 建任务，可能重复建任务')
     const confirm = within(dialog).getByRole('button', { name: '重新建任务' })
     expect(confirm).toBeDisabled()
     const input = within(dialog).getByRole('textbox')
@@ -141,13 +141,13 @@ describe('reconcile dialogs', () => {
     expect(ids[2]).not.toBe(ids[1])
   })
 
-  it('dismiss says Todoist is not checked, and Escape closes without sending', async () => {
+  it('dismiss says Tasks is not checked, and Escape closes without sending', async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ [DETAIL]: eventDetail() })
     renderApp(`/events/${EVENT_ID}`)
     const trigger = await screen.findByRole('button', { name: '放弃' })
     await user.click(trigger)
-    expect(screen.getByRole('dialog', { name: '放弃此事件' })).toHaveTextContent('不会检查 Todoist')
+    expect(screen.getByRole('dialog', { name: '放弃此事件' })).toHaveTextContent('不会检查 Tasks')
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()

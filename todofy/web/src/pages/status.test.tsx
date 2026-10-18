@@ -104,18 +104,18 @@ describe('reminders page', () => {
     const rows = within(screen.getByRole('list', { name: '提醒记录' })).getAllByRole('listitem')
     expect(rows).toHaveLength(2)
     expect(rows[0]).toHaveTextContent('当天不再重发')
-    expect(within(rows[1]!).getByRole('link')).toHaveAttribute('href', 'https://app.todoist.com/app/task/6X7rM8997g3RQmvh')
+    expect(within(rows[1]!).getByRole('link')).toHaveAttribute('href', '/task/6X7rM8997g3RQmvh')
   })
 })
 
 describe('budget and health pages', () => {
-  it('shows Gemini and Todoist usage', async () => {
+  it('shows Gemini usage and no Todoist window', async () => {
     mockApi({})
     renderApp('/budget')
     const gemini = await screen.findByRole('region', { name: 'Gemini' })
     expect(within(gemini).getByRole('meter', { name: '今日 token' })).toHaveAttribute('aria-valuenow', String(181_233 + 4096))
     expect(gemini).toHaveTextContent('gemini-3.8-flash')
-    expect(screen.getByRole('meter', { name: '15 分钟窗口' })).toHaveAttribute('aria-valuemax', '1000')
+    expect(screen.queryByRole('region', { name: 'Todoist' })).not.toBeInTheDocument()
   })
 
   it('shows the email and report fallback orders independently', async () => {
@@ -164,11 +164,13 @@ describe('budget and health pages', () => {
 
 describe('setup page', () => {
   it('shows webhook addresses and which secrets are configured, never their values', async () => {
-    mockApi({ 'GET /api/v1/integration': setup() })
+    const configured = { mail_webhook_token: true, report_basic_auth: true, gemini_api_key: true }
+    mockApi({ 'GET /api/v1/integration': setup({ configured }) })
     renderApp('/setup')
     expect(await screen.findByText('https://todofy-hooks.example.test/hooks/mail')).toBeInTheDocument()
     const secrets = screen.getByRole('region', { name: '密钥与配置' })
-    expect(within(secrets).getByText('TODOIST_API_KEY').closest('li')).toHaveTextContent('未配置')
+    expect(within(secrets).queryByText('TODOIST_API_KEY')).not.toBeInTheDocument()
+    expect(within(secrets).getByText('TODOIST_DEFAULT_PROJECT_ID').closest('li')).toHaveTextContent('未配置')
     expect(within(secrets).getByText('GEMINI_API_KEY').closest('li')).toHaveTextContent('已配置')
   })
 })

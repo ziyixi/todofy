@@ -2,16 +2,16 @@ import { AlarmClock, ExternalLink } from 'lucide-react'
 import { useOverview, useReminders } from '../api/queries'
 import { idOf, iso, reminderErrors, reminderStates, type DailyReminder } from '../api/types'
 import { Badge, EmptyState, ErrorPanel, Facts, Loading, PageHeader, Section, Time, Button } from '../components/ui'
-import { todoistTaskUrl, utcDay } from '../lib/format'
+import { taskUrl, utcDay } from '../lib/format'
 import { REMINDER_ERRORS, REMINDER_STATES } from '../lib/labels'
 
 function TaskLink({ taskId }: { taskId: string }) {
   if (!taskId) return <span className="muted">—</span>
   return (
-    <a href={todoistTaskUrl(taskId)} target="_blank" rel="noopener noreferrer" className="link">
+    <a href={taskUrl(taskId)} target="_blank" rel="noopener noreferrer" className="link">
       {taskId}
       <ExternalLink size={14} aria-hidden="true" />
-      <span className="visually-hidden">（在新窗口打开 Todoist）</span>
+      <span className="visually-hidden">（在新窗口打开 Tasks）</span>
     </a>
   )
 }
@@ -70,7 +70,7 @@ function Today({ reminder, enabled }: { reminder: DailyReminder | undefined; ena
           ]}
         />
       ) : (
-        <p className="muted">今天还没有提醒：只有存在需关注的事件时，才会在 Todoist 建一条每日提醒。</p>
+        <p className="muted">今天还没有提醒：只有存在需关注的事件时，才会在 Tasks 建一条每日提醒。</p>
       )}
     </Section>
   )
@@ -84,7 +84,7 @@ export function RemindersPage() {
 
   return (
     <>
-      <PageHeader title="每日提醒" description="有需关注的事件时，每个 UTC 日在 Todoist 建一条提醒；结果不明的当天不会重发。" />
+      <PageHeader title="每日提醒" description="有需关注的事件时，每个 UTC 日在 Tasks 建一条提醒；结果不明的当天不会重发。" />
       {list.isPending ? (
         <Loading />
       ) : list.isError ? (

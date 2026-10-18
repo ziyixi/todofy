@@ -66,7 +66,7 @@ describe('GTD page', () => {
   it('explains an empty ledger and says when completions are unknown', async () => {
     mockApi({ 'GET /api/v1/gtdDays': gtdDays(0), 'GET /api/v1/gtdReviews': {} })
     renderApp('/gtd')
-    expect(await screen.findByText('还没有 Todoist 快照')).toBeInTheDocument()
+    expect(await screen.findByText('还没有 Tasks 快照')).toBeInTheDocument()
     expect(await screen.findByText('还没有回顾任务')).toBeInTheDocument()
 
     const partial = gtdDays(1, {

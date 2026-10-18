@@ -67,7 +67,7 @@ export const EVENT_ERRORS: Record<EventErrorName, CodeLabel> = {
   },
   todoist_auth_blocked: {
     title: 'Todoist 认证失败',
-    detail: 'Todoist 认证失败（401/403），建任务阶段暂停 6 小时；请检查 TODOIST_API_KEY',
+    detail: 'Todoist 认证失败（401/403），当时建任务阶段暂停了 6 小时',
   },
   todoist_rate_limited: { title: 'Todoist 限流', detail: 'Todoist 限流（429），会按 Retry-After 与退避自动重试' },
   todoist_unavailable: {
@@ -167,7 +167,7 @@ export const RECONCILE_ACTIONS: Record<ReconcileActionName, ActionCopy> = {
     trigger: '我找到了任务',
     confirm: '确认已建任务',
     consequence:
-      '事件会记为已建任务并使用你填写的 Todoist 任务 ID，之后不再为它调用 Todoist 建任务。请确认该任务的描述里带有本事件的页脚。',
+      '事件会记为已建任务并使用你填写的 Tasks 任务 ID，之后不再为它建任务。请确认该任务的描述里带有本事件的页脚。',
     destructive: false,
   },
   task_not_created: {
@@ -175,14 +175,14 @@ export const RECONCILE_ACTIONS: Record<ReconcileActionName, ActionCopy> = {
     trigger: '任务没有建成',
     confirm: '重新建任务',
     consequence:
-      '会先在 Todoist 默认项目里只读查找带本事件页脚的任务；没有找到时，用冻结的任务内容再次调用 Todoist。会再次调用 Todoist，可能重复建任务。',
+      '会先在 Tasks 里只读查找带本事件页脚的任务；没有找到时，用冻结的任务内容再次在 Tasks 建任务，可能重复建任务。',
     destructive: true,
   },
   retry_summary: {
     title: '重新生成摘要',
     trigger: '重试摘要',
     confirm: '重新生成摘要',
-    consequence: '会重新调用 Gemini 生成摘要并计入当日 token 预算；成功后按正常流程创建 Todoist 任务。',
+    consequence: '会重新调用 Gemini 生成摘要并计入当日 token 预算；成功后按正常流程出现在 Tasks 的 Mail 页。',
     destructive: false,
   },
   dismiss: {
@@ -190,7 +190,7 @@ export const RECONCILE_ACTIONS: Record<ReconcileActionName, ActionCopy> = {
     trigger: '放弃',
     confirm: '放弃事件',
     consequence:
-      '事件会变为已忽略，不再自动处理。不会检查 Todoist：如果任务其实已经创建，它会留在 Todoist 里。账本保留去重记录，同一事件再次投递也不会重新处理。',
+      '事件会变为已忽略，不再自动处理。不会检查 Tasks：如果任务其实已经创建，它会留在 Tasks 里。账本保留去重记录，同一事件再次投递也不会重新处理。',
     destructive: true,
   },
 }

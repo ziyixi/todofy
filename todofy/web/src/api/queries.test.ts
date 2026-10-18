@@ -27,7 +27,7 @@ describe('eventPollInterval', () => {
     expect(eventPollInterval(event({ state: 'pending', next_attempt_time: '2026-09-28T11:59:55Z' }), now)).toBe(EVENT_POLL_MS)
   })
 
-  it('stops for a row that stays overdue (a pause, a Todoist block or a backlog)', () => {
+  it('stops for a row that stays overdue (a pause, a Tasks outage or a backlog)', () => {
     expect(eventPollInterval(event({ state: 'summarized', next_attempt_time: '2026-09-28T11:50:00Z' }), now)).toBe(false)
     expect(eventPollInterval(event({ state: 'pending', next_attempt_time: '2026-09-27T12:00:00Z' }), now)).toBe(false)
   })

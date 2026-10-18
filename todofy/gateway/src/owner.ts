@@ -7,6 +7,7 @@
  *   every method but GET its `authorize` hook checks the same-origin Origin and the signed double-submit CSRF token,
  *   then MAINTENANCE_MODE, before the body is read;
  * - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
+ * - GET /task/<id>: a 302 to that task in Tasks (TASKS_PUBLIC_URL), the link the UI shows for a task;
  * - the routes of the owner API before todofy.ui.v1 (api/owner-api-v1.openapi.yaml until 2026-10-02:
  *   /api/v1/overview, /api/v1/events/..., ...): 410 `reload_required` in their old error envelope, so a tab still
  *   running the old UI tells the owner to reload (for one release, then NOT_FOUND like any other path);
@@ -19,12 +20,16 @@ import type { RouteInfo } from '@ziyixi/proto/http-transcoder';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { authenticate } from './access.ts';
 import { issueCsrf, verifyCsrf } from './csrf.ts';
+import { variable } from './env.ts';
 import { errorEnvelope, HttpError, MESSAGES, withPrivateHeaders, type Context } from './http.ts';
 import { maintenance, REASONS, transcoder, uiError, type Reason, type UiContext } from './ui.ts';
 import { warmCodec } from './warm.ts';
 
 const API_PREFIX = '/api/v1/';
 const CSRF_PATH = '/api/csrf';
+const TASK_PREFIX = '/task/';
+/** A Tasks task ID (its imported Todoist IDs included). */
+const TASK_ID = /^[A-Za-z0-9_-]{1,128}$/;
 /** The message of the 410 an old UI tab gets (its error panel shows it). */
 export const RELOAD_MESSAGE = 'Todofy 已更新，请刷新页面';
 
@@ -97,6 +102,14 @@ async function route(ctx: Context): Promise<Response> {
       if (error instanceof RpcError) return statusResponse(ctx, error);
       throw error;
     }
+  }
+  if (path.startsWith(TASK_PREFIX)) {
+    if (ctx.request.method !== 'GET' && ctx.request.method !== 'HEAD') return statusResponse(ctx, methodNotAllowed('GET, HEAD'));
+    const id = path.slice(TASK_PREFIX.length);
+    if (!TASK_ID.test(id)) return statusResponse(ctx, uiError('NOT_FOUND'));
+    const tasks = variable(ctx.env, 'TASKS_PUBLIC_URL').replace(/\/+$/, '');
+    if (tasks === '') return statusResponse(ctx, uiError('NOT_CONFIGURED'));
+    return new Response(null, { status: 302, headers: { location: `${tasks}/?task=${id}` } });
   }
   if (path === '/api/v1' || path.startsWith(API_PREFIX)) {
     const result = await api.handle(ctx.request, { env: ctx.env, url: ctx.url, owner }, ctx.requestId);
