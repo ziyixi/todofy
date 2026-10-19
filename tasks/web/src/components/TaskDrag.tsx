@@ -98,9 +98,10 @@ export function TaskDragProvider({
       }}
     >
       <DragContext value={{ moving, lastMove }}>{children}</DragContext>
+      {/* Finish preview cleanup immediately, retaining dnd-kit's keyboard focus restoration. */}
       <DragOverlay
         style={{ pointerEvents: "none" }}
-        dropAnimation={null}
+        dropAnimation={() => undefined}
       >
         {(source) =>
           source.data.task ? (

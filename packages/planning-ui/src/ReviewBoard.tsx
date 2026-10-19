@@ -506,9 +506,10 @@ export function ReviewBoard({
           ))}
         </div>
       </div>
+      {/* Finish preview cleanup immediately, retaining dnd-kit's keyboard focus restoration. */}
       <DragOverlay
         style={{ pointerEvents: "none" }}
-        dropAnimation={null}
+        dropAnimation={() => undefined}
       >
         {(source) => {
           const task = source.data?.task as PlanningTask | undefined;

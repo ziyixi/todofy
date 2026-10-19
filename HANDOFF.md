@@ -30,10 +30,14 @@ runtime/static, shared-package, contract and retired-consumer check. An existing
 failed and reproduced locally: while the manager was idle and the source's rectangle unchanged, the
 empty `data-dnd-dropping` overlay intercepted pointerdown. Its delayed cleanup could also hide the next
 accepted drag's preview. The Tasks, Plan Review and Week visual overlays now ignore pointer events and
-use synchronous drop cleanup (`dropAnimation=null`); the moving preview remains. Temporary diagnostics
-and ineffective test waits were removed; the original gesture and saved-state assertions remain.
-The final build passes five original detach repetitions. The complete browser suite and new gate are
-running before release.
+use an immediate no-animation completion callback; dnd-kit still restores keyboard focus. Temporary
+diagnostics and ineffective test waits were removed; the original gesture and saved-state assertions
+remain. The second [39217877032](https://github.com/ziyixi/todofy/actions/runs/39217877032) passed Tasks,
+including all 66 browser cases, but found that `dropAnimation=null` skips keyboard focus restoration.
+The supported immediate callback corrects that regression. Final local checks and a new complete gate
+are required before release.
+The callback passes the unchanged packaged keyboard-drop case and five consecutive native detach
+cases; the full native and retired-consumer browser suites are running on the final bundles.
 
 ### Tasks row selection and whole-row drag: released (2026-10-19 UTC)
 

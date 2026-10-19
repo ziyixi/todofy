@@ -449,9 +449,10 @@ export function PlanningWeek(props: Props) {
           }
         />
       </section>
+      {/* Finish preview cleanup immediately, retaining dnd-kit's keyboard focus restoration. */}
       <DragOverlay
         style={{ pointerEvents: "none" }}
-        dropAnimation={null}
+        dropAnimation={() => undefined}
       >
         {(source) => {
           const id = String(source.data?.taskId ?? "");
