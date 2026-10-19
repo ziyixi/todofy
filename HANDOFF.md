@@ -9,35 +9,23 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-### Plan write reliability: awaiting CI/release (2026-10-19 UTC)
+### Plan write reliability: released (2026-10-19 UTC)
 
-`codex/plan-write-reliability` starts from `fd399c5a`; the original/Claude checkout is untouched.
-Two reproductions explain the owner's failed Step creation and repeated drags. Native weekly rollover
-uses the old five-item external-writer batch and rejects the requested action while old commitments
-remain. Confirmed frontend reorders discard new task etags and leave affected siblings available for
-stale writes. Native reset now uses Core's existing D1 transaction for a bounded page of 100 memberships;
-the shared UI retains confirmed etags and keeps affected native siblings pending. Existing reset
-receipts retain membership through durable completion. Legacy Todoist behavior stays unchanged.
-The decisive 32-member regression failed with UNAVAILABLE/27 remaining before the fix; the first Step
-request and its replay now succeed with one child. Local checks pass: 22 real Core/Tasks/D1 cases,
-235 focused rollover/schema/receipt cases, 66 packaged Chromium journeys, 59 Tasks units, 24 shared
-planning units and 308 retired-consumer units. Broad Core host checks passed 2,207 cases with one
-pre-existing absent-protos skip before the final receipt tests; lint/type/build and independent review
-also pass. Browser startup now waits for the harness's completed migrations instead of its early CSRF
-response. No production task has been changed for acceptance, and this branch has not been released.
-Initial branch [39216036015](https://github.com/ziyixi/todofy/actions/runs/39216036015) passed every Core
-runtime/static, shared-package, contract and retired-consumer check. An existing second main-list drag
-failed and reproduced locally: while the manager was idle and the source's rectangle unchanged, the
-empty `data-dnd-dropping` overlay intercepted pointerdown. Its delayed cleanup could also hide the next
-accepted drag's preview. The Tasks, Plan Review and Week visual overlays now ignore pointer events and
-use an immediate no-animation completion callback; dnd-kit still restores keyboard focus. Temporary
-diagnostics and ineffective test waits were removed; the original gesture and saved-state assertions
-remain. The second [39217877032](https://github.com/ziyixi/todofy/actions/runs/39217877032) passed Tasks,
-including all 66 browser cases, but found that `dropAnimation=null` skips keyboard focus restoration.
-The supported immediate callback corrects that regression. Final local checks and a new complete gate
-are required before release.
-The callback passes the unchanged packaged keyboard-drop case and five consecutive native detach
-cases; the full native and retired-consumer browser suites are running on the final bundles.
+`cb4ef15b481c34c82542833a39a60d8796ed6e9f` passed complete
+[branch 39218617558](https://github.com/ziyixi/todofy/actions/runs/39218617558) and same-SHA
+[main 39219943729](https://github.com/ziyixi/todofy/actions/runs/39219943729). Tasks and Todofy released;
+independent provider reads verify all three Worker identities/configurations with zero differences.
+Native rollover handles a bounded 100-member page in Core D1; Step creation no longer waits through
+the legacy five-item batches at the observed scale. Reorders retain confirmed etags and hold affected
+native siblings pending. Visual overlays ignore pointer events and finish immediately through the
+library's callback, preserving keyboard focus and avoiding cleanup of the next drag's preview.
+Local checks include 22 real Core/Tasks/D1 cases, 235 focused checks, 66 native and 65 retired-consumer
+browser journeys. The original consecutive-detach case passes five repeats unchanged. One final-source
+cold-CPU check passed on a single rerun without source or threshold changes. Production week is current,
+enabled, with zero expired memberships; the old batches had drained before release. No real task or
+open draft was operated on. Original/Claude checkouts are untouched. Full evidence and release IDs:
+[verification](docs/tasks-plan-reliability-verification.md). Closing branch `codex/plan-write-verification`
+changes root documentation only.
 
 ### Tasks row selection and whole-row drag: released (2026-10-19 UTC)
 
@@ -407,10 +395,11 @@ Answered in chat; do not re-ask.
   verify the first production file removal and one Dropbox cold read, recording metadata only, never page content.
 - GTD additions: the Waiting list, the weekly review checklist and the Sunday-commit fix. The one-card
   Clarify queue was not chosen, so the checklist only counts the mail project's unplanned tasks and links it.
-- Todoist Plus's weekly rollover stays on. Its first natural run is the ten-minute cron after Monday 2026-10-19
-  00:00 US/Pacific (07:00 UTC). Afterwards observe it by metadata only (old-week batch drained, week start
-  advanced, no error code), never task content.
-  Controls: [weekly rollover and controls](todofy/docs/todoist-plus.md#weekly-rollover-and-controls).
+- Native weekly rollover remains enabled. Limited October 19 metadata confirms the current week and zero
+  expired memberships. Its five-item legacy batching defect is fixed and released; the 32-member
+  first-request behavior is proved by real local Core/Tasks/D1 tests, not by production content writes.
+  [Evidence](docs/tasks-plan-reliability-verification.md) and
+  [controls](todofy/docs/todoist-plus.md#weekly-rollover-and-controls).
 - The 48 merged `codex/*` branches were pruned from origin after a local bundle backup, so branch names cited
   above as closing documentation no longer exist. The three unmerged Recall experiment branches remain:
   `codex/recall-permission-setup`, `codex/recall-startup-diagnostic` and `codex/recall-orion-permission-verification`.
