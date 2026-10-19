@@ -6,8 +6,8 @@ export default defineConfig({
   use: { baseURL: "http://127.0.0.1:8798", headless: true, timezoneId: "UTC" },
   webServer: {
     command: "node ../worker/test/runtime/dev-server.ts",
-    url: "http://127.0.0.1:8798/api/tasks/csrf",
-    reuseExistingServer: !process.env.CI,
+    // Miniflare can issue CSRF tokens before the harness finishes applying D1 migrations.
+    wait: { stdout: /Tasks synthetic local D1 ready at/u },
     timeout: 60_000,
   },
   reporter: "line",

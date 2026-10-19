@@ -249,6 +249,15 @@ the ledger. Losing the object's SQLite only collects again, which finds what is 
 
 ## Weekly rollover and controls
 
+With native Tasks, rollover expires up to 100 remembered old-week memberships in Core's D1 per
+invocation. The state update and ordinary membership cleanup share one transaction, without Tasks
+service calls. An unfinished committed stage becomes weekly; area, flags, lead window and all Task
+content, dates and history stay unchanged. Current-week and next-week choices are excluded. Existing
+started reset receipts retain their memberships until the receipt is finished, so interruption can
+resume through the same bounded path. The first new-week action proceeds as soon as that page drains
+the old memberships. The existing cron, maintenance controls and backup lease still apply.
+
+The following label-writing behavior applies to the retained Todoist integration.
 Rollover is disabled until mapping confirmation. The existing ten-minute cron observes planning marks;
 after Monday 00:00 in the confirmed Todoist timezone, it processes up to five remembered old-week tasks
 per invocation. Unfinished old commitments become weekly candidates; while a setup still binds the retired

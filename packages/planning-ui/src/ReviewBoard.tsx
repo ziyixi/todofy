@@ -390,7 +390,10 @@ export function ReviewBoard({
         return result;
       },
       {
-        pending: [pendingTask(task.id)],
+        // Native reorders change sibling revisions too; their next writes need the returned etags.
+        pending: plan.nativePlanning
+          ? next.map(pendingTask)
+          : [pendingTask(task.id)],
         predict: predictLaneOrder(lane, next),
       },
     );

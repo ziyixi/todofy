@@ -4,8 +4,9 @@ import json
 from typing import Any
 
 from todofy.core import plus
+from todofy.core.sql import native_plan as native_sql
 from todofy.core.sql import plus as sql
-from todofy.runtime import native_plan, native_plus, native_tasks
+from todofy.runtime import native_plan, native_tasks
 from todofy.runtime import plus_receipts as receipts
 from todofy.runtime import plus_store as store
 from todofy.runtime import plus_todoist as todoist
@@ -20,6 +21,8 @@ async def remember_page(env: Any, items: list[dict[str, Any]], week: str, mappin
 
 async def reset_ended(core: Any, week: str, mapping: list[dict[str, Any]]) -> bool:
     """One bounded batch; a recorded new-week choice can never match this query."""
+    if native_tasks.enabled(core.env):
+        return await _reset_native(core, week)
     env = core.env
     ended = await store.rows(env.DB, sql.ENDED_WEEK, week)
     for record in ended:
@@ -39,19 +42,6 @@ async def reset_ended(core: Any, week: str, mapping: list[dict[str, Any]]) -> bo
             continue
         if previous:
             commands = previous.commands
-        elif native_tasks.enabled(env):
-            state = dict(task["_native_plan_state"])
-            if not record["committed"] or state["stage"] != "committed":
-                await store.run(env.DB, sql.FORGET_WEEK, task_id, record["week_start"])
-                continue
-            state["stage"] = "weekly"
-            commands = [
-                {
-                    "method": "",
-                    "body": {"name": f"tasks/{task_id}", "request_id": plus.command_id(request_id)},
-                    "planning": {"state": state, "expected_rev": task["_native_plan_rev"]},
-                }
-            ]
         else:
             labels = plus.reset_labels(task, record, mapping)
             if set(labels) == set(task.get("labels") or []):
@@ -66,13 +56,65 @@ async def reset_ended(core: Any, week: str, mapping: list[dict[str, Any]]) -> bo
                 }
             ]
         await receipts.start(core, request_id, "WeekReset", plus.fingerprint(record), commands)
-        if native_tasks.enabled(env) and previous is not None:
-            await todoist._native(native_plus.resume(core, commands))
-        else:
-            await todoist.commands(core, commands)
+        await todoist.commands(core, commands)
         receipts.finish(core.sql, request_id, {})
         await store.run(env.DB, sql.FORGET_WEEK, task_id, record["week_start"])
     return len(ended) < sql.RESET_BATCH
+
+
+async def _reset_native(core: Any, week: str) -> bool:
+    """Expire native current-state commitments atomically, without reading or changing Tasks."""
+    env = core.env
+    ended = await store.rows(env.DB, native_sql.ENDED_WEEK.sql, week)
+    if not ended:
+        return True
+    existing = {}
+    changes = []
+    for record in ended:
+        membership = {key: record[key] for key in ("task_id", "week_start", "committed", "bet")}
+        request_id = "week:" + record["week_start"] + ":" + record["task_id"]
+        # Native WeekReset receipts were always written to the object's SQLite. Read matching existing
+        # receipts here; a fresh state-only transaction needs no cross-service journal.
+        saved = core.sql.exec(
+            "SELECT state FROM plus_receipts WHERE request_id=? AND method='WeekReset' AND request_hash=?"
+            " AND created_at>=?",
+            request_id,
+            plus.fingerprint(membership),
+            now_s() - receipts.MAX_AGE,
+        ).toArray()
+        if saved:
+            existing[record["task_id"]] = (request_id, saved[0].state)
+        changes.append(
+            {
+                **record,
+                "request_id": plus.command_id(request_id),
+                "cleanup": int(record["task_id"] not in existing),
+                "reset": int(
+                    record["committed"] and record["stage"] == "committed" and not (saved and saved[0].state == "done")
+                ),
+            }
+        )
+    document = json.dumps(changes, separators=(",", ":"))
+    result = await env.DB.batch(
+        [
+            env.DB.prepare(native_sql.RESET_WEEK.sql).bind(now_s(), document),
+            env.DB.prepare(native_sql.FORGET_WEEK.sql).bind(document),
+        ]
+    )
+    updated = {dict(row)["task_id"] for row in result[0].results}
+    finished = []
+    for change in changes:
+        if change["task_id"] in existing and (not change["reset"] or change["state_id"] in updated):
+            # Keep existing receipts' memberships until their finish is durable. A failed sync may
+            # leave a done receipt in memory, so the next pass also syncs it before deleting membership.
+            request_id, state = existing[change["task_id"]]
+            if state == "started":
+                receipts.finish(core.sql, request_id, {})
+            finished.append({**change, "cleanup": 1})
+    if finished:
+        await core.ctx.storage.sync()
+        await env.DB.prepare(native_sql.FORGET_WEEK.sql).bind(json.dumps(finished, separators=(",", ":"))).all()
+    return await store.first(env.DB, native_sql.WEEK_REMAINS.sql, week) is None
 
 
 async def tick(coordinator: Any) -> None:

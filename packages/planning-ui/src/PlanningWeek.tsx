@@ -199,7 +199,10 @@ export function PlanningWeek(props: Props) {
         reorderRequests.current.delete(key);
         return result;
       },
-      { pending: [pendingTask(id)], predict },
+      {
+        pending: plan.nativePlanning ? next.map(pendingTask) : [pendingTask(id)],
+        predict,
+      },
     );
   }
   return (

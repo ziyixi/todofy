@@ -381,6 +381,44 @@ def test_actual_native_plan_actions_keep_gtd_state_out_of_task_labels(native, re
     assert all(planning_task(native, child["id"])["parent_id"] == task["id"] for child in children)
 
 
+def test_native_title_only_steps_inherit_parent_location_and_replay(native, ready_plan):
+    project = rpc(
+        native, "CreateProject", {"project": {"title": "Synthetic step project"}, "request_id": str(uuid.uuid4())}
+    )
+    section = rpc(
+        native,
+        "CreateSection",
+        {
+            "section": {"title": "Synthetic step section", "project_id": project["id"]},
+            "request_id": str(uuid.uuid4()),
+        },
+    )
+    for location in ({}, {"project_id": project["id"]}, {"project_id": project["id"], "section_id": section["id"]}):
+        parent = rpc(
+            native,
+            "CreateTask",
+            {
+                "task": {"title": "Synthetic title-only step parent", **location},
+                "task_id": "synthetic-imported-" + uuid.uuid4().hex,
+                "request_id": str(uuid.uuid4()),
+            },
+        )
+        request = {
+            "parent_id": parent["id"],
+            "steps": [{"title": "Synthetic title-only step"}],
+            "request_id": str(uuid.uuid4()),
+        }
+        created = planning(native, "AppendTaskSteps", **request)
+        assert len(created["task_ids"]) == 1, created
+        assert planning(native, "AppendTaskSteps", **request) == created
+        children = rpc(native, "ListTasks", {"parent_id": parent["id"]})["tasks"]
+        assert [child["id"] for child in children] == created["task_ids"]
+        [child] = children
+        assert child["kind"] == "step" and not child.get("duration_minutes")
+        assert child.get("project_id", "") == parent.get("project_id", "")
+        assert child.get("section_id", "") == parent.get("section_id", "")
+
+
 def test_native_week_reset_changes_planning_only_and_keeps_next_week_choices(native, ready_plan):
     current = ready_plan["week_start"]
     following = (date.fromisoformat(current) + timedelta(days=7)).isoformat()
@@ -816,3 +854,88 @@ def test_catalog_metadata_selector_keeps_legacy_default_and_cross_language_false
     metadata = rpc(native, "GetCatalog", {"name": "catalog", "include_task_counts": False})
     assert explicit == full and full["task_counts"]
     assert metadata == {key: value for key, value in full.items() if key != "task_counts"}
+
+
+def test_native_new_week_step_write_settles_existing_commitments_without_a_failed_action(native, ready_plan):
+    week = ready_plan["week_start"]
+    ended_week = (date.fromisoformat(week) - timedelta(days=7)).isoformat()
+    tasks = [
+        rpc(
+            native,
+            "CreateTask",
+            {"task": {"title": "Synthetic rollover commitment"}, "request_id": str(uuid.uuid4())},
+        )
+        for _ in range(32)
+    ]
+    ids = json.dumps([task["id"] for task in tasks])
+    native.d1(
+        "INSERT INTO plan_tasks(provider,external_id,created_at)"
+        f" SELECT 'tasks',value,1 FROM json_each('{ids}');"
+        "INSERT INTO plan_task_state(task_id,stage,area,lead_days,waiting,active,rev,request_id,updated_at)"
+        f" SELECT id,'committed','work',21,1,1,1,'synthetic-rollover',1 FROM plan_tasks"
+        f" WHERE provider='tasks' AND external_id IN (SELECT value FROM json_each('{ids}'));"
+        "INSERT OR REPLACE INTO plus_weeks(task_id,week_start,committed,bet)"
+        f" SELECT value,'{ended_week}',1,0 FROM json_each('{ids}');"
+        f"UPDATE plus_settings SET week_start='{ended_week}' WHERE id=1"
+    )
+    request = {
+        "parent_id": tasks[0]["id"],
+        "steps": [{"title": "Synthetic step after rollover"}],
+        "request_id": str(uuid.uuid4()),
+    }
+    created = planning(native, "AppendTaskSteps", **request)
+    remaining = native.d1(f"SELECT count(*) AS n FROM plus_weeks WHERE week_start<'{week}'")[0]["n"]
+    assert "error" not in created, {"error": created.get("error"), "remaining": remaining}
+    assert len(created["task_ids"]) == 1
+    assert planning(native, "AppendTaskSteps", **request) == created
+    assert remaining == 0
+    assert native.d1("SELECT week_start FROM plus_settings WHERE id=1") == [{"week_start": week}]
+    states = native.d1(
+        "SELECT stage,area,lead_days,waiting,active,rev,count(*) AS n FROM plan_task_state"
+        " WHERE task_id IN (SELECT id FROM plan_tasks"
+        f" WHERE provider='tasks' AND external_id IN (SELECT value FROM json_each('{ids}')))"
+        " GROUP BY stage,area,lead_days,waiting,active,rev"
+    )
+    assert states == [
+        {"stage": "weekly", "area": "work", "lead_days": 21, "waiting": 1, "active": 1, "rev": 2, "n": 32}
+    ]
+    for task in tasks:
+        current = rpc(native, "GetTask", {"name": task["name"]})
+        assert {**current, "child_count": 0} == {**task, "child_count": 0}
+
+
+def test_native_rollover_transaction_failure_keeps_state_and_membership_together(native, ready_plan):
+    week = ready_plan["week_start"]
+    ended_week = (date.fromisoformat(week) - timedelta(days=7)).isoformat()
+    task = rpc(native, "CreateTask", {"task": {"title": "Synthetic atomic rollover"}, "request_id": str(uuid.uuid4())})
+    task_id = task["id"]
+    native.d1(
+        f"INSERT INTO plan_tasks(provider,external_id,created_at) VALUES('tasks','{task_id}',1);"
+        "INSERT INTO plan_task_state(task_id,stage,rev,request_id,updated_at)"
+        f" SELECT id,'committed',1,'synthetic-atomic-rollover',1 FROM plan_tasks WHERE external_id='{task_id}';"
+        f"INSERT INTO plus_weeks VALUES('{task_id}','{ended_week}',1,0);"
+        f"UPDATE plus_settings SET week_start='{ended_week}' WHERE id=1;"
+        "CREATE TRIGGER synthetic_rollover_failure BEFORE DELETE ON plus_weeks"
+        f" WHEN OLD.task_id='{task_id}' BEGIN SELECT RAISE(ABORT,'synthetic_rollover_failure'); END"
+    )
+    request = {
+        "parent_id": task_id,
+        "steps": [{"title": "Synthetic step after atomic retry"}],
+        "request_id": str(uuid.uuid4()),
+    }
+    try:
+        assert planning(native, "AppendTaskSteps", **request) == {"error": "UNAVAILABLE"}
+        assert native.d1(f"SELECT week_start FROM plus_weeks WHERE task_id='{task_id}'") == [{"week_start": ended_week}]
+        assert native.d1(
+            "SELECT stage,rev FROM plan_task_state WHERE task_id="
+            f"(SELECT id FROM plan_tasks WHERE external_id='{task_id}')"
+        ) == [{"stage": "committed", "rev": 1}]
+        assert rpc(native, "ListTasks", {"parent_id": task_id}).get("tasks", []) == []
+    finally:
+        native.d1("DROP TRIGGER synthetic_rollover_failure")
+    created = planning(native, "AppendTaskSteps", **request)
+    assert len(created["task_ids"]) == 1
+    assert planning(native, "AppendTaskSteps", **request) == created
+    assert native.d1(
+        f"SELECT stage,rev FROM plan_task_state WHERE task_id=(SELECT id FROM plan_tasks WHERE external_id='{task_id}')"
+    ) == [{"stage": "weekly", "rev": 2}]

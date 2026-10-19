@@ -9,6 +9,23 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+### Plan write reliability: awaiting CI/release (2026-10-19 UTC)
+
+`codex/plan-write-reliability` starts from `fd399c5a`; the original/Claude checkout is untouched.
+Two reproductions explain the owner's failed Step creation and repeated drags. Native weekly rollover
+uses the old five-item external-writer batch and rejects the requested action while old commitments
+remain. Confirmed frontend reorders discard new task etags and leave affected siblings available for
+stale writes. Native reset now uses Core's existing D1 transaction for a bounded page of 100 memberships;
+the shared UI retains confirmed etags and keeps affected native siblings pending. Existing reset
+receipts retain membership through durable completion. Legacy Todoist behavior stays unchanged.
+The decisive 32-member regression failed with UNAVAILABLE/27 remaining before the fix; the first Step
+request and its replay now succeed with one child. Local checks pass: 22 real Core/Tasks/D1 cases,
+235 focused rollover/schema/receipt cases, 66 packaged Chromium journeys, 59 Tasks units, 24 shared
+planning units and 308 retired-consumer units. Broad Core host checks passed 2,207 cases with one
+pre-existing absent-protos skip before the final receipt tests; lint/type/build and independent review
+also pass. Browser startup now waits for the harness's completed migrations instead of its early CSRF
+response. No production task has been changed for acceptance, and this branch has not been released.
+
 ### Tasks row selection and whole-row drag: released (2026-10-19 UTC)
 
 `30cc7327e6292ea07406b511907db2e05474153b` passed complete branch

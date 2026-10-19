@@ -1,6 +1,163 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
+
+test("a native lane reorder keeps its siblings pending and the next stage drag saves on its first attempt", async ({
+  page,
+}) => {
+  const tasks = [
+    { id: "native-first", title: "Synthetic first outcome", sort_order: 1 },
+    { id: "native-second", title: "Synthetic second outcome", sort_order: 2 },
+  ].map((task) => ({
+    ...task,
+    kind: "task",
+    project_id: "inbox",
+    area: "work",
+    stage: "weekly",
+    explicit_stage: "weekly",
+    etag: "1",
+  }));
+  let laneOrder = tasks.map((task) => task.id);
+  let releaseReorder: (() => void) | undefined;
+  const heldReorder = new Promise<void>((resolve) => {
+    releaseReorder = resolve;
+  });
+  const stageWrites: Record<string, unknown>[] = [];
+  let taskReads = 0;
+  await page.route("**/api/plus/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/plus/v1/plan:read") {
+      await route.fulfill({
+        json: {
+          plan: {
+            timezone: "America/Los_Angeles",
+            week_start: "2026-10-12",
+            today: "2026-10-13",
+            enabled: true,
+            native_planning: true,
+            etag: "native-plan",
+            lane_orders: [{ lane: "weekly", task_ids: laneOrder }],
+          },
+        },
+      });
+      return;
+    }
+    if (path === "/api/plus/v1/tasks") {
+      taskReads++;
+      await route.fulfill({ json: { planning_tasks: tasks } });
+      return;
+    }
+    if (path === "/api/plus/v1/tasks:reorder") {
+      const body = route.request().postDataJSON();
+      expect(body.task_ids).toEqual(["native-second", "native-first"]);
+      laneOrder = body.task_ids;
+      for (const task of tasks) {
+        task.sort_order = laneOrder.indexOf(task.id) + 1;
+        task.etag = "2";
+      }
+      await heldReorder;
+      await route.fulfill({
+        json: {
+          tasks,
+          lane_order: { lane: "weekly", task_ids: laneOrder },
+        },
+      });
+      return;
+    }
+    if (path === "/api/plus/v1/tasks:setTaskPlan") {
+      const body = route.request().postDataJSON();
+      stageWrites.push(body);
+      const task = tasks.find((task) => task.id === body.task_id)!;
+      if (body.etag !== task.etag) {
+        await route.fulfill({
+          status: 409,
+          json: {
+            error: {
+              status: "ABORTED",
+              message: "Synthetic task changed",
+            },
+          },
+        });
+        return;
+      }
+      task.stage = body.stage;
+      task.explicit_stage = body.stage;
+      task.etag = "3";
+      await route.fulfill({ json: { task } });
+      return;
+    }
+    if (path === "/api/plus/flowday/api/v1/tasks") {
+      await route.fulfill({ json: { tasks: [] } });
+      return;
+    }
+    if (path.startsWith("/api/plus/flowday/api/v1/flows/")) {
+      await route.fulfill({
+        json: { name: path.slice("/api/plus/flowday/api/v1/".length) },
+      });
+      return;
+    }
+    if (path === "/api/plus/flowday/api/v1/timerSession") {
+      await route.fulfill({
+        json: { name: "timerSession", state: "idle", etag: "0" },
+      });
+      return;
+    }
+    throw new Error(`Unexpected synthetic request ${path}`);
+  });
+  async function drag(source: Locator, target: Locator) {
+    await expect(
+      page.locator("[data-dnd-overlay][data-dnd-dragging]"),
+    ).toHaveCount(0);
+    const from = (await source.boundingBox())!;
+    const to = (await target.boundingBox())!;
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from.x + from.width / 2 + 8, from.y + from.height / 2, {
+      steps: 3,
+    });
+    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {
+      steps: 18,
+    });
+    await page.mouse.up();
+  }
+  await page.clock.setFixedTime(new Date("2026-10-13T18:00:00Z"));
+  await page.goto("/#/plan");
+  const week = page.getByRole("region", { name: "Week", exact: true });
+  const month = page.getByRole("region", { name: "Month", exact: true });
+  const firstHandle = page.getByRole("button", {
+    name: /^Move outcome: Synthetic first outcome/u,
+  });
+  const secondHandle = page.getByRole("button", {
+    name: /^Move outcome: Synthetic second outcome/u,
+  });
+  await expect(firstHandle).toBeVisible();
+  const firstCard = week.locator('[data-outcome-id="native-first"]');
+  await drag(secondHandle, firstCard);
+  await expect(week.locator('.review-draggable[aria-busy="true"]')).toHaveCount(2);
+  await expect(firstHandle).toHaveAttribute("aria-disabled", "true");
+  await expect(secondHandle).toHaveAttribute("aria-disabled", "true");
+  releaseReorder!();
+  await expect(week.locator(".review-draggable.is-pending")).toHaveCount(0);
+  await expect(week.locator(".planning-outcome-title")).toHaveText([
+    "Synthetic second outcome",
+    "Synthetic first outcome",
+  ]);
+  expect(taskReads).toBe(1);
+  await drag(firstHandle, month);
+  await expect(month.locator('[data-outcome-id="native-first"]')).toBeVisible();
+  await expect(month.locator(".review-draggable.is-pending")).toHaveCount(0);
+  expect(stageWrites).toHaveLength(1);
+  expect(stageWrites[0]).toMatchObject({
+    task_id: "native-first",
+    etag: "2",
+    stage: "monthly",
+  });
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.reload();
+  await expect(month.locator('[data-outcome-id="native-first"]')).toBeVisible();
+  await expect(week.locator('[data-outcome-id="native-second"]')).toBeVisible();
+  expect(stageWrites).toHaveLength(1);
+});
 
 test("native Plan, Focus timer and Mail use the owner transport without an extension connection", async ({
   page,
