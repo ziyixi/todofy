@@ -15,12 +15,12 @@ waiting lists from `414925e`. Later observations in that snapshot supersede many
 remaining acceptance are in [HANDOFF](../HANDOFF.md); current rebuild steps and verified limits are in
 [Rebuild](rebuild.md) and [rebuild verification](rebuild-verification.md).
 
-## Todoist Plus removal, October 18
+## Todoist Plus removal, decided October 18
 
-By the owner's decision of 2026-10-18 the Todoist Plus Chrome extension was removed with no compatibility window,
-together with its CI job, Todofy's `/plus` page and hooks-host `/api/plus/*` routes, FlowDay's `FocusEntrypoint`
-and the nine `PlusService` RPCs only the extension called (`proto/retired.json`). Tasks hosts Plan, Focus and Mail
-natively. The last commit with the extension's source is `f6c08aaf`; see
+By the owner's decision of 2026-10-18, the release that merged `claude/tasks-cleanup` removed the Todoist Plus
+Chrome extension with no compatibility window, together with its CI job, Todofy's `/plus` page and hooks-host
+`/api/plus/*` routes, FlowDay's `FocusEntrypoint` and the nine `PlusService` RPCs only the extension called
+(`proto/retired.json`). Tasks hosts Plan, Focus and Mail natively. The last commit with the extension's source is `69ddb339`; see
 [Todoist Plus (retired)](history/todoist-plus.md).
 
 ## October 11 maintenance simplification

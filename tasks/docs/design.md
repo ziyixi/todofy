@@ -19,8 +19,8 @@ Applications do not import each other's source or databases. `packages/planning-
 Tasks; `packages/task-dates` supplies the date parser used by the Tasks Worker and import tools. FlowDay
 receives read-only access to Tasks. Todofy receives the provisioned task API; other bindings are rejected.
 
-Source selection is explicit; Tasks is the live task source after the verified import and consumer cutover.
-A native consumer does not fall back to Todoist after an error. Existing FlowDay task IDs and planning internal IDs must survive cutover.
+Tasks is the only task source; no consumer reads or writes Todoist. Existing FlowDay task IDs and planning
+internal IDs survived the cutover.
 
 ## Task interface
 
@@ -92,8 +92,8 @@ from their completion state; there is no independent Blocked checkbox.
 
 The one-time private conversion keeps each imported choice,
 removes its technical label membership and soft-retires the exact replaced labels and filters. Native planning
-does not require label mapping. The retired Todoist adapter keeps its frozen role
-projection internally; it does not define the native public label catalog.
+does not require label mapping. The role projection lives in Core's native planning code
+(`core/plus.py`, `core/native_plan.py`); it does not define the native public label catalog.
 Dragging a task into a planning day changes the FlowDay queue, preserving its task date and real deadline.
 Native task edits invalidate the mounted planning snapshot through the existing refresh path.
 Plan keeps the candidate columns vertically stacked within their existing desktop row. Committed alone

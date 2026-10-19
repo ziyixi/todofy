@@ -140,7 +140,7 @@ registration error and was excluded from acceptance evidence; the packaged build
 
 The requested obsolete email entry was a project, not a saved filter. The owner explicitly approved
 archiving it after reviewing the counts. The standard owner UI saved Archived, then a separate metadata
-query confirmed all 2,307 task IDs remain: 192 incomplete and 2,115 complete, all hidden from active
+query confirmed every task ID remains, open and completed, all hidden from active
 project views. No tasks were deleted and no source Todoist objects were changed. Private project
 identity and screenshots remain outside this public repository.
 
@@ -155,7 +155,7 @@ healthy Newsletter, active monitored daemons and a clean reconcile plan without 
 
 Mail Hero's separate stale-backup alert came from `native_backup_lease_expired`. A retry through its
 existing native R2 snapshot runner created snapshot `65cc4689-64b4-4d0e-9019-dd5ed88813c9`, fully verified
-at 2026-10-18 22:33:49.013 UTC: 1,903 files and 66,221,731 bytes, `native_readback_verified`.
+at 2026-10-18 22:33:49.013 UTC, every file and byte of the snapshot, `native_readback_verified`.
 The copy and validation finished in about 28 minutes and the existing pause was released. No backup
 contents were downloaded or printed. After the next due owner refresh, Home reports every app normal
 and no attention items. Its stale-backup warning recovered from the actual successful timestamp; no

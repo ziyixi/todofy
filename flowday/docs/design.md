@@ -515,8 +515,8 @@ A failed settlement does not authorize another completion. Todofy keeps that suc
 
 Migration `0004` adds Todoist parent and actual deadline fields, distinct from due/scheduled dates. It also added
 the `estimate_override` marker (set on existing nonempty estimates), which kept a FlowDay estimate over the source's
-duration. Since 2026-10-18 nothing reads or sets it: the source's duration is a mirrored task's only estimate. The
-column stays for the one-time copy of those estimates into Tasks
+duration. Since the release that removed FlowDay's estimate override, nothing reads or sets it: the source's
+duration is a mirrored task's only estimate. The column stays for the one-time copy of those estimates into Tasks
 ([backup](../../tasks/docs/backup.md#one-time-flowday-estimate-backfill)).
 Existing Todoist sync state also got a one-shot hierarchy refresh marker for the Todoist sync of that release;
 `0005` deleted it with the rest of the Todoist settings.

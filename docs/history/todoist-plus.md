@@ -6,8 +6,9 @@ FlowDay's focus methods through Todofy. Todofy wrote Todoist, using planning lab
 `/plus` page; FlowDay kept the day queue and the timer. Once Tasks hosted the same Plan, Focus and Mail natively
 (the cutover of 2026-10-18), the extension remained only as a test host for the shared components.
 
-On 2026-10-18 the owner removed it, with no compatibility window. The last commit with its source and
-documents is `f6c08aaf` (`git show f6c08aaf:todoist-plus/README.md`); its releases are recorded in
+The owner decided on 2026-10-18 to remove it, with no compatibility window; the release that merged
+`claude/tasks-cleanup` removed it. The last commit with its source and documents is `69ddb339`
+(`git show 69ddb339:todoist-plus/README.md`); its releases are recorded in
 [the retired handoff](todoist-plus-handoff-2026-10-17.md).
 
 | Part | Replaced by |
@@ -18,7 +19,7 @@ documents is `f6c08aaf` (`git show f6c08aaf:todoist-plus/README.md`); its releas
 | The Mailbox (LookupMailItems, FileMailItem, DeleteMailItems, UpdateMailSettings) | Tasks' Mail page: ListMailItems, ConvertMailItem, DeleteMailSummaries, UpdateMailCategories |
 | FlowDay's `FocusEntrypoint` and the extension's FlowDay proxy | FlowDay's `NativeFocusEntrypoint`, reached through the same Planning channel |
 | `todofy/docs/todoist-plus.md` | [planning-api.md](../../todofy/docs/planning-api.md) |
-| `docs/todoist-plus-verification.md`, `docs/todoist-plus-planning-prototype.md`, the extension's docs | Git history at `f6c08aaf` |
+| `docs/todoist-plus-verification.md`, `docs/todoist-plus-planning-prototype.md`, the extension's docs | Git history at `69ddb339` |
 
 The nine retired RPCs and the messages only they used are listed in `proto/retired.json`. The planning store
 (`plan_*`), the Bets, dependencies, lane orders and mail summaries are unchanged: Tasks uses them. Todofy's

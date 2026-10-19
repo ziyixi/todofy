@@ -18,8 +18,8 @@ prefix: the owner host and the hooks hosts answer 404.
 SetTaskPlan, SetTaskLead, AppendTaskSteps, CompleteTask, SetWeeklyBet, SetTaskDependency, ResolveDependencies,
 ReorderTasks, ListMailItems, ReadMailSummary, ConvertMailItem, DeleteMailSummaries, ReadMailSettings,
 UpdateMailCategories and VerifyPlanStore. Any other method answers `ACTION_NOT_ALLOWED` before its body is read.
-Each call is one core RPC, `plus_native_ui(method, request)`. It answers `UNAVAILABLE` unless the core's own task
-source is Tasks with its `TASKS` binding, and `plus_api.handle` runs it under the coordinator's `plus_lock`.
+Each call is one core RPC, `plus_native_ui(method, request)`. It answers `UNAVAILABLE` while the core has no
+`TASKS` binding, and `plus_api.handle` runs it under the coordinator's `plus_lock`.
 
 The FlowDay half forwards only ListTasks (at most 100 a page), GetFlow, UpdateFlow, RolloverFlow, GetTimerSession
 and CommandTimer to FlowDay's `NativeFocusEntrypoint` (binding `FLOWDAY_NATIVE_FOCUS`). A SETTLE command comes
@@ -41,15 +41,15 @@ whole job.
 
 ## Receipts
 
-The writes that change Tasks (SetTaskPlan, SetTaskLead, CompleteTask, AppendTaskSteps, ReorderTasks,
-ConvertMailItem and each task of the Monday reset) record a receipt in TodofyCore's own SQLite (`plus_receipts`,
+The writes that change Tasks (SetTaskPlan, SetTaskLead, CompleteTask, AppendTaskSteps, ReorderTasks and
+ConvertMailItem) record a receipt in TodofyCore's own SQLite (`plus_receipts`,
 `runtime/plus_receipts.py`) before they send anything: `started` with the frozen requests, then `done` with IDs
 only, never a title. Each request to Tasks is also stored as sent, with its etag, in `native_task_requests`
 (`runtime/native_plus.py`), so an uncertain answer is replayed with the same bytes and request ID. Tasks' own D1
 receipt is the final authority. A repeated request ID must carry the same input, else `BAD_REQUEST`. A done
 receipt answers from its IDs, and a started one resends its frozen requests. Lookups read the last 30 days.
-DeleteMailSummaries keeps the indexes of the summaries it kept. D1 `plus_actions`, the receipts of earlier
-releases, is read for request IDs of the last 30 days and never written.
+DeleteMailSummaries keeps the indexes of the summaries it kept. Migration `0012` dropped the older D1
+`plus_actions` receipts.
 
 SetWeeklyBet, SetTaskDependency, ResolveDependencies and UpdateMailCategories are value writes without a receipt:
 sending the saved value again answers it as saved.

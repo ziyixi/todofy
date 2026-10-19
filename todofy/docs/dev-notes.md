@@ -505,9 +505,9 @@ request identity stored in `todoist_request_id`) and `request_id.todoist_request
 async def tick(env, coordinator, now: int) -> int     # returns the next check time
 async def page(db, before_day: str | None, limit: int) -> tuple[list[dict], str | None]  # for api.py
 ```
-Claims the UTC day with `INSERT ... ON CONFLICT(day) DO NOTHING` before calling `todoist.create_task`,
-freezing the project (`TODOIST_OPS_PROJECT_ID`, else `TODOIST_DEFAULT_PROJECT_ID`; a row from before
-migration 0004 has `project_id = ''` and retries into the default project);
+Claims the UTC day with `INSERT ... ON CONFLICT(day) DO NOTHING` before calling `native_tasks.create_task`,
+freezing the project (`TODOIST_OPS_PROJECT_ID`, a frozen name for a Tasks project, else the Tasks Inbox; a row
+from before migration 0004 has `project_id = ''` and retries into the Inbox);
 `unknown` is never resent that day; `failed` retried hourly up to `REMINDER_MAX_ATTEMPTS`. Nothing is sent
 while `REMINDER_ENABLED` is off or `FORCE_PAUSE_TODOIST` or `PROCESSING_PAUSED` is on.
 

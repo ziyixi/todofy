@@ -22,4 +22,4 @@ Tasks 内置 Plan、Focus 和邮件。Tasks 保存任务，Todofy 保存规划�
 
 共享组件的测试在 `packages/planning-ui/test/`。Tasks 浏览器场景用一次性 Chromium、本地 D1 上的真实 Tasks Worker，以及 `planning-stub.ts` 合成的规划和 FlowDay 回答；它们证明界面和请求，不证明生产 Access、私有绑定或真实业务写入。Core 场景在 workerd 中连接真实 Tasks Worker 与 D1。
 
-Todoist Plus 扩展、它的连接口令和 hooks 主机上的 `/api/plus/*` 已于 2026-10-18 删除，见 [历史记录](../../docs/history/todoist-plus.md)。
+Todoist Plus 扩展、它的连接口令和 hooks 主机上的 `/api/plus/*` 由 2026-10-18 的决定删除，随合并 `claude/tasks-cleanup` 的发布下线，见 [历史记录](../../docs/history/todoist-plus.md)。

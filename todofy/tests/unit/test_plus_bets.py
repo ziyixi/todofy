@@ -44,7 +44,7 @@ def test_a_bet_is_one_trimmed_line(text, stored):
 
 def test_a_bet_is_at_most_160_utf16_code_units():
     assert plan.bet_text("写" * 160) == "写" * 160
-    assert plan.bet_text("😀" * 80) == "😀" * 80  # two code units each, as the extension's input counts them
+    assert plan.bet_text("😀" * 80) == "😀" * 80  # two code units each, as Plan's input counts them
     assert plan.bet_text("a" * 158 + "😀") == "a" * 158 + "😀"
     for text in ("写" * 161, "😀" * 80 + "a", "a" * 159 + "😀"):
         with pytest.raises(ValueError, match="BAD_REQUEST"):
