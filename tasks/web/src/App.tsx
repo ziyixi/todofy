@@ -287,7 +287,7 @@ export function App() {
             </div>
           )}
           {route.page === "mail" ? (
-            <ErrorBoundary>
+            <ErrorBoundary key="mail">
               <Suspense
                 fallback={
                   <p className="loading-state" role="status">
@@ -302,7 +302,8 @@ export function App() {
               </Suspense>
             </ErrorBoundary>
           ) : isPlanning(route.page) ? (
-            <ErrorBoundary>
+            // Plan and Focus share one PlanningPage, so the route resets a failure instead of a remount.
+            <ErrorBoundary key="planning" resetKey={route.page}>
               <Suspense
                 fallback={
                   <p className="loading-state" role="status">

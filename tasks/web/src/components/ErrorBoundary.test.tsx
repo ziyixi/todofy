@@ -27,3 +27,32 @@ it("offers a reload when a lazy chunk from an older deploy no longer loads", asy
   );
   expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
 });
+
+it("names a render error generically, and the next route clears it", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  function Page({ broken }: { broken: boolean }) {
+    if (broken) throw new Error("Synthetic render failure");
+    return <p>Synthetic Focus page</p>;
+  }
+  const { rerender } = render(
+    <ErrorBoundary resetKey="plan">
+      <Page broken />
+    </ErrorBoundary>,
+  );
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("This part of Tasks could not be shown.");
+  expect(alert.textContent).not.toContain("Tasks was updated.");
+  rerender(
+    <ErrorBoundary resetKey="plan">
+      <Page broken={false} />
+    </ErrorBoundary>,
+  );
+  expect(screen.getByRole("alert")).toBeTruthy();
+  rerender(
+    <ErrorBoundary resetKey="focus">
+      <Page broken={false} />
+    </ErrorBoundary>,
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByText("Synthetic Focus page")).toBeTruthy();
+});

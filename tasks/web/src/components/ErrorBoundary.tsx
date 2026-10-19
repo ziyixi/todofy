@@ -1,22 +1,43 @@
 import { Component, type ReactNode } from "react";
 
+/** Chrome, Firefox and Safari each word a lazy chunk that no longer loads differently. */
+const MISSING_CHUNK =
+  /dynamically imported module|Importing a module script failed/i;
+
 /**
  * Lazily loaded parts fail to load once a newer deploy has replaced their chunk. Instead of blanking the
- * whole app, this one place asks for a reload, which fetches the current build.
+ * whole app, this one place asks for a reload, which fetches the current build. A changed `resetKey`, such
+ * as the next route, clears the failure so one page's error does not stay on the pages after it.
  */
 export class ErrorBoundary extends Component<
-  { children: ReactNode },
-  { failed: boolean }
+  { children: ReactNode; resetKey?: string },
+  { failed: boolean; updated: boolean; resetKey?: string }
 > {
-  override state = { failed: false };
-  static getDerivedStateFromError() {
-    return { failed: true };
+  override state = {
+    failed: false,
+    updated: false,
+    resetKey: this.props.resetKey,
+  };
+  static getDerivedStateFromError(error: unknown) {
+    return {
+      failed: true,
+      updated: error instanceof Error && MISSING_CHUNK.test(error.message),
+    };
+  }
+  static getDerivedStateFromProps(
+    props: { resetKey?: string },
+    state: { resetKey?: string },
+  ) {
+    if (props.resetKey === state.resetKey) return null;
+    return { failed: false, updated: false, resetKey: props.resetKey };
   }
   override render() {
     if (!this.state.failed) return this.props.children;
     return (
       <p className="loading-state" role="alert">
-        Tasks was updated.
+        {this.state.updated
+          ? "Tasks was updated."
+          : "This part of Tasks could not be shown."}
         <button
           className="text-button"
           onClick={() => window.location.reload()}
