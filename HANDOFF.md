@@ -14,12 +14,12 @@ refinement and cutover, VPS recovery, Recall, Mailsort) in
 
 ### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
 
-A local branch from `f6c08aaf`, not pushed yet, merged with `origin/main` at `69ddb339` so that Codex's October 18-19
-Tasks and Plan work (inline subtasks, whole-row drag, Plan completion, native rollover) runs on the native path: the
-verified Tasks review fixes, Tasks' D1 in Todofy's weekly
-backup, the Tasks duration as the only estimate, the Planning channel allowlist, and the removal of the Todoist Plus
-extension and of every Todoist path in Todofy and FlowDay. By the owner's decision the end state ships at once: no
-compatibility window, staged rollout, flag or rollback machinery.
+A local branch from `f6c08aaf`, not pushed yet: the verified Tasks review fixes, Tasks' D1 in Todofy's weekly backup,
+the Tasks duration as the only estimate, the Planning channel allowlist, and the removal of the Todoist Plus extension
+and of every Todoist path in Todofy and FlowDay. It merges `origin/main` at `69ddb339`, so Codex's October 18-19 Tasks
+and Plan work (inline subtasks, whole-row drag, Plan completion, the bounded native rollover) ships with it on the
+native path. By the owner's decision the end state ships at once: no compatibility window, staged rollout, flag or
+rollback machinery.
 
 - **Release.** Push, wait for the complete gate, then fast-forward `main` to the same green SHA. CI releases Tasks →
   FlowDay → Todofy → Home, and each works while the later apps still run the previous release. Migrations: Tasks
