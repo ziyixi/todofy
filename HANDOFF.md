@@ -15,7 +15,8 @@ Its old waiting lists and release identities are historical, not instructions to
 branch [39181190423](https://github.com/ziyixi/todofy/actions/runs/39181190423) and same-SHA main
 [39181722770](https://github.com/ziyixi/todofy/actions/runs/39181722770). Tasks and Todofy released;
 independent provider reads verify all three Worker versions/configurations with zero differences.
-The original/Claude checkouts remain untouched. Closing changes only record verification.
+The original/Claude checkouts remain untouched. Closing changes record verification and make the
+native drag test wait for its queued transport write instead of treating the optimistic card as a receipt.
 
 The rollout adds collapsed inline outcome subtasks, detail reordering for both child kinds, tooltips,
 save-in-place, main-list outdent, sidebar category drops, native property metadata and explicit years

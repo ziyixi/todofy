@@ -191,10 +191,13 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
   await expect(
     month.getByText("Synthetic native weekly outcome", { exact: true }),
   ).toBeVisible();
-  expect(writes[0]).toMatchObject({
-    task_id: "native-outcome",
-    stage: "monthly",
-  });
+  // Dragging updates the card before the queued mutation reaches the transport.
+  await expect
+    .poll(() => writes[0])
+    .toMatchObject({
+      task_id: "native-outcome",
+      stage: "monthly",
+    });
   expect(tasks[0]!.labels).toEqual(["ordinary"]);
   await month
     .getByText("Synthetic native weekly outcome", { exact: true })
@@ -207,7 +210,9 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
   await expect(
     details.getByRole("checkbox", { name: "Quick action", exact: true }),
   ).toBeChecked();
-  expect(writes[1]).toMatchObject({ task_id: "native-outcome", quick: true });
+  await expect
+    .poll(() => writes[1])
+    .toMatchObject({ task_id: "native-outcome", quick: true });
   expect(writes[1]).not.toHaveProperty("labels");
   await details.getByRole("button", { name: "Close", exact: true }).click();
   await expect(
