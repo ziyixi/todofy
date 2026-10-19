@@ -48,9 +48,14 @@ RETIRED_WEBSITE_BINDINGS = {
     "RECONCILE_UTC_HOUR",
     "IGNORED_EDITOR_IDS",
 }
-# Bindings to Workers the owner retired; a normal release of that app removes them.
-# Drop an entry once the target Worker is deleted (see infra/README "Retiring an app"). Empty: none is being retired.
-RETIRED_SERVICE_BINDINGS: dict[str, set[str]] = {}
+# Bindings the owner retired from an app; a normal release of that app removes them, a repair still stops.
+# A binding to a deleted Worker stays until that Worker is gone (see infra/README "Retiring an app"). Todofy's
+# Todoist-era vars and its FlowDay Focus binding leave with the release that makes Tasks its only task source;
+# empty that entry in the commit after that release is verified. A secret never goes here: a deploy keeps the
+# secrets it does not name, so a retired secret is deleted before the push or the release's record step fails.
+RETIRED_SERVICE_BINDINGS: dict[str, set[str]] = {
+    "todofy": {"FLOWDAY_FOCUS", "TASK_SOURCE", "TODOIST_API_BASE", "PLUS_METADATA"},
+}
 
 
 def read_toml(path):
@@ -190,7 +195,7 @@ def preflight(source, app, sha, repair, cloud, github, check_only=False):
                 change["reason"] == "BINDING_UNDECLARED"
                 and change["field"] in RETIRED_SERVICE_BINDINGS.get(app, ())
             ):
-                # Explicit owner-approved app retirement; repair still cannot remove it.
+                # Explicit owner-approved retirement; repair still cannot remove it.
                 change["reason"] = "RETIRED_SERVICE_BINDING"
     if any(item["reason"] in MANUAL for item in changes):
         print(json.dumps({"state": "manual_required", "changes": changes}))

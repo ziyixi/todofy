@@ -82,6 +82,7 @@ class ProviderFixture:
                         "HomeState": "home-state",
                         "WatchState": "watch-state",
                         "MailCoordinator": "mail-coordinator",
+                        "TodofyCore": "todofy-core-do",
                     }[source["class_name"]]
                     binding["namespace_id"] = self.resources["durable_objects"][alias]
                 bindings.append(binding)
@@ -149,13 +150,13 @@ class ProviderFixture:
             raise AssertionError("Unexpected provider operation")
         return io.BytesIO(json.dumps(value).encode())
 
-    def bindings(self):
+    def bindings(self, script=None):
         config = self.configs[0]
         path = (
             "/accounts/"
             + config["account_id"]
             + "/workers/scripts/"
-            + config["name"]
+            + (script or config["name"])
             + "/versions/"
             + VERSION
         )
@@ -448,6 +449,68 @@ class DriftAcceptance(unittest.TestCase):
                     json.loads(output.getvalue())["changes"],
                     [{"script": fixture.configs[0]["name"], "field": name,
                       "reason": "BINDING_UNDECLARED"}],
+                )
+                self.assert_readonly(fixture)
+
+    def todofy_with_todoist_era_bindings(self):
+        """The live core and gateway as the last release before native-only Tasks left them."""
+        fixture = self.fixture("todofy")
+        fixture.bindings("todofy-core").extend(
+            [
+                {"name": "TASK_SOURCE", "type": "plain_text", "text": "tasks"},
+                {"name": "TODOIST_API_BASE", "type": "plain_text",
+                 "text": "https://api.example.invalid"},
+                {"name": "PLUS_METADATA", "type": "plain_text", "text": "cache"},
+            ]
+        )
+        fixture.bindings("todofy").extend(
+            [
+                {"name": "TASK_SOURCE", "type": "plain_text", "text": "tasks"},
+                {"name": "FLOWDAY_FOCUS", "type": "service", "service": "flowday",
+                 "entrypoint": "FocusEntrypoint", "environment": "production"},
+            ]
+        )
+        return fixture
+
+    def test_normal_todofy_release_retires_the_todoist_era_bindings(self):
+        fixture = self.todofy_with_todoist_era_bindings()
+        output = io.StringIO()
+        with redirect_stdout(output):
+            required = preflight(
+                ROOT, fixture.app, SHA, False, fixture.cloud, fixture.github
+            )
+        self.assertTrue(required)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["state"], "repairable")
+        self.assertEqual(
+            sorted((item["script"], item["field"], item["reason"]) for item in result["changes"]),
+            [
+                ("todofy", "FLOWDAY_FOCUS", "RETIRED_SERVICE_BINDING"),
+                ("todofy", "TASK_SOURCE", "RETIRED_SERVICE_BINDING"),
+                ("todofy-core", "PLUS_METADATA", "RETIRED_SERVICE_BINDING"),
+                ("todofy-core", "TASK_SOURCE", "RETIRED_SERVICE_BINDING"),
+                ("todofy-core", "TODOIST_API_BASE", "RETIRED_SERVICE_BINDING"),
+            ],
+        )
+        self.assert_readonly(fixture)
+
+    def test_todofy_retirement_stops_for_a_repair_or_a_secret_the_deploy_would_keep(self):
+        for repair, name, kind in (
+            (True, "TASK_SOURCE", "plain_text"),
+            (False, "TODOIST_API_KEY", "secret_text"),
+        ):
+            with self.subTest(repair=repair, name=name):
+                fixture = self.fixture("todofy")
+                fixture.bindings("todofy-core").append({"name": name, "type": kind})
+                output = io.StringIO()
+                with (
+                    redirect_stdout(output),
+                    self.assertRaisesRegex(ReleaseError, "REPAIR_MANUAL_REQUIRED"),
+                ):
+                    preflight(ROOT, "todofy", SHA, repair, fixture.cloud, fixture.github)
+                self.assertEqual(
+                    json.loads(output.getvalue())["changes"],
+                    [{"script": "todofy-core", "field": name, "reason": "BINDING_UNDECLARED"}],
                 )
                 self.assert_readonly(fixture)
 
