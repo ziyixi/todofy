@@ -147,7 +147,7 @@ export function App() {
       },
     });
   }, [catalog, loadCatalog]);
-  const openTask = useCallback(async (id: string) => {
+  const openTask = useCallback(async (id: string, fromLink = false) => {
     const request = ++taskOpenSequence.current;
     const key = `task:${id}` as const;
     const cached = peekDetailRead<Task>(key);
@@ -162,13 +162,16 @@ export function App() {
       );
       if (request === taskOpenSequence.current) setEditor({ task });
     } catch (reason) {
+      // A link to a task that does not open, such as one deleted since, would otherwise fail on every reload.
+      // An opened link stays until its editor closes, so a reload meanwhile reopens the task.
+      if (fromLink) removeQueryParameter("task");
       if (request === taskOpenSequence.current)
         setNotice(describeError(reason));
     }
   }, []);
   useEffect(() => {
     const id = new URL(window.location.href).searchParams.get("task");
-    if (id) void openTask(id);
+    if (id) void openTask(id, true);
   }, [openTask]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {

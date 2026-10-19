@@ -88,6 +88,28 @@ test("a task link opens once, and closing a dialog returns focus to its opener",
   await expect(open).toBeFocused();
 });
 
+test("a link to a task that no longer exists shows its error once", async ({
+  page,
+}) => {
+  const id = crypto.randomUUID();
+  const reads: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith(`/tasks/${id}`))
+      reads.push(request.url());
+  });
+  await page.goto(`/?task=${id}#/inbox`);
+  const notice = page.locator(".notice");
+  await expect(notice).toBeVisible();
+  expect(reads).toHaveLength(1);
+  expect(new URL(page.url()).searchParams.has("task")).toBe(false);
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Inbox", exact: true }),
+  ).toBeVisible();
+  await expect(notice).toHaveCount(0);
+  expect(reads).toHaveLength(1);
+});
+
 test("quick add, edit, complete and reopen persist through page reload", async ({
   page,
 }) => {
