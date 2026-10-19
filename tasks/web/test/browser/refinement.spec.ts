@@ -7,6 +7,11 @@ import {
 
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
 
+test.afterEach(async ({ page }) => {
+  // Route projections use the request fixture; finish them before that fixture is disposed.
+  await page.unrouteAll({ behavior: "wait" });
+});
+
 interface SavedTask {
   id: string;
   title: string;
@@ -297,6 +302,8 @@ test("parent editors keep subtasks and executable steps separate and can delete 
   );
   expect((await savedTask(request, parent.id)).title).toBe(parent.title);
   await page.reload();
+  await expect(subtasks.locator("h3 > span")).toHaveText("0/0");
+  await expect(steps.locator("h3 > span")).toHaveText("0/0");
   await expect(
     subtasks.getByRole("button", { name: subtaskTitle, exact: true }),
   ).toHaveCount(0);

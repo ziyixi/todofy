@@ -394,3 +394,86 @@ it("does not write generic task data for an unchanged draft while planning can s
   expect(listRead).toHaveBeenCalledTimes(1);
   expect(result.current.mutationRevision).toBe(0);
 });
+
+function listView() {
+  return {
+    tasks: [],
+    setTasks: vi.fn(),
+    nextPage: "",
+    loading: false,
+    error: "",
+    setError: vi.fn(),
+    read: vi.fn(async () => {}),
+    replace: vi.fn(),
+    remove: vi.fn(),
+  };
+}
+
+it("replays a queued Plan completion with its original baseline, while the next occurrence gets a new identity", async () => {
+  const first = create(TaskSchema, {
+    id: "synthetic",
+    name: "tasks/synthetic",
+    etag: "before",
+    recurrence: "every day",
+  });
+  const next = create(TaskSchema, {
+    ...first,
+    etag: "advanced",
+    dueDate: "2026-10-20",
+    completedCount: 1,
+  });
+  const close = vi.spyOn(api, "completeTask").mockResolvedValue(next);
+  vi.spyOn(focus, "settleCompletedTask").mockResolvedValue(undefined);
+  const list = listView();
+  const { result } = renderHook(() =>
+    useTaskActions({ page: "plan", id: "" }, "sort_order", list),
+  );
+  const finish = result.current.finishTask;
+  const requestId = crypto.randomUUID();
+  await act(async () => {
+    await finish(first, requestId, "2026-10-19");
+  });
+  expect(result.current.finishTask).toBe(finish);
+  await act(async () => {
+    await result.current.finishTask(next, requestId, "2026-10-19");
+  });
+  expect(close.mock.calls.map(([body]) => [body.requestId, body.etag])).toEqual(
+    [
+      [requestId, "before"],
+      [requestId, "before"],
+    ],
+  );
+  const following = crypto.randomUUID();
+  await act(async () => {
+    await result.current.finishTask(next, following, "2026-10-20");
+  });
+  expect(close.mock.calls.at(-1)![0]).toMatchObject({
+    requestId: following,
+    etag: "advanced",
+  });
+});
+
+it("Plan's finish action cannot turn into Reopen when a fresh read finds the task already completed", async () => {
+  const completed = create(TaskSchema, {
+    id: "synthetic",
+    name: "tasks/synthetic",
+    etag: "done",
+    completed: true,
+  });
+  const close = vi.spyOn(api, "completeTask").mockResolvedValue(completed);
+  const reopen = vi.spyOn(api, "reopenTask");
+  vi.spyOn(focus, "settleCompletedTask").mockResolvedValue(undefined);
+  const list = listView();
+  const { result } = renderHook(() =>
+    useTaskActions({ page: "plan", id: "" }, "sort_order", list),
+  );
+  await act(async () => {
+    await result.current.finishTask(
+      completed,
+      crypto.randomUUID(),
+      "2026-10-19",
+    );
+  });
+  expect(close).toHaveBeenCalledOnce();
+  expect(reopen).not.toHaveBeenCalled();
+});

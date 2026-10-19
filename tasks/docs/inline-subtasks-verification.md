@@ -40,6 +40,9 @@ with horizontal cards aligned to the candidate columns; the existing narrow pair
 layouts remain. Alignment also keeps the existing keyboard spatial navigation on adjacent cards.
 Outcomes, the commitment overview, next Steps, Quick and scheduled cards now expose completion through
 the existing command queue and request receipts. Calendar completion passes its actual FlowDay date.
+The native host uses the same generic completion/Focus proof as task lists. Completing an outcome also
+settles its running completed descendant on the timer's original date; it does not reopen an already
+completed task. A repeated queued request retains its original task etag, including recurrence.
 
 Quick is always standalone. Core projects existing Quick rows as executable without a read-side write
 or backfill, enforces the same rule on new edits, and keeps content labels separate. Both editors show
@@ -51,7 +54,7 @@ because the selected project was still undefined. A browser regression reproduce
 
 ## Local checks
 
-On 2026-10-18 (America/Los_Angeles), Tasks web lint, typecheck, build and all 57 unit checks passed. All 61 Chromium journeys
+On 2026-10-18 (America/Los_Angeles), Tasks web lint, typecheck, build and all 59 unit checks passed. All 62 Chromium journeys
 against real local D1 passed, including folded first load, nested outcomes, hidden Steps, editing, sibling
 dragging, completion/reopening, adding the first child, Today de-duplication, bounded pagination and
 selected-child actions, save geometry and persisted outdent. Existing cached-dialog and popup layout
@@ -66,7 +69,9 @@ parent/kind/estimate/completion fields through real D1 reads. Existing main-list
 dialog checks passed too. Shared planning typecheck and 23 units pass; its legacy consumer retains 308
 passing units. Core's focused 34 checks include real Python/TasksApi/D1 execution: existing Quick rows
 gain the effective standalone flag while the physical row and revision remain unchanged, new writes
-enforce it, and exact request replays still work. The complete branch gate and final live checks are pending.
+enforce it, and exact request replays still work. The complete branch gate and final live checks are pending. A CI-only teardown race in the synthetic
+planning routes now waits for in-flight handlers, and the deletion test waits for the loaded zero counts;
+no assertions or callback errors are ignored.
 
 Real owner Chrome also verified collapsed first load and nested expansion in the ephemeral preview.
 Only synthetic tasks appear in these screenshots. Chrome Save leaves the editor frame unchanged and

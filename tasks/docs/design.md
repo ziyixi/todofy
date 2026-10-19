@@ -90,7 +90,9 @@ Plan keeps the candidate columns vertically stacked within their existing deskto
 spans the row below, with horizontal cards aligned to those columns; narrow layouts keep the existing
 paired/single-column behavior. Review cards, the commitment overview, next Steps, Quick and scheduled
 Steps reuse the existing completion operation. A calendar completion supplies its actual FlowDay date.
-The Tasks host invalidates normal task caches/counts after completion, including partial settlement failure.
+The Tasks host reuses the generic list completion path: original etag/request proof, descendant timer
+settlement on its own day, and count/cache invalidation even if Focus subsequently warns. Repeated queued
+commands retain their first task revision; a finish operation cannot become a Reopen after a fresh read.
 
 ## Focus completion
 

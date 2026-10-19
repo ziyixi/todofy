@@ -279,7 +279,7 @@ export function App() {
             }
           >
             <PlanningPage
-              onTaskChanged={actions.taskChanged}
+              onCompleteTask={actions.finishTask}
               page={route.page}
               mutationRevision={actions.mutationRevision}
               onOpenTask={(id) => void openTask(id)}

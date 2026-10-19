@@ -82,73 +82,106 @@ export function useTaskActions(
     list.remove(task.id);
     setNotice("Task deleted");
   }
-  async function writeCompletion(task: Task, reopen = false) {
-    const key = `${reopen ? "reopen" : "complete"}:${task.id}`;
-    let completion = completionRequests.current.get(key);
-    if (!completion) {
-      completion = { requestId: crypto.randomUUID(), etag: task.etag };
-      completionRequests.current.set(key, completion);
-    }
-    try {
-      const result = await (reopen ? api.reopenTask : api.completeTask)({
-        name: task.name,
-        etag: completion.etag,
-        requestId: completion.requestId,
-      });
-      completionRequests.current.delete(key);
-      return { result, completion };
-    } catch (error) {
-      if (
-        error instanceof RpcStatusError &&
-        [400, 409].includes(error.status.httpStatus)
-      )
-        completionRequests.current.delete(key);
-      throw error;
-    }
-  }
-  async function complete(task: Task): Promise<string | undefined> {
-    setBusyIds((current) => new Set([...current, task.id]));
-    setNotice("");
-    try {
-      const { result, completion } = await writeCompletion(
-        task,
-        task.completed,
-      );
-      taskChanged();
-      if (result.completed === (route.page === "completed"))
-        list.replace(result);
-      else list.remove(task.id);
-      const confirmedMessage = task.completed
-        ? "Task reopened"
-        : result.recurrence
-          ? "Occurrence completed · next date scheduled"
-          : "Task completed";
-      let warning = task.completed
-        ? undefined
-        : await settleCompletedTask(
-            task,
-            completion.requestId,
-            completion.etag,
-            today,
-          );
-      try {
-        if (!isPlanning(route.page) && route.page !== "catalog")
-          await list.read();
-      } catch {
-        warning = `${warning || confirmedMessage}. The task list could not refresh. Refresh the view.`;
+  const writeCompletion = useCallback(
+    async (task: Task, reopen = false, requestId?: string) => {
+      const action = reopen ? "reopen" : "complete";
+      const key = `${requestId ? "queued" : action}:${task.id}`;
+      let completion = completionRequests.current.get(key);
+      if (!completion || (requestId && completion.requestId !== requestId)) {
+        completion = {
+          requestId: requestId || crypto.randomUUID(),
+          etag: task.etag,
+        };
+        completionRequests.current.set(key, completion);
       }
-      setNotice(warning || confirmedMessage);
-      return undefined;
-    } catch (reason) {
-      const message = describeError(reason);
-      setNotice(message);
-      return message;
-    } finally {
-      setBusyIds(
-        (current) => new Set([...current].filter((id) => id !== task.id)),
-      );
-    }
+      try {
+        const result = await (reopen ? api.reopenTask : api.completeTask)({
+          name: task.name,
+          etag: completion.etag,
+          requestId: completion.requestId,
+        });
+        // Planning views supply one identity per queued operation; retain only the latest baseline per task.
+        if (!requestId) completionRequests.current.delete(key);
+        return { result, completion };
+      } catch (error) {
+        if (
+          error instanceof RpcStatusError &&
+          [400, 409].includes(error.status.httpStatus)
+        )
+          completionRequests.current.delete(key);
+        throw error;
+      }
+    },
+    [],
+  );
+  const applyCompletion = useCallback(
+    async (
+      task: Task,
+      reopen: boolean,
+      flowDate = today,
+      requestId?: string,
+    ): Promise<string | undefined> => {
+      setBusyIds((current) => new Set([...current, task.id]));
+      setNotice("");
+      try {
+        const { result, completion } = await writeCompletion(
+          task,
+          reopen,
+          requestId,
+        );
+        taskChanged();
+        if (result.completed === (route.page === "completed"))
+          list.replace(result);
+        else list.remove(task.id);
+        const confirmedMessage = reopen
+          ? "Task reopened"
+          : result.recurrence
+            ? "Occurrence completed · next date scheduled"
+            : "Task completed";
+        let warning = reopen
+          ? undefined
+          : await settleCompletedTask(
+              task,
+              completion.requestId,
+              completion.etag,
+              flowDate,
+            );
+        try {
+          if (!isPlanning(route.page) && route.page !== "catalog")
+            await list.read();
+        } catch {
+          warning = `${warning || confirmedMessage}. The task list could not refresh. Refresh the view.`;
+        }
+        setNotice(warning || confirmedMessage);
+        return undefined;
+      } catch (reason) {
+        const message = describeError(reason);
+        setNotice(message);
+        return message;
+      } finally {
+        setBusyIds(
+          (current) => new Set([...current].filter((id) => id !== task.id)),
+        );
+      }
+    },
+    [
+      route.page,
+      list.replace,
+      list.remove,
+      list.read,
+      taskChanged,
+      today,
+      writeCompletion,
+    ],
+  );
+  function complete(task: Task) {
+    return applyCompletion(task, task.completed);
   }
+  const finishTask = useCallback(
+    (task: Task, requestId: string, flowDate?: string) =>
+      applyCompletion(task, false, flowDate, requestId),
+    [applyCompletion],
+  );
   async function patchTask(
     task: Task,
     values: Partial<TaskDraft>,
@@ -448,6 +481,7 @@ export function useTaskActions(
     saveTask,
     deleteTask,
     complete,
+    finishTask,
     reorder,
     detach,
     batch,

@@ -41,9 +41,12 @@ the other desktop columns into separate rows. Real Chrome synthetic checks confi
 outcome and scheduled-Step completion; no real tasks were edited for those checks.
 Quick now implies standalone in native projections/writes and both editors. Existing Quick rows need
 no backfill; a real Worker/D1 test confirms reads retain their physical row/revision. Core's focused
-34 checks, shared planning's 23 units, 57 Tasks units and 61 Tasks browser/D1 journeys pass.
-The legacy shared-UI consumer's final packaged browser checks and the complete branch gate are being
-finished; final production verification remains. No schema, wire format, dependency, service or
+34 checks, shared planning's 23 units, 59 Tasks units and 62 Tasks browser/D1 journeys pass.
+The native host now routes Plan/Focus completion through the existing generic completion proof, including
+a parent's running descendant and its original timer day. Replay retains its original etag; finish never
+becomes Reopen. The first follow-up branch run found a synthetic route/request teardown race; the
+fixture now waits for active handlers and verifies loaded zero child counts instead of ending during
+loading. No test errors are ignored. The final combined branch gate and production verification remain. No schema, wire format, dependency, service or
 persistent cache was added. The original/Claude checkouts remain untouched.
 See [acceptance](tasks/docs/inline-subtasks-verification.md).
 

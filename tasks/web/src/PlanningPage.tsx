@@ -5,7 +5,7 @@ import {
   type PlusSnapshot,
 } from "@ziyixi/planning-ui";
 import "@ziyixi/planning-ui/styles.css";
-import { api, send } from "./api";
+import { api, send, type Task } from "./api";
 import { usePlanView } from "./usePlanView";
 
 export default function PlanningPage({
@@ -13,13 +13,17 @@ export default function PlanningPage({
   mutationRevision,
   onOpenTask,
   onSettings,
-  onTaskChanged,
+  onCompleteTask,
 }: {
   page: "plan" | "focus";
   mutationRevision: number;
   onOpenTask: (id: string) => void;
   onSettings: () => void;
-  onTaskChanged: () => void;
+  onCompleteTask: (
+    task: Task,
+    requestId: string,
+    flowDate?: string,
+  ) => Promise<string | undefined>;
 }) {
   const actions = useMemo(() => {
     const actions = createPlanningActions(
@@ -33,13 +37,14 @@ export default function PlanningPage({
     );
     return {
       ...actions,
-      async completeTask(...args: Parameters<typeof actions.completeTask>) {
-        try {
-          await actions.completeTask(...args);
-        } finally {
-          // Completion can be saved even when the following Focus settlement fails.
-          onTaskChanged();
-        }
+      async completeTask(
+        task: Parameters<typeof actions.completeTask>[0],
+        requestId: string,
+        flowDate?: string,
+      ) {
+        const current = await api.getTask({ name: `tasks/${task.id}` });
+        const error = await onCompleteTask(current, requestId, flowDate);
+        if (error) throw new Error(error);
       },
       async updateEstimate(id: string, minutes: number) {
         const task = await api.getTask({ name: `tasks/${id}` });
@@ -51,7 +56,7 @@ export default function PlanningPage({
         });
       },
     };
-  }, [onTaskChanged]);
+  }, [onCompleteTask]);
   const [snapshot, setSnapshot] = useState<PlusSnapshot>();
   const [planView, updatePlanView] = usePlanView();
   return (
