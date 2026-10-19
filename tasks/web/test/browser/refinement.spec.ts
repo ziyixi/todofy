@@ -420,7 +420,8 @@ test("Quick automatically enables standalone scheduling and keeps it checked aft
   await dialog
     .getByRole("button", { name: "Close dialog", exact: true })
     .click();
-  await page.reload();
+  // Closing the editor removes its task link, so reopen the task from a fresh page.
+  await openTask(page, task.id);
   await expect(standalone).toBeChecked();
   await expect(standalone).toBeDisabled();
   await dialog
