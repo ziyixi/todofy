@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
 export type Json = Record<string, unknown>;
 export interface PlanningRequest {
@@ -271,4 +271,24 @@ export function flowdayTaskWrites(state: PlanningState) {
       request.path.startsWith(`${FLOWDAY}tasks`) &&
       (request.path.endsWith(":sync") || request.method !== "GET"),
   );
+}
+
+/**
+ * Creates a task in the dev server's own D1. Plan and Focus complete a task in Tasks first (GetTask, then
+ * CompleteTask) and only then settle FlowDay through Todofy, so a journey that completes one needs it there.
+ */
+export async function createTask(
+  request: APIRequestContext,
+  task: Json,
+): Promise<{ id: string; name: string; etag: string; title: string }> {
+  const { token } = await (await request.get("/api/tasks/csrf")).json();
+  const response = await request.post(
+    `/api/tasks/v1/tasks?request_id=${crypto.randomUUID()}`,
+    {
+      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
+      data: task,
+    },
+  );
+  expect(response.status()).toBe(200);
+  return response.json();
 }

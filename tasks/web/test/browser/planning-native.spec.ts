@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { flowdayTaskWrites, stubPlanning } from "./planning-stub";
+import { createTask, flowdayTaskWrites, stubPlanning } from "./planning-stub";
 
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
 
@@ -172,11 +172,21 @@ test("a native lane reorder keeps its siblings pending and the next stage drag s
 
 test("native Plan, Focus timer and Mail use the owner transport without an extension connection", async ({
   page,
+  request,
 }) => {
   const today = "2026-10-13";
+  // Focus completes the step in Tasks' own D1 before it settles FlowDay through Todofy.
+  const { id: outcomeId } = await createTask(request, {
+    title: "Synthetic native weekly outcome",
+  });
+  const { id: stepId } = await createTask(request, {
+    title: "Synthetic native next step",
+    kind: "step",
+    parent_id: outcomeId,
+  });
   const tasks: Record<string, unknown>[] = [
     {
-      id: "native-outcome",
+      id: outcomeId,
       kind: "task",
       title: "Synthetic native weekly outcome",
       area: "work",
@@ -187,10 +197,10 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
       etag: "1",
     },
     {
-      id: "native-step",
+      id: stepId,
       kind: "step",
       title: "Synthetic native next step",
-      parent_id: "native-outcome",
+      parent_id: outcomeId,
       area: "unassigned",
       stage: "none",
       explicit_stage: "none",
@@ -203,13 +213,13 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
     tasks,
     flowTasks: [
       {
-        name: "tasks/native-step",
-        todoist_id: "native-step",
+        name: `tasks/${stepId}`,
+        todoist_id: stepId,
         title: tasks[1]!.title,
         estimated_minutes: 30,
       },
     ],
-    days: { [today]: ["native-step"] },
+    days: { [today]: [stepId] },
     mail: [
       {
         id: "native-message",
@@ -270,7 +280,7 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
   await expect
     .poll(() => writes()[0])
     .toMatchObject({
-      task_id: "native-outcome",
+      task_id: outcomeId,
       stage: "monthly",
     });
   expect(tasks[0]!.labels).toEqual(["ordinary"]);
@@ -287,14 +297,14 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
   ).toBeChecked();
   await expect
     .poll(() => writes()[1])
-    .toMatchObject({ task_id: "native-outcome", quick: true });
+    .toMatchObject({ task_id: outcomeId, quick: true });
   expect(writes()[1]).not.toHaveProperty("labels");
   await details.getByRole("button", { name: "Close", exact: true }).click();
   await expect(
     page.getByRole("link", { name: "Planning settings", exact: true }),
   ).toHaveCount(0);
   await page.getByRole("link", { name: "Focus", exact: true }).click();
-  const step = page.locator('.plus-focus-slot[data-task-id="native-step"]');
+  const step = page.locator(`.plus-focus-slot[data-task-id="${stepId}"]`);
   await expect(step).toContainText("Synthetic native next step");
   await expect(step).toContainText("Synthetic native weekly outcome");
   await step
@@ -314,7 +324,7 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
   );
   expect(command?.body).toMatchObject({
     action: "start",
-    task_id: "native-step",
+    task_id: stepId,
   });
   await step
     .getByRole("button", {

@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
+  createTask,
   flowdayTaskWrites,
   stubPlanning,
   type Json,
@@ -115,14 +116,24 @@ test("a weekly Bet is edited in place and saved once over its etag", async ({
 
 test("a dependency is added in the details, and completing its prerequisite in Focus settles it", async ({
   page,
+  request,
 }) => {
+  // Focus completes the step in Tasks' own D1 before it settles FlowDay through Todofy.
+  const { id: venue } = await createTask(request, {
+    title: "Synthetic venue booking",
+  });
+  const { id: call } = await createTask(request, {
+    title: "Synthetic venue call",
+    kind: "step",
+    parent_id: venue,
+  });
   const state = await stubPlanning(page, {
     tasks: [
       outcome("launch", "Synthetic launch"),
-      outcome("venue", "Synthetic venue booking"),
-      step("venue-call", "Synthetic venue call", "venue"),
+      outcome(venue, "Synthetic venue booking"),
+      step(call, "Synthetic venue call", venue),
     ],
-    days: { "2026-10-13": ["venue-call"] },
+    days: { "2026-10-13": [call] },
   });
   await openPlan(page);
   const dialog = await details(page, "Synthetic launch");
@@ -139,7 +150,7 @@ test("a dependency is added in the details, and completing its prerequisite in F
     .toEqual([
       {
         task_id: "launch",
-        prerequisite_id: "venue-call",
+        prerequisite_id: call,
         waits: true,
         request_id: expect.any(String),
       },
@@ -152,7 +163,7 @@ test("a dependency is added in the details, and completing its prerequisite in F
   await expect(waiting).toBeVisible();
 
   await page.getByRole("link", { name: "Focus", exact: true }).click();
-  const slot = page.locator('.plus-focus-slot[data-task-id="venue-call"]');
+  const slot = page.locator(`.plus-focus-slot[data-task-id="${call}"]`);
   await slot
     .getByRole("button", { name: "Complete task: Synthetic venue call" })
     .click();
@@ -163,7 +174,7 @@ test("a dependency is added in the details, and completing its prerequisite in F
   await page.getByRole("link", { name: "Plan", exact: true }).click();
   await expect
     .poll(() => bodies(state, "/api/plus/v1/tasks:resolveDependencies"))
-    .toEqual([{ task_ids: ["venue-call"], request_id: expect.any(String) }]);
+    .toEqual([{ task_ids: [call], request_id: expect.any(String) }]);
   await expect(waiting).toHaveCount(0);
   expect(flowdayTaskWrites(state)).toEqual([]);
 });
