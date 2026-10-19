@@ -69,10 +69,27 @@ afterwards.
    `database_id` is the live database. `sql` checks every part again and writes one
    `INSERT ... ON CONFLICT DO NOTHING` per row, parents first, so a re-run after a partial load is safe. Triggers
    rebuild `task_labels`, `project_archived` and the change feed. `verify` ends with `verify PASS`.
-5. Set the `tasks` entry of `[d1_databases]` in `config/resources.toml` to the new id. Then run
-   `python3.12 tools/cloud-config/generate.py` (it rewrites `tasks/wrangler.toml`), commit and push to `main`.
-   That push releases Tasks on the restored database. The committed `database_name` stays `tasks`, because
-   wrangler binds the database by its id.
+5. Switch the Tasks Worker to the new database. This step is not rehearsed, and a push alone does not do it:
+   the release's preflight finds the live `DB` binding on the old id and stops (`STATEFUL_BINDING_CHANGED`
+   needs a manual change).
+   - Set the `tasks` entry of `[d1_databases]` in `config/resources.toml` to the new id, run
+     `python3.12 tools/cloud-config/generate.py` (it rewrites `tasks/wrangler.toml`) and commit without pushing.
+     The committed `database_name` stays `tasks`, because wrangler binds the database by its id.
+   - From a clean checkout of that commit, deploy Tasks once by hand as `.github/actions/release-tasks` does,
+     but without `--secrets-file`, so the Worker keeps its secrets:
+     ```sh
+     for dir in packages/planning-ui packages/task-dates tasks/worker tasks/web; do npm ci --prefix "$dir"; done
+     npm run build --prefix tasks/web
+     (cd tasks/worker && GITHUB_SHA=$(git rev-parse HEAD) node ../deploy/deploy-vars.mjs exec -- \
+       npx --no-install wrangler deploy --config ../wrangler.toml)
+     ```
+     From `tasks/worker`, `npx wrangler deployments status --config ../wrangler.toml` names the version, and
+     `npx wrangler versions view <that version> --config ../wrangler.toml` lists `DB` with the new id. Go on
+     to step 6 only then.
+   - Push the commit to `main`. Its preflight now finds the binding it expects and releases the same code.
+   - `infra/` still holds the old database as `cloudflare_d1_database.app["tasks"]`, so "Infra drift" and the
+     reconcile report the id difference, and the new database as unregistered, until the infra state is moved
+     to it ([import notes](../../infra/README.md#import-notes)). Keep the old database until then.
 6. Reset FlowDay's mirror. It hides the mirrored tasks and forgets the Tasks cursor and catalog, and queues,
    timers and work records keep their task IDs. From `flowday/worker`:
    ```sh
@@ -101,21 +118,29 @@ Tasks Worker, restored into a new local D1 and compared table by table) cover th
 
 ## One-time FlowDay estimate backfill
 
-Since 2026-10-18 a task's estimate is its Tasks duration alone. Before that, FlowDay kept its own estimate for a
-mirrored task once the owner set one there (`estimate_override=1`), and Plan showed that value. Run this once,
-right after the release that made the change: FlowDay's sync now replaces such an estimate as soon as its task
-changes in Tasks. `tools/prepare-estimate-backfill.ts` (logic in `tools/estimate-backfill.ts`) copies every
-FlowDay value that differs into Tasks with Tasks' own write semantics: `revision+1`, `updated_at` in
-milliseconds and a change-feed row, so FlowDay's mirror learns the value. Each statement applies only to the
-revision it read, so a task edited in between is left alone and counted again by the next dry run. Missing or
-deleted tasks, values outside 0 to 10,080 minutes and malformed ids are skipped and counted.
+Since the release that removed FlowDay's estimate override, a task's estimate is its Tasks duration alone.
+Before it, FlowDay kept its own estimate for a mirrored task once the owner set one there
+(`estimate_override=1`), and Plan showed that value. The new FlowDay replaces such an estimate as soon as its
+task changes in Tasks, so the FlowDay values are saved before that release is pushed and copied into Tasks right
+after it. `tools/prepare-estimate-backfill.ts` (logic in `tools/estimate-backfill.ts`) copies every FlowDay value
+that differs into Tasks with Tasks' own write semantics: `revision+1`, `updated_at` in milliseconds and a
+change-feed row, so FlowDay's mirror learns the value. Each statement applies only to the revision it read, so a
+task edited after the Tasks export is left alone and counted again by the next dry run. Missing or deleted tasks,
+values outside 0 to 10,080 minutes and malformed ids are skipped and counted.
 
-From the repository root, with `PRIV` as above:
+From the repository root, with `PRIV` as above. Before pushing the release, save FlowDay's values, and change
+no estimate in FlowDay afterwards:
 
 ```sh
 (cd flowday/worker && npx wrangler d1 execute DB --remote --config ../wrangler.toml --json \
   --command "SELECT id, estimated_mins FROM tasks WHERE estimate_override=1 AND todoist_id IS NOT NULL" \
   > "$PRIV/flowday-overrides.json")
+```
+
+Right after the release, without waiting: a duration changed in Tasks before the Tasks export below is replaced
+by the saved FlowDay value.
+
+```sh
 (cd tasks/worker && npx wrangler d1 execute DB --remote --config ../wrangler.toml --json \
   --command "SELECT id, duration_minutes, revision FROM tasks WHERE deleted_at IS NULL" \
   > "$PRIV/tasks-durations.json")
@@ -130,9 +155,9 @@ node tasks/tools/prepare-estimate-backfill.ts --flowday "$PRIV/flowday-overrides
 
 Then check it:
 
-1. Export Tasks again (the second command) and dry-run: `update_count` is 0.
-2. Open FlowDay and press Sync until it reports Synced. Export FlowDay again (the first command) and dry-run:
-   `update_count` is still 0, because the mirror now shows the Tasks values.
+1. Export Tasks again and dry-run: `update_count` is 0.
+2. Open FlowDay and press Sync until it reports Synced. Export FlowDay again (this replaces the saved file) and
+   dry-run: `update_count` is still 0, because the mirror now shows the Tasks values.
 3. Delete the three files in `$PRIV`; they hold task ids and estimates.
 
 `node --test tasks/tools/test/estimate-backfill.test.mjs` covers the generator on synthetic rows.

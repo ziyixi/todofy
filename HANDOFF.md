@@ -16,49 +16,63 @@ refinement and cutover, VPS recovery, Recall, Mailsort) in
 
 A local branch from `f6c08aaf`, not pushed yet: the verified Tasks review fixes, Tasks' D1 in Todofy's weekly backup,
 the Tasks duration as the only estimate, the Planning channel allowlist, and the removal of the Todoist Plus extension
-and of every Todoist path in Todofy and FlowDay. It merges `origin/main` at `69ddb339`, so Codex's October 18-19 Tasks
-and Plan work (inline subtasks, whole-row drag, Plan completion, the bounded native rollover) ships with it on the
-native path. By the owner's decision the end state ships at once: no compatibility window, staged rollout, flag or
-rollback machinery.
+and of every Todoist path in Todofy and FlowDay. It merges `origin/main` at `69ddb339`, keeping Codex's
+already-released October 18-19 Tasks and Plan work (inline subtasks, whole-row drag, Plan completion, the bounded
+native rollover) on the native-only path. By the owner's decision the end state ships at once: no compatibility
+window, staged rollout, flag or rollback machinery.
 
+- **Before pushing,** in this order:
+  1. This read-only check must print nothing. If a map is listed, set it again without `TODOIST_API_KEY` and
+     `CREDENTIAL_KEY` (`tools/cloud-bootstrap/bootstrap.py secrets`); the deploy wrappers now refuse those names.
+     `gh secret list --env production --repo ziyixi/todofy | grep -E '^(TODOFY_CORE_WORKER_SECRETS|FLOWDAY_WORKER_SECRETS)\s'`
+  2. Save FlowDay's estimates with the first command of [the backfill](tasks/docs/backup.md#one-time-flowday-estimate-backfill).
+     The new FlowDay replaces one as soon as its task changes in Tasks.
+  3. Delete the two retired Worker secrets; a deploy keeps every secret it does not name, so the release's record
+     step would fail. The running builds never read them (FlowDay syncs natively while Tasks is bound; the core's
+     native paths do not call Todoist).
+     ```sh
+     (cd todofy/gateway && npx wrangler secret delete TODOIST_API_KEY --name todofy-core)
+     (cd flowday/worker && npx wrangler secret delete CREDENTIAL_KEY --name flowday)
+     ```
 - **Release.** Push, wait for the complete gate, then fast-forward `main` to the same green SHA. CI releases Tasks →
   FlowDay → Todofy → Home, and each works while the later apps still run the previous release. Migrations: Tasks
   `0004`, FlowDay `0005` (deletes the Todoist settings rows), Todofy `0012` (drops `plus_connections`, `plus_actions`).
-- **Expected effects.** Home reports the retired Worker secrets as drift until step 2. A ConvertMailItem or
-  DeleteMailSummaries retry across the release with the same request ID is refused; a new request works. FlowDay
-  drops `FocusEntrypoint` while the old gateway still binds it (nothing calls it); if Cloudflare refuses that
-  upload, the gateway, which drops the binding, has to go first.
-- **Before pushing (read-only).** This must print nothing. If a map is listed, set it again without `TODOIST_API_KEY`
-  and `CREDENTIAL_KEY` (`tools/cloud-bootstrap/bootstrap.py secrets`); the deploy wrappers now refuse those names.
-  `gh secret list --env production --repo ziyixi/todofy | grep -E '^(TODOFY_CORE_WORKER_SECRETS|FLOWDAY_WORKER_SECRETS)\s'`
+  Todofy's release drops the gateway's `FLOWDAY_FOCUS` and the `TASK_SOURCE`, `TODOIST_API_BASE` and `PLUS_METADATA`
+  vars under `RETIRED_SERVICE_BINDINGS` (`tools/cloud-release/control.py`); a later commit empties that entry.
+- **Expected effects.** Until Home deploys, the old Home reports the two deleted secrets as missing. A
+  ConvertMailItem or DeleteMailSummaries retry across the release with the same request ID is refused; a new request
+  works. FlowDay drops `FocusEntrypoint` while the old gateway still binds it (nothing calls it). If Cloudflare
+  refuses that upload, Todofy is skipped too, since it waits for FlowDay. Then deploy only Todofy, which drops the
+  binding, and once it is green, FlowDay:
+  `gh workflow run ci.yml --repo ziyixi/todofy --ref main -f app=todofy`, then the same with `-f app=flowday`.
 
 Right after the release, in this order:
 
-1. The one-time FlowDay estimate backfill: [commands and checks](tasks/docs/backup.md#one-time-flowday-estimate-backfill).
-   Do not wait: FlowDay's sync replaces an old FlowDay estimate as soon as its task changes in Tasks.
+1. The rest of the one-time FlowDay estimate backfill: [commands and checks](tasks/docs/backup.md#one-time-flowday-estimate-backfill).
+   Do not wait: it replaces a duration changed in Tasks since the push with the saved FlowDay value.
 2. Delete what nothing reads any more, then refresh Home's drift check and expect no differences. The owner may also
    revoke the Todoist API token; nothing uses it.
    ```sh
-   (cd todofy/gateway && npx wrangler secret delete TODOIST_API_KEY --name todofy-core)
-   (cd flowday/worker && npx wrangler secret delete CREDENTIAL_KEY --name flowday)
    gh secret delete FLOWDAY_CREDENTIAL_KEY --env production --repo ziyixi/todofy
    gh variable delete TODOFY_PLUS_METADATA --env production --repo ziyixi/todofy
    ```
 3. Confirm the first Tasks backup, taken at Todofy's first alarm after the release: its time on Todofy's health page
    or Home is newer than the release. Restore it locally as [Rehearse locally](tasks/docs/backup.md#rehearse-locally) says.
 4. Remove the Plus releases and the merged branches. `git branch -r --merged origin/main | grep codex/` lists exactly
-   these fourteen; the three unmerged Recall experiment branches stay by the owner's earlier decision.
+   these fourteen; the three unmerged Recall experiment branches stay by the owner's earlier decision. Git refuses to
+   delete a branch a worktree has checked out, so remove the worktree first (`git worktree list`).
    ```sh
    for t in $(git tag -l 'todoist-plus-v*'); do gh release delete "$t" --cleanup-tag --yes --repo ziyixi/todofy; done
    git push origin --delete codex/cloud-recovery-tasks codex/plan-write-reliability codex/plan-write-verification \
      codex/plus-ui-refinement codex/plus-ui-refinement-verification \
      codex/tasks-dependency-layout codex/tasks-details-polish codex/tasks-layout-verification codex/tasks-native \
      codex/tasks-read-efficiency codex/tasks-read-verification codex/tasks-refinement-verification \
-     codex/tasks-workflow-refinement codex/vps-release-recovery
-   git push origin --delete claude/tasks-cleanup; git branch -d claude/tasks-cleanup; git worktree prune
+     codex/tasks-workflow-refinement codex/vps-release-recovery claude/tasks-cleanup
+   git worktree remove <its path>   # or `git worktree prune` once its directory is gone
+   git branch -d claude/tasks-cleanup
    ```
 5. Owner, on the Mac: remove Todoist Plus at `chrome://extensions` with its unpacked folder, and delete the cutover's
-   temporary operator files (a generated secrets file, private snapshots), whose locations are in private notes.
+   temporary operator files listed in the private notes.
 
 ## Open acceptance
 
@@ -78,9 +92,6 @@ Answered in chat; do not re-ask.
   first-request behavior is proved by real local Core/Tasks/D1 tests, not by production content writes.
   [Evidence](docs/tasks-plan-reliability-verification.md) and
   [controls](todofy/docs/planning-api.md#weekly-rollover-and-controls).
-- The 48 merged `codex/*` branches were pruned from origin after a local bundle backup, so branch names cited
-  in the archives as closing documentation may no longer exist. The three unmerged Recall experiment branches remain:
-  `codex/recall-permission-setup`, `codex/recall-startup-diagnostic` and `codex/recall-orion-permission-verification`.
 
 ### Waiting for the owner
 
@@ -111,6 +122,9 @@ Answered in chat; do not re-ask.
 - Not rechecked since: Watch's first real changed-watch digest, FlowDay's owner setup/device check before F6
   retirement, and Newsletter's natural provider/send acceptance. Check fresh status before treating an old waiting
   item as open; do not restart Compose, replay a send or request credentials solely from an archived note.
+- Mail Hero (`mail-hero/docs/todofy-integration.md`, `cloudflare-setup.md`, `ci-cd.md`) and Watch (`README.md`,
+  `docs/design.md`) docs still say Todoist. Todofy writes Tasks, and mail stays a summary until it is converted.
+  A docs edit there redeploys the app, so update them with each app's next natural release.
 - Recall: the cost estimates in [design §5.3](recall/docs/design.md#53-budgets) predate minute snapshots with
   screenshots. The phone still reports build 337, and the `page_probe_invalid_reply_type` cause is not established
   ([diagnostic evidence](docs/recall-diagnostic-verification.md#october-14-recurrence-and-repeated-installation-delay)).
@@ -155,5 +169,6 @@ retained host cutover snapshot stays through **2026-10-29**; deletion is a separ
   [VPS bootstrap/recovery](tools/vps-bootstrap/README.md), [infra](infra/README.md): current operating commands.
 - [Documentation guide](docs/README.md), [architecture](docs/architecture.md), [service catalog](docs/service-catalog.md),
   [proto](proto/README.md), [contracts](contracts/README.md): canonical boundaries and application entry points.
-- [History](docs/history.md) and the handoff archives of [October 18](docs/history/handoff-2026-10-18.md) and
-  [October 11](docs/history/handoff-2026-10-11.md): earlier releases and evidence. Move completed details there.
+- [History](docs/history.md) and the handoff archives of [October 19](docs/history/handoff-2026-10-19.md),
+  [October 18](docs/history/handoff-2026-10-18.md) and [October 11](docs/history/handoff-2026-10-11.md): earlier
+  releases and evidence. Move completed details there.
