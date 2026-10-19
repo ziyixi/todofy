@@ -1,9 +1,8 @@
 """D1 statements of the planning store (runtime/plan_store.py, migrations/0007_plan_store.sql).
 
 The weekly Bets are plan_notes rows of kind 'bets', one per account week (period: its Monday) and area, read and
-written by primary key only. The Mailbox's categories are plan_categories rows of scheme 'mail' (their label
-binding and the project filed mail goes to are the Todoist adapter's document plan_settings 'todoist.mail'),
-replaced as one set in one batch.
+written by primary key only. The Mail categories are plan_categories rows of scheme 'mail' (their Tasks label IDs
+are in plan_settings 'todoist.mail', a frozen key name), replaced as one set in one batch.
 
 ``VERIFY`` is the owner's check after a restore or a migration (PlusService.VerifyPlanStore): one statement that
 counts every row of the six plan tables, so it is a deliberate whole-table read rather than a ``Query``

@@ -44,13 +44,13 @@ REPLACED_FILTER_QUERIES = {
         f"{'day' if days == 1 else 'days'}&!@active&!@waiting&!@blocked&!@parked)"
         for label, days in LEADS.items()
     ),
-    # Waiting with a deadline (two spellings), all waiting and in progress with a deadline: the extension's
+    # Waiting with a deadline (two spellings), all waiting and in progress with a deadline: Plan's
     # Review board shows them in Waiting, or in their own stage lane, and an in-progress task needs no lane.
     "!nodeadline&(@blocked)&!@parked",
     "!nodeadline&@blocked&!@parked",
     "@blocked",
     "@active&!nodeadline&!@blocked&!@parked",
-    # Quick tasks are Week's Quick source, parked tasks Review's Parked lane (the extension's quickTasks and
+    # Quick tasks are Week's Quick source, parked tasks Review's Parked lane (Plan's quickTasks and
     # boardLanes); @parked only while the account has a label of that name (replaced_filters).
     "@quick&(nodate|3days)",
     "@parked",
@@ -74,7 +74,7 @@ def replaced_filters(
     filters: list[dict[str, Any]], mapping: list[dict[str, Any]] | None = None, label_names: Collection[str] = ()
 ) -> list[str]:
     """Match the existing view semantics; names and private filter IDs are never baked in. ``label_names``: the
-    account's labels; @parked is replaced only while one is named parked, as the extension's Parked lane exists."""
+    account's labels; @parked is replaced only while one is named parked, as Plan's Parked lane exists."""
     names = role_labels(mapping)
     result = []
     for row in filters:

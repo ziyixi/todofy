@@ -3,8 +3,8 @@
 A mail item is a Mail Hero event Todofy summarised (its ``summaries`` row): its ID is the event ID, its task an
 external reference. Its brief is one plain sentence, the first line the summary prompt asks for
 (core/prompts.SUMMARY_EMAIL); ``brief_of`` reads it from any summary, older ones included. The owner's mail
-categories are an existing label and a priority each (P1-P4, 1 the most urgent); the Todoist adapter
-(core/plus.py) binds the label and writes the priority.
+categories are an existing label and a priority each (P1-P4, 1 the most urgent); Tasks' Mail conversion
+(runtime/plus_mail.py) adds the label and sets the priority.
 """
 
 import hashlib
@@ -134,7 +134,7 @@ class MailSettings:
     @property
     def etag(self) -> str:
         """Changes with any category's ID, label or priority, their order, or the destination; not with a label's
-        name, which Todoist owns."""
+        name, which Tasks owns."""
         value = [[[c.id, c.label_id, c.priority] for c in self.categories], self.destination]
         return hashlib.sha256(json.dumps(value, separators=(",", ":")).encode()).hexdigest()
 

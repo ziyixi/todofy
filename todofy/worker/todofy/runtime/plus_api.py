@@ -81,7 +81,7 @@ async def plan(core: Any, metadata: dict[str, Any] | None = None) -> dict[str, A
 async def review_targets(env: Any, week: str) -> dict[str, Any]:
     """The weekly review's IDs, the Bets and the Review lanes' order, read with each Plan answer rather than with
     every task page or write: Todofy's mail project, the newest review task it created (this or the previous ISO
-    week; the extension sees whether it is still open), the choices already kept for next week, every dependency,
+    week; Tasks sees whether it is still open), the choices already kept for next week, every dependency,
     the Bets of last, this and next week, every lane the owner arranged, and the Mail entries still pending."""
     monday = date.fromisoformat(week)
     statements = [

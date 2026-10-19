@@ -1,8 +1,8 @@
 """The planning store in D1 (migrations/0007_plan_store.sql): the only module that reads or writes plan_*.
 
 Owner-authored planning facts and Todofy's own task identities; never task content. Dependencies, the weekly
-Bets (plan_notes of kind 'bets'), the Mailbox's categories (plan_categories of scheme 'mail', with the Todoist
-adapter's binding in plan_settings 'todoist.mail') and the order of the Review lanes (plan_settings 'board') are
+Bets (plan_notes of kind 'bets'), the Mail categories (plan_categories of scheme 'mail', with their Tasks label IDs
+in plan_settings 'todoist.mail', a frozen key name) and the order of the Review lanes (plan_settings 'board') are
 the facts it keeps so far; the other tables wait for later steps (docs/planning-api.md, "Planning store" and
 "Bets, dependencies and reordering"). Callers name tasks by the task store's own IDs, with its provider
 (core/plan.py PROVIDERS).
@@ -17,12 +17,11 @@ from todofy.core.gtd import rfc3339
 from todofy.core.mailbox import Category, MailSettings
 from todofy.core.sql import plan as sql
 
-# The Todoist adapter's binding of the Mailbox:
-#   {"categories": [{"id": <plan_categories.id>, "label_id": "<Todoist label ID>", "label": "<its name when saved>"}],
-#    "destination": "<Todoist project ID>"}
-# The destination is the one sent with the last change, never used for filing: filed mail goes to the account's
-# Inbox since planning protocol 6, which sends the literal "inbox"; an extension before it sends the Inbox that
-# ReadMailSettings answers.
+# The Mail categories' Tasks labels (a frozen key name):
+#   {"categories": [{"id": <plan_categories.id>, "label_id": "<Tasks label ID>", "label": "<its name when saved>"}],
+#    "destination": "<a project ID saved before Tasks>"}
+# Nothing reads the destination: Tasks' Mail conversion (runtime/plus_mail.py) creates an Inbox task, and an
+# update keeps the saved value as it is.
 MAIL_KEY = "todoist.mail"
 # The owner's order of the Review lanes (core/plan.py arrange_lane).
 BOARD_KEY = "board"

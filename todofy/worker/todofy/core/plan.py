@@ -1,8 +1,8 @@
 """The planning store's vocabulary and limits (migrations/0007_plan_store.sql), independent of any task provider.
 
 The tables check only the shape of a setting key, provider, kind or scheme, because SQLite changes a CHECK only by
-rebuilding the table; the closed lists live here. Nothing here names a Todoist label or filter: that is the
-Todoist adapter's (core/plus.py).
+rebuilding the table; the closed lists live here. Nothing here names a label or filter: the planning roles are
+core/plus.py's and core/native_plan.py's.
 """
 
 import unicodedata
@@ -10,8 +10,8 @@ from collections.abc import Iterable
 from datetime import date, timedelta
 from typing import Any
 
-# plan_settings keys, one JSON object each. 'todoist.mail' is the Todoist adapter's binding of the Mailbox: each mail
-# category's label, and a project no longer used for filing (runtime/plan_store.py mail_settings). 'board' is
+# plan_settings keys, one JSON object each. 'todoist.mail' (a frozen key name) holds each Mail category's Tasks
+# label, and a project nothing reads (runtime/plan_store.py mail_settings). 'board' is
 # {"lanes": {"<lane>": [<plan_tasks.id>, …]}}: the Review lanes the owner arranged, at most MAX_LANE_TASKS each, each
 # ID in one lane at most (arrange_lane).
 SETTING_KEYS = ("account", "week", "todoist", "todoist.mail", "board", "native")
@@ -26,7 +26,7 @@ EDGE_KINDS = (WAITS_FOR,)
 NOTE_KINDS = ("bets", "review")
 # plan_categories.scheme: the Mailbox triage.
 CATEGORY_SCHEMES = ("mail",)
-# The extension's Review lanes, in their order on the board; the owner's order of each is the 'board' document.
+# Plan's Review lanes, in their order on the board; the owner's order of each is the 'board' document.
 LANES = ("start", "waiting", "parked", "quarterly", "monthly", "weekly", "committed")
 MAX_LANE_TASKS = 100
 
@@ -79,7 +79,7 @@ def check_dependency(
 
 # plan_notes kind 'bets': one line of the owner's text per account week (period: its Monday) and area.
 BET_AREAS = ("work", "personal")
-# In UTF-16 code units, as the extension's input counts them (an emoji outside the BMP takes two).
+# In UTF-16 code units, as Plan's input counts them (an emoji outside the BMP takes two).
 MAX_BET_LENGTH = 160
 
 
@@ -87,7 +87,7 @@ def bet_text(text: str) -> str:
     """A Bet as it is stored: one line, each run of whitespace or control characters one space, trimmed.
 
     Empty means no Bet. Raises ValueError("BAD_REQUEST") above MAX_BET_LENGTH UTF-16 code units, and
-    (UnicodeEncodeError) for a lone surrogate, which no text the extension sends contains.
+    (UnicodeEncodeError) for a lone surrogate, which no text Plan sends contains.
     """
     line = " ".join("".join(" " if unicodedata.category(c) == "Cc" else c for c in text).split())
     if len(line.encode("utf-16-le")) // 2 > MAX_BET_LENGTH:
