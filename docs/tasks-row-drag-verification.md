@@ -53,5 +53,20 @@ tasks or production credentials. Production task edits are excluded from accepta
 
 ## Release
 
-Pending the complete branch gate and same-SHA main release. The previous production version remains
-`455e4e8` while this follow-up is being checked. Only Tasks is intended to release.
+Implementation `30cc7327e6292ea07406b511907db2e05474153b` passed complete
+[branch 39185583556](https://github.com/ziyixi/todofy/actions/runs/39185583556) and the
+[same-SHA main release 39186010120](https://github.com/ziyixi/todofy/actions/runs/39186010120).
+Only Tasks released. The final local lint/type/build, 59 units and all 65 Chromium/D1 journeys passed
+again after the context/gesture correction.
+
+Native GitHub Deployment `7163725810` (`deploy:tasks`, success at `2026-10-19T01:36:36Z`) records the
+verified release. An independent Cloudflare read confirms Worker version
+`71535d95-8f54-4aa2-96eb-ac8282f52aa0`, exact source SHA, unchanged D1 identity, expected planning binding
+and declared public variables. Other applications and the original/Claude checkouts were not changed.
+
+The existing owner Chrome tab first retained its old bundle when only the SPA hash changed. An explicit
+reload then loaded `index-pgAflU2s.js`, matching the checked build. Its two visible rows had six new drop
+zones, zero normal-mode batch checkboxes, zero old native HTML5 handles, one-line project context and
+zero alerts. This was a bounded DOM/configuration read: no task titles, descriptions or credentials were
+emitted, and no production task was edited, moved or completed. Gesture/persistence acceptance uses the
+synthetic cases above. The disposable preview tab and loopback server have been closed.

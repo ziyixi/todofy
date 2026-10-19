@@ -9,20 +9,24 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-### Tasks row selection and whole-row drag (in progress, 2026-10-19 UTC)
+### Tasks row selection and whole-row drag: released (2026-10-19 UTC)
 
-`codex/cloud-recovery-tasks` is extending the released task organization work. The owner reported
-that the bulk checkbox beside the completion circle is ambiguous and grip-only dragging cannot
-reparent intuitively. This follow-up uses the existing dnd-kit version for whole-row dragging,
-before/inside/after drop feedback and sidebar drops; bulk selection gets its own mode. Task identity,
-dates, descendants and the Task/Step distinction stay intact. Local lint/type/build, 59 units and all
-65 Chromium/D1 journeys pass. Actual owner Chrome completed whole-title reparent, promotion and sidebar
-project moves with disposable synthetic data. The original and Claude checkouts are not changed. No new
-backend service, schema or API was added. Branch gate/main release pending; see
-[acceptance](docs/tasks-row-drag-verification.md). The old grip-only native drag/MIME handlers are removed.
-The first branch gate caught two gesture-driver timing/scroll issues. The helper now waits for actual
-drag readiness and a stable/centered surface; both cases pass five repeats each. Long project context
-also stays on one line. Complete final CI is pending; no follow-up source has reached production yet.
+`30cc7327e6292ea07406b511907db2e05474153b` passed complete branch
+[39185583556](https://github.com/ziyixi/todofy/actions/runs/39185583556) and same-SHA main
+[39186010120](https://github.com/ziyixi/todofy/actions/runs/39186010120). Only Tasks released.
+Rows normally show one completion circle; batch selection has its own mode. Whole-row dragging supports
+before/inside/after placement, reparenting, promotion and sidebar categories with a floating preview.
+The parent editor uses the same drag mechanism for Subtasks and Steps. Nested/long project context is
+compact, and the old grip-only HTML5/MIME handlers are removed. No new backend service, schema or API.
+
+Local lint/type/build, 59 units and all 65 Chromium/D1 journeys pass. The initial CI gesture failures were
+fixed without relaxing saved-state assertions; both affected cases also pass five repeats each.
+Actual owner Chrome completed synthetic whole-title reparent, promotion and sidebar moves. Independent
+provider reads match source, D1 identity, planning target and public configuration. Native Deployment
+7163725810 records Worker `71535d95-8f54-4aa2-96eb-ac8282f52aa0`; owner Chrome loaded
+`index-pgAflU2s.js` with the new row controls and no alerts. No real task was changed for acceptance;
+the original and Claude checkouts remain untouched. Details and screenshots:
+[acceptance](docs/tasks-row-drag-verification.md). This closing commit updates root documentation only.
 
 ### Cloud recovery and task organization: released (2026-10-19 UTC)
 
