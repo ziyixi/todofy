@@ -50,10 +50,13 @@ function refusal(code: number, status: string, reason: string) {
 /**
  * Answers `/api/plus/**` in the page as Todofy's planning API and FlowDay's focus API do for
  * Tasks, from synthetic data only. Every request is recorded; an unknown one fails with 500.
+ * With `tasksIn`, the task list leaves out a task the dev server's D1 holds completed, as
+ * Todofy's list of Tasks' open tasks does.
  */
 export async function stubPlanning(
   page: Page,
   seed: Partial<Omit<PlanningState, "requests">> = {},
+  tasksIn?: APIRequestContext,
 ): Promise<PlanningState> {
   const state: PlanningState = {
     today: "2026-10-13",
@@ -88,7 +91,9 @@ export async function stubPlanning(
       body,
       authorization: request.headers()["authorization"] ?? null,
     });
-    const answer = (): { status?: number; json: unknown } | undefined => {
+    const answer = async (): Promise<
+      { status?: number; json: unknown } | undefined
+    > => {
       if (path === "/api/plus/v1/plan:read")
         return {
           json: {
@@ -110,7 +115,13 @@ export async function stubPlanning(
           },
         };
       if (path === "/api/plus/v1/tasks")
-        return { json: { planning_tasks: state.tasks } };
+        return {
+          json: {
+            planning_tasks: tasksIn
+              ? await stillOpen(tasksIn, state.tasks)
+              : state.tasks,
+          },
+        };
       if (path === "/api/plus/v1/tasks:setTaskPlan") {
         const saved = task(body.task_id)!;
         if (body.stage !== undefined) {
@@ -126,6 +137,30 @@ export async function stubPlanning(
         saved.planning_flags = [...flags];
         saved.etag = String(Number(saved.etag) + 1);
         return { json: { task: saved } };
+      }
+      if (path === "/api/plus/v1/tasks:reorder") {
+        // The listed siblings take positions in the given order; a lane's order is saved with the plan.
+        const ids = body.task_ids as string[];
+        const lane = String(body.lane ?? "");
+        const reordered = ids.flatMap((id, index) => {
+          const saved = task(id);
+          if (!saved) return [];
+          saved.sort_order = index + 1;
+          saved.etag = String(Number(saved.etag) + 1);
+          return [saved];
+        });
+        if (!lane) return { json: { tasks: reordered } };
+        const orders = (state.plan.lane_orders as Json[] | undefined) ?? [];
+        state.plan = {
+          ...state.plan,
+          lane_orders: [
+            ...orders.filter((order) => order.lane !== lane),
+            { lane, task_ids: ids },
+          ],
+        };
+        return {
+          json: { tasks: reordered, lane_order: { lane, task_ids: ids } },
+        };
       }
       if (path === "/api/plus/v1/tasks:setTaskLead") {
         const saved = task(body.task_id);
@@ -183,6 +218,22 @@ export async function stubPlanning(
       }
       if (path === "/api/plus/v1/tasks:completeTask") {
         state.tasks = state.tasks.filter((item) => item.id !== body.task_id);
+        // The FlowDay settlement: the day's queue drops the task, and its timer on that day stops.
+        const flowDate = String(body.flow_date ?? "");
+        if (flowDate) {
+          state.days[flowDate] = (state.days[flowDate] ?? []).filter(
+            (id) => id !== body.flow_task_id && id !== body.task_id,
+          );
+          if (
+            [body.flow_task_id, body.task_id].includes(state.timer.task_id) &&
+            state.timer.flow_date === flowDate
+          )
+            state.timer = {
+              name: "timerSession",
+              state: "idle",
+              etag: String(Number(state.timer.etag) + 1),
+            };
+        }
         return { json: { task_id: body.task_id } };
       }
       if (path === "/api/plus/v1/mailItems")
@@ -253,7 +304,7 @@ export async function stubPlanning(
       }
       return undefined;
     };
-    const response = answer();
+    const response = await answer();
     await route.fulfill(
       response ?? {
         status: 500,
@@ -262,6 +313,16 @@ export async function stubPlanning(
     );
   });
   return state;
+}
+
+async function stillOpen(request: APIRequestContext, tasks: Json[]) {
+  const open = await Promise.all(
+    tasks.map(async (task) => {
+      const saved = await request.get(`/api/tasks/v1/tasks/${String(task.id)}`);
+      return !saved.ok() || !(await saved.json()).completed;
+    }),
+  );
+  return tasks.filter((_, index) => open[index]);
 }
 
 /** FlowDay calls Tasks must never make: its own task sync and task writes. */

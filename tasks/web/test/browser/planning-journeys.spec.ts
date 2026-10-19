@@ -253,6 +253,88 @@ test("Week schedules a step into a day and moves it to another with FlowDay's qu
   expect(flowdayTaskWrites(state)).toEqual([]);
 });
 
+test("the keyboard moves a Committed card along its row, Escape puts it back, and Down from Week commits a candidate", async ({
+  page,
+}) => {
+  const state = await stubPlanning(page, {
+    tasks: [
+      outcome("parent", "Synthetic weekly outcome", { sort_order: 1 }),
+      outcome("launch", "Synthetic launch", { sort_order: 2 }),
+      outcome("audit", "Synthetic audit", { sort_order: 3 }),
+      outcome("candidate", "Synthetic week candidate", {
+        stage: "weekly",
+        explicit_stage: "weekly",
+      }),
+    ],
+  });
+  await openPlan(page);
+  const committed = page.getByRole("region", {
+    name: "Committed",
+    exact: true,
+  });
+  const order = () =>
+    committed
+      .locator(".review-draggable [data-outcome-id]")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute("data-outcome-id")),
+      );
+  const writes = () =>
+    state.requests.filter((request) => request.method !== "GET");
+  const handle = committed.getByRole("button", {
+    name: /^Move outcome: Synthetic weekly outcome/u,
+  });
+  await expect.poll(order).toEqual(["parent", "launch", "audit"]);
+  // Picked up, moved and put back with Escape: nothing changes, and focus stays.
+  await handle.focus();
+  await page.keyboard.press("Space");
+  await expect(committed.locator(".is-dragging")).toHaveCount(1);
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Escape");
+  await expect(
+    page.locator("[data-dnd-overlay][data-dnd-dragging]"),
+  ).toHaveCount(0);
+  await expect(handle).toBeFocused();
+  expect(await order()).toEqual(["parent", "launch", "audit"]);
+  expect(writes()).toEqual([]);
+  // The cards sit side by side: Right two, Left one, dropped after the launch card.
+  await page.keyboard.press("Space");
+  await expect(committed.locator(".is-dragging")).toHaveCount(1);
+  const after = committed.locator(".is-insert-after [data-outcome-id]");
+  await page.keyboard.press("ArrowRight");
+  await expect(after).toHaveAttribute("data-outcome-id", "launch");
+  await page.keyboard.press("ArrowRight");
+  await expect(after).toHaveAttribute("data-outcome-id", "audit");
+  await page.keyboard.press("ArrowLeft");
+  await expect(after).toHaveAttribute("data-outcome-id", "launch");
+  await page.keyboard.press("Space");
+  await expect.poll(order).toEqual(["launch", "parent", "audit"]);
+  await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+  await expect(handle).toBeFocused();
+  expect(bodies(state, "/api/plus/v1/tasks:reorder")).toEqual([
+    expect.objectContaining({
+      task_ids: ["launch", "parent", "audit"],
+      lane: "committed",
+    }),
+  ]);
+  await expect(
+    page.locator("[data-dnd-overlay][data-dnd-dragging]"),
+  ).toHaveCount(0);
+  // Committed is the row under Week, so Down takes a Week card there: its stage.
+  await page
+    .getByRole("region", { name: "Week", exact: true })
+    .getByRole("button", { name: "Move outcome: Synthetic week candidate" })
+    .focus();
+  await page.keyboard.press("Space");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Space");
+  await expect(
+    committed.locator('[data-outcome-id="candidate"]'),
+  ).toBeVisible();
+  await expect
+    .poll(() => bodies(state, "/api/plus/v1/tasks:setTaskPlan").at(-1))
+    .toMatchObject({ task_id: "candidate", stage: "committed" });
+});
+
 test("the weekly review link opens the checklist once and clears its parameter", async ({
   page,
 }) => {
