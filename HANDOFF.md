@@ -9,46 +9,31 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
-### Cloud reconcile recovery and inline subtasks (2026-10-18 UTC)
+### Cloud recovery and task organization: released (2026-10-19 UTC)
 
-Branch `codex/cloud-recovery-tasks` uses an isolated checkout while the owner's other agent works.
-The failed VPS comparison in [39147228294](https://github.com/ziyixi/todofy/actions/runs/39147228294)
-was recovered with the documented owner-run k3s restart. All three running Pod UIDs and restart counts
-were unchanged; the failed-job rerun passed. Fleet now reports a ready runtime and a clean reconcile plan.
-The separate Mail Hero stale-backup alert was traced to an expired native snapshot lease. The existing
-native retry verified 1,903 files / 66,221,731 bytes at 22:33:49 UTC and released its pause. No backup
-contents were read locally. After the next due owner refresh, every Home app is normal and its attention
-list is empty; no alert was dismissed.
-The owner-approved legacy email project is archived through the owner UI. Its 192 incomplete and 2,115
-completed tasks remain intact; no filter or task was deleted. The original Todoist account was not changed.
-Inline child lists start collapsed, read bounded pages only when opened and reuse normal task actions.
-Schedule and priority icons now use the installed Base UI tooltip on hover/focus in both task menus.
-The owner also reported missing drag support in parent details. Both Subtasks and Steps now expose
-handles and before/after drop feedback, persisting only sibling sort order. Their kinds remain unchanged.
-Initial SHA `81dbf79f4da8b419cef40c57ea5fb615c3ad75bb` passed branch
-[39174037014](https://github.com/ziyixi/todofy/actions/runs/39174037014) and same-SHA main
-[39174359695](https://github.com/ziyixi/todofy/actions/runs/39174359695). Independent provider reads verify
-version `062d24b5-7bc5-4b7f-8223-de64429dcdb4`, source SHA, database and Planning binding.
-Owner follow-ups keep existing editors open after Save, hide Steps from ordinary views/counts, detach
-subtasks through main-list dragging, and show years outside the current account year. Those changes pass
-56 web units, 58 Chromium/local-D1 journeys and 41 Worker runtime checks. Actual Chrome confirms Save
-retains the frame, a future deadline includes its year, and expanded main lists omit Steps.
-The newer requests are implemented: native property tags separated from real labels, batched list
-planning reads, sidebar project/Inbox/label/Today drops, and Plan outcome/Step completion through the
-existing receipt/Focus settlement path. Committed alone occupies the full-width row below the existing
-desktop columns; candidate cards remain vertical. The owner's correction explicitly rules out splitting
-the other desktop columns into separate rows. Real Chrome synthetic checks confirm this layout and both
-outcome and scheduled-Step completion; no real tasks were edited for those checks.
-Quick now implies standalone in native projections/writes and both editors. Existing Quick rows need
-no backfill; a real Worker/D1 test confirms reads retain their physical row/revision. Core's focused
-34 checks, shared planning's 23 units, 59 Tasks units and 62 Tasks browser/D1 journeys pass.
-The native host now routes Plan/Focus completion through the existing generic completion proof, including
-a parent's running descendant and its original timer day. Replay retains its original etag; finish never
-becomes Reopen. The first follow-up branch run found a synthetic route/request teardown race; the
-fixture now waits for active handlers and verifies loaded zero child counts instead of ending during
-loading. No test errors are ignored. The final combined branch gate and production verification remain. No schema, wire format, dependency, service or
-persistent cache was added. The original/Claude checkouts remain untouched.
-See [acceptance](tasks/docs/inline-subtasks-verification.md).
+`codex/cloud-recovery-tasks` implementation `455e4e8888991ac05ca44f459b7515e3fe831d21` passed complete
+branch [39181190423](https://github.com/ziyixi/todofy/actions/runs/39181190423) and same-SHA main
+[39181722770](https://github.com/ziyixi/todofy/actions/runs/39181722770). Tasks and Todofy released;
+independent provider reads verify all three Worker versions/configurations with zero differences.
+The original/Claude checkouts remain untouched. Closing changes only record verification.
+
+The rollout adds collapsed inline outcome subtasks, detail reordering for both child kinds, tooltips,
+save-in-place, main-list outdent, sidebar category drops, native property metadata and explicit years
+outside the current year. Steps remain in details/execution views. Committed alone spans the row below
+the unchanged desktop candidate columns, with horizontal cards. Plan/Focus completion uses the generic
+native completion proof, preserves queued request identities and settles a completed descendant's timer
+on its original date. Quick always implies standalone, including old rows, without a backfill.
+Tasks passes 59 units / 62 Chromium-D1 journeys; shared planning 23 units; its legacy consumer 308 units /
+65 packaged-browser journeys. Core's full CI and targeted real Tasks integration pass. No new schema,
+wire format, service, dependency or persistent cache was added.
+
+Owner Chrome verifies the new bundle/layout and an existing Quick's automatic standalone control,
+without editing/completing real tasks. The approved legacy email project remains archived with all
+2,307 tasks/history intact. VPS reconcile recovered through the documented owner k3s restart, preserving
+all three running Pod identities/restart counts. Mail Hero's native R2 snapshot verified at 22:33:49 UTC.
+A final fresh Home refresh shows every app/service normal and no attention items; none were dismissed.
+Host address changes and future snapshot timeouts are not claimed permanently fixed by this recovery.
+Dated evidence, release identities and limits: [acceptance](tasks/docs/inline-subtasks-verification.md).
 
 ### Tasks workflow refinement (2026-10-18 UTC)
 

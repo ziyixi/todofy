@@ -69,13 +69,13 @@ parent/kind/estimate/completion fields through real D1 reads. Existing main-list
 dialog checks passed too. Shared planning typecheck and 23 units pass; its legacy consumer retains 308
 passing units. Core's focused 34 checks include real Python/TasksApi/D1 execution: existing Quick rows
 gain the effective standalone flag while the physical row and revision remain unchanged, new writes
-enforce it, and exact request replays still work. The complete branch gate and final live checks are pending. A CI-only teardown race in the synthetic
-planning routes now waits for in-flight handlers, and the deletion test waits for the loaded zero counts;
+enforce it, and exact request replays still work. The complete branch gate and final live checks have
+passed. A CI-only teardown race in the synthetic planning routes now waits for in-flight handlers, and the deletion test waits for the loaded zero counts;
 no assertions or callback errors are ignored.
 
 Real owner Chrome also verified collapsed first load and nested expansion in the ephemeral preview.
 Only synthetic tasks appear in these screenshots. Chrome Save leaves the editor frame unchanged and
-shows the full future year. The newest follow-up release checks are pending.
+shows the full future year. The final production rollout and read-only owner-page checks have passed.
 
 The same Chrome also rendered the actual bundled planning components with synthetic data: candidate
 columns remain together, Committed is below them, and completing an outcome changes its count from
@@ -100,6 +100,37 @@ icons, verifies the displayed explanation and unchanged menu bounds, then perfor
 writes against local D1. No scheduling semantics changed.
 
 ![Task shortcut explanation in the synthetic Chrome preview](images/task-menu-tooltip.png)
+
+## Release
+
+Implementation `455e4e8888991ac05ca44f459b7515e3fe831d21` passed the complete branch
+[39181190423](https://github.com/ziyixi/todofy/actions/runs/39181190423), including all three Core
+runtime shards, Tasks, shared packages, contracts and the packaged legacy UI consumer. Same-SHA main
+[39181722770](https://github.com/ziyixi/todofy/actions/runs/39181722770) completed successfully.
+Tasks ran 59 units and 62 real Chromium/local-D1 journeys; the shared package ran 23 units, and the
+retired extension consumer ran 308 units and 65 packaged-browser journeys. Existing budget and safety
+checks remain enabled. Only Tasks and Todofy deployed; the installed extension and VPS were not updated.
+
+Independent read-only Cloudflare checks verify the source SHA, persistent resources, public vars,
+bindings, schedules, exposure and routes with zero differences for each Worker:
+
+| Worker | Actual version | Verified Deployment |
+| --- | --- | --- |
+| Tasks | `15ed9b3c-c787-4467-8b3c-ffdcf4b364ce` | `7163101870` |
+| Todofy Core | `a98f12cd-5fc0-4d60-98fa-ef42f6397c58` | `7163118808` |
+| Todofy gateway | `8b59bffd-d05a-41d5-b3e3-0524024e0e76` | `7163118808` |
+
+Owner Chrome loaded the matching `index-C6d4HG8y.js`. Bounded DOM observations verify one row of
+candidate columns, a full-width Committed region below them, horizontal card columns and visible
+completion controls in Review/Week. After Core released, one existing Quick's checked Quick and checked,
+disabled Schedule as a step controls were verified without saving. Its dialog was closed; the owner's
+Week selection was restored. No production task was completed, moved or edited for these checks,
+and task titles/descriptions were not emitted or captured in public screenshots.
+A fresh owner Home refresh reports all eleven app tiles and both background services normal, with no
+attention items; no alert was dismissed. The original and other agent's checkouts remain untouched.
+
+The screenshots above use a bundled synthetic preview. An unbundled Vite preview encountered a plugin
+registration error and was excluded from acceptance evidence; the packaged builds and browser suites passed.
 
 ## Owner-approved archive
 
