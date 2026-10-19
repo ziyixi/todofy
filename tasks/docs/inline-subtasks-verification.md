@@ -1,5 +1,9 @@
 # Inline subtasks and operations follow-up
 
+This record covers the initial `455e4e8` rollout. The later whole-row drag and selection update is tracked
+in [its acceptance record](../../docs/tasks-row-drag-verification.md); the old native-drag limitation below
+describes that initial version.
+
 ## Behavior
 
 Main task lists show a chevron for parents. Children start collapsed and are read only when expanded,

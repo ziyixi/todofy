@@ -1,3 +1,4 @@
+import { dragTask } from "./drag";
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
 test("retrying Quick Add after a lost response keeps one persisted task", async ({
@@ -398,9 +399,7 @@ test("dragging custom order persists and selected tasks complete as a group", as
       response.request().method() === "PATCH" &&
       response.url().includes("/api/tasks/v1/tasks/"),
   );
-  await beta
-    .getByRole("button", { name: "Drag Synthetic ordered Beta", exact: true })
-    .dragTo(alpha);
+  await dragTask(page, beta.locator(".task-open"), alpha);
   expect((await persisted).status()).toBe(200);
   await page.reload();
   await expect(
@@ -410,13 +409,7 @@ test("dragging custom order persists and selected tasks complete as a group", as
   expect(ordered.indexOf("Synthetic ordered Beta")).toBeLessThan(
     ordered.indexOf("Synthetic ordered Alpha"),
   );
-  await alpha.hover();
-  await page
-    .getByRole("checkbox", {
-      name: "Select Synthetic ordered Alpha",
-      exact: true,
-    })
-    .check();
+  await alpha.locator(".task-open").click({ modifiers: ["ControlOrMeta"] });
   await beta.hover();
   await page
     .getByRole("checkbox", {

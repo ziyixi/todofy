@@ -15,11 +15,11 @@ import {
   Target,
   Timer,
 } from "lucide-react";
-import { useState, type DragEvent } from "react";
+import { useState } from "react";
 import type { Catalog, CatalogItem, CatalogKind } from "../api";
 import { CatalogMenu } from "./CatalogMenu";
 import { routeHref, type Route } from "../routes";
-import { TASK_DRAG_TYPE, type TaskDropTarget } from "../task-drag";
+import { TaskCategoryLink } from "./TaskDrag";
 
 const navigation = [
   { page: "search", title: "Search", icon: Search },
@@ -39,7 +39,6 @@ export function Sidebar({
   onEditCatalog,
   onCatalogSaved,
   onError,
-  onTaskDrop,
 }: {
   route: Route;
   catalog: Catalog;
@@ -48,34 +47,7 @@ export function Sidebar({
   onEditCatalog: (kind: CatalogKind, item?: CatalogItem) => void;
   onCatalogSaved: () => Promise<void>;
   onError: (message: string) => void;
-  onTaskDrop: (id: string, target: TaskDropTarget) => void;
 }) {
-  const [dropTarget, setDropTarget] = useState("");
-  function categoryDrop(target?: TaskDropTarget) {
-    if (!target) return {};
-    const key = `${target.page}:${"id" in target ? target.id : ""}`;
-    return {
-      "data-task-drop": dropTarget === key || undefined,
-      onDragOver(event: DragEvent<HTMLAnchorElement>) {
-        if (!event.dataTransfer.types.includes(TASK_DRAG_TYPE)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEffect = "move";
-        setDropTarget(key);
-      },
-      onDragLeave() {
-        setDropTarget("");
-      },
-      onDrop(event: DragEvent<HTMLAnchorElement>) {
-        if (!event.dataTransfer.types.includes(TASK_DRAG_TYPE)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        setDropTarget("");
-        const id = event.dataTransfer.getData(TASK_DRAG_TYPE);
-        if (id) onTaskDrop(id, target);
-      },
-    };
-  }
   const [projectsOpen, setProjectsOpen] = useState(() => {
     try {
       return localStorage.getItem("tasks.projects-open") !== "false";
@@ -125,20 +97,20 @@ export function Sidebar({
             onError={onError}
           >
             <div className="sidebar-context-row">
-              <a
+              <TaskCategoryLink
                 className={`nav-item ${active("project", project.id) ? "selected" : ""}`}
                 style={{ paddingInlineStart: `${12 + depth * 14}px` }}
                 href={routeHref({ page: "project", id: project.id })}
-                {...categoryDrop(
+                target={
                   project.archived
                     ? undefined
-                    : { page: "project", id: project.id },
-                )}
+                    : { page: "project", id: project.id }
+                }
               >
                 <Hash size={18} style={{ color: project.color || undefined }} />
                 <span>{project.title}</span>
                 {categoryCount("project", project.id)}
-              </a>
+              </TaskCategoryLink>
               <CatalogMenu
                 kind="project"
                 item={project}
@@ -201,19 +173,17 @@ export function Sidebar({
       </button>
       <nav aria-label="Main navigation">
         {navigation.map(({ page, title, icon: Icon }) => (
-          <a
+          <TaskCategoryLink
             key={page}
             href={routeHref({ page, id: "" })}
             className={`nav-item ${active(page) ? "selected" : ""}`}
             aria-current={active(page) ? "page" : undefined}
-            {...categoryDrop(
-              page === "inbox" || page === "today" ? { page } : undefined,
-            )}
+            target={page === "inbox" || page === "today" ? { page } : undefined}
           >
             <Icon size={19} />
             <span>{title}</span>
             {categoryCount(page)}
-          </a>
+          </TaskCategoryLink>
         ))}
       </nav>
       {favorites.length > 0 && (
@@ -229,19 +199,19 @@ export function Sidebar({
               onError={onError}
             >
               <div className="sidebar-context-row">
-                <a
+                <TaskCategoryLink
                   className={`nav-item ${active(page, id) ? "selected" : ""}`}
                   href={routeHref({ page, id })}
-                  {...categoryDrop(
+                  target={
                     page === "project" || page === "label"
                       ? { page, id }
-                      : undefined,
-                  )}
+                      : undefined
+                  }
                 >
                   <Icon size={17} style={{ color: color || undefined }} />
                   <span>{title}</span>
                   {categoryCount(page, id)}
-                </a>
+                </TaskCategoryLink>
                 <CatalogMenu
                   kind={page}
                   item={item}

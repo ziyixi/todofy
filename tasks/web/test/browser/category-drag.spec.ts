@@ -1,3 +1,4 @@
+import { dragTask } from "./drag";
 import {
   expect,
   test,
@@ -89,9 +90,11 @@ test("sidebar drops move a subtask family, add a label and schedule Today withou
       exact: true,
     })
     .click();
-  await page
-    .getByRole("button", { name: `Drag ${child.title}`, exact: true })
-    .dragTo(page.getByRole("link", { name: destination.title, exact: true }));
+  await dragTask(
+    page,
+    page.getByText(child.title, { exact: true }),
+    page.getByRole("link", { name: destination.title, exact: true }),
+  );
   const readChild = async () =>
     (await request.get(`/api/tasks/v1/tasks/${child.id}`)).json();
   await expect
@@ -116,22 +119,31 @@ test("sidebar drops move a subtask family, add a label and schedule Today withou
   await page
     .getByRole("link", { name: destination.title, exact: true })
     .click();
-  const drag = () =>
-    page.getByRole("button", { name: `Drag ${child.title}`, exact: true });
-  await drag().dragTo(
+  const drag = () => page.getByText(child.title, { exact: true });
+  await dragTask(
+    page,
+    drag(),
     page.getByRole("link", { name: addedLabel.title, exact: true }),
   );
   await expect
     .poll(async () => (await readChild()).label_ids)
     .toEqual([firstLabel.id, addedLabel.id]);
-  await drag().dragTo(page.getByRole("link", { name: "Today", exact: true }));
+  await dragTask(
+    page,
+    drag(),
+    page.getByRole("link", { name: "Today", exact: true }),
+  );
   const catalog = await (await request.get("/api/tasks/v1/catalog")).json();
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: catalog.time_zone || "UTC",
   }).format(new Date());
   await expect.poll(async () => (await readChild()).due_date).toBe(today);
   expect((await readChild()).deadline).toBe("2040-04-22");
-  await drag().dragTo(page.getByRole("link", { name: "Inbox", exact: true }));
+  await dragTask(
+    page,
+    drag(),
+    page.getByRole("link", { name: "Inbox", exact: true }),
+  );
   await expect.poll(async () => (await readChild()).project_id || "").toBe("");
   expect(await readChild()).toMatchObject({
     id: child.id,

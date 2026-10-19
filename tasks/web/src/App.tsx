@@ -30,6 +30,7 @@ import { Sidebar } from "./components/Sidebar";
 import { SidebarResize } from "./components/SidebarResize";
 import { TaskWorkspace } from "./components/TaskWorkspace";
 import { CatalogView } from "./components/CatalogView";
+import { TaskDragProvider } from "./components/TaskDrag";
 const PlanningPage = lazy(() => import("./PlanningPage"));
 const MailPage = lazy(() => import("./MailPage"));
 const TaskDialog = lazy(() =>
@@ -206,164 +207,178 @@ export function App() {
   const editCatalog = (kind: CatalogKind, item?: CatalogItem) =>
     setCatalogEditor({ kind, item });
   return (
-    <div className={`app-shell ${showSidebar ? "sidebar-open" : ""}`}>
-      <Sidebar
-        route={route}
-        catalog={catalog}
-        onAddTask={addTask}
-        onAddProject={() => editCatalog("project")}
-        onEditCatalog={editCatalog}
-        onCatalogSaved={refreshCatalog}
-        onError={actions.setNotice}
-        onTaskDrop={(id, target) =>
-          void actions.dropOnCategory(id, target, catalog.timeZone)
-        }
-      />
-      <SidebarResize />
-      {showSidebar && (
-        <button
-          className="sidebar-backdrop"
-          aria-label="Close navigation"
-          onClick={() => setShowSidebar(false)}
+    <TaskDragProvider
+      onError={actions.setNotice}
+      onDrop={async (task, target) => {
+        if (target.kind === "category")
+          return actions.dropOnCategory(
+            task.id,
+            target.target,
+            catalog.timeZone,
+          );
+        if (target.kind === "detach") return actions.detach(task);
+        return actions.dropInList(task, target);
+      }}
+    >
+      <div className={`app-shell ${showSidebar ? "sidebar-open" : ""}`}>
+        <Sidebar
+          route={route}
+          catalog={catalog}
+          onAddTask={addTask}
+          onAddProject={() => editCatalog("project")}
+          onEditCatalog={editCatalog}
+          onCatalogSaved={refreshCatalog}
+          onError={actions.setNotice}
         />
-      )}
-      <main
-        className={
-          route.page !== "mail" && isPlanning(route.page)
-            ? "main-content planning-content"
-            : "main-content"
-        }
-      >
-        <div className="mobile-bar">
+        <SidebarResize />
+        {showSidebar && (
           <button
-            className="icon-button"
-            aria-label="Toggle navigation"
-            onClick={() => setShowSidebar((current) => !current)}
-          >
-            <Menu size={20} />
-          </button>
-          <span>{title}</span>
-        </div>
-        {catalogError && (
-          <div className="error-message" role="alert">
-            {catalogError}
-            <button onClick={() => void loadCatalog()} className="text-button">
-              Retry
-            </button>
-          </div>
+            className="sidebar-backdrop"
+            aria-label="Close navigation"
+            onClick={() => setShowSidebar(false)}
+          />
         )}
-        {notice && (
-          <div className="notice" role="status">
-            {notice}
-            <button className="text-button" onClick={() => setNotice("")}>
-              Dismiss
+        <main
+          className={
+            route.page !== "mail" && isPlanning(route.page)
+              ? "main-content planning-content"
+              : "main-content"
+          }
+        >
+          <div className="mobile-bar">
+            <button
+              className="icon-button"
+              aria-label="Toggle navigation"
+              onClick={() => setShowSidebar((current) => !current)}
+            >
+              <Menu size={20} />
             </button>
+            <span>{title}</span>
           </div>
-        )}
-        {route.page === "mail" ? (
+          {catalogError && (
+            <div className="error-message" role="alert">
+              {catalogError}
+              <button
+                onClick={() => void loadCatalog()}
+                className="text-button"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {notice && (
+            <div className="notice" role="status">
+              {notice}
+              <button className="text-button" onClick={() => setNotice("")}>
+                Dismiss
+              </button>
+            </div>
+          )}
+          {route.page === "mail" ? (
+            <Suspense
+              fallback={
+                <p className="loading-state" role="status">
+                  Loading Mail…
+                </p>
+              }
+            >
+              <MailPage catalog={catalog} onTaskCreated={actions.taskChanged} />
+            </Suspense>
+          ) : isPlanning(route.page) ? (
+            <Suspense
+              fallback={
+                <p className="loading-state" role="status">
+                  Loading {title}…
+                </p>
+              }
+            >
+              <PlanningPage
+                onCompleteTask={actions.finishTask}
+                page={route.page}
+                mutationRevision={actions.mutationRevision}
+                onOpenTask={(id) => void openTask(id)}
+                onSettings={() => {
+                  window.location.hash = "/plan";
+                }}
+              />
+            </Suspense>
+          ) : route.page === "catalog" ? (
+            <CatalogView
+              catalog={catalog}
+              onEdit={editCatalog}
+              onSaved={refreshCatalog}
+              onError={actions.setNotice}
+            />
+          ) : (
+            <TaskWorkspace
+              title={title}
+              route={route}
+              catalog={catalog}
+              catalogLoading={catalogLoading}
+              list={list}
+              actions={actions}
+              search={search}
+              setSearch={setSearch}
+              searchRef={searchRef}
+              date={upcomingDate}
+              setDate={setDate}
+              includeCompleted={includeCompleted}
+              setIncludeCompleted={setIncludeCompleted}
+              orderBy={orderBy}
+              setOrderBy={setOrderBy}
+              addTask={addTask}
+              openTask={openTask}
+              editCatalog={editCatalog}
+            />
+          )}
+        </main>
+        {editor && catalog.timeZone && (
           <Suspense
             fallback={
               <p className="loading-state" role="status">
-                Loading Mail…
+                Opening task…
               </p>
             }
           >
-            <MailPage catalog={catalog} onTaskCreated={actions.taskChanged} />
-          </Suspense>
-        ) : isPlanning(route.page) ? (
-          <Suspense
-            fallback={
-              <p className="loading-state" role="status">
-                Loading {title}…
-              </p>
-            }
-          >
-            <PlanningPage
-              onCompleteTask={actions.finishTask}
-              page={route.page}
-              mutationRevision={actions.mutationRevision}
-              onOpenTask={(id) => void openTask(id)}
-              onSettings={() => {
-                window.location.hash = "/plan";
+            <TaskDialog
+              onChildAdded={() => {
+                actions.taskChanged();
+                void list.read();
               }}
+              key={editor.task?.id || "new"}
+              task={editor.task}
+              defaults={editor.defaults}
+              catalog={catalog}
+              onClose={() => {
+                taskOpenSequence.current++;
+                setEditor(undefined);
+              }}
+              onSave={saveTask}
+              onDelete={deleteTask}
+              onComplete={complete}
+              onOpen={(id) => void openTask(id)}
             />
           </Suspense>
-        ) : route.page === "catalog" ? (
-          <CatalogView
-            catalog={catalog}
-            onEdit={editCatalog}
-            onSaved={refreshCatalog}
-            onError={actions.setNotice}
-          />
-        ) : (
-          <TaskWorkspace
-            title={title}
-            route={route}
-            catalog={catalog}
-            catalogLoading={catalogLoading}
-            list={list}
-            actions={actions}
-            search={search}
-            setSearch={setSearch}
-            searchRef={searchRef}
-            date={upcomingDate}
-            setDate={setDate}
-            includeCompleted={includeCompleted}
-            setIncludeCompleted={setIncludeCompleted}
-            orderBy={orderBy}
-            setOrderBy={setOrderBy}
-            addTask={addTask}
-            openTask={openTask}
-            editCatalog={editCatalog}
-          />
         )}
-      </main>
-      {editor && catalog.timeZone && (
-        <Suspense
-          fallback={
-            <p className="loading-state" role="status">
-              Opening task…
-            </p>
-          }
-        >
-          <TaskDialog
-            onChildAdded={() => {
-              actions.taskChanged();
-              void list.read();
-            }}
-            key={editor.task?.id || "new"}
-            task={editor.task}
-            defaults={editor.defaults}
-            catalog={catalog}
-            onClose={() => {
-              taskOpenSequence.current++;
-              setEditor(undefined);
-            }}
-            onSave={saveTask}
-            onDelete={deleteTask}
-            onComplete={complete}
-            onOpen={(id) => void openTask(id)}
-          />
-        </Suspense>
-      )}
-      {catalogEditor && (
-        <Suspense
-          fallback={
-            <p className="loading-state" role="status">
-              Opening editor…
-            </p>
-          }
-        >
-          <CatalogEditor
-            kind={catalogEditor.kind}
-            item={catalogEditor.item}
-            catalog={catalog}
-            projectId={route.page === "project" ? route.id : ""}
-            onClose={() => setCatalogEditor(undefined)}
-            onSaved={refreshCatalog}
-          />
-        </Suspense>
-      )}
-    </div>
+        {catalogEditor && (
+          <Suspense
+            fallback={
+              <p className="loading-state" role="status">
+                Opening editor…
+              </p>
+            }
+          >
+            <CatalogEditor
+              kind={catalogEditor.kind}
+              item={catalogEditor.item}
+              catalog={catalog}
+              projectId={route.page === "project" ? route.id : ""}
+              onClose={() => setCatalogEditor(undefined)}
+              onSaved={refreshCatalog}
+            />
+          </Suspense>
+        )}
+      </div>
+    </TaskDragProvider>
   );
 }

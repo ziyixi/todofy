@@ -45,12 +45,6 @@
 .child-drag:active {
   cursor: grabbing;
 }
-.task-child-row.child-drop-before {
-  box-shadow: 0 -2px var(--accent);
-}
-.task-child-row.child-drop-after {
-  box-shadow: 0 2px var(--accent);
-}
 @media (hover: none) {
   .child-drag {
     opacity: 1;

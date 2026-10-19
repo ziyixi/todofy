@@ -4,6 +4,7 @@ import { TaskRow, type TaskRowProps } from "./TaskRow";
 import "./task-tree.css";
 import { useTaskListProperties } from "../useTaskListProperties";
 import type { PlanningTask } from "../task-planning";
+import { useTaskDragState } from "./TaskDrag";
 
 type RowContext = Omit<
   TaskRowProps,
@@ -15,6 +16,7 @@ type RowContext = Omit<
   | "childContent"
   | "peers"
   | "planning"
+  | "ancestors"
 >;
 
 export function TaskTreeRow({
@@ -35,10 +37,16 @@ export function TaskTreeRow({
   showCompleted: boolean;
   orderBy: string;
   ancestors?: readonly string[];
-  peers?: readonly Task[];
+  peers: readonly Task[];
   planningById: ReadonlyMap<string, PlanningTask>;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const { lastMove } = useTaskDragState();
+  const moveAtMount = useRef(lastMove);
+  useEffect(() => {
+    if (lastMove !== moveAtMount.current && lastMove?.parentId === task.id)
+      setExpanded(true);
+  }, [lastMove, task.id]);
   const [children, setChildren] = useState<Task[]>([]);
   const [nextPage, setNextPage] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -122,8 +130,9 @@ export function TaskTreeRow({
     <TaskRow
       {...row}
       task={task}
-      parentTitle={parentTitle}
+      parentTitle={ancestors.length ? undefined : parentTitle}
       peers={peers}
+      ancestors={ancestors}
       planning={planningById.get(task.id)}
       expanded={expanded}
       onToggleChildren={() => setExpanded((value) => !value)}

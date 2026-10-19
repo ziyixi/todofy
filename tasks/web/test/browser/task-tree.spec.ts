@@ -1,3 +1,4 @@
+import { dragTask, beginTaskDrag, dropTaskOn } from "./drag";
 import {
   expect,
   test,
@@ -150,9 +151,7 @@ test("subtasks start folded and load only on expansion, with nested steps, editi
       response.request().method() === "PATCH" &&
       response.url().includes(`/tasks/${sibling.id}`),
   );
-  await siblingRow
-    .getByRole("button", { name: `Drag ${sibling.title}`, exact: true })
-    .dragTo(editedRow);
+  await dragTask(page, siblingRow.locator(".task-open"), editedRow);
   expect((await ordered).status()).toBe(200);
   await expect
     .poll(() => list.locator(".task-title").allTextContents())
@@ -290,11 +289,8 @@ test("expanded children use bounded pages and participate in selected-task actio
     .click();
   await expect(list.locator(".task-row")).toHaveCount(103);
   await list
-    .getByRole("checkbox", {
-      name: "Select Synthetic paged child 102",
-      exact: true,
-    })
-    .check();
+    .getByText("Synthetic paged child 102", { exact: true })
+    .click({ modifiers: ["ControlOrMeta"] });
   await page
     .locator(".selection-bar")
     .getByRole("button", { name: "Complete", exact: true })
@@ -363,17 +359,13 @@ test("task details reorder both subtasks and steps by dragging and keep the save
       r.request().method() === "PATCH" &&
       r.url().includes(`/tasks/${subtaskB.id}`),
   );
-  await subtasks
-    .getByRole("button", { name: `Drag ${subtaskB.title}`, exact: true })
-    .dragTo(
-      subtasks.locator(".task-child-row").filter({
-        has: page.getByRole("button", {
-          name: subtaskA.title,
-          exact: true,
-        }),
-      }),
-      { targetPosition: { x: 80, y: 3 } },
-    );
+  await dragTask(
+    page,
+    subtasks.getByRole("button", { name: subtaskB.title, exact: true }),
+    subtasks.locator(".task-child-row").filter({
+      has: page.getByRole("button", { name: subtaskA.title, exact: true }),
+    }),
+  );
   expect((await beforeSubtask).status()).toBe(200);
   await expect(subtasks.locator(".task-child-title")).toHaveText([
     subtaskB.title,
@@ -382,15 +374,17 @@ test("task details reorder both subtasks and steps by dragging and keep the save
   const stepTarget = steps.locator(".task-child-row").filter({
     has: page.getByRole("button", { name: stepB.title, exact: true }),
   });
-  const stepBox = await stepTarget.boundingBox();
   const afterStep = page.waitForResponse(
     (r) =>
       r.request().method() === "PATCH" &&
       r.url().includes(`/tasks/${stepA.id}`),
   );
-  await steps
-    .getByRole("button", { name: `Drag ${stepA.title}`, exact: true })
-    .dragTo(stepTarget, { targetPosition: { x: 80, y: stepBox!.height - 3 } });
+  await dragTask(
+    page,
+    steps.getByRole("button", { name: stepA.title, exact: true }),
+    stepTarget,
+    "after",
+  );
   expect((await afterStep).status()).toBe(200);
   await expect(steps.locator(".task-child-title")).toHaveText([
     stepB.title,
@@ -559,9 +553,7 @@ test("main-list dragging can detach a subtask without changing its dates, projec
       r.request().method() === "PATCH" &&
       r.url().includes(`/tasks/${child.id}`),
   );
-  await nested
-    .getByRole("button", { name: `Drag ${child.title}`, exact: true })
-    .dragTo(rootRow, { targetPosition: { x: 80, y: 5 } });
+  await dragTask(page, nested.getByText(child.title, { exact: true }), rootRow);
   expect((await detached).status()).toBe(200);
   await expect(nested.getByText(child.title, { exact: true })).toHaveCount(0);
   const secondDetach = page.waitForResponse(
@@ -569,23 +561,11 @@ test("main-list dragging can detach a subtask without changing its dates, projec
       r.request().method() === "PATCH" &&
       r.url().includes(`/tasks/${other.id}`),
   );
-  const grip = nested.getByRole("button", {
-    name: `Drag ${other.title}`,
-    exact: true,
-  });
-  const gripBox = await grip.boundingBox();
-  await page.mouse.move(gripBox!.x + 8, gripBox!.y + 7);
-  await page.mouse.down();
-  await page.mouse.move(gripBox!.x + 20, gripBox!.y + 7, { steps: 4 });
-  const zone = page.getByRole("region", {
-    name: "Make independent task",
-    exact: true,
-  });
-  await zone.scrollIntoViewIfNeeded();
-  const zoneBox = await zone.boundingBox();
-  await page.mouse.move(zoneBox!.x + 40, zoneBox!.y + 20, { steps: 5 });
-  await page.mouse.move(zoneBox!.x + 42, zoneBox!.y + 21);
-  await page.mouse.up();
+  await beginTaskDrag(page, nested.getByText(other.title, { exact: true }));
+  await dropTaskOn(
+    page,
+    page.getByRole("region", { name: "Make independent task", exact: true }),
+  );
   expect((await secondDetach).status()).toBe(200);
   await page.reload();
   await expect(

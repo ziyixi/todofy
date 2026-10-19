@@ -9,6 +9,18 @@ Its old waiting lists and release identities are historical, not instructions to
 
 ## Current work
 
+### Tasks row selection and whole-row drag (in progress, 2026-10-19 UTC)
+
+`codex/cloud-recovery-tasks` is extending the released task organization work. The owner reported
+that the bulk checkbox beside the completion circle is ambiguous and grip-only dragging cannot
+reparent intuitively. This follow-up uses the existing dnd-kit version for whole-row dragging,
+before/inside/after drop feedback and sidebar drops; bulk selection gets its own mode. Task identity,
+dates, descendants and the Task/Step distinction stay intact. Local lint/type/build, 59 units and all
+65 Chromium/D1 journeys pass. Actual owner Chrome completed whole-title reparent, promotion and sidebar
+project moves with disposable synthetic data. The original and Claude checkouts are not changed. No new
+backend service, schema or API was added. Branch gate/main release pending; see
+[acceptance](docs/tasks-row-drag-verification.md). The old grip-only native drag/MIME handlers are removed.
+
 ### Cloud recovery and task organization: released (2026-10-19 UTC)
 
 `codex/cloud-recovery-tasks` implementation `455e4e8888991ac05ca44f459b7515e3fe831d21` passed complete

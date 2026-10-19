@@ -14,8 +14,9 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 - Desktop Inbox, Today, Upcoming, search, nested projects, sections, labels and saved filters.
 - Task editing, separate Subtask and Step lists, priority, dates, deadlines, structured repeat and completion history.
 - Collapsed inline subtasks in main lists; expand to edit, complete or reorder children without opening their parent.
-- Drag Subtasks or Steps within their own list in the parent editor; the order is saved on drop.
-- Existing editors stay open after Save. Main-list subtasks can be dragged out as independent tasks; Steps stay in details and execution views.
+- Drag a task's title or row: the edges insert beside a task, the middle makes it a subtask. Drag Subtasks or Steps within their own list in the parent editor; the order is saved on drop.
+- Each row normally has one completion circle. Select task in its menu, or Ctrl/Cmd/Shift-click, enters bulk selection with checkboxes in the same position.
+- Existing editors stay open after Save. Main-list subtasks can move to another parent or become independent; Steps stay in details and execution views.
 - Drag to a sidebar project/Inbox to move, a label to add it, or Today to schedule. Native task properties appear separately from ordinary labels.
 - Visible planning stage, context, task options, start-ahead window and Deep/Shallow effort in task details.
 - Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.

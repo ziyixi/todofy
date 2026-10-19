@@ -63,7 +63,7 @@ export function TaskWorkspace({
   openTask,
   editCatalog,
 }: Props) {
-  const { batch, busyIds, selected, setSelected, complete, reorder } = actions;
+  const { batch, busyIds, selected, setSelected, complete } = actions;
   const [historyVisible, setHistoryVisible] = useState(false);
   const project = catalog.projects.find((item) => item.id === route.id);
   return (
@@ -256,8 +256,6 @@ export function TaskWorkspace({
         }
         onOpen={(id) => void openTask(id)}
         onComplete={(task) => void complete(task)}
-        onReorder={(task, before, peers) => void reorder(task, before, peers)}
-        onDetach={(task) => void actions.detach(task)}
         groupBy={
           route.page === "upcoming"
             ? "date"

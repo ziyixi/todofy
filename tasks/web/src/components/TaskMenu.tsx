@@ -6,6 +6,7 @@ import {
   CalendarDays,
   CalendarRange,
   Check,
+  SquareCheck,
   Copy,
   ExternalLink,
   Flag,
@@ -92,6 +93,8 @@ export function TaskMenuItems({
   onOpen,
   onProperty,
   onDelete,
+  onSelect,
+  selected = false,
 }: {
   task: Task;
   catalog: Catalog;
@@ -100,6 +103,8 @@ export function TaskMenuItems({
   onOpen: () => void;
   onProperty: (property: TaskMenuProperty) => void;
   onDelete: () => void;
+  onSelect?: () => void;
+  selected?: boolean;
 }) {
   const today = todayDate(new Date(), catalog.timeZone || undefined);
   const weekday = new Date(`${today}T12:00:00`).getDay();
@@ -236,6 +241,12 @@ export function TaskMenuItems({
         Copy link to task
       </Menu.Item>
       <Menu.Separator className="task-menu-separator" />
+      {onSelect && (
+        <Menu.Item className="task-menu-item" onClick={onSelect}>
+          <SquareCheck size={15} />
+          {selected ? "Deselect task" : "Select task"}
+        </Menu.Item>
+      )}
       <Menu.Item
         className="task-menu-item danger"
         disabled={busy}

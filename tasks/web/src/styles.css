@@ -385,6 +385,7 @@ h1 {
   color: #916c32;
 }
 .complete-button {
+  position: relative;
   padding: 2px 0;
   display: grid;
   place-items: center;
@@ -396,6 +397,8 @@ h1 {
 .complete-button svg {
   stroke-width: 1.5;
 }
+.complete-button .complete-hover-check { position: absolute; opacity: 0; transition: opacity 100ms; }
+.complete-button:hover .complete-hover-check, .complete-button:focus-visible .complete-hover-check { opacity: 1; }
 .priority-1 {
   color: #cf443a;
 }
@@ -458,27 +461,17 @@ h1 {
   opacity: 1;
 }
 .task-select {
-  position: absolute;
-  left: -39px;
-  top: 12px;
-  width: 13px;
-  height: 13px;
-  opacity: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
   accent-color: var(--accent);
 }
-.task-row:hover .task-select,
-.task-select:checked,
-.task-select:focus-visible {
-  opacity: 1;
-}
-.task-row.drop-before::before {
-  content: "";
-  position: absolute;
-  top: -1px;
-  height: 2px;
-  background: var(--accent);
-  left: 0;
-  right: 0;
+.task-selection-slot {
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 24px;
 }
 .task-group-heading {
   font-size: 14px;
@@ -1012,9 +1005,6 @@ h1 {
   }
   .view-header {
     margin-top: 0;
-  }
-  .task-select {
-    left: -20px;
   }
   .drag-handle {
     display: none;

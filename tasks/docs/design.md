@@ -46,6 +46,17 @@ Task fields, effort and Deadline remain visible if the planning service is unava
 The parent editor also saves Subtask and Step ordering on drag/drop within each group. The drop line
 supports insertion before or after another child and changes only `sort_order`. It uses custom child
 order independently of the main view's sort selection; dragging cannot convert a Subtask into a Step.
+Lists and child editors use the existing dnd-kit version. A six-pixel mouse movement starts a drag from
+the title or row surface; other controls keep their ordinary clicks. A floating preview follows the pointer
+and animates on drop. The handle remains for keyboard use. Main-list row edges insert before/after at
+the target's parent level; the middle moves under that task and opens its child branch. Known descendant
+targets are disabled; the existing Worker rejects cycles. Only drop saves a narrow etag-checked update,
+never pointer movement. No new backend method, schema or persistent drag state is needed.
+
+Nested rows use indentation for parent context without repeating the parent title at the right. A normal
+row has one completion circle, with a tick on hover/focus. Select task in the menu, or Ctrl/Cmd/Shift-click,
+enters batch selection: its checkbox replaces that circle in the same slot. Clear exits selection.
+
 Main-list subtasks can also be detached as independent tasks. Sidebar drops move to an active project or
 Inbox, add a chosen label, or schedule Today. They read a fresh task etag and use existing narrow updates;
 project moves preserve descendants. Saved filters have no inferred drop semantics.

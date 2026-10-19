@@ -70,6 +70,7 @@ test("right click and More share actions and contextual dates stay at the clicke
     "Move to",
     "Duplicate",
     "Copy link to task",
+    "Select task",
     "Delete",
   ]);
   const menuBounds = await menu.boundingBox();

@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { Catalog, Task } from "../api";
 import { dateLabel, todayDate } from "../dates";
 import { TaskTreeRow } from "./TaskTreeRow";
 import type { TaskMenuActions } from "./TaskMenu";
 import { useTaskListProperties } from "../useTaskListProperties";
+import { TaskDetachZone } from "./TaskDrag";
 
 export function TaskList({
   tasks,
@@ -13,8 +14,6 @@ export function TaskList({
   onSelect,
   onOpen,
   onComplete,
-  onReorder,
-  onDetach,
   groupBy = "none",
   menuActions,
   showCompleted = false,
@@ -27,15 +26,11 @@ export function TaskList({
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onComplete: (task: Task) => void;
-  onReorder: (task: Task, before: Task, peers?: readonly Task[]) => void;
-  onDetach: (task: Task) => void;
   groupBy?: "none" | "date" | "section";
   menuActions?: TaskMenuActions;
   showCompleted?: boolean;
   orderBy?: string;
 }) {
-  const [draggedTask, setDraggedTask] = useState<Task>();
-  const [overId, setOverId] = useState("");
   const properties = useTaskListProperties(tasks);
   const taskIndex = useMemo(
     () => new Map(tasks.map((task) => [task.id, task])),
@@ -76,11 +71,6 @@ export function TaskList({
     onSelect,
     onOpen,
     onComplete,
-    onReorder,
-    draggedTask,
-    overId,
-    setDraggedTask,
-    setOverId,
     menuActions,
   };
   function heading(key: string): string {
@@ -114,6 +104,7 @@ export function TaskList({
               <TaskTreeRow
                 key={task.id}
                 task={task}
+                peers={items}
                 row={row}
                 planningById={properties.byId}
                 listedIds={listedIds}
@@ -127,28 +118,7 @@ export function TaskList({
           </ul>
         </section>
       ))}
-      {draggedTask?.parentId && draggedTask.kind !== "step" && (
-        <div
-          role="region"
-          aria-label="Make independent task"
-          className={`task-detach-zone ${overId === "detach" ? "is-over" : ""}`}
-          onDragOver={(event) => {
-            event.preventDefault();
-            event.dataTransfer.dropEffect = "move";
-            setOverId("detach");
-          }}
-          onDragLeave={() => setOverId("")}
-          onDrop={(event) => {
-            event.preventDefault();
-            onDetach(draggedTask);
-            setDraggedTask(undefined);
-            setOverId("");
-          }}
-        >
-          Make independent task
-          <span>Keep its project and dates.</span>
-        </div>
-      )}
+      <TaskDetachZone />
     </div>
   );
 }

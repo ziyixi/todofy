@@ -14,7 +14,7 @@ import { todayDate } from "./dates";
 import { settleCompletedTask } from "./task-completion-focus";
 import { taskDropOrder } from "./task-order";
 import type { useTaskView } from "./useTaskView";
-import type { TaskDropTarget } from "./task-drag";
+import type { TaskDropTarget, TaskRowDrop } from "./task-drag";
 
 export function useTaskActions(
   route: Route,
@@ -184,7 +184,7 @@ export function useTaskActions(
   );
   async function patchTask(
     task: Task,
-    values: Partial<TaskDraft>,
+    values: Partial<TaskDraft> & { sortOrder?: number },
     fields: string[],
   ) {
     setBusyIds((current) => new Set([...current, task.id]));
@@ -338,84 +338,79 @@ export function useTaskActions(
       setNotice("Could not copy the link. Open the task and copy its address.");
     }
   }
-  async function reorder(
-    task: Task,
-    before: Task,
-    peers: readonly Task[] = list.tasks,
-  ) {
-    if (
-      task.parentId &&
-      !before.parentId &&
-      task.projectId === before.projectId &&
-      task.sectionId === before.sectionId
-    ) {
-      await detach(task, orderBy === "sort_order" ? before : undefined);
-      return;
-    }
-    if (orderBy !== "sort_order") {
+  async function dropInList(task: Task, target: TaskRowDrop) {
+    if (task.id === target.task.id) return false;
+    const inside = target.position === "inside";
+    const parentId = inside ? target.task.id : target.task.parentId;
+    const sameGroup =
+      task.parentId === parentId &&
+      task.projectId === target.task.projectId &&
+      task.sectionId === target.task.sectionId;
+    if (inside && sameGroup) return false;
+    if (!inside && sameGroup && orderBy !== "sort_order") {
       setNotice("Choose Custom order before dragging tasks.");
-      return;
+      return false;
     }
-    if (
-      task.parentId !== before.parentId ||
-      task.projectId !== before.projectId ||
-      task.sectionId !== before.sectionId
-    ) {
-      setNotice("Reorder tasks within the same project, section and parent.");
-      return;
-    }
-    const siblings = peers.filter(
-      (item) =>
-        item.parentId === before.parentId &&
-        item.sectionId === before.sectionId &&
-        item.projectId === before.projectId,
-    );
-    const sortOrder = taskDropOrder(siblings, task.id, before.id);
-    if (sortOrder === undefined) return;
-    setBusyIds(new Set([task.id]));
-    try {
-      await api.updateTask({
-        requestId: crypto.randomUUID(),
-        etag: task.etag,
-        task: { name: task.name, sortOrder },
-        updateMask: { paths: ["sort_order"] },
+    let sortOrder: number | undefined;
+    if (inside) {
+      // Insert first, including when this parent's children have never been expanded.
+      const children = await api.listTasks({
+        parentId: target.task.id,
+        pageSize: 1,
+        orderBy: "sort_order",
+        includeCompleted: true,
       });
-      await list.read();
-    } catch (reason) {
-      setNotice(describeError(reason));
-    } finally {
-      setBusyIds(new Set());
+      sortOrder = (children.tasks[0]?.sortOrder ?? 0) - 1;
+    } else {
+      const siblings = target.peers
+        .filter(
+          (item) =>
+            item.parentId === target.task.parentId &&
+            item.sectionId === target.task.sectionId &&
+            item.projectId === target.task.projectId,
+        )
+        .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
+      sortOrder = taskDropOrder(
+        siblings,
+        task.id,
+        target.task.id,
+        target.position === "after",
+      );
     }
+    if (sortOrder === undefined || (sameGroup && sortOrder === task.sortOrder))
+      return false;
+    await patchTask(
+      task,
+      {
+        parentId,
+        projectId: target.task.projectId,
+        sectionId: target.task.sectionId,
+        sortOrder,
+      },
+      ["parent_id", "project_id", "section_id", "sort_order"],
+    );
+    return true;
   }
-  async function detach(task: Task, before?: Task) {
-    if (!task.parentId || task.kind === "step") return;
-    const siblings = list.tasks.filter(
-      (other) =>
-        !other.parentId &&
-        other.projectId === task.projectId &&
-        other.sectionId === task.sectionId,
-    );
-    const sortOrder = before
-      ? taskDropOrder(siblings, task.id, before.id)
-      : Math.max(0, ...siblings.map((other) => other.sortOrder ?? 0)) + 1;
-    if (sortOrder === undefined) return;
-    setBusyIds(new Set([task.id]));
-    setNotice("");
-    try {
-      await api.updateTask({
-        requestId: crypto.randomUUID(),
-        etag: task.etag,
-        task: { name: task.name, parentId: "", sortOrder },
-        updateMask: { paths: ["parent_id", "sort_order"] },
-      });
-      taskChanged();
-      await list.read();
-      setNotice("Task moved out of its parent");
-    } catch (reason) {
-      setNotice(describeError(reason));
-    } finally {
-      setBusyIds(new Set());
-    }
+  async function detach(task: Task) {
+    if (!task.parentId || task.kind === "step") return false;
+    const sortOrder =
+      Math.max(
+        0,
+        ...list.tasks
+          .filter(
+            (other) =>
+              !other.parentId &&
+              other.projectId === task.projectId &&
+              other.sectionId === task.sectionId,
+          )
+          .map((other) => other.sortOrder ?? 0),
+      ) + 1;
+    await patchTask(task, { parentId: "", sortOrder }, [
+      "parent_id",
+      "sort_order",
+    ]);
+    setNotice("Task moved out of its parent");
+    return true;
   }
   async function batch(action: "complete" | "move", projectId = "") {
     const ids = [...selected];
@@ -482,7 +477,7 @@ export function useTaskActions(
     deleteTask,
     complete,
     finishTask,
-    reorder,
+    dropInList,
     detach,
     batch,
     busyIds,

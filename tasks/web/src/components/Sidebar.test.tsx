@@ -46,7 +46,6 @@ function sidebar() {
       route={{ page: "inbox", id: "" }}
       catalog={catalog}
       onAddTask={vi.fn()}
-      onTaskDrop={vi.fn()}
       onAddProject={vi.fn()}
       onEditCatalog={vi.fn()}
       onCatalogSaved={async () => {}}
