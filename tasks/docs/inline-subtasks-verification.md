@@ -26,26 +26,60 @@ Normal date labels add the year outside the account's current year; month/week h
 Ordinary API views select outcome tasks. Explicit-ID reads, parent reads and `view=all` retain Steps;
 the dependency picker uses `all` with bounded search text. No IDL or database migration is needed.
 
+Row metadata now shows native stage, action/status options, effort, context, Deadline and start-ahead
+as compact `#...` properties. Actual labels have tag icons and a divider. Planning reads are batched by
+100 IDs, with a reserved line that keeps the row and real labels still as the reply arrives. Row reads
+do not seed the full-detail cache. Core outages leave task content visible with a specific status.
+
+Dragging to sidebar project/Inbox uses the existing family move, clears the old parent/section and
+preserves descendants. Label drops add membership; Today moves the calendar date while preserving the
+real Deadline. All start with a fresh task etag. Saved filters have no guessed drop operation.
+
+Plan's other desktop lanes remain in one row of vertical columns. Committed alone spans the row below,
+with horizontal cards aligned to the candidate columns; the existing narrow paired/single-column
+layouts remain. Alignment also keeps the existing keyboard spatial navigation on adjacent cards.
+Outcomes, the commitment overview, next Steps, Quick and scheduled cards now expose completion through
+the existing command queue and request receipts. Calendar completion passes its actual FlowDay date.
+
+Quick is always standalone. Core projects existing Quick rows as executable without a read-side write
+or backfill, enforces the same rule on new edits, and keeps content labels separate. Both editors show
+Standalone checked and unavailable while Quick is selected. Clearing Quick retains Standalone until
+the owner explicitly clears it. Recurrence, deadlines, task kind and real labels are unchanged.
+
 Project Edit also waits for catalog metadata: an early click previously opened the Add project form
 because the selected project was still undefined. A browser regression reproduces that exact race.
 
 ## Local checks
 
-On 2026-10-18, Tasks web lint, typecheck, build and all 56 unit checks passed. All 58 Chromium journeys
+On 2026-10-18 (America/Los_Angeles), Tasks web lint, typecheck, build and all 57 unit checks passed. All 61 Chromium journeys
 against real local D1 passed, including folded first load, nested outcomes, hidden Steps, editing, sibling
 dragging, completion/reopening, adding the first child, Today de-duplication, bounded pagination and
 selected-child actions, save geometry and persisted outdent. Existing cached-dialog and popup layout
-regressions also passed. Worker lint/type, 2 units and 41 runtime checks passed. Read-budget measurements
+regressions also passed. Sidebar family moves, additive labels, Today with a preserved Deadline, batched
+property reads with stable row geometry and Quick's immediate scheduling controls are covered too.
+Worker lint/type, 2 units and 41 runtime checks passed. Read-budget measurements
 remain 179 rows for a full Catalog, 10 for metadata only and 298 across count-history growth, all zero writes.
 
 The added detail-drag regression performs an upward Subtask move and a downward Step move while the
 main list uses Name order. It reloads/reopens the editor and verifies persisted ordering, unchanged
 parent/kind/estimate/completion fields through real D1 reads. Existing main-list dragging and warm/narrow
-dialog checks passed too. The final combined source is awaiting the branch's complete gate.
+dialog checks passed too. Shared planning typecheck and 23 units pass; its legacy consumer retains 308
+passing units. Core's focused 34 checks include real Python/TasksApi/D1 execution: existing Quick rows
+gain the effective standalone flag while the physical row and revision remain unchanged, new writes
+enforce it, and exact request replays still work. The complete branch gate and final live checks are pending.
 
 Real owner Chrome also verified collapsed first load and nested expansion in the ephemeral preview.
 Only synthetic tasks appear in these screenshots. Chrome Save leaves the editor frame unchanged and
 shows the full future year. The newest follow-up release checks are pending.
+
+The same Chrome also rendered the actual bundled planning components with synthetic data: candidate
+columns remain together, Committed is below them, and completing an outcome changes its count from
+eight to seven. Completing an arranged Step removes it from the tray/calendar and reduces the day estimate.
+These are synthetic UI checks, not writes to the owner's production tasks.
+
+![Committed below the unchanged candidate columns, after a synthetic completion](images/plan-committed-region.png)
+
+![A synthetic scheduled Step has been completed in Plan](images/plan-step-completed.png)
 
 ![Expanded outcome subtasks in the synthetic Chrome preview](images/inline-subtasks.png)
 

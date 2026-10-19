@@ -9,7 +9,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { create } from "@ziyixi/proto/protobuf";
 import { PlanningTaskSchema } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 import { createPlanningActions, planningTask } from "../src/api";
-import { hasPlanningFlag } from "../src/domain";
+import { hasPlanningFlag, isSchedulable } from "../src/domain";
 import { canMarkActive, deadlineState } from "../src/deadlines";
 import { canPark, isDateCandidate } from "../src/planning-outcomes";
 import { withStage } from "../src/plan-updates";
@@ -81,6 +81,13 @@ it("keeps ordinary tags separate from native planning flags, including an empty 
   expect(deadlineState(task, "2026-10-17")?.kind).toBe("window");
   expect(canMarkActive(plan)).toBe(true);
   expect(canPark(plan)).toBe(true);
+});
+
+it("makes native Quick schedulable without requiring a separate standalone flag", () => {
+  const quick = { ...task, kind: "task" as const, planningFlags: ["quick"] };
+  expect(hasPlanningFlag(quick, "task")).toBe(true);
+  expect(isSchedulable(quick)).toBe(true);
+  expect(isSchedulable({ ...quick, planningFlags: [] })).toBe(false);
 });
 
 it("puts native states in the existing lanes and keeps tags unchanged on a stage drag", () => {
@@ -410,4 +417,16 @@ it("keeps grouped native flags checked and disabled without local draft state", 
     (screen.getByRole("checkbox", { name: "Routine" }) as HTMLInputElement)
       .checked,
   ).toBe(true);
+  rerender(
+    <TaskEditor
+      {...props}
+      busy={false}
+      task={{ ...props.task, kind: "task", planningFlags: ["quick"] }}
+    />,
+  );
+  const standalone = screen.getByRole("checkbox", {
+    name: "Schedule as a step",
+  }) as HTMLInputElement;
+  expect(standalone.checked).toBe(true);
+  expect(standalone.disabled).toBe(true);
 });

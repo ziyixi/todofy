@@ -5,6 +5,10 @@ import { displayedTitle, formattedMinutes, taskIndex } from "./domain";
 import { dragHandle } from "./drag-announcements";
 import { outcomeArea, outcomeColor, outcomeForTask } from "./planning-outcomes";
 import { pendingStep } from "./plan-updates";
+import {
+  CompleteTaskButton,
+  type CompletePlanningTask,
+} from "./CompleteTaskButton";
 import { PendingMark } from "./StatusMarks";
 import { words } from "./i18n";
 import { isoWeek } from "./weekly-review";
@@ -27,6 +31,7 @@ interface Props {
   /** The ID of the drag instructions, which every handle names. */
   dragHint: string;
   editTask: (task: PlanningTask) => void;
+  completeTask: CompletePlanningTask;
   onWeekChange: (week: string) => void;
   onRemove: (day: FlowDayPlan, id: string) => void;
 }
@@ -41,6 +46,7 @@ export function PlanningCalendar({
   pending,
   dragHint,
   editTask,
+  completeTask,
   onWeekChange,
   onRemove,
 }: Props) {
@@ -133,6 +139,7 @@ export function PlanningCalendar({
             pending={pending}
             dragHint={dragHint}
             editTask={editTask}
+            completeTask={completeTask}
             onSelect={() => setSelectedDate(day.date)}
             onRemove={(id) => onRemove(day, id)}
           />
@@ -190,6 +197,7 @@ function CalendarDay({
   pending,
   dragHint,
   editTask,
+  completeTask,
   onSelect,
   onRemove,
 }: {
@@ -205,6 +213,7 @@ function CalendarDay({
   pending?: ReadonlySet<string>;
   dragHint: string;
   editTask: Props["editTask"];
+  completeTask: CompletePlanningTask;
   onSelect: () => void;
   onRemove: (id: string) => void;
 }) {
@@ -252,6 +261,7 @@ function CalendarDay({
             pending={pending?.has(pendingStep(day.date, id)) ?? false}
             dragHint={dragHint}
             editTask={editTask}
+            completeTask={completeTask}
             onRemove={onRemove}
           />
         ))}
@@ -277,6 +287,7 @@ function CalendarStep({
   pending,
   dragHint,
   editTask,
+  completeTask,
   onRemove,
 }: {
   id: string;
@@ -290,6 +301,7 @@ function CalendarStep({
   pending: boolean;
   dragHint: string;
   editTask: Props["editTask"];
+  completeTask: CompletePlanningTask;
   onRemove: (id: string) => void;
 }) {
   const task = taskIndex(plan.tasks).get(id);
@@ -361,6 +373,14 @@ function CalendarStep({
           {title}
         </button>
         {pending && <PendingMark language={language} />}
+        {task && (
+          <CompleteTaskButton
+            task={task}
+            language={language}
+            disabled={busy || pending}
+            onComplete={() => completeTask(task, day.date)}
+          />
+        )}
         <button
           className="planning-step-remove"
           disabled={busy || timing || pending}
@@ -414,7 +434,14 @@ const dateStyles = {
   weekday: { weekday: "short" },
   range: { month: "short", day: "numeric", year: "numeric" },
   day: { weekday: "short", month: "short", day: "numeric" },
+  dayYear: {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  },
   monthDay: { month: "short", day: "numeric" },
+  monthDayYear: { year: "numeric", month: "short", day: "numeric" },
 } satisfies Record<string, Intl.DateTimeFormatOptions>;
 const dateFormats = new Map<string, Intl.DateTimeFormat>();
 /** Formatters are costly to construct, so each language and style is built once. */
@@ -435,11 +462,17 @@ export function shortDay(date: string, language: Language): string {
 }
 /** "Mon, Oct 12" or "10月12日周一"; ISO dates stay for storage keys. */
 export function readableDate(date: string, language: Language): string {
-  return dateFormat(language, "day").format(dayDate(date));
+  const style =
+    Number(date.slice(0, 4)) === new Date().getFullYear() ? "day" : "dayYear";
+  return dateFormat(language, style).format(dayDate(date));
 }
 /** "Oct 12" or "10月12日". */
 export function monthDay(date: string, language: Language): string {
-  return dateFormat(language, "monthDay").format(dayDate(date));
+  const style =
+    Number(date.slice(0, 4)) === new Date().getFullYear()
+      ? "monthDay"
+      : "monthDayYear";
+  return dateFormat(language, style).format(dayDate(date));
 }
 /** "Week 42 · from Oct 12" or "第 42 周 · 10月12日起", with the ISO week number. */
 export function weekLabel(weekStart: string, language: Language): string {

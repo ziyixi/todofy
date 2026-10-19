@@ -664,6 +664,7 @@ export function App({
                     : () => setSelectedId("board-labels")
                 }
                 completeReview={(task) => complete(task, "")}
+                completeTask={(task, day) => void complete(task, day)}
                 dependencyNotices={dependencyNotices}
                 onReviewShown={onReviewShown}
                 onOpenMailbox={() => onViewChange?.("mailbox")}

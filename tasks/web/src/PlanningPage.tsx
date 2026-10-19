@@ -13,11 +13,13 @@ export default function PlanningPage({
   mutationRevision,
   onOpenTask,
   onSettings,
+  onTaskChanged,
 }: {
   page: "plan" | "focus";
   mutationRevision: number;
   onOpenTask: (id: string) => void;
   onSettings: () => void;
+  onTaskChanged: () => void;
 }) {
   const actions = useMemo(() => {
     const actions = createPlanningActions(
@@ -31,6 +33,14 @@ export default function PlanningPage({
     );
     return {
       ...actions,
+      async completeTask(...args: Parameters<typeof actions.completeTask>) {
+        try {
+          await actions.completeTask(...args);
+        } finally {
+          // Completion can be saved even when the following Focus settlement fails.
+          onTaskChanged();
+        }
+      },
       async updateEstimate(id: string, minutes: number) {
         const task = await api.getTask({ name: `tasks/${id}` });
         await api.updateTask({
@@ -41,7 +51,7 @@ export default function PlanningPage({
         });
       },
     };
-  }, []);
+  }, [onTaskChanged]);
   const [snapshot, setSnapshot] = useState<PlusSnapshot>();
   const [planView, updatePlanView] = usePlanView();
   return (

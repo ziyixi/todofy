@@ -514,6 +514,21 @@ async function setupPlanner(context: BrowserContext, worker: Worker) {
       }
       if (url.pathname.endsWith("/tasks:completeTask")) {
         state.tasks = state.tasks.filter((task) => task.id !== body.task_id);
+        const flowDate = String(body.flow_date ?? "");
+        if (flowDate) {
+          state.days[flowDate] = (state.days[flowDate] ?? []).filter(
+            (id) => id !== body.task_id,
+          );
+          if (
+            state.timer.task_id === body.task_id &&
+            state.timer.flow_date === flowDate
+          )
+            state.timer = {
+              name: "timerSession",
+              state: "idle",
+              etag: "completed",
+            };
+        }
         // Todofy records the completion for what waits for the task.
         for (const dependency of state.dependencies)
           if (dependency.prerequisite_id === body.task_id)

@@ -29,15 +29,26 @@ Task and Subtask share `kind=task`; their hierarchy describes outcomes. An execu
 resource with `kind=step` and a Task/Subtask parent. A Step cannot contain children. Only Steps and Tasks
 explicitly marked Standalone action enter the day calendar. Adding an ordinary Subtask does not make it a Step.
 The editor separates Subtasks and Steps, with completion, reopening, deletion and Step estimates in each list.
+Quick implies Standalone: new writes enforce it, and existing Quick state is projected as standalone without
+a database backfill. Clearing Quick retains Standalone until it is explicitly cleared.
 
 Main lists also expose collapsed child branches. Expansion reads the existing parent query in bounded
 pages; the same row actions work for children. Today/search children already present in the root result
-are not duplicated. Completed visibility follows the current view. Child refreshes retain the rendered
+are not duplicated. Ordinary lists/counts omit Steps; parent, explicit-ID and `all` reads retain them.
+Completed visibility follows the current view. Child refreshes retain the rendered
 rows until their replacement arrives; collapsed branches make no background reads.
+
+Row metadata separates native `#...` properties from real labels with a divider and tag icons. Planning
+facts use bounded ID batches (100 per request), separately from the detail cache; a reserved text line
+prevents asynchronous flag arrival from changing row geometry. Opening a child branch reads only that branch.
+Task fields, effort and Deadline remain visible if the planning service is unavailable.
 
 The parent editor also saves Subtask and Step ordering on drag/drop within each group. The drop line
 supports insertion before or after another child and changes only `sort_order`. It uses custom child
 order independently of the main view's sort selection; dragging cannot convert a Subtask into a Step.
+Main-list subtasks can also be detached as independent tasks. Sidebar drops move to an active project or
+Inbox, add a chosen label, or schedule Today. They read a fresh task etag and use existing narrow updates;
+project moves preserve descendants. Saved filters have no inferred drop semantics.
 
 Title, description and visible planning options stay in the main editor. Project, Date, Deadline, Start ahead,
 priority, labels and Effort occupy the narrow property rail. Start ahead accepts days or weeks before the
@@ -55,6 +66,8 @@ and points to task details for explicit executable timing; Steps retain the ente
 Existing descriptions render Markdown and bare links; Edit description opens the draft and Done returns to
 the preview. Save changes persists the draft. The renderer loads in its own chunk, omits remote images and
 raw HTML, and opens links only on a user click. A failed completion shows its reason inside the open editor.
+Existing saves keep the editor open with the returned write baseline and unchanged frame/scroll; an
+unchanged save writes nothing. Creation, completion and deletion retain their existing close behavior.
 
 Quick Add opens with `Q`; `Ctrl/Cmd+Enter` saves, Escape and backdrop close the dialog. Create actions retain
 their request identity after a lost response. Lists support selection, batch completion/move and custom
@@ -73,6 +86,11 @@ does not require label mapping or an extension connection. The retired Todoist a
 projection internally; it does not define the native public label catalog.
 Dragging a task into a planning day changes the FlowDay queue, preserving its task date and real deadline.
 Native task edits invalidate the mounted planning snapshot through the existing refresh path.
+Plan keeps the candidate columns vertically stacked within their existing desktop row. Committed alone
+spans the row below, with horizontal cards aligned to those columns; narrow layouts keep the existing
+paired/single-column behavior. Review cards, the commitment overview, next Steps, Quick and scheduled
+Steps reuse the existing completion operation. A calendar completion supplies its actual FlowDay date.
+The Tasks host invalidates normal task caches/counts after completion, including partial settlement failure.
 
 ## Focus completion
 

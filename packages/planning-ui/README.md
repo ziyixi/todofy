@@ -43,3 +43,8 @@ Reloads hydrate the same session; pause/resume keeps its original flow date. Vis
 once per minute and refresh the task view at account midnight. Finishing a pomodoro uses the existing atomic
 FlowDay finish command, which caps recorded time even if the browser was closed when the countdown ended.
 Native estimates come from Tasks while FlowDay's cached task feed catches up.
+
+Review keeps candidate columns together and gives Committed a separate full-width row of horizontal cards.
+Plan's outcome, Step, Quick and calendar checkboxes use the same completion receipts and settlement as Focus;
+calendar cards pass their own flow date. Native Quick actions always qualify as standalone, even when an
+older response contains only the Quick flag. Ordinary labels do not imply native planning properties.

@@ -278,8 +278,14 @@ def test_native_planning_state_replays_and_rejects_stale_writes_without_changing
     # Even the first action cannot overwrite a later plan after its original receipt was lost.
     assert call(native, "/native/state", request) == {"error": 409}
     [changed] = call(native, "/native/state", {"action": "overlay", "tasks": [projected]})["tasks"]
-    assert set(changed["labels"]) == {label["title"], "quarter", "home", "quick"}
+    assert set(changed["labels"]) == {label["title"], "quarter", "home", "quick", "task"}
+    assert changed["_native_plan_state"]["task"] is True
     assert changed["_native_plan_rev"] == 2
+    # Existing Quick rows become schedulable without a backfill or a read-side write.
+    assert native.d1(
+        "SELECT quick,task,rev FROM plan_task_state WHERE task_id IN "
+        "(SELECT id FROM plan_tasks WHERE external_id='" + task["id"] + "')"
+    ) == [{"quick": 1, "task": 0, "rev": 2}]
     assert native.d1("SELECT provider FROM plan_tasks WHERE external_id='" + task["id"] + "'") == [
         {"provider": "tasks"}
     ]
@@ -330,7 +336,7 @@ def test_actual_native_plan_actions_keep_gtd_state_out_of_task_labels(native, re
     }
     planned = planning(native, "SetTaskPlan", **request)["task"]
     assert planned["stage"] == planned["explicit_stage"] == "committed"
-    assert planned["area"] == "work" and planned["planning_flags"] == ["quick"]
+    assert planned["area"] == "work" and planned["planning_flags"] == ["quick", "task"]
     assert planned["labels"] == [label["title"]]
     assert rpc(native, "GetTask", {"name": task["name"]}) == task
     assert planning(native, "SetTaskPlan", **request)["task"] == planned

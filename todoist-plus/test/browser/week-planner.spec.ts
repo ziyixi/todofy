@@ -794,6 +794,9 @@ test("a quick card under Next steps drags into a day like a step, with one FlowD
         }
       ).plannerState.tasks.push({
         id: "quick-one",
+        kind: "task",
+        explicit_stage: "none",
+        planning_flags: ["quick"],
         title: "Synthetic quick errand",
         area: "work",
         stage: "none",
@@ -903,7 +906,7 @@ test("a card dropped on another card of its lane takes its place at once, writes
     await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {
       steps: 18,
     });
-    // Over the audit card, moving down: the line is under it, and nothing in the DOM has moved.
+    // Over the audit card, moving right: the line is under it, and nothing in the DOM has moved.
     await expect(committed.locator(".is-insert-after")).toHaveCount(1);
     await expect(
       committed.locator(".is-insert-after [data-outcome-id]"),
@@ -987,14 +990,14 @@ test("a card let go in the gap between two cards of its lane moves nothing and w
       .locator('.review-draggable:has([data-outcome-id="audit"])')
       .boundingBox())!;
     // The middle of the 7px gap between the two cards.
-    const gap = (above.y + above.height + below.y) / 2;
-    expect(below.y - (above.y + above.height)).toBeCloseTo(7, 0);
+    const gap = (above.x + above.width + below.x) / 2;
+    expect(below.x - (above.x + above.width)).toBeCloseTo(7, 0);
     await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
     await page.mouse.down();
     await page.mouse.move(from.x + from.width / 2 + 8, from.y + 8, {
       steps: 3,
     });
-    await page.mouse.move(above.x + above.width / 2, gap, { steps: 18 });
+    await page.mouse.move(gap, above.y + above.height / 2, { steps: 18 });
     await expect(committed.locator(".is-insert-after")).toHaveCount(0);
     await expect(committed.locator(".is-insert-before")).toHaveCount(0);
     await page.mouse.up();
@@ -1032,7 +1035,8 @@ test("the keyboard moves a card card by card in its lane, Escape puts it back, a
     // Picked up, moved and put back with Escape: nothing changes, and focus stays.
     await handle.focus();
     await page.keyboard.press("Space");
-    await page.keyboard.press("ArrowDown");
+    await expect(committed.locator(".is-dragging")).toHaveCount(1);
+    await page.keyboard.press("ArrowRight");
     await page.keyboard.press("Escape");
     // The next drag starts once this one's drop animation is over.
     await expect(
@@ -1045,11 +1049,21 @@ test("the keyboard moves a card card by card in its lane, Escape puts it back, a
       "audit",
     ]);
     expect(await plannerWrites(worker)).toEqual([]);
-    // Down two, up one, dropped: on the launch card's place, with focus still on its handle.
+    // Right two, left one, dropped: each arrow waits for its visible insertion target.
     await page.keyboard.press("Space");
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("ArrowUp");
+    await expect(committed.locator(".is-dragging")).toHaveCount(1);
+    await page.keyboard.press("ArrowRight");
+    await expect(
+      committed.locator(".is-insert-after [data-outcome-id]"),
+    ).toHaveAttribute("data-outcome-id", "launch");
+    await page.keyboard.press("ArrowRight");
+    await expect(
+      committed.locator(".is-insert-after [data-outcome-id]"),
+    ).toHaveAttribute("data-outcome-id", "audit");
+    await page.keyboard.press("ArrowLeft");
+    await expect(
+      committed.locator(".is-insert-after [data-outcome-id]"),
+    ).toHaveAttribute("data-outcome-id", "launch");
     await page.keyboard.press("Space");
     await expect
       .poll(() => laneOrder(page, "Committed"))
@@ -1068,7 +1082,7 @@ test("the keyboard moves a card card by card in its lane, Escape puts it back, a
       .getByRole("button", { name: "Move outcome: Synthetic week candidate" })
       .focus();
     await page.keyboard.press("Space");
-    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Space");
     await expect(
       committed.locator('[data-outcome-id="candidate"]'),

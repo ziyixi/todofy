@@ -379,6 +379,50 @@ test("ordinary task planning, effort and deadline lead are visible and survive s
   ).toHaveValue("weeks");
 });
 
+test("Quick automatically enables standalone scheduling and keeps it checked after saving", async ({
+  page,
+  request,
+}) => {
+  const planning = await planningService(page, request);
+  const task = await createTask(
+    request,
+    `Synthetic Quick action ${crypto.randomUUID()}`,
+    { due_date: "2030-01-02" },
+  );
+  const dialog = await openTask(page, task.id);
+  const standalone = dialog.getByRole("checkbox", {
+    name: "Standalone action",
+    exact: true,
+  });
+  await expect(standalone).not.toBeChecked();
+  await dialog
+    .getByRole("checkbox", { name: "Quick action", exact: true })
+    .check();
+  await expect(standalone).toBeChecked();
+  await expect(standalone).toBeDisabled();
+  await dialog.getByRole("button", { name: "Date", exact: true }).click();
+  await expect(
+    dialog.getByRole("button", { name: "Time options", exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "Date", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  expect(planning.get(task.id)!.flags).toEqual(new Set(["task", "quick"]));
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
+  await page.reload();
+  await expect(standalone).toBeChecked();
+  await expect(standalone).toBeDisabled();
+  await dialog
+    .getByRole("checkbox", { name: "Quick action", exact: true })
+    .uncheck();
+  await expect(standalone).toBeChecked();
+  await expect(standalone).toBeEnabled();
+});
+
 test("repeat controls save calendar rules while only steps expose a clock time", async ({
   page,
   request,

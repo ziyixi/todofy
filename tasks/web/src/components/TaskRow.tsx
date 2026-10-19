@@ -2,19 +2,16 @@ import { useRef, useState, type ReactNode } from "react";
 import { ContextMenu } from "@base-ui/react/context-menu";
 import { Menu } from "@base-ui/react/menu";
 import {
-  CalendarDays,
   Check,
   ChevronRight,
   Circle,
-  Flag,
   GripVertical,
   MoreHorizontal,
-  Repeat2,
-  Tag,
-  Timer,
 } from "lucide-react";
 import { type Catalog, type Task, describeError } from "../api";
-import { dateLabel } from "../dates";
+import { TaskMetadata } from "./TaskMetadata";
+import type { PlanningTask } from "../task-planning";
+import { TASK_DRAG_TYPE } from "../task-drag";
 import { Dialog } from "./Dialog";
 import {
   TaskMenuChooser,
@@ -25,6 +22,7 @@ import {
 
 export interface TaskRowProps {
   task: Task;
+  planning?: PlanningTask;
   catalog: Catalog;
   today: string;
   parentTitle?: string;
@@ -48,6 +46,7 @@ export interface TaskRowProps {
 
 export function TaskRow({
   task,
+  planning,
   catalog,
   today,
   parentTitle,
@@ -69,7 +68,6 @@ export function TaskRow({
   peers,
 }: TaskRowProps) {
   const project = catalog.projects.find((item) => item.id === task.projectId);
-  const due = task.dueDate || task.dueDatetime.slice(0, 10);
   const more = useRef<HTMLButtonElement>(null);
   const contextAnchor = useRef<HTMLSpanElement>(null);
   const origin = useRef<"context" | "more">("more");
@@ -153,6 +151,7 @@ export function TaskRow({
           setDraggedTask(task);
           event.dataTransfer.effectAllowed = "move";
           event.dataTransfer.setData("text/plain", task.id);
+          event.dataTransfer.setData(TASK_DRAG_TYPE, task.id);
         }}
         onDragEnd={() => {
           setDraggedTask(undefined);
@@ -181,49 +180,12 @@ export function TaskRow({
         {task.descriptionPreview && (
           <span className="task-description">{task.descriptionPreview}</span>
         )}
-        <span className="task-meta">
-          {due && (
-            <span className={due < today && !task.completed ? "overdue" : ""}>
-              <CalendarDays size={12} />
-              {dateLabel(due, today)}
-              {task.dueDatetime &&
-                ` ${new Date(task.dueDatetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: task.dueTimezone || catalog.timeZone || undefined })}`}
-            </span>
-          )}
-          {task.recurrence && (
-            <span title={task.recurrence}>
-              <Repeat2 size={12} />
-              {task.recurrence}
-            </span>
-          )}
-          {task.deadline && (
-            <span className="deadline">
-              <Flag size={12} />
-              {dateLabel(task.deadline, today)}
-            </span>
-          )}
-          {task.childCount > 0 && (
-            <span>
-              <ChevronRight size={12} />
-              {task.completedChildCount}/{task.childCount}
-            </span>
-          )}
-          {task.durationMinutes > 0 && (
-            <span>
-              <Timer size={12} />
-              {task.durationMinutes}m
-            </span>
-          )}
-          {task.labelIds.map((id) => {
-            const label = catalog.labels.find((item) => item.id === id);
-            return label ? (
-              <span key={id}>
-                <Tag size={11} style={{ color: label.color || undefined }} />
-                {label.title}
-              </span>
-            ) : null;
-          })}
-        </span>
+        <TaskMetadata
+          task={task}
+          catalog={catalog}
+          today={today}
+          planning={planning}
+        />
       </button>
       <span className="task-context">
         {parentTitle && (

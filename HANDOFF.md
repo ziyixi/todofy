@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-18 UTC. Keep this file focused on active work, open acceptance and dated compatibility constraints.
+Updated 2026-10-19 UTC. Keep this file focused on active work, open acceptance and dated compatibility constraints.
 Move completed rollout detail to a dated record and link it here. Repository rules are in [AGENTS](AGENTS.md);
 service entry points are in [README](README.md). Never put private content, credentials or raw production output here.
 
@@ -33,9 +33,18 @@ Owner follow-ups keep existing editors open after Save, hide Steps from ordinary
 subtasks through main-list dragging, and show years outside the current account year. Those changes pass
 56 web units, 58 Chromium/local-D1 journeys and 41 Worker runtime checks. Actual Chrome confirms Save
 retains the frame, a future deadline includes its year, and expanded main lists omit Steps.
-Still implementing the newer requests: native property tags, sidebar category drops, completion from
-Plan, and a full-width Committed region below other stages. Final combined gate and production checks
-remain. No schema, wire format, dependency or persistent cache was added.
+The newer requests are implemented: native property tags separated from real labels, batched list
+planning reads, sidebar project/Inbox/label/Today drops, and Plan outcome/Step completion through the
+existing receipt/Focus settlement path. Committed alone occupies the full-width row below the existing
+desktop columns; candidate cards remain vertical. The owner's correction explicitly rules out splitting
+the other desktop columns into separate rows. Real Chrome synthetic checks confirm this layout and both
+outcome and scheduled-Step completion; no real tasks were edited for those checks.
+Quick now implies standalone in native projections/writes and both editors. Existing Quick rows need
+no backfill; a real Worker/D1 test confirms reads retain their physical row/revision. Core's focused
+34 checks, shared planning's 23 units, 57 Tasks units and 61 Tasks browser/D1 journeys pass.
+The legacy shared-UI consumer's final packaged browser checks and the complete branch gate are being
+finished; final production verification remains. No schema, wire format, dependency, service or
+persistent cache was added. The original/Claude checkouts remain untouched.
 See [acceptance](tasks/docs/inline-subtasks-verification.md).
 
 ### Tasks workflow refinement (2026-10-18 UTC)

@@ -26,7 +26,7 @@ def state_from_labels(labels: Iterable[str], mapping: list[dict[str, Any]] | Non
 
 
 def labels_from_state(state: dict[str, Any]) -> list[str]:
-    labels = [flag for flag in FLAG_NAMES if state.get(flag)]
+    labels = [flag for flag in FLAG_NAMES if state.get(flag) or (flag == "task" and state.get("quick"))]
     if role := plus.STAGES[state.get("stage", "none")]:
         labels.append(role)
     if role := plus.AREAS[state.get("area", "unassigned")]:
@@ -40,7 +40,7 @@ def apply_plan(state: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]
         raise ValueError("BAD_REQUEST")
     if request.get("blocked"):
         raise ValueError("BAD_REQUEST")
-    updated = {**state}
+    updated = {**state, "task": bool(state.get("task") or state.get("quick"))}
     for field, allowed in (("stage", plus.STAGES), ("area", plus.AREAS)):
         if field in request:
             if request[field] not in allowed:
@@ -54,6 +54,8 @@ def apply_plan(state: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]
             updated[flag] = request[field]
     if request.get("parked"):
         updated.update(stage="none", active=False)
+    if updated.get("quick"):
+        updated["task"] = True
     return updated
 
 

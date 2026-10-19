@@ -30,6 +30,7 @@ async function planProps(language: Language): Promise<PlanViewProps> {
     editTask: vi.fn(),
     onWeekChange: vi.fn(),
     onLabels: vi.fn(),
+    completeTask: vi.fn(),
     completeReview: vi.fn(),
   };
 }
@@ -37,10 +38,12 @@ async function planProps(language: Language): Promise<PlanViewProps> {
 it("shows dates as people read them, with the ISO week number", () => {
   expect(readableDate("2026-10-12", "en")).toBe("Mon, Oct 12");
   expect(readableDate("2026-10-12", "zh")).toBe("10月12日周一");
+  expect(readableDate("2040-04-22", "en")).toContain("2040");
+  expect(readableDate("2040-04-22", "zh")).toContain("2040年");
   expect(weekLabel("2026-10-12", "en")).toBe("Week 42 · from Oct 12");
   expect(weekLabel("2026-10-12", "zh")).toBe("第 42 周 · 10月12日起");
   // The week belongs to the year of its Thursday.
-  expect(weekLabel("2025-12-29", "en")).toBe("Week 1 · from Dec 29");
+  expect(weekLabel("2025-12-29", "en")).toBe("Week 1 · from Dec 29, 2025");
 });
 
 it("counts steps in natural English and Chinese", async () => {

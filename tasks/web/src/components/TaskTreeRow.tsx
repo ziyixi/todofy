@@ -1,7 +1,9 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, describeError, type Task } from "../api";
 import { TaskRow, type TaskRowProps } from "./TaskRow";
 import "./task-tree.css";
+import { useTaskListProperties } from "../useTaskListProperties";
+import type { PlanningTask } from "../task-planning";
 
 type RowContext = Omit<
   TaskRowProps,
@@ -12,6 +14,7 @@ type RowContext = Omit<
   | "childListId"
   | "childContent"
   | "peers"
+  | "planning"
 >;
 
 export function TaskTreeRow({
@@ -23,6 +26,7 @@ export function TaskTreeRow({
   orderBy,
   ancestors = [],
   peers,
+  planningById,
 }: {
   task: Task;
   row: RowContext;
@@ -32,6 +36,7 @@ export function TaskTreeRow({
   orderBy: string;
   ancestors?: readonly string[];
   peers?: readonly Task[];
+  planningById: ReadonlyMap<string, PlanningTask>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<Task[]>([]);
@@ -99,7 +104,11 @@ export function TaskTreeRow({
     }
   }
   const path = [...ancestors, task.id];
-  const taskChildren = children.filter((child) => child.kind !== "step");
+  const taskChildren = useMemo(
+    () => children.filter((child) => child.kind !== "step"),
+    [children],
+  );
+  const properties = useTaskListProperties(taskChildren);
   const eligible = taskChildren.filter(
     (child) => (showCompleted || !child.completed) && !path.includes(child.id),
   );
@@ -115,6 +124,7 @@ export function TaskTreeRow({
       task={task}
       parentTitle={parentTitle}
       peers={peers}
+      planning={planningById.get(task.id)}
       expanded={expanded}
       onToggleChildren={() => setExpanded((value) => !value)}
       childListId={childListId}
@@ -126,11 +136,17 @@ export function TaskTreeRow({
             aria-label={`Subtasks of ${task.title}`}
             aria-busy={pending || (!loaded && !error)}
           >
+            {properties.unavailable && (
+              <li className="task-property-warning" role="status">
+                Planning properties unavailable. Refresh tasks to retry.
+              </li>
+            )}
             {visible.map((child) => (
               <TaskTreeRow
                 key={child.id}
                 task={child}
                 row={row}
+                planningById={properties.byId}
                 parentTitle={task.title}
                 peers={children}
                 listedIds={listedIds}

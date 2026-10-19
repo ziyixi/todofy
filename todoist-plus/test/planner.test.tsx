@@ -31,6 +31,7 @@ async function props(): Promise<PlanViewProps> {
     editTask: vi.fn(),
     onWeekChange: vi.fn(),
     onLabels: vi.fn(),
+    completeTask: vi.fn(),
     completeReview: vi.fn(),
   };
 }

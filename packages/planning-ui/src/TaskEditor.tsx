@@ -452,7 +452,17 @@ export function TaskEditor({
                         <input
                           type="checkbox"
                           checked={hasPlanningFlag(task, flag)}
-                          disabled={busy}
+                          disabled={
+                            busy ||
+                            (field === "singleAction" &&
+                              hasPlanningFlag(task, "quick"))
+                          }
+                          title={
+                            field === "singleAction" &&
+                            hasPlanningFlag(task, "quick")
+                              ? "Quick actions are always standalone"
+                              : undefined
+                          }
                           onChange={(event) => {
                             const update: PlanUpdate = {
                               [field]: event.target.checked,

@@ -28,7 +28,12 @@ export function TaskPlanningFields({
           <input
             type="checkbox"
             checked={value[field]}
-            disabled={disabled}
+            disabled={disabled || (field === "singleAction" && value.quick)}
+            title={
+              field === "singleAction" && value.quick
+                ? "Quick actions are always standalone"
+                : undefined
+            }
             onChange={(event) => onChange(field, event.target.checked)}
           />
           <span>{label}</span>

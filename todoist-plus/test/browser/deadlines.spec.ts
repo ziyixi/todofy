@@ -97,9 +97,9 @@ test("Start now and Waiting lead the four stage lanes with the same cards, and S
       "Week",
       "Committed",
     ]);
-    // One row of lanes at this width, all of the same width.
+    // Candidate lanes retain one row; Committed alone spans the row below.
     const boxes = await page
-      .locator(".review-lane")
+      .locator('.review-lane:not([data-lane="committed"])')
       .evaluateAll((lanes) =>
         lanes.map((item) => item.getBoundingClientRect().toJSON()),
       );
@@ -167,7 +167,7 @@ test("Start now and Waiting lead the four stage lanes with the same cards, and S
           style.boxShadow,
           style.minHeight,
           style.paddingLeft,
-          Math.round(element.getBoundingClientRect().width),
+          style.paddingRight,
         ];
       });
     expect(
@@ -183,15 +183,14 @@ test("Start now and Waiting lead the four stage lanes with the same cards, and S
         ),
       ),
     );
-    // At rest Start takes no room: a Start now card's title is as wide as any other card's.
-    const titleWidth = (title: string) =>
-      card(page, title)
+    // The hover action must not shrink its own title, even though the regions have different widths.
+    const titleWidth = () =>
+      card(page, "Submit the expense claim")
         .locator(".planning-outcome-title")
         .evaluate((element) => element.getBoundingClientRect().width);
-    expect(await titleWidth("Submit the expense claim")).toBeCloseTo(
-      await titleWidth("Synthetic weekly outcome"),
-      0,
-    );
+    const beforeHover = await titleWidth();
+    await card(page, "Submit the expense claim").hover();
+    expect(await titleWidth()).toBeCloseTo(beforeHover, 0);
     // The one colour is the days past.
     expect(
       await page
@@ -221,6 +220,13 @@ test("Start now and Waiting lead the four stage lanes with the same cards, and S
     expect(await at()).toEqual(before);
     await page.mouse.move(0, 0);
     await claim.locator(".planning-outcome-card").focus();
+    await page.keyboard.press("Tab");
+    await expect(
+      claim.getByRole("button", {
+        name: "Complete task: Submit the expense claim",
+        exact: true,
+      }),
+    ).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(start).toBeFocused();
     expect(await opacity(start)).toBe("1");
@@ -479,7 +485,7 @@ test("a waiting card's two-part status fits one line in Chinese at this width", 
   }
 });
 
-test("medium windows keep the four stages in one row under Start now and Waiting", async () => {
+test("medium desktop keeps the existing candidate columns together and Committed alone below", async () => {
   const { context, worker } = await launchPlanner();
   try {
     await addDeadlineTasks(worker);
@@ -487,35 +493,24 @@ test("medium windows keep the four stages in one row under Start now and Waiting
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
     await expect(lane(page, "Start now")).toBeVisible();
-    const box = async (name: string) => (await lane(page, name).boundingBox())!;
-    const start = await box("Start now");
-    const waiting = await box("Waiting");
-    const stages = [
-      await box("Quarter"),
-      await box("Month"),
-      await box("Week"),
-      await box("Committed"),
-    ];
-    // Start now and Waiting share the first row, two of the four columns each.
-    expect(waiting.y).toBeCloseTo(start.y, 0);
-    expect(start.x).toBeCloseTo(stages[0]!.x, 0);
-    expect(start.x + start.width).toBeCloseTo(
-      stages[1]!.x + stages[1]!.width,
-      0,
-    );
-    expect(waiting.x).toBeCloseTo(stages[2]!.x, 0);
-    expect(waiting.x + waiting.width).toBeCloseTo(
-      stages[3]!.x + stages[3]!.width,
-      0,
-    );
-    // The stages, in order, in one row below them.
-    for (const [index, stage] of stages.entries()) {
-      expect(stage.y).toBeCloseTo(stages[0]!.y, 0);
-      expect(stage.y).toBeGreaterThan(
-        Math.max(start.y + start.height, waiting.y + waiting.height),
+    const columns = await page
+      .locator('.review-lane:not([data-lane="committed"])')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => node.getBoundingClientRect().toJSON()),
       );
-      if (index) expect(stage.x).toBeGreaterThan(stages[index - 1]!.x);
+    expect(columns).toHaveLength(5);
+    for (const [index, column] of columns.entries()) {
+      expect(column.y).toBeCloseTo(columns[0]!.y, 0);
+      expect(column.width).toBeCloseTo(columns[0]!.width, 0);
+      if (index) expect(column.x).toBeGreaterThan(columns[index - 1]!.x);
     }
+    const committed = (await lane(page, "Committed").boundingBox())!;
+    const board = (await page.locator(".review-lanes").boundingBox())!;
+    expect(committed.x).toBeCloseTo(board.x, 0);
+    expect(committed.width).toBeCloseTo(board.width, 0);
+    expect(committed.y).toBeGreaterThan(
+      Math.max(...columns.map((column) => column.y + column.height)),
+    );
   } finally {
     await context.close();
   }
@@ -637,7 +632,7 @@ test("Parked sits between Waiting and the stages; a drag in sets a card aside, o
   }
 });
 
-test("seven lanes keep one row while wide, then put the side lanes above the stages, pair and stack them", async () => {
+test("candidate lanes keep their desktop row, pair and stack narrowly, while Committed always has its own row", async () => {
   const { context, worker } = await launchPlanner();
   try {
     await addDeadlineTasks(worker);
@@ -660,17 +655,11 @@ test("seven lanes keep one row while wide, then put the side lanes above the sta
     };
     const rows = (boxes: Awaited<ReturnType<typeof layout>>) =>
       boxes.map((box) => box.row);
-    // Wide: one row.
-    expect(rows(await layout(1854))).toEqual([0, 0, 0, 0, 0, 0, 0]);
-    // Medium: Start now, Waiting and Parked above the four stages, so a drag goes straight down.
-    const medium = await layout(1300);
-    expect(rows(medium)).toEqual([0, 0, 0, 1, 1, 1, 1]);
-    expect(medium[0]!.x).toBe(medium[3]!.x);
-    // Two columns: the stages start a row of their own, leaving a cell beside Parked empty.
-    const pairs = await layout(1000);
-    expect(rows(pairs)).toEqual([0, 0, 1, 2, 2, 3, 3]);
-    expect(pairs[2]!.x).toBe(pairs[3]!.x);
-    // Narrow: one lane per row, with no page overflow.
+    // Committed is the only full-width lane on desktop.
+    expect(rows(await layout(1854))).toEqual([0, 0, 0, 0, 0, 0, 1]);
+    expect(rows(await layout(1300))).toEqual([0, 0, 0, 0, 0, 0, 1]);
+    // Narrow layouts retain paired columns and then one column.
+    expect(rows(await layout(1000))).toEqual([0, 0, 1, 1, 2, 2, 3]);
     expect(rows(await layout(700))).toEqual([0, 1, 2, 3, 4, 5, 6]);
     expect(
       await page.evaluate(
@@ -696,7 +685,7 @@ const overflowing = (page: Page) =>
     }),
   );
 
-test("seven lanes in one row keep every card's text inside the card, in English and in Chinese", async () => {
+test("candidate columns and the Committed row keep every card's text inside, in English and Chinese", async () => {
   const { context, worker } = await launchPlanner();
   try {
     await addDeadlineTasks(worker);
@@ -730,7 +719,7 @@ test("seven lanes in one row keep every card's text inside the card, in English 
     const rows = new Set(
       (await laneBoxes(page)).map((box) => Math.round(box.y)),
     );
-    expect(rows.size).toBe(1);
+    expect(rows.size).toBe(2);
     await expect(page.locator(".planning-outcome-counts")).not.toHaveCount(0);
     expect(await overflowing(page)).toEqual([]);
     await page.evaluate(() => (document.documentElement.lang = "zh-CN"));
@@ -773,12 +762,12 @@ test("an empty Parked lane is in place before a drag starts, so the board never 
   }
 });
 
-test("alone and empty above the stages, Parked is a thin strip, not a tall empty row", async () => {
+test("empty Parked retains its candidate column while Committed occupies the row below", async () => {
   const { context, worker } = await launchPlanner();
   try {
     await addParked(worker, true);
     const page = await context.newPage();
-    // Without Start now and Waiting: five lanes, Parked over the four stages.
+    // Without Start now and Waiting: Parked stays alongside the three candidate stages.
     for (const width of [1150, 1000]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto("https://app.todoist.com/app/today?todoist-plus=plan");
@@ -789,9 +778,11 @@ test("alone and empty above the stages, Parked is a thin strip, not a tall empty
       await expect(lane(page, "Parked")).toContainText("Drop here to park");
       const parked = (await lane(page, "Parked").boundingBox())!;
       const quarter = (await lane(page, "Quarter").boundingBox())!;
-      expect(parked.y + parked.height).toBeLessThan(quarter.y);
-      expect(parked.width).toBeGreaterThan(quarter.width * 1.5);
-      expect(parked.height).toBeLessThan(90);
+      expect(parked.y).toBeCloseTo(quarter.y, 0);
+      expect(parked.width).toBeCloseTo(quarter.width, 0);
+      expect(parked.height).toBeGreaterThan(169);
+      const committed = (await lane(page, "Committed").boundingBox())!;
+      expect(committed.y).toBeGreaterThan(parked.y + parked.height);
     }
     // In one row with the stages it is a lane like theirs.
     await page.setViewportSize({ width: 1854, height: 900 });

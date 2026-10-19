@@ -68,3 +68,11 @@
 .planning-step-warning {
   color: var(--plus-warning) !important;
 }
+
+.plus-root .planning-complete {
+  align-self: center;
+  color: var(--plus-priority);
+}
+.plus-root .planning-complete:focus-visible svg {
+  opacity: 1;
+}

@@ -3,6 +3,10 @@ import { useDraggable } from "@dnd-kit/react";
 import { GripVertical } from "lucide-react";
 import { displayedTitle } from "./domain";
 import { dragHandle } from "./drag-announcements";
+import {
+  CompleteTaskButton,
+  type CompletePlanningTask,
+} from "./CompleteTaskButton";
 import { words } from "./i18n";
 import type { FocusState, Language, PlanningTask } from "./model";
 
@@ -18,6 +22,7 @@ interface Props {
   /** The ID of the drag instructions, which every handle names. */
   dragHint: string;
   editTask: (task: PlanningTask) => void;
+  completeTask: CompletePlanningTask;
 }
 /**
  * The native Quick / Ops filter's tasks, as a quiet line under Next steps: one-line cards on the
@@ -30,6 +35,7 @@ export function QuickTasks({
   busy,
   dragHint,
   editTask,
+  completeTask,
 }: Props) {
   const text = words(language);
   // Shown in full only on request, for this visit.
@@ -52,6 +58,7 @@ export function QuickTasks({
             busy={busy}
             dragHint={dragHint}
             editTask={editTask}
+            completeTask={completeTask}
           />
         ))}
         {hidden > 0 && (
@@ -76,6 +83,7 @@ function QuickCard({
   busy,
   dragHint,
   editTask,
+  completeTask,
 }: {
   task: PlanningTask;
   /** Its session is running or paused, so it cannot move. */
@@ -84,6 +92,7 @@ function QuickCard({
   busy: boolean;
   dragHint: string;
   editTask: Props["editTask"];
+  completeTask: CompletePlanningTask;
 }) {
   const title = displayedTitle(task.title);
   const { ref, handleRef, isDragSource } = useDraggable({
@@ -120,6 +129,12 @@ function QuickCard({
       >
         {title}
       </button>
+      <CompleteTaskButton
+        task={task}
+        language={language}
+        disabled={busy}
+        onComplete={() => completeTask(task)}
+      />
     </li>
   );
 }

@@ -15,10 +15,11 @@ import {
   Target,
   Timer,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type DragEvent } from "react";
 import type { Catalog, CatalogItem, CatalogKind } from "../api";
 import { CatalogMenu } from "./CatalogMenu";
 import { routeHref, type Route } from "../routes";
+import { TASK_DRAG_TYPE, type TaskDropTarget } from "../task-drag";
 
 const navigation = [
   { page: "search", title: "Search", icon: Search },
@@ -38,6 +39,7 @@ export function Sidebar({
   onEditCatalog,
   onCatalogSaved,
   onError,
+  onTaskDrop,
 }: {
   route: Route;
   catalog: Catalog;
@@ -46,7 +48,34 @@ export function Sidebar({
   onEditCatalog: (kind: CatalogKind, item?: CatalogItem) => void;
   onCatalogSaved: () => Promise<void>;
   onError: (message: string) => void;
+  onTaskDrop: (id: string, target: TaskDropTarget) => void;
 }) {
+  const [dropTarget, setDropTarget] = useState("");
+  function categoryDrop(target?: TaskDropTarget) {
+    if (!target) return {};
+    const key = `${target.page}:${"id" in target ? target.id : ""}`;
+    return {
+      "data-task-drop": dropTarget === key || undefined,
+      onDragOver(event: DragEvent<HTMLAnchorElement>) {
+        if (!event.dataTransfer.types.includes(TASK_DRAG_TYPE)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+        setDropTarget(key);
+      },
+      onDragLeave() {
+        setDropTarget("");
+      },
+      onDrop(event: DragEvent<HTMLAnchorElement>) {
+        if (!event.dataTransfer.types.includes(TASK_DRAG_TYPE)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setDropTarget("");
+        const id = event.dataTransfer.getData(TASK_DRAG_TYPE);
+        if (id) onTaskDrop(id, target);
+      },
+    };
+  }
   const [projectsOpen, setProjectsOpen] = useState(() => {
     try {
       return localStorage.getItem("tasks.projects-open") !== "false";
@@ -100,6 +129,11 @@ export function Sidebar({
                 className={`nav-item ${active("project", project.id) ? "selected" : ""}`}
                 style={{ paddingInlineStart: `${12 + depth * 14}px` }}
                 href={routeHref({ page: "project", id: project.id })}
+                {...categoryDrop(
+                  project.archived
+                    ? undefined
+                    : { page: "project", id: project.id },
+                )}
               >
                 <Hash size={18} style={{ color: project.color || undefined }} />
                 <span>{project.title}</span>
@@ -172,6 +206,9 @@ export function Sidebar({
             href={routeHref({ page, id: "" })}
             className={`nav-item ${active(page) ? "selected" : ""}`}
             aria-current={active(page) ? "page" : undefined}
+            {...categoryDrop(
+              page === "inbox" || page === "today" ? { page } : undefined,
+            )}
           >
             <Icon size={19} />
             <span>{title}</span>
@@ -195,6 +232,11 @@ export function Sidebar({
                 <a
                   className={`nav-item ${active(page, id) ? "selected" : ""}`}
                   href={routeHref({ page, id })}
+                  {...categoryDrop(
+                    page === "project" || page === "label"
+                      ? { page, id }
+                      : undefined,
+                  )}
                 >
                   <Icon size={17} style={{ color: color || undefined }} />
                   <span>{title}</span>

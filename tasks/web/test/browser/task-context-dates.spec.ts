@@ -101,21 +101,23 @@ test("clearing a deadline through its context menu clears native start-ahead aft
   let leadDays = 14;
   let reads = 0;
   await page.route("**/api/plus/v1/tasks?**", async (route) => {
-    reads++;
-    const current = await (
-      await request.get(`/api/tasks/v1/tasks/${task.id}`)
-    ).json();
-    expect(current.deadline || "").toBe("");
+    const url = new URL(route.request().url());
+    // The row metadata batch may read before the write; the mutation preflight must read after it.
+    if (url.searchParams.get("page_size") === "1") {
+      reads++;
+      const current = await (
+        await request.get(`/api/tasks/v1/tasks/${task.id}`)
+      ).json();
+      expect(current.deadline || "").toBe("");
+    }
     await route.fulfill({
       json: {
-        planning_tasks: [
-          {
-            id: task.id,
-            title: task.title,
-            lead_days: leadDays,
-            etag: "fresh-context-planning",
-          },
-        ],
+        planning_tasks: url.searchParams.getAll("task_ids").map((id) => ({
+          id,
+          title: task.title,
+          lead_days: id === task.id ? leadDays : 0,
+          etag: "fresh-context-planning",
+        })),
       },
     });
   });

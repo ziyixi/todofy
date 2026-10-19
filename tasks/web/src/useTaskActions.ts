@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { RpcStatusError } from "@ziyixi/proto/http-client";
 import {
   api,
@@ -14,6 +14,7 @@ import { todayDate } from "./dates";
 import { settleCompletedTask } from "./task-completion-focus";
 import { taskDropOrder } from "./task-order";
 import type { useTaskView } from "./useTaskView";
+import type { TaskDropTarget } from "./task-drag";
 
 export function useTaskActions(
   route: Route,
@@ -31,9 +32,9 @@ export function useTaskActions(
   const duplicateRequests = useRef(
     new Map<string, { requestId: string; etag: string }>(),
   );
-  function taskChanged() {
+  const taskChanged = useCallback(() => {
     setMutationRevision((revision) => revision + 1);
-  }
+  }, []);
   async function saveTask(
     draft: TaskDraft,
     original?: Task,
@@ -230,6 +231,38 @@ export function useTaskActions(
       },
       ["project_id", "section_id", "parent_id"],
     );
+  }
+  async function dropOnCategory(
+    id: string,
+    target: TaskDropTarget,
+    timeZone: string,
+  ) {
+    try {
+      const task = await api.getTask({ name: `tasks/${id}` });
+      if (target.page === "today") {
+        await scheduleTask(task, today, timeZone);
+      } else if (target.page === "label") {
+        if (task.labelIds.includes(target.id)) {
+          setNotice("Label already applied");
+          return;
+        }
+        await patchTask(task, { labelIds: [...task.labelIds, target.id] }, [
+          "label_ids",
+        ]);
+      } else {
+        await patchTask(
+          task,
+          {
+            projectId: target.page === "project" ? target.id : "",
+            sectionId: "",
+            parentId: "",
+          },
+          ["project_id", "section_id", "parent_id"],
+        );
+      }
+    } catch (reason) {
+      setNotice(describeError(reason));
+    }
   }
   async function duplicateTask(task: Task) {
     setBusyIds((current) => new Set([...current, task.id]));
@@ -430,6 +463,7 @@ export function useTaskActions(
     parseTaskSchedule,
     setDeadline,
     moveTask,
+    dropOnCategory,
     duplicateTask,
     copyTaskLink,
   };

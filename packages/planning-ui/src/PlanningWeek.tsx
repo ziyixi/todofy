@@ -20,6 +20,10 @@ import {
   dragInstructions,
   spokenDrags,
 } from "./drag-announcements";
+import {
+  CompleteTaskButton,
+  type CompletePlanningTask,
+} from "./CompleteTaskButton";
 import { OutcomeCard } from "./ReviewBoard";
 import { PlanningCalendar, shortDay, taskTitle } from "./PlanningCalendar";
 import {
@@ -65,6 +69,7 @@ interface Props {
   actions: PlusActions;
   run: RunOperation;
   editTask: (task: PlanningTask) => void;
+  completeTask: CompletePlanningTask;
   onWeekChange: (week: string) => void;
   /** The selected commitment: absent for the first one, "" for none. PlanView keeps it. */
   selectedId?: string;
@@ -95,6 +100,7 @@ export function PlanningWeek(props: Props) {
     actions,
     run,
     editTask,
+    completeTask,
     onWeekChange,
     selectedId,
     onSelect,
@@ -324,16 +330,25 @@ export function PlanningWeek(props: Props) {
         </header>
         <div id={gridId} className="planning-commitment-grid" hidden={folded}>
           {shown.map((task) => (
-            <OutcomeCard
-              key={task.id}
-              task={task}
-              tasks={plan.tasks}
-              managedLabels={plan.managedLabels}
-              scheduledIds={scheduledIds}
-              language={language}
-              selected={selected?.id === task.id}
-              onClick={() => onSelect(selected?.id === task.id ? "" : task.id)}
-            />
+            <div className="planning-commitment" key={task.id}>
+              <OutcomeCard
+                task={task}
+                tasks={plan.tasks}
+                managedLabels={plan.managedLabels}
+                scheduledIds={scheduledIds}
+                language={language}
+                selected={selected?.id === task.id}
+                onClick={() =>
+                  onSelect(selected?.id === task.id ? "" : task.id)
+                }
+              />
+              <CompleteTaskButton
+                task={task}
+                language={language}
+                disabled={busy}
+                onComplete={() => completeTask(task)}
+              />
+            </div>
           ))}
         </div>
         {selected ? (
@@ -373,6 +388,7 @@ export function PlanningWeek(props: Props) {
                   pending={pending?.has(pendingTask(task.id)) ?? false}
                   dragHint={hintId}
                   editTask={editTask}
+                  completeTask={completeTask}
                 />
               ))}
               {/* Keyed by the commitment: another one's selection closes it and drops the draft. */}
@@ -407,6 +423,7 @@ export function PlanningWeek(props: Props) {
           busy={busy}
           dragHint={hintId}
           editTask={editTask}
+          completeTask={completeTask}
         />
         <PlanningCalendar
           plan={plan}
@@ -419,6 +436,7 @@ export function PlanningWeek(props: Props) {
           pending={pending}
           dragHint={hintId}
           editTask={editTask}
+          completeTask={completeTask}
           onWeekChange={onWeekChange}
           onRemove={(day, id) =>
             // The card stays, marked pending, until FlowDay confirms the removal.
@@ -478,6 +496,7 @@ function TrayStep({
   pending,
   dragHint,
   editTask,
+  completeTask,
 }: {
   task: PlanningTask;
   /** Its place among the steps shown. */
@@ -493,6 +512,7 @@ function TrayStep({
   /** The ID of the drag instructions, which every handle names. */
   dragHint: string;
   editTask: Props["editTask"];
+  completeTask: CompletePlanningTask;
 }) {
   const timing = timer?.taskId === task.id;
   const title = displayedTitle(task.title);
@@ -571,6 +591,12 @@ function TrayStep({
           )}
       </button>
       {pending && <PendingMark language={language} />}
+      <CompleteTaskButton
+        task={task}
+        language={language}
+        disabled={busy || pending}
+        onComplete={() => completeTask(task)}
+      />
     </article>
   );
 }

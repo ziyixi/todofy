@@ -9,10 +9,11 @@ import type {
 /** Native planning flags never derive from ordinary tags. Legacy hosts still use their labels. */
 export function hasPlanningFlag(task: PlanningTask, flag: string): boolean {
   if (flag === "blocked" && task.kind) return false;
-  return (task.planningFlags ?? task.labels).includes(flag);
+  const flags = task.planningFlags ?? task.labels;
+  return flags.includes(flag) || (flag === "task" && flags.includes("quick"));
 }
 
-/** Only explicit steps and ordinary tasks deliberately made standalone enter the day calendar. */
+/** Steps, standalone tasks and Quick actions can enter the day calendar. */
 export function isSchedulable(task: PlanningTask): boolean {
   return task.kind
     ? task.kind === "step" || hasPlanningFlag(task, "task")

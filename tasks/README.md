@@ -16,8 +16,10 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 - Collapsed inline subtasks in main lists; expand to edit, complete or reorder children without opening their parent.
 - Drag Subtasks or Steps within their own list in the parent editor; the order is saved on drop.
 - Existing editors stay open after Save. Main-list subtasks can be dragged out as independent tasks; Steps stay in details and execution views.
+- Drag to a sidebar project/Inbox to move, a label to add it, or Today to schedule. Native task properties appear separately from ordinary labels.
 - Visible planning stage, context, task options, start-ahead window and Deep/Shallow effort in task details.
 - Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.
+- Plan keeps the candidate columns above a full-width Committed row, with horizontal cards and completion controls for outcomes and Steps.
 - Installable desktop PWA; an explicit offline page, with task data available online.
 - Owner-only Cloudflare Worker and D1, using the repository's proto API and authentication conventions.
 - A verified Todoist import and coordinated native source for Todofy and FlowDay.
@@ -30,7 +32,8 @@ export and identity-check commands.
 
 A Task or Subtask describes an outcome. Add a Step beneath it to arrange an executable action in the week,
 or select Standalone action to schedule the Task itself. Only these executable items expose a clock time
-and estimate. A Step cannot contain children. Task details can add, complete, reopen or delete either kind
+and estimate. Quick actions are always standalone, including existing Quick tasks; no second checkbox is needed.
+A Step cannot contain children. Task details can add, complete, reopen or delete either kind
 of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites.
 
 Repeat uses frequency, interval and calendar controls; imported custom rules remain intact until replaced.

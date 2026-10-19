@@ -215,6 +215,9 @@ export function App() {
         onEditCatalog={editCatalog}
         onCatalogSaved={refreshCatalog}
         onError={actions.setNotice}
+        onTaskDrop={(id, target) =>
+          void actions.dropOnCategory(id, target, catalog.timeZone)
+        }
       />
       <SidebarResize />
       {showSidebar && (
@@ -276,6 +279,7 @@ export function App() {
             }
           >
             <PlanningPage
+              onTaskChanged={actions.taskChanged}
               page={route.page}
               mutationRevision={actions.mutationRevision}
               onOpenTask={(id) => void openTask(id)}
