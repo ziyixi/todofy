@@ -13,8 +13,5 @@ REMEMBER_WEEK = (
 )
 # A write that leaves a task with neither mark: nothing for Monday to reset, and no choice kept for next week.
 FORGET_TASK = "DELETE FROM plus_weeks WHERE task_id=?"
-RESET_BATCH = 5
-ENDED_WEEK = f"SELECT * FROM plus_weeks WHERE week_start < ? ORDER BY week_start,task_id LIMIT {RESET_BATCH}"
-FORGET_WEEK = "DELETE FROM plus_weeks WHERE task_id=? AND week_start=?"
 # Choices already recorded for a week after the given one (the plus_weeks_ended index), IDs only.
 NEXT_WEEK = "SELECT task_id FROM plus_weeks WHERE week_start > ? ORDER BY week_start,task_id LIMIT 100"

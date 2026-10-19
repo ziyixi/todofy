@@ -76,6 +76,17 @@ def test_native_single_action_and_hold_use_the_proto_field_names():
     assert state["task"] is True and state["onhold"] is True
 
 
+def test_quick_is_standalone_for_existing_state_and_new_writes():
+    existing = native_plan.state_from_labels(["quick"])
+    assert existing["task"] is False
+    assert set(native_plan.labels_from_state(existing)) == {"quick", "task"}
+    updated = native_plan.apply_plan(existing, {"quick": True, "single_action": False})
+    assert updated["quick"] is True and updated["task"] is True
+    # Clearing Quick retains the independent action; it can be cleared explicitly afterwards.
+    assert native_plan.apply_plan(existing, {"quick": False})["task"] is True
+    assert native_plan.apply_plan(updated, {"quick": False, "single_action": False})["task"] is False
+
+
 def test_custom_lead_migration_preserves_existing_planning_rows_and_revisions():
     import sqlite3
     from pathlib import Path

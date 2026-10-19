@@ -5,6 +5,8 @@ current production state; [HANDOFF](../HANDOFF.md) names the current rollout and
 
 ## Archived handoffs
 
+[Handoff of October 19, 2026](history/handoff-2026-10-19.md) keeps Codex's release notes for Plan write reliability,
+whole-row drag and the cloud recovery with inline subtasks and Plan completion.
 [Handoff through October 18, 2026](history/handoff-2026-10-18.md) keeps the release receipts and completed notes
 moved out of HANDOFF on October 18: the Tasks refinement and native cutover, the VPS host recovery, Recall, Mailsort
 and the October 11 maintenance, with counts of private data replaced by neutral wording.

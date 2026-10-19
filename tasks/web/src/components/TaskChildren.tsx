@@ -1,16 +1,11 @@
 import { useEffect, useState } from "react";
-import {
-  CalendarDays,
-  Check,
-  Circle,
-  Flag,
-  Plus,
-  Repeat2,
-  Trash2,
-} from "lucide-react";
+import { Plus } from "lucide-react";
 import { api, describeError, type Task } from "../api";
-import { dateLabel, todayDate } from "../dates";
+import { todayDate } from "../dates";
+import { taskDropOrder } from "../task-order";
 import "./task-children.css";
+import { TaskDragProvider } from "./TaskDrag";
+import { TaskChildRow } from "./TaskChildRow";
 
 export function TaskChildren({
   task,
@@ -144,196 +139,190 @@ export function TaskChildren({
       onBusy(false);
     }
   }
+  async function reorder(moving: Task, target: Task, after: boolean) {
+    if (busy || loading || moving.kind !== target.kind) return false;
+    const sortOrder = taskDropOrder(
+      children.filter((child) => child.kind === moving.kind),
+      moving.id,
+      target.id,
+      after,
+    );
+    if (sortOrder === undefined || sortOrder === moving.sortOrder) return false;
+    onBusy(true);
+    onError("");
+    try {
+      const saved = await api.updateTask({
+        requestId: crypto.randomUUID(),
+        etag: moving.etag,
+        task: { name: moving.name, sortOrder },
+        updateMask: { paths: ["sort_order"] },
+      });
+      setChildren((current) =>
+        current
+          .map((child) => (child.id === saved.id ? saved : child))
+          .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
+      );
+      onChanged();
+      return true;
+    } catch (reason) {
+      onError(describeError(reason));
+      return false;
+    } finally {
+      onBusy(false);
+    }
+  }
   return (
-    <section className="task-children" aria-label="Subtasks and steps">
-      {loading && (
-        <span className="visually-hidden" role="status">
-          Reading subtasks and steps…
-        </span>
-      )}
-      {(["task", "step"] as const).map((kind) => {
-        const rows = children.filter(
-          (child) => (child.kind || "task") === kind,
-        );
-        return (
-          <section
-            className="task-child-group"
-            aria-label={kind === "step" ? "Steps" : "Subtasks"}
-            key={kind}
-          >
-            <h3>
-              {kind === "step" ? "Steps" : "Subtasks"}
-              <span>
-                {loading
-                  ? "…"
-                  : `${rows.filter((child) => child.completed).length}/${rows.length}`}
-              </span>
-            </h3>
-            {(loading || !rows.length) && (
-              <p className="muted child-empty">
-                {kind === "step"
-                  ? "Add a small action to arrange in your week."
-                  : "Add another outcome or part of this task."}
-              </p>
-            )}
-            {rows.map((child) => (
-              <div
-                className={`task-child-row ${child.completed ? "is-completed" : ""}`}
-                key={child.id}
-              >
-                <button
-                  type="button"
-                  className={`complete-button priority-${child.priority}`}
-                  aria-label={`${child.completed ? "Reopen" : "Complete"} ${child.title}`}
-                  disabled={busy}
-                  onClick={() => void finish(child)}
-                >
-                  {child.completed ? <Check size={13} /> : <Circle size={18} />}
-                </button>
-                <button
-                  type="button"
-                  className="task-child-title"
-                  aria-label={child.title}
-                  onClick={() => onOpen(child.id)}
-                >
-                  <span>{child.title}</span>
-                  {(child.dueDate || child.deadline || child.recurrence) && (
-                    <span className="task-child-meta">
-                      {child.dueDate && (
-                        <span
-                          className={
-                            child.dueDate < today && !child.completed
-                              ? "child-overdue"
-                              : ""
-                          }
-                        >
-                          <CalendarDays size={11} />
-                          {dateLabel(child.dueDate, today)}
-                        </span>
-                      )}
-                      {child.recurrence && (
-                        <Repeat2 size={11} aria-label="Repeating" />
-                      )}
-                      {child.deadline && (
-                        <span>
-                          <Flag size={11} />
-                          {dateLabel(child.deadline, today)}
-                        </span>
-                      )}
-                    </span>
-                  )}
-                </button>
-                {kind === "step" && (
-                  <span className="child-estimate">
-                    {child.durationMinutes
-                      ? `${child.durationMinutes}m`
-                      : "No estimate"}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  className="icon-button child-delete"
-                  aria-label={`Delete ${kind === "step" ? "step" : "subtask"} ${child.title}`}
-                  disabled={busy}
-                  onClick={() => setDeleting(child.id)}
-                >
-                  <Trash2 size={14} />
-                </button>
-                {deleting === child.id && (
-                  <div className="child-delete-confirm" role="alert">
-                    <span>
-                      Delete this {kind === "step" ? "step" : "subtask"}
-                      {child.childCount ? " and its children" : ""}?
-                    </span>
-                    <button
-                      type="button"
-                      className="text-button"
-                      onClick={() => setDeleting("")}
-                    >
-                      Keep
-                    </button>
-                    <button
-                      type="button"
-                      className="text-button danger"
-                      disabled={busy}
-                      onClick={() => void remove(child)}
-                    >
-                      Delete {kind === "step" ? "step" : "subtask"}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </section>
-        );
-      })}
-      {page && (
-        <button
-          type="button"
-          className="text-button"
-          disabled={busy}
-          onClick={() => void more()}
-        >
-          Load more children
-        </button>
-      )}
-      <div className="task-child-add">
-        <div className="child-kind-tabs" role="group" aria-label="Add a child">
-          <button
-            type="button"
-            aria-pressed={adding === "task"}
-            onClick={() => setAdding("task")}
-          >
-            Subtask
-          </button>
-          <button
-            type="button"
-            aria-pressed={adding === "step"}
-            onClick={() => setAdding("step")}
-          >
-            Step
-          </button>
-        </div>
-        <div className="inline-add">
-          <Plus size={15} />
-          <input
-            aria-label={adding === "step" ? "New step" : "New subtask"}
-            placeholder={
-              adding === "step" ? "Add an executable step" : "Add subtask"
-            }
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                event.stopPropagation();
-                void add();
-              }
-            }}
-          />
-          {adding === "step" && (
-            <select
-              aria-label="Step estimate"
-              value={minutes}
-              onChange={(event) => setMinutes(Number(event.target.value))}
+    <TaskDragProvider
+      onError={onError}
+      onDrop={async (moving, target) =>
+        target.kind === "row"
+          ? reorder(moving, target.task, target.position === "after")
+          : false
+      }
+    >
+      <section className="task-children" aria-label="Subtasks and steps">
+        {loading && (
+          <span className="visually-hidden" role="status">
+            Reading subtasks and steps…
+          </span>
+        )}
+        {(["task", "step"] as const).map((kind) => {
+          const rows = children.filter(
+            (child) => (child.kind || "task") === kind,
+          );
+          return (
+            <section
+              className="task-child-group"
+              aria-label={kind === "step" ? "Steps" : "Subtasks"}
+              key={kind}
             >
-              {[15, 30, 45, 60, 90, 120].map((value) => (
-                <option value={value} key={value}>
-                  {value}m
-                </option>
+              <h3>
+                {kind === "step" ? "Steps" : "Subtasks"}
+                <span>
+                  {loading
+                    ? "…"
+                    : `${rows.filter((child) => child.completed).length}/${rows.length}`}
+                </span>
+              </h3>
+              {(loading || !rows.length) && (
+                <p className="muted child-empty">
+                  {kind === "step"
+                    ? "Add a small action to arrange in your week."
+                    : "Add another outcome or part of this task."}
+                </p>
+              )}
+              {rows.map((child) => (
+                <TaskChildRow
+                  key={child.id}
+                  child={child}
+                  peers={rows}
+                  busy={busy || loading}
+                  today={today}
+                  onOpen={() => onOpen(child.id)}
+                  onComplete={() => void finish(child)}
+                  onDelete={() => setDeleting(child.id)}
+                  confirmation={
+                    deleting === child.id && (
+                      <div className="child-delete-confirm" role="alert">
+                        <span>
+                          Delete this {kind === "step" ? "step" : "subtask"}
+                          {child.childCount ? " and its children" : ""}?
+                        </span>
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => setDeleting("")}
+                        >
+                          Keep
+                        </button>
+                        <button
+                          type="button"
+                          className="text-button danger"
+                          disabled={busy}
+                          onClick={() => void remove(child)}
+                        >
+                          Delete {kind === "step" ? "step" : "subtask"}
+                        </button>
+                      </div>
+                    )
+                  }
+                />
               ))}
-            </select>
-          )}
+            </section>
+          );
+        })}
+        {page && (
           <button
             type="button"
             className="text-button"
-            disabled={busy || loading || !title.trim()}
-            onClick={() => void add()}
+            disabled={busy}
+            onClick={() => void more()}
           >
-            Add
+            Load more children
           </button>
+        )}
+        <div className="task-child-add">
+          <div
+            className="child-kind-tabs"
+            role="group"
+            aria-label="Add a child"
+          >
+            <button
+              type="button"
+              aria-pressed={adding === "task"}
+              onClick={() => setAdding("task")}
+            >
+              Subtask
+            </button>
+            <button
+              type="button"
+              aria-pressed={adding === "step"}
+              onClick={() => setAdding("step")}
+            >
+              Step
+            </button>
+          </div>
+          <div className="inline-add">
+            <Plus size={15} />
+            <input
+              aria-label={adding === "step" ? "New step" : "New subtask"}
+              placeholder={
+                adding === "step" ? "Add an executable step" : "Add subtask"
+              }
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void add();
+                }
+              }}
+            />
+            {adding === "step" && (
+              <select
+                aria-label="Step estimate"
+                value={minutes}
+                onChange={(event) => setMinutes(Number(event.target.value))}
+              >
+                {[15, 30, 45, 60, 90, 120].map((value) => (
+                  <option value={value} key={value}>
+                    {value}m
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              type="button"
+              className="text-button"
+              disabled={busy || loading || !title.trim()}
+              onClick={() => void add()}
+            >
+              Add
+            </button>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </TaskDragProvider>
   );
 }

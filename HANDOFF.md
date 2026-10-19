@@ -1,10 +1,12 @@
 # Handoff
 
-Updated 2026-10-18 UTC. Keep this file focused on active work, open acceptance and dated compatibility constraints.
+Updated 2026-10-19 UTC. Keep this file focused on active work, open acceptance and dated compatibility constraints.
 Move completed rollout detail to a dated record and link it here. Repository rules are in [AGENTS](AGENTS.md);
 service entry points are in [README](README.md). Never put private content, credentials or raw production output here.
 
-Completed work is archived: through October 18 (Tasks refinement and cutover, VPS recovery, Recall, Mailsort) in
+Completed work is archived: the October 19 releases (Plan write reliability, whole-row drag, inline subtasks and Plan
+completion) in [docs/history/handoff-2026-10-19.md](docs/history/handoff-2026-10-19.md), through October 18 (Tasks
+refinement and cutover, VPS recovery, Recall, Mailsort) in
 [docs/history/handoff-2026-10-18.md](docs/history/handoff-2026-10-18.md), earlier in
 [docs/history/handoff-2026-10-11.md](docs/history/handoff-2026-10-11.md). Their waiting lists are not instructions.
 
@@ -12,7 +14,9 @@ Completed work is archived: through October 18 (Tasks refinement and cutover, VP
 
 ### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
 
-A local branch from `f6c08aaf`, not pushed yet: the verified Tasks review fixes, Tasks' D1 in Todofy's weekly
+A local branch from `f6c08aaf`, not pushed yet, merged with `origin/main` at `69ddb339` so that Codex's October 18-19
+Tasks and Plan work (inline subtasks, whole-row drag, Plan completion, native rollover) runs on the native path: the
+verified Tasks review fixes, Tasks' D1 in Todofy's weekly
 backup, the Tasks duration as the only estimate, the Planning channel allowlist, and the removal of the Todoist Plus
 extension and of every Todoist path in Todofy and FlowDay. By the owner's decision the end state ships at once: no
 compatibility window, staged rollout, flag or rollback machinery.
@@ -43,10 +47,11 @@ Right after the release, in this order:
 3. Confirm the first Tasks backup, taken at Todofy's first alarm after the release: its time on Todofy's health page
    or Home is newer than the release. Restore it locally as [Rehearse locally](tasks/docs/backup.md#rehearse-locally) says.
 4. Remove the Plus releases and the merged branches. `git branch -r --merged origin/main | grep codex/` lists exactly
-   these eleven; the three unmerged Recall experiment branches stay by the owner's earlier decision.
+   these fourteen; the three unmerged Recall experiment branches stay by the owner's earlier decision.
    ```sh
    for t in $(git tag -l 'todoist-plus-v*'); do gh release delete "$t" --cleanup-tag --yes --repo ziyixi/todofy; done
-   git push origin --delete codex/plus-ui-refinement codex/plus-ui-refinement-verification \
+   git push origin --delete codex/cloud-recovery-tasks codex/plan-write-reliability codex/plan-write-verification \
+     codex/plus-ui-refinement codex/plus-ui-refinement-verification \
      codex/tasks-dependency-layout codex/tasks-details-polish codex/tasks-layout-verification codex/tasks-native \
      codex/tasks-read-efficiency codex/tasks-read-verification codex/tasks-refinement-verification \
      codex/tasks-workflow-refinement codex/vps-release-recovery
@@ -68,9 +73,14 @@ Answered in chat; do not re-ask.
   verify the first production file removal and one Dropbox cold read, recording metadata only, never page content.
 - GTD additions: the Waiting list, the weekly review checklist and the Sunday-commit fix. The one-card
   Clarify queue was not chosen, so the checklist only counts the mail project's unplanned tasks and links it.
-- The native Plan weekly rollover stays on; its first natural run is the ten-minute cron after Monday 2026-10-19
-  00:00 US/Pacific (07:00 UTC). Observe it by metadata only (old-week batch drained, week start advanced, no error
-  code), never task content. [Controls](todofy/docs/planning-api.md#weekly-rollover-and-controls).
+- Native weekly rollover remains enabled. Limited October 19 metadata confirms the current week and zero
+  expired memberships. Its five-item legacy batching defect is fixed and released; the 32-member
+  first-request behavior is proved by real local Core/Tasks/D1 tests, not by production content writes.
+  [Evidence](docs/tasks-plan-reliability-verification.md) and
+  [controls](todofy/docs/planning-api.md#weekly-rollover-and-controls).
+- The 48 merged `codex/*` branches were pruned from origin after a local bundle backup, so branch names cited
+  in the archives as closing documentation may no longer exist. The three unmerged Recall experiment branches remain:
+  `codex/recall-permission-setup`, `codex/recall-startup-diagnostic` and `codex/recall-orion-permission-verification`.
 
 ### Waiting for the owner
 

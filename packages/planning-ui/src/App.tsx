@@ -615,6 +615,7 @@ export function App({
                 actions={planActions}
                 editTask={openTask}
                 completeReview={(task) => complete(task, "")}
+                completeTask={(task, day) => void complete(task, day)}
                 dependencyNotices={dependencyNotices}
                 onReviewShown={onReviewShown}
                 onOpenMail={onOpenMail}

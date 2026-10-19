@@ -18,7 +18,11 @@ export function dateLabel(value: string, today = todayDate()): string {
   const date = new Date(`${value.slice(0, 10)}T12:00:00`);
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    : date.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: value.slice(0, 4) === today.slice(0, 4) ? undefined : "numeric",
+      });
 }
 export function shiftDate(value: string, days: number): string {
   const date = new Date(`${value}T12:00:00`);

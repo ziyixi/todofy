@@ -60,6 +60,18 @@
 .task-menu-icon.is-current {
   background: #ededeb;
 }
+.task-shortcut-tooltip-positioner {
+  z-index: 80;
+}
+.task-shortcut-tooltip {
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: #333;
+  color: white;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 2px 6px #0002;
+}
 .task-menu-separator {
   height: 1px;
   margin: 5px 4px;

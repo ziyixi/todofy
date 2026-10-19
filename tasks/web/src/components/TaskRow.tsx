@@ -1,21 +1,17 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { ContextMenu } from "@base-ui/react/context-menu";
 import { Menu } from "@base-ui/react/menu";
 import {
-  CalendarDays,
   Check,
   ChevronRight,
   Circle,
-  Flag,
   GripVertical,
   MoreHorizontal,
-  Repeat2,
-  Tag,
-  Timer,
 } from "lucide-react";
 import { type Catalog, type Task, describeError } from "../api";
-import { dateLabel } from "../dates";
-import { repeatLabel } from "../recurrence-controls";
+import { TaskMetadata } from "./TaskMetadata";
+import type { PlanningTask } from "../task-planning";
+import { TaskRowDropZones, useTaskDrag } from "./TaskDrag";
 import { Dialog } from "./Dialog";
 import {
   TaskMenuChooser,
@@ -24,24 +20,9 @@ import {
   type TaskMenuProperty,
 } from "./TaskMenu";
 
-export function TaskRow({
-  task,
-  catalog,
-  today,
-  parentTitle,
-  busyIds,
-  selected,
-  onSelect,
-  onOpen,
-  onComplete,
-  onReorder,
-  draggedId,
-  overId,
-  setDraggedId,
-  setOverId,
-  menuActions,
-}: {
+export interface TaskRowProps {
   task: Task;
+  planning?: PlanningTask;
   catalog: Catalog;
   today: string;
   parentTitle?: string;
@@ -50,15 +31,36 @@ export function TaskRow({
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onComplete: (task: Task) => void;
-  onReorder: (id: string, before: Task) => void;
-  draggedId: string;
-  overId: string;
-  setDraggedId: (id: string) => void;
-  setOverId: (id: string) => void;
   menuActions?: TaskMenuActions;
-}) {
+  expanded?: boolean;
+  onToggleChildren?: () => void;
+  childListId?: string;
+  childContent?: ReactNode;
+  peers: readonly Task[];
+  ancestors?: readonly string[];
+}
+
+export function TaskRow({
+  task,
+  planning,
+  catalog,
+  today,
+  parentTitle,
+  busyIds,
+  selected,
+  onSelect,
+  onOpen,
+  onComplete,
+  menuActions,
+  expanded,
+  onToggleChildren,
+  childListId,
+  childContent,
+  peers,
+  ancestors,
+}: TaskRowProps) {
+  const drag = useTaskDrag(task, busyIds.has(task.id));
   const project = catalog.projects.find((item) => item.id === task.projectId);
-  const due = task.dueDate || task.dueDatetime.slice(0, 10);
   const more = useRef<HTMLButtonElement>(null);
   const contextAnchor = useRef<HTMLSpanElement>(null);
   const origin = useRef<"context" | "more">("more");
@@ -95,122 +97,105 @@ export function TaskRow({
     busy: busyIds.has(task.id),
     onOpen: () => onOpen(task.id),
     onProperty: openProperty,
+    onSelect: () => onSelect(task.id),
+    selected: selected.has(task.id),
     onDelete: () => {
       deleteRequest.current = crypto.randomUUID();
       setConfirmDelete(true);
     },
   };
   const row = (
-    <li
-      className={`task-row ${task.completed ? "is-completed" : ""} ${selected.has(task.id) ? "is-selected" : ""} ${overId === task.id ? "drop-before" : ""}`}
+    <div
+      ref={drag.ref}
+      data-task-id={task.id}
+      className={`task-row ${task.completed ? "is-completed" : ""} ${selected.has(task.id) ? "is-selected" : ""} ${drag.isDragSource ? "is-dragging" : ""}`}
       onContextMenu={(event) => {
         setContextPoint({ x: event.clientX, y: event.clientY });
         origin.current = "context";
       }}
-      onDragOver={(event) => {
-        if (draggedId && draggedId !== task.id) {
-          event.preventDefault();
-          setOverId(task.id);
-        }
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        if (draggedId && draggedId !== task.id) onReorder(draggedId, task);
-        setDraggedId("");
-        setOverId("");
-      }}
     >
+      <TaskRowDropZones
+        task={task}
+        peers={peers}
+        ancestors={ancestors}
+        busy={busyIds.has(task.id)}
+      />
+      {onToggleChildren && (task.childCount > 0 || expanded) ? (
+        <button
+          className="task-expand"
+          aria-label={`${expanded ? "Collapse" : "Expand"} subtasks for ${task.title}`}
+          aria-expanded={expanded}
+          aria-controls={expanded ? childListId : undefined}
+          onClick={onToggleChildren}
+        >
+          <ChevronRight size={15} />
+        </button>
+      ) : (
+        <span className="task-expand-space" aria-hidden />
+      )}
       <button
+        ref={drag.handleRef}
         className="drag-handle"
         aria-label={`Drag ${task.title}`}
-        draggable
-        onDragStart={(event) => {
-          setDraggedId(task.id);
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData("text/plain", task.id);
-        }}
-        onDragEnd={() => {
-          setDraggedId("");
-          setOverId("");
-        }}
+        disabled={busyIds.has(task.id)}
       >
         <GripVertical size={15} />
       </button>
-      <input
-        className="task-select"
-        type="checkbox"
-        aria-label={`Select ${task.title}`}
-        checked={selected.has(task.id)}
-        onChange={() => onSelect(task.id)}
-      />
+      {selected.size > 0 ? (
+        <span className="task-selection-slot">
+          <input
+            className="task-select"
+            type="checkbox"
+            aria-label={`Select ${task.title}`}
+            checked={selected.has(task.id)}
+            onChange={() => onSelect(task.id)}
+          />
+        </span>
+      ) : (
+        <button
+          className={`complete-button priority-${task.priority}`}
+          aria-label={`${task.completed ? "Reopen" : "Complete"} ${task.title}`}
+          disabled={busyIds.has(task.id)}
+          onClick={() => onComplete(task)}
+        >
+          {task.completed ? (
+            <Check size={12} />
+          ) : (
+            <>
+              <Circle size={18} />
+              <Check size={11} className="complete-hover-check" aria-hidden />
+            </>
+          )}
+        </button>
+      )}
       <button
-        className={`complete-button priority-${task.priority}`}
-        aria-label={`${task.completed ? "Reopen" : "Complete"} ${task.title}`}
-        disabled={busyIds.has(task.id)}
-        onClick={() => onComplete(task)}
+        className="task-open"
+        onClick={(event) => {
+          if (selected.size || event.metaKey || event.ctrlKey || event.shiftKey)
+            onSelect(task.id);
+          else onOpen(task.id);
+        }}
       >
-        {task.completed ? <Check size={12} /> : <Circle size={18} />}
-      </button>
-      <button className="task-open" onClick={() => onOpen(task.id)}>
         <span className="task-title">{task.title}</span>
         {task.descriptionPreview && (
           <span className="task-description">{task.descriptionPreview}</span>
         )}
-        <span className="task-meta">
-          {due && (
-            <span
-              className={due < today && !task.completed ? "overdue" : ""}
-            >
-              <CalendarDays size={12} />
-              {dateLabel(due, today)}
-              {task.dueDatetime &&
-                ` ${new Date(task.dueDatetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: task.dueTimezone || catalog.timeZone || undefined })}`}
-            </span>
-          )}
-          {task.recurrence && (
-            <span title={task.recurrence}>
-              <Repeat2 size={12} />
-              {repeatLabel(task.recurrence)}
-            </span>
-          )}
-          {task.deadline && (
-            <span className="deadline">
-              <Flag size={12} />
-              {dateLabel(task.deadline, today)}
-            </span>
-          )}
-          {task.childCount > 0 && (
-            <span>
-              <ChevronRight size={12} />
-              {task.completedChildCount}/{task.childCount}
-            </span>
-          )}
-          {task.durationMinutes > 0 && (
-            <span>
-              <Timer size={12} />
-              {task.durationMinutes}m
-            </span>
-          )}
-          {task.labelIds.map((id) => {
-            const label = catalog.labels.find((item) => item.id === id);
-            return label ? (
-              <span key={id}>
-                <Tag size={11} style={{ color: label.color || undefined }} />
-                {label.title}
-              </span>
-            ) : null;
-          })}
-        </span>
+        <TaskMetadata
+          task={task}
+          catalog={catalog}
+          today={today}
+          planning={planning}
+        />
       </button>
       <span className="task-context">
         {parentTitle && (
           <span title={`Parent: ${parentTitle}`}>
-            {parentTitle}
+            <span className="task-context-name">{parentTitle}</span>
             <ChevronRight size={11} />
           </span>
         )}
-        <span>
-          {project?.title || "Inbox"}
+        <span title={project?.title || "Inbox"}>
+          <span className="task-context-name">{project?.title || "Inbox"}</span>
           <span
             className="project-dot"
             style={{ background: project?.color || "#9a9a92" }}
@@ -296,23 +281,26 @@ export function TaskRow({
           </footer>
         </Dialog>
       )}
-    </li>
+    </div>
   );
   return (
-    <ContextMenu.Root disabled={!menuActions}>
-      <ContextMenu.Trigger render={row} />
-      {menuActions && (
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="task-menu-positioner">
-            <ContextMenu.Popup
-              className="task-menu-popup"
-              aria-label={`Actions for ${task.title}`}
-            >
-              <TaskMenuItems {...menuProps} actions={menuActions} />
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
-      )}
-    </ContextMenu.Root>
+    <li className="task-branch">
+      <ContextMenu.Root disabled={!menuActions}>
+        <ContextMenu.Trigger render={row} />
+        {menuActions && (
+          <ContextMenu.Portal>
+            <ContextMenu.Positioner className="task-menu-positioner">
+              <ContextMenu.Popup
+                className="task-menu-popup"
+                aria-label={`Actions for ${task.title}`}
+              >
+                <TaskMenuItems {...menuProps} actions={menuActions} />
+              </ContextMenu.Popup>
+            </ContextMenu.Positioner>
+          </ContextMenu.Portal>
+        )}
+      </ContextMenu.Root>
+      {childContent}
+    </li>
   );
 }

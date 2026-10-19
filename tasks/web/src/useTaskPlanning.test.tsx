@@ -43,6 +43,20 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it("Quick enables standalone immediately and keeps it after Quick is cleared", () => {
+  const { result } = renderHook(() => useTaskPlanning());
+  act(() => result.current.patch("quick", true));
+  expect(result.current.draft.singleAction).toBe(true);
+  act(() => result.current.patch("quick", false));
+  expect(result.current.draft.singleAction).toBe(true);
+  act(() => result.current.patch("singleAction", false));
+  expect(result.current.draft.singleAction).toBe(false);
+  expect(
+    planningDraft(create(PlanningTaskSchema, { planningFlags: ["quick"] }))
+      .singleAction,
+  ).toBe(true);
+});
+
 it("opens warm planning details with known checked values and no loading placeholder", async () => {
   const read = vi
     .spyOn(planningApi, "listPlanningTasks")
@@ -112,7 +126,7 @@ it("does not reuse planning from another generic task etag", async () => {
     );
   });
   expect(result.current.draft).toMatchObject({
-    singleAction: false,
+    singleAction: true,
     quick: true,
     waiting: false,
   });

@@ -5,7 +5,7 @@ import {
   type PlusSnapshot,
 } from "@ziyixi/planning-ui";
 import "@ziyixi/planning-ui/styles.css";
-import { api, send } from "./api";
+import { api, send, type Task } from "./api";
 import { removeQueryParameter } from "./routes";
 import { usePlanView } from "./usePlanView";
 
@@ -14,22 +14,34 @@ export default function PlanningPage({
   mutationRevision,
   onOpenTask,
   onSettings,
+  onCompleteTask,
 }: {
   page: "plan" | "focus";
   mutationRevision: number;
   onOpenTask: (id: string) => void;
   onSettings: () => void;
+  onCompleteTask: (
+    task: Task,
+    requestId: string,
+    flowDate?: string,
+  ) => Promise<string | undefined>;
 }) {
   const actions = useMemo(() => {
-    const actions = createPlanningActions(
-      {
-        plus: send,
-        flowday: (call) =>
-          send({ ...call, url: `/api/plus/flowday${call.url}` }),
-      },
-    );
+    const actions = createPlanningActions({
+      plus: send,
+      flowday: (call) => send({ ...call, url: `/api/plus/flowday${call.url}` }),
+    });
     return {
       ...actions,
+      async completeTask(
+        task: Parameters<typeof actions.completeTask>[0],
+        requestId: string,
+        flowDate?: string,
+      ) {
+        const current = await api.getTask({ name: `tasks/${task.id}` });
+        const error = await onCompleteTask(current, requestId, flowDate);
+        if (error) throw new Error(error);
+      },
       async updateEstimate(id: string, minutes: number) {
         const task = await api.getTask({ name: `tasks/${id}` });
         await api.updateTask({
@@ -40,7 +52,7 @@ export default function PlanningPage({
         });
       },
     };
-  }, []);
+  }, [onCompleteTask]);
   // The weekly review link opens the checklist once; a reload or a later visit to Plan does not.
   const [review] = useState(
     () => new URLSearchParams(window.location.search).get("review") === "1",

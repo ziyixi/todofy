@@ -70,8 +70,15 @@ test("right click and More share actions and contextual dates stay at the clicke
     "Move to",
     "Duplicate",
     "Copy link to task",
+    "Select task",
     "Delete",
   ]);
+  const menuBounds = await menu.boundingBox();
+  for (const label of labels.slice(0, 9)) {
+    await menu.getByRole("menuitem", { name: label!, exact: true }).hover();
+    await expect(page.getByRole("tooltip")).toHaveText(label!);
+    expect(await menu.boundingBox()).toEqual(menuBounds);
+  }
   await menu.getByRole("menuitem", { name: "More dates", exact: true }).click();
   const picker = page.getByRole("dialog", { name: "Date picker", exact: true });
   await expect(picker).toBeVisible();
@@ -113,6 +120,10 @@ test("right click and More share actions and contextual dates stay at the clicke
       ),
     );
   expect(moreLabels).toEqual(labels);
+  await moreMenu
+    .getByRole("menuitem", { name: "Priority 2", exact: true })
+    .hover();
+  await expect(page.getByRole("tooltip")).toHaveText("Priority 2");
   await moreMenu
     .getByRole("menuitem", { name: "Priority 2", exact: true })
     .click();
@@ -298,7 +309,9 @@ test("sidebar and catalog menus save favorite and archive changes without deleti
     })
     .click();
   await page.getByRole("menuitem", { name: "Unarchive", exact: true }).click();
-  await page.getByRole("button", { name: "Show active projects", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Show active projects", exact: true })
+    .click();
   await expect(
     page
       .locator(".sidebar")

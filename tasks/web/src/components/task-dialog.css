@@ -11,6 +11,13 @@
 .task-detail-dialog .dialog-footer {
   flex-shrink: 0;
 }
+.task-detail-dialog .dialog-footer .primary-button {
+  min-width: 112px;
+}
+.task-save-status {
+  color: var(--muted);
+  font-size: 12px;
+}
 .task-detail-dialog form {
   display: flex;
   flex-direction: column;

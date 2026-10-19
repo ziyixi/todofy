@@ -14,8 +14,14 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 - Desktop Inbox, Today, Upcoming, search, nested projects, sections, labels and saved filters. In a filter,
   `#Inbox` matches tasks with no project as well as tasks in the Inbox project.
 - Task editing, separate Subtask and Step lists, priority, dates, deadlines, structured repeat and completion history.
+- Collapsed inline subtasks in main lists; expand to edit, complete or reorder children without opening their parent.
+- Drag a task's title or row: the edges insert beside a task, the middle makes it a subtask. Drag Subtasks or Steps within their own list in the parent editor; the order is saved on drop.
+- Each row normally has one completion circle. Select task in its menu, or Ctrl/Cmd/Shift-click, enters bulk selection with checkboxes in the same position.
+- Existing editors stay open after Save. Main-list subtasks can move to another parent or become independent; Steps stay in details and execution views.
+- Drag to a sidebar project/Inbox to move, a label to add it, or Today to schedule. Native task properties appear separately from ordinary labels.
 - Visible planning stage, context, task options, start-ahead window and Deep/Shallow effort in task details.
 - Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.
+- Plan keeps the candidate columns above a full-width Committed row, with horizontal cards and completion controls for outcomes and Steps.
 - Installable desktop PWA; an explicit offline page, with task data available online.
 - Owner-only Cloudflare Worker and D1, using the repository's proto API and authentication conventions.
 - A verified Todoist import and coordinated native source for Todofy and FlowDay.
@@ -29,7 +35,8 @@ Travel, the restore into a new database and the one-time copy of FlowDay's older
 
 A Task or Subtask describes an outcome. Add a Step beneath it to arrange an executable action in the week,
 or select Standalone action to schedule the Task itself. Only these executable items expose a clock time
-and estimate. A Step cannot contain children. Task details can add, complete, reopen or delete either kind
+and estimate. Quick actions are always standalone, including existing Quick tasks; no second checkbox is needed.
+A Step cannot contain children. Task details can add, complete, reopen or delete either kind
 of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites.
 
 Completing a task completes its open children, recurring ones included. Completing a recurring task records

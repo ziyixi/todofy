@@ -127,6 +127,7 @@ it("shows Week's quick tasks as a quiet line of one-line cards under Next steps,
       run={vi.fn()}
       editTask={editTask}
       onWeekChange={vi.fn()}
+      completeTask={vi.fn()}
       completeReview={vi.fn()}
     />,
   );
@@ -185,6 +186,7 @@ it("shows no Quick line without a quick task to plan", async () => {
       run={vi.fn()}
       editTask={vi.fn()}
       onWeekChange={vi.fn()}
+      completeTask={vi.fn()}
       completeReview={vi.fn()}
     />,
   );

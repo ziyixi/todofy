@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { Catalog, Task } from "../api";
 import { dateLabel, todayDate } from "../dates";
-import { TaskRow } from "./TaskRow";
+import { TaskTreeRow } from "./TaskTreeRow";
 import type { TaskMenuActions } from "./TaskMenu";
+import { useTaskListProperties } from "../useTaskListProperties";
+import { TaskDetachZone } from "./TaskDrag";
 
 export function TaskList({
   tasks,
@@ -12,9 +14,10 @@ export function TaskList({
   onSelect,
   onOpen,
   onComplete,
-  onReorder,
   groupBy = "none",
   menuActions,
+  showCompleted = false,
+  orderBy = "sort_order",
 }: {
   tasks: Task[];
   catalog: Catalog;
@@ -23,12 +26,12 @@ export function TaskList({
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   onComplete: (task: Task) => void;
-  onReorder: (id: string, before: Task) => void;
   groupBy?: "none" | "date" | "section";
   menuActions?: TaskMenuActions;
+  showCompleted?: boolean;
+  orderBy?: string;
 }) {
-  const [draggedId, setDraggedId] = useState("");
-  const [overId, setOverId] = useState("");
+  const properties = useTaskListProperties(tasks);
   const taskIndex = useMemo(
     () => new Map(tasks.map((task) => [task.id, task])),
     [tasks],
@@ -56,6 +59,20 @@ export function TaskList({
     return groups;
   }, [tasks, groupBy]);
   const today = todayDate(new Date(), catalog.timeZone || undefined);
+  const listedIds = useMemo(
+    () => new Set(tasks.map((task) => task.id)),
+    [tasks],
+  );
+  const row = {
+    catalog,
+    today,
+    busyIds,
+    selected,
+    onSelect,
+    onOpen,
+    onComplete,
+    menuActions,
+  };
   function heading(key: string): string {
     if (groupBy === "section")
       return (
@@ -69,6 +86,11 @@ export function TaskList({
   }
   return (
     <div className="task-groups">
+      {properties.unavailable && (
+        <p role="status" className="task-property-warning">
+          Planning properties unavailable. Refresh tasks to retry.
+        </p>
+      )}
       {groups.map(([group, items]) => (
         <section key={group}>
           {groupBy !== "none" && (
@@ -79,30 +101,24 @@ export function TaskList({
           )}
           <ul className="task-list">
             {items.map((task) => (
-              <TaskRow
+              <TaskTreeRow
                 key={task.id}
                 task={task}
-                catalog={catalog}
-                today={today}
+                peers={items}
+                row={row}
+                planningById={properties.byId}
+                listedIds={listedIds}
+                showCompleted={showCompleted}
+                orderBy={orderBy}
                 parentTitle={
                   task.parentTitle || taskIndex.get(task.parentId)?.title
                 }
-                busyIds={busyIds}
-                selected={selected}
-                onSelect={onSelect}
-                onOpen={onOpen}
-                onComplete={onComplete}
-                onReorder={onReorder}
-                draggedId={draggedId}
-                overId={overId}
-                setDraggedId={setDraggedId}
-                setOverId={setOverId}
-                menuActions={menuActions}
               />
             ))}
           </ul>
         </section>
       ))}
+      <TaskDetachZone />
     </div>
   );
 }

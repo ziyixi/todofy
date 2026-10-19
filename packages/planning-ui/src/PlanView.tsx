@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { effectiveArea } from "./domain";
 import { committedOutcomes } from "./planning-outcomes";
 import { boardLanes } from "./review-lanes";
+import type { CompletePlanningTask } from "./CompleteTaskButton";
 import { ReviewBoard } from "./ReviewBoard";
 import { PlanningWeek } from "./PlanningWeek";
 import { WeeklyReview } from "./WeeklyReview";
@@ -38,6 +39,7 @@ export interface PlanViewProps {
   editTask: (task: PlanningTask) => void;
   onWeekChange: (weekStart: string) => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
+  completeTask: CompletePlanningTask;
   /** One line per task that no longer waits because what it waited for was deleted or left the list. */
   dependencyNotices?: readonly string[];
   /**

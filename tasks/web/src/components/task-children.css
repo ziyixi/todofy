@@ -29,6 +29,27 @@
   min-height: 37px;
   border-bottom: 1px solid #f1f1f1;
 }
+.child-drag {
+  display: grid;
+  place-items: center;
+  flex: 0 0 16px;
+  padding: 0;
+  color: #888;
+  cursor: grab;
+  opacity: 0;
+}
+.task-child-row:hover .child-drag,
+.child-drag:focus-visible {
+  opacity: 1;
+}
+.child-drag:active {
+  cursor: grabbing;
+}
+@media (hover: none) {
+  .child-drag {
+    opacity: 1;
+  }
+}
 .task-child-title {
   flex: 1;
   min-width: 80px;

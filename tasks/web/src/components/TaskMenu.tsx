@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Menu } from "@base-ui/react/menu";
+import { Tooltip } from "@base-ui/react/tooltip";
 import {
   CalendarArrowUp,
   CalendarDays,
   CalendarRange,
   Check,
+  SquareCheck,
   Copy,
   ExternalLink,
   Flag,
@@ -39,6 +41,50 @@ export type TaskMenuActions = Pick<
   | "setNotice"
 >;
 
+function TaskMenuIcon({
+  label,
+  children,
+  className = "task-menu-icon",
+  disabled,
+  onClick,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+  disabled: boolean;
+  onClick: Menu.Item.Props["onClick"];
+}) {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        delay={250}
+        render={
+          <Menu.Item
+            className={className}
+            disabled={disabled}
+            aria-label={label}
+            label={label}
+            onClick={onClick}
+          />
+        }
+      >
+        {children}
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Positioner
+          className="task-shortcut-tooltip-positioner"
+          side="top"
+          sideOffset={6}
+        >
+          <Tooltip.Popup role="tooltip" className="task-shortcut-tooltip">
+            {label}
+          </Tooltip.Popup>
+        </Tooltip.Positioner>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  );
+}
+
 export function TaskMenuItems({
   task,
   catalog,
@@ -47,6 +93,8 @@ export function TaskMenuItems({
   onOpen,
   onProperty,
   onDelete,
+  onSelect,
+  selected = false,
 }: {
   task: Task;
   catalog: Catalog;
@@ -55,6 +103,8 @@ export function TaskMenuItems({
   onOpen: () => void;
   onProperty: (property: TaskMenuProperty) => void;
   onDelete: () => void;
+  onSelect?: () => void;
+  selected?: boolean;
 }) {
   const today = todayDate(new Date(), catalog.timeZone || undefined);
   const weekday = new Date(`${today}T12:00:00`).getDay();
@@ -65,23 +115,17 @@ export function TaskMenuItems({
   return (
     <>
       <div className="task-menu-shortcuts" aria-label="Schedule shortcuts">
-        <Menu.Item
-          className="task-menu-icon"
+        <TaskMenuIcon
           disabled={busy}
-          aria-label="Today"
-          title="Today"
           label="Today"
           onClick={() =>
             run(actions.scheduleTask(task, today, catalog.timeZone))
           }
         >
           <Sun size={17} color="#058527" />
-        </Menu.Item>
-        <Menu.Item
-          className="task-menu-icon"
+        </TaskMenuIcon>
+        <TaskMenuIcon
           disabled={busy}
-          aria-label="Tomorrow"
-          title="Tomorrow"
           label="Tomorrow"
           onClick={() =>
             run(
@@ -90,24 +134,18 @@ export function TaskMenuItems({
           }
         >
           <Sunrise size={17} color="#ad6200" />
-        </Menu.Item>
-        <Menu.Item
-          className="task-menu-icon"
+        </TaskMenuIcon>
+        <TaskMenuIcon
           disabled={busy}
-          aria-label="Next week"
-          title="Next week"
           label="Next week"
           onClick={() =>
             run(actions.scheduleTask(task, nextWeek, catalog.timeZone))
           }
         >
           <CalendarArrowUp size={17} color="#a146ba" />
-        </Menu.Item>
-        <Menu.Item
-          className="task-menu-icon"
+        </TaskMenuIcon>
+        <TaskMenuIcon
           disabled={busy}
-          aria-label="Next weekend"
-          title="Next weekend"
           label="Next weekend"
           onClick={() =>
             run(
@@ -120,31 +158,26 @@ export function TaskMenuItems({
           }
         >
           <Sofa size={17} color="#246fe0" />
-        </Menu.Item>
-        <Menu.Item
-          className="task-menu-icon"
+        </TaskMenuIcon>
+        <TaskMenuIcon
           disabled={busy}
-          aria-label="More dates"
-          title="More dates"
           label="More dates"
           onClick={() => onProperty("date")}
         >
           <CalendarDays size={17} />
-        </Menu.Item>
+        </TaskMenuIcon>
       </div>
       <div className="task-menu-shortcuts" aria-label="Priority shortcuts">
         {["#d1453b", "#eb8909", "#246fe0", "#808080"].map((color, index) => (
-          <Menu.Item
+          <TaskMenuIcon
             key={color}
             className={`task-menu-icon${task.priority === index + 1 ? " is-current" : ""}`}
             disabled={busy}
-            aria-label={`Priority ${index + 1}`}
-            title={`Priority ${index + 1}`}
             label={`Priority ${index + 1}`}
             onClick={() => run(actions.setPriority(task, index + 1))}
           >
             <Flag size={16} color={color} fill={index < 3 ? color : "none"} />
-          </Menu.Item>
+          </TaskMenuIcon>
         ))}
       </div>
       <Menu.Separator className="task-menu-separator" />
@@ -208,6 +241,12 @@ export function TaskMenuItems({
         Copy link to task
       </Menu.Item>
       <Menu.Separator className="task-menu-separator" />
+      {onSelect && (
+        <Menu.Item className="task-menu-item" onClick={onSelect}>
+          <SquareCheck size={15} />
+          {selected ? "Deselect task" : "Select task"}
+        </Menu.Item>
+      )}
       <Menu.Item
         className="task-menu-item danger"
         disabled={busy}

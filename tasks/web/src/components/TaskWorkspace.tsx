@@ -63,7 +63,7 @@ export function TaskWorkspace({
   openTask,
   editCatalog,
 }: Props) {
-  const { batch, busyIds, selected, setSelected, complete, reorder } = actions;
+  const { batch, busyIds, selected, setSelected, complete } = actions;
   const [historyVisible, setHistoryVisible] = useState(false);
   const project = catalog.projects.find((item) => item.id === route.id);
   return (
@@ -112,6 +112,7 @@ export function TaskWorkspace({
               <button
                 className="icon-button"
                 aria-label="Edit project"
+                disabled={catalogLoading || !project}
                 onClick={() => editCatalog("project", project)}
               >
                 <Pencil size={17} />
@@ -238,6 +239,9 @@ export function TaskWorkspace({
         </p>
       )}
       <TaskList
+        key={`${route.page}:${route.id || ""}:${route.page === "upcoming" ? date : ""}`}
+        showCompleted={includeCompleted || route.page === "completed"}
+        orderBy={orderBy}
         menuActions={actions}
         tasks={list.tasks}
         catalog={catalog}
@@ -252,7 +256,6 @@ export function TaskWorkspace({
         }
         onOpen={(id) => void openTask(id)}
         onComplete={(task) => void complete(task)}
-        onReorder={(id, before) => void reorder(id, before)}
         groupBy={
           route.page === "upcoming"
             ? "date"

@@ -71,8 +71,15 @@ class Stack:
         ).fetchone()
         return "none" if row is None else row[0]
 
-    def resets(self) -> int:
-        return self.sql.db.execute("SELECT count(*) FROM plus_receipts WHERE method = 'WeekReset'").fetchone()[0]
+    def revisions(self) -> dict[str, int]:
+        """Each task's planning-state revision, which only a write or the rollover moves."""
+        rows = self.d1.db.execute(
+            "SELECT t.external_id, s.rev FROM plan_task_state s JOIN plan_tasks t ON t.id = s.task_id"
+        ).fetchall()
+        return {row[0]: row[1] for row in rows}
+
+    def tasks_read(self) -> int:
+        return sum(method == "GetTask" for method, _ in self.tasks.calls)
 
     def tick(self) -> None:
         self.core.plus_next_tick = 0
@@ -118,9 +125,10 @@ def test_keeping_a_commitment_on_sunday_keeps_it_through_monday(stack: Stack) ->
     stack.at("2026-10-18T20:00:00")
     assert stack.set_plan("weekday", stage="committed")["task"]["stage"] == "committed"
     assert "weekday" in stack.plan()["next_week_task_ids"]
+    revisions = stack.revisions()
     stack.at("2026-10-19T00:05:00")
     stack.tick()
-    assert stack.stage("weekday") == "committed" and stack.resets() == 0
+    assert stack.stage("weekday") == "committed" and stack.revisions() == revisions
 
 
 def test_a_sunday_commit_whose_confirming_read_fails_is_still_kept(stack: Stack) -> None:
@@ -155,22 +163,24 @@ def test_monday_reset_touches_no_task_without_marks(stack: Stack) -> None:
     stack.set_plan("fresh", stage="committed")
     stack.set_plan("fresh", stage="weekly")
     assert stack.d1.weeks() == {"weekday": (WEEK, 1, 0)}
+    revisions = stack.revisions()
     stack.at("2026-10-19T00:01:00")
     stack.tick()
-    assert stack.resets() == 1  # the unfinished commitment only
+    # The unfinished commitment only, at its next revision.
+    assert stack.revisions() == {**revisions, "weekday": revisions["weekday"] + 1}
     assert stack.d1.weeks() == {}
     assert (stack.stage("weekday"), stack.stage("fresh"), stack.stage("goal")) == ("weekly", "weekly", "monthly")
 
 
-def test_a_task_deleted_while_its_monday_reset_waits_does_not_block_the_rollover(stack: Stack) -> None:
-    stack.at("2026-10-19T00:01:00")
+def test_the_monday_reset_reads_no_task_so_an_unavailable_or_deleted_one_cannot_hold_it(stack: Stack) -> None:
     stack.tasks.failures["GetTask"] = [503]
-    with pytest.raises(stack.runtime.plus_api.plus_tasks.PlusError):
-        stack.tick()  # Tasks is unavailable for the reset's read
-    del stack.tasks.tasks["weekday"]  # deleted in Tasks before the retry
-    stack.at("2026-10-19T00:11:00")
+    del stack.tasks.tasks["weekday"]  # deleted in Tasks while its reset waits
+    reads = stack.tasks_read()
+    stack.at("2026-10-19T00:01:00")
     stack.tick()
-    assert stack.d1.weeks() == {}
+    assert stack.d1.weeks() == {} and stack.stage("weekday") == "weekly"
+    assert stack.tasks_read() == reads
+    stack.tasks.failures.clear()
     assert stack.set_plan("fresh", stage="committed")["task"]["stage"] == "committed"
 
 
@@ -182,4 +192,4 @@ def test_a_monday_write_runs_the_reset_first(stack: Stack, method: str) -> None:
     else:
         request = {"task_id": "goal"}
     assert "error" not in stack.call(method, request_id=str(uuid.uuid4()), **request)
-    assert stack.stage("weekday") == "weekly" and stack.resets() == 1
+    assert stack.stage("weekday") == "weekly" and "weekday" not in stack.d1.weeks()

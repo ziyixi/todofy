@@ -79,6 +79,7 @@ it("shows a step's own start window in Start now while its parent occupies the c
       actions={actions}
       run={vi.fn()}
       editTask={vi.fn()}
+      completeTask={vi.fn()}
       completeReview={vi.fn()}
     />,
   );

@@ -12,6 +12,27 @@ import { scheduledDate, scheduledTime } from "../task-schedule";
 import "./color-detail.css";
 import "./task-dialog.css";
 
+function taskDraft(task?: Task, defaults?: Partial<TaskDraft>): TaskDraft {
+  return {
+    title: task?.title ?? "",
+    description: task?.description ?? "",
+    projectId: task?.projectId ?? "",
+    sectionId: task?.sectionId ?? "",
+    parentId: task?.parentId ?? "",
+    labelIds: task?.labelIds ?? [],
+    priority: task?.priority ?? 4,
+    dueDate: task?.dueDate ?? "",
+    dueDatetime: task?.dueDatetime ?? "",
+    dueTimezone: task?.dueTimezone || "",
+    deadline: task?.deadline ?? "",
+    durationMinutes: task?.durationMinutes ?? 0,
+    recurrence: task?.recurrence ?? "",
+    kind: task?.kind || "task",
+    effort: task?.effort || "",
+    ...defaults,
+  };
+}
+
 export function TaskDialog({
   task,
   catalog,
@@ -40,26 +61,12 @@ export function TaskDialog({
   const [currentTask, setCurrentTask] = useState(task);
   // A create can save content before its planning write finishes; keep its form compact until it closes.
   const displayTask = task ? currentTask : undefined;
-  const [draft, setDraft] = useState<TaskDraft>(() => ({
-    title: task?.title ?? "",
-    description: task?.description ?? "",
-    projectId: task?.projectId ?? "",
-    sectionId: task?.sectionId ?? "",
-    parentId: task?.parentId ?? "",
-    labelIds: task?.labelIds ?? [],
-    priority: task?.priority ?? 4,
-    dueDate: task?.dueDate ?? "",
-    dueDatetime: task?.dueDatetime ?? "",
-    dueTimezone: task?.dueTimezone || "",
-    deadline: task?.deadline ?? "",
-    durationMinutes: task?.durationMinutes ?? 0,
-    recurrence: task?.recurrence ?? "",
-    kind: task?.kind || "task",
-    effort: task?.effort || "",
-    ...defaults,
-  }));
+  const [draft, setDraft] = useState<TaskDraft>(() =>
+    taskDraft(task, defaults),
+  );
   const planning = useTaskPlanning(task);
   const [busy, setBusy] = useState(false);
+  const [saveComplete, setSaveComplete] = useState(false);
   const saveRequestId = useRef(crypto.randomUUID());
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -73,6 +80,7 @@ export function TaskDialog({
     event.preventDefault();
     if (!draft.title.trim() || busy) return;
     setBusy(true);
+    setSaveComplete(false);
     setError("");
     let saved: Task | undefined;
     try {
@@ -89,11 +97,13 @@ export function TaskDialog({
       );
       const genericChanged = saved !== currentTask;
       setCurrentTask(saved);
+      setDraft(taskDraft(saved));
       saveRequestId.current = crypto.randomUUID();
       const planningChanged =
         !saved.completed && (await planning.save(saved.id, draft.deadline));
       if (genericChanged || planningChanged) onChildAdded();
-      onClose();
+      if (task) setSaveComplete(true);
+      else onClose();
     } catch (reason) {
       const message =
         reason instanceof Error && !("status" in reason)
@@ -211,6 +221,8 @@ export function TaskDialog({
       )}
       <form
         onSubmit={submit}
+        onChangeCapture={() => setSaveComplete(false)}
+        onClickCapture={() => setSaveComplete(false)}
         onKeyDown={(event) => {
           if (
             event.key === "Enter" &&
@@ -306,9 +318,11 @@ export function TaskDialog({
               Delete
             </button>
           )}
-          <span className="spacer" />
+          <span className="spacer task-save-status" role="status">
+            {saveComplete ? "Saved" : ""}
+          </span>
           <button type="button" className="secondary-button" onClick={onClose}>
-            Cancel
+            {task ? "Close" : "Cancel"}
           </button>
           <button
             className="primary-button"

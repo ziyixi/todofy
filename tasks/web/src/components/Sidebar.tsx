@@ -19,6 +19,7 @@ import { useState } from "react";
 import type { Catalog, CatalogItem, CatalogKind } from "../api";
 import { CatalogMenu } from "./CatalogMenu";
 import { routeHref, type Route } from "../routes";
+import { TaskCategoryLink } from "./TaskDrag";
 
 const navigation = [
   { page: "search", title: "Search", icon: Search },
@@ -96,15 +97,20 @@ export function Sidebar({
             onError={onError}
           >
             <div className="sidebar-context-row">
-              <a
+              <TaskCategoryLink
                 className={`nav-item ${active("project", project.id) ? "selected" : ""}`}
                 style={{ paddingInlineStart: `${12 + depth * 14}px` }}
                 href={routeHref({ page: "project", id: project.id })}
+                target={
+                  project.archived
+                    ? undefined
+                    : { page: "project", id: project.id }
+                }
               >
                 <Hash size={18} style={{ color: project.color || undefined }} />
                 <span>{project.title}</span>
                 {categoryCount("project", project.id)}
-              </a>
+              </TaskCategoryLink>
               <CatalogMenu
                 kind="project"
                 item={project}
@@ -167,16 +173,17 @@ export function Sidebar({
       </button>
       <nav aria-label="Main navigation">
         {navigation.map(({ page, title, icon: Icon }) => (
-          <a
+          <TaskCategoryLink
             key={page}
             href={routeHref({ page, id: "" })}
             className={`nav-item ${active(page) ? "selected" : ""}`}
             aria-current={active(page) ? "page" : undefined}
+            target={page === "inbox" || page === "today" ? { page } : undefined}
           >
             <Icon size={19} />
             <span>{title}</span>
             {categoryCount(page)}
-          </a>
+          </TaskCategoryLink>
         ))}
       </nav>
       {favorites.length > 0 && (
@@ -192,14 +199,19 @@ export function Sidebar({
               onError={onError}
             >
               <div className="sidebar-context-row">
-                <a
+                <TaskCategoryLink
                   className={`nav-item ${active(page, id) ? "selected" : ""}`}
                   href={routeHref({ page, id })}
+                  target={
+                    page === "project" || page === "label"
+                      ? { page, id }
+                      : undefined
+                  }
                 >
                   <Icon size={17} style={{ color: color || undefined }} />
                   <span>{title}</span>
                   {categoryCount(page, id)}
-                </a>
+                </TaskCategoryLink>
                 <CatalogMenu
                   kind={page}
                   item={item}

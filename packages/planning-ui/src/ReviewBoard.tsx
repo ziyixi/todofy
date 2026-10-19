@@ -46,6 +46,10 @@ import {
   statusLine,
   type BoardLanes,
 } from "./review-lanes";
+import {
+  CompleteTaskButton,
+  type CompletePlanningTask,
+} from "./CompleteTaskButton";
 import { PendingMark } from "./StatusMarks";
 import { untouchedText } from "./weekly-review";
 import { words } from "./i18n";
@@ -211,6 +215,7 @@ interface Props {
   actions: PlusActions;
   run: RunOperation;
   editTask: (task: PlanningTask) => void;
+  completeTask: CompletePlanningTask;
   /**
    * One quiet line each, under the lanes so that nothing above them moves: a task that no longer waits
    * because what it waited for was deleted or left the list, told once.
@@ -244,6 +249,7 @@ export function ReviewBoard({
   actions,
   run,
   editTask,
+  completeTask,
   dependencyNotices = [],
 }: Props) {
   const text = words(language);
@@ -378,7 +384,8 @@ export function ReviewBoard({
         return result;
       },
       {
-        pending: [pendingTask(task.id)],
+        // A reorder changes the siblings' revisions too; their next writes need the returned etags.
+        pending: next.map(pendingTask),
         predict: predictLaneOrder(lane, next),
       },
     );
@@ -471,6 +478,7 @@ export function ReviewBoard({
               pending={pending}
               dragHint={hintId}
               editTask={editTask}
+              completeTask={completeTask}
               onStart={(task) => void start(task)}
             />
           ))}
@@ -484,7 +492,11 @@ export function ReviewBoard({
           ))}
         </div>
       </div>
-      <DragOverlay dropAnimation={{ duration: 160, easing: "ease-out" }}>
+      {/* Finish preview cleanup immediately, retaining dnd-kit's keyboard focus restoration. */}
+      <DragOverlay
+        style={{ pointerEvents: "none" }}
+        dropAnimation={() => undefined}
+      >
         {(source) => {
           const task = source.data?.task as PlanningTask | undefined;
           return task ? (
@@ -526,6 +538,7 @@ function ReviewLane({
   pending,
   dragHint,
   editTask,
+  completeTask,
   onStart,
 }: {
   lane: LaneId;
@@ -547,6 +560,7 @@ function ReviewLane({
   /** The ID of the drag instructions, which every handle names. */
   dragHint: string;
   editTask: Props["editTask"];
+  completeTask: CompletePlanningTask;
   onStart?: (task: PlanningTask) => void;
 }) {
   const { ref } = useDroppable({
@@ -611,6 +625,7 @@ function ReviewLane({
             pending={pending?.has(pendingTask(task.id)) ?? false}
             dragHint={dragHint}
             editTask={editTask}
+            completeTask={completeTask}
             onStart={onStart}
           />
         ))}
@@ -652,6 +667,7 @@ function DraggableOutcome({
   pending,
   dragHint,
   editTask,
+  completeTask,
   onStart,
 }: {
   task: PlanningTask;
@@ -670,6 +686,7 @@ function DraggableOutcome({
   pending: boolean;
   dragHint: string;
   editTask: Props["editTask"];
+  completeTask: CompletePlanningTask;
   onStart?: (task: PlanningTask) => void;
 }) {
   const { ref, handleRef, isDragSource } = useSortable({
@@ -728,6 +745,12 @@ function DraggableOutcome({
         waitsFor={waitsFor}
         untouched={lane === "parked"}
         onClick={() => editTask(task)}
+      />
+      <CompleteTaskButton
+        task={task}
+        language={language}
+        disabled={busy || pending}
+        onComplete={() => completeTask(task)}
       />
       {startable && (
         <button

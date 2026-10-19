@@ -244,7 +244,7 @@ def test_a_receipt_older_than_thirty_days_is_not_read_and_nothing_deletes_one(st
 # ---- the Monday reset ------------------------------------------------------------------------------------
 
 
-def test_the_monday_reset_keeps_its_receipts_in_the_object(stack):
+def test_the_monday_reset_changes_planning_state_only_without_a_receipt(stack):
     native_plan = stack.runtime.native_plan
     committed = {**native_plan.state_from_labels(["committed", "office"])}
     asyncio.run(native_plan.save_fields(stack.core.env, "parent", committed, 0, str(uuid.uuid4())))
@@ -256,8 +256,7 @@ def test_the_monday_reset_keeps_its_receipts_in_the_object(stack):
     asyncio.run(stack.runtime.plus_week.tick(stack.core))
     [state] = stack.d1.db.execute("SELECT stage, area FROM plan_task_state").fetchall()
     assert tuple(state) == ("weekly", "work")
-    # The reset changes Todofy's planning state only: Tasks is read, never written.
-    assert "storage.sync" in stack.journal
-    assert not {"UpdateTask", "CompleteTask", "CreateTask"} & set(stack.journal)
-    [receipt] = [row for key, row in stack.receipts().items() if key.startswith("week:")]
-    assert receipt["state"] == "done" and receipt["result"] == "{}" and receipt["method"] == "WeekReset"
+    # One D1 transaction changes Todofy's planning state: Tasks is neither read nor written, and there is no
+    # receipt to keep.
+    assert not {"GetTask", "UpdateTask", "CompleteTask", "CreateTask"} & set(stack.journal)
+    assert not [key for key in stack.receipts() if key.startswith("week:")]

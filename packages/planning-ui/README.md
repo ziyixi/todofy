@@ -49,3 +49,8 @@ FlowDay finish command, which caps recorded time even if the browser was closed 
 A task's estimate is its Tasks duration: the host supplies `updateEstimate`, which writes Tasks, and FlowDay's
 mirrored copy is never read. Only FlowDay's local tasks keep an estimate of their own. A day queue write goes
 straight to FlowDay's queue; it never waits for FlowDay's mirror to know the task.
+
+Review keeps candidate columns together and gives Committed a separate full-width row of horizontal cards.
+Plan's outcome, Step, Quick and calendar checkboxes use the same completion receipts and settlement as Focus;
+calendar cards pass their own flow date. Quick actions always qualify as standalone, even when an older
+response contains only the Quick flag. Ordinary labels do not imply planning properties.

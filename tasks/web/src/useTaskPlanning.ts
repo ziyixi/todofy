@@ -60,6 +60,7 @@ export function useTaskPlanning(task?: Task) {
     setDraft((current) => ({
       ...current,
       [field]: value,
+      ...(field === "quick" && value === true ? { singleAction: true } : {}),
       ...((field === "stage" && value !== "none") ||
       (field === "active" && value === true)
         ? { parked: false }

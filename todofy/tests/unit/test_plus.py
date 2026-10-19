@@ -6,10 +6,18 @@ from pathlib import Path
 import pytest
 
 from todofy.core import plus
+from todofy.core.sql import native_plan as native_sql
 from todofy.core.sql import plus as sql
 
 TODAY = "2026-10-13"
 REQUEST = "f4438dda-dc8d-4732-aa59-bdb1a4dc21fa"
+
+
+def migrated() -> sqlite3.Connection:
+    db = sqlite3.connect(":memory:")
+    for migration in sorted((Path(__file__).resolve().parents[2] / "migrations").glob("*.sql")):
+        db.executescript(migration.read_text())
+    return db
 
 
 def task(**values):
@@ -81,12 +89,10 @@ def test_estimates_are_optional_and_two_hours_is_not_rejected():
 def test_the_week_starts_on_monday_and_a_row_kept_for_it_has_not_ended():
     assert plus.week_start("2026-10-18") == "2026-10-12"
     assert plus.week_start("2026-10-19") == "2026-10-19"
-    db = sqlite3.connect(":memory:")
-    migration = Path(__file__).resolve().parents[2] / "migrations/0006_todoist_plus.sql"
-    db.executescript(migration.read_text())
+    db = migrated()
     db.execute(sql.REMEMBER_WEEK, ("task1", "2026-10-12", 1, 1))
     db.execute(sql.REMEMBER_WEEK, ("task1", "2026-10-19", 1, 1))
-    assert db.execute(sql.ENDED_WEEK, ("2026-10-19",)).fetchall() == []
+    assert db.execute(native_sql.ENDED_WEEK.sql, ("2026-10-19",)).fetchall() == []
 
 
 def test_only_a_commitment_chosen_on_the_last_day_waits_for_the_next_week():
@@ -103,8 +109,7 @@ def test_only_a_commitment_chosen_on_the_last_day_waits_for_the_next_week():
 
 
 def test_membership_never_moves_back_so_sunday_scans_cannot_undo_a_next_week_choice():
-    db = sqlite3.connect(":memory:")
-    db.executescript((Path(__file__).resolve().parents[2] / "migrations/0006_todoist_plus.sql").read_text())
+    db = migrated()
 
     def week_of(task_id):
         return db.execute("SELECT week_start, committed, bet FROM plus_weeks WHERE task_id=?", (task_id,)).fetchone()
@@ -119,7 +124,7 @@ def test_membership_never_moves_back_so_sunday_scans_cannot_undo_a_next_week_cho
     assert week_of("weekday") == ("2026-10-12", 1, 0)
     assert db.execute(sql.NEXT_WEEK, ("2026-10-12",)).fetchall() == [("sunday",)]
     # Monday's reset selects only the ending week's row, and the new week's scan may update the kept one.
-    assert [row[0] for row in db.execute(sql.ENDED_WEEK, ("2026-10-19",))] == ["weekday"]
+    assert [row[0] for row in db.execute(native_sql.ENDED_WEEK.sql, ("2026-10-19",))] == ["weekday"]
     db.execute(sql.REMEMBER_WEEK, ("sunday", "2026-10-19", 1, 1))
     assert week_of("sunday") == ("2026-10-19", 1, 1)
     assert db.execute(sql.NEXT_WEEK, ("2026-10-19",)).fetchall() == []
@@ -128,8 +133,7 @@ def test_membership_never_moves_back_so_sunday_scans_cannot_undo_a_next_week_cho
 
 
 def test_a_sunday_removal_updates_a_kept_choice_and_one_leaving_no_mark_forgets_it():
-    db = sqlite3.connect(":memory:")
-    db.executescript((Path(__file__).resolve().parents[2] / "migrations/0006_todoist_plus.sql").read_text())
+    db = migrated()
 
     def week_of(task_id):
         return db.execute("SELECT week_start, committed, bet FROM plus_weeks WHERE task_id=?", (task_id,)).fetchone()
@@ -146,7 +150,7 @@ def test_a_sunday_removal_updates_a_kept_choice_and_one_leaving_no_mark_forgets_
     # So a mark added again later that Sunday, here by a page scan, resets on Monday as usual.
     db.execute(sql.REMEMBER_WEEK, ("goal", "2026-10-12", 0, 1))
     assert week_of("goal") == ("2026-10-12", 0, 1)
-    assert [row[0] for row in db.execute(sql.ENDED_WEEK, ("2026-10-19",))] == ["goal"]
+    assert [row[0] for row in db.execute(native_sql.ENDED_WEEK.sql, ("2026-10-19",))] == ["goal"]
     # An unchanged scan writes nothing.
     changes = db.total_changes
     db.execute(sql.REMEMBER_WEEK, ("both", "2026-10-12", 1, 0))

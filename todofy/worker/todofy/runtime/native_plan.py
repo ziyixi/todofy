@@ -26,8 +26,14 @@ async def read_overlay(env: Any, tasks: list[dict[str, Any]]) -> list[dict[str, 
     overlaid = []
     for task in tasks:
         state = states.get(task["id"], {})
+        planning = {
+            **state_from_labels([]),
+            **{key: bool(state[key]) if key in FLAG_NAMES else state[key] for key in sql.FIELDS if key in state},
+        }
+        if planning["quick"]:
+            planning["task"] = True
         content_labels = list(task.get("_native_content_labels", task.get("labels") or []))
-        labels = sorted((set(content_labels) - ROLE_NAMES) | set(labels_from_state(state)))
+        labels = sorted((set(content_labels) - ROLE_NAMES) | set(labels_from_state(planning)))
         updated = task.get("updated_at")
         if state.get("updated_at", 0) > (parse_instant(updated) or 0):
             updated = rfc3339(state["updated_at"])
@@ -39,12 +45,7 @@ async def read_overlay(env: Any, tasks: list[dict[str, Any]]) -> list[dict[str, 
                 "_native_planning": True,
                 "_native_plan_rev": int(state.get("rev", 0)),
                 "_native_content_labels": content_labels,
-                "_native_plan_state": {
-                    **state_from_labels([]),
-                    **{
-                        key: bool(state[key]) if key in FLAG_NAMES else state[key] for key in sql.FIELDS if key in state
-                    },
-                },
+                "_native_plan_state": planning,
             }
         )
     return overlaid

@@ -1,22 +1,28 @@
 .review-board {
   container: review / inline-size;
 }
-/* Four stage lanes and Parked (while the account has the label), with Start now and Waiting only
-   when they have cards. */
+/* Keep the existing vertical candidate columns; only Committed gets its own row. */
 .review-lanes {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  --review-columns: 3;
+  grid-template-columns: repeat(var(--review-columns), minmax(0, 1fr));
   gap: 12px;
   align-items: start;
 }
 .review-lanes[data-lanes="5"] {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  --review-columns: 4;
 }
 .review-lanes[data-lanes="6"] {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  --review-columns: 5;
 }
 .review-lanes[data-lanes="7"] {
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  --review-columns: 6;
+}
+.review-lane[data-lane="committed"] {
+  grid-column: 1 / -1;
+}
+.review-lane[data-lane="committed"] .review-lane-cards {
+  grid-template-columns: repeat(var(--review-columns), minmax(0, 1fr));
 }
 .review-lane {
   min-width: 0;
@@ -265,6 +271,20 @@
 .review-draggable.is-insert-after::before {
   bottom: -5px;
 }
+.review-lane[data-lane="committed"] .review-draggable::before {
+  top: 0;
+  bottom: 0;
+  height: auto;
+  width: 3px;
+}
+.review-lane[data-lane="committed"] .is-insert-before::before {
+  left: -5px;
+  right: auto;
+}
+.review-lane[data-lane="committed"] .is-insert-after::before {
+  left: auto;
+  right: -5px;
+}
 .review-drag-handle {
   position: absolute;
   inset: 0 auto 0 4px;
@@ -347,65 +367,14 @@
   pointer-events: none;
   box-shadow: var(--plus-shadow-2);
 }
-/*
- * Five to seven lanes stay in one row until each lane has about 200px. Then the four stages keep
- * their row, and the side lanes (Start now, Waiting, Parked) share the row above it (one alone
- * takes it whole), so a drag from them into a stage goes straight down. Two columns pair them
- * again, and the stages always start a row of their own.
- */
-@container review (max-width: 1470px) {
-  .review-lanes[data-lanes="7"] {
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-  }
-  .review-lanes[data-lanes="7"] > .review-lane {
-    grid-column: span 3;
-  }
-  .review-lanes[data-lanes="7"]
-    > :is([data-lane="start"], [data-lane="waiting"], [data-lane="parked"]) {
-    grid-column: span 4;
-  }
-}
-@container review (max-width: 1260px) {
-  .review-lanes[data-lanes="6"] {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-  .review-lanes[data-lanes="6"]
-    > :is([data-lane="start"], [data-lane="waiting"], [data-lane="parked"]) {
-    grid-column: span 2;
-  }
-}
-@container review (max-width: 1050px) {
-  .review-lanes[data-lanes="5"] {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-  .review-lanes[data-lanes="5"]
-    > :is([data-lane="start"], [data-lane="waiting"], [data-lane="parked"]) {
-    grid-column: 1 / -1;
-  }
-  /* Parked alone and empty is a thin strip over the stages, not a tall empty row: its header and
-     one line saying where to drop. It stays in place, so a drag start moves nothing. */
-  .review-lanes[data-lanes="5"] > [data-lane="parked"]:has(.review-lane-empty) {
-    min-height: 0;
-  }
-  .review-lanes[data-lanes="5"] > [data-lane="parked"] .review-lane-empty {
-    margin: 0;
-    padding: 0 4px;
-  }
-}
 @container review (max-width: 800px) {
   .review-lanes[data-lanes] {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .review-lanes:is([data-lanes="6"], [data-lanes="7"]) > .review-lane {
-    grid-column: auto;
-  }
-  .review-lanes[data-lanes] > [data-lane="quarterly"] {
-    grid-column-start: 1;
+    --review-columns: 2;
   }
 }
 @container review (max-width: 430px) {
   .review-lanes[data-lanes] {
-    grid-template-columns: minmax(0, 1fr);
+    --review-columns: 1;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -413,4 +382,22 @@
   .planning-outcome-card {
     transition: none;
   }
+}
+
+.review-draggable > .planning-outcome-card,
+.planning-commitment > .planning-outcome-card {
+  padding-right: 34px;
+}
+.review-draggable > .planning-complete,
+.planning-commitment > .planning-complete {
+  position: absolute;
+  top: 10px;
+  right: 9px;
+}
+.plus-root .review-card-action {
+  right: 35px;
+}
+.planning-commitment {
+  position: relative;
+  min-width: 0;
 }

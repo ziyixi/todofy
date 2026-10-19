@@ -44,7 +44,7 @@ async function openDateMenu(
   });
 }
 
-test("context date input saves normal tasks as calendar dates and keeps clock time for steps", async ({
+test("context date input saves calendar dates while Steps stay out of ordinary search", async ({
   page,
   request,
 }) => {
@@ -79,18 +79,15 @@ test("context date input saves normal tasks as calendar dates and keeps clock ti
   await page
     .getByRole("textbox", { name: "Search tasks", exact: true })
     .fill(step.title);
-  const stepDate = await openDateMenu(page, step.title, "date");
-  await stepDate
-    .getByRole("textbox", { name: "Schedule", exact: true })
-    .fill("2044-04-08 at 09:30");
-  await stepDate.getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(stepDate).not.toBeVisible();
-  const timed = await (
+  await expect(
+    page.getByText("No matching tasks", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText(step.title, { exact: true })).toHaveCount(0);
+  const retained = await (
     await request.get(`/api/tasks/v1/tasks/${step.id}`)
   ).json();
-  expect(timed.due_date).toBe("2044-04-08");
-  expect(timed.due_datetime).toBe("2044-04-08T16:30:00.000Z");
-  expect(timed.due_timezone).toBe("America/Los_Angeles");
+  expect(retained.kind).toBe("step");
+  expect(retained.parent_id).toBe(task.id);
 });
 
 test("clearing a deadline through its context menu clears native start-ahead after the D1 write", async ({
@@ -104,21 +101,23 @@ test("clearing a deadline through its context menu clears native start-ahead aft
   let leadDays = 14;
   let reads = 0;
   await page.route("**/api/plus/v1/tasks?**", async (route) => {
-    reads++;
-    const current = await (
-      await request.get(`/api/tasks/v1/tasks/${task.id}`)
-    ).json();
-    expect(current.deadline || "").toBe("");
+    const url = new URL(route.request().url());
+    // The row metadata batch may read before the write; the mutation preflight must read after it.
+    if (url.searchParams.get("page_size") === "1") {
+      reads++;
+      const current = await (
+        await request.get(`/api/tasks/v1/tasks/${task.id}`)
+      ).json();
+      expect(current.deadline || "").toBe("");
+    }
     await route.fulfill({
       json: {
-        planning_tasks: [
-          {
-            id: task.id,
-            title: task.title,
-            lead_days: leadDays,
-            etag: "fresh-context-planning",
-          },
-        ],
+        planning_tasks: url.searchParams.getAll("task_ids").map((id) => ({
+          id,
+          title: task.title,
+          lead_days: id === task.id ? leadDays : 0,
+          etag: "fresh-context-planning",
+        })),
       },
     });
   });

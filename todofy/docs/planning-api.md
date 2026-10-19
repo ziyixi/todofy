@@ -99,10 +99,13 @@ or summary.
 
 Rollover runs once the plan is confirmed and the native planning state is initialized. The coordinator's alarm
 ticks it at most once every ten minutes; each tick observes one page of active tasks and records the commitments
-of the account week. After Monday 00:00 in the account timezone it resets up to five recorded old-week tasks per
-tick: a task still committed becomes a weekly candidate (one planning-state write at its revision, under a
-receipt), and a task no longer committed, or deleted, is forgotten. Then the week in effect advances. Task
-content, dates and ordinary tags never change.
+of the account week. After Monday 00:00 in the account timezone, a tick or the week's first planning write expires
+up to 100 recorded old-week memberships in one D1 transaction (`core/sql/native_plan.py RESET_WEEK`), without a
+call to Tasks: a stage still committed at the recorded revision becomes weekly, and every other membership,
+including a hidden or deleted task's, is forgotten. Area, flags, lead window and every task's content, dates,
+tags and history stay as they are. A reset receipt an earlier build left started keeps its membership until the
+receipt is finished and synced, so an interrupted pass resumes on the same path. The week in effect advances once
+no old membership remains; the first new-week write goes on as soon as that page drains them.
 
 A commitment chosen on the week's last day is a choice for the next week: SetTaskPlan with `stage = committed`
 on Sunday records the task under the next Monday, so the coming reset leaves it in place, and no later scan or

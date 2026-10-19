@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { RpcStatusError } from "@ziyixi/proto/http-client";
 import {
   api,
@@ -12,7 +12,9 @@ import { scheduledDate, scheduledTime } from "./task-schedule";
 import { clearTaskStartAhead, taskScheduleFromText } from "./task-date-actions";
 import { todayDate } from "./dates";
 import { settleCompletedTask, type FocusReads } from "./task-completion-focus";
+import { taskDropOrder } from "./task-order";
 import type { useTaskView } from "./useTaskView";
+import type { TaskDropTarget, TaskRowDrop } from "./task-drag";
 
 export function useTaskActions(
   route: Route,
@@ -30,9 +32,9 @@ export function useTaskActions(
   const duplicateRequests = useRef(
     new Map<string, { requestId: string; etag: string }>(),
   );
-  function taskChanged() {
+  const taskChanged = useCallback(() => {
     setMutationRevision((revision) => revision + 1);
-  }
+  }, []);
   async function saveTask(
     draft: TaskDraft,
     original?: Task,
@@ -81,76 +83,109 @@ export function useTaskActions(
     list.remove(task.id);
     setNotice("Task deleted");
   }
-  async function writeCompletion(task: Task, reopen = false) {
-    const key = `${reopen ? "reopen" : "complete"}:${task.id}`;
-    let completion = completionRequests.current.get(key);
-    if (!completion) {
-      completion = { requestId: crypto.randomUUID(), etag: task.etag };
-      completionRequests.current.set(key, completion);
-    }
-    try {
-      const result = await (reopen ? api.reopenTask : api.completeTask)({
-        name: task.name,
-        etag: completion.etag,
-        requestId: completion.requestId,
-      });
-      completionRequests.current.delete(key);
-      return { result, completion };
-    } catch (error) {
-      if (
-        error instanceof RpcStatusError &&
-        [400, 409].includes(error.status.httpStatus)
-      )
-        completionRequests.current.delete(key);
-      throw error;
-    }
-  }
-  async function complete(task: Task): Promise<string | undefined> {
-    setBusyIds((current) => new Set([...current, task.id]));
-    setNotice("");
-    try {
-      const { result, completion } = await writeCompletion(
-        task,
-        task.completed,
-      );
-      taskChanged();
-      if (result.completed === (route.page === "completed"))
-        list.replace(result);
-      else list.remove(task.id);
-      const confirmedMessage = task.completed
-        ? "Task reopened"
-        : result.recurrence
-          ? "Occurrence completed · next date scheduled"
-          : "Task completed";
-      let warning = task.completed
-        ? undefined
-        : await settleCompletedTask(
-            task,
-            completion.requestId,
-            completion.etag,
-            today,
-          );
-      try {
-        if (!isPlanning(route.page) && route.page !== "catalog")
-          await list.refresh();
-      } catch {
-        warning = `${warning || confirmedMessage}. The task list could not refresh. Refresh the view.`;
+  const writeCompletion = useCallback(
+    async (task: Task, reopen = false, requestId?: string) => {
+      const action = reopen ? "reopen" : "complete";
+      const key = `${requestId ? "queued" : action}:${task.id}`;
+      let completion = completionRequests.current.get(key);
+      if (!completion || (requestId && completion.requestId !== requestId)) {
+        completion = {
+          requestId: requestId || crypto.randomUUID(),
+          etag: task.etag,
+        };
+        completionRequests.current.set(key, completion);
       }
-      setNotice(warning || confirmedMessage);
-      return undefined;
-    } catch (reason) {
-      const message = describeError(reason);
-      setNotice(message);
-      return message;
-    } finally {
-      setBusyIds(
-        (current) => new Set([...current].filter((id) => id !== task.id)),
-      );
-    }
+      try {
+        const result = await (reopen ? api.reopenTask : api.completeTask)({
+          name: task.name,
+          etag: completion.etag,
+          requestId: completion.requestId,
+        });
+        // Planning views supply one identity per queued operation; retain only the latest baseline per task.
+        if (!requestId) completionRequests.current.delete(key);
+        return { result, completion };
+      } catch (error) {
+        if (
+          error instanceof RpcStatusError &&
+          [400, 409].includes(error.status.httpStatus)
+        )
+          completionRequests.current.delete(key);
+        throw error;
+      }
+    },
+    [],
+  );
+  const applyCompletion = useCallback(
+    async (
+      task: Task,
+      reopen: boolean,
+      flowDate = today,
+      requestId?: string,
+    ): Promise<string | undefined> => {
+      setBusyIds((current) => new Set([...current, task.id]));
+      setNotice("");
+      try {
+        const { result, completion } = await writeCompletion(
+          task,
+          reopen,
+          requestId,
+        );
+        taskChanged();
+        if (result.completed === (route.page === "completed"))
+          list.replace(result);
+        else list.remove(task.id);
+        const confirmedMessage = reopen
+          ? "Task reopened"
+          : result.recurrence
+            ? "Occurrence completed · next date scheduled"
+            : "Task completed";
+        let warning = reopen
+          ? undefined
+          : await settleCompletedTask(
+              task,
+              completion.requestId,
+              completion.etag,
+              flowDate,
+            );
+        try {
+          if (!isPlanning(route.page) && route.page !== "catalog")
+            await list.refresh();
+        } catch {
+          warning = `${warning || confirmedMessage}. The task list could not refresh. Refresh the view.`;
+        }
+        setNotice(warning || confirmedMessage);
+        return undefined;
+      } catch (reason) {
+        const message = describeError(reason);
+        setNotice(message);
+        return message;
+      } finally {
+        setBusyIds(
+          (current) => new Set([...current].filter((id) => id !== task.id)),
+        );
+      }
+    },
+    [
+      route.page,
+      list.replace,
+      list.remove,
+      list.refresh,
+      taskChanged,
+      today,
+      writeCompletion,
+    ],
+  );
+  function complete(task: Task) {
+    return applyCompletion(task, task.completed);
   }
+  const finishTask = useCallback(
+    (task: Task, requestId: string, flowDate?: string) =>
+      applyCompletion(task, false, flowDate, requestId),
+    [applyCompletion],
+  );
   async function patchTask(
     task: Task,
-    values: Partial<TaskDraft>,
+    values: Partial<TaskDraft> & { sortOrder?: number },
     fields: string[],
   ) {
     setBusyIds((current) => new Set([...current, task.id]));
@@ -231,6 +266,38 @@ export function useTaskActions(
       ["project_id", "section_id", "parent_id"],
     );
   }
+  async function dropOnCategory(
+    id: string,
+    target: TaskDropTarget,
+    timeZone: string,
+  ) {
+    try {
+      const task = await api.getTask({ name: `tasks/${id}` });
+      if (target.page === "today") {
+        await scheduleTask(task, today, timeZone);
+      } else if (target.page === "label") {
+        if (task.labelIds.includes(target.id)) {
+          setNotice("Label already applied");
+          return;
+        }
+        await patchTask(task, { labelIds: [...task.labelIds, target.id] }, [
+          "label_ids",
+        ]);
+      } else {
+        await patchTask(
+          task,
+          {
+            projectId: target.page === "project" ? target.id : "",
+            sectionId: "",
+            parentId: "",
+          },
+          ["project_id", "section_id", "parent_id"],
+        );
+      }
+    } catch (reason) {
+      setNotice(describeError(reason));
+    }
+  }
   async function duplicateTask(task: Task) {
     setBusyIds((current) => new Set([...current, task.id]));
     setNotice("");
@@ -272,69 +339,111 @@ export function useTaskActions(
       setNotice("Could not copy the link. Open the task and copy its address.");
     }
   }
-  async function reorder(id: string, before: Task) {
-    if (orderBy !== "sort_order") {
+  async function dropInList(task: Task, target: TaskRowDrop) {
+    if (task.id === target.task.id) return false;
+    const inside = target.position === "inside";
+    const parentId = inside ? target.task.id : target.task.parentId;
+    const sameGroup =
+      task.parentId === parentId &&
+      task.projectId === target.task.projectId &&
+      task.sectionId === target.task.sectionId;
+    if (inside && sameGroup) return false;
+    if (!inside && sameGroup && orderBy !== "sort_order") {
       setNotice("Choose Custom order before dragging tasks.");
-      return;
+      return false;
     }
-    const task = list.tasks.find((item) => item.id === id);
-    if (
-      !task ||
-      task.parentId !== before.parentId ||
-      task.projectId !== before.projectId ||
-      task.sectionId !== before.sectionId
-    ) {
-      setNotice("Reorder tasks within the same project, section and parent.");
-      return;
-    }
-    const siblings = list.tasks.filter(
-      (item) =>
-        item.id !== id &&
-        item.parentId === before.parentId &&
-        item.sectionId === before.sectionId &&
-        item.projectId === before.projectId,
-    );
-    const index = siblings.findIndex((item) => item.id === before.id);
-    const previous = siblings[index - 1];
-    const sortOrder = previous
-      ? ((previous.sortOrder ?? 0) + (before.sortOrder ?? 0)) / 2
-      : (before.sortOrder ?? 0) - 1;
-    setBusyIds(new Set([id]));
-    try {
-      await api.updateTask({
-        requestId: crypto.randomUUID(),
-        etag: task.etag,
-        task: { name: task.name, sortOrder },
-        updateMask: { paths: ["sort_order"] },
+    let sortOrder: number | undefined;
+    if (inside) {
+      // Insert first, including when this parent's children have never been expanded.
+      const children = await api.listTasks({
+        parentId: target.task.id,
+        pageSize: 1,
+        orderBy: "sort_order",
+        includeCompleted: true,
       });
-      await list.refresh();
-    } catch (reason) {
-      setNotice(describeError(reason));
-    } finally {
-      setBusyIds(new Set());
+      sortOrder = (children.tasks[0]?.sortOrder ?? 0) - 1;
+    } else {
+      const siblings = target.peers
+        .filter(
+          (item) =>
+            item.parentId === target.task.parentId &&
+            item.sectionId === target.task.sectionId &&
+            item.projectId === target.task.projectId,
+        )
+        .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
+      sortOrder = taskDropOrder(
+        siblings,
+        task.id,
+        target.task.id,
+        target.position === "after",
+      );
     }
+    if (sortOrder === undefined || (sameGroup && sortOrder === task.sortOrder))
+      return false;
+    await patchTask(
+      task,
+      {
+        parentId,
+        projectId: target.task.projectId,
+        sectionId: target.task.sectionId,
+        sortOrder,
+      },
+      ["parent_id", "project_id", "section_id", "sort_order"],
+    );
+    return true;
+  }
+  async function detach(task: Task) {
+    if (!task.parentId || task.kind === "step") return false;
+    const sortOrder =
+      Math.max(
+        0,
+        ...list.tasks
+          .filter(
+            (other) =>
+              !other.parentId &&
+              other.projectId === task.projectId &&
+              other.sectionId === task.sectionId,
+          )
+          .map((other) => other.sortOrder ?? 0),
+      ) + 1;
+    await patchTask(task, { parentId: "", sortOrder }, [
+      "parent_id",
+      "sort_order",
+    ]);
+    setNotice("Task moved out of its parent");
+    return true;
   }
   async function batch(action: "complete" | "move", projectId = "") {
-    const chosen = list.tasks.filter((task) => selected.has(task.id));
-    const byId = new Map(list.tasks.map((task) => [task.id, task]));
-    // Completing or moving a task changes its descendants too, so a selected descendant is covered by its
-    // topmost selected ancestor; writing it again would only fail on its now stale etag.
-    const covered = new Map<string, string[]>();
-    for (const task of chosen) {
-      let root = task;
-      let parent = byId.get(task.parentId);
-      for (let depth = 0; parent && depth < 32; depth++) {
-        if (selected.has(parent.id)) root = parent;
-        parent = byId.get(parent.parentId);
-      }
-      covered.set(root.id, [...(covered.get(root.id) ?? []), task.id]);
-    }
-    const targets = chosen.filter((task) => covered.has(task.id));
-    setBusyIds(new Set(chosen.map((task) => task.id)));
+    const ids = [...selected];
+    setBusyIds(new Set(ids));
     setNotice("");
     let focusWarning = "";
     const reads: FocusReads = {};
     try {
+      // A subtask selected in an expanded branch is not one of the list's rows, so it is read once.
+      const chosen = await Promise.all(
+        ids.map(
+          (id) =>
+            list.tasks.find((task) => task.id === id) ??
+            api.getTask({ name: `tasks/${id}` }),
+        ),
+      );
+      const byId = new Map(
+        [...list.tasks, ...chosen].map((task) => [task.id, task]),
+      );
+      // Completing or moving a task changes its descendants too, so a selected descendant is covered by its
+      // topmost selected ancestor; writing it again would only fail on its now stale etag.
+      const covered = new Map<string, string[]>();
+      for (const task of chosen) {
+        let root = task;
+        let parent = byId.get(task.parentId);
+        for (let depth = 0; parent && depth < 32; depth++) {
+          if (selected.has(parent.id)) root = parent;
+          parent = byId.get(parent.parentId);
+        }
+        covered.set(root.id, [...(covered.get(root.id) ?? []), task.id]);
+      }
+      const targets = chosen.filter((task) => covered.has(task.id));
       for (const task of targets) {
         if (action === "complete") {
           const { completion } = await writeCompletion(task);
@@ -388,7 +497,9 @@ export function useTaskActions(
     saveTask,
     deleteTask,
     complete,
-    reorder,
+    finishTask,
+    dropInList,
+    detach,
     batch,
     busyIds,
     selected,
@@ -402,6 +513,7 @@ export function useTaskActions(
     parseTaskSchedule,
     setDeadline,
     moveTask,
+    dropOnCategory,
     duplicateTask,
     copyTaskLink,
   };

@@ -65,6 +65,7 @@ async function props(
     }),
     editTask: vi.fn(),
     onWeekChange: vi.fn(),
+    completeTask: vi.fn(),
     completeReview: vi.fn(async () => true),
   };
 }

@@ -7,6 +7,11 @@ import {
 
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
 
+test.afterEach(async ({ page }) => {
+  // Route projections use the request fixture; finish them before that fixture is disposed.
+  await page.unrouteAll({ behavior: "wait" });
+});
+
 interface SavedTask {
   id: string;
   title: string;
@@ -297,6 +302,8 @@ test("parent editors keep subtasks and executable steps separate and can delete 
   );
   expect((await savedTask(request, parent.id)).title).toBe(parent.title);
   await page.reload();
+  await expect(subtasks.locator("h3 > span")).toHaveText("0/0");
+  await expect(steps.locator("h3 > span")).toHaveText("0/0");
   await expect(
     subtasks.getByRole("button", { name: subtaskTitle, exact: true }),
   ).toHaveCount(0);
@@ -343,6 +350,10 @@ test("ordinary task planning, effort and deadline lead are visible and survive s
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   const saved = await savedTask(request, task.id);
   expect(saved.effort).toBe("deep");
@@ -373,6 +384,50 @@ test("ordinary task planning, effort and deadline lead are visible and survive s
   await expect(
     dialog.getByRole("combobox", { name: "Start ahead unit", exact: true }),
   ).toHaveValue("weeks");
+});
+
+test("Quick automatically enables standalone scheduling and keeps it checked after saving", async ({
+  page,
+  request,
+}) => {
+  const planning = await planningService(page, request);
+  const task = await createTask(
+    request,
+    `Synthetic Quick action ${crypto.randomUUID()}`,
+    { due_date: "2030-01-02" },
+  );
+  const dialog = await openTask(page, task.id);
+  const standalone = dialog.getByRole("checkbox", {
+    name: "Standalone action",
+    exact: true,
+  });
+  await expect(standalone).not.toBeChecked();
+  await dialog
+    .getByRole("checkbox", { name: "Quick action", exact: true })
+    .check();
+  await expect(standalone).toBeChecked();
+  await expect(standalone).toBeDisabled();
+  await dialog.getByRole("button", { name: "Date", exact: true }).click();
+  await expect(
+    dialog.getByRole("button", { name: "Time options", exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "Date", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  expect(planning.get(task.id)!.flags).toEqual(new Set(["task", "quick"]));
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
+  await page.reload();
+  await expect(standalone).toBeChecked();
+  await expect(standalone).toBeDisabled();
+  await dialog
+    .getByRole("checkbox", { name: "Quick action", exact: true })
+    .uncheck();
+  await expect(standalone).toBeChecked();
+  await expect(standalone).toBeEnabled();
 });
 
 test("repeat controls save calendar rules while only steps expose a clock time", async ({
@@ -449,6 +504,10 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).recurrence).toBe(
     "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR",
@@ -484,6 +543,10 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).recurrence).toBe("every! 2 weeks");
   await openTask(page, task.id);
@@ -511,6 +574,10 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await date.click();
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
     .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).recurrence).toBe(
@@ -551,7 +618,9 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await expect(stepDialog.getByLabel("Time", { exact: true })).toHaveCount(0);
   await expect(timeOptions).toHaveText("Time · 09:30");
   await timeOptions.click();
-  await expect(stepDialog.getByLabel("Time", { exact: true })).toHaveValue("09:30");
+  await expect(stepDialog.getByLabel("Time", { exact: true })).toHaveValue(
+    "09:30",
+  );
   const closeGeometry = await stepDate.evaluate(async (button) => {
     if (!(button instanceof HTMLButtonElement))
       throw new Error("Date trigger is not a button");
@@ -564,7 +633,9 @@ test("repeat controls save calendar rules while only steps expose a clock time",
       extraHeight: extra.clientHeight,
     };
     button.click();
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
     return {
       before,
       after: {
@@ -582,6 +653,10 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await stepDate.click();
   await stepDialog
     .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(stepDialog.locator(".task-save-status")).toHaveText("Saved");
+  await stepDialog
+    .getByRole("button", { name: "Close dialog", exact: true })
     .click();
   await expect(stepDialog).not.toBeVisible();
   const timed = await savedTask(request, step.id);
@@ -713,6 +788,10 @@ test("clearing a deadline clears its lead and Parked stays exclusive with a chos
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).deadline || "").toBe("");
   expect(planning.get(task.id)).toMatchObject({
@@ -727,6 +806,10 @@ test("clearing a deadline clears its lead and Parked stays exclusive with a chos
   await parked.check();
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
     .click();
   await expect(dialog).not.toBeVisible();
   await openTask(page, task.id);

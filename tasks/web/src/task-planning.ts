@@ -10,6 +10,23 @@ import {
 } from "./detail-read-cache";
 
 export const planningApi = createHttpClient(PlusService, send);
+export type { PlanningTask };
+
+/** List decoration is a bounded bulk read; it never seeds the editor's detail cache. */
+export async function readTaskListPlanning(tasks: readonly Task[]) {
+  const ids = tasks.filter((task) => !task.completed).map((task) => task.id);
+  const values = new Map<string, PlanningTask>();
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const result = await planningApi.listPlanningTasks({
+      taskIds: ids.slice(offset, offset + 100),
+      pageSize: 100,
+    });
+    if (result.nextPageToken)
+      throw new Error("Planning properties are incomplete.");
+    for (const value of result.planningTasks) values.set(value.id, value);
+  }
+  return values;
+}
 export const TASK_OPTIONS = [
   ["singleAction", "task", "Standalone action"],
   ["quick", "quick", "Quick action"],
@@ -27,6 +44,7 @@ export interface PlanningDraft extends Record<TaskOption, boolean> {
 }
 export function planningDraft(task?: PlanningTask): PlanningDraft {
   const flags = new Set(task?.planningFlags || []);
+  if (flags.has("quick")) flags.add("task");
   return {
     stage: task?.explicitStage || "none",
     area: task?.area || "unassigned",
