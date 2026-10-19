@@ -98,7 +98,10 @@ export function TaskDragProvider({
       }}
     >
       <DragContext value={{ moving, lastMove }}>{children}</DragContext>
-      <DragOverlay dropAnimation={{ duration: 160, easing: "ease-out" }}>
+      <DragOverlay
+        style={{ pointerEvents: "none" }}
+        dropAnimation={null}
+      >
         {(source) =>
           source.data.task ? (
             <div className="task-drag-preview" aria-hidden inert>

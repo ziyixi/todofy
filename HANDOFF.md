@@ -25,6 +25,15 @@ planning units and 308 retired-consumer units. Broad Core host checks passed 2,2
 pre-existing absent-protos skip before the final receipt tests; lint/type/build and independent review
 also pass. Browser startup now waits for the harness's completed migrations instead of its early CSRF
 response. No production task has been changed for acceptance, and this branch has not been released.
+Initial branch [39216036015](https://github.com/ziyixi/todofy/actions/runs/39216036015) passed every Core
+runtime/static, shared-package, contract and retired-consumer check. An existing second main-list drag
+failed and reproduced locally: while the manager was idle and the source's rectangle unchanged, the
+empty `data-dnd-dropping` overlay intercepted pointerdown. Its delayed cleanup could also hide the next
+accepted drag's preview. The Tasks, Plan Review and Week visual overlays now ignore pointer events and
+use synchronous drop cleanup (`dropAnimation=null`); the moving preview remains. Temporary diagnostics
+and ineffective test waits were removed; the original gesture and saved-state assertions remain.
+The final build passes five original detach repetitions. The complete browser suite and new gate are
+running before release.
 
 ### Tasks row selection and whole-row drag: released (2026-10-19 UTC)
 

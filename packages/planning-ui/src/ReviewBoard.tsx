@@ -506,7 +506,10 @@ export function ReviewBoard({
           ))}
         </div>
       </div>
-      <DragOverlay dropAnimation={{ duration: 160, easing: "ease-out" }}>
+      <DragOverlay
+        style={{ pointerEvents: "none" }}
+        dropAnimation={null}
+      >
         {(source) => {
           const task = source.data?.task as PlanningTask | undefined;
           return task ? (

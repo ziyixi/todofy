@@ -449,7 +449,10 @@ export function PlanningWeek(props: Props) {
           }
         />
       </section>
-      <DragOverlay dropAnimation={{ duration: 160, easing: "ease-out" }}>
+      <DragOverlay
+        style={{ pointerEvents: "none" }}
+        dropAnimation={null}
+      >
         {(source) => {
           const id = String(source.data?.taskId ?? "");
           const task = taskIndex(plan.tasks).get(id);

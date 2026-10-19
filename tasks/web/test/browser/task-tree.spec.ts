@@ -553,6 +553,11 @@ test("main-list dragging can detach a subtask without changing its dates, projec
       r.request().method() === "PATCH" &&
       r.url().includes(`/tasks/${child.id}`),
   );
+  // The visual wrapper remains mounted while idle and after its preview disappears.
+  await expect(page.locator("[data-dnd-overlay]")).toHaveCSS(
+    "pointer-events",
+    "none",
+  );
   await dragTask(page, nested.getByText(child.title, { exact: true }), rootRow);
   expect((await detached).status()).toBe(200);
   await expect(nested.getByText(child.title, { exact: true })).toHaveCount(0);

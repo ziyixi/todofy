@@ -131,6 +131,10 @@ test("a native lane reorder keeps its siblings pending and the next stage drag s
     name: /^Move outcome: Synthetic second outcome/u,
   });
   await expect(firstHandle).toBeVisible();
+  await expect(page.locator("[data-dnd-overlay]").first()).toHaveCSS(
+    "pointer-events",
+    "none",
+  );
   const firstCard = week.locator('[data-outcome-id="native-first"]');
   await drag(secondHandle, firstCard);
   await expect(week.locator('.review-draggable[aria-busy="true"]')).toHaveCount(2);
