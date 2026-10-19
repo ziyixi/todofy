@@ -432,14 +432,25 @@ export function useTaskActions(
         [...list.tasks, ...chosen].map((task) => [task.id, task]),
       );
       // Completing or moving a task changes its descendants too, so a selected descendant is covered by its
-      // topmost selected ancestor; writing it again would only fail on its now stale etag.
+      // topmost selected ancestor; writing it again would only fail on its now stale etag. An ancestor that is
+      // not one of the list's rows, such as Today's undated middle parent, is read once per batch, before any
+      // write.
+      const ancestor = async (id: string) => {
+        if (!id) return undefined;
+        const known = byId.get(id);
+        if (known) return known;
+        const read = await api.getTask({ name: `tasks/${id}` });
+        byId.set(id, read);
+        return read;
+      };
       const covered = new Map<string, string[]>();
       for (const task of chosen) {
         let root = task;
-        let parent = byId.get(task.parentId);
+        let parent =
+          chosen.length > 1 ? await ancestor(task.parentId) : undefined;
         for (let depth = 0; parent && depth < 32; depth++) {
           if (selected.has(parent.id)) root = parent;
-          parent = byId.get(parent.parentId);
+          parent = await ancestor(parent.parentId);
         }
         covered.set(root.id, [...(covered.get(root.id) ?? []), task.id]);
       }

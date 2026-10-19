@@ -483,6 +483,75 @@ it("reads a subtask selected in an expanded branch, then moves only its selected
   expect(result.current.selected.size).toBe(0);
 });
 
+it.each(["complete", "move"] as const)(
+  "reads Today's unlisted middle parent so a selected grandparent covers its selected grandchild (%s)",
+  async (action) => {
+    const grandparent = create(TaskSchema, {
+      id: "today-grandparent",
+      name: "tasks/today-grandparent",
+      title: "Synthetic dated grandparent",
+      dueDate: "2026-10-17",
+      etag: "1",
+    });
+    // Undated, so Today does not list it.
+    const middle = create(TaskSchema, {
+      id: "today-middle",
+      name: "tasks/today-middle",
+      title: "Synthetic undated parent",
+      parentId: grandparent.id,
+      etag: "1",
+    });
+    const grandchild = create(TaskSchema, {
+      id: "today-grandchild",
+      name: "tasks/today-grandchild",
+      title: "Synthetic dated grandchild",
+      parentId: middle.id,
+      dueDate: "2026-10-17",
+      etag: "1",
+    });
+    const read = vi.spyOn(api, "getTask").mockResolvedValue(middle);
+    const written: string[] = [];
+    vi.spyOn(api, "completeTask").mockImplementation(async (request) => {
+      written.push(request?.name || "");
+      return create(TaskSchema, { completed: true });
+    });
+    vi.spyOn(api, "updateTask").mockImplementation(async (request) => {
+      written.push(request?.task?.name || "");
+      return create(TaskSchema);
+    });
+    vi.spyOn(focus.completionFocusApi, "getTimerSession").mockResolvedValue(
+      create(TimerSessionSchema),
+    );
+    vi.spyOn(focus.completionFocusApi, "getFlow").mockResolvedValue(
+      create(FlowSchema, { name: "flows/2026-10-17" }),
+    );
+    const list = {
+      tasks: [grandchild, grandparent],
+      refresh: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ReturnType<typeof useTaskView>;
+    const { result } = renderHook(() =>
+      useTaskActions(
+        { page: "today", id: "" },
+        "sort_order",
+        list,
+        "2026-10-17",
+      ),
+    );
+    await act(() =>
+      result.current.setSelected(new Set([grandchild.id, grandparent.id])),
+    );
+    await act(() => result.current.batch(action, "synthetic-project"));
+    expect(read).toHaveBeenCalledExactlyOnceWith({ name: middle.name });
+    expect(written).toEqual([grandparent.name]);
+    expect(result.current.notice).toBe(
+      action === "complete"
+        ? "Selected tasks completed"
+        : "Selected tasks moved",
+    );
+    expect(result.current.selected.size).toBe(0);
+  },
+);
+
 function listView() {
   return {
     tasks: [],
