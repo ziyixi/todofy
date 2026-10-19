@@ -447,6 +447,42 @@ it("completes a selected parent once for its selected child and reads Focus once
   expect(result.current.selected.size).toBe(0);
 });
 
+it("reads a subtask selected in an expanded branch, then moves only its selected parent", async () => {
+  const parent = create(TaskSchema, {
+    id: "expanded-parent",
+    name: "tasks/expanded-parent",
+    title: "Synthetic listed parent",
+    etag: "1",
+  });
+  // Shown only in the parent's expanded branch, so it is not one of the list's rows.
+  const child = create(TaskSchema, {
+    id: "expanded-child",
+    name: "tasks/expanded-child",
+    title: "Synthetic expanded child",
+    parentId: parent.id,
+    etag: "1",
+  });
+  const read = vi.spyOn(api, "getTask").mockResolvedValue(child);
+  const moved: string[] = [];
+  vi.spyOn(api, "updateTask").mockImplementation(async (request) => {
+    moved.push(request?.task?.name || "");
+    return create(TaskSchema);
+  });
+  const list = {
+    tasks: [parent],
+    refresh: vi.fn().mockResolvedValue(undefined),
+  } as unknown as ReturnType<typeof useTaskView>;
+  const { result } = renderHook(() =>
+    useTaskActions({ page: "today", id: "" }, "sort_order", list, "2026-10-17"),
+  );
+  await act(() => result.current.setSelected(new Set([parent.id, child.id])));
+  await act(() => result.current.batch("move", "synthetic-project"));
+  expect(read).toHaveBeenCalledExactlyOnceWith({ name: child.name });
+  expect(moved).toEqual([parent.name]);
+  expect(result.current.notice).toBe("Selected tasks moved");
+  expect(result.current.selected.size).toBe(0);
+});
+
 function listView() {
   return {
     tasks: [],
