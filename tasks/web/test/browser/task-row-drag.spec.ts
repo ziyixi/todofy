@@ -149,6 +149,8 @@ test("selection replaces the completion circle without moving the title, and nor
     .click();
   const taskRow = row(page, child.id);
   await expect(taskRow.getByRole("checkbox")).toHaveCount(0);
+  const context = await taskRow.locator(".task-context").boundingBox();
+  expect(context!.height).toBeLessThan(20);
   await expect(
     taskRow.getByRole("button", {
       name: `Complete ${child.title}`,

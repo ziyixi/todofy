@@ -20,6 +20,9 @@ dates, descendants and the Task/Step distinction stay intact. Local lint/type/bu
 project moves with disposable synthetic data. The original and Claude checkouts are not changed. No new
 backend service, schema or API was added. Branch gate/main release pending; see
 [acceptance](docs/tasks-row-drag-verification.md). The old grip-only native drag/MIME handlers are removed.
+The first branch gate caught two gesture-driver timing/scroll issues. The helper now waits for actual
+drag readiness and a stable/centered surface; both cases pass five repeats each. Long project context
+also stays on one line. Complete final CI is pending; no follow-up source has reached production yet.
 
 ### Cloud recovery and task organization: released (2026-10-19 UTC)
 

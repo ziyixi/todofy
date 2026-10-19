@@ -190,12 +190,12 @@ export function TaskRow({
       <span className="task-context">
         {parentTitle && (
           <span title={`Parent: ${parentTitle}`}>
-            {parentTitle}
+            <span className="task-context-name">{parentTitle}</span>
             <ChevronRight size={11} />
           </span>
         )}
-        <span>
-          {project?.title || "Inbox"}
+        <span title={project?.title || "Inbox"}>
+          <span className="task-context-name">{project?.title || "Inbox"}</span>
           <span
             className="project-dot"
             style={{ background: project?.color || "#9a9a92" }}

@@ -1,7 +1,26 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 export async function beginTaskDrag(page: Page, source: Locator) {
-  await source.scrollIntoViewIfNeeded();
+  // Wait for the previous drop to release this row, then start from a stable, visible surface.
+  await expect
+    .poll(() =>
+      source.evaluate((e) => {
+        const row = e.closest(".task-row,.task-child-row");
+        const handle = row?.querySelector<HTMLButtonElement>(
+          ".drag-handle,.child-drag",
+        );
+        return (
+          !!handle &&
+          !handle.disabled &&
+          !row?.classList.contains("is-dragging")
+        );
+      }),
+    )
+    .toBe(true);
+  await source.evaluate((e) =>
+    e.scrollIntoView({ block: "center", inline: "nearest" }),
+  );
+  await source.hover();
   const bounds = await source.boundingBox();
   if (!bounds) throw new Error("Drag source is not visible");
   const x = bounds.x + bounds.width / 2;

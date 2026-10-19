@@ -438,6 +438,12 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.task-context-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .project-dot {
   display: inline-block;
   width: 6px;

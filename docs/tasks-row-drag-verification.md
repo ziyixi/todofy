@@ -13,8 +13,8 @@
 - Sidebar project/Inbox moves, additive labels and Today scheduling keep their existing meaning.
   Task IDs, dates, Deadline, kind and descendant identities remain intact. Steps remain absent from normal
   lists, and the parent editor reorders Subtasks and Steps separately using the same drag mechanism.
-- Nested rows no longer repeat the already-visible parent title. The shorter rows keep one completion
-  control aligned with the title.
+- Nested rows no longer repeat the already-visible parent title. Long project context stays on one
+  clipped line with its full name on hover, keeping the completion control aligned with the title.
 
 The change reuses installed dnd-kit 0.3.2 and the existing Tasks update API. Tasks declares the same pinned
 dependencies directly, with Vite deduplication across the linked planning package. There is no new backend
@@ -36,6 +36,13 @@ The test gesture follows a row's updated bounds after native auto-scroll. A prev
 left the pointer at its old screen position after the dialog scrolled; the screenshot and bounding boxes
 identified that cause. No product retry or timing delay was added. Ctrl-click tests use ControlOrMeta so
 macOS's context-menu gesture is not mistaken for the application's batch-selection action.
+
+The first branch [39184856027](https://github.com/ziyixi/todofy/actions/runs/39184856027) remained blocked
+on two gesture checks, so it did not deploy. The pointer helper now waits for the prior drag to release
+the rendered row and starts from a stable surface; dialog gestures center that surface before pickup.
+The saved hierarchy/order assertions are unchanged. Both affected cases passed five repetitions each.
+The same inspection exposed multi-line project context enlarging rows; the one-line context now has a
+browser height check. No product retry, fixed sleep or relaxed assertion was added.
 
 Actual owner Chrome, against the disposable loopback/D1 instance, successfully dragged a title surface
 under another task, promoted it beside its new parent, and moved it to a sidebar project. The moved child
