@@ -22,6 +22,8 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 - Visible planning stage, context, task options, start-ahead window and Deep/Shallow effort in task details.
 - Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.
 - Plan keeps the candidate columns above a full-width Committed row, with horizontal cards and completion controls for outcomes and Steps.
+- Plan cards drag by their whole row, like the task list (6px, or a 250ms hold on touch); Week's commitments reorder
+  like Review's Committed row.
 - A Step's planning panel shows only its time estimate; Plan's Add steps gives each new Step a time (30 min unless
   another is chosen). In Week a click selects a commitment and a double-click opens it; elsewhere in Plan a click opens.
 - Installable desktop PWA; an explicit offline page, with task data available online.
