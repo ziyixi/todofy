@@ -415,15 +415,12 @@ export function createPrototype(
     // restarts it, and a new one holds (the limits are left out).
     async setDependencies(item, prerequisiteIds, added) {
       const own = plan.dependencies.filter((other) => other.taskId === item.id);
-      const saved = prerequisiteIds.map(
-        (id) =>
-          (!(added?.restart && added.id === id) &&
-            own.find((other) => other.prerequisiteId === id)) || {
-            taskId: item.id,
-            prerequisiteId: id,
-            done: false,
-          },
-      );
+      const saved = prerequisiteIds.map((id) => {
+        const kept = own.find((other) => other.prerequisiteId === id);
+        return kept && !(added?.restart && added.id === id)
+          ? kept
+          : { taskId: item.id, prerequisiteId: id, done: false };
+      });
       plan = {
         ...plan,
         dependencies: [

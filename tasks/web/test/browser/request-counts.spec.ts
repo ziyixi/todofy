@@ -137,7 +137,7 @@ test("a dialog save on a list page writes once and reads the list and the catalo
   });
   await expect(stage).toBeVisible();
   await settled(page);
-  // The session's token is read while the page loads, beside its first reads, not on a write's path.
+  // The session's token is read while the page loads, not on a write's path.
   expect(sent.filter((line) => line === "GET /api/tasks/csrf")).toHaveLength(1);
   sent.length = 0;
   await stage.selectOption("weekly");

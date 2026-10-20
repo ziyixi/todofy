@@ -6,10 +6,9 @@ import type { LaneId, PlanningTask, PlusActions, RunOperation } from "./model";
 /**
  * A lane reorder, as Review's lanes and Week's Committed row write it. `reorderLane` moves `task`
  * from `from` to `to`, both positions in the whole lane (`laneTasks`, which an area filter never
- * shortens): one ReorderTasks with the lane's new order, at most 100, under the etags Plan holds for
- * the cards. The card shows in its new
- * place at once and waits there until Tasks confirms. It returns true when it queued a
- * write; the caller then puts focus back on the moved card's grip.
+ * shortens): one ReorderTasks with the lane's new order, at most 100, under the etags Plan holds
+ * for the cards. The card shows in its new place at once and waits there until Tasks confirms. It
+ * returns true when it queued a write; the caller then puts focus back on the moved card's grip.
  */
 export function useLaneReorder(actions: PlusActions, run: RunOperation) {
   // A reorder's request ID, reused when the same reorder is tried again.

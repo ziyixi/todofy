@@ -11,7 +11,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Every request the tab sends, with the CSRF token a write carried; `csrf` answers the token reads. */
+/** Every request the tab sends, with a write's CSRF token; `csrf` answers the token reads. */
 function stubFetch(csrf: () => Response) {
   const sent: string[] = [];
   vi.stubGlobal(

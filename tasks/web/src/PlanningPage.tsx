@@ -44,8 +44,8 @@ export default function PlanningPage({
         );
         if (error) throw new Error(error);
       },
-      // Answers the duration Tasks saved and the task's new etag, which Plan and Focus merge without
-      // reading again.
+      // Answers the duration Tasks saved and the task's new etag, which Plan and Focus merge
+      // without reading again.
       async updateEstimate(task, minutes) {
         const saved = await api.updateTask({
           requestId: crypto.randomUUID(),

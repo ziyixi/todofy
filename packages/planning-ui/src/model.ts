@@ -160,7 +160,10 @@ export interface ReorderResult {
   /** The lane's saved order; absent when only the tasks' order changed. */
   lane?: { lane: LaneId; taskIds: string[] };
 }
-/** A saved estimate: the task's duration in the host's task store, 0 for none, and the etag the write gave it. */
+/**
+ * A saved estimate: the task's duration in the host's task store, 0 for none, and the etag the
+ * write gave the task.
+ */
 export interface EstimateResult {
   estimate: { taskId: string; minutes: number };
   etag: string;
@@ -297,9 +300,10 @@ export interface PlusActions {
     focusDay: string,
   ): Promise<void>;
   /**
-   * Saves the tasks `task` waits for, one write of the waiting task under its etag. `added` names the one this write
-   * adds, which Tasks may refuse. Tasks keeps a dependency it already has as it is, so a done one (`restart`) is
-   * removed and added again, a second write: a recurring task is then waited for until its next completion.
+   * Saves the tasks `task` waits for, one write of the waiting task under its etag. `added` names
+   * the one this write adds, which Tasks may refuse. Tasks keeps a dependency it already has as it
+   * is, so a done one (`restart`) is removed and added again, a second write: a recurring task is
+   * then waited for until its next completion.
    */
   setDependencies(
     task: PlanningTask,
