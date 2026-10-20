@@ -1,9 +1,8 @@
 // The owner API's codec path, run at startup: in the Worker's global scope (api.ts calls warmUp right after it builds
-// the transcoder), outside any request's CPU time on Workers Free, as FlowDay's worker/src/warmup.ts does. Without it
-// an isolate's first request of a method runs that method's share of protobuf-es and the wire JSON codec before V8
-// compiled it (and builds the codec's per-message rule tables): SendMessage's first run read 6.01 reference ms on a
-// GitHub runner against its bound of 6 (test/cpu/delivery-request-cpu.test.mjs), where the hand-written API it
-// replaced read about 4.1-4.9.
+// the transcoder), outside any request's CPU time on Workers Free. Without it an isolate's first request of a method
+// runs that method's share of protobuf-es and the wire JSON codec before V8 compiled it (and builds the codec's
+// per-message rule tables): SendMessage's first run read 6.01 reference ms on a GitHub runner against its bound of 6
+// (test/cpu/delivery-request-cpu.test.mjs), where the hand-written API it replaced read about 4.1-4.9.
 //
 // For each call of WARM_CALLS it does what HttpTranscoder.handle does with a request, on synthetic data:
 //

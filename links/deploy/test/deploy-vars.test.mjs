@@ -1,6 +1,6 @@
-// The deploy wrapper (../deploy-vars.mjs): FlowDay's rules with the links app's inputs, and no real deploy with a
+// The deploy wrapper (../deploy-vars.mjs): the dashboard's rules with the links app's inputs, and no real deploy with a
 // placeholder. Synthetic values only; the wrapper runs a stub instead of wrangler. (The owner rules are compared with
-// the dashboard's and FlowDay's wrappers in .github/scripts/test_wrangler_configs.py: an app reads no other app.)
+// the dashboard's wrapper in .github/scripts/test_wrangler_configs.py: an app reads no other app.)
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'

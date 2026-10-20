@@ -83,11 +83,11 @@ for the owner). The check of the AUD is "Infra drift", which the W2 push runs be
 `vars.ACCESS_AUDIENCE differs from access_aud` means the AUD is wrong: read it again (`infra/README.md` "Adding an
 app" step 4), fix it here and push; this job then ships the fix.
 
-The deploy token is `CF_API_TOKEN`, as for FlowDay and the links app. The wrapper writes three Worker secrets:
+The deploy token is `CF_API_TOKEN`, as for the links app. The wrapper writes three Worker secrets:
 
 | Worker secret | From the `production` environment secret | Why |
 | --- | --- | --- |
-| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | the watch app's owner is the dashboard's owner: one person with the same Access identities, so it reuses the dashboard's secret (as FlowDay and the links app do) |
+| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | the watch app's owner is the dashboard's owner: one person with the same Access identities, so it reuses the dashboard's secret (as the links app does) |
 | `ACCESS_OWNER_ALIASES` | `DASHBOARD_ACCESS_OWNER_ALIASES` | as above |
 | `CSRF_SIGNING_KEY` | `WATCH_CSRF_SIGNING_KEY` (the watch app's own) | a separate key per app: a token of one app never verifies at another |
 

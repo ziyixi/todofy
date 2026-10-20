@@ -220,22 +220,22 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
   registry names the Worker and the D1 database under a hidden entry 短链接 (no tile, status `none`), and the
   `Links deploy` job also checks the Worker's own anonymous answers (`/robots.txt`, and an unknown key's 302 to
   `/_/k/<key>`, both no-store and noindex). **Adopted by IaC P4:** the D1 database and the Access application are in
-  `infra/` (`import {}` blocks, applied by "Infra apply"; `infra/README.md`); they were managed by hand until then,
-  like FlowDay's. The steps as planned:
+  `infra/` (`import {}` blocks, applied by "Infra apply"; `infra/README.md`); they were managed by hand until then.
+  The steps as planned:
   1. Create the D1 database `links` (`wrangler d1 create links`, Workers Free) and commit its id as `database_id` in
      `wrangler.toml`.
   2. Create the Access application for `s.ziyixi.science/_/*` with an extra destination for the exact
      `s.ziyixi.science/_`, a policy allowing exactly the owner's identities (the dashboard's), session duration 7 days;
      commit its AUD as `ACCESS_AUDIENCE`. The rest of the host stays outside Access.
   3. Add the GitHub `production` secret `LINKS_CSRF_SIGNING_KEY` (64 hex, `openssl rand -hex 32`); the owner values
-     come from the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`, as for FlowDay.
-  4. In one commit (FlowDay's F2 and F3 commits needed the same edits):
+     come from the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`.
+  4. In one commit:
      - `routes = [{ pattern = "s.ziyixi.science", custom_domain = true }]` in `wrangler.toml`.
      - `.github/scripts/test_wrangler_configs.py`: move `links` from `UNDEPLOYED` to `PRODUCTION` and `WRAPPERS` (with
        `LINKS_ACCESS_OWNER*` in `PERSONAL_INPUTS` and `SHARED_SECRETS`), and add `links` to the routed Workers of
        `LocalDev.test_the_production_configs_with_routes_are_the_ones_dev_runs`.
      - `.github/scripts/ci_changes.py`: drop `links` from `CHECK_ONLY` and add the `links_deploy` output.
-     - `.github/workflows/ci.yml`: a `Links deploy` job shaped like `FlowDay deploy` (secrets file, dry-run with the
+     - `.github/workflows/ci.yml`: a `Links deploy` job shaped like `Dashboard deploy` (secrets file, dry-run with the
        bundle budget, `tools/cf-guard` on the config, `wrangler d1 migrations apply DB --remote`, the wrapper's deploy,
        the production check of the live version and the migrations, then an Access probe that `GET /_` (the exact
        destination), `GET /_/` and `GET /_/api/v1/links` each answer with Access's login redirect while
@@ -250,8 +250,7 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
        9 Workers in `dashboard/worker/test/drift.test.ts` ("names every production Worker") and in
        `dashboard/docs/design-v2.md` (the drift check's "8 Workers ... three ticks": 9 still take three ticks, 3 + 4 + 2).
      - The dashboard registry (`dashboard/worker/src/registry.ts` `WORKERS` and `RESOURCES`: the Worker `links` and the
-       D1 database `links` by id), or an explicit exclusion with its reason, as `dashboard/worker/test/registry.test.ts`
-       records for FlowDay.
+       D1 database `links` by id), or an explicit exclusion with its reason in `dashboard/worker/test/registry.test.ts`.
      - Adopt the D1 database and the Access application into `infra/` as for the other apps (done by IaC P4, above).
   5. Verify with synthetic links only: a public and a private link, anonymous and logged in, the continuation, and
      that nothing is logged.

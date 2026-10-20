@@ -1,4 +1,4 @@
-// The deploy wrapper (../deploy-vars.mjs): FlowDay's and the links app's rules with the watch app's inputs, and
+// The deploy wrapper (../deploy-vars.mjs): the links app's rules with the watch app's inputs, and
 // no real deploy with the AUD placeholder. Synthetic values only; the wrapper runs a stub instead of wrangler. (The owner rules are
 // compared with the dashboard's wrapper in .github/scripts/test_wrangler_configs.py: an app reads no other app.)
 import test from 'node:test'

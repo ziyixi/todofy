@@ -100,8 +100,8 @@ is put misleading words in its own title and text.
 An Access **Bypass** application with exactly three destinations, `recall.ziyixi.science/api/machine/v1/batches`,
 `…/api/machine/v1/changes` and `…/api/machine/v1/blobs/*`, lets the two machine callers through Access (edge-auth
 refuses service-token JWTs, and an Access session in the extension would expire). Exact paths as Fleet's receipt has,
-and a wildcard only where the path carries a blob's path (FlowDay's `/pwa/*` is the precedent for a wildcard Bypass
-destination); hand-written in `infra/access.tf` next to `fleet_receipt`. The prefix is `/api/machine/v1` rather than
+and a wildcard only where the path carries a blob's path; hand-written in `infra/access.tf` next to `fleet_receipt`.
+The prefix is `/api/machine/v1` rather than
 the `/api/internal/` of Mail Hero's backup and Fleet's receipt: it is part of a contract that other stores implement,
 and it names the callers (machines with their own tokens). The Worker checks every machine request itself, strictly
 and cheaply, since Bypass traffic counts against the account's Worker requests: before any Durable Object call it

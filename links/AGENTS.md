@@ -7,8 +7,8 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. Rules of the links app:
   the Custom Domain `s.ziyixi.science`; only `/_` and `/_/*` are behind the path-scoped Access application `links`.
   Never add a hostname that this Access application does not cover in the same way, and never widen the application
   past `/_/*`: the deploy's probe fails when `/robots.txt` or a short link meets an Access login. A new hostname needs
-  the cf-guard allowance rules of FlowDay's F3/F4 steps. `deploy/deploy-vars.mjs` still refuses a real deploy with an
-  all-zeros D1 id or AUD.
+  cf-guard's allowances (`tools/cf-guard/README.md`), set only in the commit that makes the change.
+  `deploy/deploy-vars.mjs` still refuses a real deploy with an all-zeros D1 id or AUD.
 - **The redirect path is the product.** `GET /<key>` is one D1 read by primary key (`src/resolve.ts`), no write of any
   kind (no click count, no last-used time, no purge), no log line, and an Access verification only when the request
   carries a token. Keep it that way: `test/runtime/redirect.test.ts` checks that the tables are unchanged and nothing

@@ -242,7 +242,7 @@ Bindings (`wrangler.toml`, `worker/src/env.ts`): `WATCH` (the object), `ASSETS`,
 entrypoint with `props = { source = "watch" }`: task intents of this source only, never Todofy's ops-v1 methods; the
 notification sink); vars `PUBLIC_HOST`
 (`watch.ziyixi.science`, the CSRF origin), `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, and `BUILD_SHA` at deploy; secrets
-`ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the dashboard's owner, as for FlowDay and the links app) and the app's
+`ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the dashboard's owner, as for the links app) and the app's
 own `CSRF_SIGNING_KEY`. A `BROWSER` binding turns on tier 3 (§4). Local development and tests only:
 `DEV_AUTH_BYPASS`, `DEV_MANUAL_ALARMS` (no alarm is armed; a clock the tests set; `/__dev/clock` and `/__dev/step`
 over loopback), `DEV_FAKE_UPSTREAM` (every page request goes to a loopback server of synthetic sites),
