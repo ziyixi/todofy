@@ -266,30 +266,37 @@
 .planning-tray-step.is-pending .plus-pending-mark {
   margin: 0 5px;
 }
-/* Quick tasks under Next steps: a quiet line of one-line cards on the step cards' surface. The
-   heading stays level with the first row when the cards wrap. */
+/* Quick tasks under Next steps: a quiet row of equal-width one-line cards on the step cards'
+   surface (six fit on one row at 1440px). The heading, with "N more" after its count, stays level
+   with the first row when the cards wrap. */
 .planning-quick {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   margin: 0 0 18px;
 }
-.plus-root .planning-quick-heading {
+.planning-quick-heading {
   flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   line-height: 28px;
   font-size: 12px;
-  font-weight: 400;
   color: var(--plus-muted);
   white-space: nowrap;
 }
-.planning-quick-heading span {
+.plus-root .planning-quick-heading h3 {
+  font-size: 12px;
+  font-weight: 400;
+}
+.planning-quick-heading h3 span {
   margin-left: 6px;
   font-variant-numeric: tabular-nums;
 }
 .planning-quick ul {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 6px;
   min-width: 0;
   margin: 0;
@@ -302,7 +309,7 @@
   gap: 2px;
   box-sizing: border-box;
   height: 28px;
-  max-width: 100%;
+  min-width: 0;
   padding: 0 8px 0 2px;
   background: var(--plus-surface);
   border: 1px solid var(--plus-line);
@@ -313,20 +320,23 @@
   width: 20px;
   height: 20px;
 }
+/* The title's text is cut inside FullTitle, whose bubble may overlap the next row. */
 .planning-week .planning-quick-title {
+  flex: 1;
   min-width: 0;
-  max-width: 200px;
   padding: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: left;
   font-size: 12px;
+  line-height: 16px;
   color: var(--plus-text);
 }
-.planning-week .planning-quick-more button {
-  padding: 0 4px;
+.planning-week .planning-quick-more {
+  padding: 0;
   font-size: 12px;
   color: var(--plus-accent);
+}
+.planning-week .planning-quick-more:hover {
+  text-decoration: underline;
 }
 .planning-calendar {
   width: 100%;

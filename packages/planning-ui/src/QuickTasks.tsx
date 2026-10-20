@@ -3,6 +3,7 @@ import { useDraggable } from "@dnd-kit/react";
 import { GripVertical } from "lucide-react";
 import { displayedTitle, effectiveArea } from "./domain";
 import { dragHandle } from "./drag-announcements";
+import { FullTitle, markCut } from "./FullTitle";
 import { areaColor } from "./planning-outcomes";
 import {
   CompleteTaskButton,
@@ -28,8 +29,9 @@ interface Props {
   completeTask: CompletePlanningTask;
 }
 /**
- * The native Quick / Ops filter's tasks, as a quiet line under Next steps: one-line cards on the
- * step cards' surface that drag into a day exactly as a step does. Nothing shows without one.
+ * The native Quick / Ops filter's tasks, as a quiet line under Next steps: equal-width one-line
+ * cards on the step cards' surface that drag into a day exactly as a step does. "N more" follows
+ * the heading's count, so it never takes a card's place. Nothing shows without one.
  */
 export function QuickTasks({
   tasks,
@@ -48,10 +50,24 @@ export function QuickTasks({
   const hidden = tasks.length - QUICK_SHOWN;
   return (
     <section className="planning-quick" aria-label={text.quickTasks}>
-      <h3 className="planning-quick-heading">
-        {text.quickTasks}
-        <span>{tasks.length}</span>
-      </h3>
+      <div className="planning-quick-heading">
+        <h3>
+          {text.quickTasks}
+          <span>{tasks.length}</span>
+        </h3>
+        {hidden > 0 && (
+          <>
+            <span aria-hidden="true">·</span>
+            <button
+              className="planning-quick-more"
+              aria-expanded={expanded}
+              onClick={() => setExpanded(!expanded)}
+            >
+              {expanded ? text.showFewer : text.moreItems(hidden)}
+            </button>
+          </>
+        )}
+      </div>
       <ul>
         {(expanded ? tasks : tasks.slice(0, QUICK_SHOWN)).map((task) => (
           <QuickCard
@@ -66,16 +82,6 @@ export function QuickTasks({
             completeTask={completeTask}
           />
         ))}
-        {hidden > 0 && (
-          <li className="planning-quick-more">
-            <button
-              aria-expanded={expanded}
-              onClick={() => setExpanded(!expanded)}
-            >
-              {expanded ? text.showFewer : text.moreItems(hidden)}
-            </button>
-          </li>
-        )}
       </ul>
     </section>
   );
@@ -133,10 +139,11 @@ function QuickCard({
       </button>
       <button
         className="planning-quick-title"
-        title={title}
         onClick={() => editTask(task)}
+        onPointerEnter={markCut}
+        onFocus={markCut}
       >
-        {title}
+        <FullTitle text={title} />
         {/* The edge colour says the area; screen readers hear it. */}
         <span className="plus-sr-only">
           {`${language === "zh" ? "，" : ", "}${text[effectiveArea(task, planTasks)]}`}

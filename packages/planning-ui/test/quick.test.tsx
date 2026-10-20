@@ -104,7 +104,7 @@ it("leaves out of Week's line what is in a shown day, a next step above it, or s
   ]);
 });
 
-it("shows Week's quick tasks as a quiet line of one-line cards under Next steps, six before more", async () => {
+it("shows Week's quick tasks as a quiet line of equal one-line cards under Next steps, six before more", async () => {
   const actions = createPrototype();
   const data = await actions.load();
   const template = data.plan.tasks.find((item) => item.id === "receipt")!;
@@ -163,16 +163,26 @@ it("shows Week's quick tasks as a quiet line of one-line cards under Next steps,
   expect((cards[0] as HTMLElement).style.getPropertyValue("--area-color")).toBe(
     "var(--plus-area-work)",
   );
-  expect(title.getAttribute("title")).toBe("Synthetic quick task 1");
+  // The full title floats from FullTitle on hover or focus, not from a second, native tooltip.
+  expect(title.hasAttribute("title")).toBe(false);
+  expect(title.querySelector(".planning-full-title-text")?.textContent).toBe(
+    "Synthetic quick task 1",
+  );
   fireEvent.click(title);
   expect(editTask).toHaveBeenCalledWith(
     expect.objectContaining({ id: "quick-1" }),
   );
-  fireEvent.click(within(line).getByRole("button", { name: "2 more" }));
+  // "N more" follows the heading's count, so it never takes a card's cell.
+  const more = within(line).getByRole("button", { name: "2 more" });
+  expect(more.closest(".planning-quick-heading")).toBeTruthy();
+  expect(more.closest("ul")).toBeNull();
+  expect(line.querySelector("ul")!.children).toHaveLength(6);
+  fireEvent.click(more);
   expect(line.querySelectorAll(".planning-quick-card")).toHaveLength(8);
-  expect(
-    within(line).getByRole("button", { name: "Show fewer" }).ariaExpanded,
-  ).toBe("true");
+  expect(line.querySelector("ul")!.children).toHaveLength(8);
+  const fewer = within(line).getByRole("button", { name: "Show fewer" });
+  expect(fewer.ariaExpanded).toBe("true");
+  expect(fewer.closest(".planning-quick-heading")).toBeTruthy();
 });
 
 it("shows no Quick line without a quick task to plan", async () => {
