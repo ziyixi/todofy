@@ -9,7 +9,7 @@ points and a lost database.
 Todofy's weekly backup job (`todofy/worker/todofy/runtime/backup.py`) runs every Sunday at 10:00 UTC and
 copies Tasks' D1 together with Todofy's own. It reads Tasks through the existing read-write `TASKS`
 binding and its machine-only `TasksApi.exportBackup` method (`worker/src/backup.ts`), which has no HTTP route
-and refuses FlowDay's `read` binding. The backup adds no binding, bucket, cron, secret or retention of its
+and refuses a `read` binding. The backup adds no binding, bucket, cron, secret or retention of its
 own:
 
 - The rows go to `todofy-backups` under `backups/<job start>/tasks/<table>/<n>.ndjson.gz`, next to Todofy's
@@ -39,10 +39,6 @@ npx wrangler d1 time-travel info DB --config ../wrangler.toml
 npx wrangler d1 time-travel restore DB --timestamp <RFC 3339 time> --config ../wrangler.toml
 ```
 
-Then reset FlowDay's mirror (step 6 below). The change feed went back with the database, so FlowDay's cursor
-is now ahead of it. FlowDay's Sync fails until the reset; Tasks reports the cursor problem instead of answering
-"Synced".
-
 ## Full restore into a new database
 
 `PRIV` is a private directory outside the repository, for example
@@ -50,7 +46,7 @@ is now ahead of it. FlowDay's Sync fails until the reset; Tasks reports the curs
 afterwards.
 
 1. Set the GitHub variable `TODOFY_FORCE_PAUSE_TODOIST=true` and run the workflow on `main`. Todofy then stops
-   creating tasks from mail, reminders and intents. Do not edit in Tasks, Plan or FlowDay until step 8.
+   creating tasks from mail, reminders and intents. Do not edit in Tasks or Plan until step 7.
 2. From `tasks/worker`, create the new database: `npx wrangler d1 create tasks-restore`. It prints the new id.
 3. From `todofy/`, download the backup whose key the health page shows. `download` checks every part,
    including the Tasks parts:
@@ -101,17 +97,10 @@ afterwards.
    - `infra/` still holds the old database as `cloudflare_d1_database.app["tasks"]`, so "Infra drift" and the
      reconcile report the id difference, and the new database as unregistered, until the infra state is moved
      to it ([import notes](../../infra/README.md#import-notes)). Keep the old database until then.
-6. Reset FlowDay's mirror. It hides the mirrored tasks and forgets the Tasks cursor and catalog, and queues,
-   timers and work records keep their task IDs. From `flowday/worker`:
-   ```sh
-   npx wrangler d1 execute DB --remote --config ../wrangler.toml --file ../deploy/reset-tasks-mirror.sql
-   ```
-   Open FlowDay and press Sync until it reports Synced. The replay brings back every task the restored database
-   holds; a task deleted in FlowDay stays deleted.
-7. Open Plan: the restored tasks carry their planning facts and dependencies. Mail links of tasks created after
+6. Open Plan: the restored tasks carry their planning facts and dependencies. Mail links of tasks created after
    the backup point at tasks the restored database lacks; converting such a Mail item creates a new Inbox task.
-8. Set `TODOFY_FORCE_PAUSE_TODOIST=false` and run the workflow on `main`.
-9. Open Focus. The timer comes back as it was backed up: a session that was running then still runs, counting from
+7. Set `TODOFY_FORCE_PAUSE_TODOIST=false` and run the workflow on `main`.
+8. Open Focus. The timer comes back as it was backed up: a session that was running then still runs, counting from
    then (at most 4 hours, or its pomodoro's length). Stop it, then fix the new record's minutes if needed.
 
 Keep the old database until the restored one has run for a while, then delete it on purpose
@@ -126,52 +115,6 @@ The same commands work on a local copy: pass `--local --persist-to "$PRIV/d1"` i
 `migrations apply`, `execute` and `verify`, and any new UUID as the database id. `node --test
 tasks/tools/test/backup-restore.test.mjs` and `todofy/tests/runtime/test_backup.py` (a real backup of a real
 Tasks Worker, restored into a new local D1 and compared table by table) cover the tools with synthetic data.
-
-## One-time FlowDay estimate backfill
-
-Since the release that removed FlowDay's estimate override, a task's estimate is its Tasks duration alone.
-Before it, FlowDay kept its own estimate for a mirrored task once the owner set one there
-(`estimate_override=1`), and Plan showed that value. The new FlowDay replaces such an estimate as soon as its
-task changes in Tasks, so the FlowDay values are saved before that release is pushed and copied into Tasks right
-after it. `tools/prepare-estimate-backfill.ts` (logic in `tools/estimate-backfill.ts`) copies every FlowDay value
-that differs into Tasks with Tasks' own write semantics: `revision+1`, `updated_at` in milliseconds and a
-change-feed row, so FlowDay's mirror learns the value. Each statement applies only to the revision it read, so a
-task edited after the Tasks export is left alone and counted again by the next dry run. Missing or deleted tasks,
-values outside 0 to 10,080 minutes and malformed ids are skipped and counted.
-
-From the repository root, with `PRIV` as above. Before pushing the release, save FlowDay's values, and change
-no estimate in FlowDay afterwards:
-
-```sh
-(cd flowday/worker && npx wrangler d1 execute DB --remote --config ../wrangler.toml --json \
-  --command "SELECT id, estimated_mins FROM tasks WHERE estimate_override=1 AND todoist_id IS NOT NULL" \
-  > "$PRIV/flowday-overrides.json")
-```
-
-Right after the release, without waiting: a duration changed in Tasks before the Tasks export below is replaced
-by the saved FlowDay value.
-
-```sh
-(cd tasks/worker && npx wrangler d1 execute DB --remote --config ../wrangler.toml --json \
-  --command "SELECT id, duration_minutes, revision FROM tasks WHERE deleted_at IS NULL" \
-  > "$PRIV/tasks-durations.json")
-# Dry run: prints counts only.
-node tasks/tools/prepare-estimate-backfill.ts --flowday "$PRIV/flowday-overrides.json" --tasks "$PRIV/tasks-durations.json"
-node tasks/tools/prepare-estimate-backfill.ts --flowday "$PRIV/flowday-overrides.json" --tasks "$PRIV/tasks-durations.json" \
-  --output "$PRIV/estimate-backfill.sql"
-# Note the current bookmark first, so Time Travel can undo the update.
-(cd tasks/worker && npx wrangler d1 time-travel info DB --config ../wrangler.toml)
-(cd tasks/worker && npx wrangler d1 execute DB --remote --config ../wrangler.toml --file "$PRIV/estimate-backfill.sql")
-```
-
-Then check it:
-
-1. Export Tasks again and dry-run: `update_count` is 0.
-2. Open FlowDay and press Sync until it reports Synced. Export FlowDay again (this replaces the saved file) and
-   dry-run: `update_count` is still 0, because the mirror now shows the Tasks values.
-3. Delete the three files in `$PRIV`; they hold task ids and estimates.
-
-`node --test tasks/tools/test/estimate-backfill.test.mjs` covers the generator on synthetic rows.
 
 ## One-time planning import
 

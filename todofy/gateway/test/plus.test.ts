@@ -43,15 +43,13 @@ describe('Planning channel transport', () => {
     }
     expect(core).toHaveLength(native.length);
   });
-  it('answers a retired method path, and the retired FlowDay proxy, with NOT_FOUND before reading the body', async () => {
+  it('answers a retired method path with NOT_FOUND before reading the body', async () => {
     const { env, core } = fakes({}, () => uiOk({}));
-    for (const path of ['/api/plus/v1/mailItems:deleteMailItems', '/api/plus/flowday/api/v1/timerSession:command']) {
-      const response = await nativePlanning(new Request(`https://planning.internal${path}`, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: 'not json',
-      }), env);
-      expect(response.status, path).toBe(404);
-      expect(await response.text(), path).toContain('NOT_FOUND');
-    }
+    const response = await nativePlanning(new Request('https://planning.internal/api/plus/v1/mailItems:deleteMailItems', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: 'not json',
+    }), env);
+    expect(response.status).toBe(404);
+    expect(await response.text()).toContain('NOT_FOUND');
     expect(core).toHaveLength(0);
   });
   it('uses the core entrypoint that verifies the native source itself', async () => {

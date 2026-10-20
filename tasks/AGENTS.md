@@ -5,9 +5,8 @@ Read the root rules, [README](README.md), [design](docs/design.md) and [verifica
 - The web app uses the generated Tasks UI client. The Worker owns D1, validation and recurrence advancement.
 - Ordinary labels carry no GTD semantics. Native stages, areas, lead windows, flags and dependencies are task fields.
 - TasksApi grants generic `read` or `read-write` binding access; do not hardcode caller app names or mail/category behavior.
-- Tasks owns task content, planning facts, dependencies, Plan, Focus and time; Todofy owns mail. FlowDay
-  is being retired: nothing new may use it. Share code only through `packages/` and contracts through root
-  `proto/`. Never import another app's implementation.
+- Tasks owns task content, planning facts, dependencies, Plan, Focus and time; Todofy owns mail. Share code
+  only through `packages/` and contracts through root `proto/`. Never import another app's implementation.
 - The installed PWA uses online task data. Do not add offline writes or private-data caching without a real need.
 - Todoist is not a task source; no code reads or writes it.
 - Preserve imported IDs, archived state, history and source completion counts. API access and a green build
@@ -16,7 +15,8 @@ Read the root rules, [README](README.md), [design](docs/design.md) and [verifica
   column updates `worker/src/backup.ts` (its runtime test compares the schema) and `tools/backup-restore.ts`.
   Restore only as [docs/backup.md](docs/backup.md) describes.
 - Production data changes go only through the Tasks API (etag and request_id) or a committed, tested generator
-  with a dry run, like `tools/estimate-backfill.ts`, whose SQL is applied with `wrangler d1 execute --remote --file`.
+  with a dry run (as the one-time planning import was; see [docs/backup.md](docs/backup.md#one-time-planning-import)),
+  whose SQL is applied with `wrangler d1 execute --remote --file`.
   Never run ad-hoc SQL against production. Note a Time Travel bookmark or take a backup first.
 - Delete a generated secrets file right after the deploy that needed it. Private operator material (snapshots,
   exports, generated SQL) is worked on in a private directory outside the repository and deleted when the task

@@ -4,7 +4,7 @@ Personal task management for the Todofy cloud. Tasks owns tasks, projects, secti
 
 ## Development status
 
-Native Tasks, Todofy and FlowDay are live, with normal processing restored. Task/history import and native planning conversion are complete; the original Todoist account is unchanged. Plan and Focus need no extension connection. Mail holds summaries until you explicitly create a task. See the [verification record](docs/verification.md) for dated production evidence.
+Native Tasks and Todofy are live, with normal processing restored. Task/history import and native planning conversion are complete; the original Todoist account is unchanged. Plan and Focus need no extension connection. Mail holds summaries until you explicitly create a task. See the [verification record](docs/verification.md) for dated production evidence.
 
 The current refinement separates Tasks/Subtasks from executable Steps and brings planning controls into the
 ordinary task editor. Its release and acceptance evidence is tracked in [refinement verification](docs/refinement-verification.md).
@@ -31,15 +31,14 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
   another is chosen). In Week a click selects a commitment and a double-click opens it; elsewhere in Plan a click opens.
 - Installable desktop PWA; an explicit offline page, with task data available online.
 - Owner-only Cloudflare Worker and D1, using the repository's proto API and authentication conventions.
-- A verified Todoist import and coordinated native source for Todofy and FlowDay.
+- A verified Todoist import and coordinated native source for Todofy.
 
 Comments, attachments, reminders, assignment, calendar integration and voice input are excluded. Mobile-specific layouts and offline writes are not part of this release.
 
 The [design](docs/design.md) explains service boundaries and the interface. [Verification](docs/verification.md)
 separates local results from the remaining release and migration work. [Import](docs/import.md) lists private
 export and identity-check commands. [Backup](docs/backup.md) describes the weekly backup through Todofy, Time
-Travel, the restore into a new database and the one-time copies of FlowDay's older estimates and of Todofy's
-planning store into Tasks.
+Travel and the restore into a new database.
 
 A Task or Subtask describes an outcome. Add a Step beneath it to arrange an executable action in the week,
 or select Standalone action to schedule the Task itself. Only these executable items expose a clock time
@@ -91,7 +90,7 @@ Lists are bounded and indexed. Completion history is separate from active tasks.
 
 ## Migration requirements
 
-Keep imported task IDs so existing mail, planning and FlowDay references remain valid. Import active and archived projects, sections, labels, filters and accessible completion history. Repeated import must not duplicate objects. Report unavailable recurring occurrences and unsupported date rules explicitly. Ordinary CSV backups are not evidence of complete history.
+Keep imported task IDs so existing mail and planning references remain valid. Import active and archived projects, sections, labels, filters and accessible completion history. Repeated import must not duplicate objects. Report unavailable recurring occurrences and unsupported date rules explicitly. Ordinary CSV backups are not evidence of complete history.
 
 Before cutover: compare source and destination counts, hierarchy, recurrence dates and existing references; verify real UI behavior; pause and drain project-owned task writes; perform the final import; switch consumers together. Preserve the original Todoist account. Do not maintain automatic bidirectional writes.
 
