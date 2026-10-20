@@ -86,9 +86,9 @@ The lead's production steps right after the release, in this order:
 ### Plan and Focus owner changes (`claude/plan-focus-ui`)
 
 **In progress, local only.** A branch from `origin/main` `b7b52e75` for the owner's ten Plan and Focus changes of
-2026-10-19, which ship in one release. Slices, in order: A (card layout and area colours) is done; B (the Step panel
-and double-click), C (whole-row drag in Plan) and D1-D3 (Tasks owns Focus day queues, the timer and time records;
-Focus reorder, Completed and the Day/Week/Month views) remain. FlowDay keeps running untouched, nothing new uses it,
+2026-10-19, which ship in one release. Slices, in order: A (card layout and area colours) and B (the Step panel and
+double-click) are done; C (whole-row drag in Plan) and D1-D3 (Tasks owns Focus day queues, the timer and time
+records; Focus reorder, Completed and the Day/Week/Month views) remain. FlowDay keeps running untouched, nothing new uses it,
 and its queue and time data are not migrated (owner decision).
 
 - **Slice A (2026-10-20 UTC).** Plan and Focus cards are coloured by area (Work slate, Personal ochre, Unassigned
@@ -96,10 +96,20 @@ and its queue and time data are not migrated (owner decision).
   status; Next steps cards are 60px; Quick chips share a 150px-minimum grid with "N more" by the heading; cut titles
   show in full in a bubble on hover or keyboard focus. Week's Committed already showed every commitment; a unit and a
   browser test now guard it. Behaviour: `packages/planning-ui/docs/interface.md`.
+- **Slice B (2026-10-20 UTC).** A Step opens a panel that sets only its time (15/30/60/90 min or 1-1440 typed); the
+  choice shows at once and the saved duration Tasks answers (`updateEstimate` returns `{ estimate }`) merges without
+  a re-read. Week's Add steps has a time select beside its input (30 min by default), sent as `estimated_minutes`;
+  the task panel's "Steps & timing" uses the same times without "Not estimated". A click on a Week commitment
+  selects it and a double-click opens it; elsewhere the dialog swallows a double-click's second press and click for
+  600ms after it opens, and focus returns to the opener when it closes.
 - **Checked locally on macOS** for slice A: `ci_changes.py` selects Changes, Shared packages, Contracts and Tasks.
   Shared packages, Contracts and Tasks passed (Tasks' worker lint, typecheck, unit and runtime suites; its web lint,
   typecheck, unit tests, build and all 89 Playwright tests, with the new `plan-layout.spec.ts` at 1440, 1024, 800 and
   680px). Changes' test steps passed; its decide step needs GitHub's token, so `ci_changes.py` ran directly.
+  For slice B the same four jobs ran again on macOS and passed: Shared packages (planning-ui's 240 unit tests),
+  Contracts, and Tasks with all 92 Playwright tests, including the new Step panel, timed Add steps and
+  double-click journeys in `planning-journeys.spec.ts`; Changes' test steps passed and its decide step again could
+  not run locally.
 - **Known limit.** With all seven Review lanes at a 1440px window (six cards a row, about 155px each) the step counts
   end in an ellipsis; the cards keep their 77px.
 
