@@ -1,7 +1,10 @@
-/** Same-origin owner transport for the existing planning APIs. Call after owner/Origin/CSRF checks. */
+/**
+ * Same-origin owner transport for Todofy's planning API (`/api/plus/v1/*`). Call after owner/Origin/CSRF checks.
+ * Focus is Tasks' own API; nothing else is forwarded.
+ */
 export async function planningRequest(request: Request, env: { PLANNING?: Fetcher }): Promise<Response | null> {
   const url = new URL(request.url);
-  if (!url.pathname.startsWith('/api/plus/v1/') && !url.pathname.startsWith('/api/plus/flowday/')) return null;
+  if (!url.pathname.startsWith('/api/plus/v1/')) return null;
   if (!env.PLANNING) {
     return Response.json(
       {

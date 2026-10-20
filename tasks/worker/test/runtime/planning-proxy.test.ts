@@ -34,3 +34,17 @@ test('forwards planning reads and authorized writes without browser credentials'
   expect(refused.status).toBe(403);
   expect(forwarded).toHaveLength(2);
 });
+
+test("answers FlowDay's old Focus paths as unknown routes and forwards nothing", async () => {
+  const before = forwarded.length;
+  for (const [method, path] of [
+    ['GET', '/api/plus/flowday/api/v1/timerSession'],
+    ['GET', '/api/plus/flowday/api/v1/flows/2026-10-13'],
+  ] as const) {
+    const response = await harness.fetch(path, { method });
+    expect(response.status).toBe(404);
+  }
+  const write = await harness.mutate('POST', '/api/plus/flowday/api/v1/timerSession:command', { action: 'start' });
+  expect(write.status).toBe(404);
+  expect(forwarded).toHaveLength(before);
+});
