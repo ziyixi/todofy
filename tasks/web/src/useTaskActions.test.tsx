@@ -8,10 +8,7 @@ import { parseStatus } from "@ziyixi/proto/rpc-status";
 import { api, type Task } from "./api";
 import type { Route } from "./routes";
 import { useTaskActions } from "./useTaskActions";
-import * as focus from "./task-completion-focus";
 import { useTaskView } from "./useTaskView";
-import { TimerSessionSchema } from "@ziyixi/proto/flowday/ui/v1/time_entry_pb";
-import { FlowSchema } from "@ziyixi/proto/flowday/ui/v1/flow_pb";
 
 afterEach(() => {
   cleanup();
@@ -146,7 +143,6 @@ it("replays the same duplicate after a lost response even if the source was then
 });
 
 it("invalidates planning only after confirmed native task changes", async () => {
-  vi.spyOn(focus, "settleCompletedTask").mockResolvedValue(undefined);
   const task = create(TaskSchema, {
     id: "synthetic",
     name: "tasks/synthetic",
@@ -212,9 +208,6 @@ it("replays an uncertain recurring completion with its original source etag and 
       }
       return create(TaskSchema, { ...task, etag: "2", completedCount: 1 });
     });
-  const settle = vi
-    .spyOn(focus, "settleCompletedTask")
-    .mockResolvedValue("Task completed. Focus is temporarily unavailable.");
   const route = { page: "focus" as const, id: "" };
   const { result } = renderHook(() =>
     useTaskActions(
@@ -230,19 +223,20 @@ it("replays an uncertain recurring completion with its original source etag and 
   );
   expect(occurrences).toBe(1);
   expect(complete.mock.calls[1]![0]).toEqual(complete.mock.calls[0]![0]);
-  expect(settle).toHaveBeenCalledWith(
-    expect.anything(),
-    complete.mock.calls[0]![0]!.requestId,
-    "1",
-    "2026-10-17",
-  );
+  // The task list names no Focus day: Tasks settles its own today's queue in the same write.
+  expect(complete.mock.calls[0]![0]).toEqual({
+    name: task.name,
+    etag: "1",
+    requestId: expect.any(String),
+    focusDay: undefined,
+  });
   expect(result.current.notice).toBe(
-    "Task completed. Focus is temporarily unavailable.",
+    "Occurrence completed · next date scheduled",
   );
   expect(result.current.mutationRevision).toBe(1);
 });
 
-it("keeps an uncertain batch completion selected and replays it once before settling Focus", async () => {
+it("keeps an uncertain batch completion selected and replays it once", async () => {
   const task = create(TaskSchema, {
     id: "batch-step",
     name: "tasks/batch-step",
@@ -266,9 +260,6 @@ it("keeps an uncertain batch completion selected and replays it once before sett
       }
       return create(TaskSchema, { ...task, etag: "2", completedCount: 1 });
     });
-  const settle = vi
-    .spyOn(focus, "settleCompletedTask")
-    .mockResolvedValue(undefined);
   const route = { page: "inbox" as const, id: "" };
   const { result } = renderHook(() =>
     useTaskActions(
@@ -286,17 +277,11 @@ it("keeps an uncertain batch completion selected and replays it once before sett
   await act(() => result.current.batch("complete"));
   expect(occurrences).toBe(1);
   expect(close.mock.calls[1]![0]).toEqual(close.mock.calls[0]![0]);
-  expect(settle).toHaveBeenCalledWith(
-    task,
-    close.mock.calls[0]![0]!.requestId,
-    "1",
-    "2026-10-17",
-    {},
-  );
+  expect(close.mock.calls[0]![0]!.focusDay).toBeUndefined();
   expect(result.current.selected.size).toBe(0);
 });
 
-it("settles Focus after a confirmed completion even when the task list refresh fails", async () => {
+it("keeps a confirmed completion successful when the task list refresh fails", async () => {
   const task = create(TaskSchema, {
     id: "refresh-failure",
     name: "tasks/refresh-failure",
@@ -306,17 +291,11 @@ it("settles Focus after a confirmed completion even when the task list refresh f
   const source = vi
     .spyOn(api, "completeTask")
     .mockResolvedValue(create(TaskSchema, { ...task, completed: true }));
-  let settled = false;
-  vi.spyOn(focus, "settleCompletedTask").mockImplementation(async () => {
-    settled = true;
-    return undefined;
-  });
   const list = {
     tasks: [task],
     replace: vi.fn(),
     remove: vi.fn(),
     refresh: vi.fn(async () => {
-      expect(settled).toBe(true);
       throw new Error("Synthetic refresh failure");
     }),
   } as unknown as ReturnType<typeof useTaskView>;
@@ -342,7 +321,6 @@ it("keeps a confirmed batch completion successful when its final refresh fails",
   vi.spyOn(api, "completeTask").mockResolvedValue(
     create(TaskSchema, { ...task, completed: true }),
   );
-  vi.spyOn(focus, "settleCompletedTask").mockResolvedValue(undefined);
   const list = {
     tasks: [task],
     refresh: vi.fn().mockRejectedValue(new Error("Synthetic refresh failure")),
@@ -398,7 +376,7 @@ it("does not write generic task data for an unchanged draft while planning can s
   expect(result.current.mutationRevision).toBe(0);
 });
 
-it("completes a selected parent once for its selected child and reads Focus once for the batch", async () => {
+it("completes a selected parent once for its selected child, naming no Focus day", async () => {
   const parent = create(TaskSchema, {
     id: "batch-parent",
     name: "tasks/batch-parent",
@@ -419,16 +397,12 @@ it("completes a selected parent once for its selected child and reads Focus once
     etag: "1",
   });
   const completed: string[] = [];
-  vi.spyOn(api, "completeTask").mockImplementation(async (request) => {
-    completed.push(request?.name || "");
-    return create(TaskSchema, { completed: true });
-  });
-  const timer = vi
-    .spyOn(focus.completionFocusApi, "getTimerSession")
-    .mockResolvedValue(create(TimerSessionSchema));
-  const flow = vi
-    .spyOn(focus.completionFocusApi, "getFlow")
-    .mockResolvedValue(create(FlowSchema, { name: "flows/2026-10-17" }));
+  const close = vi
+    .spyOn(api, "completeTask")
+    .mockImplementation(async (request) => {
+      completed.push(request?.name || "");
+      return create(TaskSchema, { completed: true });
+    });
   const list = {
     tasks: [parent, child, other],
     refresh: vi.fn().mockResolvedValue(undefined),
@@ -441,8 +415,10 @@ it("completes a selected parent once for its selected child and reads Focus once
   );
   await act(() => result.current.batch("complete"));
   expect(completed).toEqual([parent.name, other.name]);
-  expect(timer).toHaveBeenCalledOnce();
-  expect(flow).toHaveBeenCalledOnce();
+  expect(close.mock.calls.map(([body]) => body?.focusDay)).toEqual([
+    undefined,
+    undefined,
+  ]);
   expect(result.current.notice).toBe("Selected tasks completed");
   expect(result.current.selected.size).toBe(0);
 });
@@ -519,12 +495,6 @@ it.each(["complete", "move"] as const)(
       written.push(request?.task?.name || "");
       return create(TaskSchema);
     });
-    vi.spyOn(focus.completionFocusApi, "getTimerSession").mockResolvedValue(
-      create(TimerSessionSchema),
-    );
-    vi.spyOn(focus.completionFocusApi, "getFlow").mockResolvedValue(
-      create(FlowSchema, { name: "flows/2026-10-17" }),
-    );
     const list = {
       tasks: [grandchild, grandparent],
       refresh: vi.fn().mockResolvedValue(undefined),
@@ -581,7 +551,6 @@ it("replays a queued Plan completion with its original baseline, while the next 
     completedCount: 1,
   });
   const close = vi.spyOn(api, "completeTask").mockResolvedValue(next);
-  vi.spyOn(focus, "settleCompletedTask").mockResolvedValue(undefined);
   const list = listView();
   const { result } = renderHook(() =>
     useTaskActions({ page: "plan", id: "" }, "sort_order", list),
@@ -595,12 +564,17 @@ it("replays a queued Plan completion with its original baseline, while the next 
   await act(async () => {
     await result.current.finishTask(next, requestId, "2026-10-19");
   });
-  expect(close.mock.calls.map(([body]) => [body.requestId, body.etag])).toEqual(
-    [
-      [requestId, "before"],
-      [requestId, "before"],
-    ],
-  );
+  // The replay sends the same request, Focus day included.
+  expect(
+    close.mock.calls.map(([body]) => [
+      body.requestId,
+      body.etag,
+      body.focusDay,
+    ]),
+  ).toEqual([
+    [requestId, "before", "2026-10-19"],
+    [requestId, "before", "2026-10-19"],
+  ]);
   const following = crypto.randomUUID();
   await act(async () => {
     await result.current.finishTask(next, following, "2026-10-20");
@@ -608,6 +582,7 @@ it("replays a queued Plan completion with its original baseline, while the next 
   expect(close.mock.calls.at(-1)![0]).toMatchObject({
     requestId: following,
     etag: "advanced",
+    focusDay: "2026-10-20",
   });
 });
 
@@ -620,7 +595,6 @@ it("Plan's finish action cannot turn into Reopen when a fresh read finds the tas
   });
   const close = vi.spyOn(api, "completeTask").mockResolvedValue(completed);
   const reopen = vi.spyOn(api, "reopenTask");
-  vi.spyOn(focus, "settleCompletedTask").mockResolvedValue(undefined);
   const list = listView();
   const { result } = renderHook(() =>
     useTaskActions({ page: "plan", id: "" }, "sort_order", list),

@@ -11,7 +11,6 @@ import { isPlanning, type Route } from "./routes";
 import { scheduledDate, scheduledTime } from "./task-schedule";
 import { clearTaskStartAhead, taskScheduleFromText } from "./task-date-actions";
 import { todayDate } from "./dates";
-import { settleCompletedTask, type FocusReads } from "./task-completion-focus";
 import { taskDropOrder } from "./task-order";
 import type { useTaskView } from "./useTaskView";
 import type { TaskDropTarget, TaskRowDrop } from "./task-drag";
@@ -83,8 +82,17 @@ export function useTaskActions(
     list.remove(task.id);
     setNotice("Task deleted");
   }
+  /**
+   * Completes or reopens the task. A completion from Plan or Focus brings its request ID and Focus day, whose
+   * queue Tasks settles in the same write; the task list sends no day, which Tasks reads as its today.
+   */
   const writeCompletion = useCallback(
-    async (task: Task, reopen = false, requestId?: string) => {
+    async (
+      task: Task,
+      reopen = false,
+      requestId?: string,
+      focusDay?: string,
+    ) => {
       const action = reopen ? "reopen" : "complete";
       const key = `${requestId ? "queued" : action}:${task.id}`;
       let completion = completionRequests.current.get(key);
@@ -96,14 +104,17 @@ export function useTaskActions(
         completionRequests.current.set(key, completion);
       }
       try {
-        const result = await (reopen ? api.reopenTask : api.completeTask)({
+        const write = {
           name: task.name,
           etag: completion.etag,
           requestId: completion.requestId,
-        });
+        };
+        const result = reopen
+          ? await api.reopenTask(write)
+          : await api.completeTask({ ...write, focusDay });
         // Planning views supply one identity per queued operation; retain only the latest baseline per task.
         if (!requestId) completionRequests.current.delete(key);
-        return { result, completion };
+        return result;
       } catch (error) {
         if (
           error instanceof RpcStatusError &&
@@ -119,17 +130,13 @@ export function useTaskActions(
     async (
       task: Task,
       reopen: boolean,
-      flowDate = today,
+      focusDay?: string,
       requestId?: string,
     ): Promise<string | undefined> => {
       setBusyIds((current) => new Set([...current, task.id]));
       setNotice("");
       try {
-        const { result, completion } = await writeCompletion(
-          task,
-          reopen,
-          requestId,
-        );
+        const result = await writeCompletion(task, reopen, requestId, focusDay);
         taskChanged();
         if (result.completed === (route.page === "completed"))
           list.replace(result);
@@ -139,21 +146,14 @@ export function useTaskActions(
           : result.recurrence
             ? "Occurrence completed · next date scheduled"
             : "Task completed";
-        let warning = reopen
-          ? undefined
-          : await settleCompletedTask(
-              task,
-              completion.requestId,
-              completion.etag,
-              flowDate,
-            );
+        let notice = confirmedMessage;
         try {
           if (!isPlanning(route.page) && route.page !== "catalog")
             await list.refresh();
         } catch {
-          warning = `${warning || confirmedMessage}. The task list could not refresh. Refresh the view.`;
+          notice = `${confirmedMessage}. The task list could not refresh. Refresh the view.`;
         }
-        setNotice(warning || confirmedMessage);
+        setNotice(notice);
         return undefined;
       } catch (reason) {
         const message = describeError(reason);
@@ -171,7 +171,6 @@ export function useTaskActions(
       list.remove,
       list.refresh,
       taskChanged,
-      today,
       writeCompletion,
     ],
   );
@@ -179,8 +178,8 @@ export function useTaskActions(
     return applyCompletion(task, task.completed);
   }
   const finishTask = useCallback(
-    (task: Task, requestId: string, flowDate?: string) =>
-      applyCompletion(task, false, flowDate, requestId),
+    (task: Task, requestId: string, focusDay?: string) =>
+      applyCompletion(task, false, focusDay, requestId),
     [applyCompletion],
   );
   async function patchTask(
@@ -417,8 +416,6 @@ export function useTaskActions(
     const ids = [...selected];
     setBusyIds(new Set(ids));
     setNotice("");
-    let focusWarning = "";
-    const reads: FocusReads = {};
     try {
       // A subtask selected in an expanded branch is not one of the list's rows, so it is read once.
       const chosen = await Promise.all(
@@ -456,17 +453,8 @@ export function useTaskActions(
       }
       const targets = chosen.filter((task) => covered.has(task.id));
       for (const task of targets) {
-        if (action === "complete") {
-          const { completion } = await writeCompletion(task);
-          const warning = await settleCompletedTask(
-            task,
-            completion.requestId,
-            completion.etag,
-            today,
-            reads,
-          );
-          if (warning) focusWarning = warning;
-        } else
+        if (action === "complete") await writeCompletion(task);
+        else
           await api.updateTask({
             etag: task.etag,
             task: {
@@ -485,10 +473,9 @@ export function useTaskActions(
         );
       }
       setNotice(
-        focusWarning ||
-          (action === "complete"
-            ? "Selected tasks completed"
-            : "Selected tasks moved"),
+        action === "complete"
+          ? "Selected tasks completed"
+          : "Selected tasks moved",
       );
     } catch (reason) {
       setNotice(describeError(reason));
