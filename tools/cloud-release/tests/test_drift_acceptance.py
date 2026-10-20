@@ -452,59 +452,9 @@ class DriftAcceptance(unittest.TestCase):
                 )
                 self.assert_readonly(fixture)
 
-    def todofy_with_retired_bindings(self):
-        """The live core and gateway as the release before native-only Tasks left them, with the gateway's FlowDay
-        proxy, which the release that moves planning into Tasks retires."""
-        fixture = self.fixture("todofy")
-        fixture.bindings("todofy-core").extend(
-            [
-                {"name": "TASK_SOURCE", "type": "plain_text", "text": "tasks"},
-                {"name": "TODOIST_API_BASE", "type": "plain_text",
-                 "text": "https://api.example.invalid"},
-                {"name": "PLUS_METADATA", "type": "plain_text", "text": "cache"},
-            ]
-        )
-        fixture.bindings("todofy").extend(
-            [
-                {"name": "TASK_SOURCE", "type": "plain_text", "text": "tasks"},
-                {"name": "FLOWDAY_FOCUS", "type": "service", "service": "flowday",
-                 "entrypoint": "FocusEntrypoint", "environment": "production"},
-                {"name": "FLOWDAY_NATIVE_FOCUS", "type": "service", "service": "flowday",
-                 "entrypoint": "NativeFocusEntrypoint", "environment": "production"},
-                {"name": "FLOWDAY_PUBLIC_URL", "type": "plain_text",
-                 "text": "https://flowday.example.invalid"},
-            ]
-        )
-        return fixture
-
-    def test_normal_todofy_release_retires_the_todoist_era_and_flowday_bindings(self):
-        fixture = self.todofy_with_retired_bindings()
-        output = io.StringIO()
-        with redirect_stdout(output):
-            required = preflight(
-                ROOT, fixture.app, SHA, False, fixture.cloud, fixture.github
-            )
-        self.assertTrue(required)
-        result = json.loads(output.getvalue())
-        self.assertEqual(result["state"], "repairable")
-        self.assertEqual(
-            sorted((item["script"], item["field"], item["reason"]) for item in result["changes"]),
-            [
-                ("todofy", "FLOWDAY_FOCUS", "RETIRED_SERVICE_BINDING"),
-                ("todofy", "FLOWDAY_NATIVE_FOCUS", "RETIRED_SERVICE_BINDING"),
-                ("todofy", "FLOWDAY_PUBLIC_URL", "RETIRED_SERVICE_BINDING"),
-                ("todofy", "TASK_SOURCE", "RETIRED_SERVICE_BINDING"),
-                ("todofy-core", "PLUS_METADATA", "RETIRED_SERVICE_BINDING"),
-                ("todofy-core", "TASK_SOURCE", "RETIRED_SERVICE_BINDING"),
-                ("todofy-core", "TODOIST_API_BASE", "RETIRED_SERVICE_BINDING"),
-            ],
-        )
-        self.assert_readonly(fixture)
-
-    def test_todofy_retirement_stops_for_a_repair_or_a_secret_the_deploy_would_keep(self):
+    def test_a_release_stops_for_a_repair_or_an_undeclared_secret(self):
         for repair, name, kind in (
             (True, "TASK_SOURCE", "plain_text"),
-            # A live secret nothing declares (TODOIST_API_KEY stays declared until it is deleted).
             (False, "RETIRED_API_KEY", "secret_text"),
         ):
             with self.subTest(repair=repair, name=name):

@@ -1037,12 +1037,6 @@
           "source": "config"
         },
         {
-          "name": "TODOIST_API_KEY",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
-        },
-        {
           "name": "TODOIST_DEFAULT_PROJECT_ID",
           "type": "secret_text",
           "source": "deploy"
