@@ -219,23 +219,29 @@
   width: 1em;
   text-align: center;
 }
+/* A card drags by its whole row, like the task list's rows (src/row-drag.ts); its grip stays
+   for the keyboard and screen readers. */
 .review-draggable {
   position: relative;
+  cursor: grab;
+}
+.review-draggable > .planning-outcome-card {
+  cursor: inherit;
 }
 .review-draggable > .planning-outcome-card,
 .review-drag-preview > .planning-outcome-card {
   padding-left: 25px;
 }
 .review-draggable.is-dragging {
-  opacity: 0.35;
+  opacity: 0.3;
 }
-/* Where a card moved inside its lane will land: the calendar's 3px line, in the 7px gap. */
+/* Where a card moved inside its lane will land: the task list's 2px line, in the 7px gap. */
 .review-draggable:is(.is-insert-before, .is-insert-after)::before {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
-  height: 3px;
+  height: 2px;
   border-radius: 2px;
   background: var(--plus-accent);
 }
@@ -249,7 +255,7 @@
   top: 0;
   bottom: 0;
   height: auto;
-  width: 3px;
+  width: 2px;
 }
 .review-lane[data-lane="committed"] .is-insert-before::before {
   left: -5px;

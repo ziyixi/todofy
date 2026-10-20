@@ -45,6 +45,7 @@ import {
 import { PendingMark } from "./StatusMarks";
 import { FullTitle, markCut } from "./FullTitle";
 import { QuickTasks } from "./QuickTasks";
+import { planningSensors } from "./row-drag";
 import { quickTray, unscheduledCommitments } from "./weekly-review";
 import { words } from "./i18n";
 import type {
@@ -208,6 +209,7 @@ export function PlanningWeek(props: Props) {
     <DragDropProvider
       key={language}
       plugins={plugins}
+      sensors={planningSensors}
       onDragEnd={({ canceled, operation }) => {
         if (canceled) return;
         const source = operation.source?.data as

@@ -135,7 +135,8 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
-/* A fixed 60px: 9 + 9 padding, 2 border, a 20px title line, 4 gap and a 16px meta line. */
+/* A fixed 60px: 9 + 9 padding, 2 border, a 20px title line, 4 gap and a 16px meta line. The
+   14px left padding holds the grip. */
 .planning-tray-step {
   position: relative;
   display: flex;
@@ -143,7 +144,7 @@
   gap: 8px;
   min-width: 0;
   height: 60px;
-  padding: 9px 10px;
+  padding: 9px 10px 9px 14px;
   background: var(--plus-surface);
   border: 1px solid var(--plus-line);
   border-left: 3px solid var(--area-color, var(--plus-area-none));
@@ -189,21 +190,55 @@
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
-.planning-week .planning-drag-handle {
+/* Small cards drag by their whole row, like the task list's rows (src/row-drag.ts). Their grip
+   is an overlay in the card's left padding, kept for the keyboard and screen readers: it shows
+   on hover of its card or on its own keyboard focus, by opacity alone, so no text moves. Touch
+   screens have no hover, so there a 250ms hold on the row drags and the grip stays hidden. */
+.planning-tray-step,
+.planning-quick-card,
+.planning-calendar-step {
+  cursor: grab;
+}
+.planning-week
+  :is(.planning-tray-step, .planning-calendar-step)
+  .planning-step-title,
+.planning-week .planning-quick-title {
+  cursor: inherit;
+}
+.plus-root .planning-week .planning-drag-handle {
+  position: absolute;
+  inset: 0 auto 0 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 14px;
   padding: 0;
-  flex: 0 0 auto;
   color: var(--plus-muted);
   cursor: grab;
   touch-action: none;
+  opacity: 0;
 }
-.planning-drag-handle:disabled,
-.planning-drag-handle[aria-disabled="true"] {
-  opacity: 0.5;
+@media (hover: hover) {
+  .plus-root
+    .planning-week
+    :is(
+      .planning-tray-step,
+      .planning-quick-card,
+      .planning-calendar-step
+    ):hover
+    .planning-drag-handle {
+    opacity: 1;
+  }
+}
+.plus-root .planning-week .planning-drag-handle:focus-visible {
+  opacity: 1;
+  outline-offset: -2px;
+}
+/* One that cannot be used now shows dimmed when it shows. */
+.plus-root
+  .planning-week
+  .planning-drag-handle:is(:disabled, [aria-disabled="true"]) {
+  color: color-mix(in srgb, var(--plus-muted) 50%, transparent);
   cursor: default;
 }
 .planning-step-tray-empty {
@@ -215,22 +250,24 @@
 .planning-step-tray > .planning-step-tray-empty {
   margin-bottom: 10px;
 }
-/* Where a step moved among its siblings will land: the calendar's 3px line in the 10px gap, on
-   the card's leading or trailing edge here, above or below it in the one-column tray. */
+/* Where a step moved among its siblings will land: the task list's 2px line, in the middle of
+   the 10px gap, on the card's leading or trailing edge here, above or below it in the one-column
+   tray. */
 .planning-tray-step:is(.is-insert-before, .is-insert-after)::before {
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 3px;
+  width: 2px;
   border-radius: 2px;
   background: var(--plus-accent);
 }
+/* Measured from inside the 3px area edge on the left and the 1px border on the right. */
 .planning-tray-step.is-insert-before::before {
-  left: -8px;
+  left: -9px;
 }
 .planning-tray-step.is-insert-after::before {
-  right: -8px;
+  right: -7px;
 }
 /* Next steps' last cell: Todoist's own "Add task" row, and the input that takes its place at the
    same 32px, so opening and closing never change the row. */
@@ -273,11 +310,6 @@
   padding-inline: 6px;
   font-size: 13px;
 }
-/* A step added there, waiting for the write and the read that lists it: the mark takes the
-   handle's place, so its title lines up with the other steps'. */
-.planning-tray-step.is-pending .plus-pending-mark {
-  margin: 0 5px;
-}
 /* Quick tasks under Next steps: a quiet row of equal-width one-line cards on the step cards'
    surface (six fit on one row at 1440px). The heading, with "N more" after its count, stays level
    with the first row when the cards wrap. */
@@ -316,21 +348,18 @@
   list-style: none;
 }
 .planning-quick-card {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
   box-sizing: border-box;
   height: 28px;
   min-width: 0;
-  padding: 0 8px 0 2px;
+  padding: 0 8px 0 12px;
   background: var(--plus-surface);
   border: 1px solid var(--plus-line);
   border-left: 3px solid var(--area-color, var(--plus-area-none));
   border-radius: 6px;
-}
-.planning-week .planning-quick-card .planning-drag-handle {
-  width: 20px;
-  height: 20px;
 }
 /* The title's text is cut inside FullTitle, whose bubble may overlap the next row. */
 .planning-week .planning-quick-title {
@@ -462,7 +491,7 @@
   position: relative;
   min-width: 0;
   margin-bottom: 8px;
-  padding: 9px 8px;
+  padding: 9px 8px 9px 12px;
   border: 1px solid var(--plus-line);
   border-left: 3px solid var(--area-color, var(--plus-area-none));
   border-radius: 6px;
@@ -473,7 +502,6 @@
   align-items: flex-start;
   gap: 6px;
 }
-.planning-calendar-step-top .planning-drag-handle,
 .planning-calendar-step-top .plus-pending-mark {
   margin-top: 3px;
 }
@@ -514,13 +542,14 @@
 .planning-week .planning-step-remove:disabled {
   opacity: 0;
 }
+/* The task list's 2px line, in the middle of the 8px gap above the card it goes before. */
 .planning-calendar-step.is-insert::before {
   content: "";
   position: absolute;
   top: -6px;
-  left: -1px;
+  left: -3px;
   right: -1px;
-  height: 3px;
+  height: 2px;
   border-radius: 2px;
   background: var(--plus-accent);
 }
@@ -598,13 +627,13 @@
     left: 0;
     right: 0;
     width: auto;
-    height: 3px;
+    height: 2px;
   }
   .planning-tray-step.is-insert-before::before {
-    top: -8px;
+    top: -7px;
   }
   .planning-tray-step.is-insert-after::before {
-    bottom: -8px;
+    bottom: -7px;
   }
 }
 @container planning-calendar (max-width:960px) {

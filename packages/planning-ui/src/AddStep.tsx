@@ -162,13 +162,13 @@ export function AddStep({
           className="planning-tray-step is-pending"
           aria-busy="true"
         >
-          <PendingMark language={language} />
           {/* Two lines like a step card's, so the swap to it keeps the row's height; the mark
-              already says the second one. */}
+              already says the second one. It follows the title, as on a step card that waits. */}
           <span className="planning-step-title">
             <span>{step.title}</span>
             <small aria-hidden="true">{text.updating}</small>
           </span>
+          <PendingMark language={language} />
         </article>
       ))}
       <div

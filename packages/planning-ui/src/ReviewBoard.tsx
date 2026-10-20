@@ -33,6 +33,7 @@ import {
 } from "./planning-outcomes";
 import { pendingTask, predictStage, withStage } from "./plan-updates";
 import { useLaneReorder } from "./lane-reorder";
+import { planningSensors } from "./row-drag";
 import {
   boardLanes,
   cardState,
@@ -366,6 +367,7 @@ export function ReviewBoard({
     <DragDropProvider
       key={language}
       plugins={plugins}
+      sensors={planningSensors}
       onDragEnd={({ canceled, operation }) => {
         if (canceled) return;
         const task = operation.source?.data?.task as PlanningTask | undefined;
