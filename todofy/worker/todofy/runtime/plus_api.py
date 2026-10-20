@@ -31,7 +31,15 @@ from todofy.runtime.config import flag, var
 from todofy.runtime.interop import now_s, to_js
 
 READ_METHODS = frozenset(
-    {"ReadPlan", "ListPlanningTasks", "VerifyPlanStore", "ListMailItems", "ReadMailSummary", "ReadMailSettings"}
+    {
+        "ReadPlan",
+        "ReadWeeklyReview",
+        "ListPlanningTasks",
+        "VerifyPlanStore",
+        "ListMailItems",
+        "ReadMailSummary",
+        "ReadMailSettings",
+    }
 )
 # Writes of Todofy's planning store only, by value: no receipt, no task write (set_dependency, resolve).
 DEPENDENCY_METHODS = frozenset({"SetTaskDependency", "ResolveDependencies"})
@@ -111,6 +119,23 @@ async def review_targets(env: Any, week: str) -> dict[str, Any]:
         "dependencies": plan_store.dependency_rows(edges),
         "weekly_bets": plan_store.weekly_bets(dict(row) for row in bets.results),
         "lane_orders": plan_store.lane_orders(lanes),
+        "mailbox_pending_count": int(dict(pending.results[0])["n"]),
+    }
+
+
+async def weekly_review(env: Any, request: dict[str, Any]) -> dict[str, Any]:
+    """ReadWeeklyReview: the two facts of Plan's weekly review Todofy keeps, for the account week Tasks' Plan names. One
+    D1 batch of two statements and no Tasks call: the newest review task created for that or the previous ISO week,
+    and the Mail entries still pending."""
+    monday = date.fromisoformat(request.get("week_start", ""))
+    if monday.isoformat() != request["week_start"] or monday.weekday() != 0:
+        raise plus_tasks.PlusError("BAD_REQUEST")
+    weeks = ["{:04d}-W{:02d}".format(*day.isocalendar()[:2]) for day in (monday, monday - timedelta(days=7))]
+    review, pending = await env.DB.batch(
+        [env.DB.prepare(gtd_sql.LATEST_REVIEW_TASK.sql).bind(*weeks), env.DB.prepare(mailbox_sql.NATIVE_COUNT.sql)]
+    )
+    return {
+        "review_task_id": next((str(dict(row)["task_id"]) for row in review.results), ""),
         "mailbox_pending_count": int(dict(pending.results[0])["n"]),
     }
 
@@ -351,6 +376,8 @@ async def handle(coordinator: Any, method: str, text: str) -> dict[str, Any]:
                 response = await plan_store.verify(env.DB)
             elif method == "ReadPlan":
                 response = {"plan": await plan(coordinator)}
+            elif method == "ReadWeeklyReview":
+                response = await weekly_review(env, request)
             elif method == "SetTaskDependency":
                 response = await set_dependency(coordinator, request)
             elif method == "ResolveDependencies":

@@ -15,13 +15,20 @@ Tasks serves `/api/plus/v1/*` on its own origin, behind the owner's Access login
 entrypoint (`gateway/src/planning.ts`, props `{source: "tasks"}`; any other source is 403). No public host routes
 either prefix: the owner host and the hooks hosts answer 404.
 
-`nativePlanning` (`gateway/src/plus.ts`) allows the methods Tasks calls: ReadPlan, ListPlanningTasks, SetTaskPlan,
-SetTaskLead, AppendTaskSteps, SetWeeklyBet, SetTaskDependency, ResolveDependencies, ReorderTasks, ListMailItems,
-ReadMailSummary, ConvertMailItem, DeleteMailSummaries, ReadMailSettings, UpdateMailCategories and VerifyPlanStore.
+`nativePlanning` (`gateway/src/plus.ts`) allows the methods Tasks calls: ReadPlan, ReadWeeklyReview, ListPlanningTasks,
+SetTaskPlan, SetTaskLead, AppendTaskSteps, SetWeeklyBet, SetTaskDependency, ResolveDependencies, ReorderTasks,
+ListMailItems, ReadMailSummary, ConvertMailItem, DeleteMailSummaries, ReadMailSettings, UpdateMailCategories and
+VerifyPlanStore.
 It still allows CompleteTask, which nothing calls: Tasks completes its own tasks and settles Focus in the same
 write. Any other method answers `ACTION_NOT_ALLOWED` before its body is read.
 Each call is one core RPC, `plus_native_ui(method, request)`. It answers `UNAVAILABLE` while the core has no
 `TASKS` binding, and `plus_api.handle` runs it under the coordinator's `plus_lock`.
+
+Since planning moved into Tasks (`tasks/migrations/0006_planning.sql`), Tasks calls only the Mail methods and
+ReadWeeklyReview: the two facts of Plan's weekly review that Todofy keeps, the newest review task it created for the
+account week Tasks names or the week before, and the pending Mail count. It is one D1 batch of two statements and
+makes no Tasks call. The planning methods stay until the Todofy cleanup release retires them, after the one-time
+import of their data into Tasks.
 
 The gateway's FlowDay half (the `/api/plus/flowday` proxy to FlowDay's `NativeFocusEntrypoint`, binding
 `FLOWDAY_NATIVE_FOCUS`) and CompleteTask's FlowDay settlement (`flow_date`, the receipt's `plus_focus_claim`) have

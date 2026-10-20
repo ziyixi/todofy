@@ -143,6 +143,13 @@ service PlusService {
   rpc ReadMailSettings(ReadMailSettingsRequest) returns (ReadMailSettingsResponse) {
     option (google.api.http) = {get: "/api/plus/v1/mailSettings:read"};
   }
+  // The weekly review's two Todofy facts: the newest review task it created for this or the previous ISO week,
+  // and the Mail entries still pending. No Tasks call.
+  // (-- api-linter: core::0131::synonyms=disabled
+  //     aip.dev/not-precedent: reads two values Todofy keeps for Plan's weekly review, not a resource. --)
+  rpc ReadWeeklyReview(ReadWeeklyReviewRequest) returns (ReadWeeklyReviewResponse) {
+    option (google.api.http) = {get: "/api/plus/v1/weeklyReview:read"};
+  }
   // Reorders tasks. The given order of one Review lane is kept in Todofy's planning store. In Tasks, the moved
   // task's siblings among the given tasks (same project, section and parent) have their existing positions
   // permuted into the given order in one atomic write; no other task changes, and Waiting and Parked never
@@ -688,6 +695,21 @@ message ReadMailSettingsResponse {
   ExternalRef destination = 3;
   // Deprecated: never sent, for the same builds.
   repeated MailProject projects = 4;
+}
+// Reads the weekly review's facts for one account week.
+message ReadWeeklyReviewRequest {
+  // The Monday of the account week, YYYY-MM-DD, as Tasks' Plan gives it.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: an account-local calendar day, the same key as Plan.week_start. --)
+  string week_start = 1 [(google.api.field_behavior) = REQUIRED];
+}
+// The weekly review's Todofy facts.
+message ReadWeeklyReviewResponse {
+  // The newest weekly review task Todofy created for that or the previous ISO week; empty when there is none. It
+  // may already be completed: only the open task list says it is open.
+  string review_task_id = 1;
+  // Mail entries still awaiting a decision.
+  int32 mailbox_pending_count = 2;
 }
 // A new order of tasks: one Review lane's, or a parent's sub-tasks.
 message ReorderTasksRequest {

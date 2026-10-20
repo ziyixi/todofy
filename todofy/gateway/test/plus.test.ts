@@ -11,6 +11,7 @@ const COMPLETE = { task_id: 'task-one', request_id: ID, flow_date: '2026-10-13' 
 /** A minimal valid request for each method Tasks calls on its Planning channel. */
 const NATIVE_CALLS: Record<string, object> = {
   readPlan: {},
+  readWeeklyReview: { weekStart: '2026-10-12' },
   listPlanningTasks: {},
   setTaskPlan: { taskId: 'task-one', etag: 'shown' },
   setTaskLead: { taskId: 'task-one', etag: 'shown' },

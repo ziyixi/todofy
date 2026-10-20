@@ -98,6 +98,14 @@ REVIEW_WEEK = Query(
     "SELECT week, state, attempts, next_attempt_at, subject, body, project_id, task_id FROM gtd_reviews WHERE week = ?",
     REVIEWS_INDEX,
 )
+# The newest review task created for either of two weeks (bind this ISO week, then the previous one), which Plan's
+# weekly review links to (PlusService.ReadWeeklyReview).
+LATEST_REVIEW_TASK = Query(
+    "SELECT task_id FROM gtd_reviews WHERE week IN (?, ?) AND state = 'created' AND task_id <> ''"
+    " ORDER BY week DESC LIMIT 1",
+    REVIEWS_INDEX,
+    sort_allowed=True,
+)
 # Created reviews from a week on (bind it) that no completed list has shown done yet.
 OPEN_REVIEWS = Query(
     "SELECT week, task_id FROM gtd_reviews WHERE week >= ? AND state = 'created' AND completed_at IS NULL"

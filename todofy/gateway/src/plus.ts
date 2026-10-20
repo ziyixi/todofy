@@ -18,7 +18,7 @@ interface PlusContext { env: Env }
  * refuses every other PlusService method. VerifyPlanStore is the restore runbook's check.
  */
 const NATIVE_METHODS = new Set([
-  'ReadPlan', 'ListPlanningTasks', 'SetTaskPlan', 'SetTaskLead', 'AppendTaskSteps', 'CompleteTask', 'SetWeeklyBet',
+  'ReadPlan', 'ReadWeeklyReview', 'ListPlanningTasks', 'SetTaskPlan', 'SetTaskLead', 'AppendTaskSteps', 'CompleteTask', 'SetWeeklyBet',
   'SetTaskDependency', 'ResolveDependencies', 'ReorderTasks', 'ListMailItems', 'ReadMailSummary', 'ConvertMailItem',
   'DeleteMailSummaries', 'ReadMailSettings', 'UpdateMailCategories', 'VerifyPlanStore',
 ]);
