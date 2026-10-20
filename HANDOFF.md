@@ -91,9 +91,10 @@ panel and double-click), C (whole-row drag in Plan), D1 (Tasks' Focus backend), 
 switch to it) and D3 (Focus reorder, Completed and the Day/Week/Month views) are all done. FlowDay keeps running
 untouched, nothing new uses it, and its queue and time data are not migrated (owner decision). To ship: merge
 `origin/main` again if it has moved, rerun the jobs `ci_changes.py` selects (every check, since D1 changed the Tasks
-API and D2 `.github/scripts`), push, wait for the complete gate and fast-forward `main` to the same green SHA. Tasks
-applies migration `0005`; FlowDay's checks and deploy run because `proto/tasks/ui/` changed, and its deploy changes
-nothing it does.
+API and D2 `.github/scripts`), push, wait for the complete gate and fast-forward `main` to the same green SHA. CI
+deploys Tasks (migration `0005` first), then FlowDay, then Todofy. FlowDay and Todofy redeploy only because they use
+the additive `proto/tasks/ui/` (and Todofy's tests and docs changed); neither changes what it does. If FlowDay's
+deploy fails, Todofy is skipped, since it waits for FlowDay, and Tasks keeps working with the previous Todofy.
 
 - **Slice A (2026-10-20 UTC).** Plan and Focus cards are coloured by area (Work slate, Personal ochre, Unassigned
   none) with legend dots; outcome cards are 77px with one left-aligned meta line, the deadline first in a two-part
@@ -149,6 +150,13 @@ nothing it does.
   decide step again could not run locally. The count-up journey waits past a minute, because Tasks saves only a
   session of a minute or more. Plan and Focus's lazy chunk grew from 118.9 to 137.3 kB (37.3 to 43.0 kB gzip) and its
   CSS from 43.9 to 51.5 kB; the main chunk is unchanged at 698 kB.
+  For the review fixes `ci_changes.py` selects Shared packages, Contracts, Tasks and Todofy (for its planning API
+  doc). On macOS Shared packages (planning-ui's 268 unit tests), Contracts and Todofy static passed. Tasks passed
+  its Worker lint, typecheck, unit and 18 runtime files (81 tests, CPU and budgets included), the web's lint,
+  typecheck, 65 unit tests and build, and 101 of 102 Playwright tests; the one failure was a wrong assertion in the
+  new Week check (`Set` has no length), fixed and rerun with `focus-time.spec.ts` and `planning-drag.spec.ts` (10
+  passed). `.github/scripts/test_doc_references.py` passed. Todofy's runtime shards were not rerun: only a Todofy
+  doc changed.
 - **Slice D1 (2026-10-20 UTC).** Tasks owns Focus; nothing calls it until D2. Migration `0005_focus.sql` adds day
   queues (`day_steps`), time records (`focus_entries`) and the one timer row (`focus_timer`), never hard-deleted.
   `proto/tasks/ui/v1/focus.proto` and seven methods: `ListFocusDays` (1-7 days, their records, every task they name
@@ -182,10 +190,31 @@ nothing it does.
   bar a day stacked by area and where the time went (grouped by each step's parent); Month a shaded calendar of its
   days (`focus-stats.ts`). Other ranges are read with `readFocus`, kept while Focus is open and read again after
   each confirmed write. Today's open steps reorder by their whole row (one `MoveFocusStep` within the day).
-- **Owner, with this release (D1-D3):** stop any FlowDay timer that is running before it. Afterwards this week's
-  day queues are empty, because nothing is migrated: arrange the week once in Plan › Week. Focus now counts up by
-  default: Start, work, then ✓ saves the time; each step's logged time opens its records. Focus cards drag by their
-  whole row. FlowDay's own site keeps working until its decommission; nothing reads it any more.
+- **Review fixes (2026-10-20 UTC).** A Focus step's grip starts its drag (it was missing from the row sensors'
+  surfaces), its drag preview is as wide as the row, and a grip that cannot be used stays hidden until hover (the
+  shared dimmed `button:disabled` showed it on the timed card and flashed it on every card during a write). A day's
+  records of steps that left its queue (moved on or removed) show read-only under "Other time", so the summary
+  adds up and every record stays editable. Week and Month count a recurring step's estimate once per completion.
+  Where the time went has one bar track, and Week's day labels are always two lines. Deleting a task, project or
+  section takes its steps off every day queue in the same batch, so they no longer fill a day's 20-step cap.
+- **Owner, with this release (D1-D3):** stop any FlowDay timer that is running before it. After the release,
+  reload every open Tasks window, the installed app too: a window from before it still calls FlowDay's old Focus
+  paths, which now answer 404, so Plan and Focus show errors until it reloads (no data is at risk). Afterwards this
+  week's day queues are empty, because nothing is migrated: arrange the week once in Plan › Week. Focus now counts up
+  by default: Start, work, then ✓ saves the time; each step's logged time opens its records. Focus cards drag by
+  their whole row. FlowDay's own site keeps working until its decommission; nothing reads it any more.
+- **Next, after this release.** Two follow-ups, in order; neither moves any data.
+  1. **Todofy cleanup release**, right after: nothing calls these any more, so retire them. In
+     `todofy/gateway/src/plus.ts`, CompleteTask in `NATIVE_METHODS`, the `/api/plus/flowday` proxy with
+     `FOCUS_METHODS`, `settleCompleted` and the `flowday_url` injection; the `FLOWDAY_NATIVE_FOCUS` binding and
+     `FLOWDAY_PUBLIC_URL` var (`gateway/src/env.ts`, `wrangler.toml`); the frozen focus claim in
+     `worker/todofy/runtime/plus_receipts.py` and `coordinator.py`; Todofy's CompleteTask handler and RPC, reserved
+     with its messages through `proto/retired.json`, and `Plan.flowday_url` reserved the same way; their tests and
+     `todofy/docs` (`planning-api.md` already says these have no caller).
+  2. **FlowDay decommission**, an owner action after the performance pass. Its checklist is this command, run again
+     then: `git grep -l -i flowday -- . ':!flowday' ':!proto/flowday' ':!docs/history'` (FlowDay's app and proto,
+     its CI jobs and `ci_changes.py` entries, infrastructure, tools, Home's registry and drift files, other apps'
+     mentions and the root docs).
 - **Known limit.** With all seven Review lanes at a 1440px window (six cards a row, about 155px each) the step counts
   end in an ellipsis; the cards keep their 77px.
 

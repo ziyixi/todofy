@@ -3,30 +3,30 @@
 `PlusService` (`proto/todofy/ui/v1/plus_service.proto`) is Tasks' planning and Mail API: Plan, Focus and Mail in
 Tasks read and write through it. Tasks keeps the tasks. Todofy keeps the planning facts Tasks does not hold (each
 task's saved stage and planning flags, the weekly Bets, dependencies, lane orders and next week's choices) and the
-mail summaries. FlowDay keeps the day queues, the timer and its time entries. The service keeps the name of the
-retired Todoist Plus extension ([history](../../docs/history/todoist-plus.md)), because renaming a published
-service is a breaking change; its paths stay `/api/plus/v1/*`.
+mail summaries. Focus's day queues, timer and time records are Tasks' own (`proto/tasks/ui/v1/focus.proto`); Todofy
+holds none of them. The service keeps the name of the retired Todoist Plus extension
+([history](../../docs/history/todoist-plus.md)), because renaming a published service is a breaking change; its
+paths stay `/api/plus/v1/*`.
 
 ## Channel and allowlist
 
-Tasks serves `/api/plus/v1/*` and `/api/plus/flowday/*` on its own origin, behind the owner's Access login, Origin
-and CSRF. It forwards each request on its `PLANNING` service binding to the gateway's `Planning` entrypoint
-(`gateway/src/planning.ts`, props `{source: "tasks"}`; any other source is 403). No public host routes either
-prefix: the owner host and the hooks hosts answer 404.
+Tasks serves `/api/plus/v1/*` on its own origin, behind the owner's Access login, Origin and CSRF, and answers
+`/api/plus/flowday/*` 404. It forwards each request on its `PLANNING` service binding to the gateway's `Planning`
+entrypoint (`gateway/src/planning.ts`, props `{source: "tasks"}`; any other source is 403). No public host routes
+either prefix: the owner host and the hooks hosts answer 404.
 
-`nativePlanning` (`gateway/src/plus.ts`) allows exactly the methods Tasks calls: ReadPlan, ListPlanningTasks,
-SetTaskPlan, SetTaskLead, AppendTaskSteps, CompleteTask, SetWeeklyBet, SetTaskDependency, ResolveDependencies,
-ReorderTasks, ListMailItems, ReadMailSummary, ConvertMailItem, DeleteMailSummaries, ReadMailSettings,
-UpdateMailCategories and VerifyPlanStore. Any other method answers `ACTION_NOT_ALLOWED` before its body is read.
+`nativePlanning` (`gateway/src/plus.ts`) allows the methods Tasks calls: ReadPlan, ListPlanningTasks, SetTaskPlan,
+SetTaskLead, AppendTaskSteps, SetWeeklyBet, SetTaskDependency, ResolveDependencies, ReorderTasks, ListMailItems,
+ReadMailSummary, ConvertMailItem, DeleteMailSummaries, ReadMailSettings, UpdateMailCategories and VerifyPlanStore.
+It still allows CompleteTask, which nothing calls: Tasks completes its own tasks and settles Focus in the same
+write. Any other method answers `ACTION_NOT_ALLOWED` before its body is read.
 Each call is one core RPC, `plus_native_ui(method, request)`. It answers `UNAVAILABLE` while the core has no
 `TASKS` binding, and `plus_api.handle` runs it under the coordinator's `plus_lock`.
 
-The FlowDay half forwards only ListTasks (at most 100 a page), GetFlow, UpdateFlow, RolloverFlow, GetTimerSession
-and CommandTimer to FlowDay's `NativeFocusEntrypoint` (binding `FLOWDAY_NATIVE_FOCUS`). A SETTLE command comes
-only from Todofy: `CompleteTask` with a `flow_date` first completes the task in Tasks, then the gateway freezes one
-FlowDay settle command in the completion's receipt (`plus_focus_claim`) and sends it. A repeat sends the same
-command and cannot complete a recurring task twice. A stale timer etag (409) is refreshed once, with a new
-request ID.
+The gateway's FlowDay half (the `/api/plus/flowday` proxy to FlowDay's `NativeFocusEntrypoint`, binding
+`FLOWDAY_NATIVE_FOCUS`) and CompleteTask's FlowDay settlement (`flow_date`, the receipt's `plus_focus_claim`) have
+no caller since Tasks owns Focus. The Todofy cleanup release removes them and retires CompleteTask
+(see [HANDOFF](../../HANDOFF.md), Plan and Focus owner changes).
 
 ## Planning store
 
