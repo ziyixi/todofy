@@ -96,6 +96,15 @@ deploys Tasks (migration `0005` first), then FlowDay, then Todofy. FlowDay and T
 the additive `proto/tasks/ui/` (and Todofy's tests and docs changed); neither changes what it does. If FlowDay's
 deploy fails, Todofy is skipped, since it waits for FlowDay, and Tasks keeps working with the previous Todofy.
 
+Final local check on 2026-10-20 UTC, with `b7b52e75` still the tip of `origin/main`: `ci_changes.py` selects every
+check job for the branch, and each passed on macOS: Changes' tests, Shared packages, Todofy static and runtime (all
+512 runtime tests in one shard, the completeness check included), Tasks (81 Worker runtime tests; the web's 65 unit
+and 102 Playwright tests), FlowDay, Mail Hero, Home, Links, Watch, Mailsort, Recall, Brief, Fleet, Website,
+Newsletter (its engine steps with an empty `HOME`, as on a runner), Infra, Proto and Contracts. CI alone runs what
+macOS cannot: the Newsletter image build (its source audit passed), Platform's kubectl, AppArmor, image and k3s steps
+(its contract tests passed), Newsletter's CJK font install, Mail Hero's GPG backup test and Changes' decide step
+(`ci_changes.py` ran directly).
+
 - **Slice A (2026-10-20 UTC).** Plan and Focus cards are coloured by area (Work slate, Personal ochre, Unassigned
   none) with legend dots; outcome cards are 77px with one left-aligned meta line, the deadline first in a two-part
   status; Next steps cards are 60px; Quick chips share a 150px-minimum grid with "N more" by the heading; cut titles
