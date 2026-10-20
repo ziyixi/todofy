@@ -76,6 +76,42 @@ async function drag(page: Page, handle: Locator, target: Locator) {
   await page.mouse.up();
 }
 
+/** The task writes the host sends to the dev server's own Tasks API (estimates). */
+function taskWrites(page: Page) {
+  const writes: { path: string; mask: string | null; body: unknown }[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (
+      url.pathname.startsWith("/api/tasks/v1/tasks/") &&
+      request.method() === "PATCH"
+    )
+      writes.push({
+        path: url.pathname,
+        mask: url.searchParams.get("update_mask"),
+        body: request.postDataJSON(),
+      });
+  });
+  return writes;
+}
+/** Where the panel and each of its parts are, and how far it is scrolled. */
+function geometry(dialog: Locator) {
+  return dialog.evaluate((node) => {
+    const box = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return [rect.x, rect.y, rect.width, rect.height].map(Math.round);
+    };
+    return {
+      dialog: box(node),
+      scroll: node.scrollTop,
+      parts: [
+        ...node.querySelectorAll(
+          ".plus-native-note button, .plus-task-breadcrumb, .plus-estimate-presets > *",
+        ),
+      ].map(box),
+    };
+  });
+}
+
 test("a weekly Bet is edited in place and saved once over its etag", async ({
   page,
 }) => {
@@ -362,4 +398,222 @@ test("the weekly review link opens the checklist once and clears its parameter",
     page.getByRole("region", { name: "Weekly goals" }),
   ).toBeVisible();
   await expect(review).toHaveCount(0);
+});
+
+test("a Step's panel sets only its time in Tasks, and shows it again when reopened", async ({
+  page,
+  request,
+}) => {
+  const { id: parent } = await createTask(request, {
+    title: "Synthetic outcome",
+  });
+  const { id: draft } = await createTask(request, {
+    title: "Synthetic draft",
+    kind: "step",
+    parent_id: parent,
+    duration_minutes: 30,
+  });
+  const state = await stubPlanning(page, {
+    tasks: [
+      outcome(parent, "Synthetic outcome"),
+      { ...step(draft, "Synthetic draft", parent), estimated_minutes: 30 },
+    ],
+  });
+  const writes = taskWrites(page);
+  await openPlan(page);
+  await page.getByRole("tab", { name: "Week", exact: true }).click();
+  const title = page
+    .getByRole("region", { name: "Next steps: Synthetic outcome" })
+    .getByRole("button", { name: /^Synthetic draft/u });
+  await title.click();
+  const dialog = page.getByRole("dialog", { name: "Synthetic draft" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("group", { name: /^Estimate: /u })).toHaveCount(
+    1,
+  );
+  await expect(
+    dialog.getByRole("group", { name: "Estimate: Synthetic draft" }),
+  ).toBeVisible();
+  await expect(dialog.getByRole("combobox")).toHaveCount(0);
+  await expect(dialog.getByRole("checkbox")).toHaveCount(0);
+  await expect(dialog.locator(".plus-task-breadcrumb")).toHaveText(
+    "Synthetic outcome",
+  );
+  await expect(dialog.getByRole("button", { name: "30 min" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  const firstOpen = await geometry(dialog);
+  const reads = () =>
+    state.requests.filter((item) => item.path === "/api/plus/v1/tasks").length;
+  const readsBefore = reads();
+
+  const sixty = dialog.getByRole("button", { name: "60 min" });
+  await sixty.click();
+  await expect(dialog.getByRole("status")).toHaveText("Estimate saved: 60 min");
+  expect(writes).toEqual([
+    {
+      path: `/api/tasks/v1/tasks/${draft}`,
+      mask: "duration_minutes",
+      body: expect.objectContaining({ duration_minutes: 60 }),
+    },
+  ]);
+  const saved = await (
+    await request.get(`/api/tasks/v1/tasks/${draft}`)
+  ).json();
+  expect(saved.duration_minutes).toBe(60);
+  // The saved estimate stays pressed and focused, moves nothing, and costs no planning read.
+  await expect(sixty).toHaveAttribute("aria-pressed", "true");
+  await expect(sixty).toBeFocused();
+  expect(await geometry(dialog)).toEqual(firstOpen);
+  expect(reads()).toBe(readsBefore);
+
+  // The first Escape gives a typed value back, the next closes; focus returns to the title.
+  const field = dialog.getByRole("spinbutton", { name: "Estimate" });
+  await field.fill("45");
+  await field.press("Escape");
+  await expect(field).toHaveValue("");
+  await expect(dialog).toBeVisible();
+  await field.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(title).toBeFocused();
+  // Reopened from the confirmed data: 60 min, with every part where it was.
+  await title.click();
+  await expect(sixty).toHaveAttribute("aria-pressed", "true");
+  expect(await geometry(dialog)).toEqual(firstOpen);
+  expect(writes).toHaveLength(1);
+});
+
+test("Add steps sends each new step with the time chosen beside it", async ({
+  page,
+}) => {
+  const state = await stubPlanning(page, {
+    tasks: [outcome("website", "Synthetic website refresh")],
+  });
+  await openPlan(page);
+  await page.getByRole("tab", { name: "Week", exact: true }).click();
+  const tray = page.getByRole("region", {
+    name: "Next steps: Synthetic website refresh",
+  });
+  await tray
+    .getByRole("button", { name: "Add steps to “Synthetic website refresh”" })
+    .click();
+  const input = tray.getByRole("textbox", { name: "New step" });
+  const time = tray.getByRole("combobox", { name: "Estimate" });
+  await expect(input).toBeFocused();
+  await expect(time).toHaveValue("30");
+  // One 32px row: the input, then the 76px time.
+  const [field, select] = [
+    (await input.boundingBox())!,
+    (await time.boundingBox())!,
+  ];
+  expect([Math.round(select.width), Math.round(select.height)]).toEqual([
+    76, 32,
+  ]);
+  expect(Math.round(select.y)).toBe(Math.round(field.y));
+  expect(select.x).toBeGreaterThan(field.x + field.width);
+  // Chosen before typing: the cell stays open.
+  await time.selectOption("60");
+  await expect(input).toBeVisible();
+  await input.fill("Synthetic outline");
+  await input.press("Enter");
+  await expect
+    .poll(() => bodies(state, "/api/plus/v1/tasks:appendTaskSteps"))
+    .toEqual([
+      {
+        parent_id: "website",
+        request_id: expect.any(String),
+        steps: [{ title: "Synthetic outline", estimated_minutes: 60 }],
+      },
+    ]);
+  // The read lists it as a step card with its time; the choice stays for the next.
+  await expect(
+    tray.getByRole("button", { name: /^Synthetic outline/u }),
+  ).toContainText("1h");
+  await expect(input).toBeFocused();
+  await expect(time).toHaveValue("60");
+});
+
+test("a double-click opens the panel: a Committed card stays selected, and the rest of a double-click never closes or writes", async ({
+  page,
+}) => {
+  const state = await stubPlanning(page, {
+    tasks: [
+      outcome("launch", "Synthetic launch"),
+      outcome("audit", "Synthetic audit"),
+      {
+        ...step("intro", "Synthetic introduction", "launch"),
+        estimated_minutes: 30,
+      },
+      outcome("ink", "Synthetic printer ink", {
+        stage: "none",
+        explicit_stage: "none",
+        planning_flags: ["quick"],
+        area: "personal",
+      }),
+    ],
+  });
+  const writes = taskWrites(page);
+  await openPlan(page);
+  await page.getByRole("tab", { name: "Week", exact: true }).click();
+  const grid = page.locator(".planning-commitment-grid");
+  const open = page.locator("dialog.plus-dialog[open]");
+  const audit = grid.getByRole("button", { name: /^Synthetic audit,/u });
+  // A click selects, and a second keeps it selected.
+  await audit.click();
+  await audit.click();
+  await expect(audit).toHaveClass(/is-selected/u);
+  await expect(open).toHaveCount(0);
+  await audit.dblclick();
+  const panel = page.getByRole("dialog", { name: "Synthetic audit" });
+  await expect(panel).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(panel).toBeVisible();
+  await expect(audit).toHaveClass(/is-selected/u);
+  await page.keyboard.press("Escape");
+  await expect(open).toHaveCount(0);
+  await expect(audit).toBeFocused();
+  // The tray's button opens the selected commitment too, and says which.
+  await page
+    .getByRole("button", { name: "Steps & timing: Synthetic audit" })
+    .click();
+  await expect(panel).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Elsewhere the first click opens; the second press and click land in the dialog.
+  await grid.getByRole("button", { name: /^Synthetic launch,/u }).click();
+  const openers = [
+    [
+      page
+        .getByRole("region", { name: "Next steps: Synthetic launch" })
+        .getByRole("button", { name: /^Synthetic introduction/u }),
+      "Synthetic introduction",
+    ],
+    [
+      page
+        .locator(".planning-quick")
+        .getByRole("button", { name: /^Synthetic printer ink/u }),
+      "Synthetic printer ink",
+    ],
+  ] as const;
+  for (const [opener, name] of openers) {
+    await opener.dblclick();
+    const opened = page.getByRole("dialog", { name });
+    await expect(opened).toBeVisible();
+    await page.waitForTimeout(300);
+    await expect(opened).toBeVisible();
+    expect(
+      await opened.evaluate((node) => node.contains(document.activeElement)),
+    ).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(open).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  }
+  await expect(
+    page
+      .getByRole("region", { name: "Next steps: Synthetic launch" })
+      .getByRole("button", { name: /^Synthetic introduction/u }),
+  ).toContainText("30m");
+  expect(writes).toEqual([]);
+  expect(state.requests.filter((item) => item.method !== "GET")).toEqual([]);
 });

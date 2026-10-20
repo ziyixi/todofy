@@ -172,6 +172,31 @@ export async function stubPlanning(
         saved.etag = String(Number(saved.etag) + 1);
         return { json: { task: saved } };
       }
+      if (path === "/api/plus/v1/tasks:appendTaskSteps") {
+        // As Todofy appends them: steps under the parent, in entered order, listed by the next read.
+        const steps = body.steps as Json[];
+        const ids = steps.map(
+          (_, index) =>
+            `${String(body.parent_id)}-step-${state.tasks.length + index}`,
+        );
+        state.tasks.push(
+          ...steps.map((item, index) => ({
+            id: ids[index],
+            kind: "step",
+            title: item.title,
+            parent_id: body.parent_id,
+            area: "unassigned",
+            stage: "none",
+            explicit_stage: "none",
+            planning_flags: [],
+            etag: "1",
+            ...(item.estimated_minutes
+              ? { estimated_minutes: item.estimated_minutes }
+              : {}),
+          })),
+        );
+        return { json: { task_ids: ids } };
+      }
       if (path === "/api/plus/v1/weeklyBets:setWeeklyBet") {
         const same = (bet: Json) =>
           bet.week_start === body.week_start && bet.area === body.area;
