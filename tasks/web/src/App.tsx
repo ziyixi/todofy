@@ -38,13 +38,13 @@ import { CatalogView } from "./components/CatalogView";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TaskDragProvider } from "./components/TaskDrag";
 import { useReturnRefresh } from "./useReturnRefresh";
-const PlanningPage = lazy(() => import("./PlanningPage"));
+// The app's own styles come before the task dialog's and Plan's, as when those two loaded on demand.
+import "./styles.css";
+// The dialog and Plan load with the app: a part loaded on demand shows only after React's 300ms Suspense
+// reveal throttle when it first opens. Mail and the catalog editor are rarely opened and still load on demand.
+import { TaskDialog } from "./components/TaskDialog";
+import PlanningPage from "./PlanningPage";
 const MailPage = lazy(() => import("./MailPage"));
-const TaskDialog = lazy(() =>
-  import("./components/TaskDialog").then((module) => ({
-    default: module.TaskDialog,
-  })),
-);
 const CatalogEditor = lazy(() =>
   import("./components/CatalogEditor").then((module) => ({
     default: module.CatalogEditor,
@@ -307,23 +307,15 @@ export function App() {
           ) : isPlanning(route.page) ? (
             // Plan and Focus share one PlanningPage, so the route resets a failure instead of a remount.
             <ErrorBoundary key="planning" resetKey={route.page}>
-              <Suspense
-                fallback={
-                  <p className="loading-state" role="status">
-                    Loading {title}…
-                  </p>
-                }
-              >
-                <PlanningPage
-                  onCompleteTask={actions.finishTask}
-                  page={route.page}
-                  mutationRevision={actions.mutationRevision}
-                  onOpenTask={(id) => void openTask(id)}
-                  onSettings={() => {
-                    window.location.hash = "/plan";
-                  }}
-                />
-              </Suspense>
+              <PlanningPage
+                onCompleteTask={actions.finishTask}
+                page={route.page}
+                mutationRevision={actions.mutationRevision}
+                onOpenTask={(id) => void openTask(id)}
+                onSettings={() => {
+                  window.location.hash = "/plan";
+                }}
+              />
             </ErrorBoundary>
           ) : route.page === "catalog" ? (
             <CatalogView
@@ -357,33 +349,25 @@ export function App() {
         </main>
         {editor && catalog.timeZone && (
           <ErrorBoundary>
-            <Suspense
-              fallback={
-                <p className="loading-state" role="status">
-                  Opening task…
-                </p>
-              }
-            >
-              <TaskDialog
-                onChildAdded={() => {
-                  actions.taskChanged();
-                  void list.refresh();
-                }}
-                key={editor.task?.id || "new"}
-                task={editor.task}
-                defaults={editor.defaults}
-                catalog={catalog}
-                onClose={() => {
-                  taskOpenSequence.current++;
-                  setEditor(undefined);
-                  removeQueryParameter("task");
-                }}
-                onSave={saveTask}
-                onDelete={deleteTask}
-                onComplete={complete}
-                onOpen={(id) => void openTask(id)}
-              />
-            </Suspense>
+            <TaskDialog
+              onChildAdded={() => {
+                actions.taskChanged();
+                void list.refresh();
+              }}
+              key={editor.task?.id || "new"}
+              task={editor.task}
+              defaults={editor.defaults}
+              catalog={catalog}
+              onClose={() => {
+                taskOpenSequence.current++;
+                setEditor(undefined);
+                removeQueryParameter("task");
+              }}
+              onSave={saveTask}
+              onDelete={deleteTask}
+              onComplete={complete}
+              onOpen={(id) => void openTask(id)}
+            />
           </ErrorBoundary>
         )}
         {catalogEditor && (

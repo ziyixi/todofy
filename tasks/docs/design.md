@@ -73,8 +73,10 @@ timezone, including daylight-saving changes. Context-menu date text saves ordina
 and points to task details for explicit executable timing; Steps retain the entered time.
 
 Existing descriptions render Markdown and bare links; Edit description opens the draft and Done returns to
-the preview. Save changes persists the draft. The renderer loads in its own chunk, omits remote images and
-raw HTML, and opens links only on a user click. A failed completion shows its reason inside the open editor.
+the preview. Save changes persists the draft. The editor, Plan and Focus load with the app, so their first
+open waits for no chunk and no Suspense reveal. The renderer loads in its own chunk, as Mail and the catalog
+editor do; it omits remote images and raw HTML, and opens links only on a user click. A failed completion
+shows its reason inside the open editor.
 Existing saves keep the editor open with the returned write baseline and unchanged frame/scroll; an
 unchanged save writes nothing. Creation, completion and deletion retain their existing close behavior.
 

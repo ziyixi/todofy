@@ -1,5 +1,4 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
-import { readdir } from "node:fs/promises";
 
 test.use({ serviceWorkers: "block" });
 
@@ -72,24 +71,15 @@ test("a deep-linked task waits for its project and selected labels before openin
       new URL(response.url()).pathname === `/api/tasks/v1/tasks/${task.id}`,
   );
   await page.goto(`/?task=${task.id}#/inbox`);
-  // Module download must not make the negative assertion pass before React can open the editor.
-  const assets = await readdir(new URL("../../dist/assets/", import.meta.url));
-  const detailModule = assets.find((file) => /^TaskDialog-.*\.js$/.test(file));
-  expect(detailModule).toBeDefined();
-  await page.evaluate(async (url) => {
-    await import(url);
-  }, `/assets/${detailModule!}`);
   releaseDetail();
   await (await detailRead).finished();
+  // The editor is part of the first load, so two frames give React the time to open it.
   await page.evaluate(
     () =>
       new Promise<void>((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       ),
   );
-  await page
-    .getByText("Opening task…", { exact: true })
-    .waitFor({ state: "hidden" });
   const dialog = page.getByRole("dialog", {
     name: "Task details",
     exact: true,
