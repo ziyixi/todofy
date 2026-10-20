@@ -176,6 +176,11 @@ is one request; completing a card is one CompleteTask, then one reload wave.
     7.03 → 5.22, the Focus week 7.99 → 5.52, planned tasks 8.90 → 5.77; warm medians down or within their spread.
   - Local checks at the fix: Tasks, Proto, Shared packages, Contracts, Mail Hero, FlowDay, Links, Watch, Dashboard,
     Todofy static and all 498 Todofy runtime tests passed; a `proto/ts` change re-checks every TypeScript app in CI.
+  - Review: four more interleaved runs against 57bd6b99 read 7.04 → 5.17, 7.79 → 5.35 and 8.77 → 5.74. First
+    requests the suite does not measure gained too (three isolates, three runs each): the catalog 4.73 → 3.65, the
+    inbox page 6.69 → 4.87, the plan 4.07 → 3.37, one task 3.97 → 3.37. A 169 ms loop added to the warm-up's async
+    step left the first request unchanged: it runs during startup. Auth (`auth.ts`, `edge-auth`) is unchanged.
+    `test/startup.test.ts` now fails when the warm-up's stub D1 no longer answers `listTasks`, which it only logs.
 
 ### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
 

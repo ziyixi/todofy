@@ -6,8 +6,9 @@ import { api, ownerRequest, serviceRequest } from './http.ts';
 import { serviceCall } from './service.ts';
 import { warmUp } from './startup.ts';
 
-// Once per isolate, in the global scope: TIME_ZONE is a plain var, which the global scope can read.
-warmUp(accountZone(env as Env));
+// Once per isolate, in the global scope: TIME_ZONE is a plain var, which the global scope can read. A zone the runtime
+// does not support fails the startup, so the deploy, instead of every request that reads the account's day.
+void warmUp(accountZone(env as Env));
 
 interface AccessProps {
   access?: unknown;

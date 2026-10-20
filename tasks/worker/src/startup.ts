@@ -16,9 +16,10 @@ const STARTUP_ROWS = 100;
 /**
  * Runs, once per isolate, the work an isolate's first owner requests would otherwise do first: index.ts calls it in
  * the Worker's global scope with the account's zone, under the platform's startup budget, before any owner's request
- * CPU is charged. No clock, network, bindings, user data or repeated compilation loops are involved.
+ * CPU is charged. No clock, network, bindings, user data or repeated compilation loops are involved. Its promise (the
+ * task page's) settles in the startup's own microtasks and never rejects; only its test awaits it.
  */
-export function warmUp(zone: string): void {
+export function warmUp(zone: string): Promise<void> {
   // workerd measured ~12ms for first Intl initialization alone, and a zone's first formatter about 0.15 ms more.
   localDate(0, zone);
   // Every API request is first read strictly into its message (the transcoder's decode): one read here runs that
@@ -28,8 +29,9 @@ export function warmUp(zone: string): void {
     { view: 'all', page_size: 100, include_completed: true, task_ids: ['startup'] },
     { strict: true },
   );
-  warmTaskPage(zone);
+  const taskPage = warmTaskPage(zone);
   warmFocusWeek();
+  return taskPage;
 }
 
 /**
@@ -37,9 +39,10 @@ export function warmUp(zone: string): void {
  * every planning field and the most dependencies a task has, enough of them for V8 to optimize its mapping (the
  * planning rules and each row's dependencies) and the codec. A stub D1 answers its query with those rows: nothing is
  * read (the global scope allows no I/O), and its promise settles in the startup's own microtasks. A failure here would
- * only lose the warm-up, so it is logged rather than thrown.
+ * only lose the warm-up, so it is logged rather than thrown; test/startup.test.ts fails on that log, so a change to
+ * listTasks' queries that the stub does not answer cannot end the warm-up unnoticed.
  */
-function warmTaskPage(zone: string): void {
+function warmTaskPage(zone: string): Promise<void> {
   const dependencies = JSON.stringify(
     Array.from({ length: MAX_DEPENDENCIES }, (_, index) => ({
       prerequisite_id: `startup-${String(index)}`,
@@ -83,8 +86,10 @@ function warmTaskPage(zone: string): void {
   );
   const statement = { bind: () => statement, all: () => Promise.resolve({ results: rows }) };
   const stubDb = { prepare: () => statement } as unknown as D1Database;
-  listTasks(stubDb, create(ListTasksRequestSchema, { view: 'all', pageSize: STARTUP_ROWS }), zone, 0)
-    .then((page) => toWire(ListTasksResponseSchema, page))
+  return listTasks(stubDb, create(ListTasksRequestSchema, { view: 'all', pageSize: STARTUP_ROWS }), zone, 0)
+    .then((page) => {
+      toWire(ListTasksResponseSchema, page);
+    })
     .catch((error: unknown) => {
       console.error('Tasks startup warm-up failed', error);
     });
