@@ -61,8 +61,8 @@ setting without printing its value (a deploy without a var deletes it, so a miss
 | Name | Kind | Rule | Becomes |
 | --- | --- | --- | --- |
 | `DASHBOARD_CANARY_ENABLED` | variable | exactly `true` or `false`; unset, empty or any other value (`False`, `0`, `no`, a stray space) fails the deploy, so a deleted variable never turns stopped canaries back on | `--var CANARY_ENABLED` (§6, §7) |
-| `DASHBOARD_ACCESS_OWNER` | secret | printable-ASCII e-mail | Worker secret `ACCESS_OWNER`; `FlowDay deploy`, `Links deploy` and `Watch deploy` read it too (same owner, `flowday/README.md` "Deploy", `links/README.md` "Deploy", `watch/README.md` "Deploy") |
-| `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one); `FlowDay deploy`, `Links deploy` and `Watch deploy` read it too |
+| `DASHBOARD_ACCESS_OWNER` | secret | printable-ASCII e-mail | Worker secret `ACCESS_OWNER`; `Links deploy` and `Watch deploy` read it too (same owner, `links/README.md` "Deploy", `watch/README.md` "Deploy") |
+| `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one); `Links deploy` and `Watch deploy` read it too |
 | `DASHBOARD_CSRF_SIGNING_KEY` | secret | 64 hex (for example `openssl rand -hex 32`, run locally) | Worker secret `CSRF_SIGNING_KEY` |
 | `DASHBOARD_CF_ANALYTICS_TOKEN` | secret | `[A-Za-z0-9_-]{20,200}` | Worker secret `CF_ANALYTICS_TOKEN` (§4) |
 | `CF_API_TOKEN` | secret (existing, Todofy's deploy token) | – | `CLOUDFLARE_API_TOKEN` for the read-only hostname guard (`tools/cf-guard`) and `wrangler deploy` only; the secrets step also receives it, only to warn when `DASHBOARD_CF_ANALYTICS_TOKEN` equals it (never written anywhere) |
@@ -70,9 +70,9 @@ setting without printing its value (a deploy without a var deletes it, so a miss
 The secrets go to `$RUNNER_TEMP` (mode 0600) for `wrangler deploy --secrets-file` and are removed at the
 end. `GITHUB_SHA` becomes `--var BUILD_SHA` (shown by `/health`). Changing a variable or secret takes
 effect with the next deploy: run the workflow on `main` with `app: dashboard` (or `all`). The two owner
-secrets also feed FlowDay, the links app and the watch app, and each Worker takes a change only with its own deploy:
+secrets also feed the links app and the watch app, and each Worker takes a change only with its own deploy:
 after changing `DASHBOARD_ACCESS_OWNER` or `DASHBOARD_ACCESS_OWNER_ALIASES` (for example removing an alias), run
-`app: all`, or `dashboard`, `flowday`, `links` and `watch`; until then the others keep accepting the old addresses.
+`app: all`, or `dashboard`, `links` and `watch`; until then the others keep accepting the old addresses.
 
 ## 4. The analytics token (`CF_ANALYTICS_TOKEN`)
 
@@ -145,9 +145,9 @@ request's URL, so the Worker would see `https://home.ziyixi.science` and refuse 
 `access_not_configured`). Change `--port` and `--local-upstream` together, and never run a bare
 `wrangler dev` of this config; `web/`'s Vite proxy sends that origin as `Origin`. The production config never holds `DEV_AUTH_BYPASS` (tests check it). An optional `DEV_NOW` (an RFC 3339 UTC instant, e.g. `2026-10-01T16:30:00Z`) makes the bypassed requests show the views as of that instant, to match ticks run locally at chosen times; the deploy never sets it either. Without the two app Workers running locally, their tiles show ◆ 未知 · 无法连接
 after the first poll and ■ 故障 from the second, and without a `CF_ANALYTICS_TOKEN` the Cloudflare view
-has no usage and no Worker rows; both are the expected state. The registry's three probes are the only
-public requests a tick makes (`GET https://www.ziyixi.science/build-info.json`,
-`https://flowday.ziyixi.science/pwa/manifest.webmanifest` and `https://s.ziyixi.science/robots.txt`; status,
+has no usage and no Worker rows; both are the expected state. The registry's two probes are the only
+public requests a tick makes (`GET https://www.ziyixi.science/build-info.json` and
+`https://s.ziyixi.science/robots.txt`; status,
 media type and latency only); set those entries' `enabled: false` in `worker/src/registry.ts` (uncommitted) to
 avoid them. Use synthetic data only; never point a local run at production resources.
 

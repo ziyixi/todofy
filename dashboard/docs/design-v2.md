@@ -96,7 +96,6 @@ GetRegistry (`GET /api/v1/registry`; no binding names or probe URLs), so no host
 | --- | --- | --- | --- |
 | Mail Hero | 应用 | `ops_v1` (MAIL_HERO, guard) | 今日收件 |
 | Todofy (`todofy`, `todofy-core`) | 应用 | `ops_v1` (TODOFY, guard) | 24 小时收到 |
-| FlowDay (`flowday`, D1 `flowday`) | 应用 | `public_http` outside Access: one GET per tick to `flowday…/pwa/manifest.webmanifest`, expecting 200 and `application/manifest+json`. The host is behind the Access app "flowday", but "flowday-bypass" covers `/pwa/*` and the Worker serves the manifest itself (a static asset, no D1 read), so Access's login redirect can never pass; plus the Worker's error rate (`error_rate`). No Ops entrypoint. F6 may remove the bypass (`flowday/docs/design.md` §11): that change must move this probe first (`test_infra_config.py` fails otherwise) | latency |
 | 短链接 (`links`, D1 `links`) | 应用 | `public_http` outside Access: one GET per tick to `s…/robots.txt`, expecting 200 and `text/plain` (the Worker's constant, before any D1 read); plus the Worker's error rate. The tile opens the launcher `https://s.ziyixi.science/_/` behind the path-scoped Access app "links". No Ops entrypoint, and a short link may go unused for days, so no idle rule | latency |
 | 网页监视 (`watch`, DO `WatchState`) | 应用 | `ops_v1` (WATCH, guard): counts and codes only, never a watch's name, URL or page text; its `status()` re-arms a missing alarm, so each tick restarts a lost scheduler | 新变化 |
 | 个人网站 (`ziyixi-website`, assets only) | 站点 | `public_http`: one GET per tick to `www…/build-info.json` (www is canonical; the apex serves the same site), status + latency only, `redirect: 'manual'`, body unread, `enabled` flag. The site's Worker (`website/`) serves static assets only, which are not Worker invocations, so analytics cannot judge it; the file is part of its static export, so the probe survives the cutover | latency |
@@ -111,7 +110,7 @@ Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → We
 `scheduler_stale` and `watches_broken` at 检查, `notify_unsettled` at 交给 Todofy; `maintenance_mode` is app-only),
 运维摘要 (巡检 → 提交摘要 → 每日提醒), and GTD 循环
 (收集 → 理清 → 组织 → 回顾 → 执行 ○: Todofy's `received_24h`, then the counters of its daily read-only
-snapshot of Tasks, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 is done in Tasks, outside the dashboard (FlowDay has its own tile but no stage: the work itself is not something the dashboard can see);
+snapshot of Tasks, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 is done in Tasks, outside the dashboard (the work itself is not something the dashboard can see);
 todofy/docs/gtd-features.md §9).
 
 `validateRegistry` (`src/registry-check.ts`, run by test/registry.test.ts; apart from the registry's data, which the
@@ -135,7 +134,7 @@ production Worker with a Custom Domain maps through its `WORKERS` row to a visib
 dashboard (Q11); Workers without a route (`todofy-core`, `ziyixi-notion-publish`) need no tile. A hidden entry,
 as the links app had until 2026-10-02, therefore fails CI.
 
-**Adding an app's tile** (as FlowDay and the links app were on 2026-10-02): an `ENTRIES` row in `apps` with its
+**Adding an app's tile** (as the links app was on 2026-10-02): an `ENTRIES` row in `apps` with its
 URL and Access lock, plus its Workers and resources. The status source is `ops_v1` when the app has an Ops
 entrypoint (a service binding in `env.ts` and `wrangler.toml`, the binding type in `StatusSource`, its signal
 codes placed by stages or `app_only_signals`; the watch app's W3 is that case), else a `public_http` probe of a
@@ -307,12 +306,12 @@ the strip's observed items, §4), the canary rows or the reminder ledger. The me
 older estimates; reads grow with retained decisions while views continue to poll every five minutes.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
-Per tick: 8 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fleet, Newsletter, mailsort and recall) +
-3 probes (website, FlowDay, links) + 1 GraphQL + ≤ 4 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12 read-only
-drift calls (§10) = 31 outbound calls
-(`outboundPerTick`, tested ≤ `MAX_OUTBOUND_PER_TICK` = 31 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
+Per tick: 10 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fleet, Newsletter, mailsort, recall, the
+brief and Tasks) + 2 probes (website, links) + 1 GraphQL + ≤ 5 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12
+read-only drift calls (§10) = 33 outbound calls
+(`outboundPerTick`, tested ≤ `MAX_OUTBOUND_PER_TICK` = 34 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
 status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~4 per tick
-(`cf_scripts` and one `probe:<entry>` per probe). The FlowDay and links probes are each one request of that app's Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
+(`cf_scripts` and one `probe:<entry>` per probe). The links probe is one request of its Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
 [`limits.md`](limits.md).
 
 **v1 removal (done 2026-09-29):** the hand-written v1 API (`/api/v1/overview`, `OverviewResponse`, `AppCard`) was
@@ -349,7 +348,7 @@ while loading; one failing source greys only its own tile. Times in the browser 
 ## 8. Decisions taken (owner-approved defaults)
 
 Q1 title 个人控制台 · Q2 tile = entry's own health · Q3 home keeps one line per flow and 4 mini bars ·
-Q4 home grouped by kind, flows by business · Q5 Flowday link-only (思源笔记 was too until the owner retired it on 2026-09-30; the owner removed Flowday's entry from the dashboard the same day, so the registry has no link-only entry now and the kind stays supported; on 2026-10-02 the owner asked for the new services on 首页, and FlowDay, now a Workers app, came back as a probed tile next to the links app; `test/registry.test.ts` no longer records a FlowDay exclusion, so the pointer to it in `links/docs/design.md` §11 (L2, the registry step) is stale until the next links change rewords that step to the rule of §3: a `WORKERS` row plus a visible entry, enforced by `test_wrangler_configs.py`; it is not edited here because any change under `links/` redeploys the links app) · Q6 probe the website every tick
+Q4 home grouped by kind, flows by business · Q5 link-only entries (思源笔记 was one until the owner retired it on 2026-09-30, so the registry has no link-only entry now and the kind stays supported; on 2026-10-02 the owner asked for the new services on 首页 as probed tiles, as the links app has) · Q6 probe the website every tick
 · Q7 Newsletter 未接入 for now · Q8 24 h sparkline later (step 3, not in scope) · Q9 registry in repo TS
 · Q10 four tabs · Q11 no tile for this dashboard · Q12 unregistered Workers never alarm · Q13
 notion-publish idle limit 26 h.
@@ -357,7 +356,7 @@ notion-publish idle limit 26 h.
 ## 9. Still to verify in production (read-only)
 
 Whether `durableObjectsInvocationsAdaptiveGroups.scriptName` is the defining or the calling script;
-whether `cpuTimeP99` includes DO time; the website, FlowDay and links probes from a same-zone Worker; notion-publish's
+whether `cpuTimeP99` includes DO time; the website and links probes from a same-zone Worker; notion-publish's
 real schedule; the TODO resource identifiers of §3. The full list of pending production checks is in
 [`verification.md`](verification.md) §2.
 

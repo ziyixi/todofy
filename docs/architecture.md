@@ -15,7 +15,6 @@ flowchart LR
   Watch[Watch] -->|task-intent-v1 binding| Todo
   Todo -->|private TasksApi binding| Tasks[Tasks: native task store and PWA]
   Todo -->|reports, HTTPS Basic auth| News[Newsletter on VPS]
-  Tasks -->|read-only change feed binding| Flow[FlowDay]
   Tasks -->|private Planning binding: Mail| Todo
   Home[Home] -->|Ops bindings| MH
   Home -->|Ops bindings| Todo
@@ -63,7 +62,6 @@ runtime. Newsletter keeps its own locked container dependencies and existing ext
 | Todofy | `todofy.ui.v1` | `/api/v1/` |
 | Tasks | `tasks.ui.v1` | `/api/tasks/v1/` |
 | Home | `dashboard.ui.v1` | `/api/v1/` |
-| FlowDay | `flowday.ui.v1` | `/api/v1/` |
 | Links | `links.ui.v1` | `/_/api/v1/` |
 | Watch | `watch.ui.v1` | `/api/v1/` |
 | Mailsort | `mailsort.ui.v2` | `/api/v2/` |
@@ -75,7 +73,7 @@ The [proto HTTP pattern](../proto/README.md#http-apis) owns route descriptors, r
 Google RPC errors. Browser owner APIs authenticate before body reads and require Origin/CSRF checks for
 mutations. Fleet's owner API is read-only; its separate exact receipt path accepts only authenticated
 machine reports. Lists are bounded, paged through indexes, and budgeted on the isolate's first request;
-FlowDay and Mail Hero warm up their heaviest codec/query paths.
+Mail Hero and Tasks warm up their heaviest codec/query paths.
 Todofy's gateway sends decoded wire JSON over `COORDINATOR.owner_ui` to the Python object, which reads it
 strictly and returns a generated response. The gateway reads that response and writes the wire JSON again.
 
@@ -115,9 +113,7 @@ lane orders and next week's commitments (`proto/tasks/ui/v1/plan.proto`). Mail r
 two facts (`ReadWeeklyReview`) cross the private `Planning` binding to Todofy; Todofy writes task changes through
 Tasks' provisioned `TasksApi`. Focus's day queues, timer and time records are Tasks' own
 (`proto/tasks/ui/v1/focus.proto`): a day drag is one Tasks `MoveFocusStep`, and a task completion settles its
-Focus day and a related timer in the same Tasks write. A task's estimate is its Tasks duration. FlowDay, which is
-being retired, still reads the native change feed through a separate read-only binding and keeps its own queues,
-timers and work records; Plan and Focus no longer use it.
+Focus day and a related timer in the same Tasks write. A task's estimate is its Tasks duration.
 
 Tasks reads the weekly rollover as a rule rather than a job: a commitment is for its week, and once that week ends
 it reads as a weekly candidate with no write. Counts stay soft limits. Todofy retains mail receipts and the weekly
@@ -126,7 +122,7 @@ keeps only the Mail categories. Mail filing uses the native Inbox, with an optio
 The task UI replaces technical planning labels and favorites with those controls while retaining their underlying
 identities.
 
-Imported task IDs preserve mail and FlowDay references; planning identities change provider in place.
+Imported task IDs preserve mail references; planning identities change provider in place.
 Tasks is the only task store: no code reads or writes Todoist, and the original account remains intact as the
 migration source. See [Tasks design](../tasks/docs/design.md), [import and cutover](../tasks/docs/import.md)
 and [verification](../tasks/docs/verification.md).
@@ -187,10 +183,6 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
 - **Tasks:** primary task content and completion history in D1, with the owner-only desktop PWA and private
   consumer bindings. Planning and date code are shared packages, not additional services. See the
   [design](../tasks/docs/design.md) and [migration runbook](../tasks/docs/import.md).
-- **FlowDay:** a read-only native Tasks mirror plus local blocks/timers/reviews on D1. Keyset pages read about one page of
-  rows, and write budgets stay small. Historical container rollback material and production retirement
-  evidence belong in HANDOFF/history; staging removal and Access changes go through reviewed infra.
-  See [AGENTS](../flowday/AGENTS.md) and [rollout design](../flowday/docs/design.md).
 - **Links:** public short links and an owner launcher under `/_/`. A redirect does one primary-key D1 read,
   zero writes/logs, and uses 302 only. A private key and a nonexistent key give anonymous callers the same
   response. Only `/_` and `/_/*` are behind Access. See [AGENTS](../links/AGENTS.md).

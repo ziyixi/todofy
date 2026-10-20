@@ -68,8 +68,8 @@ runs:
         npm run build --prefix web
     # The owner's addresses and the CSRF key are environment secrets (masked in this public log) and reach the Worker
     # as secrets through --secrets-file; wrangler prints plain vars. The links app's owner is the dashboard's owner
-    # (one person, the same Access identities), so the addresses come from the dashboard's secrets, as for
-    # FlowDay; the CSRF key is the links app's own. links/README.md "Deploy".
+    # (one person, the same Access identities), so the addresses come from the dashboard's secrets; the CSRF key is
+    # the links app's own. links/README.md "Deploy".
     - name: Write the Worker secrets file
       if: inputs.required == 'true'
       working-directory: .release-source/links/worker

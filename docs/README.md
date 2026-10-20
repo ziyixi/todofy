@@ -35,7 +35,6 @@ The documents below have different jobs; keep one authoritative home for each fa
 | Todofy | [Development notes](../todofy/docs/dev-notes.md), [gateway contract](../todofy/docs/gateway-contract.md), [planning API](../todofy/docs/planning-api.md) | [Setup](../todofy/docs/cloudflare-setup.md), [CI/CD](../todofy/docs/ci-cd.md), [verification](../todofy/docs/verification.md) |
 | Tasks | [README](../tasks/README.md), [design](../tasks/docs/design.md), [AGENTS](../tasks/AGENTS.md) | [Backup and restore](../tasks/docs/backup.md), [verification](../tasks/docs/verification.md) |
 | Home | [Current views](../dashboard/docs/design-v2.md), [storage and jobs](../dashboard/docs/design.md) | [Setup](../dashboard/docs/setup.md), [limits](../dashboard/docs/limits.md), [verification](../dashboard/docs/verification.md) |
-| FlowDay | [Design](../flowday/docs/design.md), [AGENTS](../flowday/AGENTS.md) | [README](../flowday/README.md) |
 | Links | [Design](../links/docs/design.md), [AGENTS](../links/AGENTS.md) | [README](../links/README.md) |
 | Watch | [Design](../watch/docs/design.md), [AGENTS](../watch/AGENTS.md) | [README](../watch/README.md) |
 | Website | [Architecture](../website/docs/architecture.md) | [Release](../website/docs/release.md), [cutover](../website/docs/cutover.md) |

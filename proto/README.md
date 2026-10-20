@@ -31,12 +31,6 @@ audit and live gating were removed, a breaking change, so a new major version), 
 `brief/ui/v1` is the brief's owner API (2026-10-10: drafted in `549069d`, landed with its first build; served by its
 Worker, first deployed in archive mode on 2026-10-11), under `/api/v1/`: the archive's issues and items, the votes, the sources' health, the profile,
 the settings, the service status and 恢复调用.
-`flowday/ui/v1` is FlowDay's owner API (2026-10-02, branch `proto-flowday-ui`), on a Worker and a Next.js UI
-that had no proto code before, and the first with large lists: its lists are pages sized to Workers Free's CPU limit
-that each read about their own D1 rows, and the Worker runs every list's query and answer once at startup
-([Cost](#http-apis)). It keeps no request log (each entry would cost a D1 row write per mutation): only its two
-creates take a `request_id`, which names the new resource, as its service header states. Its old routes answer 410
-`reload_required` for one release.
 `dashboard/ui/v1` is the dashboard's
 owner API (2026-10-02, branch `proto-dashboard-ui`): the registry and the four views are AIP-156 singletons read with
 standard Gets, the refreshes and the guard and canary actions are custom methods; HomeState still serializes each view
@@ -72,8 +66,7 @@ this and next week, the Review lane orders and next week's commitments; `UpdateW
 answer, `MoveFocusStep` adds, removes, reorders or moves one step), the one timer (`GetFocusTimer`,
 `CommandFocusTimer`) and its time records (`CreateFocusEntry`, `UpdateFocusEntry`, `DeleteFocusEntry`).
 `CompleteTask.focus_day` names the day whose queue a completion settles, and a related timer session is saved and
-stopped in the same batch. FlowDay's own queues and timer keep running until its decommission; nothing is migrated
-from them.
+stopped in the same batch.
 
 `ops/v1/ops.proto` is the IDL of `contracts/ops-v1` (2026-10-01) and its single source of validation: the
 value rules are options in the IDL ([Value rules](#value-rules)), the contract's JSON Schema is generated from
@@ -163,7 +156,7 @@ which allows only the methods Tasks calls. See [`todofy/docs/planning-api.md`](.
    `lower_snake_case`, versioned packages) and `COMMENTS` (every element documented); exceptions are written
    next to the element with `buf:lint:ignore` and a reason, and the AIP-shaped HTTP packages are excused only
    from the two response-name rules the AIPs contradict: `links/ui`,
-   `watch/ui`, `mailsort/ui`, `flowday/ui`, `dashboard/ui`, `mailhero/ui`, `recall/ui` and `brief/ui` by those two `buf:lint:ignore` lines on each method that answers a resource (with the
+   `watch/ui`, `mailsort/ui`, `dashboard/ui`, `mailhero/ui`, `recall/ui` and `brief/ui` by those two `buf:lint:ignore` lines on each method that answers a resource (with the
    reason in the file's header),
    because `buf.yaml` reaches every proto user's deploy (`proto_deploys` below) and a new package must not
    redeploy the other apps. Google's api-linter
@@ -223,7 +216,7 @@ which allows only the methods Tasks calls. See [`todofy/docs/planning-api.md`](.
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `retired.json` | The published elements deleted on purpose (rule 6), which `tools/retired.py` keeps deleted and leaves out of the breaking checks' base |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `mailsort/ui/v2/*.proto` is `mailsort.ui.v2`, mailsort's owner API; `flowday/ui/v1/*.proto` is `flowday.ui.v1`, FlowDay's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `mailhero/ui/v2/*.proto` is `mailhero.ui.v2`, Mail Hero's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1); `todofy/ui/v1/*.proto` is `todofy.ui.v1`, Todofy's owner API; `recall/ui/v1/*.proto` is `recall.ui.v1`, recall's owner API, `recall/ingest/v1/ingest.proto` is `recall.ingest.v1`, the upload of recall's browser extension, and `recall/archive/v1/archive.proto` is `recall.archive.v1`, recall's change feed and archive records (`contracts/recall-archive-v1`, whose fixtures `test/recall-archive.test.ts` round-trips); recall's Worker serves all three; `brief/ui/v1/*.proto` is `brief.ui.v1`, the brief's owner API |
+| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `mailsort/ui/v2/*.proto` is `mailsort.ui.v2`, mailsort's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `mailhero/ui/v2/*.proto` is `mailhero.ui.v2`, Mail Hero's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1); `todofy/ui/v1/*.proto` is `todofy.ui.v1`, Todofy's owner API; `recall/ui/v1/*.proto` is `recall.ui.v1`, recall's owner API, `recall/ingest/v1/ingest.proto` is `recall.ingest.v1`, the upload of recall's browser extension, and `recall/archive/v1/archive.proto` is `recall.archive.v1`, recall's change feed and archive records (`contracts/recall-archive-v1`, whose fixtures `test/recall-archive.test.ts` round-trips); recall's Worker serves all three; `brief/ui/v1/*.proto` is `brief.ui.v1`, the brief's owner API |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/watch/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the packages of `WIRE_PACKAGES` the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
@@ -542,7 +535,7 @@ search 1.7 / 0.8 → 5.1 / 1.8, a settings update 3.4 / 1.4 → 4.9 / 1.7, every
 and 1.9 warm. The two reads near or over Free's 10 ms (a message with the largest parsed record: 9.8 / 8.4 before,
 12.8 first through the transcoder; a zone's first dashboard: 13.2 before, 14.6) are answered by the coordinator: the
 Worker forwards them in under 1 ms, and the coordinator's slowest answer took 18 ms of its 30 s. **The startup
-warm-up** (`mail-hero/cloudflare/src/native/warmup.ts`, like FlowDay's): an isolate's first request of a method ran
+warm-up** (`mail-hero/cloudflare/src/native/warmup.ts`): an isolate's first request of a method ran
 its share of protobuf-es and the codec before V8 compiled it, and a GitHub runner read the first SendMessage at 6.01
 reference ms against its bound of 6 (`test/cpu/delivery-request-cpu.test.mjs`; the hand-written send read 4.1-4.9
 there). The Worker's global scope now routes, reads and answers synthetic requests of the heaviest methods (the
@@ -593,13 +586,12 @@ recommendation-v1, mail-received-v1 and every app's UI API follow the same patte
   its absence), so only then does the profile write the producer's bytes back unchanged; those files carry a
   file-wide `core::0216::state-field-output-only` exception for their fields of a `State` enum, and the
   fields written only when set stay `OUTPUT_ONLY`. A mutation takes an AIP-155 `request_id` with
-  `(google.api.field_info).format = UUID4`. An app without a request log (FlowDay: a log row would cost a D1 write on
+  `(google.api.field_info).format = UUID4`. An app without a request log (where a log row would cost a D1 write on
   every mutation) takes it on its creates only, where it becomes the new resource's ID so a repeat finds it, and makes
   every other mutation set a state; its service header says so, with the api-linter exceptions next to each element.
 - `IMMUTABLE` fields (AIP-203) may appear in an update's body or mask only with their stored value; another value is
   `INVALID_ARGUMENT`, never silently dropped. Without a mask, a field left at its default was not given. A repeated
-  field's empty value never selects a method's broadest action: such an action takes its own `bool` (FlowDay's
-  `RolloverFlowRequest.all_unfinished`).
+  field's empty value never selects a method's broadest action: such an action takes its own `bool`.
 - `page_size` (AIP-158): 0 is the default, a value above the maximum is read as the maximum, a negative one is
   `INVALID_ARGUMENT`; every repeated field of a page counts against its bound, not only the main one.
 - Resource IDs have no `/` (AIP-122). An ID whose natural key has one (`team/item`) writes it as `~`
@@ -692,14 +684,14 @@ request's first run and every warm median in milliseconds of the reference machi
 README), and its bundles are held to budgets (`tools/bundle-size`: `<app>/deploy/bundle-size.mjs` for the Worker,
 `<app>/web/scripts/js-budget.mjs` for the UI's JavaScript).
 
-**Large lists** (measured 2026-10-02 on FlowDay, the first API with lists of hundreds of items:
-`flowday/worker/test/runtime/cpu.test.ts`, same meter and machine). Writing a message with `toWire` costs a few
+**Large lists** (measured 2026-10-02 on the first API with lists of hundreds of items, a time-blocking app retired on
+2026-10-20 whose CPU and read tests remain in history at `777d5f01`; same meter and machine). Writing a message with `toWire` costs a few
 microseconds per item warm and several times that the first time an isolate runs it (300 tasks: 0.9 ms warm, 5.5-7 ms
-on the first run, in Node), so an answer's size is a CPU decision. FlowDay's first cut answered whole lists: a page of
+on the first run, in Node), so an answer's size is a CPU decision. That app's first cut answered whole lists: a page of
 500 time entries with their tasks took 7.0 ms warm (Free's 10 ms with no margin), and an isolate's first API request,
 a page of 300 tasks, 12.9 ms. Two changes keep both inside the limit. Lists are AIP-158 pages sized to the budget (200
 tasks, days or entries; the UI reads every page), and the Worker's global scope writes a few hundred synthetic messages
-once at startup (`flowday/worker/src/warmup.ts`), outside any request's CPU time like the transcoder's route table,
+once at startup, outside any request's CPU time like the transcoder's route table,
 so V8 has optimized the writer before a request needs it. An isolate's first API request, a page of 200 of 1,000
 tasks, is then 7.6 ms (median of three isolates; 11-13 ms without the warm-up; the hand-written answer of all 1,000
 tasks took 8.2 ms), and every warm request 3 ms or less (the sync's first chunk 7.3 ms cold, unchanged). The review
@@ -709,8 +701,8 @@ carried a whole range's flows and tasks (25.6 ms for a year). The warm-up now al
 synthetic raw rows through it (a stub binding that is never called), and every repeated field of a page counts
 against its bound: every list's largest first page is 3.7-6.7 ms on an isolate's first request, below the bound of
 10 ms. Paging also has a D1 cost: a page that re-reads a table and slices it makes reading every page grow with the
-square of the data, so every FlowDay page seeks to its cursor through an index and reads about its own rows
-(`flowday/worker/test/runtime/reads.test.ts`). Bundles: FlowDay's Worker 56.1 → 114.3 KiB gzip (it had no
+square of the data, so every page of that app sought to its cursor through an index and read about its own rows.
+Bundles: its Worker 56.1 → 114.3 KiB gzip (it had no
 protobuf-es runtime before; budget 140 KiB), its UI's JavaScript 362.8 → 398.9 KiB gzip (budget 480 KiB). An app
 with lists that long should expect the same: page sizes from its CPU test, keyset pages, and the warm-up.
 
@@ -771,16 +763,16 @@ which every other job needs. When Changes has no base (it runs everything: first
 `breaking.sh` compares with `HEAD~1` and says so in the log; a base that predates `proto/` has nothing to break. The job is in `CI gate`'s needs and in
 `CHECK_JOBS` (a push to `main` reuses a green branch run only if it passed Proto checks).
 
-A `proto/` change also re-checks every app in `PROTO_USERS` (Todofy, Mail Hero, the dashboard, FlowDay, the links app, the watch app,
+A `proto/` change also re-checks every app in `PROTO_USERS` (Todofy, Mail Hero, the dashboard, the links app, the watch app,
 mailsort, recall, the brief, Fleet, Platform and the website) and runs
 `Contracts` (the contracts' tests check the codecs against the schemas and pin the wire bytes). It deploys only
 the apps whose production bundle the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`).
 `PROTO_USERS` names each user's bundled languages: Mail Hero and the dashboard `"ts"` (their Workers, and
-Mail Hero's and the dashboard's UIs), FlowDay, the links, watch, mailsort and recall apps `"ts"` (their Workers and UIs), the brief `"ts"` (its Worker and UI), Todofy `"ts"` and `"python"` (its gateway and UI bundle the runtime and the descriptors of todofy.ui.v1;
+Mail Hero's and the dashboard's UIs), the links, watch, mailsort and recall apps `"ts"` (their Workers and UIs), the brief `"ts"` (its Worker and UI), Todofy `"ts"` and `"python"` (its gateway and UI bundle the runtime and the descriptors of todofy.ui.v1;
 todofy-core vendors the wheel). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
 TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
 options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
-`todofy/taskintent/` Todofy and the watch app, `todofy/report/` Todofy, `todofy/ui/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `flowday/ui/` FlowDay, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `mailsort/ui/` mailsort, `recall/ui/`, `recall/ingest/` and `recall/archive/` recall, `brief/ui/` the brief, `dashboard/ui/` the dashboard, `ops/` the apps with an `Ops` entrypoint or caller (Mail Hero, the dashboard, Todofy, the watch app, mailsort, recall, the brief and the website relay), `common/errors/` and `prototest/` none);
+`todofy/taskintent/` Todofy and the watch app, `todofy/report/` Todofy, `todofy/ui/` Todofy, `mailhero/webhook/` Mail Hero and Todofy, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `mailsort/ui/` mailsort, `recall/ui/`, `recall/ingest/` and `recall/archive/` recall, `brief/ui/` the brief, `dashboard/ui/` the dashboard, `ops/` the apps with an `Ops` entrypoint or caller (Mail Hero, the dashboard, Todofy, the watch app, mailsort, recall, the brief and the website relay), `common/errors/` and `prototest/` none);
 the module and toolchain files (`buf.yaml`, `buf.lock`, `package-lock.json`, `tools/ensure.mjs`) and any path
 not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
 generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,
@@ -789,7 +781,7 @@ the users' languages and each package's importers from the sources, so the maps 
 
 ## Later
 
-Every app's UI API is on the [HTTP APIs](#http-apis) pattern (the dashboard's, FlowDay's, Mail Hero's and Todofy's moved on 2026-10-02). ops-v1 moved on 2026-10-01 as one package,
+Every app's UI API is on the [HTTP APIs](#http-apis) pattern (the dashboard's, Mail Hero's and Todofy's moved on 2026-10-02). ops-v1 moved on 2026-10-01 as one package,
 `ops/v1`, because its four services share every message, recommendation-v1 and summary-v1 as `todofy/report/v1`
 (messages only; Todofy's owner API, which lists them, moved on 2026-10-02 as `todofy/ui/v1`), and mail-received-v1 as
 `mailhero/webhook/v1` (messages only: the webhook's path, authentication and Idempotency-Key header stay the HTTP

@@ -113,9 +113,8 @@ Each entry has one status kind:
 
 Optional `tile_metric` is `counter` plus a counter `name`, `latency`, or `last_active`. `app_only_signals`
 lists existing public counter names that stay in the detail view. This metadata does not add a new
-signal or collector. In particular, FlowDay's probe still reads its public PWA manifest, checks the
-manifest content type, and keeps the Worker error-rate signal. It does not probe the authenticated
-owner page or a retired staging hostname.
+signal or collector. In particular, the links app's probe reads its public `robots.txt`, checks its
+content type, and keeps the Worker error-rate signal. It does not probe the authenticated owner launcher.
 
 Newsletter uses `target = "vps"`, its image repository and no `workers` or `access`. Its Home entry uses
 `ops_v1` through the exact Fleet provider/binding above, with `guard = false`. This reports the latest
@@ -136,8 +135,8 @@ entries and Worker-to-entry mapping. Its external self-hosted-services entry, fl
 remain explicitly maintained outside these regions. The independent cloud-config generator owns public
 [`resource-identities.ts`](../dashboard/worker/src/resource-identities.ts), consumed outside catalog regions.
 
-[`infra/access.tf`](../infra/access.tf) receives the owner application map, including Fleet, plus destinations
-and session durations for the two FlowDay applications. It preserves Terraform addresses, policy attachments
+[`infra/access.tf`](../infra/access.tf) receives the owner application map, including Fleet. It preserves
+Terraform addresses, policy attachments
 and `prevent_destroy`. Policy rules, Fleet's exact machine receipt bypass with independent HMAC authentication,
 the frozen Mail Hero backup application and Platform's separate machine/Tunnel objects stay explicitly
 maintained outside catalog regions. The catalog does not take over identity providers or secret values.
@@ -180,6 +179,5 @@ tested images of the same SHA; changing a catalog row alone does not start that 
 4. Change CI jobs only when the application has its real check and release contract. A catalog row
    alone does not authorize deployment, billing, data import or access to another service.
 
-Special policies remain explicit: FlowDay's keys and policy attachment differ from owner applications;
-the backup application is frozen; Email Routing and the root mailbox are outside this catalog. Keep
+Special policies remain explicit: the backup application is frozen; Email Routing and the root mailbox are outside this catalog. Keep
 those exceptions in their owning contracts rather than adding general-purpose escape hatches here.

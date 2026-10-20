@@ -1,6 +1,6 @@
 /**
  * CPU of a Worker's requests inside workerd, calibrated to the machine running the test: the shared part of the
- * apps' CPU tests (flowday/worker, links/worker, dashboard/worker and watch/worker test/runtime/cpu.test.ts, Mail Hero's test/cpu/native-ops-cpu.test.mjs) against Workers Free's 10 ms per request.
+ * apps' CPU tests (each Worker's test/runtime/cpu.test.ts, Mail Hero's test/cpu/native-ops-cpu.test.mjs) against Workers Free's 10 ms per request.
  *
  * Test tooling only. A test imports this file by relative path; no production source may (a bundle would carry it,
  * and a tools/ change deploys nothing: .github/scripts/ci_changes.py, test_app_isolation.py). It imports
@@ -15,7 +15,7 @@
  * than waiting for the test runner's timeout.
  *
  * Calibrating. A test's bounds are milliseconds of the reference machine (an Apple M1 Max), and the measured CPU
- * scales with the machine running the test: GitHub runners measured FlowDay's sync 1.1-2.1x the reference, varying
+ * scales with the machine running the test: GitHub runners measured an app's CPU test at 1.1-2.1x the reference, varying
  * 2x within an hour. So the test calibrates the machine in the same isolate: a fixed, deterministic workload
  * (CALIBRATION_SETUP) runs in the Worker's own global scope through the inspector's Runtime.evaluate, with the
  * profiler running as for the requests. Its warm median wall time over CALIBRATION_REFERENCE_MS is the machine's
@@ -129,7 +129,7 @@ export const CALIBRATION_CALL = `${CALIBRATION_FN}()`;
 export const CALIBRATION_CHARS = CALIBRATION_PASSES * 293_004;
 /**
  * The calibration's warm median wall time on the reference machine (an Apple M1 Max, workerd 1.20260926.1): the
- * median of 12 runs of FlowDay's CPU test, which measured 4.59-5.28 ms. Measure it again when the workload or a
+ * median of 12 runs of an app's CPU test there, which measured 4.59-5.28 ms. Measure it again when the workload or a
  * workerd update changes its cost.
  */
 export const CALIBRATION_REFERENCE_MS = 4.8;

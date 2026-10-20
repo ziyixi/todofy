@@ -43,8 +43,8 @@ Besides the page it runs four jobs:
   fixtures.
 
 Workers Free only: the fetch and cron handlers authenticate, route and make one RPC; all work runs in
-the SQLite Durable Object `HomeState`, every read, call and table is bounded (one GraphQL query and three
-public probes per tick: the website, FlowDay and the links app; rate-limited owner refreshes; design-v2 §5), and
+the SQLite Durable Object `HomeState`, every read, call and table is bounded (one GraphQL query and two
+public probes per tick: the website and the links app; rate-limited owner refreshes; design-v2 §5), and
 nothing holds mail content.
 
 | Path | What |

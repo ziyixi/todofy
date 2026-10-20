@@ -18,7 +18,7 @@ option java_package = "science.ziyixi.tasks.ui.v1";
 message FocusDay {
   // The day, YYYY-MM-DD in the account's time zone.
   string day = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Open steps queued for the day, first to last. (FlowDay's queue also listed completed steps; this one does not.)
+  // Open steps queued for the day, first to last.
   repeated string task_ids = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Steps completed from this day's queue, first to last.
   repeated string done_task_ids = 3 [(google.api.field_behavior) = OUTPUT_ONLY];

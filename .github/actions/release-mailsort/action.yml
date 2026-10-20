@@ -121,7 +121,7 @@ runs:
     # Nothing anonymous on the host shows BUILD_SHA (all of it is behind Access), so production is read through the
     # API with the deploy token (GETs only): the Worker serves exactly one version at 100% and that version's
     # BUILD_SHA is this commit. wrangler's JSON answers are parsed, never printed (they name the token's account
-    # email); only the version id and the result are. (FlowDay's and the links app's check without their D1 part.)
+    # email); only the version id and the result are. (The links app's check without its D1 part.)
     - name: Check that production runs this commit
       if: inputs.required == 'true'
       working-directory: .release-source/mailsort/worker

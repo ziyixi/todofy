@@ -78,7 +78,6 @@
 - Todofy：[开发约束](todofy/docs/dev-notes.md)、[网关合同](todofy/docs/gateway-contract.md)、[发布](todofy/docs/ci-cd.md)。
 - Home：[架构约束](docs/architecture.md#home)、[设计](dashboard/docs/design.md)、[当前视图](dashboard/docs/design-v2.md)、
   [配额](dashboard/docs/limits.md)、[设置](dashboard/docs/setup.md)。不读取其他应用 D1/R2/代码；status、刷新、漂移有明确调用预算。
-- FlowDay：[AGENTS](flowday/AGENTS.md)、[设计](flowday/docs/design.md)。从不写 Todoist，控制 D1 写入与分页读取。
 - Links：[AGENTS](links/AGENTS.md)、[设计](links/docs/design.md)。匿名重定向一次索引读取、零写入、不记录 key/目标。
 - Watch：[AGENTS](watch/AGENTS.md)、[设计](watch/docs/design.md)。逐跳抓取政策、合成站点、内容不进通知；冻结 intent 幂等重试。
 - Mailsort：[AGENTS](mailsort/AGENTS.md)、[设计](mailsort/docs/design.md)。只经 `gmail.ts` 的封闭操作表访问 Gmail，从不标记已读或删除；

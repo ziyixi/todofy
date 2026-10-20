@@ -14,7 +14,6 @@ Home is the daily starting point. Services run and release independently, sharin
 | Mail Hero | 收件箱与可靠 webhook / Inbox and reliable webhooks | Cloudflare Worker + D1 + R2 + DO | [mail-hero/](mail-hero/README.md) |
 | Todofy | 邮件摘要、规划与每日提醒 / Mail summaries, planning and daily reminders | Cloudflare TS gateway + Python core + D1/DO | [todofy/](todofy/README.md) |
 | Tasks | 主任务库、子任务与 Plan/Focus / Primary task store, subtasks and Plan/Focus | Cloudflare Worker + D1, desktop PWA | [tasks/](tasks/README.md) |
-| FlowDay | 时间块、计时与回顾 / Time blocks, timers and reviews | Cloudflare Worker + D1 | [flowday/](flowday/README.md) |
 | Links | 私人短链接 / Personal short links | Cloudflare Worker + D1 | [links/](links/README.md) |
 | Watch | 网页变化收件箱 / Web change inbox | Cloudflare Worker + DO | [watch/](watch/README.md) |
 | Mailsort | Gmail 自动分拣 / Gmail sorting by label | Cloudflare Worker + DO + Workers AI | [mailsort/](mailsort/README.md) |
@@ -24,9 +23,9 @@ Home is the daily starting point. Services run and release independently, sharin
 | Newsletter | 生成并发送简报 / Build and send the newsletter | VPS k3s, separate image | [newsletter/](newsletter/README.md) |
 | Fleet | VPS、daemon 与发布状态 / VPS, daemons and release status | Cloudflare Worker + DO | [fleet/](fleet/README.md) |
 
-Tasks 是任务与规划入口，Todofy 处理邮件和规划规则，FlowDay 保存每日队列与计时。Todoist 只是 2026-10-17 的一次性迁移来源，现在没有代码读写它。
+Tasks 是任务与规划入口，也保存 Focus 的每日队列与计时；Todofy 处理邮件和每日提醒。Todoist 只是 2026-10-17 的一次性迁移来源，现在没有代码读写它。
 
-Tasks is the task and planning app. Todofy handles mail and planning rules; FlowDay owns daily queues and timers.
+Tasks is the task and planning app and owns Focus's daily queues and timers. Todofy handles mail and daily reminders.
 Todoist was the one-time migration source of 2026-10-17; no code reads or writes it now.
 
 Cloudflare 托管日常应用；VPS 的 k3s 运行 Newsletter 和独立的部署 daemon。
@@ -47,7 +46,7 @@ Release progress, business health and observation freshness stay separate. See [
    Work in the application's directory; follow its commands and use local bindings and synthetic data.
 
 ```sh
-cd mail-hero    # 或 / or todofy, tasks, dashboard, flowday, links, watch, mailsort, recall, brief, website, newsletter, fleet, platform
+cd mail-hero    # 或 / or todofy, tasks, dashboard, links, watch, mailsort, recall, brief, website, newsletter, fleet, platform
 ```
 
 仓库没有“一条命令启动所有服务”的要求。Cloudflare TypeScript 应用安装时生成 proto；Todofy 的 Python 代码由 `uv` 构建时生成。

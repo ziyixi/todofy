@@ -25,4 +25,4 @@ uv run --no-project --python 3.12 --with-requirements .github/scripts/requiremen
 ```
 
 App jobs retain their own tokens, gates, concurrency groups, and special checks
-(FlowDay's PWA and Links' public redirects).
+(Links' public redirects).

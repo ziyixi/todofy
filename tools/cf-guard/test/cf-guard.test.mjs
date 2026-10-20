@@ -258,7 +258,7 @@ test(
 );
 
 test(
-  "moving a Worker from its staging host onto a tunnel's CNAME needs both allowances (FlowDay's F4 cutover)",
+  "moving a Worker from its staging host onto a tunnel's CNAME needs both allowances (a Worker's cutover)",
   withDir(async (dir) => {
     const state = baseState();
     state.domains.push({ id: "a9".repeat(16), hostname: "staging.example.com", service: "app", zone_id: ZONE });

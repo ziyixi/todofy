@@ -7,7 +7,7 @@ non-empty category replaces what is live (verified in wrangler 4.142's `publish-
   `PUT .../workers/scripts/<name>/domains/records` with `override_scope: true`. In CI (no TTY) wrangler also
   sets `override_existing_origin` and `override_existing_dns_record`, so a listed hostname is taken from
   another Worker without a prompt, and wrangler asks the API to overwrite an existing DNS record for it.
-  **The API does not always do so**: on 2026-10-01 it refused FlowDay's cutover onto a hostname whose DNS
+  **The API does not always do so**: on 2026-10-01 it refused a cutover onto a hostname whose DNS
   record was a tunnel CNAME it had not created (Cloudflare error `100117`), although CI passed
   `override_existing_dns_record`. Moving a hostname off such a record (a tunnel CNAME, an `A` record to an old
   server) therefore needs that record deleted by hand right before the deploy, after saving it privately for

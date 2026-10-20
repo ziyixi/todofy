@@ -57,8 +57,7 @@ The Cloudflare owner APIs use the shared proto HTTP pattern. The dated cleanup s
 | --- | --- | --- |
 | Mail Hero | Old envelope, 410 `reload_required` | 2026-11-01 |
 | Home | Old envelope, 410 `not_found` with a reload message | 2026-11-02 |
-| FlowDay and Todofy | Old envelope, 410 `reload_required` | 2026-11-02 |
-| FlowDay `UpdateTimerSession` / `ClearTimerSession` | google.rpc.Status, `RELOAD_REQUIRED`; refresh for server-owned timer commands | 2026-11-13 |
+| Todofy | Old envelope, 410 `reload_required` | 2026-11-02 |
 | Mailsort (`mailsort.ui.v1`, `/api/v1/...`) | google.rpc.Status, 410 `RELOAD_REQUIRED` with the zh-CN message 邮件分拣已更新，请刷新页面 | 2026-11-10 |
 
 Do not remove these routes early. Read HANDOFF before removal and test what an old client shows.
