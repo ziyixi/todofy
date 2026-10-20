@@ -274,7 +274,7 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
     # shared transcoder and Todofy's UI calls it through the shared client.
     "proto/todofy/ui/": ("todofy", "tasks"),
-    "proto/flowday/ui/": ("flowday", "todofy", "tasks"),
+    "proto/flowday/ui/": ("flowday", "todofy"),
     "proto/tasks/ui/": ("tasks", "todofy", "flowday"),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
