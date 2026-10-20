@@ -3,7 +3,6 @@ import type { Catalog, Task } from "../api";
 import { dateLabel, todayDate } from "../dates";
 import { TaskTreeRow } from "./TaskTreeRow";
 import type { TaskMenuActions } from "./TaskMenu";
-import { useTaskListProperties } from "../useTaskListProperties";
 import { TaskDetachZone } from "./TaskDrag";
 
 export function TaskList({
@@ -31,7 +30,6 @@ export function TaskList({
   showCompleted?: boolean;
   orderBy?: string;
 }) {
-  const properties = useTaskListProperties(tasks);
   const taskIndex = useMemo(
     () => new Map(tasks.map((task) => [task.id, task])),
     [tasks],
@@ -86,11 +84,6 @@ export function TaskList({
   }
   return (
     <div className="task-groups">
-      {properties.unavailable && (
-        <p role="status" className="task-property-warning">
-          Planning properties unavailable. Refresh tasks to retry.
-        </p>
-      )}
       {groups.map(([group, items]) => (
         <section key={group}>
           {groupBy !== "none" && (
@@ -106,7 +99,6 @@ export function TaskList({
                 task={task}
                 peers={items}
                 row={row}
-                planningById={properties.byId}
                 listedIds={listedIds}
                 showCompleted={showCompleted}
                 orderBy={orderBy}

@@ -2,11 +2,7 @@ import { CalendarDays, ChevronRight, Repeat2, Tag, Timer } from "lucide-react";
 import type { Catalog, Task } from "../api";
 import { dateLabel } from "../dates";
 import { repeatLabel } from "../recurrence-controls";
-import {
-  planningDraft,
-  TASK_OPTIONS,
-  type PlanningTask,
-} from "../task-planning";
+import { planningDraft, TASK_OPTIONS } from "../task-planning";
 import "./task-metadata.css";
 
 const stages: Record<string, string> = {
@@ -20,17 +16,17 @@ export function TaskMetadata({
   task,
   catalog,
   today,
-  planning,
 }: {
   task: Task;
   catalog: Catalog;
   today: string;
-  planning?: PlanningTask;
 }) {
   const due = task.dueDate || task.dueDatetime.slice(0, 10);
   const properties: string[] = [];
-  if (planning?.explicitStage && stages[planning.explicitStage])
-    properties.push(`#${stages[planning.explicitStage]}`);
+  // Completed tasks carry no planning tags.
+  const planning = task.completed ? undefined : task;
+  if (planning?.stage && stages[planning.stage])
+    properties.push(`#${stages[planning.stage]}`);
   if (planning?.mustStart) properties.push("#Start now");
   if (task.deadline)
     properties.push(`#Deadline ${dateLabel(task.deadline, today)}`);

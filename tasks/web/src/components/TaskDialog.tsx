@@ -8,6 +8,7 @@ import { TaskChildren } from "./TaskChildren";
 import { TaskPlanningFields } from "./TaskPlanningFields";
 import { TaskDependencyFields } from "./TaskDependencyFields";
 import { useTaskPlanning } from "../useTaskPlanning";
+import { planningChanges, planningDraft } from "../task-planning";
 import { scheduledDate, scheduledTime } from "../task-schedule";
 import "./color-detail.css";
 import "./task-dialog.css";
@@ -52,6 +53,7 @@ export function TaskDialog({
     draft: TaskDraft,
     original?: Task,
     requestId?: string,
+    planning?: ReturnType<typeof planningChanges>,
   ) => Promise<Task>;
   onDelete: (task: Task) => Promise<void>;
   onOpen: (id: string) => void;
@@ -59,7 +61,7 @@ export function TaskDialog({
   onChildAdded: () => void;
 }) {
   const [currentTask, setCurrentTask] = useState(task);
-  // A create can save content before its planning write finishes; keep its form compact until it closes.
+  // A create closes once saved; keep its form compact until then.
   const displayTask = task ? currentTask : undefined;
   const [draft, setDraft] = useState<TaskDraft>(() =>
     taskDraft(task, defaults),
@@ -82,9 +84,9 @@ export function TaskDialog({
     setBusy(true);
     setSaveComplete(false);
     setError("");
-    let saved: Task | undefined;
     try {
-      saved = await onSave(
+      // Content and planning are one write of the task, under its etag.
+      const saved = await onSave(
         {
           ...draft,
           title: draft.title.trim(),
@@ -94,22 +96,18 @@ export function TaskDialog({
         },
         currentTask,
         saveRequestId.current,
+        planningChanges(planning.draft, planningDraft(currentTask)),
       );
-      const genericChanged = saved !== currentTask;
+      const changed = saved !== currentTask;
       setCurrentTask(saved);
       setDraft(taskDraft(saved));
+      planning.setDraft(planningDraft(saved));
       saveRequestId.current = crypto.randomUUID();
-      const planningChanged =
-        !saved.completed && (await planning.save(saved.id, draft.deadline));
-      if (genericChanged || planningChanged) onChildAdded();
+      if (changed) onChildAdded();
       if (task) setSaveComplete(true);
       else onClose();
     } catch (reason) {
-      const message =
-        reason instanceof Error && !("status" in reason)
-          ? reason.message
-          : describeError(reason);
-      setError(saved ? `Task saved. ${message}` : message);
+      setError(describeError(reason));
     } finally {
       setBusy(false);
     }
@@ -251,36 +249,15 @@ export function TaskDialog({
           finish={finish}
           onOpen={onOpen}
           executable={executable}
-          planningLoading={planning.loading || Boolean(planning.error)}
           leadDays={planning.draft.leadDays}
           onLeadChange={(value) => planning.patch("leadDays", value)}
         >
           {!isStep && (
-            <>
-              <TaskPlanningFields
-                value={planning.draft}
-                onChange={planning.patch}
-                loading={planning.loading || Boolean(planning.error)}
-                disabled={
-                  busy ||
-                  planning.loading ||
-                  Boolean(planning.error) ||
-                  Boolean(currentTask?.completed)
-                }
-              />
-              {planning.error && (
-                <p className="error-message" role="alert">
-                  Planning unavailable. Other task fields can still be saved.
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={planning.retry}
-                  >
-                    Retry planning
-                  </button>
-                </p>
-              )}
-            </>
+            <TaskPlanningFields
+              value={planning.draft}
+              onChange={planning.patch}
+              disabled={busy || Boolean(currentTask?.completed)}
+            />
           )}
           {displayTask && (
             <>
@@ -301,7 +278,11 @@ export function TaskDialog({
                 task={displayTask}
                 busy={busy}
                 onOpen={onOpen}
-                onChanged={onChildAdded}
+                onSaved={(saved) => {
+                  // A dependency write is a write of this task: its etag changes, and the drafts stay.
+                  setCurrentTask(saved);
+                  onChildAdded();
+                }}
               />
             </>
           )}
@@ -326,7 +307,7 @@ export function TaskDialog({
           </button>
           <button
             className="primary-button"
-            disabled={busy || planning.loading || !draft.title.trim()}
+            disabled={busy || !draft.title.trim()}
           >
             {busy ? "Saving…" : currentTask ? "Save changes" : "Add task"}
           </button>

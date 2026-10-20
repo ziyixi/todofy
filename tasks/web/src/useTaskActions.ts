@@ -9,7 +9,8 @@ import {
 } from "./api";
 import { isPlanning, type Route } from "./routes";
 import { scheduledDate, scheduledTime } from "./task-schedule";
-import { clearTaskStartAhead, taskScheduleFromText } from "./task-date-actions";
+import { taskScheduleFromText } from "./task-date-actions";
+import type { planningChanges } from "./task-planning";
 import { todayDate } from "./dates";
 import { taskDropOrder } from "./task-order";
 import type { useTaskView } from "./useTaskView";
@@ -43,13 +44,17 @@ export function useTaskActions(
     setMutationRevision((revision) => revision + 1);
     setPlanRevision((revision) => revision + 1);
   }, []);
+  /** One write of the task: its content and the planning paths the dialog changed (`planning`). */
   async function saveTask(
     draft: TaskDraft,
     original?: Task,
     requestId: string = crypto.randomUUID(),
+    planning?: ReturnType<typeof planningChanges>,
   ) {
+    const planned = planning ?? { paths: [], values: {} };
     if (
       original &&
+      !planned.paths.length &&
       Object.entries(draft).every(([field, value]) => {
         const current = original[field as keyof TaskDraft];
         return Array.isArray(value)
@@ -66,10 +71,19 @@ export function useTaskActions(
       ? await api.updateTask({
           requestId,
           etag: original.etag,
-          task: { ...draft, name: original.name, etag: original.etag },
-          updateMask: { paths: TASK_EDIT_FIELDS },
+          task: {
+            ...draft,
+            ...planned.values,
+            name: original.name,
+            etag: original.etag,
+          },
+          updateMask: { paths: [...TASK_EDIT_FIELDS, ...planned.paths] },
         })
-      : await api.createTask({ requestId, taskId: requestId, task: draft });
+      : await api.createTask({
+          requestId,
+          taskId: requestId,
+          task: { ...draft, ...planned.values },
+        });
     taskChanged();
     if (original) list.replace(task);
     // Membership can change with date, labels or parent. Re-read this bounded view only.
@@ -251,16 +265,9 @@ export function useTaskActions(
         "Date saved. Set a time on a Step or Standalone action in task details.",
       );
   }
-  async function setDeadline(task: Task, deadline: string) {
-    await patchTask(task, { deadline }, ["deadline"]);
-    if (deadline || task.completed) return;
-    try {
-      await clearTaskStartAhead(task.id);
-    } catch {
-      setNotice(
-        "Deadline saved. Start-ahead could not be cleared. Reopen the task to check it.",
-      );
-    }
+  /** Clearing the deadline clears its start-ahead days in the same write. */
+  function setDeadline(task: Task, deadline: string) {
+    return patchTask(task, { deadline }, ["deadline"]);
   }
   function moveTask(task: Task, projectId: string, sectionId: string) {
     return patchTask(

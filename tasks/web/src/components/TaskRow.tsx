@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { type Catalog, type Task, describeError } from "../api";
 import { TaskMetadata } from "./TaskMetadata";
-import type { PlanningTask } from "../task-planning";
 import { TaskRowDropZones, useTaskDrag } from "./TaskDrag";
 import { Dialog } from "./Dialog";
 import {
@@ -22,7 +21,6 @@ import {
 
 export interface TaskRowProps {
   task: Task;
-  planning?: PlanningTask;
   catalog: Catalog;
   today: string;
   parentTitle?: string;
@@ -42,7 +40,6 @@ export interface TaskRowProps {
 
 export function TaskRow({
   task,
-  planning,
   catalog,
   today,
   parentTitle,
@@ -180,12 +177,7 @@ export function TaskRow({
         {task.descriptionPreview && (
           <span className="task-description">{task.descriptionPreview}</span>
         )}
-        <TaskMetadata
-          task={task}
-          catalog={catalog}
-          today={today}
-          planning={planning}
-        />
+        <TaskMetadata task={task} catalog={catalog} today={today} />
       </button>
       <span className="task-context">
         {parentTitle && (

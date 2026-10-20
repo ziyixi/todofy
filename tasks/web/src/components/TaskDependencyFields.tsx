@@ -1,85 +1,26 @@
 import { useEffect, useState } from "react";
 import { Link2, Plus, X } from "lucide-react";
-import { RpcStatusError } from "@ziyixi/proto/http-client";
-import type { TaskDependency } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 import { api, describeError, type Task } from "../api";
-import { planningApi } from "../task-planning";
 
+/** What the task waits for, as GetTask answered it; each change is one write of the task's dependencies. */
 export function TaskDependencyFields({
   task,
   busy,
   onOpen,
-  onChanged,
+  onSaved,
 }: {
   task: Task;
   busy: boolean;
   onOpen: (id: string) => void;
-  onChanged: () => void;
+  /** The task as Tasks saved it: a dependency write changes its etag. */
+  onSaved: (task: Task) => void;
 }) {
-  const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
-  const [related, setRelated] = useState<Record<string, Task>>({});
   const [query, setQuery] = useState("");
   const [picking, setPicking] = useState(false);
   const [results, setResults] = useState<Task[]>([]);
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    void planningApi
-      .readPlan({})
-      .then(async (value) => {
-        let edges = (value.plan?.dependencies || []).filter(
-          (edge) => edge.taskId === task.id,
-        );
-        const missing: string[] = [];
-        const tasks = await Promise.all(
-          edges.map(async (edge) => {
-            try {
-              return await api.getTask({
-                name: `tasks/${edge.prerequisiteId}`,
-              });
-            } catch (reason) {
-              if (
-                reason instanceof RpcStatusError &&
-                reason.status.reason === "NOT_FOUND"
-              ) {
-                missing.push(edge.prerequisiteId);
-                return undefined;
-              }
-              throw reason;
-            }
-          }),
-        );
-        if (active && missing.length) {
-          const settled = await planningApi.resolveDependencies({
-            taskIds: missing,
-            requestId: crypto.randomUUID(),
-          });
-          edges = settled.dependencies.filter(
-            (edge) => edge.taskId === task.id,
-          );
-        }
-        if (active) {
-          setDependencies(edges);
-          setRelated(
-            Object.fromEntries(
-              tasks.flatMap((value) => (value ? [[value.id, value]] : [])),
-            ),
-          );
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) setError(describeError(reason));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [task.id]);
+  const dependencies = task.dependencies;
   useEffect(() => {
     if (!picking || !query.trim()) {
       setResults([]);
@@ -110,37 +51,29 @@ export function TaskDependencyFields({
       window.clearTimeout(timer);
     };
   }, [picking, query, task.id, dependencies]);
-  const done = (edge: TaskDependency) => {
-    const prerequisite = related[edge.prerequisiteId];
-    if (prerequisite)
-      return (
-        prerequisite.completed ||
-        Boolean(
-          prerequisite.recurrence &&
-          prerequisite.completedCount > edge.baselineCompletedCount,
-        )
-      );
-    return edge.done;
-  };
-  const blocked = dependencies.some((edge) => !done(edge));
+  const blocked = dependencies.some((edge) => !edge.done);
   async function change(prerequisiteId: string, waits: boolean) {
     setSaving(true);
     setError("");
     try {
-      const response = await planningApi.setTaskDependency({
-        taskId: task.id,
-        prerequisiteId,
-        waits,
+      const prerequisites = [
+        ...dependencies
+          .map((edge) => edge.prerequisiteId)
+          .filter((id) => id !== prerequisiteId),
+        ...(waits ? [prerequisiteId] : []),
+      ];
+      const saved = await api.updateTask({
         requestId: crypto.randomUUID(),
+        etag: task.etag,
+        task: {
+          name: task.name,
+          dependencies: prerequisites.map((id) => ({ prerequisiteId: id })),
+        },
+        updateMask: { paths: ["dependencies"] },
       });
-      setDependencies(
-        response.dependencies.filter((edge) => edge.taskId === task.id),
-      );
-      const added = results.find((value) => value.id === prerequisiteId);
-      if (added) setRelated((current) => ({ ...current, [added.id]: added }));
       setPicking(false);
       setQuery("");
-      onChanged();
+      onSaved(saved);
     } catch (reason) {
       setError(describeError(reason));
     } finally {
@@ -151,16 +84,11 @@ export function TaskDependencyFields({
     <section className="task-dependencies" aria-label="Task dependencies">
       <h3>
         <Link2 size={13} /> Depends on{" "}
-        {loading && (
-          <span className="dependency-loading" role="status">
-            Checking…
-          </span>
-        )}
         {blocked && <span className="dependency-blocked">Blocked</span>}
       </h3>
       {dependencies.map((edge) => (
         <div
-          className={`task-dependency-row ${done(edge) ? "is-done" : ""}`}
+          className={`task-dependency-row ${edge.done ? "is-done" : ""}`}
           key={edge.prerequisiteId}
         >
           <button
@@ -168,14 +96,14 @@ export function TaskDependencyFields({
             className="text-button"
             onClick={() => onOpen(edge.prerequisiteId)}
           >
-            {related[edge.prerequisiteId]?.title || "Referenced task"}
+            {edge.title || "Referenced task"}
           </button>
-          {done(edge) && <span className="muted">Done</span>}
+          {edge.done && <span className="muted">Done</span>}
           <button
             type="button"
             className="icon-button"
             disabled={busy || saving}
-            aria-label={`Remove dependency ${related[edge.prerequisiteId]?.title || edge.prerequisiteId}`}
+            aria-label={`Remove dependency ${edge.title || edge.prerequisiteId}`}
             onClick={() => void change(edge.prerequisiteId, false)}
           >
             <X size={13} />
@@ -243,7 +171,7 @@ export function TaskDependencyFields({
         <button
           type="button"
           className="text-button"
-          disabled={busy || saving || loading || task.completed}
+          disabled={busy || saving || task.completed}
           onClick={() => {
             setError("");
             setPicking(true);

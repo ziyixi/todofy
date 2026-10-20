@@ -10,7 +10,6 @@ import { StartAheadPicker } from "./StartAheadPicker";
 interface Props {
   children?: ReactNode;
   executable: boolean;
-  planningLoading: boolean;
   leadDays: number;
   onLeadChange: (days: number) => void;
   task?: Task;
@@ -32,7 +31,6 @@ interface Props {
 export function TaskFields({
   children,
   executable,
-  planningLoading,
   leadDays,
   onLeadChange,
   task,
@@ -197,15 +195,9 @@ export function TaskFields({
           }}
         />
         <StartAheadPicker
-          key={planningLoading ? "loading" : "ready"}
           days={leadDays}
           deadline={draft.deadline}
-          disabled={
-            busy ||
-            planningLoading ||
-            Boolean(task?.completed) ||
-            !draft.deadline
-          }
+          disabled={busy || Boolean(task?.completed) || !draft.deadline}
           onChange={onLeadChange}
         />
         <PriorityPicker

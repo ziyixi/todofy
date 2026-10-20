@@ -1,58 +1,10 @@
-import { useEffect, useState } from "react";
-import {
-  planningDraft,
-  peekTaskPlanning,
-  readCachedTaskPlanning,
-  saveTaskPlanning,
-  type PlanningDraft,
-} from "./task-planning";
-import { describeError, type Task } from "./api";
-import { clearDetailReadCache } from "./detail-read-cache";
+import { useState } from "react";
+import { planningDraft, type PlanningDraft } from "./task-planning";
+import type { Task } from "./api";
 
+/** The dialog's planning draft, from the task as GetTask answered it; it is saved with the task. */
 export function useTaskPlanning(task?: Task) {
-  const known = task && !task.completed ? peekTaskPlanning(task) : undefined;
-  const [draft, setDraft] = useState<PlanningDraft>(() => planningDraft(known));
-  const [base, setBase] = useState<PlanningDraft | undefined>(() =>
-    known ? planningDraft(known) : undefined,
-  );
-  const [loading, setLoading] = useState(
-    Boolean(task && !task.completed && !known),
-  );
-  const [error, setError] = useState("");
-  const [readAttempt, setReadAttempt] = useState(0);
-  useEffect(() => {
-    if (!task || task.completed) {
-      setLoading(false);
-      return;
-    }
-    let active = true;
-    const cached = peekTaskPlanning(task);
-    setLoading(!cached);
-    setError("");
-    if (cached) {
-      const next = planningDraft(cached);
-      setDraft(next);
-      setBase(next);
-      return;
-    }
-    void readCachedTaskPlanning(task)
-      .then((value) => {
-        if (!active) return;
-        if (!value) throw new Error("This task is not available in planning.");
-        const next = planningDraft(value);
-        setDraft(next);
-        setBase(next);
-      })
-      .catch((reason: unknown) => {
-        if (active) setError(describeError(reason));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [task?.id, task?.etag, task?.completed, readAttempt]);
+  const [draft, setDraft] = useState<PlanningDraft>(() => planningDraft(task));
   function patch<K extends keyof PlanningDraft>(
     field: K,
     value: PlanningDraft[K],
@@ -70,29 +22,5 @@ export function useTaskPlanning(task?: Task) {
         : {}),
     }));
   }
-  async function save(id: string, deadline: string) {
-    if (loading) throw new Error("Planning is still loading.");
-    const dirty =
-      JSON.stringify(draft) !== JSON.stringify(base || planningDraft());
-    if (error) {
-      if (!dirty) return false;
-      throw new Error(
-        "Planning is unavailable. Your task was saved; retry planning when the connection is restored.",
-      );
-    }
-    await saveTaskPlanning(id, deadline, draft, base);
-    setBase(draft);
-    return dirty;
-  }
-  return {
-    draft,
-    patch,
-    loading,
-    error,
-    save,
-    retry: () => {
-      clearDetailReadCache();
-      setReadAttempt((value) => value + 1);
-    },
-  };
+  return { draft, setDraft, patch };
 }

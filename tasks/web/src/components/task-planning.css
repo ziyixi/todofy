@@ -67,19 +67,6 @@
   margin: 0;
   accent-color: var(--accent);
 }
-.planning-control-placeholder,
-.task-option-placeholder {
-  display: block;
-  border-radius: 4px;
-  background: var(--line);
-}
-.planning-control-placeholder {
-  height: 31px;
-}
-.task-option-placeholder {
-  height: 13px;
-  width: 78%;
-}
 .start-ahead-field {
   display: grid !important;
   gap: 6px;
@@ -119,12 +106,6 @@
   margin: 0 0 9px;
   font-size: 13px;
   font-weight: 600;
-}
-.dependency-loading {
-  white-space: nowrap;
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--muted);
 }
 .task-dependency-row {
   display: flex;

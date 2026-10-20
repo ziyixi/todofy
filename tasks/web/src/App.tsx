@@ -19,11 +19,6 @@ import {
 } from "./api";
 import { todayDate } from "./dates";
 import {
-  clearDetailReadCache,
-  peekDetailRead,
-  readDetail,
-} from "./detail-read-cache";
-import {
   isPlanning,
   readRoute,
   removeQueryParameter,
@@ -107,16 +102,12 @@ export function App() {
   useEffect(() => {
     void loadCatalog();
   }, [loadCatalog]);
-  useEffect(() => {
-    window.addEventListener("focus", clearDetailReadCache);
-    document.addEventListener("visibilitychange", clearDetailReadCache);
-    return () => {
-      window.removeEventListener("focus", clearDetailReadCache);
-      document.removeEventListener("visibilitychange", clearDetailReadCache);
+  useEffect(
+    () => () => {
       taskOpenSequence.current++;
-      clearDetailReadCache();
-    };
-  }, []);
+    },
+    [],
+  );
   useEffect(() => {
     if (actions.mutationRevision > 0) void loadCatalog();
   }, [actions.mutationRevision, loadCatalog]);
@@ -153,17 +144,9 @@ export function App() {
   }, [catalog, loadCatalog]);
   const openTask = useCallback(async (id: string, fromLink = false) => {
     const request = ++taskOpenSequence.current;
-    const key = `task:${id}` as const;
-    const cached = peekDetailRead<Task>(key);
-    if (cached) {
-      setEditor({ task: cached });
-      return;
-    }
     try {
-      // ListTasks omits full descriptions; only the dedicated GetTask reply may seed a detail.
-      const task = await readDetail(key, () =>
-        api.getTask({ name: `tasks/${id}` }),
-      );
+      // ListTasks omits full descriptions; GetTask answers the whole task, planning facts included.
+      const task = await api.getTask({ name: `tasks/${id}` });
       if (request === taskOpenSequence.current) setEditor({ task });
     } catch (reason) {
       // A link to a task that does not open, such as one deleted since, would otherwise fail on every reload.

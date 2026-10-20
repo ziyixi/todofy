@@ -15,7 +15,6 @@ import type {
   Label,
   SavedFilter,
 } from "@ziyixi/proto/tasks/ui/v1/task_pb";
-import { clearDetailReadCache } from "./detail-read-cache";
 import { checkBuild, isOutdated } from "./outdated";
 
 export type Task = ApiTask;
@@ -58,7 +57,6 @@ async function csrfToken(): Promise<string> {
     cache: "no-store",
   })
     .then(async (response) => {
-      if ([401, 403].includes(response.status)) clearDetailReadCache();
       if (!response.ok)
         throw new Error(
           "Could not verify your session. Refresh and sign in again.",
@@ -84,22 +82,14 @@ export async function send(call: HttpCall): Promise<Response> {
   const headers = new Headers({ Accept: "application/json" });
   if (call.body !== undefined) headers.set("Content-Type", "application/json");
   if (mutation) headers.set("X-CSRF-Token", await csrfToken());
-  let response: Response;
-  try {
-    response = await fetch(call.url, {
-      method: call.httpMethod,
-      body: call.body,
-      headers,
-      credentials: "same-origin",
-      cache: "no-store",
-      redirect: "error",
-    });
-  } catch (error) {
-    if (mutation) clearDetailReadCache();
-    throw error;
-  }
-  if (mutation || [401, 403, 409].includes(response.status))
-    clearDetailReadCache();
+  const response = await fetch(call.url, {
+    method: call.httpMethod,
+    body: call.body,
+    headers,
+    credentials: "same-origin",
+    cache: "no-store",
+    redirect: "error",
+  });
   if (response.status === 401 || response.status === 403) csrf = undefined;
   await checkBuild(response);
   return response;

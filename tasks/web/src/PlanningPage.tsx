@@ -30,7 +30,7 @@ export default function PlanningPage({
   ) => Promise<string | undefined>;
 }) {
   const actions = useMemo<PlusActions>(() => {
-    // Todofy's planning API and Tasks' own Focus API, both on this origin.
+    // Tasks' own planning and Focus API, and Todofy's weekly review facts, both on this origin.
     const actions = createPlanningActions({ plus: send, tasks: send });
     return {
       ...actions,
