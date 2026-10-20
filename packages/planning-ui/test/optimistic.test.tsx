@@ -830,6 +830,89 @@ it("lets Start now and Waiting cards take only their own lane's cards", async ()
   expect(accepts("cleanup", "start")).toBe(true);
 });
 
+/** Week's commitments, in the grid's order. */
+function commitments() {
+  return [
+    ...document.querySelectorAll(
+      ".planning-commitment-grid .planning-outcome-card",
+    ),
+  ].map((card) => card.getAttribute("data-outcome-id"));
+}
+/** A Week commitment's sortable, as it is now. */
+function commitment(id: string) {
+  return drops.sortables.get(`week-outcome:${id}`)!;
+}
+
+it("reorders Week's commitments at once, with one ReorderTasks of the Committed lane", async () => {
+  const actions = createPrototype();
+  const reorders = hold(actions, "reorderTasks");
+  await mountPlan(actions);
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  expect(commitments()).toEqual(["release", "research", "notes", "desk"]);
+  // Only another commitment is a target, and the arrow keys step between them.
+  expect(commitment("research").accept).toBe("week-outcome");
+  expect(commitment("research").plugins).toHaveLength(1);
+  // Dropped on the desk's card, the research card takes its place.
+  await drop(commitment("research").data!, commitment("desk").data!);
+  expect(reorders.map((call) => call.args)).toEqual([
+    [
+      ["release", "notes", "desk", "research"],
+      "research",
+      "committed",
+      expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    ],
+  ]);
+  expect(commitments()).toEqual(["release", "notes", "desk", "research"]);
+  const card = document
+    .querySelector('.planning-commitment [data-outcome-id="research"]')!
+    .closest<HTMLElement>(".planning-commitment")!;
+  expect(card.getAttribute("aria-busy")).toBe("true");
+  // Focus, lost while React moved the card, goes to its grip.
+  expect(document.activeElement?.getAttribute("aria-label")).toBe(
+    "Move commitment: Prepare the next research check-in, Updating…",
+  );
+  // Not saved: it goes back, and the same move again is the same request.
+  await act(async () => reorders[0]!.fail());
+  await waitFor(() =>
+    expect(commitments()).toEqual(["release", "research", "notes", "desk"]),
+  );
+  await drop(commitment("research").data!, commitment("desk").data!);
+  expect(reorders[1]!.args).toEqual(reorders[0]!.args);
+  await act(() => reorders[1]!.confirm());
+  expect(commitments()).toEqual(["release", "notes", "desk", "research"]);
+  expect(card.getAttribute("aria-busy")).toBeNull();
+  // Review's Committed lane is the same order.
+  fireEvent.click(screen.getByRole("tab", { name: "Review" }));
+  expect(laneTitles("Committed").at(-1)).toBe(
+    "Prepare the next research check-in",
+  );
+});
+
+it("moves a filtered commitment within the whole lane, and nothing for a drop off another commitment", async () => {
+  const actions = createPrototype();
+  const reorders = hold(actions, "reorderTasks");
+  const moves = hold(actions, "moveTaskToDay");
+  await mountPlan(actions);
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  // Its own place, or a day (which takes only steps), moves nothing.
+  await drop(commitment("notes").data!, commitment("notes").data!);
+  await drop(commitment("notes").data!, { date: "2026-10-15" });
+  expect(reorders).toHaveLength(0);
+  expect(moves).toHaveLength(0);
+  // With Work alone shown, the positions are still the whole lane's.
+  fireEvent.click(
+    within(screen.getByRole("tablist", { name: "Commitment area" })).getByRole(
+      "tab",
+      { name: "Work" },
+    ),
+  );
+  expect(commitments()).toEqual(["release", "research", "notes"]);
+  await drop(commitment("notes").data!, commitment("release").data!);
+  expect(reorders.map((call) => call.args.slice(0, 3))).toEqual([
+    [["notes", "release", "research", "desk"], "notes", "committed"],
+  ]);
+});
+
 /** The website refresh with a third child that has a step of its own, so it is no leaf. */
 function withNestedStep(actions: PlusActions) {
   const load = actions.load.bind(actions);

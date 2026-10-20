@@ -6,6 +6,7 @@ import {
   spokenDrags,
   type SpokenName,
 } from "../src/drag-announcements";
+import { weekDragName } from "../src/PlanningWeek";
 
 type Options = NonNullable<ConstructorParameters<typeof Accessibility>[1]>;
 type Event = Record<string, unknown>;
@@ -81,6 +82,61 @@ it("speaks a drag in the page's language from titles and places", () => {
       say("dragend")({ operation: { source, target }, canceled: true }),
     ]).toEqual(texts);
     expect(instructions).toMatch(language === "zh" ? /空格或回车/u : /Space/u);
+  }
+});
+
+it("speaks a Week Committed drag by its title and its place in Committed", () => {
+  const commitment = (id: string, title: string, position: number) => ({
+    id: `week-outcome:${id}`,
+    data: { title, lane: "committed", position },
+  });
+  const moving = commitment("synthetic-1", "Book the venue", 0);
+  const over = commitment("synthetic-2", "Ship the website", 1);
+  for (const [language, texts] of [
+    [
+      "en",
+      [
+        "Picked up: Book the venue. Arrow keys move it, Space or Enter drops it, Escape cancels.",
+        "Over: Committed, position 2",
+        "Dropped: Book the venue",
+        // A step over a sibling and over a day still says so.
+        "Over: step 2",
+        "Over: Tue",
+      ],
+    ],
+    [
+      "zh",
+      [
+        "已拿起：Book the venue。方向键移动，空格或回车放下，Esc 取消。",
+        "移到：本周承诺第 2 项",
+        "已放下：Book the venue",
+        "移到：第 2 步",
+        "移到：周二",
+      ],
+    ],
+  ] as const) {
+    const { say } = spoken(language, weekDragName(language));
+    const step = { id: "tray:synthetic-3", data: { title: "Draft" } };
+    expect([
+      say("dragstart")({ operation: { source: moving } }),
+      say("dragover")({ operation: { source: moving, target: over } }),
+      say("dragend")({
+        operation: { source: moving, target: over },
+        canceled: false,
+      }),
+      say("dragover")({
+        operation: {
+          source: step,
+          target: { id: "tray:synthetic-4", data: { position: 1 } },
+        },
+      }),
+      say("dragover")({
+        operation: {
+          source: step,
+          target: { id: "week-day:2026-10-13", data: { date: "2026-10-13" } },
+        },
+      }),
+    ]).toEqual(texts);
   }
 });
 
