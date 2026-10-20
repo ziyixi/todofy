@@ -66,6 +66,27 @@ export const BACKUP_TABLES: readonly BackupTable[] = [
     columns: ['id', 'fingerprint', 'response', 'created_at', 'revision_guard'],
     key: ['id'],
   },
+  {
+    name: 'day_steps',
+    columns: ['day', 'task_id', 'position', 'done_at', 'created_at', 'updated_at', 'deleted_at'],
+    key: ['day', 'task_id'],
+  },
+  {
+    name: 'focus_entries',
+    columns: [
+      'id', 'task_id', 'day', 'seconds', 'started_at', 'source', 'area', 'revision', 'created_at', 'updated_at',
+      'deleted_at',
+    ],
+    key: ['id'],
+  },
+  {
+    name: 'focus_timer',
+    columns: [
+      'id', 'state', 'task_id', 'day', 'area', 'target_seconds', 'started_at', 'segment_start', 'saved_seconds',
+      'finished_task_id', 'finished_seconds', 'revision', 'created_at', 'updated_at', 'deleted_at',
+    ],
+    key: ['id'],
+  },
 ];
 /**
  * Rows per page, and the bytes they may hold. The Worker's CPU grows with the bytes D1 hands it: about 6.5 reference ms

@@ -15,8 +15,9 @@ own:
 - The rows go to `todofy-backups` under `backups/<job start>/tasks/<table>/<n>.ndjson.gz`, next to Todofy's
   tables. The manifest's `tasks` section lists Tasks' applied migration, each table's columns, key, row count
   and the SHA-256 of every part.
-- Every table a restore needs is included: projects, sections, labels, filters, tasks, completions and request
-  receipts. `task_labels` and the change feed are left out, because inserts rebuild them.
+- Every table a restore needs is included: projects, sections, labels, filters, tasks, completions, request
+  receipts and, since `0005_focus.sql`, Focus's day queues (`day_steps`), time records (`focus_entries`) and the one
+  timer (`focus_timer`). `task_labels` and the change feed are left out, because inserts rebuild them.
 - The newest six complete backups are kept. Todofy's health page and Home show the last backup, and a failed
   or stale one (`backup_failed`, `backup_stale`). Without the `TASKS` binding a job fails with
   `tasks_unavailable`.
@@ -68,7 +69,10 @@ afterwards.
    path inside the repository and an existing file. Never copy `tasks/wrangler.toml` for this: its
    `database_id` is the live database. `sql` checks every part again and writes one
    `INSERT ... ON CONFLICT DO NOTHING` per row, parents first, so a re-run after a partial load is safe. Triggers
-   rebuild `task_labels`, `project_archived` and the change feed. `verify` ends with `verify PASS`.
+   rebuild `task_labels`, `project_archived` and the change feed. The backed-up timer replaces the idle one the
+   migration seeds. A backup made before `0005_focus.sql` has no Focus tables: `sql` says so in a `NOTE` line, they
+   restore empty with the idle timer, and `verify` expects 0, 0 and 1 rows in them. `verify` ends with
+   `verify PASS`.
 5. Switch the Tasks Worker to the new database. This step is not rehearsed, and a push alone does not do it:
    the release's preflight finds the live `DB` binding on the old id and stops (`STATEFUL_BINDING_CHANGED`
    needs a manual change).
@@ -102,6 +106,8 @@ afterwards.
    point at tasks the restored database lacks. Plan no longer shows those tasks, and converting such a Mail
    item creates a new Inbox task.
 8. Set `TODOFY_FORCE_PAUSE_TODOIST=false` and run the workflow on `main`.
+9. Open Focus. The timer comes back as it was backed up: a session that was running then still runs, counting from
+   then (at most 4 hours, or its pomodoro's length). Stop it, then fix the new record's minutes if needed.
 
 Keep the old database until the restored one has run for a while, then delete it on purpose
 (`npx wrangler d1 delete <old name>`); it holds task content too.

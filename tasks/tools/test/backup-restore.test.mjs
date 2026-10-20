@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
-import { RESTORE_ORDER, RestoreError, readBackup, restoreConfig, restoreSql } from '../backup-restore.ts';
+import { FOCUS_TABLES, RESTORE_ORDER, RestoreError, readBackup, restoreConfig, restoreSql } from '../backup-restore.ts';
 
 const TOOL = fileURLToPath(new URL('../backup-restore.ts', import.meta.url));
 const MIGRATIONS = fileURLToPath(new URL('../../migrations/', import.meta.url));
@@ -53,6 +53,12 @@ function seed(db) {
       (5,'c5','t-parent','Stored second',3,1),(9,'c9','t-done','Done',7,0);
     INSERT INTO requests(id,fingerprint,response,created_at,revision_guard)
       VALUES('00000000-0000-4000-8000-000000000009','f','{"title":"it''s"}',1,1);
+    INSERT INTO day_steps(day,task_id,position,done_at,created_at,updated_at) VALUES
+      ('2026-10-19','t-child',1.5,NULL,1,1),('2026-10-19','t-done',0.75,7,1,7);
+    INSERT INTO focus_entries(id,task_id,day,seconds,started_at,source,area,created_at,updated_at) VALUES
+      ('e-timer','t-done','2026-10-19',1500,5,'timer','work',7,7),('e-manual','t-child','2026-10-18',900,NULL,'manual','',3,3);
+    UPDATE focus_timer SET state='running',task_id='t-child',day='2026-10-19',area='personal',started_at=10,
+      segment_start=12,saved_seconds=60,revision=3,updated_at=12 WHERE id='timer';
   `);
   db.prepare("INSERT INTO tasks(id,title,description,created_at,updated_at) VALUES('t-nul','NUL',?,1,1)").run(
     "a\0b “quoted” it's\n第二行",
@@ -67,8 +73,8 @@ function columns(db, table) {
 }
 
 /** What Todofy's job stores for the Tasks section: two parts per table, skipping the rows `skip` names. */
-function backupOf(db, root, { skip = () => false, change = { start: 3, end: 3 } } = {}) {
-  const tables = RESTORE_ORDER.map((name) => {
+function backupOf(db, root, { skip = () => false, change = { start: 3, end: 3 }, tables: names = RESTORE_ORDER } = {}) {
+  const tables = names.map((name) => {
     const names = columns(db, name);
     const rows = db
       .prepare(`SELECT ${names.join(',')} FROM ${name} ORDER BY rowid`)
@@ -91,7 +97,7 @@ function backupOf(db, root, { skip = () => false, change = { start: 3, end: 3 } 
 }
 
 function dump(db) {
-  const keys = { completions: 'sequence' };
+  const keys = { completions: 'sequence', day_steps: 'day,task_id' };
   return Object.fromEntries(
     [...RESTORE_ORDER, 'task_labels'].map((name) => [
       name,
@@ -126,7 +132,8 @@ test('every table but the derived ones is restored, in an order its references a
 test('a backup round-trips with its ids, revisions, sequences and labels, and a re-run changes nothing', () =>
   withBackup((root, source) => {
     const { sql, statements } = restoreSql(readBackup(root));
-    assert.equal(statements, 4 + 1 + 2 + 1 + 5 + 2 + 1);
+    // Every row, and one DELETE of the migration's idle timer before the backed-up one.
+    assert.equal(statements, 4 + 1 + 2 + 1 + 5 + 2 + 1 + 2 + 2 + 1 + 1);
     const lines = sql.split('\n');
     const at = (id) => lines.findIndex((line) => line.startsWith('INSERT INTO tasks(') && line.includes(`'${id}'`));
     assert.ok(at('t-parent') < at('t-child'), 'the parent, stored after its child, is inserted first');
@@ -136,9 +143,42 @@ test('a backup round-trips with its ids, revisions, sequences and labels, and a 
     target.exec(sql);
     assert.deepEqual(dump(target), dump(source));
     assert.ok(target.prepare('SELECT count(*) AS n FROM changes').get().n > 0, 'the inserts rebuilt the change feed');
+    assert.equal(target.prepare("SELECT state FROM focus_timer WHERE id='timer'").get().state, 'running');
     target.exec("INSERT INTO completions(id,task_id,title,completed_at) VALUES('c-new','t-done','Done',8)");
     assert.equal(target.prepare("SELECT sequence FROM completions WHERE id='c-new'").get().sequence, 10);
   }));
+
+test('a backup made before the Focus tables restores them empty, with the idle timer', () =>
+  withBackup(
+    (root, source) => {
+      const backup = readBackup(root);
+      assert.deepEqual(
+        backup.section.tables.map((table) => table.name),
+        RESTORE_ORDER.filter((name) => !FOCUS_TABLES.includes(name)),
+      );
+      const target = migrated();
+      target.exec(restoreSql(backup).sql);
+      const restored = dump(target);
+      const before = dump(source);
+      for (const name of RESTORE_ORDER.filter((table) => !FOCUS_TABLES.includes(table)))
+        assert.deepEqual(restored[name], before[name], name);
+      assert.deepEqual(restored.day_steps, []);
+      assert.deepEqual(restored.focus_entries, []);
+      assert.deepEqual(
+        restored.focus_timer.map(({ id, state, task_id, revision }) => ({ id, state, task_id, revision })),
+        [{ id: 'timer', state: 'idle', task_id: '', revision: 1 }],
+      );
+    },
+    { tables: RESTORE_ORDER.filter((name) => !FOCUS_TABLES.includes(name)) },
+  ));
+
+test('a backup with only some of the Focus tables is refused', () =>
+  withBackup(
+    (root) => {
+      assert.throws(() => readBackup(root), /unexpected Tasks tables: .*day_steps, focus_entries$/);
+    },
+    { tables: RESTORE_ORDER.filter((name) => name !== 'focus_timer') },
+  ));
 
 test('a live row whose reference is missing from the backup is refused by id', () =>
   withBackup(
@@ -197,6 +237,44 @@ test('the config names only a new database, outside the repository, and never ov
   }
 });
 
+/** The SQL loaded into a node:sqlite file, and `verify` against it through a stand-in for `wrangler d1 execute`. */
+function loaded(root, sql) {
+  const file = join(root, 'target.sqlite');
+  const target = migrated(file);
+  target.exec(readFileSync(sql, 'utf8'));
+  target.close();
+  const wrangler = join(root, 'wrangler.mjs');
+  writeFileSync(
+    wrangler,
+    `import { DatabaseSync } from 'node:sqlite';
+const args = process.argv.slice(2);
+const db = new DatabaseSync(process.env.TASKS_TARGET);
+console.log(JSON.stringify([{ results: db.prepare(args[args.indexOf('--command') + 1]).all(), success: true }]));`,
+  );
+  const verify = () =>
+    spawnSync('node', [TOOL, 'verify', '--in', root, '--config', 'unused.toml', '--local', '--wrangler', `node ${wrangler}`], {
+      encoding: 'utf8',
+      env: { ...process.env, TASKS_TARGET: file },
+    });
+  return { file, verify };
+}
+
+test('the CLI restores and verifies a backup made before the Focus tables', () =>
+  withBackup(
+    (root) => {
+      const out = join(root, 'restore.sql');
+      const written = execFileSync('node', [TOOL, 'sql', '--in', root, '--out', out], { encoding: 'utf8' });
+      assert.match(written, /\nNOTE day_steps, focus_entries, focus_timer: not in this backup/);
+      const passed = loaded(root, out).verify();
+      assert.equal(passed.status, 0, passed.stderr);
+      assert.match(
+        passed.stdout,
+        /PASS requests rows=1\/1\nPASS day_steps rows=0\/0\nPASS focus_entries rows=0\/0\nPASS focus_timer rows=1\/1\nverify PASS\n$/,
+      );
+    },
+    { tables: RESTORE_ORDER.filter((name) => !FOCUS_TABLES.includes(name)) },
+  ));
+
 test('the CLI writes the SQL owner-only, warns about a moving snapshot and verifies the loaded database', () =>
   withBackup(
     (root) => {
@@ -205,37 +283,19 @@ test('the CLI writes the SQL owner-only, warns about a moving snapshot and verif
       assert.equal(statSync(out).mode & 0o777, 0o600);
       assert.match(written, /^WARN Tasks changed while the backup ran \(change 3 to 4\)/);
       assert.match(written, /PASS tasks rows=5\n/);
-      assert.doesNotMatch(written, /Stored|synthetic|段落/);
-      // verify runs `wrangler d1 execute`; this stand-in answers from a node:sqlite file the same way.
-      const file = join(root, 'target.sqlite');
-      const target = migrated(file);
-      target.exec(readFileSync(out, 'utf8'));
-      target.close();
-      const wrangler = join(root, 'wrangler.mjs');
-      writeFileSync(
-        wrangler,
-        `import { DatabaseSync } from 'node:sqlite';
-const args = process.argv.slice(2);
-const db = new DatabaseSync(process.env.TASKS_TARGET);
-console.log(JSON.stringify([{ results: db.prepare(args[args.indexOf('--command') + 1]).all(), success: true }]));`,
-      );
-      const verify = () =>
-        spawnSync(
-          'node',
-          [TOOL, 'verify', '--in', root, '--config', 'unused.toml', '--local', '--wrangler', `node ${wrangler}`],
-          {
-            encoding: 'utf8',
-            env: { ...process.env, TASKS_TARGET: file },
-          },
-        );
+      assert.doesNotMatch(written, /Stored|synthetic|段落|NOTE/);
+      const { file, verify } = loaded(root, out);
       const passed = verify();
       assert.equal(passed.status, 0, passed.stderr);
       assert.match(passed.stdout, new RegExp(`PASS schema_version ${FILES.at(-1)}\n`));
-      assert.match(passed.stdout, /PASS completions rows=2\/2\nPASS requests rows=1\/1\nverify PASS\n$/);
+      assert.match(
+        passed.stdout,
+        /PASS requests rows=1\/1\nPASS day_steps rows=2\/2\nPASS focus_entries rows=2\/2\nPASS focus_timer rows=1\/1\nverify PASS\n$/,
+      );
       new DatabaseSync(file).exec('DELETE FROM requests');
       const failed = verify();
       assert.equal(failed.status, 1);
-      assert.match(failed.stdout, /FAIL requests rows=0\/1\nverify FAIL\n$/);
+      assert.match(failed.stdout, /FAIL requests rows=0\/1\n(?:PASS [a-z_]+ rows=\d+\/\d+\n)+verify FAIL\n$/);
     },
     { change: { start: 3, end: 4 } },
   ));

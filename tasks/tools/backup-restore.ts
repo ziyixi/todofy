@@ -10,6 +10,8 @@
  *           project, section, parent or label is not in the backup (naming ids only) and a statement over D1's limit.
  *   verify  compare the restored database's row counts with the manifest and check that its migration is applied.
  *
+ * A backup made before 0005_focus.sql has no Focus tables; it restores with them empty and the migration's idle timer.
+ *
  *   node tools/backup-restore.ts config --database-name tasks-restore --database-id <uuid> --out <outside>/restore.toml
  *   node tools/backup-restore.ts sql --in <download dir> --out <outside>/tasks-restore.sql
  *   node tools/backup-restore.ts verify --in <download dir> --config <outside>/restore.toml --remote
@@ -33,7 +35,20 @@ const FORMAT = 'todofy-d1-backup-v1';
 /** D1 refuses a statement over 100 KB. A task row holds at most about 50 KB. */
 export const MAX_STATEMENT_BYTES = 90_000;
 /** Each table after the tables its rows reference. */
-export const RESTORE_ORDER = ['projects', 'sections', 'labels', 'filters', 'tasks', 'completions', 'requests'];
+export const RESTORE_ORDER = [
+  'projects',
+  'sections',
+  'labels',
+  'filters',
+  'tasks',
+  'completions',
+  'requests',
+  'day_steps',
+  'focus_entries',
+  'focus_timer',
+];
+/** The tables 0005_focus.sql added. Older backups lack all three; the migration seeds the one timer row. */
+export const FOCUS_TABLES = ['day_steps', 'focus_entries', 'focus_timer'];
 
 export class RestoreError extends Error {}
 
@@ -72,7 +87,9 @@ export function readBackup(root: string): Backup {
   if (!section)
     throw new RestoreError('manifest.json has no tasks section: the backup was made before Tasks was in it');
   const names = section.tables.map((table) => table.name);
-  if ([...names].sort().join() !== [...RESTORE_ORDER].sort().join())
+  const given = [...names].sort().join();
+  const beforeFocus = RESTORE_ORDER.filter((name) => !FOCUS_TABLES.includes(name));
+  if (given !== [...RESTORE_ORDER].sort().join() && given !== beforeFocus.sort().join())
     throw new RestoreError(`unexpected Tasks tables: ${names.join(', ')}`);
   section.tables.sort((a, b) => RESTORE_ORDER.indexOf(a.name) - RESTORE_ORDER.indexOf(b.name));
   const rows = new Map<string, Row[]>();
@@ -177,6 +194,15 @@ function missingReferences(rows: Map<string, Row[]>): string[] {
   return missing;
 }
 
+/** The Focus tables a backup lacks, with the rows a migrated database holds in them: none, and the idle timer. */
+export function missingFocusTables(section: TasksSection): { name: string; rows: number }[] {
+  const names = new Set(section.tables.map((table) => table.name));
+  return FOCUS_TABLES.filter((name) => !names.has(name)).map((name) => ({
+    name,
+    rows: name === 'focus_timer' ? 1 : 0,
+  }));
+}
+
 /** The restore SQL: every row once, as an INSERT that a re-run leaves alone. */
 export function restoreSql({ section, rows }: Backup): { sql: string; statements: number } {
   const missing = missingReferences(rows);
@@ -190,6 +216,8 @@ export function restoreSql({ section, rows }: Backup): { sql: string; statements
     const values = rows.get(table.name) ?? [];
     const ordered = table.name === 'projects' || table.name === 'tasks' ? parentsFirst(table.name, values) : values;
     const insert = `INSERT INTO ${table.name}(${table.columns.join(',')}) VALUES`;
+    // The migration seeded an idle timer; the backed-up one, running or not, takes its place.
+    if (table.name === 'focus_timer' && ordered.length) lines.push('DELETE FROM focus_timer;');
     for (const row of ordered) {
       const statement = `${insert}(${table.columns.map((column) => literal(row[column])).join(',')}) ON CONFLICT DO NOTHING;`;
       if (Buffer.byteLength(statement) > MAX_STATEMENT_BYTES)
@@ -244,7 +272,7 @@ function verifyLines(section: TasksSection, found: Row): { ok: boolean; lines: s
   const applied = JSON.parse(found.migrations as string) as string[];
   let ok = applied.includes(section.schema_version);
   const lines = [`${ok ? 'PASS' : 'FAIL'} schema_version ${section.schema_version}${ok ? '' : ' (not applied)'}`];
-  for (const table of section.tables) {
+  for (const table of [...section.tables, ...missingFocusTables(section)]) {
     const matches = found[table.name] === table.rows;
     ok &&= matches;
     lines.push(`${matches ? 'PASS' : 'FAIL'} ${table.name} rows=${String(found[table.name])}/${String(table.rows)}`);
@@ -254,7 +282,9 @@ function verifyLines(section: TasksSection, found: Row): { ok: boolean; lines: s
 
 function verify(root: string, args: string[]): { ok: boolean; lines: string[] } {
   const { section } = readBackup(root);
-  const counts = section.tables.map((table) => `(SELECT count(*) FROM ${table.name}) AS ${table.name}`);
+  const counts = [...section.tables, ...missingFocusTables(section)].map(
+    (table) => `(SELECT count(*) FROM ${table.name}) AS ${table.name}`,
+  );
   const query = `SELECT (SELECT json_group_array(name) FROM d1_migrations) AS migrations, ${counts.join(', ')}`;
   const [command = WRANGLER, ...prefix] = (option(args, '--wrangler') ?? WRANGLER).split(/\s+/);
   const config = option(args, '--config');
@@ -303,6 +333,9 @@ async function main(): Promise<boolean> {
     const { start, end } = backup.section.change_sequence;
     lines = backup.section.tables.map((table) => `PASS ${table.name} rows=${String(table.rows)}`);
     lines.push(`statements=${String(statements)}`);
+    const absent = missingFocusTables(backup.section).map((table) => table.name);
+    if (absent.length)
+      lines.push(`NOTE ${absent.join(', ')}: not in this backup (made before 0005_focus.sql); they restore as migrated`);
     if (start !== end)
       lines.unshift(
         `WARN Tasks changed while the backup ran (change ${String(start)} to ${String(end)}): rows may mix both`,

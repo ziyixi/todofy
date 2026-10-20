@@ -90,6 +90,19 @@ test('a plan and its pages hold every row of every table', async () => {
   });
   expect(done.status, await done.clone().text()).toBe(200);
   await harness.db.prepare('UPDATE tasks SET sort_order=1.25 WHERE id=?').bind(parent.id).run();
+  // A Focus queue row and a time record; the migration seeds the idle timer.
+  await harness.db.batch([
+    harness.db
+      .prepare(
+        "INSERT INTO day_steps(day,task_id,position,done_at,created_at,updated_at) VALUES('2030-10-21',?,1.5,2,1,2)",
+      )
+      .bind(child.id),
+    harness.db
+      .prepare(
+        "INSERT INTO focus_entries(id,task_id,day,seconds,started_at,source,area,created_at,updated_at) VALUES('synthetic-entry',?,'2030-10-21',1500,1,'timer','work',2,2)",
+      )
+      .bind(child.id),
+  ]);
 
   const planned = await plan();
   const migrations = (await readdir(join(dirname(fileURLToPath(import.meta.url)), '../../../migrations'))).sort();

@@ -50,10 +50,14 @@ TASKS_TABLES = {
     "tasks": "id",
     "completions": "sequence",
     "requests": "id",
+    "day_steps": "day, task_id",
+    "focus_entries": "id",
+    "focus_timer": "id",
     "task_labels": "task_id, label_id",
 }
-# Seeded Tasks rows (seed_tasks): 3 projects, a section, a label, a filter, 252 tasks, 2 completions, a receipt.
-TASK_ROWS, TASKS_ROWS = 252, 3 + 1 + 1 + 1 + 252 + 2 + 1
+# Seeded Tasks rows (seed_tasks): 3 projects, a section, a label, a filter, 252 tasks, 2 completions, a receipt,
+# a Focus queue row and a time record, and the timer row Tasks' migration seeds.
+TASK_ROWS, TASKS_ROWS = 252, 3 + 1 + 1 + 1 + 252 + 2 + 1 + 1 + 1 + 1
 # Seeded prefixes: six complete ones and an incomplete one, all older than the jobs' own.
 OLD_COMPLETE = [f"backups/2020-0{month}-05/" for month in range(1, 7)]
 OLD_INCOMPLETE = "backups/2020-01-12/"
@@ -188,7 +192,11 @@ def seed_tasks(worker: Worker) -> None:
         "INSERT INTO completions (sequence, id, task_id, title, completed_at, imported)"
         " VALUES (5, 'c5', 't007', 'Synthetic task 7', 7, 1), (9, 'c9', 't014', 'Synthetic task 14', 14, 0);"
         "INSERT INTO requests (id, fingerprint, response, created_at, revision_guard)"
-        " VALUES ('00000000-0000-4000-8000-000000000009', 'f', '{\"title\":\"Stored first\"}', 1, 1)",
+        " VALUES ('00000000-0000-4000-8000-000000000009', 'f', '{\"title\":\"Stored first\"}', 1, 1);"
+        "INSERT INTO day_steps (day, task_id, position, created_at, updated_at)"
+        " VALUES ('2026-10-19', 't-child', 1.5, 1, 1);"
+        "INSERT INTO focus_entries (id, task_id, day, seconds, source, area, created_at, updated_at)"
+        " VALUES ('synthetic-entry', 't-child', '2026-10-19', 1500, 'manual', 'work', 1, 1)",
     )
 
 

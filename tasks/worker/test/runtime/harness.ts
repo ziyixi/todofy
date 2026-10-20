@@ -117,7 +117,8 @@ export async function startHarness(
     .run();
   for (const file of (await readdir(migrations)).filter((f) => f.endsWith('.sql')).sort()) {
     const sql = (await readFile(join(migrations, file), 'utf8')).replace(/--[^\n]*/g, '');
-    for (const statement of sql.split(/;\s*(?=(?:ALTER|CREATE|DROP|PRAGMA)\b)/i))
+    // A seed INSERT starts its own line; the INSERTs in trigger bodies are indented and stay in their trigger.
+    for (const statement of sql.split(/;\s*(?=(?:ALTER|CREATE|DROP|PRAGMA)\b)|;\s*\n(?=INSERT\b)/i))
       if (statement.trim()) await db.prepare(statement).run();
     await db.prepare('INSERT INTO d1_migrations(name) VALUES(?)').bind(file).run();
   }
