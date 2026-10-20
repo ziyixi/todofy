@@ -84,8 +84,6 @@ from todofy.runtime import (
     ops,
     plus_api,
     plus_receipts,
-    plus_tasks,
-    plus_week,
     reminder,
     reports,
     retention,
@@ -643,8 +641,8 @@ class TodofyCore(DurableObject):
             )
             self.sql.exec("DELETE FROM llm_inflight WHERE event_id = ?", row.event_id)
 
-    # The pause of every task write, shared with runtime/gtd.py (the weekly review), runtime/intents.py
-    # (task-intent-v1 creates) and runtime/plus_week.py.
+    # The pause of every task write, shared with runtime/gtd.py (the weekly review) and runtime/intents.py
+    # (task-intent-v1 creates).
     def task_writes_wait(self, now: int) -> int | None:
         return self._task_writes_wait(now)
 
@@ -708,10 +706,6 @@ class TodofyCore(DurableObject):
             worked = await self._step(now, writes_open=self._task_writes_wait(now) is None)
         await self._ticks()
         await self._gtd_tick()
-        try:
-            await plus_week.tick(self)
-        except (plus_tasks.PlusError, JsException) as error:
-            _log(plus="weekly_check_failed", code=getattr(error, "reason", "UNAVAILABLE"))
         await storage.setAlarm(await self._next_alarm_ms(worked))
 
     async def _arm_watchdog(self) -> None:

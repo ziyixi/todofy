@@ -1,17 +1,15 @@
-"""The Plus API's reads and writes of the Tasks store, with Tasks' failures as PlusService reasons."""
+"""Mail's reads and writes of the Tasks store, with Tasks' failures as PlusService reasons."""
 
 from typing import Any
 
-from todofy.core import native_task_view, plan
-from todofy.runtime import native_plus, native_tasks
+from todofy.core import native_task_view
+from todofy.runtime import native_tasks
 
-# The provider of every task ID the planning store keeps (plan_store: external_id with its provider).
+# The provider of every task and label ID Mail names (ExternalRef.provider).
 PROVIDER = "tasks"
-# The task IDs one read of the open tasks (active) may name.
-ACTIVE_READ = 200
 
-# Tasks' own reasons that Plan and Mail can explain better than the HTTP status alone. Tasks answers 400 for
-# both BAD_REQUEST and PRECONDITION_FAILED, and 409 for both ETAG_MISMATCH and ALREADY_EXISTS (a reused ID).
+# Tasks' own reasons that Mail can explain better than the HTTP status alone. Tasks answers 400 for both
+# BAD_REQUEST and PRECONDITION_FAILED, and 409 for both ETAG_MISMATCH and ALREADY_EXISTS (a reused ID).
 NATIVE_REASONS = {
     "BAD_REQUEST": "BAD_REQUEST",
     "PRECONDITION_FAILED": "ACTION_NOT_ALLOWED",
@@ -27,7 +25,7 @@ class PlusError(Exception):
 
 
 async def native(awaitable: Any) -> Any:
-    """``awaitable``'s value; a Tasks failure becomes a PlusError with the reason Plan shows."""
+    """``awaitable``'s value; a Tasks failure becomes a PlusError with the reason Mail shows."""
     try:
         return await awaitable
     except native_tasks.NativeTasksError as error:
@@ -40,44 +38,25 @@ async def native(awaitable: Any) -> Any:
         raise PlusError(reason, error.status) from error
 
 
-async def metadata(core: Any) -> dict[str, Any]:
-    """The account's timezone, labels and filters, from one Tasks catalog read."""
-    return native_task_view.metadata(await native(native_tasks.catalog(core.env)))
-
-
-async def tasks(core: Any, limit: int = 100, cursor: str = "") -> tuple[list[dict[str, Any]], str]:
-    """One page of open tasks."""
-    return await native(native_tasks.page(core.env, cursor=cursor, limit=limit))
+async def labels(core: Any) -> dict[str, str]:
+    """The owner's labels in Tasks, their names by ID, from one catalog read."""
+    catalog = native_task_view.metadata(await native(native_tasks.catalog(core.env)))
+    return {label["id"]: label["name"] for label in catalog["labels"]}
 
 
 async def task(core: Any, task_id: str) -> dict[str, Any]:
     return await native(native_tasks.task(core.env, task_id))
 
 
-async def active(core: Any, task_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """The open tasks among ``task_ids`` (at most ACTIVE_READ), by ID. An incomplete answer raises: a task
-    missing from it would look closed."""
-    result: dict[str, dict[str, Any]] = {}
-    for start in range(0, len(task_ids), 100):
-        page, following = await native(native_tasks.page(core.env, ids=task_ids[start : start + 100]))
-        if following:
-            raise PlusError("UNAVAILABLE")
-        result.update({item["id"]: item for item in page})
-    return result
-
-
-async def closed_as(core: Any, task_id: str) -> str | None:
-    """How a task no longer listed as open closed: 'completed', 'deleted' (Tasks no longer has it), or None when
-    it is open again."""
-    try:
-        current = await task(core, task_id)
-    except PlusError as error:
-        if error.reason == "NOT_FOUND":
-            return plan.DELETED
-        raise
-    return plan.COMPLETED if current.get("checked") else None
-
-
 async def commands(core: Any, operations: list[dict[str, Any]]) -> dict[str, Any]:
-    """The frozen Tasks operations of one receipt (runtime/native_plus.py), each run at most once."""
-    return await native(native_plus.commands(core, operations))
+    """The frozen Tasks operations of one receipt (runtime/plus_receipts.py), in order, and their tasks' IDs. Each
+    carries a request ID derived from the receipt's (core/mailbox.command_id), which Tasks keeps with its first
+    answer: sending one again after a lost answer replays that answer instead of writing twice. A receipt started
+    while Todoist was still a store holds Sync envelopes ("type"), which are refused."""
+    if any("type" in operation for operation in operations):
+        raise PlusError("ACTION_NOT_ALLOWED")
+    task_ids = []
+    for operation in operations:
+        answer = await native(native_tasks.call(core.env, operation["method"], operation["body"]))
+        task_ids.append(str(answer["id"]))
+    return {"task_ids": task_ids}

@@ -32,7 +32,6 @@ from todofy.core.gtd import GtdCode, Scope, SnapshotStatus
 from todofy.core.metrics import Step, StepPoint
 from todofy.core.request_id import todoist_request_id
 from todofy.core.sql import gtd as sql
-from todofy.core.sql import plus as plus_sql
 from todofy.core.sql import reminders as reminder_sql
 from todofy.core.todoist_request import build_task_request
 from todofy.core.vocab import ATTENTION_AGE_SECONDS, ReminderState
@@ -492,12 +491,11 @@ def _outcome(verdict: TaskVerdict) -> tuple[ReminderState, str]:
 
 async def _review_body(env: Any, coordinator: Any, state: State, week: str, now: int) -> str:
     db, today = env.DB, rules.day_of(now)
-    days, attention, history, plus = await db.batch(
+    days, attention, history = await db.batch(
         [
             db.prepare(sql.DAILY_RANGE.sql).bind(rules.shift(today, -13), today, 28),
             db.prepare(reminder_sql.ATTENTION_COUNT.sql).bind(source_id(env), now - ATTENTION_AGE_SECONDS),
             db.prepare(sql.REVIEW_HISTORY.sql).bind(rules.week_shift(week, -HISTORY_WEEKS), HISTORY_WEEKS + 1),
-            db.prepare(plus_sql.SETTINGS).bind(),
         ]
     )
     _refresh_reviews(state, [dict(row) for row in history.results], {})
@@ -536,9 +534,8 @@ async def _review_body(env: Any, coordinator: Any, state: State, week: str, now:
         public_host=var(env, "TODOFY_PUBLIC_HOST"),
         dashboard_url=None if report is None else report.dashboard_url,
         oldest_inbox=oldest,
-        plus_review=any(dict(row)["enabled"] for row in plus.results),
         task_url=origin + "/?task=",
-        plus_review_url=origin + "/?review=1#/plan",
+        plan_review_url=origin + "/?review=1#/plan",
     )
     return rules.review_body(facts, now)
 

@@ -419,16 +419,9 @@ def test_the_review_goes_to_the_inbox_without_a_review_project(probe, unset):
     assert created["description"].startswith("快照：本周没有可用的 Tasks 快照")
 
 
-def test_the_review_links_plans_checklist_once_planning_is_set_up(probe):
+def test_the_review_links_plans_checklist(probe):
     review(probe, SUNDAY)
-    assert "review=1" not in probe.created()[0]["description"]
-    probe.insert("plus_settings", id=1, mapping="{}", timezone="UTC", week_start="2026-09-28", enabled=1)
-    try:
-        review(probe, SUNDAY + 7 * DAY)
-    finally:
-        probe.sql("DELETE FROM plus_settings")
-    [_, later] = probe.created()
-    assert later["description"].endswith(f"   周回顾：{TASKS_ORIGIN}/?review=1#/plan\n")
+    assert probe.created()[0]["description"].endswith(f"   周回顾：{TASKS_ORIGIN}/?review=1#/plan\n")
 
 
 def test_a_failed_review_is_retried_hourly_then_stops(probe):

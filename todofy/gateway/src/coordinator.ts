@@ -68,7 +68,7 @@ export interface Coordinator extends Rpc.DurableObjectBranded {
    */
   owner_ui(owner: string, method: string, request: string, cursor: string | null): Promise<UiAnswer>;
   setup(): Promise<CoreSetup>;
-  /** One PlusService rpc from Tasks' Planning channel; refuses before dispatch unless the core uses Tasks. */
+  /** One PlusService rpc from Tasks' Planning channel (Mail, the weekly review); refuses without a TASKS binding. */
   plus_native_ui(method: string, request: string): Promise<UiAnswer>;
   // ops-v1 (the Ops entrypoint, src/ops.ts). Structured inputs travel as JSON text; the core reads them strictly and
   // writes every answer with the wire JSON profile (worker/todofy/core/ops.py).

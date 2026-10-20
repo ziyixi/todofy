@@ -595,11 +595,9 @@ class ReviewFacts:
     dashboard_url: str | None
     # Up to REVIEW_OLDEST_LINKS IDs of the snapshot day's oldest inbox tasks, oldest first (links only).
     oldest_inbox: tuple[str, ...] = ()
-    # Planning is set up (plus_settings): link Plan's weekly review checklist.
-    plus_review: bool = False
     # Links on the Tasks origin (TASKS_PUBLIC_URL): a task by ID, and Plan's review checklist.
     task_url: str = ""
-    plus_review_url: str = ""
+    plan_review_url: str = ""
 
 
 REVIEW_OLDEST_LINKS = 3
@@ -696,8 +694,8 @@ def review_body(facts: ReviewFacts, now: int) -> str:
         links.append(f"面板：{facts.dashboard_url}")
     if facts.public_host:
         links.append(f"Todofy GTD：https://{facts.public_host}/gtd")
-    if facts.plus_review:
-        links.append(f"周回顾：{facts.plus_review_url}")
+    if facts.plan_review_url:
+        links.append(f"周回顾：{facts.plan_review_url}")
     if links:
         lines.append("   ".join(links))
     body = "\n".join(lines) + "\n"

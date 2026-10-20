@@ -182,7 +182,7 @@ def test_incomplete_native_scan_cannot_claim_no_matching_task(runtime):
     assert len(service.calls) == 11
 
 
-def test_projection_keeps_planning_semantics_and_native_concurrency():
+def test_projection_keeps_task_semantics_and_native_concurrency():
     source = native_row("native-one") | {
         "label_ids": ["label-one"],
         "priority": 1,
@@ -205,78 +205,6 @@ def test_projection_keeps_planning_semantics_and_native_concurrency():
     assert native_task_view.metadata(CATALOG)["timezone"] == "America/Los_Angeles"
 
 
-def test_planning_page_reuses_one_metadata_read_and_refreshes_it_for_the_next_request(runtime, monkeypatch):
-    from todofy.runtime import plus_api
-
-    service = Service()
-    service.pages = [{"tasks": [native_row("first")]}, {"tasks": [native_row("second")]}]
-    env = types.SimpleNamespace(TASKS=service, DB=D1())
-    core = types.SimpleNamespace(env=env, plus_lock=asyncio.Lock())
-    monkeypatch.setattr(plus_api, "account_day", lambda _timezone: "2026-10-17")
-    for task_id in ("first", "second"):
-        answer = asyncio.run(
-            plus_api.handle(core, "ListPlanningTasks", json.dumps({"task_ids": [task_id], "page_size": 1}))
-        )
-        assert "error" not in answer
-        [task] = json.loads(answer["ok"])["planning_tasks"]
-        assert task["id"] == task_id and task["title"] == "Synthetic task"
-    assert [method for method, _request in service.calls] == ["GetCatalog", "ListTasks"] * 2
-    assert all(
-        request == {"name": "catalog", "include_task_counts": False}
-        for method, request in service.calls
-        if method == "GetCatalog"
-    )
-
-
-def test_a_planning_page_of_two_hundred_reads_two_task_pages_with_one_catalog(runtime, monkeypatch):
-    from todofy.runtime import plus_api
-
-    service = Service()
-    first = [native_row(f"first-{index}") for index in range(100)]
-    second = [native_row(f"second-{index}") for index in range(60)]
-    service.pages = [{"tasks": first, "next_page_token": "after-first"}, {"tasks": second}]
-    env = types.SimpleNamespace(TASKS=service, DB=D1())
-    core = types.SimpleNamespace(env=env, plus_lock=asyncio.Lock())
-    monkeypatch.setattr(plus_api, "account_day", lambda _timezone: "2026-10-17")
-    answer = asyncio.run(plus_api.handle(core, "ListPlanningTasks", json.dumps({"page_size": 200})))
-    assert "error" not in answer
-    page = json.loads(answer["ok"])
-    assert len(page["planning_tasks"]) == 160 and not page.get("next_page_token")
-    assert [method for method, _request in service.calls] == ["GetCatalog", "ListTasks", "ListTasks"]
-    assert service.calls[2][1]["page_token"] == "after-first" and service.calls[2][1]["page_size"] == 100
-
-
-def test_a_planning_write_reads_the_tasks_catalog_once(runtime, monkeypatch):
-    from tests.unit.plus_support import Storage
-    from todofy.core import native_plan as plan_rules
-    from todofy.core import plus
-    from todofy.runtime import plus_api, plus_receipts
-
-    service = Service()
-    env = types.SimpleNamespace(TASKS=service, DB=D1())
-    storage = Storage([])
-    for statement in plus_receipts.DO_SCHEMA:
-        storage.sql.exec(statement)
-    core = types.SimpleNamespace(env=env, sql=storage.sql, ctx=types.SimpleNamespace(storage=storage))
-    monkeypatch.setattr(plus_api, "account_day", lambda _timezone: "2026-10-17")
-    env.DB.db.execute("INSERT INTO plan_settings VALUES ('native', '{\"initialized\":true}', 1)")
-    env.DB.db.execute(
-        "INSERT INTO plus_settings(id,mapping,timezone,week_start,enabled) VALUES(1,'{}','America/Los_Angeles',?,1)",
-        (plus.week_start("2026-10-17"),),
-    )
-    shown = asyncio.run(runtime.native.task(env, "native-one"))
-    service.calls.clear()
-    request = {
-        "task_id": "native-one",
-        "stage": "committed",
-        "etag": plus.task_etag(shown, plan_rules.CANONICAL_MAPPING),
-        "request_id": str(uuid.uuid4()),
-    }
-    answer = asyncio.run(plus_api.mutate(core, "SetTaskPlan", request))
-    assert answer["task"]["id"] == "native-one"
-    assert [method for method, _request in service.calls] == ["GetCatalog", "GetTask", "GetTask"]
-
-
 @pytest.mark.parametrize(
     ("status", "tasks_reason", "plus_reason"),
     [
@@ -289,7 +217,7 @@ def test_a_planning_write_reads_the_tasks_catalog_once(runtime, monkeypatch):
         (403, "", "ACTION_NOT_ALLOWED"),
     ],
 )
-def test_tasks_error_reasons_reach_plan_and_mail(runtime, status, tasks_reason, plus_reason):
+def test_tasks_error_reasons_reach_mail(runtime, status, tasks_reason, plus_reason):
     from todofy.runtime import plus_tasks
 
     service = Service()

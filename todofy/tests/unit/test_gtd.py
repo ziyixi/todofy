@@ -381,7 +381,6 @@ def test_the_review_body_is_counts_trends_and_links():
         public_host="todofy.example",
         dashboard_url="https://home.ziyixi.science/",
         task_url="https://tasks.example/?task=",
-        plus_review_url="https://tasks.example/?review=1#/plan",
     )
     body = gtd.review_body(facts, NOW + 4 * 3600)
     assert body == (
@@ -417,8 +416,9 @@ def test_the_review_body_is_counts_trends_and_links():
     )
     assert "bad id" not in text
     assert gtd.review_title("2026-W40") == "每周回顾 2026-W40"
-    # With planning set up, the links end with Plan's review checklist.
-    assert gtd.review_body(replace(facts, plus_review=True), NOW + 4 * 3600).endswith(
+    # With the Tasks origin, the links end with Plan's review checklist.
+    linked = replace(facts, plan_review_url="https://tasks.example/?review=1#/plan")
+    assert gtd.review_body(linked, NOW + 4 * 3600).endswith(
         "Todofy GTD：https://todofy.example/gtd   周回顾：https://tasks.example/?review=1#/plan\n"
     )
 

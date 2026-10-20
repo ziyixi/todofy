@@ -60,10 +60,6 @@ class D1:
     async def batch(self, statements: list[Statement]) -> list[Any]:
         return [types.SimpleNamespace(results=statement.rows()) for statement in statements]
 
-    def weeks(self) -> dict[str, tuple[str, int, int]]:
-        rows = self.db.execute("SELECT task_id, week_start, committed, bet FROM plus_weeks").fetchall()
-        return {row[0]: (row[1], row[2], row[3]) for row in rows}
-
 
 class Cursor:
     def __init__(self, rows: list[sqlite3.Row], rows_written: int) -> None:
@@ -120,22 +116,13 @@ def stubbed_pyodide(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]
                 del sys.modules[name]
 
 
-def plan_ready(db: D1, *, timezone: str, week: str) -> None:
-    """Planning as the one-time cutover leaves it (tools/prepare_native_plan.py): initialised and enabled."""
-    db.db.execute("INSERT INTO plan_settings VALUES ('native', '{\"initialized\":true}', 1)")
-    db.db.execute(
-        "INSERT INTO plus_settings(id,mapping,timezone,week_start,enabled) VALUES(1,'{}',?,?,1)", (timezone, week)
-    )
-    db.db.commit()
-
-
 def _status(code: int, reason: str) -> types.SimpleNamespace:
     details = [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": reason}]
     return types.SimpleNamespace(status=code, body=json.dumps({"error": {"code": code, "details": details}}))
 
 
 class NativeTasks:
-    """The TASKS binding of a host test: the Tasks rules the Plus handlers rely on, over plain dicts.
+    """The TASKS binding of a host test: the Tasks rules the Mail handlers rely on, over plain dicts.
 
     Every write takes the task's current etag; a request ID runs once (the same request answers as before, another
     is ALREADY_EXISTS); a recurring task completes by counting up and staying open. ``calls`` journals each call,

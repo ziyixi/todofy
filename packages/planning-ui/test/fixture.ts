@@ -36,7 +36,7 @@ const task = (
   ...value,
   explicitStage: value.explicitStage ?? value.stage ?? "none",
 });
-/** The planning flags SetTaskPlan's switches set (core/native_plan.py). */
+/** The planning flags the plan switches set (Task.planning_flags in Tasks). */
 const FLAGS: Partial<Record<keyof PlanUpdate, string>> = {
   quick: "quick",
   waiting: "waiting",
@@ -335,7 +335,7 @@ export function createPrototype(
       return structuredClone(plan.tasks.find((task) => task.id === item.id)!);
     },
     async setWeeklyBet(next) {
-      // As Todofy answers SetWeeklyBet: the saved text is a replay, only this week and the next
+      // As Tasks answers UpdateWeeklyBet: the saved text is a replay, only this week and the next
       // take a write, and only from the etag shown.
       const text = betText(next.text);
       const saved = weeklyBet(plan.weeklyBets, next.weekStart, next.area);

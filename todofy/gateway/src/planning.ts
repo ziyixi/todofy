@@ -2,7 +2,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import type { Env } from './env.ts';
 import { nativePlanning } from './plus.ts';
 
-/** The standalone Tasks UI calls the existing planning API through this private binding. */
+/** Tasks' Mail page and Plan's weekly review reach PlusService through this private binding. */
 export class Planning extends WorkerEntrypoint<Env, { source?: string }> {
   override async fetch(request: Request): Promise<Response> {
     if (this.ctx.props.source !== 'tasks') return new Response(null, { status: 403 });

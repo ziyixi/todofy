@@ -7,23 +7,13 @@ import { nativePlanning } from '../src/plus.ts';
 
 /** A minimal valid request for each method Tasks calls on its Planning channel. */
 const NATIVE_CALLS: Record<string, object> = {
-  readPlan: {},
   readWeeklyReview: { weekStart: '2026-10-12' },
-  listPlanningTasks: {},
-  setTaskPlan: { taskId: 'task-one', etag: 'shown' },
-  setTaskLead: { taskId: 'task-one', etag: 'shown' },
-  appendTaskSteps: { parentId: 'task-one', steps: [{ title: 'Synthetic step' }] },
-  setWeeklyBet: { weekStart: '2026-10-12', area: 'work' },
-  setTaskDependency: { taskId: 'task-one', prerequisiteId: 'task-two' },
-  resolveDependencies: { taskIds: ['task-one'] },
-  reorderTasks: { taskIds: ['task-one'], taskId: 'task-one' },
   listMailItems: {},
   readMailSummary: { id: 'event-one' },
   convertMailItem: { eventId: 'event-one', etag: 'shown' },
   deleteMailSummaries: { eventIds: ['event-one'] },
   readMailSettings: {},
   updateMailCategories: { etag: 'shown' },
-  verifyPlanStore: {},
 };
 
 /** The generated PlusService client over the private Planning channel. */
@@ -38,9 +28,10 @@ function channel(env: Env, path: string, method = 'GET', body?: unknown): Promis
     method, headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   }), env);
 }
-describe('Native Tasks planning transport', () => {
+
+describe('Planning channel transport', () => {
   it('reaches the core for exactly the methods Tasks calls and refuses every other PlusService method', async () => {
-    const { env, core } = fakes({}, call => uiOk(call.args[0] === 'ReadPlan' ? { plan: {} } : {}));
+    const { env, core } = fakes({}, () => uiOk({}));
     const client = planningClient(env) as unknown as Record<string, (input: object) => Promise<unknown>>;
     const native = PlusService.methods.filter(method => method.localName in NATIVE_CALLS);
     expect(native).toHaveLength(Object.keys(NATIVE_CALLS).length);
@@ -64,8 +55,8 @@ describe('Native Tasks planning transport', () => {
     expect(core).toHaveLength(0);
   });
   it('uses the core entrypoint that verifies the native source itself', async () => {
-    const { env, core } = fakes({}, () => uiOk({ plan: {} }));
-    const response = await nativePlanning(new Request('https://planning.internal/api/plus/v1/plan:read'), env);
+    const { env, core } = fakes({}, () => uiOk({}));
+    const response = await nativePlanning(new Request('https://planning.internal/api/plus/v1/mailSettings:read'), env);
     expect(response.status).toBe(200);
     expect(core.map(call => call.method)).toEqual(['plus_native_ui']);
   });
@@ -91,8 +82,8 @@ describe('Native Tasks planning transport', () => {
     }
   });
   it('serves the Planning API on neither the owner host nor the hooks hosts', async () => {
-    const { env, core } = fakes({}, () => uiOk({ plan: {} }));
-    for (const path of ['/api/plus/v1/plan:read', '/api/plus/v1/mailItems']) {
+    const { env, core } = fakes({}, () => uiOk({}));
+    for (const path of ['/api/plus/v1/weeklyReview:read?week_start=2026-10-12', '/api/plus/v1/mailItems']) {
       expect((await hooks(env, path)).status, path).toBe(404);
       expect((await owner(env, path)).status, path).toBe(404);
     }
@@ -102,23 +93,12 @@ describe('Native Tasks planning transport', () => {
 
 describe('Planning channel behaviour', () => {
   it('refuses writes in maintenance but still answers the reads', async () => {
-    const { env, core } = fakes({ MAINTENANCE_MODE: 'true' }, () => uiOk({ plan: {} }));
-    expect((await channel(env, '/api/plus/v1/plan:read')).status).toBe(200);
+    const { env, core } = fakes({ MAINTENANCE_MODE: 'true' }, () => uiOk({}));
+    expect((await channel(env, '/api/plus/v1/mailItems')).status).toBe(200);
     const conversion = await channel(env, '/api/plus/v1/mailItems:convertMailItem', 'POST', { event_id: 'event-one', etag: 'shown' });
     expect(conversion.status).toBe(503);
     expect(await conversion.text()).toContain('MAINTENANCE');
-    expect(core.map(call => call.args[0])).toEqual(['ReadPlan']);
-  });
-  it('passes a reorder to the core as ReorderTasks with a generated request ID', async () => {
-    const answer = { tasks: [{ id: 'task-two', sort_order: 1 }], lane_order: { lane: 'weekly', task_ids: ['task-two', 'task-one'] } };
-    const { env, core } = fakes({}, () => uiOk(answer));
-    const response = await channel(env, '/api/plus/v1/tasks:reorder', 'POST', { task_ids: ['task-two', 'task-one'], task_id: 'task-two', lane: 'weekly' });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(answer);
-    const call = core.find(row => row.method === 'plus_native_ui');
-    expect(call?.args[0]).toBe('ReorderTasks');
-    const sent = JSON.parse(String(call?.args[1])) as { request_id: string; task_ids: string[]; task_id: string; lane: string };
-    expect(sent).toEqual({ request_id: expect.stringMatching(/^[0-9a-f-]{36}$/) as unknown, task_ids: ['task-two', 'task-one'], lane: 'weekly', task_id: 'task-two' });
+    expect(core.map(call => call.args[0])).toEqual(['ListMailItems']);
   });
   it('gives an omitted optional request ID a fresh identity', async () => {
     const { env, core } = fakes({}, () => uiOk({ deleted_event_ids: ['event-one'] }));

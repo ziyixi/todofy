@@ -1,17 +1,16 @@
-"""Actual Python -> TasksApi RPC -> D1 create and read."""
+"""Actual Python -> TasksApi RPC -> D1 create and read: Todofy's task creates and footer lookup, and Mail's
+conversion through its receipt (runtime/plus_api.py) on a real TodofyCore and the Tasks Worker's D1."""
 
 import json
 import shutil
 import uuid
 from collections.abc import Iterator
-from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from tests.runtime.harness import ROOT, Worker, _run, tasks_config
-from todofy.core.native_plan import CANONICAL_MAPPING
 from todofy.core.render import FOOTER_PREFIX
 
 EVENT = "6cd0ae26-2222-4222-8222-123456789012"
@@ -39,7 +38,7 @@ def native(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Worker]:
                 "d1_databases": [
                     {
                         "binding": "DB",
-                        "database_name": "native-planning-test",
+                        "database_name": "native-clients-test",
                         "database_id": "00000000-0000-4000-8000-000000000002",
                         "migrations_dir": str(ROOT / "migrations"),
                     }
@@ -71,28 +70,9 @@ def rpc(worker: Worker, method: str, body: dict[str, Any]) -> dict[str, Any]:
     return call(worker, "/native/call", {"method": method, "body": body})
 
 
-def planning(worker: Worker, method: str, **body: Any) -> dict[str, Any]:
-    return call(worker, "/native/plan", {"method": method, "body": body})
-
-
-@pytest.fixture(scope="module")
-def ready_plan(native: Worker) -> dict[str, Any]:
-    current = planning(native, "ReadPlan")["plan"]
-    document = json.dumps({"labels": CANONICAL_MAPPING, "etag": current["etag"]})
-    native.d1(
-        "INSERT OR REPLACE INTO plus_settings(id,mapping,timezone,week_start,enabled)"
-        f" VALUES(1,'{document}','{current['timezone']}','{current['week_start']}',1);"
-        "INSERT OR REPLACE INTO plan_settings VALUES ('native','{\"initialized\":true}',1)"
-    )
-    value = planning(native, "ReadPlan")["plan"]
-    assert value["enabled"] is True and value["native_planning"] is True
-    assert not value.get("labels") and not value.get("missing_labels")
-    return value
-
-
-def planning_task(worker: Worker, task_id: str) -> dict[str, Any]:
-    tasks = planning(worker, "ListPlanningTasks", page_size=100)["planning_tasks"]
-    return next(task for task in tasks if task["id"] == task_id)
+def plus(worker: Worker, method: str, **body: Any) -> dict[str, Any]:
+    """One PlusService rpc as Tasks' Planning channel reaches TodofyCore."""
+    return call(worker, "/native/plus", {"method": method, "body": body})
 
 
 def test_frozen_native_create_replay_and_full_footer_lookup(native):
@@ -111,16 +91,15 @@ def test_frozen_native_create_replay_and_full_footer_lookup(native):
     assert call(native, "/native/find", {"event_id": EVENT})["ids"] == [first["task_id"]]
 
 
-def test_native_mail_conversion_needs_no_inbox_project_or_planning_setup(native):
+def test_native_mail_conversion_needs_no_inbox_project(native):
     assert not rpc(native, "GetCatalog", {"name": "catalog"}).get("projects")
-    assert planning(native, "ReadPlan")["plan"].get("enabled", False) is False
     event_id = str(uuid.uuid4())
     native.d1(
         "INSERT INTO summaries(event_id,created_at,subject,summary,model)"
         f" VALUES('{event_id}',100,'Synthetic fresh Mail','Synthetic fresh summary','synthetic')"
     )
-    [mail] = planning(native, "ListMailItems")["mail_items"]
-    filed = planning(native, "ConvertMailItem", event_id=event_id, etag=mail["etag"], request_id=str(uuid.uuid4()))
+    [mail] = plus(native, "ListMailItems")["mail_items"]
+    filed = plus(native, "ConvertMailItem", event_id=event_id, etag=mail["etag"], request_id=str(uuid.uuid4()))
     assert "task" in filed, filed
     task = rpc(native, "GetTask", {"name": f"tasks/{filed['task']['id']}"})
     assert task.get("project_id", "") == ""
@@ -158,8 +137,8 @@ def test_intent_child_inherits_parent_project_without_rewriting_frozen_body(nati
     assert value["parent_id"] == parent["task_id"]
 
 
-def test_native_plus_filing_and_decimal_order_use_real_sqlite_receipts_and_tasks_d1(native):
-    label = rpc(native, "CreateLabel", {"label": {"title": "Synthetic planning"}, "request_id": str(uuid.uuid4())})
+def test_mail_task_operations_replay_through_tasks_receipts(native):
+    label = rpc(native, "CreateLabel", {"label": {"title": "Synthetic filing"}, "request_id": str(uuid.uuid4())})
     project = rpc(native, "CreateProject", {"project": {"title": "Synthetic filed"}, "request_id": str(uuid.uuid4())})
     value = rpc(
         native,
@@ -177,22 +156,12 @@ def test_native_plus_filing_and_decimal_order_use_real_sqlite_receipts_and_tasks
             },
         }
     ]
-    assert "error" not in call(native, "/native/plus", {"commands": filing})
+    assert call(native, "/native/commands", {"commands": filing}) == {"task_ids": [value["id"]]}
     filed = rpc(native, "GetTask", {"name": value["name"]})
     assert filed["project_id"] == project["id"] and filed["label_ids"] == [label["id"]] and filed["priority"] == 2
-    assert "error" not in call(native, "/native/plus", {"commands": filing})  # the journal answers the replay
+    # Resent after a lost answer, its etag is stale by now: Tasks' receipt answers it, nothing is written again.
+    assert call(native, "/native/commands", {"commands": filing}) == {"task_ids": [value["id"]]}
     assert rpc(native, "GetTask", {"name": value["name"]})["etag"] == filed["etag"]
-    reorder = [
-        {
-            "method": "ReorderTasks",
-            "body": {
-                "positions": [{"name": filed["name"], "etag": filed["etag"], "sort_order": 1.375}],
-                "request_id": str(uuid.uuid4()),
-            },
-        }
-    ]
-    assert "error" not in call(native, "/native/plus", {"commands": reorder})
-    assert rpc(native, "GetTask", {"name": value["name"]})["sort_order"] == 1.375
     stale = [
         {
             "method": "UpdateTask",
@@ -204,222 +173,11 @@ def test_native_plus_filing_and_decimal_order_use_real_sqlite_receipts_and_tasks
             },
         }
     ]
-    assert call(native, "/native/plus", {"commands": stale}) == {"error": 409}
+    assert call(native, "/native/commands", {"commands": stale}) == {"error": "ETAG_MISMATCH"}
     # A receipt started while Todoist was still a store holds a Sync command: refused, never converted.
     envelope = [{"type": "item_update", "uuid": str(uuid.uuid4()), "args": {"id": value["id"], "priority": 4}}]
-    assert call(native, "/native/plus", {"commands": envelope}) == {"error": 400}
+    assert call(native, "/native/commands", {"commands": envelope}) == {"error": "ACTION_NOT_ALLOWED"}
     assert rpc(native, "GetTask", {"name": value["name"]})["priority"] == 2
-
-
-def test_native_planning_state_replays_and_rejects_stale_writes_without_changing_task_content(native):
-    label = rpc(native, "CreateLabel", {"label": {"title": "Synthetic state context"}, "request_id": str(uuid.uuid4())})
-    task = rpc(
-        native,
-        "CreateTask",
-        {
-            "task": {
-                "title": "Synthetic native planning",
-                "label_ids": [label["id"]],
-                "due_date": "2026-11-03",
-                "deadline": "2026-11-30",
-            },
-            "request_id": str(uuid.uuid4()),
-        },
-    )
-    assert call(native, "/native/state", {"action": "ready"}) == {"ready": False}
-    request = {
-        "action": "save",
-        "task_id": task["id"],
-        "labels": ["committed", "office", "lead_2w", "waiting"],
-        "expected_rev": 0,
-        "request_id": str(uuid.uuid4()),
-    }
-    assert call(native, "/native/state", request) == {"revision": 1}
-    assert call(native, "/native/state", request) == {"revision": 1}
-    assert call(native, "/native/state", {**request, "request_id": str(uuid.uuid4()), "labels": ["quarter"]}) == {
-        "error": 409
-    }
-    assert rpc(native, "GetTask", {"name": task["name"]}) == task
-    projected = {"id": task["id"], "labels": [label["title"]], "updated_at": task["update_time"]}
-    [first] = call(native, "/native/state", {"action": "overlay", "tasks": [projected]})["tasks"]
-    assert set(first["labels"]) == {label["title"], "committed", "office", "lead_2w", "waiting"}
-    assert first["_native_plan_rev"] == 1 and first["_native_planning"] is True
-    assert call(
-        native,
-        "/native/state",
-        {**request, "expected_rev": 1, "request_id": str(uuid.uuid4()), "labels": ["quarter", "home", "quick"]},
-    ) == {"revision": 2}
-    # Even the first action cannot overwrite a later plan after its original receipt was lost.
-    assert call(native, "/native/state", request) == {"error": 409}
-    [changed] = call(native, "/native/state", {"action": "overlay", "tasks": [projected]})["tasks"]
-    assert set(changed["labels"]) == {label["title"], "quarter", "home", "quick", "task"}
-    assert changed["_native_plan_state"]["task"] is True
-    assert changed["_native_plan_rev"] == 2
-    # Existing Quick rows become schedulable without a backfill or a read-side write.
-    assert native.d1(
-        "SELECT quick,task,rev FROM plan_task_state WHERE task_id IN "
-        "(SELECT id FROM plan_tasks WHERE external_id='" + task["id"] + "')"
-    ) == [{"quick": 1, "task": 0, "rev": 2}]
-    assert native.d1("SELECT provider FROM plan_tasks WHERE external_id='" + task["id"] + "'") == [
-        {"provider": "tasks"}
-    ]
-    native.d1("INSERT INTO plan_settings VALUES ('native', '{\"initialized\":true}', 1)")
-    assert call(native, "/native/state", {"action": "ready"}) == {"ready": True}
-
-
-def test_missing_native_state_does_not_reinterpret_old_labels(native):
-    [task] = call(
-        native,
-        "/native/state",
-        {
-            "action": "overlay",
-            "tasks": [{"id": "synthetic-unseeded", "labels": ["committed", "home", "ordinary-context"]}],
-        },
-    )["tasks"]
-    assert task["labels"] == ["ordinary-context"]
-    assert task["_native_plan_rev"] == 0
-
-
-def test_actual_native_plan_actions_keep_gtd_state_out_of_task_labels(native, ready_plan):
-    label = rpc(native, "CreateLabel", {"label": {"title": "Synthetic content label"}, "request_id": str(uuid.uuid4())})
-    project = rpc(
-        native, "CreateProject", {"project": {"title": "Synthetic planned work"}, "request_id": str(uuid.uuid4())}
-    )
-    task = rpc(
-        native,
-        "CreateTask",
-        {
-            "task": {
-                "title": "Synthetic native commitment",
-                "project_id": project["id"],
-                "label_ids": [label["id"]],
-                "due_date": "2030-01-01",
-                "deadline": "2030-01-10",
-            },
-            "request_id": str(uuid.uuid4()),
-        },
-    )
-    shown = planning_task(native, task["id"])
-    request = {
-        "task_id": task["id"],
-        "etag": shown["etag"],
-        "request_id": str(uuid.uuid4()),
-        "stage": "committed",
-        "area": "work",
-        "quick": True,
-    }
-    planned = planning(native, "SetTaskPlan", **request)["task"]
-    assert planned["stage"] == planned["explicit_stage"] == "committed"
-    assert planned["area"] == "work" and planned["planning_flags"] == ["quick", "task"]
-    assert planned["labels"] == [label["title"]]
-    assert rpc(native, "GetTask", {"name": task["name"]}) == task
-    assert planning(native, "SetTaskPlan", **request)["task"] == planned
-    assert planning(native, "SetTaskPlan", **{**request, "request_id": str(uuid.uuid4()), "stage": "monthly"}) == {
-        "error": "ETAG_MISMATCH"
-    }
-
-    lead = {
-        "task_id": task["id"],
-        "etag": planned["etag"],
-        "request_id": str(uuid.uuid4()),
-        "deadline": "2030-01-12",
-        "lead_days": 21,
-    }
-    updated = planning(native, "SetTaskLead", **lead)["task"]
-    assert updated["lead_days"] == 21 and updated["deadline"] == "2030-01-12"
-    physical = rpc(native, "GetTask", {"name": task["name"]})
-    assert physical["due_date"] == task["due_date"] and physical["label_ids"] == [label["id"]]
-    assert physical["deadline"] == "2030-01-12"
-    assert planning(native, "SetTaskLead", **lead)["task"] == updated
-    assert rpc(native, "GetTask", {"name": task["name"]}) == physical
-
-    steps = {
-        "parent_id": task["id"],
-        "request_id": str(uuid.uuid4()),
-        "steps": [
-            {"title": "Synthetic first next step", "estimated_minutes": 45},
-            {"title": "Synthetic second next step", "estimated_minutes": 75},
-        ],
-    }
-    created = planning(native, "AppendTaskSteps", **steps)
-    assert len(created["task_ids"]) == 2
-    assert planning(native, "AppendTaskSteps", **steps) == created
-    children = rpc(native, "ListTasks", {"parent_id": task["id"], "page_size": 100})["tasks"]
-    assert [child["id"] for child in children] == created["task_ids"]
-    assert [child["duration_minutes"] for child in children] == [45, 75]
-    assert all(child["kind"] == "step" for child in children)
-    subset = planning(native, "ListPlanningTasks", page_size=100, task_ids=created["task_ids"])["planning_tasks"]
-    assert {row["id"] for row in subset} == set(created["task_ids"])
-    assert all(row["kind"] == "step" for row in subset)
-    assert all(child["project_id"] == project["id"] and not child.get("label_ids") for child in children)
-    assert all(planning_task(native, child["id"])["parent_id"] == task["id"] for child in children)
-
-
-def test_native_title_only_steps_inherit_parent_location_and_replay(native, ready_plan):
-    project = rpc(
-        native, "CreateProject", {"project": {"title": "Synthetic step project"}, "request_id": str(uuid.uuid4())}
-    )
-    section = rpc(
-        native,
-        "CreateSection",
-        {
-            "section": {"title": "Synthetic step section", "project_id": project["id"]},
-            "request_id": str(uuid.uuid4()),
-        },
-    )
-    for location in ({}, {"project_id": project["id"]}, {"project_id": project["id"], "section_id": section["id"]}):
-        parent = rpc(
-            native,
-            "CreateTask",
-            {
-                "task": {"title": "Synthetic title-only step parent", **location},
-                "task_id": "synthetic-imported-" + uuid.uuid4().hex,
-                "request_id": str(uuid.uuid4()),
-            },
-        )
-        request = {
-            "parent_id": parent["id"],
-            "steps": [{"title": "Synthetic title-only step"}],
-            "request_id": str(uuid.uuid4()),
-        }
-        created = planning(native, "AppendTaskSteps", **request)
-        assert len(created["task_ids"]) == 1, created
-        assert planning(native, "AppendTaskSteps", **request) == created
-        children = rpc(native, "ListTasks", {"parent_id": parent["id"]})["tasks"]
-        assert [child["id"] for child in children] == created["task_ids"]
-        [child] = children
-        assert child["kind"] == "step" and not child.get("duration_minutes")
-        assert child.get("project_id", "") == parent.get("project_id", "")
-        assert child.get("section_id", "") == parent.get("section_id", "")
-
-
-def test_native_week_reset_changes_planning_only_and_keeps_next_week_choices(native, ready_plan):
-    current = ready_plan["week_start"]
-    following = (date.fromisoformat(current) + timedelta(days=7)).isoformat()
-    roots = []
-    for name in ("Synthetic ended commitment", "Synthetic kept commitment"):
-        task = rpc(native, "CreateTask", {"task": {"title": name}, "request_id": str(uuid.uuid4())})
-        planned = planning(
-            native,
-            "SetTaskPlan",
-            task_id=task["id"],
-            etag=planning_task(native, task["id"])["etag"],
-            stage="committed",
-            request_id=str(uuid.uuid4()),
-        )
-        assert planned["task"]["stage"] == "committed"
-        roots.append(task)
-    for task, week in zip(roots, (current, following), strict=True):
-        native.d1(f"INSERT OR REPLACE INTO plus_weeks VALUES ('{task['id']}','{week}',1,0)")
-    assert call(native, "/native/reset-week", {"week": following}) == {"complete": True}
-    assert planning_task(native, roots[0]["id"])["stage"] == "weekly"
-    assert planning_task(native, roots[1]["id"])["stage"] == "committed"
-    for task in roots:
-        assert rpc(native, "GetTask", {"name": task["name"]}) == task
-    assert native.d1(f"SELECT task_id FROM plus_weeks WHERE task_id='{roots[0]['id']}'") == []
-    assert native.d1(f"SELECT task_id FROM plus_weeks WHERE task_id='{roots[1]['id']}'") == [
-        {"task_id": roots[1]["id"]}
-    ]
 
 
 @pytest.fixture(scope="module")
@@ -427,16 +185,16 @@ def active_label(native):
     return rpc(native, "CreateLabel", {"label": {"title": "active"}, "request_id": str(uuid.uuid4())})
 
 
-def test_native_mail_category_is_an_ordinary_tag_on_the_converted_inbox_task(native, ready_plan, active_label):
+def test_native_mail_category_is_an_ordinary_tag_on_the_converted_inbox_task(native, active_label):
     label = active_label
     event_id = str(uuid.uuid4())
     native.d1(
         "INSERT INTO summaries(event_id,created_at,subject,summary,model)"
         f" VALUES('{event_id}',103,'Synthetic mail with a category','Synthetic summary','synthetic')"
     )
-    settings = planning(native, "ReadMailSettings")
+    settings = plus(native, "ReadMailSettings")
     assert "destination" not in settings
-    saved = planning(
+    saved = plus(
         native,
         "UpdateMailCategories",
         categories=[
@@ -449,7 +207,7 @@ def test_native_mail_category_is_an_ordinary_tag_on_the_converted_inbox_task(nat
     )
     assert "error" not in saved, saved
     assert "destination" not in saved and len(saved["categories"]) == 1
-    listed = planning(native, "ListMailItems", page_size=50)
+    listed = plus(native, "ListMailItems", page_size=50)
     mail = next(item for item in listed["mail_items"] if item["id"] == event_id)
     request = {
         "event_id": event_id,
@@ -458,19 +216,16 @@ def test_native_mail_category_is_an_ordinary_tag_on_the_converted_inbox_task(nat
         "categories_etag": listed["categories_etag"],
         "request_id": str(uuid.uuid4()),
     }
-    converted = planning(native, "ConvertMailItem", **request)
+    converted = plus(native, "ConvertMailItem", **request)
     assert "task" in converted, converted
     physical = rpc(native, "GetTask", {"name": f"tasks/{converted['task']['id']}"})
     assert physical.get("project_id", "") == ""
     assert physical["label_ids"] == [label["id"]] and physical["priority"] == 2
-    projected = planning_task(native, physical["id"])
-    assert projected["labels"] == ["active"]
-    assert "active" not in projected.get("planning_flags", []) and projected["stage"] == "none"
-    assert planning(native, "ConvertMailItem", **request) == converted
+    assert plus(native, "ConvertMailItem", **request) == converted
     assert rpc(native, "GetTask", {"name": physical["name"]}) == physical
 
 
-def test_native_mail_exists_before_task_and_explicit_conversion_creates_only_one_inbox_task(native, ready_plan):
+def test_native_mail_exists_before_task_and_explicit_conversion_creates_only_one_inbox_task(native):
     event_id = str(uuid.uuid4())
     title = "Synthetic deferred mail " + "😀" * 250
     summary = "Full synthetic summary.\n" + "😀" * 9000
@@ -479,18 +234,18 @@ def test_native_mail_exists_before_task_and_explicit_conversion_creates_only_one
         f" VALUES('{event_id}',100,'{title}','{summary}','Synthetic brief.','synthetic')"
     )
     before = rpc(native, "ListTasks", {"view": "all", "page_size": 100})["tasks"]
-    listed = planning(native, "ListMailItems", page_size=50)
+    listed = plus(native, "ListMailItems", page_size=50)
     mail = next(item for item in listed["mail_items"] if item["id"] == event_id)
     assert mail["title"] == title and "task" not in mail
-    assert planning(native, "ReadMailSummary", id=event_id) == {"summary": summary}
+    assert plus(native, "ReadMailSummary", id=event_id) == {"summary": summary}
     assert rpc(native, "ListTasks", {"view": "all", "page_size": 100})["tasks"] == before
-    plan = planning(native, "ReadPlan")["plan"]
-    assert plan["mailbox_pending_count"] == len(listed["mail_items"])
+    review = plus(native, "ReadWeeklyReview", week_start="2026-10-12")
+    assert review["mailbox_pending_count"] == len(listed["mail_items"])
     request = {"event_id": event_id, "etag": mail["etag"], "request_id": str(uuid.uuid4())}
-    assert planning(native, "ConvertMailItem", **{**request, "etag": "stale"}) == {"error": "ETAG_MISMATCH"}
-    filed = planning(native, "ConvertMailItem", **request)
+    assert plus(native, "ConvertMailItem", **{**request, "etag": "stale"}) == {"error": "ETAG_MISMATCH"}
+    filed = plus(native, "ConvertMailItem", **request)
     assert "task" in filed, filed
-    assert planning(native, "ConvertMailItem", **request) == filed
+    assert plus(native, "ConvertMailItem", **request) == filed
     task = rpc(native, "GetTask", {"name": f"tasks/{filed['task']['id']}"})
     assert task.get("project_id", "") == ""
     assert task["title"].startswith("Synthetic deferred mail") and title.startswith(task["title"])
@@ -502,17 +257,17 @@ def test_native_mail_exists_before_task_and_explicit_conversion_creates_only_one
     assert len(after) == len(before) + 1
     [saved] = native.d1(f"SELECT task_id,triaged_at FROM summaries WHERE event_id='{event_id}'")
     assert saved["task_id"] == task["id"] and saved["triaged_at"] > 0
-    assert event_id not in {item["id"] for item in planning(native, "ListMailItems").get("mail_items", [])}
+    assert event_id not in {item["id"] for item in plus(native, "ListMailItems").get("mail_items", [])}
     # Recreate the one possible interrupted boundary: Tasks committed but the D1 triage link did not.
     native.d1(f"UPDATE summaries SET task_id='',triaged_at=NULL WHERE event_id='{event_id}'")
-    repeated = planning(native, "ConvertMailItem", **{**request, "request_id": str(uuid.uuid4())})
+    repeated = plus(native, "ConvertMailItem", **{**request, "request_id": str(uuid.uuid4())})
     assert repeated == filed
     assert rpc(native, "ListTasks", {"view": "all", "page_size": 100})["tasks"] == after
-    assert planning(native, "ReadMailSummary", id=event_id) == {"summary": summary}
+    assert plus(native, "ReadMailSummary", id=event_id) == {"summary": summary}
 
 
 @pytest.mark.parametrize("gone", ["deleted", "completed"])
-def test_mail_whose_linked_task_is_gone_becomes_a_new_inbox_task(native, ready_plan, gone):
+def test_mail_whose_linked_task_is_gone_becomes_a_new_inbox_task(native, gone):
     old = rpc(
         native,
         "CreateTask",
@@ -525,9 +280,9 @@ def test_mail_whose_linked_task_is_gone_becomes_a_new_inbox_task(native, ready_p
         "INSERT INTO summaries(event_id,created_at,subject,summary,model,task_id)"
         f" VALUES('{event_id}',102,'Synthetic linked mail','Synthetic summary','synthetic','{old['id']}')"
     )
-    listed = planning(native, "ListMailItems", page_size=50)
+    listed = plus(native, "ListMailItems", page_size=50)
     mail = next(item for item in listed["mail_items"] if item["id"] == event_id)
-    filed = planning(native, "ConvertMailItem", event_id=event_id, etag=mail["etag"], request_id=str(uuid.uuid4()))
+    filed = plus(native, "ConvertMailItem", event_id=event_id, etag=mail["etag"], request_id=str(uuid.uuid4()))
     assert "task" in filed, filed
     task = rpc(native, "GetTask", {"name": f"tasks/{filed['task']['id']}"})
     assert task["id"] != old["id"] and not task.get("completed") and task.get("project_id", "") == ""
@@ -537,7 +292,7 @@ def test_mail_whose_linked_task_is_gone_becomes_a_new_inbox_task(native, ready_p
         assert rpc(native, "GetTask", {"name": old["name"]})["completed"] is True
 
 
-def test_native_mail_summary_delete_never_deletes_a_linked_task(native, ready_plan):
+def test_native_mail_summary_delete_never_deletes_a_linked_task(native):
     task = rpc(
         native,
         "CreateTask",
@@ -549,226 +304,10 @@ def test_native_mail_summary_delete_never_deletes_a_linked_task(native, ready_pl
         f" VALUES('{event_id}',101,'Synthetic old mail','Synthetic old summary','synthetic','{task['id']}')"
     )
     request = {"event_ids": [event_id], "request_id": str(uuid.uuid4())}
-    assert planning(native, "DeleteMailSummaries", **request) == {"deleted_event_ids": [event_id]}
-    assert planning(native, "DeleteMailSummaries", **request) == {"deleted_event_ids": [event_id]}
+    assert plus(native, "DeleteMailSummaries", **request) == {"deleted_event_ids": [event_id]}
+    assert plus(native, "DeleteMailSummaries", **request) == {"deleted_event_ids": [event_id]}
     assert rpc(native, "GetTask", {"name": task["name"]}) == task
-    assert planning(native, "ReadMailSummary", id=event_id) == {}
-
-
-def test_native_weekly_bet_and_dependencies_persist_and_real_completion_releases_waiting(native, ready_plan):
-    plan = planning(native, "ReadPlan")["plan"]
-    current = next(
-        (
-            bet
-            for bet in plan.get("weekly_bets", [])
-            if bet["week_start"] == plan["week_start"] and bet["area"] == "work"
-        ),
-        {},
-    )
-    before = rpc(native, "ListTasks", {"view": "all", "page_size": 100})
-    request = {
-        "week_start": plan["week_start"],
-        "area": "work",
-        "etag": current.get("etag", ""),
-        "text": "Finish the synthetic weekly outcome",
-    }
-    saved = planning(native, "SetWeeklyBet", **request)["weekly_bet"]
-    assert saved["text"] == request["text"] and saved["etag"]
-    assert planning(native, "SetWeeklyBet", **request) == {"weekly_bet": saved}
-    assert saved in planning(native, "ReadPlan")["plan"]["weekly_bets"]
-    assert rpc(native, "ListTasks", {"view": "all", "page_size": 100}) == before
-    waiter, prerequisite = [
-        rpc(native, "CreateTask", {"task": {"title": title}, "request_id": str(uuid.uuid4())})
-        for title in ("Synthetic dependency waiter", "Synthetic dependency prerequisite")
-    ]
-    dependency = {
-        "task_id": waiter["id"],
-        "prerequisite_id": prerequisite["id"],
-        "waits": True,
-        "request_id": str(uuid.uuid4()),
-    }
-    added = planning(native, "SetTaskDependency", **dependency)
-    [edge] = added["dependencies"]
-    assert (
-        edge["task_id"] == waiter["id"]
-        and edge["prerequisite_id"] == prerequisite["id"]
-        and not edge.get("done", False)
-    )
-    assert planning(native, "SetTaskDependency", **dependency) == added
-    assert edge in planning(native, "ReadPlan")["plan"]["dependencies"]
-    assert planning(
-        native,
-        "SetTaskDependency",
-        task_id=prerequisite["id"],
-        prerequisite_id=waiter["id"],
-        waits=True,
-        request_id=str(uuid.uuid4()),
-    ) == {"error": "ACTION_NOT_ALLOWED"}
-    assert rpc(native, "GetTask", {"name": waiter["name"]}) == waiter
-    assert rpc(native, "GetTask", {"name": prerequisite["name"]}) == prerequisite
-    complete = {"task_id": prerequisite["id"], "request_id": str(uuid.uuid4())}
-    assert planning(native, "CompleteTask", **complete) == {"task_id": prerequisite["id"]}
-    assert planning(native, "CompleteTask", **complete) == {"task_id": prerequisite["id"]}
-    assert rpc(native, "GetTask", {"name": prerequisite["name"]})["completed"] is True
-    assert len(rpc(native, "ListCompletions", {"task_id": prerequisite["id"]})["completions"]) == 1
-    resolved = planning(
-        native, "ResolveDependencies", task_ids=[waiter["id"], prerequisite["id"]], request_id=str(uuid.uuid4())
-    )
-    released = next(item for item in resolved["dependencies"] if item["task_id"] == waiter["id"])
-    assert released["done"] is True and released in planning(native, "ReadPlan")["plan"]["dependencies"]
-    assert rpc(native, "GetTask", {"name": waiter["name"]}) == waiter
-
-
-def test_native_bet_cas_lane_order_deleted_prerequisite_and_plan_store_check(native, ready_plan):
-    plan = planning(native, "ReadPlan")["plan"]
-    personal = {"week_start": plan["week_start"], "area": "personal"}
-    first = planning(native, "SetWeeklyBet", **personal, etag="", text="Synthetic personal outcome")["weekly_bet"]
-    # A second tab still showing no Bet cannot overwrite the saved one.
-    assert planning(native, "SetWeeklyBet", **personal, etag="", text="Stale tab") == {"error": "ETAG_MISMATCH"}
-    changed = planning(native, "SetWeeklyBet", **personal, etag=first["etag"], text="Synthetic changed")["weekly_bet"]
-    assert changed["etag"] != first["etag"] and changed["text"] == "Synthetic changed"
-
-    lane = [
-        rpc(native, "CreateTask", {"task": {"title": title}, "request_id": str(uuid.uuid4())})["id"]
-        for title in ("Synthetic lane one", "Synthetic lane two")
-    ]
-    order = list(reversed(lane))
-    answer = planning(
-        native, "ReorderTasks", task_ids=order, task_id=order[0], lane="waiting", request_id=str(uuid.uuid4())
-    )
-    assert answer["lane_order"] == {"lane": "waiting", "task_ids": order}
-    assert {"lane": "waiting", "task_ids": order} in planning(native, "ReadPlan")["plan"]["lane_orders"]
-
-    waiter, gone = [
-        rpc(native, "CreateTask", {"task": {"title": title}, "request_id": str(uuid.uuid4())})
-        for title in ("Synthetic waiter of a deleted task", "Synthetic deleted prerequisite")
-    ]
-    planning(
-        native,
-        "SetTaskDependency",
-        task_id=waiter["id"],
-        prerequisite_id=gone["id"],
-        waits=True,
-        request_id=str(uuid.uuid4()),
-    )
-    rpc(native, "DeleteTask", {"name": gone["name"], "etag": gone["etag"], "request_id": str(uuid.uuid4())})
-    resolved = planning(native, "ResolveDependencies", task_ids=[gone["id"]], request_id=str(uuid.uuid4()))
-    assert resolved["dropped_task_ids"] == [waiter["id"]]
-
-    store = planning(native, "VerifyPlanStore")
-    assert store["task_row_count"] >= 4 and store["note_row_count"] >= 1
-    for problem in ("orphan_mark_count", "orphan_edge_count", "orphan_state_count", "limit_violation_count"):
-        assert store.get(problem, 0) == 0, problem
-
-
-def test_native_planning_missing_task_reports_source_error(native, ready_plan):
-    assert planning(
-        native,
-        "SetTaskPlan",
-        task_id="synthetic-does-not-exist",
-        etag="missing",
-        stage="weekly",
-        request_id=str(uuid.uuid4()),
-    ) == {"error": "NOT_FOUND"}
-
-
-def test_native_hundred_siblings_reorder_through_one_atomic_tasks_operation(native, ready_plan):
-    parent = rpc(
-        native, "CreateTask", {"task": {"title": "Synthetic hundred-step parent"}, "request_id": str(uuid.uuid4())}
-    )
-    native.tasks_d1(
-        "WITH RECURSIVE sequence(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM sequence WHERE i<99)"
-        " INSERT INTO tasks(id,title,parent_id,sort_order,created_at,updated_at)"
-        " SELECT 'synthetic-reorder-'||i,'Synthetic reorder step',"
-        f" '{parent['id']}',i+0.25,1,1 FROM sequence",
-    )
-    ids = [f"synthetic-reorder-{index}" for index in reversed(range(100))]
-    request = {"task_ids": ids, "task_id": ids[0], "request_id": str(uuid.uuid4())}
-    answer = planning(native, "ReorderTasks", **request)
-    assert "tasks" in answer, answer
-    assert [task["id"] for task in answer["tasks"]] == ids
-    assert [task["sort_order"] for task in answer["tasks"]] == [index + 0.25 for index in range(100)]
-    actual = rpc(native, "ListTasks", {"parent_id": parent["id"], "page_size": 100})["tasks"]
-    assert [task["id"] for task in actual] == ids and all(task["etag"] == "2" for task in actual)
-    assert planning(native, "ReorderTasks", **request) == answer
-    assert rpc(native, "ListTasks", {"parent_id": parent["id"], "page_size": 100})["tasks"] == actual
-
-
-@pytest.mark.parametrize("recurring", [False, True])
-def test_generic_completion_replays_exactly_through_core_for_focus_without_advancing_again(
-    native, ready_plan, recurring
-):
-    task = rpc(
-        native,
-        "CreateTask",
-        {
-            "task": {
-                "title": "Synthetic independently completed task",
-                "due_date": "2030-01-01",
-                **({"recurrence": "every day"} if recurring else {}),
-            },
-            "request_id": str(uuid.uuid4()),
-        },
-    )
-    request_id = str(uuid.uuid4())
-    http_request = {
-        "method": "POST",
-        "path": f"/api/tasks/v1/{task['name']}:complete",
-        "body": {"etag": task["etag"], "request_id": request_id},
-    }
-    completed = call(native, "/native/http", http_request)
-    # The browser can lose this response and repeat the same HTTP completion safely.
-    assert call(native, "/native/http", http_request) == completed
-    proof = {
-        "task_id": task["id"],
-        "task_etag": task["etag"],
-        "request_id": request_id,
-        "flow_task_id": task["id"],
-        "flow_date": "2026-10-17",
-    }
-    assert planning(native, "CompleteTask", **proof) == {"task_id": task["id"]}
-    assert planning(native, "CompleteTask", **proof) == {"task_id": task["id"]}
-    current = rpc(native, "GetTask", {"name": task["name"]})
-    assert current == completed and current["completed_count"] == 1
-    if recurring:
-        assert not current.get("completed") and current["due_date"] == completed["due_date"]
-
-
-def test_completion_focus_target_must_be_a_completed_descendant(native, ready_plan):
-    parent = rpc(
-        native, "CreateTask", {"task": {"title": "Synthetic completed outcome"}, "request_id": str(uuid.uuid4())}
-    )
-    child = rpc(
-        native,
-        "CreateTask",
-        {
-            "task": {"title": "Synthetic timed step", "parent_id": parent["id"], "kind": "step"},
-            "request_id": str(uuid.uuid4()),
-        },
-    )
-    unrelated = rpc(
-        native, "CreateTask", {"task": {"title": "Synthetic unrelated action"}, "request_id": str(uuid.uuid4())}
-    )
-    request_id = str(uuid.uuid4())
-    rpc(native, "CompleteTask", {"name": parent["name"], "etag": parent["etag"], "request_id": request_id})
-    proof = {
-        "task_id": parent["id"],
-        "task_etag": parent["etag"],
-        "request_id": request_id,
-        "flow_task_id": child["id"],
-        "flow_date": "2026-10-16",
-    }
-    assert planning(native, "CompleteTask", **proof) == {"task_id": parent["id"]}
-    assert rpc(native, "GetTask", {"name": child["name"]})["completed"]
-    assert planning(
-        native, "CompleteTask", **{**proof, "request_id": str(uuid.uuid4()), "flow_task_id": unrelated["id"]}
-    ) == {"error": "ACTION_NOT_ALLOWED"}
-    assert not rpc(native, "GetTask", {"name": unrelated["name"]}).get("completed")
-    rpc(native, "CompleteTask", {"name": unrelated["name"], "etag": unrelated["etag"], "request_id": str(uuid.uuid4())})
-    assert planning(
-        native, "CompleteTask", **{**proof, "request_id": str(uuid.uuid4()), "flow_task_id": unrelated["id"]}
-    ) == {"error": "ACTION_NOT_ALLOWED"}
-    assert rpc(native, "GetTask", {"name": parent["name"]})["completed_count"] == 1
+    assert plus(native, "ReadMailSummary", id=event_id) == {}
 
 
 def test_catalog_metadata_selector_keeps_legacy_default_and_cross_language_false(native):
@@ -777,88 +316,3 @@ def test_catalog_metadata_selector_keeps_legacy_default_and_cross_language_false
     metadata = rpc(native, "GetCatalog", {"name": "catalog", "include_task_counts": False})
     assert explicit == full and full["task_counts"]
     assert metadata == {key: value for key, value in full.items() if key != "task_counts"}
-
-
-def test_native_new_week_step_write_settles_existing_commitments_without_a_failed_action(native, ready_plan):
-    week = ready_plan["week_start"]
-    ended_week = (date.fromisoformat(week) - timedelta(days=7)).isoformat()
-    tasks = [
-        rpc(
-            native,
-            "CreateTask",
-            {"task": {"title": "Synthetic rollover commitment"}, "request_id": str(uuid.uuid4())},
-        )
-        for _ in range(32)
-    ]
-    ids = json.dumps([task["id"] for task in tasks])
-    native.d1(
-        "INSERT INTO plan_tasks(provider,external_id,created_at)"
-        f" SELECT 'tasks',value,1 FROM json_each('{ids}');"
-        "INSERT INTO plan_task_state(task_id,stage,area,lead_days,waiting,active,rev,request_id,updated_at)"
-        f" SELECT id,'committed','work',21,1,1,1,'synthetic-rollover',1 FROM plan_tasks"
-        f" WHERE provider='tasks' AND external_id IN (SELECT value FROM json_each('{ids}'));"
-        "INSERT OR REPLACE INTO plus_weeks(task_id,week_start,committed,bet)"
-        f" SELECT value,'{ended_week}',1,0 FROM json_each('{ids}');"
-        f"UPDATE plus_settings SET week_start='{ended_week}' WHERE id=1"
-    )
-    request = {
-        "parent_id": tasks[0]["id"],
-        "steps": [{"title": "Synthetic step after rollover"}],
-        "request_id": str(uuid.uuid4()),
-    }
-    created = planning(native, "AppendTaskSteps", **request)
-    remaining = native.d1(f"SELECT count(*) AS n FROM plus_weeks WHERE week_start<'{week}'")[0]["n"]
-    assert "error" not in created, {"error": created.get("error"), "remaining": remaining}
-    assert len(created["task_ids"]) == 1
-    assert planning(native, "AppendTaskSteps", **request) == created
-    assert remaining == 0
-    assert native.d1("SELECT week_start FROM plus_settings WHERE id=1") == [{"week_start": week}]
-    states = native.d1(
-        "SELECT stage,area,lead_days,waiting,active,rev,count(*) AS n FROM plan_task_state"
-        " WHERE task_id IN (SELECT id FROM plan_tasks"
-        f" WHERE provider='tasks' AND external_id IN (SELECT value FROM json_each('{ids}')))"
-        " GROUP BY stage,area,lead_days,waiting,active,rev"
-    )
-    assert states == [
-        {"stage": "weekly", "area": "work", "lead_days": 21, "waiting": 1, "active": 1, "rev": 2, "n": 32}
-    ]
-    for task in tasks:
-        current = rpc(native, "GetTask", {"name": task["name"]})
-        assert {**current, "child_count": 0} == {**task, "child_count": 0}
-
-
-def test_native_rollover_transaction_failure_keeps_state_and_membership_together(native, ready_plan):
-    week = ready_plan["week_start"]
-    ended_week = (date.fromisoformat(week) - timedelta(days=7)).isoformat()
-    task = rpc(native, "CreateTask", {"task": {"title": "Synthetic atomic rollover"}, "request_id": str(uuid.uuid4())})
-    task_id = task["id"]
-    native.d1(
-        f"INSERT INTO plan_tasks(provider,external_id,created_at) VALUES('tasks','{task_id}',1);"
-        "INSERT INTO plan_task_state(task_id,stage,rev,request_id,updated_at)"
-        f" SELECT id,'committed',1,'synthetic-atomic-rollover',1 FROM plan_tasks WHERE external_id='{task_id}';"
-        f"INSERT INTO plus_weeks VALUES('{task_id}','{ended_week}',1,0);"
-        f"UPDATE plus_settings SET week_start='{ended_week}' WHERE id=1;"
-        "CREATE TRIGGER synthetic_rollover_failure BEFORE DELETE ON plus_weeks"
-        f" WHEN OLD.task_id='{task_id}' BEGIN SELECT RAISE(ABORT,'synthetic_rollover_failure'); END"
-    )
-    request = {
-        "parent_id": task_id,
-        "steps": [{"title": "Synthetic step after atomic retry"}],
-        "request_id": str(uuid.uuid4()),
-    }
-    try:
-        assert planning(native, "AppendTaskSteps", **request) == {"error": "UNAVAILABLE"}
-        assert native.d1(f"SELECT week_start FROM plus_weeks WHERE task_id='{task_id}'") == [{"week_start": ended_week}]
-        assert native.d1(
-            "SELECT stage,rev FROM plan_task_state WHERE task_id="
-            f"(SELECT id FROM plan_tasks WHERE external_id='{task_id}')"
-        ) == [{"stage": "committed", "rev": 1}]
-        assert rpc(native, "ListTasks", {"parent_id": task_id}).get("tasks", []) == []
-    finally:
-        native.d1("DROP TRIGGER synthetic_rollover_failure")
-    created = planning(native, "AppendTaskSteps", **request)
-    assert len(created["task_ids"]) == 1
-    assert planning(native, "AppendTaskSteps", **request) == created
-    assert native.d1(
-        f"SELECT stage,rev FROM plan_task_state WHERE task_id=(SELECT id FROM plan_tasks WHERE external_id='{task_id}')"
-    ) == [{"stage": "weekly", "rev": 2}]

@@ -4,14 +4,17 @@ A mail item is a Mail Hero event Todofy summarised (its ``summaries`` row): its 
 external reference. Its brief is one plain sentence, the first line the summary prompt asks for
 (core/prompts.SUMMARY_EMAIL); ``brief_of`` reads it from any summary, older ones included. The owner's mail
 categories are an existing label and a priority each (P1-P4, 1 the most urgent); Tasks' Mail conversion
-(runtime/plus_mail.py) adds the label and sets the priority.
+(runtime/plus_mail.py) adds the label and sets the priority. The request rules at the end are the Mail API's
+(runtime/plus_api.py).
 """
 
 import hashlib
 import json
 import re
+import uuid
 from base64 import b64decode, urlsafe_b64encode
 from dataclasses import dataclass
+from typing import Any
 
 # What a read takes of a summary to find its brief: substr(summary, 1, 600).
 BRIEF_SOURCE_CHARS = 600
@@ -166,3 +169,37 @@ def replace_categories(
         raise ValueError("BAD_REQUEST")
     ids = {category.id for category in saved}
     return saved, [category.id for category in current if category.id not in ids]
+
+
+# ---- the Mail API's requests ----------------------------------------------------------------------------------
+
+ID = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
+
+
+def check_id(value: str) -> str:
+    """A mail, task or label ID a request names; never a browser's temporary ID (tmp-…)."""
+    if not ID.fullmatch(value) or value.startswith("tmp-"):
+        raise ValueError("BAD_REQUEST")
+    return value
+
+
+def action_id(value: str) -> str:
+    """A write's request ID: a canonical UUIDv4."""
+    try:
+        parsed = uuid.UUID(value)
+    except (ValueError, AttributeError) as error:
+        raise ValueError("BAD_REQUEST") from error
+    if parsed.version != 4 or str(parsed) != value:
+        raise ValueError("BAD_REQUEST")
+    return value
+
+
+def fingerprint(value: Any) -> str:
+    """A receipt's request hash (runtime/plus_receipts.py)."""
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def command_id(request_id: str, index: int = 0) -> str:
+    """The Tasks request ID of a write's ``index``th operation: the same for every retry of that write, so Tasks runs
+    it once. Frozen: a conversion retried across a release must keep it."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"todofy-plus:{request_id}:{index}"))

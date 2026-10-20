@@ -235,13 +235,10 @@ TASK_INTENT_TASKS = Table(
 
 PLUS_SETTINGS = Table("plus_settings", ("id", "mapping", "timezone", "week_start", "enabled"), ("id",), 50)
 PLUS_WEEKS = Table("plus_weeks", ("task_id", "week_start", "committed", "bet"), ("task_id",), 500)
-# The planning store (migration 0007): owner facts and task identities, never task content. plan_tasks is the last
-# table, after those that hold its IDs. The order alone does not keep a backup's task IDs complete: the job takes
-# every table's max(rowid) when it starts, and plan_marks and plan_edges have no INTEGER PRIMARY KEY, so a row added
-# during the job can reuse a deleted row's rowid inside their snapshot while its task is outside plan_tasks'. What
-# does is the lease (runtime/backup.py), which holds Plus writes and the ticks for the whole job. If the lease is
-# ever relaxed, take plan_tasks' max(rowid) when its own export starts; VerifyPlanStore counts orphans after a
-# restore.
+# The planning store (migration 0007): owner facts and task identities, never task content. Planning is Tasks' now,
+# so only the Mail categories (plan_categories, plan_settings 'todoist.mail') still change; the other tables keep
+# what Tasks' one-time import reads until they are dropped. plan_tasks is the last table, after those that hold its
+# IDs.
 PLAN_SETTINGS = Table("plan_settings", ("key", "value", "updated_at"), ("key",), 50)
 PLAN_MARKS = Table("plan_marks", ("task_id", "kind", "period", "created_at"), ("task_id", "kind", "period"), 500)
 PLAN_EDGES = Table(

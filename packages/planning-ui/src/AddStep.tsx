@@ -40,7 +40,7 @@ interface NewStep {
  * Week › Next steps' last cell: Todoist's own "Add task" row, which opens a one-line input in its
  * place, with the new step's time beside it (30 min unless another is chosen; kept while the cell
  * stays open). Enter adds the title with that time as a sub-task of the selected commitment (one
- * confirm-first AppendTaskSteps), clears the input at once and keeps it open for the next; the
+ * confirm-first CreateTask), clears the input at once and keeps it open for the next; the
  * title waits as a dimmed card until a read lists the new step. One step saves at a time, and
  * typing never pauses. Esc, Enter with nothing typed, or focus leaving the cell with nothing typed
  * closes it; leaving with text keeps the draft and writes nothing. PlanningWeek keys it by the

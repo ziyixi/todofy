@@ -21,7 +21,6 @@ from todofy.core.backoff import LOOKUP_MAX_PAGES, LOOKUP_PAGE_TIMEOUT
 from todofy.core.classify import Failure, HttpOutcome, TaskVerdict, classify_task_create
 from todofy.core.render import FOOTER_PREFIX, has_footer
 from todofy.core.todoist_request import TaskRequest, matching_task_ids
-from todofy.runtime import native_plan
 
 
 class NativeTasksError(Exception):
@@ -87,10 +86,9 @@ async def catalog(env: Any) -> dict[str, Any]:
     return await call(env, "GetCatalog", {"name": "catalog", "include_task_counts": False})
 
 
-async def task(env: Any, task_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-    source = metadata if metadata is not None else await catalog(env)
-    row = await call(env, "GetTask", {"name": f"tasks/{task_id}"})
-    return (await native_plan.read_overlay(env, [native_task_view.task(row, source)]))[0]
+async def task(env: Any, task_id: str) -> dict[str, Any]:
+    source = await catalog(env)
+    return native_task_view.task(await call(env, "GetTask", {"name": f"tasks/{task_id}"}), source)
 
 
 async def page(
@@ -98,30 +96,23 @@ async def page(
     *,
     cursor: str = "",
     limit: int = 100,
-    project_id: str = "",
     metadata: dict[str, Any] | None = None,
-    ids: list[str] | None = None,
     include_description: bool = False,
     query: str = "",
 ) -> tuple[list[dict[str, Any]], str]:
     source = metadata if metadata is not None else await catalog(env)
-    # The all view includes descendants. Project view is intentionally root-only for the UI.
+    # The all view includes descendants.
     request: dict[str, Any] = {
         "view": "search" if query else "all",
         "page_size": min(limit, 20 if include_description else 100),
         "page_token": cursor,
         "include_description": include_description,
     }
-    if project_id:
-        request["project_id"] = project_id
-    if ids:
-        request["task_ids"] = ids
     if query:
         request["query"] = query
     response = await call(env, "ListTasks", request)
-    return await native_plan.read_overlay(
-        env, [native_task_view.task(row, source) for row in response.get("tasks", [])]
-    ), response.get("next_page_token", "")
+    tasks = [native_task_view.task(row, source) for row in response.get("tasks", [])]
+    return tasks, response.get("next_page_token", "")
 
 
 @dataclass(frozen=True, slots=True)

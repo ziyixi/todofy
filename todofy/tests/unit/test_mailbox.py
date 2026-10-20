@@ -1,4 +1,4 @@
-"""Mail's pure rules: core/mailbox.py (the brief, the categories). Synthetic text only."""
+"""Mail's pure rules: core/mailbox.py (the brief, the categories, the requests). Synthetic text only."""
 
 import sqlite3
 from pathlib import Path
@@ -123,3 +123,30 @@ def test_the_settings_etag_follows_ids_labels_priorities_order_and_destination_o
 def test_task_text_limit_preserves_whole_non_bmp_characters():
     assert mailbox.task_text("A😀B", 3) == "A😀"
     assert mailbox.task_text("A😀B", 2) == "A"
+
+
+# ---- requests -------------------------------------------------------------------------------------------------
+
+
+def test_a_writes_tasks_request_ids_are_stable_and_frozen_across_releases():
+    request = "a2b8f9a4-5c1d-4e7f-9a3b-6c2d1e0f4a5b"
+    assert mailbox.command_id(request) == mailbox.command_id(request, 0) != mailbox.command_id(request, 1)
+    # A conversion retried across a release must name the same Tasks request: this value never changes.
+    assert mailbox.command_id("mail-create:00000000-0000-0000-0000-000000000001") == (
+        "45bf0978-b9fd-5afa-9bf7-497854379382"
+    )
+
+
+@pytest.mark.parametrize("value", ["tmp-local-task", "", "a b", "x" * 101])
+def test_ids_from_a_browser_or_out_of_shape_are_refused(value):
+    with pytest.raises(ValueError, match="BAD_REQUEST"):
+        mailbox.check_id(value)
+
+
+@pytest.mark.parametrize(
+    "value", ["", "not-a-uuid", "00000000-0000-1000-8000-000000000000", "A2B8F9A4-5C1D-4E7F-9A3B-6C2D1E0F4A5B"]
+)
+def test_a_write_takes_a_canonical_uuid4(value):
+    with pytest.raises(ValueError, match="BAD_REQUEST"):
+        mailbox.action_id(value)
+    assert mailbox.action_id("a2b8f9a4-5c1d-4e7f-9a3b-6c2d1e0f4a5b") == "a2b8f9a4-5c1d-4e7f-9a3b-6c2d1e0f4a5b"

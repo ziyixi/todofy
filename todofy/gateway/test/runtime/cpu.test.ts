@@ -44,10 +44,6 @@ const AUDIENCE = SYNTHETIC_BINDINGS['ACCESS_AUDIENCE'] ?? '';
 const API_INIT = "GET /api/v1/serviceStatus as the isolate's first API request";
 const LEGACY = 'GET /api/v1/legacyTexts/{id} (1.9 MB of ASCII with escapes)';
 const REPORTS = 'GET /api/v1/latestReports (every report at its limits)';
-const PLUS = "GET /api/plus/v1/tasks (200 tasks, Tasks' Planning channel)";
-// A FULL Plan: 500 labels, 300 dependencies, six Bets and every Review lane's order (7 lanes of 100), the most
-// TodofyCore answers.
-const PLAN = 'GET /api/plus/v1/plan:read (500 labels, 300 dependencies, six Bets, 700 lane order IDs)';
 // Mail's two largest answers, passed through unread like the legacy text and the reports: a decode of either again
 // would show here.
 const MAIL_ITEMS = 'GET /api/plus/v1/mailItems (a full page of 50 items)';
@@ -56,26 +52,6 @@ const PASSED_THROUGH = new Set([LEGACY, REPORTS, MAIL_ITEMS, MAIL_SUMMARY]);
 
 const ANSWERS = {
   plus_native_ui: {
-    ListPlanningTasks: fixtures.ok({ planning_tasks: Array.from({ length: 200 }, (_, n) => ({
-      id: `task-${String(n)}`, title: 'Synthetic planning task '.repeat(20), project_id: 'test-project',
-      labels: ['office', 'deep', 'committed', 'lead_2w'], stage: 'committed', area: 'work',
-      deadline: '2026-10-27', due: '2026-10-13', lead_days: 14, estimated_minutes: 45, etag: 'a'.repeat(64),
-      update_time: '2026-10-14T09:30:05Z', child_order: n, order_key: `a${n.toString(36).padStart(8, '0')}`,
-    })) }),
-    ReadPlan: fixtures.ok({ plan: {
-      timezone: 'America/Los_Angeles', week_start: '2026-10-12', today: '2026-10-13', enabled: true, etag: 'a'.repeat(64),
-      available_labels: Array.from({ length: 500 }, (_, n) => ({ id: `label-${String(n)}`, label: `synthetic_label_${String(n)}` })),
-      next_week_task_ids: Array.from({ length: 100 }, (_, n) => `task-${String(n)}`),
-      dependencies: Array.from({ length: 300 }, (_, n) => ({
-        task_id: `task-${String(n)}`, prerequisite_id: `task-${String(n + 1)}`, baseline_completed_count: n, done: n % 2 === 0,
-      })),
-      weekly_bets: ['2026-10-05', '2026-10-12', '2026-10-19'].flatMap((week) => ['work', 'personal'].map((area) => ({
-        week_start: week, area, text: 'Synthetic weekly Bet '.repeat(8).slice(0, 160), etag: '7', update_time: '2026-10-12T09:30:05Z',
-      }))),
-      lane_orders: ['start', 'waiting', 'parked', 'quarterly', 'monthly', 'weekly', 'committed'].map((lane) => ({
-        lane, task_ids: Array.from({ length: 100 }, (_, n) => `6X7rM8997g3RQ${lane}${String(n).padStart(3, '0')}`),
-      })),
-    } }),
     ListMailItems: fixtures.ok(fixtures.mailItems(50)),
     ReadMailSummary: fixtures.ok(fixtures.mailSummary()),
   },
@@ -168,8 +144,6 @@ async function session({ h, meter }: GatewayIsolate): Promise<Measurement[]> {
   for (const [label, path, options] of requests) measured.push(await meter.measure(label, () => expectOk(h, path, options), RUNS));
   // Tasks' requests on its private Planning channel.
   const planning: [string, string][] = [
-    [PLUS, '/api/plus/v1/tasks?page_size=200'],
-    [PLAN, '/api/plus/v1/plan:read'],
     [MAIL_ITEMS, '/api/plus/v1/mailItems?page_size=50'],
     [MAIL_SUMMARY, `/api/plus/v1/mailItems:readMailSummary?id=${fixtures.UUID(0)}`],
   ];
@@ -200,6 +174,6 @@ describe('CPU per owner API request (Workers Free: 10 ms)', () => {
         expect(median, `${label}: warm median`).toBeLessThan(API_BOUND_MS);
       }
     }
-    expect(reference.size).toBe(15);
+    expect(reference.size).toBe(13);
   });
 });

@@ -1,31 +1,27 @@
-"""Replay receipts of the Plus writes that change the task store, in TodofyCore's own SQLite (docs/planning-api.md,
-"Receipts").
+"""Replay receipts of the Mail writes, in TodofyCore's own SQLite (docs/planning-api.md, "Receipts").
 
-SetTaskPlan, SetTaskLead, CompleteTask, AppendTaskSteps, ReorderTasks, ConvertMailItem and each planning update of
-the Monday reset record a receipt ``started`` with their frozen Tasks operations, wait until the object's storage
-holds it, and only then send them. ``done`` drops the operations and keeps the answer's IDs, never a title;
-ReorderTasks' keeps nothing (runtime/plus_order.py). A replay of a done request answers from those IDs, a started
-one resends the same operations, whose request IDs (uuid5 of the request ID) Tasks runs at most once
-(runtime/native_plus.py). So a lost receipt only turns a replay into a re-run that Tasks deduplicates: receipts may
-live in the object's SQLite, which no backup holds. A planning write's started receipt also keeps the plan etag it
-was chosen under: once that has changed, its retry answers ETAG_MISMATCH.
+ConvertMailItem records a receipt ``started`` with its frozen Tasks operation, waits until the object's storage
+holds it, and only then sends it; DeleteMailSummaries records one with no operation. ``done`` drops the operations
+and keeps the answer's IDs, never a title. A replay of a done request answers from those IDs, a started one resends
+the same operations, whose request IDs (core/mailbox.command_id of the request ID) Tasks runs at most once and
+answers again from its own receipt. So a lost receipt only turns a replay into a re-run that Tasks deduplicates:
+receipts may live in the object's SQLite, which no backup holds.
 
 A lookup reads only the receipts of the last MAX_AGE, and an older request ID starts over. Nothing deletes a
-receipt (the owner's rule: no automatic time-based deletion), so one that never finished keeps its operations,
-step titles included, in the object's SQLite.
+receipt (the owner's rule: no automatic time-based deletion), so one that never finished keeps its operations in the
+object's SQLite. Planning is Tasks' now: the receipts of Todofy's planning writes (with their plan_etag) and their
+operation journal (native_task_requests) stay in the object as they are, and nothing reads them.
 """
 
 import json
 from typing import Any, NamedTuple
 
 from todofy.core.backoff import DAY
-from todofy.runtime import native_plus
 from todofy.runtime.interop import now_s
 
 MAX_AGE = 30 * DAY
 
 DO_SCHEMA = (
-    native_plus.SCHEMA,
     "CREATE TABLE IF NOT EXISTS plus_receipts (request_id TEXT PRIMARY KEY, method TEXT NOT NULL,"
     " request_hash TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('started', 'done')), commands TEXT,"
     " plan_etag TEXT, result TEXT CHECK (result IS NULL OR length(result) <= 4096), created_at INTEGER NOT NULL,"
@@ -34,17 +30,13 @@ DO_SCHEMA = (
     # Nothing reads the unfinished receipts by this index any more.
     "DROP INDEX IF EXISTS plus_receipts_started",
 )
-FIND = (
-    "SELECT request_hash, state, commands, plan_etag, result FROM plus_receipts"
-    " WHERE request_id = ? AND created_at >= ?"
-)
+FIND = "SELECT request_hash, state, commands, result FROM plus_receipts WHERE request_id = ? AND created_at >= ?"
 # A started receipt keeps its commands; one older than MAX_AGE is replaced, as if it did not exist.
 START = (
-    "INSERT INTO plus_receipts (request_id, method, request_hash, state, commands, plan_etag, created_at)"
-    " VALUES (?, ?, ?, 'started', ?, ?, ?) ON CONFLICT (request_id) DO UPDATE SET method = excluded.method,"
-    " request_hash = excluded.request_hash, state = 'started', commands = excluded.commands,"
-    " plan_etag = excluded.plan_etag, result = NULL, created_at = excluded.created_at, finished_at = NULL"
-    " WHERE plus_receipts.created_at < ?"
+    "INSERT INTO plus_receipts (request_id, method, request_hash, state, commands, created_at)"
+    " VALUES (?, ?, ?, 'started', ?, ?) ON CONFLICT (request_id) DO UPDATE SET method = excluded.method,"
+    " request_hash = excluded.request_hash, state = 'started', commands = excluded.commands, plan_etag = NULL,"
+    " result = NULL, created_at = excluded.created_at, finished_at = NULL WHERE plus_receipts.created_at < ?"
 )
 FINISH = (
     "UPDATE plus_receipts SET state = 'done', commands = NULL, result = ?, finished_at = ?"
@@ -55,7 +47,6 @@ FINISH = (
 class Receipt(NamedTuple):
     request_hash: str
     commands: list[dict[str, Any]] | None  # the frozen Tasks operations, until done
-    plan_etag: str | None  # a planning write's: the plan etag its operations were chosen under
     result: dict[str, Any] | None  # once done: the answer's IDs
 
 
@@ -70,24 +61,16 @@ async def find(core: Any, request_id: str) -> Receipt | None:
         return None
     row = rows[0]
     if row.state == "done":
-        return Receipt(str(row.request_hash), None, None, json.loads(row.result))
-    etag = None if row.plan_etag is None else str(row.plan_etag)
-    return Receipt(str(row.request_hash), json.loads(row.commands), etag, None)
+        return Receipt(str(row.request_hash), None, json.loads(row.result))
+    return Receipt(str(row.request_hash), json.loads(row.commands), None)
 
 
-async def start(
-    core: Any,
-    request_id: str,
-    method: str,
-    request_hash: str,
-    commands: list[dict[str, Any]],
-    plan_etag: str | None = None,
-) -> None:
-    """Record ``commands`` before they are sent (a started receipt keeps the ones it has, with its
-    ``plan_etag``), and wait until the object's storage holds them: Cloudflare documents the output gate that
-    holds back a fetch for put() and delete() only, not for an SQL write."""
+async def start(core: Any, request_id: str, method: str, request_hash: str, commands: list[dict[str, Any]]) -> None:
+    """Record ``commands`` before they are sent (a started receipt keeps the ones it has), and wait until the
+    object's storage holds them: Cloudflare documents the output gate that holds back a fetch for put() and delete()
+    only, not for an SQL write."""
     now = now_s()
-    core.sql.exec(START, request_id, method, request_hash, _json(commands), plan_etag, now, now - MAX_AGE)
+    core.sql.exec(START, request_id, method, request_hash, _json(commands), now, now - MAX_AGE)
     await core.ctx.storage.sync()
 
 

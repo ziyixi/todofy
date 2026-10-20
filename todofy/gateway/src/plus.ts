@@ -1,6 +1,6 @@
 /**
- * Tasks' planning and Mail API (PlusService), reached only through the private Planning binding (planning.ts).
- * Tasks checks Access, Origin and CSRF before it forwards.
+ * Tasks' Mail API and the weekly review's two Todofy facts (PlusService), reached only through the private Planning
+ * binding (planning.ts). Tasks checks Access, Origin and CSRF before it forwards. Planning itself is Tasks' own.
  */
 import { HttpTranscoder, PreEncoded, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder';
 import { PlusService } from '@ziyixi/proto/todofy/ui/v1/plus_service_pb';
@@ -11,13 +11,12 @@ import { API_DOMAIN, isReason, uiError } from './ui.ts';
 
 interface PlusContext { env: Env }
 /**
- * What Tasks calls on its private Planning channel (packages/planning-ui/src/api.ts, tasks/web/src); that path
- * refuses every other PlusService method. VerifyPlanStore is the restore runbook's check.
+ * What Tasks calls on its private Planning channel (packages/planning-ui/src/api.ts, tasks/web/src): Mail and the
+ * weekly review's facts. That path refuses every other PlusService method.
  */
 const NATIVE_METHODS = new Set([
-  'ReadPlan', 'ReadWeeklyReview', 'ListPlanningTasks', 'SetTaskPlan', 'SetTaskLead', 'AppendTaskSteps', 'SetWeeklyBet',
-  'SetTaskDependency', 'ResolveDependencies', 'ReorderTasks', 'ListMailItems', 'ReadMailSummary', 'ConvertMailItem',
-  'DeleteMailSummaries', 'ReadMailSettings', 'UpdateMailCategories', 'VerifyPlanStore',
+  'ReadWeeklyReview', 'ListMailItems', 'ReadMailSummary', 'ConvertMailItem', 'DeleteMailSummaries', 'ReadMailSettings',
+  'UpdateMailCategories',
 ]);
 const PREFIX = '/api/plus/v1/';
 const DOMAIN = API_DOMAIN;

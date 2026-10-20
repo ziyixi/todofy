@@ -7,7 +7,7 @@ import js
 from workers import Response, WorkerEntrypoint
 
 from todofy.core.todoist_request import build_task_request
-from todofy.runtime import gtd, intents, native_plan, native_plus, native_tasks, plus_week, reminder
+from todofy.runtime import gtd, intents, native_tasks, plus_tasks, reminder
 from todofy.runtime.coordinator import TodofyCore
 from todofy.runtime.interop import to_js
 
@@ -35,30 +35,14 @@ class Default(WorkerEntrypoint):
             result = await native_tasks.call(self.env, data["method"], data["body"])
         elif path == "/native/producer":
             result = json.loads(await self.env.PLUS.getByName(data["name"]).produce(json.dumps(data)))
-        elif path == "/native/plus":
+        elif path == "/native/commands":
             result = json.loads(await self.env.PLUS.getByName("native-plus-test").run(json.dumps(data)))
-        elif path == "/native/plan":
+        elif path == "/native/plus":
             answer = await self.env.PLUS.getByName("native-plus-test").plus_native_ui(
                 data["method"], json.dumps(data.get("body", {}))
             )
             text = getattr(answer, "ok", None)
             result = json.loads(text) if text is not None else {"error": answer.error}
-        elif path == "/native/reset-week":
-            result = {"complete": await self.env.PLUS.getByName("native-plus-test").reset_week(data["week"])}
-        elif path == "/native/state":
-            if data["action"] == "ready":
-                result = {"ready": await native_plan.ready(self.env)}
-            elif data["action"] == "overlay":
-                result = {"tasks": await native_plan.read_overlay(self.env, data["tasks"])}
-            else:
-                try:
-                    state = native_plan.state_from_labels(data["labels"])
-                    revision = await native_plan.save_fields(
-                        self.env, data["task_id"], state, data["expected_rev"], data["request_id"]
-                    )
-                    result = {"revision": revision}
-                except native_tasks.NativeTasksError as error:
-                    result = {"error": error.status}
         elif path == "/native/create":
             frozen = build_task_request(
                 data["title"],
@@ -104,15 +88,12 @@ class NativePlusProbe(TodofyCore):
         finally:
             self.running = False
 
-    async def reset_week(self, week):
-        return await plus_week.reset_ended(self, week)
-
     async def run(self, text):
         data = json.loads(text)
         try:
-            result = await native_plus.commands(self, data["commands"])
-        except native_tasks.NativeTasksError as error:
-            result = {"error": error.status}
+            result = await plus_tasks.commands(self, data["commands"])
+        except plus_tasks.PlusError as error:
+            result = {"error": error.reason}
         return json.dumps(result)
 
 

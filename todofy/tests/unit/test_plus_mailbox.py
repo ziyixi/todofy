@@ -2,7 +2,7 @@
 UpdateMailCategories and DeleteMailSummaries.
 
 D1 is host SQLite with every migration and the object's SQLite another, and Tasks the fake of plus_support.py,
-which journals every call. Planning is not set up: Mail needs none. Synthetic mail and tasks only.
+which journals every call. Synthetic mail and tasks only.
 """
 
 import asyncio
@@ -28,7 +28,6 @@ class Stack:
         runtime.clock["ms"] = int(NOW.timestamp() * 1000)
         self.d1 = D1()
         self.tasks = NativeTasks(labels=LABELS)
-        monkeypatch.setattr(runtime.plus_api, "account_day", lambda _tz: NOW.date().isoformat())
         monkeypatch.setattr(runtime.plus_api.backup, "holds_ledger", lambda *_: False)
         self.journal: list[str] = []
         storage = Storage(self.journal)
@@ -136,7 +135,6 @@ def test_read_summary_answers_the_full_text_or_nothing(stack):
 
 
 def test_categories_accept_an_ordinary_active_tag_without_a_destination(stack):
-    assert stack.call("ReadPlan")["plan"].get("enabled", False) is False
     original = stack.call("ReadMailSettings")
     saved = stack.call(
         "UpdateMailCategories",

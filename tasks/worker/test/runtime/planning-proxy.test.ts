@@ -7,17 +7,17 @@ beforeAll(async () => {
   harness = await startHarness({
     planning: async (request) => {
       forwarded.push({ method: request.method, headers: request.headers, body: await request.text() });
-      return Response.json({ plan: { native_planning: true, enabled: true } });
+      return Response.json({ categories: [], etag: 'synthetic' });
     },
   });
 });
 afterAll(async () => { await harness.dispose(); });
 
-test('forwards planning reads and authorized writes without browser credentials', async () => {
-  const read = await harness.fetch('/api/plus/v1/plan:read');
-  expect(await read.json()).toEqual({ plan: { native_planning: true, enabled: true } });
-  const input = { task_id: 'synthetic', etag: '1', stage: 'committed' };
-  const write = await harness.mutate('POST', '/api/plus/v1/tasks:setTaskPlan', input);
+test('forwards Mail reads and authorized writes without browser credentials', async () => {
+  const read = await harness.fetch('/api/plus/v1/mailSettings:read');
+  expect(await read.json()).toEqual({ categories: [], etag: 'synthetic' });
+  const input = { categories: [], etag: 'synthetic' };
+  const write = await harness.mutate('POST', '/api/plus/v1/mailSettings:updateCategories', input);
   expect(write.status).toBe(200);
   const writeRequest = forwarded[1];
   if (!writeRequest) throw new Error("Missing forwarded write");
@@ -28,7 +28,7 @@ test('forwards planning reads and authorized writes without browser credentials'
     expect(request.headers.has('cf-access-jwt-assertion')).toBe(false);
     expect(request.headers.has('x-csrf-token')).toBe(false);
   }
-  const refused = await harness.fetch('/api/plus/v1/tasks:setTaskPlan', {
+  const refused = await harness.fetch('/api/plus/v1/mailSettings:updateCategories', {
     method: 'POST', headers: { 'content-type': 'application/json', origin: harness.url.origin }, body: JSON.stringify(input),
   });
   expect(refused.status).toBe(403);
