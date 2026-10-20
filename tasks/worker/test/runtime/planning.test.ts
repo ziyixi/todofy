@@ -202,12 +202,9 @@ test('a commitment reads as weekly the Monday after its week, and a Sunday choic
 test('GetPlan reads the Bets of three weeks, the arranged lanes and next week, in one batch', async () => {
   const today = localDate(Date.now(), ZONE);
   const week = mondayOf(today);
+  // The body is the masked Bet, as the shared client sends it; the etag is a request field.
   const bet = (name: string, text: string, etag = '') =>
-    harness.mutate('PATCH', `/api/tasks/v1/weeklyBets/${name}?update_mask=text`, {
-      name: `weeklyBets/${name}`,
-      text,
-      etag,
-    });
+    harness.mutate('PATCH', `/api/tasks/v1/weeklyBets/${name}?update_mask=text&etag=${etag}`, { text });
   const work = await bet(`${week}-work`, '  Ship the\nsynthetic draft ');
   expect(work.status, await work.clone().text()).toBe(200);
   expect(await work.json()).toMatchObject({
@@ -244,7 +241,7 @@ test('a Bet is a value write: the saved text replays, a stale etag and an ended 
   const write = (name: string, text: string, etag: string, now: number) =>
     updateWeeklyBet(
       harness.db,
-      fromWire(UpdateWeeklyBetRequestSchema, { weekly_bet: { name: `weeklyBets/${name}`, text, etag } }).message,
+      fromWire(UpdateWeeklyBetRequestSchema, { weekly_bet: { name: `weeklyBets/${name}`, text }, etag }).message,
       ZONE,
       now,
     );

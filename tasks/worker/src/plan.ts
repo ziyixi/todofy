@@ -107,7 +107,7 @@ export async function updateWeeklyBet(db: D1Database, input: UpdateWeeklyBetRequ
   if (current.text === text) return current;
   if (!betWritable(week, mondayOf(localDate(now, zone))))
     precondition("Only this week's and next week's goals can be changed");
-  if (bet.etag !== current.etag) conflict();
+  if (input.etag !== current.etag) conflict();
   const written = await storage(() =>
     db
       .prepare(

@@ -447,9 +447,9 @@ export function createPlanningActions(transports: {
           weeklyBet: {
             name: `weeklyBets/${bet.weekStart}-${bet.area}`,
             text: bet.text,
-            etag: bet.etag,
           },
           updateMask: { paths: ["text"] },
+          etag: bet.etag,
         });
       } catch (error) {
         const reason =

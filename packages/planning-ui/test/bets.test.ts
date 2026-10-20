@@ -92,7 +92,7 @@ it("saves in the write queue and says why a refused Bet was not saved", async ()
   );
 });
 
-it("sends UpdateWeeklyBet with no request ID and maps Tasks' refusals", async () => {
+it("sends UpdateWeeklyBet with no request ID, its etag outside the masked body, and maps Tasks' refusals", async () => {
   const bodies: unknown[] = [];
   const answers = [
     json({
@@ -111,7 +111,7 @@ it("sends UpdateWeeklyBet with no request ID and maps Tasks' refusals", async ()
     vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(String(input));
       expect(url.pathname + url.search).toBe(
-        "/api/tasks/v1/weeklyBets/2026-10-12-work?update_mask=text",
+        "/api/tasks/v1/weeklyBets/2026-10-12-work?update_mask=text&etag=1",
       );
       expect(init?.method).toBe("PATCH");
       bodies.push(JSON.parse(String(init?.body)));

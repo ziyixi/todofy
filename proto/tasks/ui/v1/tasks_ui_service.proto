@@ -920,8 +920,14 @@ message GetPlanRequest {
 }
 // Input to UpdateWeeklyBet.
 message UpdateWeeklyBetRequest {
-  // The Bet's name, its new text and the etag shown (empty when it had none).
+  // The Bet's name and its new text.
   WeeklyBet weekly_bet = 1 [(google.api.field_behavior) = REQUIRED];
   // text, the only field that changes; empty means text.
   google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The etag shown, empty when the week and area had none; separate from the fields being updated.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this concurrency token stays outside the masked resource body. --)
+  // (-- api-linter: core::0154::no-duplicate-etag=disabled
+  //     aip.dev/not-precedent: the shared HTTP client masks resource bodies; this token must survive an update_mask. --)
+  string etag = 3 [(google.api.field_behavior) = OPTIONAL];
 }
