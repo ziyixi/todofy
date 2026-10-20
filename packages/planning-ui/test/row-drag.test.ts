@@ -41,6 +41,21 @@ it("lets a card's own surfaces start its drag, never its other controls", () => 
   expect(prevent(".planning-complete svg")).toBe(true);
   expect(prevent("[data-no-drag] .planning-step-title")).toBe(true);
   expect(prevent("input")).toBe(true);
+  // Focus's grip is a surface too, so pressing it drags its step.
+  document.body.innerHTML = `
+    <li class="plus-focus-slot">
+      <button class="plus-focus-grip"><svg></svg></button>
+      <button class="plus-checkbox"><svg></svg></button>
+    </li>`;
+  const slot = document.querySelector("li")!;
+  const pressIn = (selector: string) =>
+    pointer.options.preventActivation!(
+      press(slot.querySelector(selector)!),
+      {} as never,
+    );
+  expect(pressIn(".plus-focus-grip svg")).toBe(false);
+  expect(pressIn(".plus-focus-grip")).toBe(false);
+  expect(pressIn(".plus-checkbox svg")).toBe(true);
   // The whole row is the activator, not only the grip.
   const element = document.createElement("div");
   const activators = pointer.options.activatorElements as (

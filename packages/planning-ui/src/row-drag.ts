@@ -6,7 +6,7 @@ import {
 
 /** The controls inside a card that are the card itself: a press on them may start its drag. */
 const SURFACES =
-  ".planning-outcome-card, .planning-step-title, .planning-quick-title, .plus-focus-title, .review-drag-handle, .planning-drag-handle";
+  ".planning-outcome-card, .planning-step-title, .planning-quick-title, .plus-focus-title, .review-drag-handle, .planning-drag-handle, .plus-focus-grip";
 
 /**
  * Every planning DragDropProvider's sensors, as the main task list has them (Tasks'
