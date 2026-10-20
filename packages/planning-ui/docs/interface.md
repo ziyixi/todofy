@@ -252,6 +252,7 @@ FlowDay 本地记录保持标题、估时和原应用入口，不创建任务的
 | 本周目标（文字）      | `src/WeeklyGoals.tsx`、`src/BetText.tsx`、`src/bets.ts`、`src/weekly-goals.css` |
 | Review 与事项卡       | `src/ReviewBoard.tsx`、`src/review-board.css`、`src/drag-announcements.ts`      |
 | 完成勾选框            | `src/CompleteTaskButton.tsx`                                                    |
+| 截断标题的完整浮层    | `src/FullTitle.tsx`、`src/planner.css`                                          |
 | Week 事项总览与小步骤 | `src/PlanningWeek.tsx`、`src/AddStep.tsx`、`src/QuickTasks.tsx`                 |
 | 日期队列与投放位置    | `src/PlanningCalendar.tsx`、`src/planning-week.css`                             |
 | 所属事项与领域色      | `src/planning-outcomes.ts`                                                      |

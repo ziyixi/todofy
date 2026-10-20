@@ -83,6 +83,26 @@ The lead's production steps right after the release, in this order:
 5. Owner, on the Mac: remove Todoist Plus at `chrome://extensions` with its unpacked folder, and delete the cutover's
    temporary operator files listed in the private notes.
 
+### Plan and Focus owner changes (`claude/plan-focus-ui`)
+
+**In progress, local only.** A branch from `origin/main` `b7b52e75` for the owner's ten Plan and Focus changes of
+2026-10-19, which ship in one release. Slices, in order: A (card layout and area colours) is done; B (the Step panel
+and double-click), C (whole-row drag in Plan) and D1-D3 (Tasks owns Focus day queues, the timer and time records;
+Focus reorder, Completed and the Day/Week/Month views) remain. FlowDay keeps running untouched, nothing new uses it,
+and its queue and time data are not migrated (owner decision).
+
+- **Slice A (2026-10-20 UTC).** Plan and Focus cards are coloured by area (Work slate, Personal ochre, Unassigned
+  none) with legend dots; outcome cards are 77px with one left-aligned meta line, the deadline first in a two-part
+  status; Next steps cards are 60px; Quick chips share a 150px-minimum grid with "N more" by the heading; cut titles
+  show in full in a bubble on hover or keyboard focus. Week's Committed already showed every commitment; a unit and a
+  browser test now guard it. Behaviour: `packages/planning-ui/docs/interface.md`.
+- **Checked locally on macOS** for slice A: `ci_changes.py` selects Changes, Shared packages, Contracts and Tasks.
+  Shared packages, Contracts and Tasks passed (Tasks' worker lint, typecheck, unit and runtime suites; its web lint,
+  typecheck, unit tests, build and all 89 Playwright tests, with the new `plan-layout.spec.ts` at 1440, 1024, 800 and
+  680px). Changes' test steps passed; its decide step needs GitHub's token, so `ci_changes.py` ran directly.
+- **Known limit.** With all seven Review lanes at a 1440px window (six cards a row, about 155px each) the step counts
+  end in an ellipsis; the cards keep their 77px.
+
 ## Open acceptance
 
 The two scheduler observations the owner stopped on October 17 (email models, website daily sync) are kept
