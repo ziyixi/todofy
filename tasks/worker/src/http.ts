@@ -1,4 +1,3 @@
-import './startup.ts';
 import { issueCsrf, STRICT_CSP, withPrivateHeaders } from '@ziyixi/edge-auth';
 import { HttpTranscoder } from '@ziyixi/proto/http-transcoder';
 import { TasksUiService } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';

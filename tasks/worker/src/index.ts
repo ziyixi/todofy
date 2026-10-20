@@ -1,9 +1,13 @@
-import { WorkerEntrypoint } from 'cloudflare:workers';
+import { env, WorkerEntrypoint } from 'cloudflare:workers';
 import { Code, RpcError } from '@ziyixi/proto/rpc-status';
-import type { Env } from './env.ts';
+import { accountZone, type Env } from './env.ts';
 import { backupCall } from './backup.ts';
 import { api, ownerRequest, serviceRequest } from './http.ts';
 import { serviceCall } from './service.ts';
+import { warmUp } from './startup.ts';
+
+// Once per isolate, in the global scope: TIME_ZONE is a plain var, which the global scope can read.
+warmUp(accountZone(env as Env));
 
 interface AccessProps {
   access?: unknown;
