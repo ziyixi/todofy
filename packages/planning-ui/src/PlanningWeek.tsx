@@ -344,8 +344,11 @@ export function PlanningWeek(props: Props) {
                 scheduledIds={scheduledIds}
                 language={language}
                 selected={selected?.id === task.id}
-                // A click (or Enter) selects, and keeps it selected; a double-click opens it.
-                onClick={() => onSelect(task.id)}
+                // A click (or Enter) selects, and on the selected card changes nothing, its open
+                // Add steps input included; a double-click opens it.
+                onClick={() => {
+                  if (selected?.id !== task.id) onSelect(task.id);
+                }}
                 onOpen={() => editTask(task)}
               />
               <CompleteTaskButton

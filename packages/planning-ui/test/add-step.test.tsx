@@ -339,6 +339,20 @@ it("asks under a new request once a failed title is edited", async () => {
   expect(createSteps.mock.calls[1]![2]).not.toBe(createSteps.mock.calls[0]![2]);
 });
 
+it("keeps the input and its draft when the selected commitment is clicked or double-clicked", async () => {
+  await week();
+  const input = openAddStep();
+  type(input, "A step for the release");
+  const card = within(
+    document.querySelector<HTMLElement>(".planning-commitment-grid")!,
+  ).getByRole("button", { name: new RegExp(`^${RELEASE},`, "u") });
+  fireEvent.click(card);
+  fireEvent.doubleClick(card);
+  expect(screen.getByRole("dialog", { name: RELEASE })).toBeTruthy();
+  expect(tray().getByRole("textbox", { name: "New step" })).toBe(input);
+  expect(input.value).toBe("A step for the release");
+});
+
 it("never writes a draft under another commitment: selecting one closes the input", async () => {
   const actions = createPrototype();
   const createSteps = vi.spyOn(actions, "createSteps");
