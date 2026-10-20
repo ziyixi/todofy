@@ -184,7 +184,8 @@ moves batch by depth to stay below Workers Free's D1 query limit. No new queue, 
 
 Owner requests validate Access before reading the body and validate Origin/CSRF before mutation decoding.
 The CSRF token and cookie last 168 hours, the Access session's length, so a PWA left open overnight can still
-save its first edit without a refresh.
+save its first edit without a refresh. The web reads the token at startup beside the catalog, so the first write
+does not wait for it; a write still reads it when that failed, and a 401 or 403 drops it.
 API responses, HTML, manifest and service worker use private no-store headers. Hashed JS/CSS can use the
 browser's private immutable cache. The service worker only supplies a clear offline page; it does not cache
 private tasks, credentials or writes. The installed PWA needs a connection to use task data.

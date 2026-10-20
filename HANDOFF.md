@@ -145,6 +145,26 @@ follows once the import is verified.
     Tasks (the Worker's 64 unit tests and 20 runtime files with 96 tests, the web's 53 unit tests, build and 105
     Playwright tests, the tools' and deploy tests), Home (with the regenerated `drift-desired.json`), Infra and
     FlowDay. The other app jobs read nothing this slice changed and were not run again.
+- **Review fixes (2026-10-20 UTC), done.** Nine confirmed review findings, each fixed with a test.
+  - Dependencies: a prerequisite in an archived project is done in Tasks too (`prerequisiteDone`), as Plan shows
+    it, so the dialog, the five-limit and the cycle guard agree with Plan's picker; unarchiving makes it hold
+    again. Choosing a done recurring prerequisite again in Plan now waits for its next completion: Tasks keeps a
+    dependency the set already has, so Plan removes it and adds it again (two UpdateTasks).
+  - Plan writes under the etags it holds, with no read first. An estimate answers the task's new etag (before, the
+    next planning save of that task got a 409 and Plan reloaded); a lane or Next-steps reorder is one
+    ReorderTasks; a dependency change is one UpdateTask of the whole set, "remove the done ones" included;
+    completing and estimating send no GetTask.
+  - The web: a dialog save on a list page reads the list and the catalog once (it read both twice), and the CSRF
+    token is read at startup, so the first write does not wait for it.
+  - The import copies facts once: its SQL ends by recording when it ran in `plan_board.created_at` (0 until then),
+    so a second apply never brings back a fact the owner cleared in Tasks.
+  - **Checked locally on macOS.** `ci_changes.py` selects every check job, since a proto comment changed; the app
+    jobs that read nothing this round changed were not run again. Passed: Tasks (the Worker's lint, typecheck, 64
+    unit tests and 20 runtime files with 98 tests; the web's lint, typecheck, 55 unit tests, build and all 107
+    Playwright tests; the tools' 44 tests and the deploy tests), Shared packages (planning-ui's 267 tests),
+    Contracts, Proto (passed on the third run: twice one of `ensure.test.ts`' lock tests hit its 60 s generation
+    timeout while the machine was loaded; the file passes alone in 15 s) and the import workflow's pin test.
+    Without the archived-project rule, the estimate's etag or the import's run record, the matching new test fails.
 
 ### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
 
