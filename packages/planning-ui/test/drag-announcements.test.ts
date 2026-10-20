@@ -6,6 +6,7 @@ import {
   spokenDrags,
   type SpokenName,
 } from "../src/drag-announcements";
+import { focusDragName } from "../src/FocusView";
 import { weekDragName } from "../src/PlanningWeek";
 
 type Options = NonNullable<ConstructorParameters<typeof Accessibility>[1]>;
@@ -135,6 +136,45 @@ it("speaks a Week Committed drag by its title and its place in Committed", () =>
           source: step,
           target: { id: "week-day:2026-10-13", data: { date: "2026-10-13" } },
         },
+      }),
+    ]).toEqual(texts);
+  }
+});
+
+it("speaks a Focus reorder by the step's title and the place it is over", () => {
+  const moving = {
+    id: "focus:synthetic-1",
+    data: { taskId: "synthetic-1", title: "Draft the outline", position: 2 },
+  };
+  const over = {
+    id: "focus:synthetic-2",
+    data: { taskId: "synthetic-2", title: "Book the venue", position: 0 },
+  };
+  for (const [language, texts] of [
+    [
+      "en",
+      [
+        "Picked up: Draft the outline. Arrow keys move it, Space or Enter drops it, Escape cancels.",
+        "Over: position 1",
+        "Dropped: Draft the outline",
+      ],
+    ],
+    [
+      "zh",
+      [
+        "已拿起：Draft the outline。方向键移动，空格或回车放下，Esc 取消。",
+        "移到：第 1 项",
+        "已放下：Draft the outline",
+      ],
+    ],
+  ] as const) {
+    const { say } = spoken(language, focusDragName(language));
+    expect([
+      say("dragstart")({ operation: { source: moving } }),
+      say("dragover")({ operation: { source: moving, target: over } }),
+      say("dragend")({
+        operation: { source: moving, target: over },
+        canceled: false,
       }),
     ]).toEqual(texts);
   }

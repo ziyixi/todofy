@@ -1054,3 +1054,77 @@ it("writes no Next steps order for more than 100 siblings, which one request can
     cleanup();
   }
 });
+
+/** Today's open steps in Focus, first to last. */
+function focusQueue() {
+  return [
+    ...document.querySelectorAll(
+      '[aria-label="Today\'s steps"] > .plus-focus-slot',
+    ),
+  ].map((slot) => slot.getAttribute("data-task-id"));
+}
+/** A Focus step's sortable, as it is now. */
+function focusStep(id: string) {
+  return drops.sortables.get(`focus:${id}`)!;
+}
+
+it("reorders today's Focus queue at once, with one MoveFocusStep inside the day", async () => {
+  const actions = createPrototype();
+  const moves = hold(actions, "moveTaskToDay");
+  render(
+    <App
+      actions={actions}
+      view="focus"
+      language="en"
+      onOpenTask={() => {}}
+      onSettings={() => {}}
+    />,
+  );
+  await screen.findByRole("list", { name: "Today's steps" });
+  expect(focusQueue()).toEqual(["copy", "outline", "receipt"]);
+  // Only another of the day's steps is a target, and the arrow keys step between them.
+  expect(focusStep("receipt")).toMatchObject({
+    accept: "focus-step",
+    group: "focus:2026-10-13",
+    type: "focus-step",
+    data: {
+      taskId: "receipt",
+      title: "Download this month’s receipt",
+      position: 2,
+    },
+  });
+  expect(focusStep("receipt").plugins).toHaveLength(1);
+  // A drop on its own place writes nothing.
+  await drop(focusStep("outline").data!, focusStep("outline").data!);
+  expect(moves).toHaveLength(0);
+  // Dropped on the first step, the receipt goes before it.
+  await drop(focusStep("receipt").data!, focusStep("copy").data!);
+  expect(moves.map((call) => call.args)).toEqual([
+    [
+      "receipt",
+      expect.objectContaining({ date: "2026-10-13" }),
+      expect.objectContaining({ date: "2026-10-13" }),
+      "copy",
+    ],
+  ]);
+  expect(focusQueue()).toEqual(["receipt", "copy", "outline"]);
+  const slot = document.querySelector('[data-task-id="receipt"]')!;
+  expect(
+    slot.querySelector(".plus-focus-block")!.getAttribute("aria-busy"),
+  ).toBe("true");
+  // Focus, lost while React moved the step, goes to its grip.
+  expect(document.activeElement?.getAttribute("aria-label")).toBe(
+    "Move step: Download this month’s receipt, Updating…",
+  );
+  // Not saved: it goes back.
+  await act(async () => moves[0]!.fail());
+  await waitFor(() =>
+    expect(focusQueue()).toEqual(["copy", "outline", "receipt"]),
+  );
+  // Moved to the end, it goes before nothing.
+  await drop(focusStep("copy").data!, focusStep("receipt").data!);
+  expect(moves[1]!.args.at(-1)).toBeUndefined();
+  expect(focusQueue()).toEqual(["outline", "receipt", "copy"]);
+  await act(() => moves[1]!.confirm());
+  expect(focusQueue()).toEqual(["outline", "receipt", "copy"]);
+});

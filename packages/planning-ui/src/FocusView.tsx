@@ -1,7 +1,28 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import {
+  DragDropProvider,
+  DragOverlay,
+  useDragOperation,
+} from "@dnd-kit/react";
+import { useSortable } from "@dnd-kit/react/sortable";
+import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
+import { pointerIntersection } from "@dnd-kit/collision";
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  GripVertical,
+} from "lucide-react";
 import {
   addDays,
+  displayedTitle,
   effectiveArea,
   formattedMinutes,
   mondayOf,
@@ -9,11 +30,19 @@ import {
   taskIndex,
 } from "./domain";
 import { unplannedDue, unplannedText } from "./deadlines";
-import { FocusBlock } from "./FocusBlock";
+import {
+  dragHandle,
+  dragInstructions,
+  spokenDrags,
+  type SpokenName,
+} from "./drag-announcements";
+import { FocusBlock, focusTitle, type FocusBlockProps } from "./FocusBlock";
 import type { RecordWrite } from "./FocusEntries";
 import { FocusMonth } from "./FocusMonth";
 import { FocusWeek } from "./FocusWeek";
-import { pendingStep, withRecord } from "./plan-updates";
+import { areaColor, outcomeForTask } from "./planning-outcomes";
+import { moved, pendingStep, predictMove, withRecord } from "./plan-updates";
+import { planningSensors } from "./row-drag";
 import { monthLabel, readableDate, weekLabel } from "./PlanningCalendar";
 import { LoggedTime } from "./StatusMarks";
 import { words } from "./i18n";
@@ -43,6 +72,17 @@ export function focusRange(tab: FocusTab, date: string): [string, string] {
   }
   const first = monthStart(date);
   return [first, addDays(monthStart(date, 1), -1)];
+}
+
+/** What a Focus drag says: the dragged step's title, and the place it is over. */
+export function focusDragName(language: Language): SpokenName {
+  return (data, as) => {
+    if (as === "target" && typeof data?.position === "number")
+      return language === "zh"
+        ? `第 ${data.position + 1} 项`
+        : `position ${data.position + 1}`;
+    return typeof data?.title === "string" ? data.title : undefined;
+  };
 }
 
 /** The page header's line: the day, week or month Focus shows. */
@@ -348,6 +388,7 @@ function FocusDay({
   pending,
   completing,
   actions,
+  run,
   writeRecord,
   showCompleted = false,
   onOpenTask,
@@ -362,6 +403,28 @@ function FocusDay({
 }) {
   const text = words(language);
   const doneHeading = useId();
+  // The drag instructions every grip names.
+  const hintId = useId();
+  const list = useRef<HTMLOListElement>(null);
+  // A step reordered keeps keyboard focus on its grip, though React moves its node.
+  const [focusMoved, setFocusMoved] = useState<string>();
+  const plugins = useMemo(
+    () => spokenDrags(language, focusDragName(language)),
+    [language],
+  );
+  useEffect(() => {
+    if (!focusMoved || !list.current) return;
+    setFocusMoved(undefined);
+    // Only where focus was lost or is still in the list; never pulled back from elsewhere.
+    const active = (list.current.getRootNode() as Document | ShadowRoot)
+      .activeElement;
+    if (active && active !== document.body && !list.current.contains(active))
+      return;
+    [...list.current.querySelectorAll<HTMLElement>(".plus-focus-slot")]
+      .find((slot) => slot.dataset.taskId === focusMoved)
+      ?.querySelector<HTMLElement>(".plus-focus-grip")
+      ?.focus();
+  }, [focusMoved]);
   // Counting up is the default: Start, work, then complete the step, which saves its time.
   const [targetSeconds, setTargetSeconds] = useState(0);
   const isToday = day.date === focus.date;
@@ -392,46 +455,67 @@ function FocusDay({
     id: string,
     index: number,
     mode: "today" | "readonly" | "done",
-  ) => (
-    <FocusBlock
-      key={id}
-      mode={mode}
-      taskId={id}
-      task={byId.get(id)}
-      known={tasks[id]}
-      plan={plan}
-      focus={focus}
-      date={day.date}
-      // A future day has nothing to log yet.
-      records={
-        future ? undefined : day.entries.filter((entry) => entry.taskId === id)
+  ): FocusBlockProps => ({
+    mode,
+    taskId: id,
+    task: byId.get(id),
+    known: tasks[id],
+    plan,
+    focus,
+    date: day.date,
+    // A future day has nothing to log yet.
+    records: future
+      ? undefined
+      : day.entries.filter((entry) => entry.taskId === id),
+    language,
+    busy,
+    pending,
+    actions,
+    writeRecord,
+    settling:
+      mode === "today" &&
+      Boolean(completing?.has(id) || pending?.has(pendingStep(day.date, id))),
+    onTimer: (action, taskId) => {
+      const task = byId.get(taskId);
+      if (action !== "start") onTimer(action, taskId);
+      else if (task)
+        onTimer(
+          action,
+          taskId,
+          targetSeconds || undefined,
+          effectiveArea(task, plan.tasks),
+        );
+    },
+    editTask,
+    complete,
+    onOpenTask,
+    index,
+    minutes: minutesOf(id),
+  });
+  const steps = (
+    <ol
+      ref={list}
+      className={`plus-focus-stack ${isToday ? "is-sortable" : ""}`}
+      aria-label={
+        isToday
+          ? language === "zh"
+            ? "今天的步骤"
+            : "Today's steps"
+          : `${language === "zh" ? "步骤" : "Steps"}: ${readableDate(day.date, language)}`
       }
-      language={language}
-      busy={busy}
-      pending={pending}
-      actions={actions}
-      writeRecord={writeRecord}
-      settling={
-        mode === "today" &&
-        Boolean(completing?.has(id) || pending?.has(pendingStep(day.date, id)))
-      }
-      onTimer={(action, taskId) => {
-        const task = byId.get(taskId);
-        if (action !== "start") onTimer(action, taskId);
-        else if (task)
-          onTimer(
-            action,
-            taskId,
-            targetSeconds || undefined,
-            effectiveArea(task, plan.tasks),
-          );
-      }}
-      editTask={editTask}
-      complete={complete}
-      onOpenTask={onOpenTask}
-      index={index}
-      minutes={minutesOf(id)}
-    />
+    >
+      {queue.map((id, index) =>
+        isToday ? (
+          <SortableFocusBlock
+            key={id}
+            {...block(id, index, "today")}
+            hint={hintId}
+          />
+        ) : (
+          <FocusBlock key={id} {...block(id, index, "readonly")} />
+        ),
+      )}
+    </ol>
   );
   return (
     <>
@@ -501,22 +585,77 @@ function FocusDay({
           {unplannedText(due, language)}
         </button>
       )}
-      {queue.length > 0 ? (
-        <ol
-          className="plus-focus-stack"
-          aria-label={
-            isToday
-              ? language === "zh"
-                ? "今天的步骤"
-                : "Today's steps"
-              : `${language === "zh" ? "步骤" : "Steps"}: ${readableDate(day.date, language)}`
-          }
+      {queue.length > 0 && !isToday && steps}
+      {queue.length > 0 && isToday && (
+        // Only today's open steps reorder: one MoveFocusStep within the day per drop.
+        <DragDropProvider
+          key={language}
+          plugins={plugins}
+          sensors={planningSensors}
+          onDragEnd={({ canceled, operation }) => {
+            if (canceled) return;
+            const source = operation.source?.data as
+              { taskId?: string; position?: number } | undefined;
+            const target = operation.target?.data as
+              { taskId?: string; position?: number } | undefined;
+            if (
+              !source?.taskId ||
+              source.position === undefined ||
+              target?.position === undefined ||
+              source.taskId === target.taskId
+            )
+              return;
+            const id = source.taskId;
+            const next = moved(queue, source.position, target.position);
+            const beforeId = next[next.indexOf(id) + 1];
+            // The step shows in its new place at once and waits there until Tasks confirms.
+            void run(() => actions.moveTaskToDay(id, day, day, beforeId), {
+              pending: [pendingStep(day.date, id)],
+              predict: predictMove(id, day.date, day.date, beforeId),
+            });
+            setFocusMoved(id);
+          }}
         >
-          {queue.map((id, index) =>
-            block(id, index, isToday ? "today" : "readonly"),
-          )}
-        </ol>
-      ) : (
+          {/* Hidden, like dnd-kit's own: read only as the grips' description. */}
+          <span id={hintId} hidden>
+            {dragInstructions(language)}
+          </span>
+          {steps}
+          {/* Finish preview cleanup at once, keeping dnd-kit's keyboard focus restoration. */}
+          <DragOverlay
+            style={{ pointerEvents: "none" }}
+            dropAnimation={() => undefined}
+          >
+            {(source) => {
+              const id = String(source.data?.taskId ?? "");
+              const task = byId.get(id);
+              const outcome = task
+                ? outcomeForTask(task, plan.tasks, plan.managedLabels)
+                : undefined;
+              return (
+                <div
+                  className="planning-step-overlay"
+                  aria-hidden="true"
+                  inert
+                  style={
+                    {
+                      "--area-color": task
+                        ? areaColor(task, plan.tasks)
+                        : "var(--plus-area-none)",
+                    } as CSSProperties
+                  }
+                >
+                  <strong>{String(source.data?.title ?? "")}</strong>
+                  {outcome && outcome.id !== id && (
+                    <small>{displayedTitle(outcome.title)}</small>
+                  )}
+                </div>
+              );
+            }}
+          </DragOverlay>
+        </DragDropProvider>
+      )}
+      {queue.length === 0 && (
         <section className="plus-focus-empty">
           <p>
             {isToday
@@ -535,10 +674,83 @@ function FocusDay({
           </h2>
           {/* Never inside the queue: completed steps are not reordered or started. */}
           <ul className="plus-focus-stack">
-            {day.completedTaskIds.map((id, index) => block(id, index, "done"))}
+            {day.completedTaskIds.map((id, index) => (
+              <FocusBlock key={id} {...block(id, index, "done")} />
+            ))}
           </ul>
         </section>
       )}
     </>
+  );
+}
+
+/**
+ * One of today's open steps, which drags by its whole row to another step's place, or by its grip
+ * with the keyboard. A step waiting for a write, or with a session, stays where it is.
+ */
+function SortableFocusBlock({
+  hint,
+  ...props
+}: FocusBlockProps & {
+  /** The ID of the drag instructions, which every grip names. */
+  hint: string;
+}) {
+  const { taskId, index: position, language, busy, settling = false } = props;
+  const title = focusTitle(props.task, props.known, language);
+  const timed =
+    props.focus.timer?.taskId === taskId &&
+    props.focus.timer.day === props.date;
+  const { ref, handleRef, isDragSource } = useSortable({
+    id: `focus:${taskId}`,
+    index: position,
+    group: `focus:${props.date}`,
+    type: "focus-step",
+    accept: "focus-step",
+    // As in Week: the arrows step between steps, and nothing moves the DOM while dragging.
+    plugins: [SortableKeyboardPlugin],
+    collisionDetector: pointerIntersection,
+    disabled: busy || settling || timed,
+    data: { taskId, title, position },
+  });
+  // A step dragged over this one draws the line where it will land: before it moving earlier,
+  // after it moving later.
+  const { source, target } = useDragOperation();
+  const from = source?.data?.position as number | undefined;
+  const insert =
+    target?.id === `focus:${taskId}` &&
+    source?.id !== target.id &&
+    from !== undefined
+      ? position < from
+        ? "before"
+        : "after"
+      : undefined;
+  return (
+    <FocusBlock
+      {...props}
+      slotRef={ref}
+      dragging={isDragSource}
+      insert={insert}
+      grip={
+        <button
+          ref={handleRef}
+          type="button"
+          className="plus-focus-grip"
+          {...dragHandle(language, hint)}
+          // A waiting grip stays focusable, so a keyboard drop keeps focus on the step.
+          disabled={busy || timed}
+          aria-disabled={settling || undefined}
+          title={
+            timed
+              ? language === "zh"
+                ? "先结束当前计时再移动"
+                : "Stop the current session before moving this step"
+              : undefined
+          }
+          aria-label={`${language === "zh" ? "移动步骤：" : "Move step: "}${title}${settling ? `, ${words(language).updating}` : ""}`}
+        >
+          <GripVertical size={14} />
+        </button>
+      }
+    />
   );
 }

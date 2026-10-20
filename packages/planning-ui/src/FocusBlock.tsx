@@ -1,5 +1,5 @@
 import { Check, Pause, Play, Square } from "lucide-react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   displayedTitle,
   formattedMinutes,
@@ -20,7 +20,18 @@ import type {
 import { areaColor, outcomeForTask } from "./planning-outcomes";
 import { PendingMark } from "./StatusMarks";
 
-interface Props {
+/** A Focus card's title: Plan's, else Tasks' Focus read's, else that it is unavailable. */
+export function focusTitle(
+  task: PlanningTask | undefined,
+  known: FocusTaskInfo | undefined,
+  language: Language,
+): string {
+  return displayedTitle(
+    task?.title ?? known?.title ?? words(language).missingTask,
+  );
+}
+
+export interface FocusBlockProps {
   /**
    * Today's open step: complete, Start and the timer. A read-only one, on another day: no
    * controls. A completed one: no timer, and its title opens Tasks' own dialog.
@@ -53,6 +64,11 @@ interface Props {
   editTask: (task: PlanningTask) => void;
   complete: (task: PlanningTask) => void;
   onOpenTask?: (id: string) => void;
+  /** A sortable step's: its row, its grip, and whether it is dragged or a drop lands by it. */
+  slotRef?: (element: Element | null) => void;
+  grip?: ReactNode;
+  dragging?: boolean;
+  insert?: "before" | "after";
 }
 
 export function FocusBlock({
@@ -76,12 +92,16 @@ export function FocusBlock({
   editTask,
   complete,
   onOpenTask,
-}: Props) {
+  slotRef,
+  grip,
+  dragging = false,
+  insert,
+}: FocusBlockProps) {
   const text = words(language);
   const done = mode === "done";
   const running = mode === "today";
   // A task Plan does not list has its title and parent from Tasks' Focus read.
-  const title = displayedTitle(task?.title ?? known?.title ?? text.missingTask);
+  const title = focusTitle(task, known, language);
   // This card's session, when it counts on the card's day.
   const session =
     focus.timer?.taskId === taskId && focus.timer.day === date
@@ -115,12 +135,17 @@ export function FocusBlock({
         .join(" › ")
     : "";
   return (
-    <li className="plus-focus-slot" data-task-id={taskId}>
+    <li
+      ref={slotRef}
+      className={`plus-focus-slot ${dragging ? "is-dragging" : ""} ${insert ? `is-insert-${insert}` : ""}`}
+      data-task-id={taskId}
+    >
       <article
         className={`plus-focus-block ${timer ? "is-current" : ""} ${settling ? "is-pending" : ""} ${done ? "is-done" : ""}`}
         style={{ "--area-color": color } as CSSProperties}
         aria-busy={settling || undefined}
       >
+        {grip}
         {done ? (
           <span
             className="plus-checkbox is-done"

@@ -99,9 +99,67 @@
   margin: 0;
 }
 .plus-focus-slot {
+  position: relative;
   margin-bottom: 8px;
 }
+/* Today's steps drag by their whole row, as Plan's cards do (src/row-drag.ts). The grip is an
+   overlay in the card's left padding for the keyboard and screen readers: it shows on hover of its
+   card or on its own keyboard focus, by opacity alone, so nothing moves; touch screens hold the
+   row for 250ms instead. */
+.plus-focus-stack.is-sortable > .plus-focus-slot {
+  cursor: grab;
+}
+.plus-focus-stack.is-sortable .plus-focus-title {
+  cursor: inherit;
+}
+.plus-root .plus-focus-grip {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  padding: 0;
+  color: var(--plus-muted);
+  cursor: grab;
+  touch-action: none;
+  opacity: 0;
+}
+@media (hover: hover) {
+  .plus-root .plus-focus-slot:hover .plus-focus-grip {
+    opacity: 1;
+  }
+}
+.plus-root .plus-focus-grip:focus-visible {
+  opacity: 1;
+  outline-offset: -2px;
+}
+/* One that cannot be used now shows dimmed when it shows. */
+.plus-root .plus-focus-grip:is(:disabled, [aria-disabled="true"]) {
+  color: color-mix(in srgb, var(--plus-muted) 50%, transparent);
+  cursor: default;
+}
+.plus-focus-slot.is-dragging {
+  opacity: 0.3;
+}
+/* The task list's 2px insertion line, centred in the gap. */
+.plus-focus-slot:is(.is-insert-before, .is-insert-after)::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--plus-accent);
+}
+.plus-focus-slot.is-insert-before::before {
+  top: -5px;
+}
+.plus-focus-slot.is-insert-after::before {
+  bottom: -5px;
+}
 .plus-focus-block {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
