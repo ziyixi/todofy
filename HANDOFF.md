@@ -16,7 +16,7 @@ refinement and cutover, VPS recovery, Recall, Mailsort) in
 
 **In progress, local only; not pushed.** A branch from `origin/main` `abd0da1a`, which holds the Plan and Focus
 release. It implements the performance design in one release, by the owner's choice without flags, staged rollout
-or a shadow phase: P0 front end, P1 planning facts in Tasks with a one-time import workflow, P2 Todofy cleanup
+or a shadow phase: P0 front end, P1 planning facts in Tasks, the one-time import workflow, P2 Todofy cleanup
 (Todofy stops serving planning and drops its FlowDay proxy). P3, dropping Todofy's planning tables, follows once the
 import is verified.
 
@@ -35,14 +35,48 @@ import is verified.
   - A tab running an older bundle asks for a reload: every authenticated Tasks answer names its `BUILD_SHA` in
     `x-tasks-build`, the web is built with the same commit, and a mismatch (or, where a build is unnamed, an
     unknown-route answer) shows "Tasks was updated." with Reload in place of the page and its errors. Tabs opened
-    before this release do not have it yet; they need one manual reload after it. The Tasks Worker bundle is 130.8
-    of its own 132 KiB gzip budget (the platform allows 3 MiB): measure P1's planning code against it and raise
-    `tasks/deploy/bundle-size.mjs` with P1 if needed.
+    before this release do not have it yet; they need one manual reload after it. The Tasks Worker bundle was 130.8
+    of its own 132 KiB gzip budget (the platform allows 3 MiB); P1 raised the budget.
   - **Checked locally on macOS.** `ci_changes.py` selects Changes, Tasks and Contracts. Tasks passed: the Worker's
     lint, typecheck, unit tests and 19 runtime files (82 tests, the new `build.test.ts` included), the web's lint,
     typecheck, 69 unit tests, build and all 105 Playwright tests (new: `request-counts.spec.ts`, `outdated.spec.ts`),
     and the tools' and deploy tests. Contracts passed, and so did Changes' test steps; its decide step needs
     GitHub's token, so `ci_changes.py` ran directly.
+- **P1 (2026-10-20 UTC), done except the import.** Planning facts, dependencies and Plan live in Tasks.
+  - **Do not release P1 alone.** From its deploy nothing writes Todofy's planning store, and production rows show
+    no planning facts until the one-time import runs. The import slice comes next: the generator
+    (`tasks/tools/planning-import.ts`, `prepare-planning-import.ts`, `planning-import.test.mjs`) and
+    `.github/workflows/tasks-planning-import.yml`, released with P1; then the design's cutover steps 2-5.
+  - Todofy: `ReadWeeklyReview`, the weekly review's two facts (the newest review task of the week or the week
+    before, the pending Mail count) in one D1 batch with no Tasks call; the gateway allows it.
+  - Tasks: migration `0006_planning.sql` (planning columns on `tasks` and the partial `tasks_committed` index,
+    `task_dependencies`, `weekly_bets`, `plan_board`); Task fields 31-38 and `plan.proto` (GetPlan,
+    UpdateWeeklyBet, `ReorderTasks.lane_order`), all additive; the rules ported from Todofy's Python in
+    `worker/src/planning.ts`; dependency writes as one set with their cycle, open-prerequisite and 300-edge checks
+    inside the write's batch; backup and restore of the new columns and tables (a pre-0006 backup restores with
+    the defaults).
+  - planning-ui reads GetPlan beside the ListTasks pages and writes only to Tasks; Todofy answers only Mail and
+    ReadWeeklyReview. The web reads planning with each row and with GetTask, saves content and planning in one
+    UpdateTask, and lost the 30-second detail cache and the separate planning reads. The browser specs seed
+    planning in the dev server's D1 through its API (`planning-stub.ts`); only Todofy's Mail and review facts
+    are synthetic.
+  - Deviations from the design: `UpdateWeeklyBetRequest.etag` is a request field (the shared HTTP client sends
+    only the masked fields of a resource, so an etag inside `WeeklyBet` never arrived; `a83b4272`).
+    `ListFocusDays`' days and `ReorderTasks.positions` stay REQUIRED, since the wire profile forbids dropping
+    REQUIRED: empty days mean Tasks' today's week, and empty positions with a `lane_order` save only the lane.
+  - Measured locally: the Tasks Worker bundle is 137.1 KiB gzip (was 130.8), budget raised to 165 KiB. The web's
+    main chunk is 891.1 kB (285.4 kB gzip), from 895.8 (285.5). `cpu.test.ts`' first page of 100 planned tasks
+    measured 8.62 reference ms against its bound of 10, and the fullest plan and a dependency write among 300
+    stay under the file's bounds. `read-budget.test.ts`: a task with 5 dependencies reads 16 rows (2 without),
+    GetPlan 3 statements and 9 rows, its next-week read through `tasks_committed`.
+  - Todofy's weekly backup carries the new columns and tables; its runtime round trip seeds and compares them.
+  - **Checked locally on macOS.** `ci_changes.py` selects every check job (the proto changed). Each passed:
+    Changes' test steps (its decide step needs GitHub's token, so `ci_changes.py` ran directly), Proto, Shared
+    packages, Contracts, Tasks (the Worker's lint, typecheck, 64 unit tests and 20 runtime files with 96 tests; the
+    web's lint, typecheck, 53 unit tests, build and all 105 Playwright tests; the tools' 37 and deploy tests),
+    Todofy static, Todofy runtime (all 512 tests in one shard, the completeness check included), FlowDay, Mail
+    Hero, Home, Links, Watch, Mailsort, Recall, Brief, Fleet, Website and Platform's contract step. CI alone runs
+    Platform's manifest compiler, AppArmor, image and k3s steps and Mail Hero's GPG backup test.
 
 ### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
 
