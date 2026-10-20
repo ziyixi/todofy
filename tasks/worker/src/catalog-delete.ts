@@ -18,6 +18,13 @@ function containedWrites(
 ): D1PreparedStatement[] {
   if (table === "projects") {
     return [
+      // First, while its tasks are live: their queue rows leave every day, so they never fill a day's cap.
+      db
+        .prepare(
+          `${family} UPDATE day_steps SET deleted_at=?,updated_at=? WHERE deleted_at IS NULL AND task_id IN
+        (SELECT id FROM tasks WHERE project_id IN (SELECT id FROM family) AND deleted_at IS NULL)`,
+        )
+        .bind(id, now, now),
       db
         .prepare(
           `${family} UPDATE tasks SET deleted_at=?,updated_at=?,revision=revision+1
@@ -39,13 +46,19 @@ function containedWrites(
     ];
   }
   if (table === "sections") {
+    const contained = `WITH RECURSIVE contained(id) AS (
+        SELECT id FROM tasks WHERE section_id=? AND deleted_at IS NULL
+        UNION SELECT t.id FROM tasks t JOIN contained c ON t.parent_id=c.id WHERE t.deleted_at IS NULL
+      )`;
     return [
       db
         .prepare(
-          `WITH RECURSIVE contained(id) AS (
-        SELECT id FROM tasks WHERE section_id=? AND deleted_at IS NULL
-        UNION SELECT t.id FROM tasks t JOIN contained c ON t.parent_id=c.id WHERE t.deleted_at IS NULL
-      ) UPDATE tasks SET deleted_at=?,updated_at=?,revision=revision+1 WHERE id IN (SELECT id FROM contained)`,
+          `${contained} UPDATE day_steps SET deleted_at=?,updated_at=? WHERE task_id IN (SELECT id FROM contained) AND deleted_at IS NULL`,
+        )
+        .bind(id, now, now),
+      db
+        .prepare(
+          `${contained} UPDATE tasks SET deleted_at=?,updated_at=?,revision=revision+1 WHERE id IN (SELECT id FROM contained)`,
         )
         .bind(id, now, now),
       db

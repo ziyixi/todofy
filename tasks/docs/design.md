@@ -94,7 +94,8 @@ removes its technical label membership and soft-retires the exact replaced label
 does not require label mapping. The role projection lives in Core's native planning code
 (`core/plus.py`, `core/native_plan.py`); it does not define the native public label catalog.
 Dragging a task into a planning day changes Tasks' day queue with one `MoveFocusStep`, preserving its task
-date and real deadline. A day holds at most 20 steps.
+date and real deadline. A day holds at most 20 steps. Deleting a task, its project or its section takes its
+steps off every day in the same batch, so they never fill a day; its time records stay.
 Native task edits invalidate the mounted planning snapshot through the existing refresh path.
 Plan keeps the candidate columns vertically stacked within their existing desktop row. Committed alone
 spans the row below, with horizontal cards aligned to those columns; narrow layouts keep the existing

@@ -4,6 +4,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { CompleteTaskRequestSchema } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { fromWire } from '@ziyixi/proto/wire-json';
 import { localDate } from '@ziyixi/task-dates';
+import { DAY_STEPS } from '../../src/focus.ts';
 import { objectReceiptHash, startHarness, type Harness } from './harness.ts';
 
 const ZONE = 'America/Los_Angeles';
@@ -252,6 +253,51 @@ test('a deleted task leaves the queues and its records stay', async () => {
     parent_title: 'Synthetic parent',
   });
   expect(await refusal(await move({ task_id: step.id, source_day: '2026-10-01' }))).toBe('NOT_FOUND');
+  // Its place is free again: the day still takes DAY_STEPS other steps.
+  const others = await Promise.all(
+    Array.from({ length: DAY_STEPS }, (_, index) => task(`Synthetic step after a deletion ${String(index)}`)),
+  );
+  await harness.db.batch(
+    others
+      .slice(1)
+      .map((other, index) =>
+        harness.db
+          .prepare(
+            "INSERT INTO day_steps(day,task_id,position,created_at,updated_at) VALUES('2026-10-01',?,?,1,1)",
+          )
+          .bind(other.id, index + 1),
+      ),
+  );
+  await ok(await move({ task_id: others[0]?.id, destination_day: '2026-10-01' }));
+  expect((await queue('2026-10-01')).open).toHaveLength(DAY_STEPS);
+});
+
+test("a deleted project's or section's steps leave the queues too", async () => {
+  const day = '2026-10-02';
+  const make = async (kind: string, body: Record<string, unknown>) =>
+    ok<WireTask>(await harness.mutate('POST', `/api/tasks/v1/${kind}?request_id=${randomUUID()}`, body));
+  const remove = async (resource: WireTask) =>
+    ok(
+      await harness.mutate(
+        'DELETE',
+        `/api/tasks/v1/${resource.name}?etag=${resource.etag}&request_id=${randomUUID()}`,
+      ),
+    );
+  const project = await make('projects', { title: 'Synthetic deleted project' });
+  const kept = await make('projects', { title: 'Synthetic kept project' });
+  const section = await make('sections', { title: 'Synthetic deleted section', project_id: kept.id });
+  const inProject = await task('Synthetic project step', { project_id: project.id });
+  const inSection = await task('Synthetic section step', { project_id: kept.id, section_id: section.id });
+  const child = await task('Synthetic section child', { parent_id: inSection.id, kind: 'step' });
+  const outside = await task('Synthetic unrelated step');
+  for (const step of [inProject, inSection, child, outside])
+    await ok(await move({ task_id: step.id, destination_day: day }));
+  await remove(project);
+  await remove(section);
+  expect(await queue(day)).toEqual({ open: [outside.id], done: [] });
+  expect((await stepRows(day)).filter((row) => row.deleted_at === null).map((row) => row.task_id)).toEqual([
+    outside.id,
+  ]);
 });
 
 test('the timer starts on Tasks today, pauses, resumes and stops into one record with its area', async () => {

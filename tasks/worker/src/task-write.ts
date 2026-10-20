@@ -202,6 +202,12 @@ export async function deleteTask(db: D1Database, input: DeleteTaskRequest, now: 
       now,
     },
     [
+      // First, while the subtree is still live: its queue rows leave every day, so they never fill a day's cap.
+      db
+        .prepare(
+          `${subtree} UPDATE day_steps SET deleted_at=?,updated_at=? WHERE task_id IN (SELECT id FROM descendants) AND deleted_at IS NULL`,
+        )
+        .bind(id, now, now),
       db
         .prepare(
           `${subtree} UPDATE tasks SET deleted_at=?,updated_at=?,revision=revision+1 WHERE id IN (SELECT id FROM descendants)`,
