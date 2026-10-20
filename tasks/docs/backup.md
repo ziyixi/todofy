@@ -170,3 +170,46 @@ Then check it:
 3. Delete the three files in `$PRIV`; they hold task ids and estimates.
 
 `node --test tasks/tools/test/estimate-backfill.test.mjs` covers the generator on synthetic rows.
+
+## One-time planning import
+
+Until the release that added `0006_planning.sql`, Todofy kept each task's planning facts, the dependencies, the
+weekly goals and Plan's lane orders. Since then Tasks keeps them and nothing writes Todofy's store, so right after
+that release `tools/prepare-planning-import.ts` (logic in `tools/planning-import.ts`) copies the store into Tasks:
+
+- A task's stage, area, start-ahead days and flags go only onto a live task whose planning columns still hold their
+  defaults, with `revision+1` and, as `updated_at`, the later of the row's and Todofy's. A commitment keeps the
+  week it was recorded for, else the week in effect, so one for an ended week reads as weekly. As every Tasks write
+  stores them, Quick adds Standalone, no deadline means no start-ahead days, and Todofy's `blocked` is left out:
+  dependencies say what blocks a task.
+- A dependency is copied when its waiting task is open and its prerequisite live, with its baseline and creation
+  time, unless Tasks has that pair, even a removed one.
+- A week's goal is copied when Tasks has none for that week and area; a cleared goal stays out.
+- The lane orders are copied while Tasks' board is untouched.
+
+Every statement repeats its guard, so a fact set in Tasks since the release is never overwritten and running the
+import again changes nothing. A state, dependency or lane entry that names a task Tasks does not have live (a deleted
+task, or a Todoist-era identity) is counted as an orphan and left out.
+
+The owner runs [Tasks planning import](../../.github/workflows/tasks-planning-import.yml) from GitHub Actions on
+`main`. It runs in the `production` environment with the releases' Cloudflare token and in the Tasks release's
+concurrency group. It answers the generator's read-only SELECTs from both databases into a private directory on
+the runner, deletes the directory at the end, and prints counts only: `states`, `dependencies`, `bets` and
+`board`, each with what is `pending`, already `present` and `orphan`, and `pending` in all. No task, title, goal or
+ID reaches the log.
+
+1. Run it with `apply` unchecked and read the counts. Avoid the account's Sunday-to-Monday midnight.
+2. Run it with `apply` checked. It counts, prints Tasks' Time Travel bookmark, applies the SQL with
+   `wrangler d1 execute --file` (Tasks' D1 answers no queries for the few seconds this takes), then counts again
+   and fails unless nothing is left pending. A failed apply prints only `PLANNING_IMPORT_APPLY_FAILED`; D1 then
+   returns to its state before the file, and the run can be repeated.
+3. In the browser, check a task's tags, its dialog, Review, Week and Focus.
+
+To undo the import, restore the printed bookmark from `tasks/worker`:
+`npx wrangler d1 time-travel restore DB --bookmark=<bookmark> --config ../wrangler.toml`. That also undoes every edit
+made in Tasks since. Running again after an undo imports the same facts.
+
+`node --test tasks/tools/test/planning-import.test.mjs` covers the generator on synthetic rows: both apps' schemas
+from their migrations, the exports on read-only connections, and the imported rows read back through the Tasks API
+on real D1. `.github/scripts/test_tasks_planning_import_workflow.py` pins the workflow. The workflow, the tool and
+their tests are deleted together with Todofy's planning tables.

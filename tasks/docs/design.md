@@ -92,6 +92,8 @@ classifications. The rules are the Worker's (`worker/src/planning.ts`): a commit
 no write; newly parking a task clears its stage and `active`; Quick implies Standalone action; no deadline means
 no start-ahead days. Each Task answers its rolled `stage`, Review's lane (`board_stage`), `must_start` and
 `missing_lead` for Tasks' today.
+The facts, dependencies, goals and lane orders Todofy kept before this are copied in once by
+`tools/planning-import.ts` ([backup](backup.md#one-time-planning-import)).
 
 Dependencies (`task_dependencies`) name prerequisite task IDs and derive Blocked from their completion state;
 there is no independent Blocked checkbox. They are written as the task's whole set with
