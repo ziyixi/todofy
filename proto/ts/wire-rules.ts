@@ -21,8 +21,9 @@
  *   group's format), the latter after the message's fields.
  *
  * The rules are read from the descriptors (getOption) once per field and cached; a regular expression is
- * compiled once per format. Rule mistakes (an unknown format, a case on a field that has no presence) stop
- * generation (proto/tools/wire_rules.py), so they cannot reach this code from a generated descriptor.
+ * compiled once per format. A message whose type reaches no rule (isRuleless; most API answers) is not walked at
+ * all. Rule mistakes (an unknown format, a case on a field that has no presence) stop generation
+ * (proto/tools/wire_rules.py), so they cannot reach this code from a generated descriptor.
  */
 import { getOption, hasOption, ScalarType, type DescEnum, type DescField, type DescFile, type DescMessage } from '@bufbuild/protobuf';
 import type { ReflectMessage } from '@bufbuild/protobuf/reflect';
@@ -230,8 +231,8 @@ export function ruleViolation(r: ReflectMessage, lenient: boolean, unrecognized:
 
 const ordered = new WeakMap<DescMessage, readonly DescField[]>();
 
-/** The fields of `desc` in field-number order, the order both codecs check them in. */
-function byNumber(desc: DescMessage): readonly DescField[] {
+/** The fields of `desc` in field-number order, the order both codecs check and write them in. */
+export function byNumber(desc: DescMessage): readonly DescField[] {
   let fields = ordered.get(desc);
   if (fields === undefined) {
     fields = [...desc.fields].sort((a, b) => a.number - b.number);
@@ -240,11 +241,52 @@ function byNumber(desc: DescMessage): readonly DescField[] {
   return fields;
 }
 
+/** The message type of a message field, list or map (its items or values), if it has one. */
+function messageOf(field: DescField): DescMessage | undefined {
+  if (field.fieldKind === 'message') return field.message;
+  if (field.fieldKind === 'list' && field.listKind === 'message') return field.message;
+  return field.fieldKind === 'map' && field.mapKind === 'message' ? field.message : undefined;
+}
+
+/** `desc` and every message type a message of it reaches through message fields, list items and map values. */
+export function reachableMessages(desc: DescMessage): DescMessage[] {
+  const seen = new Set([desc]);
+  for (const current of seen) {
+    for (const field of current.fields) {
+      const target = messageOf(field);
+      if (target !== undefined) seen.add(target);
+    }
+  }
+  return [...seen];
+}
+
+const ruleless = new WeakMap<DescMessage, boolean>();
+
+/**
+ * Whether no rule applies anywhere in a message of `desc`: neither it nor a message type it reaches has a rule of its
+ * own, so checking one finds nothing and walks none of it. Most messages are such (a UI API's answer of hundreds of
+ * items, often). Reads the rules of every message type it reaches, which fills the caches the checks read.
+ */
+export function isRuleless(desc: DescMessage): boolean {
+  let value = ruleless.get(desc);
+  if (value === undefined) {
+    value = true;
+    for (const message of reachableMessages(desc)) {
+      const own = rulesOf(message);
+      if (own.discriminator !== null || own.anyMatch.length > 0) value = false;
+      for (const field of message.fields) if (compiled(field) !== NONE) value = false;
+    }
+    ruleless.set(desc, value);
+  }
+  return value;
+}
+
 function join(path: string, name: string): string {
   return path === '' ? name : `${path}.${name}`;
 }
 
 function checkMessage(r: ReflectMessage, path: string, context: Context): string | null {
+  if (isRuleless(r.desc)) return null;
   const { discriminator, anyMatch } = rulesOf(r.desc);
   let variant: string | undefined;
   if (discriminator !== null && discriminator.fieldKind === 'enum') {

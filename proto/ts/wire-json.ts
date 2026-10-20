@@ -82,7 +82,7 @@ import { FieldMaskSchema, timestampDate, timestampFromDate, TimestampSchema, typ
 import { closed as closedOption, method as methodOption } from './common/wire/v1/wire_pb.ts';
 import { FieldMaskError, formatFieldMask, parseFieldMask } from './field-mask.ts';
 import { field_behavior, FieldBehavior } from './google/api/field_behavior_pb.ts';
-import { keepsOrder, ruleViolation, writesEmpty } from './wire-rules.ts';
+import { byNumber, isRuleless, keepsOrder, reachableMessages, ruleViolation, writesEmpty } from './wire-rules.ts';
 
 export { fieldRules, formatMatches } from './wire-rules.ts';
 
@@ -335,6 +335,26 @@ export interface WriteOptions {
   readonly lenient?: boolean;
 }
 
+/**
+ * Reads now what the codec reads from the descriptors of `desc` and of every message type it reaches (each field's
+ * REQUIRED behaviour and value rules, the fields' order and names, the enums' wire names), which a first read or write
+ * of a message does otherwise. The HTTP transcoder calls it for every method's input and output when it is constructed,
+ * which a Worker does at global scope: outside every request's CPU time.
+ */
+export function prepareWire(desc: DescMessage): void {
+  isRuleless(desc);
+  for (const message of reachableMessages(desc)) {
+    byNumber(message);
+    fieldsByName(message);
+    for (const field of message.fields) {
+      required(field);
+      if (field.fieldKind === 'enum' || (field.fieldKind === 'list' && field.listKind === 'enum') || (field.fieldKind === 'map' && field.mapKind === 'enum')) {
+        wireTable(field.enum);
+      }
+    }
+  }
+}
+
 /** The wire JSON object of `message` (a plain object; JSON.stringify gives the wire bytes). Checks its value rules first. */
 export function toWire<Desc extends DescMessage>(schema: Desc, message: MessageShape<Desc>, options: WriteOptions = {}): WireOf<Desc> {
   const r = reflect(schema, message);
@@ -345,7 +365,7 @@ export function toWire<Desc extends DescMessage>(schema: Desc, message: MessageS
 
 function writeMessage(r: ReflectMessage): JsonObject {
   const out: JsonObject = {};
-  for (const field of [...r.fields].sort((a, b) => a.number - b.number)) {
+  for (const field of byNumber(r.desc)) {
     const set = r.isSet(field);
     const always = required(field);
     switch (field.fieldKind) {
@@ -444,6 +464,18 @@ function isObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+const namedFields = new WeakMap<DescMessage, ReadonlyMap<string, DescField>>();
+
+/** The fields of `desc` by their proto (wire) names. */
+function fieldsByName(desc: DescMessage): ReadonlyMap<string, DescField> {
+  let fields = namedFields.get(desc);
+  if (fields === undefined) {
+    fields = new Map(desc.fields.map((f) => [f.name, f]));
+    namedFields.set(desc, fields);
+  }
+  return fields;
+}
+
 /** How a read goes: strict or lenient, where skipped paths go, and whether REQUIRED is checked here. */
 interface ReadState {
   readonly strict: boolean;
@@ -456,7 +488,7 @@ function readMessage(schema: DescMessage, json: unknown, path: string, state: Re
   if (!isObject(json)) throw new WireJsonError(`${path || '$'}: not an object`);
   const message = create(schema);
   const r = reflect(schema, message);
-  const byName = new Map(schema.fields.map((f) => [f.name, f]));
+  const byName = fieldsByName(schema);
   for (const [key, value] of Object.entries(json)) {
     const at = path === '' ? key : `${path}.${key}`;
     const field = byName.get(key);

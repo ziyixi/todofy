@@ -5,8 +5,10 @@
  * and a list written even when empty; and a service binding's arguments follow (common.wire.v1.method).positional.
  * test/python/test_wire_rules.py is the Python twin.
  */
-import { create } from '@bufbuild/protobuf';
+import { create, createFileRegistry } from '@bufbuild/protobuf';
+import { FileDescriptorProtoSchema } from '@bufbuild/protobuf/wkt';
 import { describe, expect, test } from 'vitest';
+import { BookSchema, ShelfSchema } from '../ts/prototest/v1/prototest_pb.ts';
 import {
   file_prototest_v1_rules,
   LabelSchema,
@@ -18,7 +20,8 @@ import {
   Priority,
   TrackRequestSchema,
 } from '../ts/prototest/v1/rules_pb.ts';
-import { fieldRules, formatMatches, fromWire, fromWireArguments, toWire, toWireArguments, WireJsonError } from '../ts/wire-json.ts';
+import { fieldRules, formatMatches, fromWire, fromWireArguments, prepareWire, toWire, toWireArguments, WireJsonError } from '../ts/wire-json.ts';
+import { isRuleless } from '../ts/wire-rules.ts';
 
 const sent = {
   status: Parcel_Status.SENT,
@@ -155,6 +158,63 @@ describe('the relations between fields and write_empty', () => {
   test('[\\s\\S] matches every character after the first visible one, above U+FFFF and lone surrogates included', () => {
     for (const text of [' \u{10ffff}', ' \u{1f600}', ' \ud800', ' \uffff\n', '\u{1f600}', 'a\u{1f600}b\u2028']) expect(formatMatches(file_prototest_v1_rules, 'Visible', text), text).toBe(true);
     expect(formatMatches(file_prototest_v1_rules, 'Visible', '   ')).toBe(false);
+  });
+});
+
+describe('a message type no rule reaches is not walked', () => {
+  // A type with no rule of its own that reaches ParcelLine's rules through a list, a map and itself (descriptors made
+  // in the test).
+  const registry = createFileRegistry(
+    create(FileDescriptorProtoSchema, {
+      name: 'fixture/v1/wrapper.proto',
+      package: 'fixture.v1',
+      syntax: 'proto3',
+      dependency: ['prototest/v1/rules.proto'],
+      messageType: [
+        {
+          name: 'Wrapper',
+          field: [
+            { name: 'lines', number: 1, type: 11, label: 3, typeName: '.prototest.v1.ParcelLine', jsonName: 'lines' },
+            { name: 'by_sku', number: 2, type: 11, label: 3, typeName: '.fixture.v1.Wrapper.BySkuEntry', jsonName: 'bySku' },
+            { name: 'inner', number: 3, type: 11, label: 1, typeName: '.fixture.v1.Wrapper', jsonName: 'inner' },
+          ],
+          nestedType: [
+            {
+              name: 'BySkuEntry',
+              options: { mapEntry: true },
+              field: [
+                { name: 'key', number: 1, type: 9, label: 1, jsonName: 'key' },
+                { name: 'value', number: 2, type: 11, label: 1, typeName: '.prototest.v1.ParcelLine', jsonName: 'value' },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+    (name) => (name === 'prototest/v1/rules.proto' ? file_prototest_v1_rules : undefined),
+  );
+  const wrapper = registry.getMessage('fixture.v1.Wrapper');
+  if (wrapper === undefined) throw new Error('no Wrapper');
+  const line = { sku: 'pen', quantity: 100 };
+
+  test('only a type that reaches no rule counts as ruleless', () => {
+    expect([BookSchema, ShelfSchema].map(isRuleless)).toEqual([true, true]);
+    expect([ParcelSchema, ParcelLineSchema, LabelSchema, wrapper].map(isRuleless)).toEqual([false, false, false, false]);
+  });
+
+  test('rules are checked through a type without rules of its own: a list, a map and a cycle', () => {
+    prepareWire(wrapper);
+    for (const [value, wire, error] of [
+      [{ lines: [line] }, { lines: [line] }, 'lines[0].quantity: above the maximum'],
+      [{ bySku: { pen: line } }, { by_sku: { pen: line } }, 'by_sku{}.quantity: above the maximum'],
+      [{ inner: { inner: { lines: [line] } } }, { inner: { inner: { lines: [line] } } }, 'inner.inner.lines[0].quantity: above the maximum'],
+    ] as const) {
+      expect(() => toWire(wrapper, create(wrapper, value)), error).toThrow(new WireJsonError(error));
+      expect(() => fromWire(wrapper, wire), error).toThrow(new WireJsonError(error));
+    }
+    expect(toWire(wrapper, create(wrapper, { inner: { lines: [{ sku: 'pen', quantity: 2 }] } }))).toEqual({
+      inner: { lines: [{ sku: 'pen', quantity: 2 }] },
+    });
   });
 });
 

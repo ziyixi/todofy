@@ -61,7 +61,7 @@ import { field_info, FieldInfo_Format } from './google/api/field_info_pb.ts';
 import { compareSpecificity, matchTemplate, PathTemplateError, sameShape, splitPath, type Bindings } from './http-path.ts';
 import { httpBindings, isTextField, resolveField, type HttpBinding, type HttpMethod } from './http-rule.ts';
 import { Code, RpcError, statusBody, type StatusOptions } from './rpc-status.ts';
-import { fromWire, toWire, WireJsonError } from './wire-json.ts';
+import { fromWire, prepareWire, toWire, WireJsonError } from './wire-json.ts';
 
 /** A matched route, as `authorize` and the result see it. */
 export interface RouteInfo {
@@ -384,16 +384,20 @@ export class HttpTranscoder<S extends GenServiceMethods, C> {
   #routes: readonly HttpBinding[] | undefined;
 
   /**
-   * Builds and checks the route table at once, so a Worker that constructs its transcoder at global scope pays
-   * for reading the descriptors' options during startup (outside any request's CPU time), and a binding this
-   * transcoder does not support fails the Worker's startup (the deploy) instead of a request. Throws as
-   * routes() does.
+   * Builds and checks the route table at once, and reads what the codec needs from each method's input and output
+   * descriptors (prepareWire), so a Worker that constructs its transcoder at global scope pays for reading the
+   * descriptors' options during startup (outside any request's CPU time), and a binding this transcoder does not
+   * support fails the Worker's startup (the deploy) instead of a request. Throws as routes() does.
    */
   constructor(service: GenService<S>, handlers: ServiceHandlers<S, C>, options: TranscoderOptions<C>) {
     this.#service = service;
     this.#handlers = handlers;
     this.#options = options;
-    for (const route of this.routes()) planOf(route.method.input);
+    for (const route of this.routes()) {
+      planOf(route.method.input);
+      prepareWire(route.method.input);
+      prepareWire(route.method.output);
+    }
   }
 
   /**

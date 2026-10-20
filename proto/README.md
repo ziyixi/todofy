@@ -664,9 +664,10 @@ LocalizedMessage, RequestInfo, typed details]}}`, `ts/rpc-status.ts`). Messages 
 from the request is echoed. Path templates (`ts/http-path.ts`) follow http.proto (`*`, `**`,
 `{field.path=...}`, `:verb`, its percent-decoding rules), with the precise choices written at the top of the
 file (a raw `:` in the last segment is a verb; literals beat `*` beat `**`). The constructor builds the route
-table, so a Worker that constructs its transcoder at global scope reads the options during startup, and an
-unsupported binding (`custom`, `response_body`, a body on GET or DELETE, a non-message body field) fails the
-Worker's startup, which is its deploy, instead of a request.
+table and reads what the codec needs from each method's input and output (`prepareWire`: REQUIRED fields, value
+rules, field orders, enum names), so a Worker that constructs its transcoder at global scope reads the options during
+startup, and an unsupported binding (`custom`, `response_body`, a body on GET or DELETE, a non-message body field)
+fails the Worker's startup, which is its deploy, instead of a request.
 
 **The client** (`ts/http-client.ts`, `createHttpClient(Service, send)`): one typed method per rpc
 (`client.getWatch({ name: 'watches/w1' })` resolves to a `Watch`), laid out by the rpc's primary binding;
@@ -683,12 +684,13 @@ workerd isolate around each request, noisy at 0.1 ms resolution, medians of 10 w
 reference machine of `tools/workerd-cpu`). The transcoder's decode, the map to messages and `toWire` add a few tenths
 of a millisecond to a warm request; the isolate's first API request about 2 ms, from running the new code paths once.
 The route table itself is built when the Worker's global scope constructs the transcoder (about 2 ms in a fresh Node
-process), outside any request. The bundles grew by the protobuf-es runtime and the embedded descriptors of the API
-and `google/api`. So an app that adopts the runtime should expect about 27 KiB more gzip in its Worker, 36 KiB more
-in its UI and about 2 ms more CPU on an isolate's first API request. Each app's CI holds its numbers: a CPU test
-bounds the isolate's first API request, every other request's first run and every warm median in milliseconds of the
-reference machine (`tools/workerd-cpu` and its README), and its bundles are held to budgets (`tools/bundle-size`:
-`<app>/deploy/bundle-size.mjs` for the Worker, `<app>/web/scripts/js-budget.mjs` for the UI's JavaScript).
+process; Tasks' 34 methods with their codec tables about 8 ms), outside any request. The bundles grew by the
+protobuf-es runtime and the embedded descriptors of the API and `google/api`. So an app that adopts the runtime
+should expect about 27 KiB more gzip in its Worker, 36 KiB more in its UI and about 2 ms more CPU on an isolate's
+first API request. Each app's CI holds its numbers: a CPU test bounds the isolate's first API request, every other
+request's first run and every warm median in milliseconds of the reference machine (`tools/workerd-cpu` and its
+README), and its bundles are held to budgets (`tools/bundle-size`: `<app>/deploy/bundle-size.mjs` for the Worker,
+`<app>/web/scripts/js-budget.mjs` for the UI's JavaScript).
 
 **Large lists** (measured 2026-10-02 on FlowDay, the first API with lists of hundreds of items:
 `flowday/worker/test/runtime/cpu.test.ts`, same meter and machine). Writing a message with `toWire` costs a few
