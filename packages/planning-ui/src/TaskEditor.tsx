@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ExternalLink, Plus, X } from "lucide-react";
 import {
+  DEFAULT_STEP_MINUTES,
   displayedTitle,
   formattedMinutes,
   hasPlanningFlag,
   isSchedulable,
+  STEP_MINUTES,
+  validMinutes,
 } from "./domain";
 import { detailStatus } from "./deadlines";
 import { TaskDependencies } from "./TaskDependencies";
@@ -141,7 +144,8 @@ export function TaskEditor({
 }: TaskEditorProps) {
   const text = words(language);
   const [lines, setLines] = useState("");
-  const [minutes, setMinutes] = useState("");
+  // New steps' time: every step gets one, 30 minutes unless another is chosen.
+  const [minutes, setMinutes] = useState(String(DEFAULT_STEP_MINUTES));
   // Only edited fields have drafts. Everything else follows the refreshed task.
   const [planning, setPlanning] = useState<{
     base: PlanningTask;
@@ -203,10 +207,7 @@ export function TaskEditor({
     .split("\n")
     .map((title) => title.trim())
     .filter(Boolean)
-    .map((title) => ({
-      title,
-      ...(minutes ? { estimatedMinutes: Number(minutes) } : {}),
-    }));
+    .map((title) => ({ title, estimatedMinutes: Number(minutes) }));
   // From the fields as shown, so a date being chosen already says where it stands.
   const status = detailStatus(task, deadline, lead, today, language);
   const active = hasPlanningFlag(task, ACTIVE_LABEL);
@@ -541,14 +542,15 @@ export function TaskEditor({
           />
           <div className="plus-estimate-presets">
             <span>{text.estimate}</span>
-            {["", "15", "30", "60", "90"].map((value) => (
+            {STEP_MINUTES.map((value) => (
               <button
                 key={value}
-                className={minutes === value ? "selected" : ""}
-                onClick={() => setMinutes(value)}
+                className={minutes === String(value) ? "selected" : ""}
+                aria-pressed={minutes === String(value)}
+                onClick={() => setMinutes(String(value))}
                 disabled={busy}
               >
-                {value ? `${value} ${text.minutes}` : text.unknown}
+                {`${value} ${text.minutes}`}
               </button>
             ))}
             <input
@@ -568,12 +570,7 @@ export function TaskEditor({
             <button
               className="plus-button plus-primary"
               disabled={
-                busy ||
-                !drafts.length ||
-                (minutes !== "" &&
-                  (!Number.isInteger(Number(minutes)) ||
-                    Number(minutes) < 1 ||
-                    Number(minutes) > 1440))
+                busy || !drafts.length || !validMinutes(Number(minutes || NaN))
               }
               onClick={() => void addSteps()}
             >

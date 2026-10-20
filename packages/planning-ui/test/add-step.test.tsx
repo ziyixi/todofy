@@ -136,7 +136,7 @@ it("adds a step at Enter, clears at once for the next, and shows it waiting unti
   await waitFor(() => expect(createSteps).toHaveBeenCalledOnce());
   expect(createSteps.mock.calls[0]!.slice(0, 2)).toEqual([
     expect.objectContaining({ id: "release" }),
-    [{ title: "Draft the release note" }],
+    [{ title: "Draft the release note", estimatedMinutes: 30 }],
   ]);
   // While it saves, Enter adds nothing more; typing goes on.
   await waitFor(() => expect(input.getAttribute("aria-disabled")).toBe("true"));
@@ -161,7 +161,9 @@ it("adds a step at Enter, clears at once for the next, and shows it waiting unti
   // The next step is a new request.
   fireEvent.keyDown(input, { key: "Enter" });
   await waitFor(() => expect(createSteps).toHaveBeenCalledTimes(2));
-  expect(createSteps.mock.calls[1]![1]).toEqual([{ title: "Check the links" }]);
+  expect(createSteps.mock.calls[1]![1]).toEqual([
+    { title: "Check the links", estimatedMinutes: 30 },
+  ]);
   expect(createSteps.mock.calls[1]![2]).not.toBe(createSteps.mock.calls[0]![2]);
 });
 
@@ -191,6 +193,84 @@ it("ignores an input method's Enter, and closes at Esc or at Enter with nothing 
     tray().getByRole("button", { name: `Add steps to “${RELEASE}”` }),
   );
   expect(createSteps).not.toHaveBeenCalled();
+});
+
+it("adds each step with the time beside it: 30 min, or the last one chosen while it stays open", async () => {
+  const actions = createPrototype();
+  const createSteps = vi.spyOn(actions, "createSteps");
+  await week(actions);
+  let input = openAddStep();
+  const time = () =>
+    tray().getByRole<HTMLSelectElement>("combobox", { name: "Estimate" });
+  expect(
+    [...time().options].map((option) => [option.value, option.text]),
+  ).toEqual([
+    ["15", "15 min"],
+    ["30", "30 min"],
+    ["60", "60 min"],
+    ["90", "90 min"],
+  ]);
+  expect(time().value).toBe("30");
+  type(input, "Draft the release note");
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(createSteps).toHaveBeenCalledOnce());
+  await waitFor(() => expect(input.getAttribute("aria-disabled")).toBeNull());
+  // A time chosen before typing; focus moving to it keeps the cell open.
+  fireEvent.blur(input, { relatedTarget: time() });
+  fireEvent.change(time(), { target: { value: "90" } });
+  expect(tray().getByRole("textbox", { name: "New step" })).toBe(input);
+  type(input, "Check the links");
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(createSteps).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(input.getAttribute("aria-disabled")).toBeNull());
+  type(input, "Ask for a review");
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(createSteps).toHaveBeenCalledTimes(3));
+  expect(createSteps.mock.calls.map((call) => call[1])).toEqual([
+    [{ title: "Draft the release note", estimatedMinutes: 30 }],
+    [{ title: "Check the links", estimatedMinutes: 90 }],
+    [{ title: "Ask for a review", estimatedMinutes: 90 }],
+  ]);
+  // Focus leaving the whole cell, from the time, closes it; opened again it starts at 30.
+  await waitFor(() => expect(input.getAttribute("aria-disabled")).toBeNull());
+  fireEvent.blur(input, { relatedTarget: time() });
+  fireEvent.blur(time());
+  expect(tray().queryByRole("textbox")).toBeNull();
+  expect(tray().queryByRole("combobox", { name: "Estimate" })).toBeNull();
+  input = openAddStep();
+  expect(time().value).toBe("30");
+  // Escape on the time closes the cell too, back to the Add steps row.
+  fireEvent.keyDown(time(), { key: "Escape" });
+  expect(document.activeElement).toBe(
+    tray().getByRole("button", { name: `Add steps to “${RELEASE}”` }),
+  );
+});
+
+it("asks under a new request when a failed step's time is changed", async () => {
+  const actions = createPrototype();
+  const createSteps = vi
+    .spyOn(actions, "createSteps")
+    .mockRejectedValueOnce(new Error("Synthetic steps unavailable"));
+  await week(actions);
+  const input = openAddStep();
+  const time = tray().getByRole<HTMLSelectElement>("combobox", {
+    name: "Estimate",
+  });
+  fireEvent.change(time, { target: { value: "60" } });
+  type(input, "Book the room");
+  fireEvent.keyDown(input, { key: "Enter" });
+  await screen.findByText(/Synthetic steps unavailable/u);
+  // The title comes back with its time.
+  expect(input.value).toBe("Book the room");
+  expect(time.value).toBe("60");
+  await waitFor(() => expect(input.getAttribute("aria-disabled")).toBeNull());
+  fireEvent.change(time, { target: { value: "15" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(createSteps).toHaveBeenCalledTimes(2));
+  expect(createSteps.mock.calls[1]![1]).toEqual([
+    { title: "Book the room", estimatedMinutes: 15 },
+  ]);
+  expect(createSteps.mock.calls[1]![2]).not.toBe(createSteps.mock.calls[0]![2]);
 });
 
 it("closes when left empty, and keeps a draft it is left with, writing nothing", async () => {
@@ -254,7 +334,7 @@ it("asks under a new request once a failed title is edited", async () => {
   fireEvent.keyDown(input, { key: "Enter" });
   await waitFor(() => expect(createSteps).toHaveBeenCalledTimes(2));
   expect(createSteps.mock.calls[1]![1]).toEqual([
-    { title: "Book the small room" },
+    { title: "Book the small room", estimatedMinutes: 30 },
   ]);
   expect(createSteps.mock.calls[1]![2]).not.toBe(createSteps.mock.calls[0]![2]);
 });

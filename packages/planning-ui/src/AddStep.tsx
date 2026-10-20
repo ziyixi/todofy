@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { useAnnouncement } from "./announce";
-import { displayedTitle } from "./domain";
+import { DEFAULT_STEP_MINUTES, displayedTitle, STEP_MINUTES } from "./domain";
 import { words } from "./i18n";
 import { PendingMark } from "./StatusMarks";
 import type {
@@ -38,11 +38,13 @@ interface NewStep {
 
 /**
  * Week › Next steps' last cell: Todoist's own "Add task" row, which opens a one-line input in its
- * place. Enter adds the title as a sub-task of the selected commitment (one confirm-first
- * AppendTaskSteps), clears the input at once and keeps it open for the next; the title waits as a
- * dimmed card until a read lists the new step. One step saves at a time, and typing never pauses.
- * Esc, or Enter or leaving with nothing typed, closes it; leaving with text keeps the draft and
- * writes nothing. PlanningWeek keys it by the commitment, so a draft never moves to another one.
+ * place, with the new step's time beside it (30 min unless another is chosen; kept while the cell
+ * stays open). Enter adds the title with that time as a sub-task of the selected commitment (one
+ * confirm-first AppendTaskSteps), clears the input at once and keeps it open for the next; the
+ * title waits as a dimmed card until a read lists the new step. One step saves at a time, and
+ * typing never pauses. Esc, Enter with nothing typed, or focus leaving the cell with nothing typed
+ * closes it; leaving with text keeps the draft and writes nothing. PlanningWeek keys it by the
+ * commitment, so a draft never moves to another one.
  */
 export function AddStep({
   outcome,
@@ -56,6 +58,7 @@ export function AddStep({
 }: Props) {
   const text = words(language);
   const [draft, setDraft] = useState("");
+  const [minutes, setMinutes] = useState<number>(DEFAULT_STEP_MINUTES);
   const [saving, setSaving] = useState(false);
   const [steps, setSteps] = useState<NewStep[]>([]);
   const [status, announce] = useAnnouncement();
@@ -95,13 +98,16 @@ export function AddStep({
   function close(focusButton: boolean) {
     refocus.current = focusButton;
     setDraft("");
+    setMinutes(DEFAULT_STEP_MINUTES);
     onOpenChange(false);
   }
   async function add() {
     const step = draft.trim();
     if (!step) return close(true);
     if (writing.current || busy) return;
-    const request = `${outcome.id}|${step}`;
+    // Another time for the same title is another request.
+    const estimatedMinutes = minutes;
+    const request = `${outcome.id}|${step}|${estimatedMinutes}`;
     const requestId = requests.current.get(request) ?? crypto.randomUUID();
     requests.current.set(request, requestId);
     const shown = { key: keys.current++, title: step };
@@ -114,7 +120,7 @@ export function AddStep({
     const saved = await run(async () => {
       created = await actions.createSteps(
         outcome,
-        [{ title: step }],
+        [{ title: step, estimatedMinutes }],
         requestId,
       );
     });
@@ -131,11 +137,13 @@ export function AddStep({
       announce(text.stepAdded(step));
       return;
     }
-    // App's banner says why. The title comes back to an empty input, with its request ID, so that
-    // Enter retries the same request; a new draft typed meanwhile stays, and the title goes.
+    // App's banner says why. The title and its time come back to an empty input, with their
+    // request ID, so that Enter retries the same request; a new draft typed meanwhile stays, and the
+    // title goes.
     setSteps((current) => current.filter((item) => item.key !== shown.key));
     if (now.current.draft) return;
     setDraft(step);
+    setMinutes(estimatedMinutes);
     if (!now.current.open) {
       focusOnOpen.current = false;
       onOpenChange(true);
@@ -163,7 +171,18 @@ export function AddStep({
           </span>
         </article>
       ))}
-      <div className="planning-add-step-cell">
+      <div
+        className={`planning-add-step-cell ${open ? "is-open" : ""}`}
+        // Only focus leaving the whole cell counts: choosing a time first keeps it open.
+        onBlur={(event) => {
+          if (
+            open &&
+            !event.currentTarget.contains(event.relatedTarget as Node | null) &&
+            !draft.trim()
+          )
+            close(false);
+        }}
+      >
         {open ? (
           <input
             ref={input}
@@ -188,9 +207,6 @@ export function AddStep({
                 close(true);
               }
             }}
-            onBlur={() => {
-              if (!draft.trim()) close(false);
-            }}
           />
         ) : (
           <button
@@ -202,6 +218,27 @@ export function AddStep({
             <Plus size={16} />
             {text.addSteps}
           </button>
+        )}
+        {open && (
+          <select
+            className="planning-add-step-minutes"
+            aria-label={text.estimate}
+            value={minutes}
+            onChange={(event) => setMinutes(Number(event.target.value))}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                close(true);
+              }
+            }}
+          >
+            {STEP_MINUTES.map((value) => (
+              <option key={value} value={value}>
+                {`${value} ${text.minutes}`}
+              </option>
+            ))}
+          </select>
         )}
         <span id={hintId} className="plus-sr-only">
           {text.addStepHint}

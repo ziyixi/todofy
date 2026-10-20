@@ -223,3 +223,39 @@ it("still opens a task's full planning panel", async () => {
     screen.getByRole("dialog", { name: "Ship the small website refresh" }),
   ).toBe(dialog);
 });
+
+it("gives new steps from a task's panel the same times, 30 min unless another is chosen", async () => {
+  const actions = native();
+  const createSteps = vi.spyOn(actions, "createSteps");
+  const dialog = await open(actions, "release");
+  const panel = within(dialog);
+  const presets = panel
+    .getByText("Estimate", { selector: ".plus-estimate-presets > span" })
+    .closest<HTMLElement>(".plus-estimate-presets")!;
+  expect(
+    within(presets)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["15 min", "30 min", "60 min", "90 min"]);
+  expect(pressed(presets)).toEqual(["30 min"]);
+  const lines = panel.getByRole("textbox", { name: "Add steps" });
+  const add = () => {
+    fireEvent.click(
+      panel
+        .getAllByRole("button", { name: "Add steps" })
+        .find((button) => button.classList.contains("plus-primary"))!,
+    );
+  };
+  fireEvent.change(lines, { target: { value: "Draft the outline" } });
+  add();
+  await waitFor(() => expect(createSteps).toHaveBeenCalledOnce());
+  await waitFor(() => expect((lines as HTMLTextAreaElement).value).toBe(""));
+  fireEvent.click(within(presets).getByRole("button", { name: "90 min" }));
+  fireEvent.change(lines, { target: { value: "Check the outline" } });
+  add();
+  await waitFor(() => expect(createSteps).toHaveBeenCalledTimes(2));
+  expect(createSteps.mock.calls.map((call) => call[1])).toEqual([
+    [{ title: "Draft the outline", estimatedMinutes: 30 }],
+    [{ title: "Check the outline", estimatedMinutes: 90 }],
+  ]);
+});

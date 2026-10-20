@@ -261,6 +261,18 @@
   height: 32px;
   font-size: 14px;
 }
+/* Open, the cell holds the input and the new step's time beside it. */
+.planning-add-step-cell.is-open {
+  display: flex;
+  gap: 6px;
+}
+.plus-root .planning-week select.planning-add-step-minutes {
+  flex: none;
+  width: 76px;
+  height: 32px;
+  padding-inline: 6px;
+  font-size: 13px;
+}
 /* A step added there, waiting for the write and the read that lists it: the mark takes the
    handle's place, so its title lines up with the other steps'. */
 .planning-tray-step.is-pending .plus-pending-mark {
