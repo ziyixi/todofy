@@ -102,6 +102,15 @@ it("counts a week's steps done and how long the done steps with an estimate and 
   expect(weekStats([week[0]!], tasks).ratio).toBeUndefined();
 });
 
+it("counts a recurring step's estimate once for each day it was done", () => {
+  // A daily 30-minute step that took exactly 30 minutes on two days took 100% of its estimate.
+  const week = [
+    day("2026-10-12", [record("draft", "2026-10-12", 30, "work")], ["draft"]),
+    day("2026-10-13", [record("draft", "2026-10-13", 30, "work")], ["draft"]),
+  ];
+  expect(weekStats(week, tasks)).toMatchObject({ stepsDone: 2, ratio: 100 });
+});
+
 it("counts only a month's own days, never the neighbouring days its calendar shows", () => {
   const days = [
     day("2026-09-30", [record("draft", "2026-09-30", 90, "work")], ["walk"]),

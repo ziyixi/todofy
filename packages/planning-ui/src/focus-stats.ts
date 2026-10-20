@@ -43,24 +43,26 @@ export function dayTotals(day: DayPlan): Totals {
 
 /**
  * Totals over the days given, the steps completed from their queues, and the time those steps took
- * against their estimates. A step completed twice (a recurring one) counts as done twice, its
- * estimate once.
+ * against their estimates. A step completed on two days (a recurring one) counts as done twice and
+ * its estimate twice, against all its records in the range.
  */
 export function weekStats(
   days: readonly DayPlan[],
   tasks: Record<string, FocusTaskInfo>,
 ): RangeStats {
   const entries = days.flatMap((day) => day.entries);
-  const done = new Set(days.flatMap((day) => day.completedTaskIds));
+  const done = new Map<string, number>();
+  for (const id of days.flatMap((day) => day.completedTaskIds))
+    done.set(id, (done.get(id) ?? 0) + 1);
   let estimated = 0;
   let logged = 0;
-  for (const id of done) {
+  for (const [id, times] of done) {
     const minutes = tasks[id]?.estimatedMinutes;
     const seconds = entries
       .filter((entry) => entry.taskId === id)
       .reduce((sum, entry) => sum + entry.seconds, 0);
     if (!minutes || !seconds) continue;
-    estimated += minutes * 60;
+    estimated += minutes * 60 * times;
     logged += seconds;
   }
   return {
