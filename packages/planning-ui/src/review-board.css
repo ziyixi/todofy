@@ -91,7 +91,7 @@
   min-height: 60px;
   padding: 8px;
   border: 1px solid var(--plus-line) !important;
-  border-left: 3px solid var(--outcome-color) !important;
+  border-left: 3px solid var(--area-color, var(--plus-area-none)) !important;
   border-radius: 6px;
   background: var(--plus-bg) !important;
   color: var(--plus-text);
@@ -109,7 +109,7 @@
 }
 .planning-outcome-card.is-selected {
   border-color: var(--plus-accent) !important;
-  border-left-color: var(--outcome-color) !important;
+  border-left-color: var(--area-color, var(--plus-area-none)) !important;
   background: var(--plus-selected) !important;
   --plus-muted: var(--plus-selected-text);
 }

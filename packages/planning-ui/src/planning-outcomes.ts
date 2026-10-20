@@ -189,19 +189,14 @@ export function outcomeForTask(
   );
 }
 
-export function outcomeColor(outcome: PlanningTask): string {
-  const colors = [
-    "#6387a3",
-    "#9b7eb0",
-    "#6b928c",
-    "#a98369",
-    "#829968",
-    "#aa8b63",
-  ];
-  let hash = 0;
-  for (const character of outcome.id)
-    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  return colors[hash % colors.length]!;
+/**
+ * A card's edge colour, from its area: its own, else its nearest ancestor's. Work and Personal have
+ * one colour each, which the area filters' dots explain; Unassigned shows none, only the card's own
+ * border. Cards set it as `--area-color`.
+ */
+export function areaColor(task: PlanningTask, tasks: PlanningTask[]): string {
+  const area = effectiveArea(task, tasks);
+  return `var(--plus-area-${area === "unassigned" ? "none" : area})`;
 }
 
 /** The label role of each planning stage, as Todofy maps them (core/plus.py STAGES). */

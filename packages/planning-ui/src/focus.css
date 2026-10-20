@@ -34,7 +34,7 @@
   gap: 12px;
   min-height: 82px;
   border: 1px solid var(--plus-line);
-  border-left: 3px solid var(--plus-family-color);
+  border-left: 3px solid var(--area-color, var(--plus-area-none));
   border-radius: 7px;
   padding: 10px 12px;
   background: var(--plus-bg);

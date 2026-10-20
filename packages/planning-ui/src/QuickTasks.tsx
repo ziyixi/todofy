@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useDraggable } from "@dnd-kit/react";
 import { GripVertical } from "lucide-react";
-import { displayedTitle } from "./domain";
+import { displayedTitle, effectiveArea } from "./domain";
 import { dragHandle } from "./drag-announcements";
+import { areaColor } from "./planning-outcomes";
 import {
   CompleteTaskButton,
   type CompletePlanningTask,
@@ -16,6 +17,8 @@ const QUICK_SHOWN = 6;
 interface Props {
   /** Week's Quick tasks (weekly-review.ts quickTray). */
   tasks: PlanningTask[];
+  /** The plan's tasks, which give each card its area. */
+  planTasks: PlanningTask[];
   timer?: FocusState["timer"];
   language: Language;
   busy: boolean;
@@ -30,6 +33,7 @@ interface Props {
  */
 export function QuickTasks({
   tasks,
+  planTasks,
   timer,
   language,
   busy,
@@ -53,6 +57,7 @@ export function QuickTasks({
           <QuickCard
             key={task.id}
             task={task}
+            planTasks={planTasks}
             timing={timer?.taskId === task.id}
             language={language}
             busy={busy}
@@ -78,6 +83,7 @@ export function QuickTasks({
 
 function QuickCard({
   task,
+  planTasks,
   timing,
   language,
   busy,
@@ -86,6 +92,7 @@ function QuickCard({
   completeTask,
 }: {
   task: PlanningTask;
+  planTasks: PlanningTask[];
   /** Its session is running or paused, so it cannot move. */
   timing: boolean;
   language: Language;
@@ -95,6 +102,7 @@ function QuickCard({
   completeTask: CompletePlanningTask;
 }) {
   const title = displayedTitle(task.title);
+  const text = words(language);
   const { ref, handleRef, isDragSource } = useDraggable({
     id: `quick:${task.id}`,
     type: "planning-step",
@@ -105,6 +113,7 @@ function QuickCard({
     <li
       ref={ref}
       className={`planning-quick-card ${isDragSource ? "is-dragging" : ""}`}
+      style={{ "--area-color": areaColor(task, planTasks) } as CSSProperties}
     >
       <button
         ref={handleRef}
@@ -118,7 +127,7 @@ function QuickCard({
               : "Stop the current session before moving this step"
             : undefined
         }
-        aria-label={`${words(language).dragQuick}: ${title}`}
+        aria-label={`${text.dragQuick}: ${title}`}
       >
         <GripVertical size={14} />
       </button>
@@ -128,6 +137,10 @@ function QuickCard({
         onClick={() => editTask(task)}
       >
         {title}
+        {/* The edge colour says the area; screen readers hear it. */}
+        <span className="plus-sr-only">
+          {`${language === "zh" ? "，" : ", "}${text[effectiveArea(task, planTasks)]}`}
+        </span>
       </button>
       <CompleteTaskButton
         task={task}

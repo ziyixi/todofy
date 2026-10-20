@@ -692,7 +692,9 @@ it("plans a quick task by dropping its card into a day, exactly as a step", asyn
   fireEvent.click(screen.getByRole("tab", { name: "Week" }));
   const quick = screen.getByRole("region", { name: "Quick tasks" });
   expect(
-    within(quick).getByRole("button", { name: "Renew the library card" }),
+    within(quick).getByRole("button", {
+      name: "Renew the library card, Work",
+    }),
   ).toBeTruthy();
   await drop(
     { taskId: "renew", title: "Renew the library card" },

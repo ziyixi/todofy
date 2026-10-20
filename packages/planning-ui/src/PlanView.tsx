@@ -278,6 +278,10 @@ export function PlanView(props: PlanViewProps) {
                 key={value}
                 role="tab"
                 aria-selected={shownArea === value}
+                // Work and Personal carry the cards' edge colour as a dot: the legend.
+                data-area={
+                  value === "work" || value === "personal" ? value : undefined
+                }
                 onClick={() => setArea(value)}
               >
                 {value === "all"

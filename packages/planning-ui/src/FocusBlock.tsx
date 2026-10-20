@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import { displayedTitle, formattedMinutes, taskAncestors } from "./domain";
 import { words } from "./i18n";
 import type { FocusState, Language, PlanState, PlanningTask } from "./model";
-import { outcomeColor, outcomeForTask } from "./planning-outcomes";
+import { areaColor, outcomeForTask } from "./planning-outcomes";
 import { Elapsed, PendingMark } from "./StatusMarks";
 
 interface Props {
@@ -62,7 +62,8 @@ export function FocusBlock({
   const outcome = task
     ? outcomeForTask(task, plan.tasks, plan.managedLabels)
     : undefined;
-  const familyColor = outcome ? outcomeColor(outcome) : "var(--plus-muted)";
+  // A task Plan does not list shows no colour.
+  const color = task ? areaColor(task, plan.tasks) : "var(--plus-area-none)";
   const parentPath = task
     ? taskAncestors(task, plan.tasks)
         .map((parent) => displayedTitle(parent.title))
@@ -72,7 +73,7 @@ export function FocusBlock({
     <li className="plus-focus-slot" data-task-id={taskId}>
       <article
         className={`plus-focus-block ${timer ? "is-current" : ""} ${settling ? "is-pending" : ""}`}
-        style={{ "--plus-family-color": familyColor } as CSSProperties}
+        style={{ "--area-color": color } as CSSProperties}
         aria-busy={settling || undefined}
       >
         {task ? (

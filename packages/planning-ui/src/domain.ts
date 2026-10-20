@@ -110,25 +110,6 @@ export function formattedMinutes(minutes: number): string {
     : `${minutes}m`;
 }
 
-export function taskFamilyColor(
-  task: PlanningTask,
-  tasks: PlanningTask[],
-): string {
-  const root = taskAncestors(task, tasks)[0] ?? task;
-  const colors = [
-    "#4379ad",
-    "#8d65ab",
-    "#b27a3b",
-    "#39877e",
-    "#ab6681",
-    "#6a8344",
-  ];
-  let hash = 0;
-  for (const character of root.id)
-    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  return colors[hash % colors.length]!;
-}
-
 export function startDate(
   deadline: string,
   leadDays: number,

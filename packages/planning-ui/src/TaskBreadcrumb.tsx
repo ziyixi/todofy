@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
-import { displayedTitle, taskAncestors, taskFamilyColor } from "./domain";
+import { displayedTitle, taskAncestors } from "./domain";
+import { areaColor } from "./planning-outcomes";
 import type { Language, PlanningTask } from "./model";
 
 export function TaskBreadcrumb({
@@ -16,9 +17,7 @@ export function TaskBreadcrumb({
   return (
     <small
       className="plus-task-breadcrumb"
-      style={
-        { "--plus-family-color": taskFamilyColor(task, tasks) } as CSSProperties
-      }
+      style={{ "--area-color": areaColor(task, tasks) } as CSSProperties}
       aria-label={language === "zh" ? "所属任务" : "Parent task"}
       title={parents.map((parent) => displayedTitle(parent.title)).join(" › ")}
     >

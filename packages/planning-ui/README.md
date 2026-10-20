@@ -51,6 +51,8 @@ mirrored copy is never read. Only FlowDay's local tasks keep an estimate of thei
 straight to FlowDay's queue; it never waits for FlowDay's mirror to know the task.
 
 Review keeps candidate columns together and gives Committed a separate full-width row of horizontal cards.
+Every Plan and Focus card's left edge is its area's colour (Work slate, Personal ochre, Unassigned none), and
+the area filters' Work and Personal dots are the legend.
 Plan's outcome, Step, Quick and calendar checkboxes use the same completion receipts and settlement as Focus;
 calendar cards pass their own flow date. Quick actions always qualify as standalone, even when an older
 response contains only the Quick flag. Ordinary labels do not imply planning properties.

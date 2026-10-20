@@ -156,9 +156,13 @@ it("shows Week's quick tasks as a quiet line of one-line cards under Next steps,
       name: "Drag quick task: Synthetic quick task 1",
     }),
   ).toBeTruthy();
+  // The edge colour says the area, and so does the title's name.
   const title = within(cards[0] as HTMLElement).getByRole("button", {
-    name: "Synthetic quick task 1",
+    name: "Synthetic quick task 1, Work",
   });
+  expect((cards[0] as HTMLElement).style.getPropertyValue("--area-color")).toBe(
+    "var(--plus-area-work)",
+  );
   expect(title.getAttribute("title")).toBe("Synthetic quick task 1");
   fireEvent.click(title);
   expect(editTask).toHaveBeenCalledWith(

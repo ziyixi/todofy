@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import {
+  areaColor,
   outcomeForTask,
   outcomeSteps,
   planningOutcomes,
@@ -149,4 +150,22 @@ it("lists next steps depth first in Todoist's order of each parent's children", 
       ),
     ),
   ).toEqual(["b1", "b2", "c", "a"]);
+});
+
+it("colours a card by its area, its own or its nearest ancestor's, and gives Unassigned no colour", () => {
+  const project = task("project", { area: "unassigned" });
+  const outcome = task("outcome", { parentId: project.id, stage: "committed" });
+  const step = task("step", { parentId: outcome.id, area: "unassigned" });
+  const errand = task("errand", { area: "personal" });
+  const loose = task("loose", { area: "unassigned" });
+  const tasks = [project, outcome, step, errand, loose];
+  expect(areaColor(step, tasks)).toBe("var(--plus-area-work)");
+  expect(areaColor(outcome, tasks)).toBe("var(--plus-area-work)");
+  expect(areaColor(errand, tasks)).toBe("var(--plus-area-personal)");
+  expect(areaColor(loose, tasks)).toBe("var(--plus-area-none)");
+  expect(areaColor(project, tasks)).toBe("var(--plus-area-none)");
+  // A parent loop ends the search instead of looping.
+  const a = task("a", { parentId: "b", area: "unassigned" });
+  const b = task("b", { parentId: "a", area: "unassigned" });
+  expect(areaColor(a, [a, b])).toBe("var(--plus-area-none)");
 });

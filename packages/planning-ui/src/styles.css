@@ -63,6 +63,10 @@
   --plus-p2: var(--product-library-priorities-p2-primary-idle-tint, #eb8909);
   --plus-p3: var(--product-library-priorities-p3-primary-idle-tint, #246fe0);
   --plus-p4: var(--product-library-priorities-p4-primary-idle-tint, #aaa);
+  /* Plan and Focus cards' left edge, by area. Unassigned shows none: the card's own border. */
+  --plus-area-work: #6387a3;
+  --plus-area-personal: #a98369;
+  --plus-area-none: var(--plus-line);
   --plus-overlay: var(--product-library-background-overlay, #0005);
   /* Resting cards and tabs, floating bars and drag previews, dialogs. */
   --plus-shadow-1: var(--product-library-shadow-raised-1, 0 1px 3px #00000012);

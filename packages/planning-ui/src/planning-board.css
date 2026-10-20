@@ -42,6 +42,20 @@
 .planning-view > .planning-area-filter {
   margin-bottom: 14px;
 }
+/* The legend: Work's and Personal's dots are the cards' edge colours. Unassigned has none. */
+.planning-area-filter button[data-area]::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--plus-area-work);
+}
+.planning-area-filter button[data-area="personal"]::before {
+  background: var(--plus-area-personal);
+}
 /* The one colour: days past a deadline. */
 .planning-danger-text {
   color: var(--plus-danger);

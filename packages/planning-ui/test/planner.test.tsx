@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PlanView, type PlanViewProps } from "../src/PlanView";
+import { TaskBreadcrumb } from "../src/TaskBreadcrumb";
 import {
   DEFAULT_PLAN_VIEW,
   mergePlanView,
@@ -175,11 +176,71 @@ it("distinguishes two planning outcomes under the same project and retains local
     card("outline").querySelector(".planning-calendar-step-meta > span")
       ?.textContent,
   ).toBe("Prepare the next research check-in");
-  expect(card("copy").style.getPropertyValue("--outcome-color")).not.toBe(
-    card("outline").style.getPropertyValue("--outcome-color"),
+  // The edge colour is the area, not the outcome: two work outcomes share it, and a task Plan
+  // does not list shows none.
+  expect(card("copy").style.getPropertyValue("--area-color")).toBe(
+    "var(--plus-area-work)",
+  );
+  expect(card("outline").style.getPropertyValue("--area-color")).toBe(
+    "var(--plus-area-work)",
+  );
+  expect(card("local-keep").style.getPropertyValue("--area-color")).toBe(
+    "var(--plus-area-none)",
   );
   expect(card("local-keep").textContent).toContain("Local planning note");
   expect(card("missing").textContent).toContain("Task unavailable");
+});
+
+it("draws each card's edge in its area's colour, with Work and Personal dots as the legend", async () => {
+  const data = await props();
+  render(<PlanView {...data} />);
+  const edge = (id: string) =>
+    document
+      .querySelector<HTMLElement>(
+        `.planning-outcome-card[data-outcome-id="${id}"]`,
+      )!
+      .style.getPropertyValue("--area-color");
+  expect(edge("release")).toBe("var(--plus-area-work)");
+  expect(edge("notes")).toBe("var(--plus-area-work)");
+  expect(edge("desk")).toBe("var(--plus-area-personal)");
+  const legend = () =>
+    screen
+      .getAllByRole("tab")
+      .filter((tab) => tab.closest(".planning-area-filter"))
+      .map((tab) => [tab.textContent, tab.dataset.area ?? ""]);
+  expect(legend()).toEqual([
+    ["All", ""],
+    ["Work", "work"],
+    ["Personal", "personal"],
+  ]);
+  openWeek();
+  expect(legend()).toEqual([
+    ["All", ""],
+    ["Work", "work"],
+    ["Personal", "personal"],
+  ]);
+  // The selected commitment's steps and its tray header share its area.
+  const tray = document.querySelector<HTMLElement>(".planning-step-tray")!;
+  expect(tray.style.getPropertyValue("--area-color")).toBe(
+    "var(--plus-area-work)",
+  );
+  for (const step of tray.querySelectorAll<HTMLElement>(
+    ".planning-tray-step[data-task-id]",
+  ))
+    expect(step.style.getPropertyValue("--area-color")).toBe(
+      "var(--plus-area-work)",
+    );
+});
+
+it("draws the breadcrumb's bar in the task's area colour", async () => {
+  const { plan } = await props();
+  const step = plan.tasks.find((task) => task.id === "measure")!;
+  render(<TaskBreadcrumb task={step} tasks={plan.tasks} language="en" />);
+  const crumb = screen.getByLabelText("Parent task");
+  expect(crumb.textContent).toBe("Make the home desk comfortable");
+  expect(crumb.style.getPropertyValue("--area-color")).toBe(
+    "var(--plus-area-personal)",
+  );
 });
 
 it("keeps timed steps readable while preventing their move, and warns rather than rejecting long steps", async () => {

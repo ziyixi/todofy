@@ -3,7 +3,7 @@ import { useDraggable, useDroppable } from "@dnd-kit/react";
 import { ChevronLeft, ChevronRight, GripVertical, X } from "lucide-react";
 import { displayedTitle, formattedMinutes, taskIndex } from "./domain";
 import { dragHandle } from "./drag-announcements";
-import { outcomeArea, outcomeColor, outcomeForTask } from "./planning-outcomes";
+import { areaColor, outcomeArea, outcomeForTask } from "./planning-outcomes";
 import { pendingStep } from "./plan-updates";
 import {
   CompleteTaskButton,
@@ -340,9 +340,10 @@ function CalendarStep({
       aria-busy={pending || undefined}
       style={
         {
-          "--outcome-color": outcome
-            ? outcomeColor(outcome)
-            : "var(--plus-muted)",
+          // A task Plan does not list shows no colour.
+          "--area-color": task
+            ? areaColor(task, plan.tasks)
+            : "var(--plus-area-none)",
         } as CSSProperties
       }
     >

@@ -26,8 +26,8 @@ import {
 } from "./drag-announcements";
 import {
   MAX_LANE_TASKS,
+  areaColor,
   outcomeArea,
-  outcomeColor,
   outcomeSteps,
   PARKED_LABEL,
   reviewLanes,
@@ -161,7 +161,7 @@ export function OutcomeCard({
     <button
       type="button"
       className={`planning-outcome-card ${selected ? "is-selected" : ""}`}
-      style={{ "--outcome-color": outcomeColor(task) } as CSSProperties}
+      style={{ "--area-color": areaColor(task, tasks) } as CSSProperties}
       data-outcome-id={task.id}
       onClick={onClick}
       // The name replaces the content, so it carries the status and pending state too.

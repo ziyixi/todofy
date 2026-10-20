@@ -11,7 +11,7 @@
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  border-left: 2px solid var(--plus-family-color, var(--plus-line));
+  border-left: 2px solid var(--area-color, var(--plus-area-none));
   padding-left: 6px;
   font-weight: 600;
   font-size: 12px;

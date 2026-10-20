@@ -27,10 +27,10 @@ import {
 import { OutcomeCard } from "./ReviewBoard";
 import { PlanningCalendar, shortDay, taskTitle } from "./PlanningCalendar";
 import {
+  areaColor,
   committedOutcomes,
   isParked,
   MAX_LANE_TASKS,
-  outcomeColor,
   outcomeForTask,
   outcomeSteps,
   stepSiblings,
@@ -318,6 +318,10 @@ export function PlanningWeek(props: Props) {
                 key={value}
                 role="tab"
                 aria-selected={area === value}
+                // Work and Personal carry the cards' edge colour as a dot: the legend.
+                data-area={
+                  value === "work" || value === "personal" ? value : undefined
+                }
                 onClick={() => selectArea(value)}
               >
                 {value === "all"
@@ -357,7 +361,9 @@ export function PlanningWeek(props: Props) {
             className="planning-step-tray"
             aria-label={`${words(language).steps}: ${displayedTitle(selected.title)}`}
             style={
-              { "--outcome-color": outcomeColor(selected) } as CSSProperties
+              {
+                "--area-color": areaColor(selected, plan.tasks),
+              } as CSSProperties
             }
           >
             <header>
@@ -380,6 +386,7 @@ export function PlanningWeek(props: Props) {
                 <TrayStep
                   key={task.id}
                   task={task}
+                  tasks={plan.tasks}
                   index={index}
                   position={stepSiblings(task, plan.tasks).indexOf(task)}
                   days={days}
@@ -419,6 +426,7 @@ export function PlanningWeek(props: Props) {
         )}
         <QuickTasks
           tasks={quickTray(plan, currentDate, days, steps)}
+          planTasks={plan.tasks}
           timer={timer}
           language={language}
           busy={busy}
@@ -465,9 +473,9 @@ export function PlanningWeek(props: Props) {
               inert
               style={
                 {
-                  "--outcome-color": outcome
-                    ? outcomeColor(outcome)
-                    : "var(--plus-muted)",
+                  "--area-color": task
+                    ? areaColor(task, plan.tasks)
+                    : "var(--plus-area-none)",
                 } as CSSProperties
               }
             >
@@ -492,6 +500,7 @@ export function PlanningWeek(props: Props) {
  */
 function TrayStep({
   task,
+  tasks,
   index,
   position,
   days,
@@ -504,6 +513,8 @@ function TrayStep({
   completeTask,
 }: {
   task: PlanningTask;
+  /** The plan's tasks, which give the step its area. */
+  tasks: PlanningTask[];
   /** Its place among the steps shown. */
   index: number;
   /** Its place among its parent's children, which a reorder writes. */
@@ -562,6 +573,7 @@ function TrayStep({
       className={`planning-tray-step ${isDragSource ? "is-dragging" : ""} ${pending ? "is-pending" : ""} ${insert ? `is-insert-${insert}` : ""}`}
       data-task-id={task.id}
       aria-busy={pending || undefined}
+      style={{ "--area-color": areaColor(task, tasks) } as CSSProperties}
     >
       <button
         ref={handleRef}
