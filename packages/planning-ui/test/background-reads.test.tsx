@@ -104,7 +104,7 @@ it("shows confirmed queue, deadline and Bet results without reading the week or 
   fireEvent.click(screen.getByRole("tab", { name: "Review" }));
   fireEvent.click(
     screen.getByRole("button", {
-      name: "Prepare the next research check-in, No priority, 2 days left, Thu, Oct 15",
+      name: "Prepare the next research check-in, Work, No priority, 2 days left, Thu, Oct 15",
     }),
   );
   const editor = within(screen.getByRole("region", { name: "Steps & timing" }));
@@ -348,4 +348,3 @@ it("never lets an older overlapping read replace a newer one", async () => {
     ),
   ).toBeTruthy();
 });
-

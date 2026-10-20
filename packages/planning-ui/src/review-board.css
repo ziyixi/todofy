@@ -88,7 +88,9 @@
   align-items: flex-start;
   gap: 7px;
   width: 100%;
-  min-height: 60px;
+  /* One height everywhere: 8 + 8 padding, 2 border, a two-line title (39), 4 gap and the meta
+     line (16). Nothing is clipped; the content fits by construction. */
+  height: 77px;
   padding: 8px;
   border: 1px solid var(--plus-line) !important;
   border-left: 3px solid var(--area-color, var(--plus-area-none)) !important;
@@ -138,7 +140,9 @@
 .planning-outcome-content {
   min-width: 0;
   flex: 1;
-  display: grid;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
 }
 .planning-outcome-title-row {
@@ -155,75 +159,45 @@
   font-size: 14px;
   font-weight: 600;
   line-height: 19.5px;
+}
+/* The clamp is on the text, so the full-title bubble under it is never clipped. */
+.planning-outcome-title .planning-full-title-text {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  overflow: hidden;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
-/*
- * The area keeps its whole name: in a narrow lane (seven lanes at about 205px) the step counts or
- * the status move under it, still at the right, and a long status wraps between its parts, never
- * inside one.
- */
+/* One left-aligned line at the bottom, never wrapping: the card keeps its height at any width. */
 .planning-outcome-meta {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px 7px;
+  flex-wrap: nowrap;
+  gap: 7px;
   align-items: center;
-  /* Never wider than the card: a status's quoted title gives way instead (.has-quoted). */
+  margin-top: auto;
   min-width: 0;
   color: var(--plus-muted);
   font-size: 12px;
   line-height: 16px;
 }
-.planning-outcome-context {
-  flex: 1 0 auto;
-  max-width: 100%;
+.planning-outcome-counts {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* A two-part status is one line, its deadline part first, and ends in an ellipsis where narrow. */
+.planning-outcome-status {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.planning-outcome-counts {
-  flex: 0 0 auto;
-  margin-left: auto;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.planning-outcome-status {
-  margin-left: auto;
-  min-width: 0;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.planning-outcome-status > span {
-  white-space: nowrap;
-}
-/*
- * A two-part status ("12 天未变动 · 10月22日截止") has its own row under the area. Where even that
- * is too narrow it wraps between its parts, and the separator that would start the next line falls
- * in the 1em clipped off at the left, so no line starts or ends with "·".
- */
-.planning-outcome-status.is-row {
-  display: flex;
-  flex-wrap: wrap;
-  margin-left: -1em;
-  clip-path: inset(0 0 0 1em);
-  text-align: left;
-  color: var(--plus-muted);
-  font-size: 12px;
-  line-height: 16px;
-}
-.planning-outcome-status.is-row > span {
-  white-space: normal;
-}
-.planning-outcome-status.is-row > :first-child {
-  padding-left: 1em;
 }
 /*
  * A prerequisite's title in the status (等「…」): a long one ends in an ellipsis inside its marks, and
- * the part that holds it stays on one line, the title giving way first; a two-part status still wraps
- * between its parts where the card is narrow. After the row's rules, which let a part wrap.
+ * the part that holds it stays on one line, the title giving way first.
  */
 .planning-outcome-status > span.has-quoted {
   display: inline-flex;

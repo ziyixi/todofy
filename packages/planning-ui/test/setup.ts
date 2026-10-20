@@ -1,4 +1,8 @@
+import { configure } from "@testing-library/react";
 import { vi } from "vitest";
+
+// A cut title's bubble repeats it for sight only (aria-hidden): text queries find the title once.
+configure({ defaultIgnore: "script, style, .planning-full-title-bubble" });
 // jsdom has no layout. Geometry is covered by the consumer's packaged browser suite.
 vi.stubGlobal(
   "ResizeObserver",

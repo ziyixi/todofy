@@ -156,7 +156,7 @@ it("shows a stage drag at once as one pending card, then the confirmed task", as
   // Screen readers hear that it waits; its handle cannot drag but keeps keyboard focus.
   expect(
     within(card).getByRole("button", {
-      name: "Clear out the old development branch, No priority, Updating…",
+      name: "Clear out the old development branch, Work, No priority, Updating…",
     }),
   ).toBeTruthy();
   const handle = within(card).getByRole("button", {
@@ -348,7 +348,7 @@ it("adds to today while a removal from today waits, keeping the removal", async 
   fireEvent.click(screen.getByRole("tab", { name: "Review" }));
   fireEvent.click(
     screen.getByRole("button", {
-      name: "Make the home desk comfortable, No priority",
+      name: "Make the home desk comfortable, Personal, No priority",
     }),
   );
   fireEvent.click(
@@ -407,7 +407,7 @@ it("keeps a pending card's details read-only until its drag settles, and the Bet
   ).toBe(false);
   fireEvent.click(
     screen.getByRole("button", {
-      name: "Ship the small website refresh, No priority, Updating…",
+      name: "Ship the small website refresh, Work, No priority, Updating…",
     }),
   );
   const editor = () =>
@@ -524,7 +524,7 @@ it("moves a Waiting card into a stage lane with its stage only, still waiting", 
       .getByRole("button", { name: /^Hear back about the venue quote,/u })
       .getAttribute("aria-label"),
   ).toMatch(
-    /^Hear back about the venue quote, No priority, No change in \d+ days$/u,
+    /^Hear back about the venue quote, Work, No priority, No change in \d+ days$/u,
   );
 });
 

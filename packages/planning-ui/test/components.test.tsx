@@ -84,13 +84,13 @@ it("shows a step's own start window in Start now while its parent occupies the c
     />,
   );
   const start = within(screen.getByRole("region", { name: "Start now" }));
-  expect(
-    start.getByRole("button", {
-      name: "Write the introduction, No priority, Deadline tomorrow, Wed, Oct 14",
-    }),
-  ).toBeTruthy();
-  // Its area comes from its parent.
-  expect(start.getByText("Work")).toBeTruthy();
+  // Its area, in its name and edge colour, comes from its parent.
+  const card = start.getByRole("button", {
+    name: "Write the introduction, Work, No priority, Deadline tomorrow, Wed, Oct 14",
+  });
+  expect(card.style.getPropertyValue("--area-color")).toBe(
+    "var(--plus-area-work)",
+  );
   expect(screen.getByText(/3\/5 work/)).toBeTruthy();
 });
 it("stopping a session preserves the task and queue; checkbox completes it", async () => {

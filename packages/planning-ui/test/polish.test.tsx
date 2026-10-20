@@ -13,7 +13,10 @@ import { readableDate, weekLabel } from "../src/PlanningCalendar";
 import { OutcomeCard } from "../src/ReviewBoard";
 import type { Language, PlanningTask } from "../src/model";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 async function planProps(language: Language): Promise<PlanViewProps> {
   const actions = createPrototype();
@@ -80,6 +83,71 @@ it("counts steps in natural English and Chinese", async () => {
   cleanup();
   card("zh", [step("one"), step("two"), step("three")]);
   expect(screen.getByText("3 个步骤 · 已安排 1")).toBeTruthy();
+});
+
+it("keeps an outcome card to a title and one left-aligned line, the deadline first in a two-part status", async () => {
+  // Untouched days count from the clock.
+  vi.useFakeTimers({
+    now: Date.parse("2026-10-13T12:00:00Z"),
+    toFake: ["Date"],
+  });
+  const { plan } = await createPrototype().load();
+  const venue: PlanningTask = {
+    ...plan.tasks.find((task) => task.id === "venue")!,
+    deadline: "2026-10-22",
+  };
+  const blocker: PlanningTask = {
+    ...plan.tasks[0]!,
+    id: "book",
+    title: "Book the room",
+  };
+  const card = (language: Language, waitsFor?: PlanningTask[]) =>
+    render(
+      <OutcomeCard
+        task={venue}
+        tasks={[...plan.tasks, blocker]}
+        managedLabels={plan.managedLabels}
+        scheduledIds={new Set()}
+        today="2026-10-13"
+        language={language}
+        waitsFor={waitsFor}
+        onClick={vi.fn()}
+      />,
+    );
+  const parts = () =>
+    [...document.querySelectorAll(".planning-outcome-status > span")].map(
+      (part) => part.textContent,
+    );
+  card("zh");
+  const button = screen.getByRole("button");
+  // The area is in the name and the edge colour, no longer a word on the card.
+  expect(button.getAttribute("aria-label")).toMatch(
+    /^Hear back about the venue quote, 工作, 未设优先级, /u,
+  );
+  expect(button.querySelector(".planning-outcome-context")).toBeNull();
+  expect(
+    button.querySelector(".planning-outcome-title")!.hasAttribute("title"),
+  ).toBe(false);
+  expect(button.querySelectorAll(".planning-outcome-status")).toHaveLength(1);
+  expect(button.querySelector(".is-row")).toBeNull();
+  // The status is the one meta line, deadline first, so it is the part never cut.
+  expect(button.querySelector(".planning-outcome-meta")!.children).toHaveLength(
+    1,
+  );
+  expect(parts()).toEqual(["10月22日截止", " · 11 天未变动"]);
+  cleanup();
+  card("en", [blocker]);
+  expect(parts()).toEqual([
+    "Deadline Oct 22",
+    " · Waiting for “Book the room”",
+  ]);
+  // The deadline's full date stays the status's tooltip; screen readers hear the whole line.
+  expect(
+    document.querySelector(".planning-outcome-status")!.getAttribute("title"),
+  ).toBe("Deadline: Thu, Oct 22");
+  expect(screen.getByRole("button").getAttribute("aria-label")).toContain(
+    "Waiting for “Book the room” · Deadline Oct 22",
+  );
 });
 
 it("names a paused timer as a state, colours checkboxes by priority and keeps FlowDay rows aligned", async () => {
@@ -161,7 +229,7 @@ it("names Start now and Waiting in both languages, in words only", async () => {
   expect(screen.getByRole("region", { name: "等待中" })).toBeTruthy();
   expect(
     screen.getByRole("button", {
-      name: "Submit the expense claim, 未设优先级, 明天截止，10月14日周三",
+      name: "Submit the expense claim, 工作, 未设优先级, 明天截止，10月14日周三",
     }),
   ).toBeTruthy();
   expect(

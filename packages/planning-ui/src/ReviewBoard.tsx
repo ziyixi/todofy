@@ -51,6 +51,7 @@ import {
   type CompletePlanningTask,
 } from "./CompleteTaskButton";
 import { PendingMark } from "./StatusMarks";
+import { FullTitle, markCut } from "./FullTitle";
 import { untouchedText } from "./weekly-review";
 import { words } from "./i18n";
 import type {
@@ -86,10 +87,11 @@ export interface OutcomeCardProps {
   onClick: () => void;
 }
 /**
- * Title, area, and the step counts or, when the task waits or should start, one muted status in
- * their place: beside the area, or in a row of its own when it has two parts. A parked card says
- * how long it has been untouched instead of its counts. Only days past a deadline are drawn in
- * --plus-danger.
+ * A fixed-height card: a title of at most two lines, then one left-aligned line pinned to the
+ * bottom with the step counts or, when the task waits or should start, one muted status in their
+ * place. A two-part status puts its deadline part first, so that "N days late" is never cut. A
+ * parked card says how long it has been untouched instead of its counts. The left edge says the
+ * area, and so does the name. Only days past a deadline are drawn in --plus-danger.
  */
 export function OutcomeCard({
   task,
@@ -130,33 +132,9 @@ export function OutcomeCard({
   const spoken = line
     ? `, ${line}${dated ? spokenDeadline({ text: line }, task.deadline, language) : ""}`
     : "";
-  const statusText = (
-    <span
-      className={`planning-outcome-status ${status.length > 1 ? "is-row" : ""}`}
-      title={dated ? deadlineTitle(task.deadline, language) : undefined}
-    >
-      {status.map((part, index) => (
-        <span key={index} className={part.quoted ? "has-quoted" : undefined}>
-          {index > 0 && <span className="planning-outcome-separator"> · </span>}
-          {part.text}
-          {part.quoted && (
-            <>
-              <span
-                className="planning-outcome-quoted"
-                title={part.quoted.title}
-              >
-                {part.quoted.title}
-              </span>
-              {part.quoted.close}
-            </>
-          )}
-          {part.danger && (
-            <span className="planning-danger-text">{part.danger}</span>
-          )}
-        </span>
-      ))}
-    </span>
-  );
+  // The deadline part first: the line ends in an ellipsis where the card is narrow.
+  const shownStatus = status.length > 1 ? [status[1]!, status[0]!] : status;
+  const area = outcomeArea(task, tasks, language);
   return (
     <button
       type="button"
@@ -164,8 +142,10 @@ export function OutcomeCard({
       style={{ "--area-color": areaColor(task, tasks) } as CSSProperties}
       data-outcome-id={task.id}
       onClick={onClick}
-      // The name replaces the content, so it carries the status and pending state too.
-      aria-label={`${title}, ${priority}${spoken}${pending ? `, ${words(language).updating}` : ""}`}
+      onPointerEnter={markCut}
+      onFocus={markCut}
+      // The name replaces the content, so it carries the area, status and pending state too.
+      aria-label={`${title}, ${area}, ${priority}${spoken}${pending ? `, ${words(language).updating}` : ""}`}
     >
       <Flag
         size={14}
@@ -177,15 +157,12 @@ export function OutcomeCard({
       </Flag>
       <span className="planning-outcome-content">
         <span className="planning-outcome-title-row">
-          <strong className="planning-outcome-title" title={title}>
-            {title}
+          <strong className="planning-outcome-title">
+            <FullTitle text={title} />
           </strong>
           {pending && <PendingMark language={language} />}
         </span>
         <span className="planning-outcome-meta">
-          <span className="planning-outcome-context">
-            {outcomeArea(task, tasks, language)}
-          </span>
           {!hasStatus ? (
             <span className="planning-outcome-counts">
               {language === "zh"
@@ -193,10 +170,38 @@ export function OutcomeCard({
                 : `${steps.length} ${steps.length === 1 ? "step" : "steps"} · ${planned} planned`}
             </span>
           ) : (
-            status.length < 2 && statusText
+            <span
+              className="planning-outcome-status"
+              title={dated ? deadlineTitle(task.deadline, language) : undefined}
+            >
+              {shownStatus.map((part, index) => (
+                <span
+                  key={index}
+                  className={part.quoted ? "has-quoted" : undefined}
+                >
+                  {index > 0 && (
+                    <span className="planning-outcome-separator"> · </span>
+                  )}
+                  {part.text}
+                  {part.quoted && (
+                    <>
+                      <span
+                        className="planning-outcome-quoted"
+                        title={part.quoted.title}
+                      >
+                        {part.quoted.title}
+                      </span>
+                      {part.quoted.close}
+                    </>
+                  )}
+                  {part.danger && (
+                    <span className="planning-danger-text">{part.danger}</span>
+                  )}
+                </span>
+              ))}
+            </span>
           )}
         </span>
-        {status.length > 1 && statusText}
       </span>
     </button>
   );

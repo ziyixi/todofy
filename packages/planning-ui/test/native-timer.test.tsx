@@ -138,19 +138,17 @@ it("reads another window's timer while visible without reloading task lists, the
   vi.setSystemTime(new Date("2026-10-17T23:58:30Z"));
   const loaded = data();
   const load = vi.fn().mockResolvedValue(loaded);
-  const readTimer = vi
-    .fn()
-    .mockResolvedValue({
-      timerEtag: "other-window",
-      timer: {
-        taskId: "step",
-        flowDate: loaded.focus.date,
-        status: "paused",
-        elapsedSeconds: 42,
-        startedAt: "",
-        etag: "other-window",
-      },
-    });
+  const readTimer = vi.fn().mockResolvedValue({
+    timerEtag: "other-window",
+    timer: {
+      taskId: "step",
+      flowDate: loaded.focus.date,
+      status: "paused",
+      elapsedSeconds: 42,
+      startedAt: "",
+      etag: "other-window",
+    },
+  });
   render(<App {...props({ load, readTimer } as unknown as PlusActions)} />);
   await act(async () => {});
   await act(async () => {

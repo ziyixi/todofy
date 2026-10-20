@@ -136,16 +136,17 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
   expect(
     document.querySelector(".review-lanes")!.getAttribute("data-lanes"),
   ).toBe("7");
-  // Start now: title, area and one status, earliest deadline first; screen readers also hear
-  // the date the status does not say.
+  // Start now: title and one status, earliest deadline first; screen readers also hear the
+  // area, which the card's edge shows, and the date the status does not say.
   expect(cards("Start now")).toEqual([
-    "Quarterly report draft, No priority, 2 days late, Sun, Oct 11",
-    "Submit the expense claim, No priority, Deadline tomorrow, Wed, Oct 14",
+    "Quarterly report draft, Work, No priority, 2 days late, Sun, Oct 11",
+    "Submit the expense claim, Work, No priority, Deadline tomorrow, Wed, Oct 14",
   ]);
   const draft = lane("Start now").querySelector(".planning-outcome-card")!;
-  expect(draft.querySelector(".planning-outcome-context")!.textContent).toBe(
-    "Work",
-  );
+  expect(draft.querySelector(".planning-outcome-context")).toBeNull();
+  expect(
+    draft.querySelector(".planning-outcome-title")!.hasAttribute("title"),
+  ).toBe(false);
   const status = draft.querySelector(".planning-outcome-status")!;
   expect(status.textContent).toBe("2 days late");
   expect(status.getAttribute("title")).toBe("Deadline: Sun, Oct 11");
@@ -162,8 +163,8 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
   );
   expect(lane("Waiting").querySelector(".review-lane-header small")).toBe(null);
   expect(cards("Waiting")).toEqual([
-    "Hear back about the venue quote, No priority, No change in 11 days",
-    "Lab access approval, No priority, No change in 3 days",
+    "Hear back about the venue quote, Work, No priority, No change in 11 days",
+    "Lab access approval, Work, No priority, No change in 3 days",
   ]);
   // In progress and no-lead tasks are not on the board.
   for (const title of ["Move house", "Renew the car insurance"])
@@ -246,7 +247,7 @@ it("puts Parked between Waiting and the stages, and shows it empty too", async (
   ).toBe("7");
   // A parked card says how long it has been untouched in place of its step counts.
   expect(cards("Parked")).toEqual([
-    "Plan a small balcony garden, No priority, No change in 53 days",
+    "Plan a small balcony garden, Personal, No priority, No change in 53 days",
   ]);
   expect(lane("Parked").querySelector(".planning-outcome-counts")).toBeNull();
   // Filtered empty, it stays in place as a drop target.
@@ -271,9 +272,11 @@ it("shows Parked's first three cards, then a quiet line for the rest", async () 
   // The most untouched first: the fixture's garden, unchanged for 53 days, then those Todoist
   // gave no time.
   expect(
-    [...parked.querySelectorAll(".planning-outcome-title")].map(
-      (title) => title.textContent,
-    ),
+    [
+      ...parked.querySelectorAll(
+        ".planning-outcome-title .planning-full-title-text",
+      ),
+    ].map((title) => title.textContent),
   ).toEqual([
     "Plan a small balcony garden",
     "Synthetic idea 1",
@@ -310,17 +313,17 @@ it("keeps a staged task in its lane with one quiet status, and a date-rule candi
   render(<PlanView {...props} />);
   // Only the 7-day date rule made "Book the venue" a Week candidate.
   expect(cards("Start now")).toContain(
-    "Book the venue, No priority, 3 days left, Fri, Oct 16",
+    "Book the venue, Work, No priority, 3 days left, Fri, Oct 16",
   );
   expect(cards("Week")).not.toContainEqual(
     expect.stringMatching(/^Book the venue/u),
   );
   expect(cards("Committed")).toEqual([
-    "Ship the small website refresh, No priority",
-    "Prepare the next research check-in, No priority, 2 days left, Thu, Oct 15",
-    "Organize the experiment notes, No priority, No change in 7 days",
-    "Prepare the visa documents, No priority, 5 days left, Sun, Oct 18",
-    "Make the home desk comfortable, No priority",
+    "Ship the small website refresh, Work, No priority",
+    "Prepare the next research check-in, Work, No priority, 2 days left, Thu, Oct 15",
+    "Organize the experiment notes, Work, No priority, No change in 7 days",
+    "Prepare the visa documents, Work, No priority, 5 days left, Sun, Oct 18",
+    "Make the home desk comfortable, Personal, No priority",
   ]);
   // The status takes the step counts' place; other cards keep their counts.
   const committed = lane("Committed");
@@ -381,9 +384,11 @@ it("marks a card in progress from its Start, in one confirmed write, and moves f
     "Start: Prepare the visa documents",
   ]);
   // Start is drawn over the card on hover or focus only; the title row keeps no room for it.
-  expect(
-    lane("Start now").querySelector(".planning-outcome-title-row")!.textContent,
-  ).toBe("Quarterly report draft");
+  const row = lane("Start now").querySelector(".planning-outcome-title-row")!;
+  expect(row.querySelector(".planning-full-title-text")!.textContent).toBe(
+    "Quarterly report draft",
+  );
+  expect(row.children).toHaveLength(1);
   const start = screen.getByRole("button", {
     name: "Start: Quarterly report draft",
   });
@@ -398,7 +403,7 @@ it("marks a card in progress from its Start, in one confirmed write, and moves f
   ]);
   // In progress, it leaves Start now and, with no stage, the board.
   expect(cards("Start now")).toEqual([
-    "Submit the expense claim, No priority, Deadline tomorrow, Wed, Oct 14",
+    "Submit the expense claim, Work, No priority, Deadline tomorrow, Wed, Oct 14",
   ]);
   // Focus moves in an effect after the commit that says so.
   await waitFor(() =>
@@ -414,7 +419,7 @@ it("marks a card in progress from its Start, in one confirmed write, and moves f
     expect(announced()).toBe("Marked in progress: Prepare the visa documents"),
   );
   expect(cards("Committed")).toContain(
-    "Prepare the visa documents, No priority",
+    "Prepare the visa documents, Work, No priority",
   );
   expect(
     screen.queryByRole("button", { name: "Start: Prepare the visa documents" }),
@@ -491,7 +496,7 @@ it("leaves a waiting task past its deadline out of Focus's line, as the board sh
   render(<PlanView {...props} />);
   expect(cards("Waiting")).toContainEqual(
     expect.stringMatching(
-      /^Quarterly report draft, No priority, .*2 days late/u,
+      /^Quarterly report draft, Work, No priority, .*2 days late/u,
     ),
   );
   expect(screen.queryByRole("region", { name: "Start now" })).toBeNull();
@@ -538,7 +543,7 @@ it("takes the line to the first staged card that should start when Start now is 
   render(<PlanView {...props} showStart />);
   await waitFor(() =>
     expect(document.activeElement?.getAttribute("aria-label")).toBe(
-      "Prepare the next research check-in, No priority, 2 days left, Thu, Oct 15",
+      "Prepare the next research check-in, Work, No priority, 2 days left, Thu, Oct 15",
     ),
   );
 });
