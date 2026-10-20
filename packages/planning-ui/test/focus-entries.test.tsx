@@ -178,6 +178,10 @@ it("refuses zero minutes; Escape puts the saved value back, a second Escape clos
   const outside = screen.getByRole("button", { name: "Adjust plan" });
   fireEvent.focusOut(added, { relatedTarget: outside });
   expect(screen.queryByRole("dialog")).toBeNull();
+  // So does Shift+Tab back to the button that opened it.
+  records = open("40m logged (Write the introduction)");
+  fireEvent.focusOut(records, { relatedTarget: trigger });
+  expect(screen.queryByRole("dialog")).toBeNull();
   expect(writes.update).not.toHaveBeenCalled();
 });
 

@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-  type RefObject,
 } from "react";
 import { Plus, X } from "lucide-react";
 import {
@@ -157,7 +156,7 @@ export function FocusLogged(props: Props) {
           {language === "zh" ? `（${title}）` : `(${title})`}
         </span>
       </button>
-      {open && <Records {...props} trigger={button} onClose={close} />}
+      {open && <Records {...props} onClose={close} />}
     </>
   );
 }
@@ -178,10 +177,8 @@ function Records({
   pending,
   actions,
   write,
-  trigger,
   onClose,
 }: Props & {
-  trigger: RefObject<HTMLButtonElement | null>;
   onClose: (refocus: boolean) => void;
 }) {
   const text = words(language);
@@ -197,7 +194,7 @@ function Records({
   const [shift, setShift] = useState(0);
   useLayoutEffect(() => {
     const box = popover.current?.getBoundingClientRect();
-    if (!box) return;
+    if (!box?.width) return;
     const room = document.documentElement.clientWidth - EDGE - box.right;
     if (room < 0) setShift(Math.max(room, EDGE - box.left));
   }, []);
@@ -217,13 +214,10 @@ function Records({
       aria-labelledby={heading}
       tabIndex={-1}
       data-no-drag
+      // Focus leaving it closes it, to wherever focus went; the button that opened it included.
       onBlur={(event) => {
         const next = event.relatedTarget;
-        if (
-          next instanceof Node &&
-          (event.currentTarget.contains(next) || next === trigger.current)
-        )
-          return;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
         onClose(false);
       }}
       onKeyDown={(event) => {
