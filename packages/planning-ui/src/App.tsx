@@ -681,6 +681,8 @@ export function App({
               busy={busy || !data.plan.configured}
               pending={pendingCards}
               completing={completing}
+              actions={planActions}
+              run={run}
               editTask={openTask}
               complete={(task) => void complete(task)}
               onOpenPlan={() => onViewChange?.("plan")}

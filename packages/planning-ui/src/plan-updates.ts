@@ -37,30 +37,37 @@ function withDays(data: PlusData, queues: DayQueue[]): PlusData {
 }
 
 /**
- * A saved record replaces the one with its ID on its day, or joins the day's records; without
- * `entry`, the record with `removed`'s ID leaves its day.
+ * A day's records with a saved one: it replaces the record with its ID, or joins the day's records;
+ * without `entry`, the record with `removed`'s ID leaves. Another day's records are unchanged.
  */
+export function withRecord<Day extends DayPlan>(
+  day: Day,
+  entry: FocusEntry | undefined,
+  removed?: { id: string; date: string },
+): Day {
+  const target = entry ?? removed;
+  if (!target || day.date !== target.date) return day;
+  if (!entry)
+    return {
+      ...day,
+      entries: day.entries.filter((item) => item.id !== target.id),
+    };
+  return {
+    ...day,
+    entries: day.entries.some((item) => item.id === entry.id)
+      ? day.entries.map((item) => (item.id === entry.id ? entry : item))
+      : [...day.entries, entry],
+  };
+}
+
 function withEntry(
   data: PlusData,
   entry: FocusEntry | undefined,
   removed?: { id: string; date: string },
 ): PlusData {
-  const target = entry ?? removed;
-  if (!target) return data;
-  const records = <Day extends DayPlan>(day: Day): Day => {
-    if (day.date !== target.date) return day;
-    if (!entry)
-      return {
-        ...day,
-        entries: day.entries.filter((item) => item.id !== target.id),
-      };
-    return {
-      ...day,
-      entries: day.entries.some((item) => item.id === entry.id)
-        ? day.entries.map((item) => (item.id === entry.id ? entry : item))
-        : [...day.entries, entry],
-    };
-  };
+  if (!entry && !removed) return data;
+  const records = <Day extends DayPlan>(day: Day) =>
+    withRecord(day, entry, removed);
   return { ...data, days: data.days.map(records), focus: records(data.focus) };
 }
 
@@ -254,6 +261,10 @@ export function pendingTask(taskId: string): string {
 /** A day card whose queue write is not yet confirmed. */
 export function pendingStep(date: string, taskId: string): string {
   return `${date}:${taskId}`;
+}
+/** A time record whose write is not yet confirmed. */
+export function pendingEntry(id: string): string {
+  return `entry:${id}`;
 }
 
 /**

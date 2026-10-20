@@ -84,21 +84,109 @@
   font-weight: 500 !important;
   overflow-wrap: anywhere;
 }
+/* "Est. 30m · 35m logged": the card's one time number is its logged time, which opens the
+   day's records. The records popover is pinned under this line, at the content column's edge. */
 .plus-focus-block-footer {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   font-size: 12px;
   flex-wrap: wrap;
+}
+.plus-focus-block-footer > [aria-hidden="true"] {
+  color: var(--plus-muted);
 }
 .plus-focus-estimate {
   color: var(--plus-text);
   font-size: 12px;
 }
-.plus-focus-block-footer output {
-  font-size: 14px;
+.plus-root .plus-focus-logged {
+  padding: 0;
+  font-size: 12px;
+  color: var(--plus-text);
   font-variant-numeric: tabular-nums;
-  color: var(--plus-accent);
+}
+.plus-root .plus-focus-logged:hover {
+  text-decoration: underline;
+}
+.plus-focus-entries {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--plus-line);
+  border-radius: 7px;
+  background: var(--plus-bg);
+  box-shadow: var(--plus-shadow-2);
+  color: var(--plus-text);
+  font-size: 12px;
+  cursor: default;
+}
+.plus-focus-entries:focus {
+  outline: none;
+}
+.plus-focus-entries header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.plus-root .plus-focus-entries h3 {
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plus-focus-entries ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.plus-focus-entries li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+.plus-focus-entry-time {
+  width: 40px;
+  color: var(--plus-muted);
+  font-variant-numeric: tabular-nums;
+}
+.plus-root .plus-focus-entries .plus-custom-minutes {
+  width: 56px;
+}
+.plus-focus-entries li .plus-icon {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+}
+.plus-focus-entries footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 34px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--plus-line);
+}
+.plus-focus-entry-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.plus-root .plus-focus-entry-add .plus-button {
+  height: 26px;
 }
 .plus-focus-timer-controls {
   display: flex;

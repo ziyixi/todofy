@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createPrototype } from "./fixture";
 import { FocusView } from "../src/FocusView";
@@ -6,6 +12,7 @@ import { FocusView } from "../src/FocusView";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 it("shows cleaned parent context, and a task Plan does not list from Tasks' read, with execution controls only", async () => {
@@ -42,6 +49,8 @@ it("shows cleaned parent context, and a task Plan does not list from Tasks' read
       complete={complete}
       onOpenPlan={vi.fn()}
       onTimer={onTimer}
+      actions={createPrototype()}
+      run={vi.fn()}
     />,
   );
   const context = screen.getByText("Synthetic outcome", { exact: true });
@@ -59,7 +68,7 @@ it("shows cleaned parent context, and a task Plan does not list from Tasks' read
   expect(
     document.querySelector('[data-task-id="unlisted"] .plus-focus-estimate')!
       .textContent,
-  ).toBe("15m");
+  ).toBe("Est. 15m");
   expect(
     screen.queryByRole("button", {
       name: "Complete task: Synthetic unlisted step",
@@ -101,9 +110,9 @@ it("shows cleaned parent context, and a task Plan does not list from Tasks' read
   expect(complete).not.toHaveBeenCalled();
 });
 
-it("shows confirmed elapsed time and distinct pause, resume and stop controls", async () => {
-  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-13T12:00:05Z"));
+it("shows one logged time per card, ticking while its session runs, and distinct pause, resume and stop controls", async () => {
   const { plan, focus } = await createPrototype().load();
+  vi.useFakeTimers({ now: Date.parse("2026-10-13T12:00:05Z") });
   focus.timer = {
     taskId: "copy",
     day: focus.date,
@@ -113,6 +122,19 @@ it("shows confirmed elapsed time and distinct pause, resume and stop controls", 
     startedAt: new Date(Date.now() - 5000).toISOString(),
     etag: "synthetic-timer-2",
   };
+  // A record saved earlier today counts too.
+  focus.entries = [
+    {
+      id: "earlier",
+      taskId: "copy",
+      date: focus.date,
+      seconds: 10 * 60,
+      source: "timer",
+      startedAt: "2026-10-13T16:00:00Z",
+      area: "work",
+      etag: "1",
+    },
+  ];
   const onTimer = vi.fn();
   const complete = vi.fn();
   const props = {
@@ -124,9 +146,23 @@ it("shows confirmed elapsed time and distinct pause, resume and stop controls", 
     complete,
     onOpenPlan: vi.fn(),
     onTimer,
+    actions: createPrototype(),
+    run: vi.fn(),
   };
   const { rerender } = render(<FocusView {...props} />);
-  expect(screen.getByLabelText("Time focused").textContent).toBe("01:25");
+  const card = document.querySelector('[data-task-id="copy"]')!;
+  const logged = () =>
+    card.querySelector(".plus-focus-logged")!.firstChild!.textContent;
+  // The card's one time number: saved and running time, as a clock while the session lasts.
+  expect(card.querySelectorAll("output")).toHaveLength(0);
+  expect(logged()).toBe("11:25 logged");
+  expect(card.querySelector(".plus-focus-block-footer")!.textContent).toMatch(
+    /^Est\. 30m·11:25 logged/u,
+  );
+  act(() => {
+    vi.advanceTimersByTime(3000);
+  });
+  expect(logged()).toBe("11:28 logged");
   const pause = screen.getByRole("button", {
     name: "Pause: Write the introduction",
   });
@@ -142,7 +178,7 @@ it("shows confirmed elapsed time and distinct pause, resume and stop controls", 
       }}
     />,
   );
-  expect(screen.getByLabelText("Time focused").textContent).toBe("01:25");
+  expect(logged()).toBe("11:25 logged");
   const resume = screen.getByRole("button", {
     name: "Resume: Write the introduction",
   });
@@ -157,8 +193,14 @@ it("shows confirmed elapsed time and distinct pause, resume and stop controls", 
   expect(onTimer).toHaveBeenLastCalledWith("stop", "copy");
   expect(complete).not.toHaveBeenCalled();
   rerender(<FocusView {...props} focus={{ ...focus, timer: undefined }} />);
-  expect(screen.queryByLabelText("Time focused")).toBeNull();
+  expect(logged()).toBe("10m logged");
   expect(screen.getByText("Write the introduction")).toBeTruthy();
+  // A card with nothing logged offers to log time.
+  expect(
+    screen.getByRole("button", {
+      name: "Log time: Outline three questions for the check-in",
+    }),
+  ).toBeTruthy();
 });
 
 it("sends an empty today queue back to Plan instead of presenting another task picker", async () => {
@@ -175,6 +217,8 @@ it("sends an empty today queue back to Plan instead of presenting another task p
       complete={vi.fn()}
       onOpenPlan={onOpenPlan}
       onTimer={vi.fn()}
+      actions={createPrototype()}
+      run={vi.fn()}
     />,
   );
   expect(screen.getByText("No steps planned for today.")).toBeTruthy();
@@ -198,6 +242,8 @@ it("starts a step whose outcome has no area as unassigned, which Tasks keeps as 
       complete={vi.fn()}
       onOpenPlan={vi.fn()}
       onTimer={onTimer}
+      actions={createPrototype()}
+      run={vi.fn()}
     />,
   );
   fireEvent.click(

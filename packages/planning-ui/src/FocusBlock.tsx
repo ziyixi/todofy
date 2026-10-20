@@ -1,22 +1,43 @@
 import { Check, Pause, Play, Square } from "lucide-react";
 import type { CSSProperties } from "react";
-import { displayedTitle, formattedMinutes, taskAncestors } from "./domain";
+import {
+  displayedTitle,
+  formattedMinutes,
+  taskAncestors,
+  taskIndex,
+} from "./domain";
+import { FocusLogged, recordArea, type RecordWrite } from "./FocusEntries";
 import { words } from "./i18n";
-import type { FocusState, Language, PlanState, PlanningTask } from "./model";
+import type {
+  FocusEntry,
+  FocusState,
+  Language,
+  PlanState,
+  PlanningTask,
+  PlusActions,
+} from "./model";
 import { areaColor, outcomeForTask } from "./planning-outcomes";
-import { Elapsed, PendingMark } from "./StatusMarks";
+import { PendingMark } from "./StatusMarks";
 
 interface Props {
   taskId: string;
   task?: PlanningTask;
   plan: PlanState;
   focus: FocusState;
+  /** The day the card is shown on. */
+  date: string;
   index: number;
   minutes: number;
+  /** The task's records on the day; absent on a future day, which has nothing to log yet. */
+  records?: FocusEntry[];
   language: Language;
   busy: boolean;
   /** A queue change waits for confirmation, or a confirmed completion for its re-read. */
   settling?: boolean;
+  /** Records whose write is not yet confirmed. */
+  pending?: ReadonlySet<string>;
+  actions: Pick<PlusActions, "addEntry" | "updateEntry" | "deleteEntry">;
+  writeRecord: RecordWrite;
   onTimer: (
     action: "start" | "pause" | "resume" | "stop",
     taskId: string,
@@ -30,11 +51,16 @@ export function FocusBlock({
   task,
   plan,
   focus,
+  date,
   index,
   minutes,
+  records,
   language,
   busy,
   settling = false,
+  pending,
+  actions,
+  writeRecord,
   onTimer,
   editTask,
   complete,
@@ -43,10 +69,12 @@ export function FocusBlock({
   // A task Plan does not list has its title and parent from Tasks' Focus read.
   const known = focus.tasks[taskId];
   const title = displayedTitle(task?.title ?? known?.title ?? text.missingTask);
-  const timer =
-    focus.timer?.taskId === taskId && focus.timer.day === focus.date
-      ? focus.timer
+  // This card's session, when it counts on the card's day.
+  const session =
+    focus.timer?.taskId === taskId && focus.timer.day === date
+      ? focus
       : undefined;
+  const timer = session?.timer;
   let status = "";
   if (index === 0) status = language === "zh" ? "下一步" : "Up next";
   let timerAction: "start" | "pause" | "resume" = "start";
@@ -59,8 +87,15 @@ export function FocusBlock({
   const outcome = task
     ? outcomeForTask(task, plan.tasks, plan.managedLabels)
     : undefined;
-  // A task Plan does not list shows no colour.
-  const color = task ? areaColor(task, plan.tasks) : "var(--plus-area-none)";
+  // A task Plan does not list takes its parent's colour when Plan lists the parent, else none.
+  const parent = known?.parentId
+    ? taskIndex(plan.tasks).get(known.parentId)
+    : undefined;
+  const color = task
+    ? areaColor(task, plan.tasks)
+    : parent
+      ? areaColor(parent, plan.tasks)
+      : "var(--plus-area-none)";
   const parentPath = task
     ? taskAncestors(task, plan.tasks)
         .map((parent) => displayedTitle(parent.title))
@@ -126,16 +161,29 @@ export function FocusBlock({
               {displayedTitle(known.parentTitle)}
             </span>
           )}
+          {/* The card's one time number: what is logged, ticking while its session runs. */}
           <div className="plus-focus-block-footer">
             <span className="plus-focus-estimate">
-              {minutes ? formattedMinutes(minutes) : text.unknown}
+              {minutes ? text.est(formattedMinutes(minutes)) : text.unknown}
             </span>
-            {timer && (
-              <output
-                aria-label={language === "zh" ? "已专注" : "Time focused"}
-              >
-                <Elapsed focus={focus} />
-              </output>
+            {records && (
+              <>
+                <span aria-hidden="true">·</span>
+                <FocusLogged
+                  taskId={taskId}
+                  title={title}
+                  date={date}
+                  records={records}
+                  session={session}
+                  area={recordArea(taskId, plan, known, records)}
+                  timezone={plan.timezone}
+                  language={language}
+                  busy={busy}
+                  pending={pending}
+                  actions={actions}
+                  write={writeRecord}
+                />
+              </>
             )}
           </div>
         </div>

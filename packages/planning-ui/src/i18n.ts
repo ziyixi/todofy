@@ -106,6 +106,20 @@ const en = {
   weeklyReview: "Weekly review",
   sundayRule:
     "Commitments chosen in Plan on Sunday stay for next week; the rest reset on Monday as usual. Goals are saved for each week and never cleared.",
+  // Focus's logged time and its records.
+  est: (minutes: string) => `Est. ${minutes}`,
+  logged: (time: string) => `${time} logged`,
+  logTime: "Log time",
+  timeRecords: "Time records",
+  minutesAt: (time: string) => `Minutes, ${time}`,
+  minutesAdded: "Minutes, added",
+  deleteRecord: "Delete record",
+  addTime: "Add time",
+  addRecord: "Add",
+  total: "Total",
+  noRecords: "No time recorded.",
+  saved: "Saved",
+  deleted: "Deleted",
 };
 const zh: typeof en = {
   plan: "计划",
@@ -212,6 +226,19 @@ const zh: typeof en = {
   weeklyReview: "周回顾",
   sundayRule:
     "在 Plan 中周日选的承诺会留到下周，其余的周一照常重置。目标按周保存，不会被清除。",
+  est: (minutes: string) => `预计 ${minutes}`,
+  logged: (time: string) => `已用 ${time}`,
+  logTime: "记录时间",
+  timeRecords: "用时记录",
+  minutesAt: (time: string) => `分钟，${time}`,
+  minutesAdded: "分钟，手动",
+  deleteRecord: "删除记录",
+  addTime: "添加时间",
+  addRecord: "添加",
+  total: "合计",
+  noRecords: "还没有记录。",
+  saved: "已保存",
+  deleted: "已删除",
 };
 export function words(language: Language): typeof en {
   return language === "zh" ? zh : en;

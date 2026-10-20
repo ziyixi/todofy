@@ -3,7 +3,9 @@ import { ArrowLeft } from "lucide-react";
 import { effectiveArea, formattedMinutes, taskIndex } from "./domain";
 import { unplannedDue, unplannedText } from "./deadlines";
 import { FocusBlock } from "./FocusBlock";
+import type { RecordWrite } from "./FocusEntries";
 import { pendingStep } from "./plan-updates";
+import { LoggedTime } from "./StatusMarks";
 import { words } from "./i18n";
 import type {
   Area,
@@ -12,6 +14,8 @@ import type {
   Language,
   PlanState,
   PlanningTask,
+  PlusActions,
+  RunOperation,
 } from "./model";
 
 interface Props {
@@ -27,6 +31,9 @@ interface Props {
   pending?: ReadonlySet<string>;
   /** Completed task IDs that wait for the re-read showing the result. */
   completing?: ReadonlySet<string>;
+  /** Record writes go through the App's queue. */
+  actions: PlusActions;
+  run: RunOperation;
   editTask: (task: PlanningTask) => void;
   complete: (task: PlanningTask) => void;
   onOpenPlan: () => void;
@@ -48,6 +55,8 @@ export function FocusView({
   busy,
   pending,
   completing,
+  actions,
+  run,
   editTask,
   complete,
   onOpenPlan,
@@ -66,6 +75,12 @@ export function FocusView({
     focus.tasks[id]?.estimatedMinutes ??
     0;
   const totalMinutes = queue.reduce((sum, id) => sum + minutesOf(id), 0);
+  // The day's records, and the session when it counts on this day.
+  const logged = focus.entries.reduce((sum, entry) => sum + entry.seconds, 0);
+  const session = focus.timer?.day === focus.date ? focus : undefined;
+  // Confirm-first: a record shows its new value once Tasks saved it; until then its row waits.
+  const writeRecord: RecordWrite = (key, write) =>
+    run(write, { pending: [key] });
   const unknown = queue.filter((id) => !minutesOf(id)).length;
   let stepLabel = language === "zh" ? "个步骤" : "steps";
   if (language === "en" && queue.length === 1) stepLabel = "step";
@@ -87,6 +102,16 @@ export function FocusView({
         {unknown > 0 && (
           <span>
             {unknown} {text.unknown.toLowerCase()}
+          </span>
+        )}
+        {(logged > 0 || session) && (
+          <span>
+            ·{" "}
+            <LoggedTime
+              seconds={logged}
+              session={session}
+              label={text.logged}
+            />
           </span>
         )}
         {queue.length > 0 && (
@@ -139,8 +164,13 @@ export function FocusView({
               task={byId.get(id)}
               plan={plan}
               focus={focus}
+              date={focus.date}
+              records={focus.entries.filter((entry) => entry.taskId === id)}
               language={language}
               busy={busy}
+              pending={pending}
+              actions={actions}
+              writeRecord={writeRecord}
               settling={Boolean(
                 completing?.has(id) ||
                 pending?.has(pendingStep(focus.date, id)),

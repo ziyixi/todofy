@@ -440,6 +440,8 @@ it("shows Focus's quiet line only for due tasks with nothing planned, and opens 
     complete: vi.fn(),
     onOpenPlan: vi.fn(),
     onTimer: vi.fn(),
+    actions: createPrototype(),
+    run: vi.fn(),
     onShowStart,
   };
   const { rerender } = render(<FocusView {...props} />);
@@ -488,6 +490,8 @@ it("leaves a waiting task past its deadline out of Focus's line, as the board sh
       complete={vi.fn()}
       onOpenPlan={vi.fn()}
       onTimer={vi.fn()}
+      actions={createPrototype()}
+      run={vi.fn()}
       onShowStart={vi.fn()}
     />,
   );

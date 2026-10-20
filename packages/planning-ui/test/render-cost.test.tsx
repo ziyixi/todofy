@@ -37,6 +37,17 @@ vi.mock("@ziyixi/planning-ui/PlanView", async (original) => {
     },
   };
 });
+const focusBlockRenders = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@ziyixi/planning-ui/FocusBlock", async (original) => {
+  const actual = await original<typeof import("../src/FocusBlock")>();
+  return {
+    ...actual,
+    FocusBlock: (props: Parameters<typeof actual.FocusBlock>[0]) => {
+      focusBlockRenders.count++;
+      return actual.FocusBlock(props);
+    },
+  };
+});
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -205,4 +216,35 @@ it("ticks a running timer without re-rendering the planning board", async () => 
   });
   expect(clock.textContent).toBe("00:03");
   expect(planViewRenders.count).toBe(before);
+});
+
+it("ticks a running session's logged time on its Focus card without re-rendering the cards", async () => {
+  const actions = createPrototype();
+  render(
+    <App
+      actions={actions}
+      language="en"
+      onOpenTask={() => {}}
+      onSettings={() => {}}
+      view="focus"
+    />,
+  );
+  const start = await screen.findByRole("button", {
+    name: "Start: Write the introduction",
+  });
+  vi.useFakeTimers({ now: Date.parse("2026-10-13T12:00:00Z") });
+  await act(async () => {
+    fireEvent.click(start);
+  });
+  const logged = screen.getByRole("button", {
+    name: "00:00 logged: Write the introduction",
+  });
+  const before = focusBlockRenders.count;
+  // The cards are counted: Start re-rendered them once.
+  expect(before).toBeGreaterThan(0);
+  act(() => {
+    vi.advanceTimersByTime(3_000);
+  });
+  expect(logged.textContent).toMatch(/^00:03 logged/u);
+  expect(focusBlockRenders.count).toBe(before);
 });

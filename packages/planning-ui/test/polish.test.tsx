@@ -176,6 +176,8 @@ it("names a paused timer as a state, colours checkboxes by priority and keeps un
     complete: vi.fn(),
     onOpenPlan: vi.fn(),
     onTimer: vi.fn(),
+    actions: createPrototype(),
+    run: vi.fn(),
   };
   const { rerender, container } = render(
     <FocusView {...props} language="en" />,
