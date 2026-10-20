@@ -532,6 +532,15 @@ test("Add steps sends each new step with the time chosen beside it", async ({
   ).toContainText("1h");
   await expect(input).toBeFocused();
   await expect(time).toHaveValue("60");
+  // Escape on the time closes the cell and goes back to the Add steps row; it opens again at 30.
+  await time.press("Escape");
+  const addSteps = tray.getByRole("button", {
+    name: "Add steps to “Synthetic website refresh”",
+  });
+  await expect(input).toHaveCount(0);
+  await expect(addSteps).toBeFocused();
+  await addSteps.click();
+  await expect(time).toHaveValue("30");
 });
 
 test("a double-click opens the panel: a Committed card stays selected, and the rest of a double-click never closes or writes", async ({
