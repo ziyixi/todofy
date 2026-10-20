@@ -1,71 +1,155 @@
 import { expect, it } from "vitest";
 import { createPlanningActions } from "../src/api";
 import type { HttpCall, HttpSend } from "@ziyixi/proto/http-client";
+import type { FocusState } from "../src/model";
 
 it("reads the native pending Mail count even when no mail task exists", async () => {
   const send: HttpSend = async () =>
     Response.json({
       plan: { enabled: true, native_planning: true, mailbox_pending_count: 0 },
     });
-  const actions = createPlanningActions({ plus: send, flowday: send });
+  const actions = createPlanningActions({ plus: send, tasks: send });
   expect(await actions.readPlan()).toMatchObject({
     mailboxPendingCount: 0,
   });
 });
 
-it("starts a FlowDay pomodoro and uses the authoritative session across pause, reload and finish", async () => {
+it("starts a pomodoro in Tasks and uses its authoritative session across reload and finish", async () => {
   const calls: HttpCall[] = [];
+  const running = {
+    name: "focusTimer",
+    state: "running",
+    etag: "new-version",
+    task_id: "step",
+    day: "2026-10-17",
+    area: "personal",
+    target_seconds: 1500,
+    saved_seconds: 60,
+    segment_start_time: "2026-10-17T12:00:00Z",
+  };
   const send: HttpSend = async (call) => {
     calls.push(call);
     const body = call.body ? JSON.parse(call.body) : {};
+    if (call.httpMethod === "GET") return Response.json(running);
     return Response.json(
-      body.action === "finish_pomodoro"
-        ? { name: "timerSession", state: "idle", etag: "finished" }
-        : {
-            name: "timerSession",
-            state: "running",
-            etag: "new-version",
-            task_id: "step",
-            flow_date: "2026-10-17",
-            mode: "pomodoro",
-            pomodoro_target_seconds: 1500,
-            saved_seconds: 60,
-            segment_start_time: "2026-10-17T12:00:00Z",
-          },
+      body.action === "finish"
+        ? {
+            timer: {
+              name: "focusTimer",
+              state: "idle",
+              etag: "finished",
+              finished_task_id: "step",
+              finished_seconds: 1500,
+            },
+            entry: {
+              name: "focusEntries/pomodoro",
+              task_id: "step",
+              day: "2026-10-17",
+              seconds: 1500,
+              source: "timer",
+              area: "personal",
+              etag: "1",
+            },
+          }
+        : { timer: running },
     );
   };
-  const api = createPlanningActions({ plus: send, flowday: send });
-  const focus: import("../src/model").FocusState = {
+  const api = createPlanningActions({ plus: send, tasks: send });
+  const focus: FocusState = {
     date: "2026-10-17",
     taskIds: ["step"],
     completedTaskIds: [],
+    entries: [],
     timerEtag: "0",
     estimates: {},
-    flowTasks: {},
+    tasks: {},
   };
-  const started = await api.timer("start", "step", focus, 1500);
-  expect(JSON.parse(calls[0]!.body!)).toMatchObject({
+  const started = await api.timer("start", "step", focus, 1500, "personal");
+  expect(calls[0]!.url).toBe("/api/tasks/v1/focusTimer:command");
+  expect(JSON.parse(calls[0]!.body!)).toEqual({
+    request_id: expect.any(String),
     etag: "0",
     action: "start",
-    mode: "pomodoro",
+    task_id: "step",
     target_seconds: 1500,
+    area: "personal",
   });
   expect(started.timer).toMatchObject({
+    day: "2026-10-17",
+    area: "personal",
     mode: "pomodoro",
     targetSeconds: 1500,
     elapsedSeconds: 60,
   });
   expect(await api.readTimer!()).toEqual(started);
+  expect(calls[1]!.url).toBe("/api/tasks/v1/focusTimer");
   const finished = await api.timer("finish", "step", { ...focus, ...started });
-  expect(JSON.parse(calls.at(-1)!.body!)).toMatchObject({
+  expect(JSON.parse(calls.at(-1)!.body!)).toEqual({
+    request_id: expect.any(String),
     etag: "new-version",
-    action: "finish_pomodoro",
-    flow_date: "2026-10-17",
+    action: "finish",
+    task_id: "step",
   });
-  expect(finished).toEqual({ timerEtag: "finished" });
+  expect(finished).toEqual({
+    timerEtag: "finished",
+    finishedPomodoro: { taskId: "step", targetSeconds: 1500 },
+    entry: {
+      id: "pomodoro",
+      taskId: "step",
+      date: "2026-10-17",
+      seconds: 1500,
+      source: "timer",
+      area: "personal",
+      etag: "1",
+    },
+  });
 });
 
-it("keeps native step estimates canonical while the FlowDay cache is catching up", async () => {
+it("counts up when Start has no target, and an unassigned task starts with no area", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const send: HttpSend = async (call) => {
+    bodies.push(JSON.parse(call.body!));
+    return Response.json({
+      timer: {
+        name: "focusTimer",
+        state: "running",
+        etag: "2",
+        task_id: "step",
+        day: "2026-10-17",
+        segment_start_time: "2026-10-17T12:00:00Z",
+      },
+    });
+  };
+  const api = createPlanningActions({ plus: send, tasks: send });
+  const focus = {
+    date: "2026-10-17",
+    taskIds: ["step"],
+    completedTaskIds: [],
+    entries: [],
+    timerEtag: "1",
+    estimates: {},
+    tasks: {},
+  };
+  const started = await api.timer("start", "step", focus, 0, "unassigned");
+  // Empty strings are left off the wire, as Tasks reads "" for unassigned.
+  expect(bodies[0]).toEqual({
+    request_id: expect.any(String),
+    etag: "1",
+    action: "start",
+    task_id: "step",
+  });
+  expect(started.timer).toEqual({
+    taskId: "step",
+    day: "2026-10-17",
+    area: "unassigned",
+    status: "running",
+    elapsedSeconds: 0,
+    startedAt: "2026-10-17T12:00:00.000Z",
+    etag: "2",
+  });
+});
+
+it("takes every estimate from the task list; Tasks' Focus read only names tasks the list leaves out", async () => {
   const send: HttpSend = async ({ url }) => {
     const path = url.split("?")[0]!;
     if (path === "/api/plus/v1/plan:read")
@@ -80,112 +164,41 @@ it("keeps native step estimates canonical while the FlowDay cache is catching up
       });
     if (path === "/api/plus/v1/tasks")
       return Response.json({
-        planning_tasks: [{ id: "step", kind: "step", estimated_minutes: 90 }],
-      });
-    if (path === "/api/v1/tasks")
-      return Response.json({
-        tasks: [
-          {
-            name: "tasks/step",
-            title: "Synthetic step",
-            todoist_id: "step",
-            estimated_minutes: 30,
-          },
+        planning_tasks: [
+          { id: "step", kind: "step", estimated_minutes: 90 },
+          { id: "cleared", kind: "step" },
         ],
       });
-    if (path.startsWith("/api/v1/flows/"))
+    if (path === "/api/tasks/v1/focusDays")
       return Response.json({
-        name: `flows/${path.split("/").at(-1)}`,
-        task_ids: ["step"],
-      });
-    return Response.json({ name: "timerSession", state: "idle", etag: "0" });
-  };
-  const api = createPlanningActions({ plus: send, flowday: send });
-  const result = await api.load();
-  expect(result.plan.tasks[0]?.estimatedMinutes).toBe(90);
-  expect(result.focus.estimates.step).toBe(90);
-  // FlowDay's mirrored copy is not read at all.
-  expect(result.focus.flowTasks.step?.estimatedMinutes).toBeUndefined();
-});
-
-it("takes every estimate from the task list: FlowDay's copy never replaces or fills one", async () => {
-  const flowdayCalls: string[] = [];
-  const send: HttpSend = async ({ url, httpMethod }) => {
-    const path = url.split("?")[0]!;
-    if (path === "/api/plus/v1/plan:read")
-      return Response.json({
-        plan: {
-          enabled: true,
-          native_planning: true,
-          timezone: "UTC",
-          today: "2026-10-17",
-          week_start: "2026-10-12",
-        },
-      });
-    if (path === "/api/plus/v1/tasks")
-      return Response.json({
-        planning_tasks: [{ id: "cleared", kind: "step" }],
-      });
-    flowdayCalls.push(`${httpMethod} ${path}`);
-    if (path === "/api/v1/tasks")
-      return Response.json({
+        days: [{ day: "2026-10-17", task_ids: ["step", "cleared", "done"] }],
         tasks: [
+          { task_id: "step", title: "Synthetic step", duration_minutes: 90 },
+          { task_id: "cleared", title: "Synthetic cleared step" },
           {
-            name: "tasks/cleared",
-            title: "Synthetic cleared step",
-            todoist_id: "cleared",
-            estimated_minutes: 45,
-          },
-          {
-            name: "tasks/local-one",
-            title: "Synthetic local task",
-            estimated_minutes: 20,
+            task_id: "done",
+            title: "Synthetic completed step",
+            parent_id: "outcome",
+            parent_title: "Synthetic outcome",
+            duration_minutes: 20,
+            completed: true,
           },
         ],
+        today: "2026-10-17",
       });
-    if (path.startsWith("/api/v1/flows/"))
-      return Response.json({
-        name: `flows/${path.split("/").at(-1)}`,
-        task_ids: ["cleared", "local-one"],
-      });
-    return Response.json({ name: "timerSession", state: "idle", etag: "0" });
+    return Response.json({ name: "focusTimer", state: "idle", etag: "1" });
   };
-  const api = createPlanningActions({ plus: send, flowday: send });
+  const api = createPlanningActions({ plus: send, tasks: send });
   expect("updateEstimate" in api).toBe(false);
   const result = await api.load();
-  expect(result.plan.tasks[0]?.estimatedMinutes).toBeUndefined();
-  expect(result.focus.estimates).toEqual({ cleared: 0 });
-  expect(result.focus.flowTasks.cleared?.estimatedMinutes).toBeUndefined();
-  // A local FlowDay task is FlowDay's own, estimate included.
-  expect(result.focus.flowTasks["local-one"]?.estimatedMinutes).toBe(20);
-  expect(flowdayCalls.every((call) => call.startsWith("GET "))).toBe(true);
-});
-
-it("queues and moves a task FlowDay has not mirrored yet without forcing a FlowDay sync", async () => {
-  const calls: HttpCall[] = [];
-  const send: HttpSend = async (call) => {
-    calls.push(call);
-    const date = call.url.split("?")[0]!.split("/").at(-1)!.split(":")[0]!;
-    if (call.url.includes(":rollover"))
-      return Response.json({
-        flow: { name: "flows/2026-10-17", task_ids: [] },
-        destination_flow: { name: "flows/2026-10-18", task_ids: ["new-step"] },
-      });
-    return Response.json({
-      name: `flows/${date}`,
-      task_ids: call.httpMethod === "PATCH" ? ["new-step"] : [],
-    });
-  };
-  const api = createPlanningActions({ plus: send, flowday: send });
-  await api.addToDay("new-step", "2026-10-17");
-  await api.moveTaskToDay(
-    "new-step",
-    { date: "2026-10-17", taskIds: ["new-step"], completedTaskIds: [] },
-    { date: "2026-10-18", taskIds: [], completedTaskIds: [] },
-  );
-  expect(calls.map((call) => `${call.httpMethod} ${call.url}`)).toEqual([
-    "GET /api/v1/flows/2026-10-17",
-    "PATCH /api/v1/flows/2026-10-17?update_mask=task_ids",
-    "POST /api/v1/flows/2026-10-17:rollover",
-  ]);
+  expect(result.plan.tasks[0]?.estimatedMinutes).toBe(90);
+  expect(result.plan.tasks[1]?.estimatedMinutes).toBeUndefined();
+  expect(result.focus.estimates).toEqual({ step: 90, cleared: 0 });
+  expect(result.focus.tasks.done).toEqual({
+    title: "Synthetic completed step",
+    parentId: "outcome",
+    parentTitle: "Synthetic outcome",
+    estimatedMinutes: 20,
+    completed: true,
+  });
 });

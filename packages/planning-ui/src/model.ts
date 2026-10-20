@@ -62,9 +62,13 @@ export interface PlanState {
   week: string;
   timezone: string;
   configured: boolean;
+  /**
+   * Todofy's today, which Plan's week, lanes and statuses count from. Focus counts on Tasks' today
+   * (FocusState.date); both Workers keep the account's time zone, so the two are the same date.
+   */
+  today: string;
   /** Pending Mail entries, supplied by a complete planning read. */
   mailboxPendingCount?: number;
-  flowdayUrl: string;
   managedLabels: { role: string; id: string; label: string }[];
   /** Newest weekly review task Todofy created; the active task list says whether it is open. */
   reviewTaskId: string;
@@ -95,10 +99,59 @@ export interface WeeklyBet {
 }
 /** Account planning settings without the task list. */
 export type PlanMetadata = Omit<PlanState, "tasks">;
-export interface FlowDayPlan {
+/** Time spent on a task, counted on one day: a timer session or time added by hand. */
+export interface FocusEntry {
+  id: string;
+  taskId: string;
   date: string;
+  /** Whole minutes, as seconds. */
+  seconds: number;
+  /** When its timer session started (ISO); absent for added time. */
+  startedAt?: string;
+  source: "timer" | "manual";
+  /** The task's area when the time was logged; it does not follow later changes. */
+  area: Area;
+  etag: string;
+}
+/** One day's Focus queue in Tasks, with the time records counted on the day. */
+export interface DayPlan {
+  date: string;
+  /** Open steps, first to last. */
   taskIds: string[];
+  /** Steps completed from this day's queue, first to last. */
   completedTaskIds: string[];
+  entries: FocusEntry[];
+}
+/** A queue write's answer: the days it changed, without their records. */
+export type DayQueue = Omit<DayPlan, "entries">;
+/** What Focus shows for a task its queues or records name, including one Plan does not list. */
+export interface FocusTaskInfo {
+  title: string;
+  /** Its immediate parent's ID and title, or empty. */
+  parentId: string;
+  parentTitle: string;
+  estimatedMinutes?: number;
+  completed: boolean;
+}
+/** Focus days of a range as Tasks keeps them, with every task they name. */
+export interface FocusRange {
+  days: DayPlan[];
+  tasks: Record<string, FocusTaskInfo>;
+  /** Tasks' today. */
+  today: string;
+}
+/** A time record to add: its task, day, whole minutes in seconds, and area. */
+export type NewFocusEntry = Pick<
+  FocusEntry,
+  "taskId" | "date" | "seconds" | "area"
+>;
+/** A record as Tasks saved it. */
+export interface SavedEntry {
+  savedEntry: FocusEntry;
+}
+/** A record Tasks deleted. */
+export interface DeletedEntry {
+  deletedEntry: { id: string; date: string };
 }
 /** A dependency write's confirmed result. */
 export interface DependencyResult {
@@ -124,7 +177,7 @@ export interface EstimateResult {
 /** A write's server-confirmed result; void means only a re-read can show it. */
 export type Confirmed =
   | void
-  | FlowDayPlan[]
+  | DayQueue[]
   | PlanningTask
   | PlanningTask[]
   | DependencyResult
@@ -132,7 +185,9 @@ export type Confirmed =
   | WeeklyBet
   | WeeklyBet[]
   | ReorderResult
-  | EstimateResult;
+  | EstimateResult
+  | SavedEntry
+  | DeletedEntry;
 /**
  * A write shown before it is confirmed. Only the named cards wait, dimmed and fixed in place,
  * with the predicted change if any; a failure drops it again.
@@ -149,17 +204,19 @@ export type RunOperation = (
   operation: () => Promise<Confirmed>,
   change?: PendingChange,
 ) => Promise<boolean>;
-export interface FocusState extends FlowDayPlan {
+/** Tasks' today in Focus: its queue and records, and the one timer. */
+export interface FocusState extends DayPlan {
   finishedPomodoro?: { taskId: string; targetSeconds: number };
   timerEtag: string;
   estimates: Record<string, number>;
-  flowTasks: Record<
-    string,
-    { title: string; local: boolean; estimatedMinutes?: number }
-  >;
+  /** Every task the read queues and records name. */
+  tasks: Record<string, FocusTaskInfo>;
   timer?: {
     taskId: string;
-    flowDate: string;
+    /** The day the session counts on: Tasks' today when it started. */
+    day: string;
+    /** The area sent with Start, which its record keeps. */
+    area: Area;
     status: "running" | "paused";
     elapsedSeconds: number;
     mode?: "countup" | "pomodoro";
@@ -187,7 +244,7 @@ export interface StepDraft {
 export interface PlusData {
   plan: PlanState;
   focus: FocusState;
-  days: FlowDayPlan[];
+  days: DayPlan[];
 }
 /** The last confirmed data, kept only in page memory between visits. */
 export interface PlusSnapshot {
@@ -199,6 +256,8 @@ export interface TimerSnapshot {
   timerEtag: string;
   finishedPomodoro?: FocusState["finishedPomodoro"];
   timer?: FocusState["timer"];
+  /** The record a command saved when it ended a session of at least a minute. */
+  entry?: FocusEntry;
 }
 export interface PlanUpdate {
   stage?: Stage;
@@ -215,7 +274,7 @@ export interface PlanUpdate {
 export interface PlusActions {
   load(weekStart?: string): Promise<PlusData>;
   readPlan(): Promise<PlanMetadata>;
-  loadDays(weekStart: string): Promise<FlowDayPlan[]>;
+  loadDays(weekStart: string): Promise<DayPlan[]>;
   /** Saves the task's planning state in Todofy. */
   updateTask(task: PlanningTask, update: PlanUpdate): Promise<PlanningTask>;
   /**
@@ -234,10 +293,14 @@ export interface PlusActions {
     deadline: string,
     leadDays: number,
   ): Promise<PlanningTask>;
+  /**
+   * Completes the task in the host's task store. In the same write Tasks marks it done in
+   * `focusDay`'s queue (empty: Tasks' today) and settles a related timer session on its own day.
+   */
   completeTask(
     task: PlanningTask,
     requestId: string,
-    flowDate: string,
+    focusDay: string,
   ): Promise<void>;
   /** Adds (`waits`) or removes that `taskId` waits for `prerequisiteId`; the tasks are not written. */
   setDependency(
@@ -248,30 +311,39 @@ export interface PlusActions {
   /** Settles tasks that dependencies name and a complete read no longer lists (at most 20). */
   resolveDependencies(taskIds: string[]): Promise<DependencyResult>;
   /**
-   * Adds or removes one step in the day's current FlowDay queue, not in the copy on screen:
-   * UpdateFlow replaces the whole queue without an etag.
+   * Adds, removes or moves one step in Tasks' day queues, each one MoveFocusStep against the
+   * queues Tasks holds, not the copy on screen.
    */
-  addToDay(taskId: string, date: string): Promise<FlowDayPlan[]>;
-  removeFromDay(taskId: string, date: string): Promise<FlowDayPlan[]>;
+  addToDay(taskId: string, date: string): Promise<DayQueue[]>;
+  removeFromDay(taskId: string, date: string): Promise<DayQueue[]>;
   moveTaskToDay(
     taskId: string,
-    source: FlowDayPlan | undefined,
-    target: FlowDayPlan,
+    source: DayQueue | undefined,
+    target: DayQueue,
     beforeId?: string,
-  ): Promise<FlowDayPlan[]>;
+  ): Promise<DayQueue[]>;
   /**
-   * Sets the task's duration in the host's task store, 0 to clear it; FlowDay mirrors it. Answers
-   * the duration the store saved.
+   * Sets the task's duration in the host's task store, 0 to clear it. Answers the duration the
+   * store saved.
    */
   updateEstimate(taskId: string, minutes: number): Promise<EstimateResult>;
-  /** The existing authoritative FlowDay timer, without rereading task lists. */
+  /** Tasks' timer, without rereading task lists. */
   readTimer?(): Promise<TimerSnapshot>;
+  /** One timer command; Start counts on Tasks' today, and `area` stays on the session's record. */
   timer(
     action: "start" | "pause" | "resume" | "stop" | "finish",
     taskId: string,
     focus: FocusState,
     targetSeconds?: number,
+    area?: Area,
   ): Promise<TimerSnapshot>;
+  /** Focus days from `start` to `end`, both included, with their records and the tasks they name. */
+  readFocus(start: string, end: string): Promise<FocusRange>;
+  /** Adds time by hand, on a day no later than Tasks' today. */
+  addEntry(entry: NewFocusEntry): Promise<SavedEntry>;
+  /** Changes a record's whole minutes, as seconds. */
+  updateEntry(entry: FocusEntry, seconds: number): Promise<SavedEntry>;
+  deleteEntry(entry: FocusEntry): Promise<DeletedEntry>;
   /**
    * Puts these tasks in this order, at most 100: `lane`'s order in Todofy's planning store, or
    * none for "". In Tasks, the siblings of `movedId` among them (same project, section and parent)

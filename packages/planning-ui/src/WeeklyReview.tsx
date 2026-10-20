@@ -23,7 +23,7 @@ import {
   type ReviewProgress,
 } from "./weekly-review";
 import type {
-  FlowDayPlan,
+  DayPlan,
   Language,
   PlanState,
   PlanningTask,
@@ -36,7 +36,7 @@ const SOMEDAY_SHOWN = 10;
 
 interface Props {
   plan: PlanState;
-  days: FlowDayPlan[];
+  days: DayPlan[];
   /** The account's today, which says whether this is the week's last day. */
   today: string;
   language: Language;

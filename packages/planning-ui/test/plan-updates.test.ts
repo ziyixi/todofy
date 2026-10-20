@@ -10,20 +10,20 @@ import {
   withNextWeek,
   withStage,
 } from "../src/plan-updates";
-import type { Stage } from "../src/model";
+import type { FocusEntry, Stage } from "../src/model";
 
-it("merges confirmed flows, tasks, Bets, plan settings and timer without a re-read", async () => {
+it("merges confirmed queues, tasks, Bets, plan settings and timer without a re-read", async () => {
   const data = await createPrototype().load();
   const today = data.focus.date;
-  const flows = applyConfirmed(data, [
+  const queues = applyConfirmed(data, [
     { date: today, taskIds: ["outline"], completedTaskIds: [] },
     { date: "2026-10-14", taskIds: [], completedTaskIds: [] },
   ]);
-  expect(flows.focus.taskIds).toEqual(["outline"]);
-  expect(flows.days.find((day) => day.date === "2026-10-14")?.taskIds).toEqual(
+  expect(queues.focus.taskIds).toEqual(["outline"]);
+  expect(queues.days.find((day) => day.date === "2026-10-14")?.taskIds).toEqual(
     [],
   );
-  expect(flows.plan).toBe(data.plan);
+  expect(queues.plan).toBe(data.plan);
 
   const copy = data.plan.tasks.find((task) => task.id === "copy")!;
   const release = data.plan.tasks.find((task) => task.id === "release")!;
@@ -70,6 +70,73 @@ it("merges confirmed flows, tasks, Bets, plan settings and timer without a re-re
   expect(timer.focus.timer).toBeUndefined();
   expect(applyConfirmed(data, undefined)).toBe(data);
   expect(applyConfirmed(data, [])).toEqual(data);
+});
+
+it("replaces a day's queue and keeps its records, and merges a saved, deleted or timer record", async () => {
+  const data = await createPrototype().load();
+  const today = data.focus.date;
+  const record = (id: string, seconds: number, date = today): FocusEntry => ({
+    id,
+    taskId: "copy",
+    date,
+    seconds,
+    source: "manual",
+    area: "work",
+    etag: "1",
+  });
+  const day = (date: string) => data.days.find((item) => item.date === date)!;
+  day(today).entries = [record("first", 600)];
+  data.focus.entries = [record("first", 600)];
+
+  // A queue answer has no records; the day's stay.
+  const queued = applyConfirmed(data, [
+    { date: today, taskIds: ["outline"], completedTaskIds: ["copy"] },
+  ]);
+  expect(queued.focus.entries).toEqual([record("first", 600)]);
+  expect(queued.focus.completedTaskIds).toEqual(["copy"]);
+  expect(queued.days.find((item) => item.date === today)?.entries).toEqual([
+    record("first", 600),
+  ]);
+
+  // A saved record replaces its old self in place, or joins its day; only that day changes.
+  const changed = applyConfirmed(queued, {
+    savedEntry: { ...record("first", 2400), etag: "2" },
+  });
+  expect(changed.focus.entries).toEqual([
+    { ...record("first", 2400), etag: "2" },
+  ]);
+  const added = applyConfirmed(changed, {
+    savedEntry: record("yesterday", 900, "2026-10-12"),
+  });
+  expect(
+    added.days.find((item) => item.date === "2026-10-12")?.entries,
+  ).toEqual([record("yesterday", 900, "2026-10-12")]);
+  expect(added.focus).toBe(changed.focus);
+  expect(rereadsAfter({ savedEntry: record("first", 60) })).toBe(false);
+
+  // A stopped session's record joins today with the idle timer.
+  const stopped = applyConfirmed(added, {
+    timerEtag: "timer-3",
+    entry: { ...record("session", 1500), source: "timer" },
+  });
+  expect(stopped.focus.timerEtag).toBe("timer-3");
+  expect(stopped.focus.entries.map((entry) => entry.id)).toEqual([
+    "first",
+    "session",
+  ]);
+  expect(
+    stopped.days
+      .find((item) => item.date === today)
+      ?.entries.map((entry) => entry.id),
+  ).toEqual(["first", "session"]);
+
+  const deleted = applyConfirmed(stopped, {
+    deletedEntry: { id: "first", date: today },
+  });
+  expect(deleted.focus.entries.map((entry) => entry.id)).toEqual(["session"]);
+  expect(rereadsAfter({ deletedEntry: { id: "first", date: today } })).toBe(
+    false,
+  );
 });
 
 it("re-reads only after void results", async () => {
@@ -145,7 +212,7 @@ it("merges a confirmed reorder's Todoist positions and the lane's saved order, a
     ...data,
     plan: { ...data.plan, laneOrders: { weekly: ["copy", "tools"] } },
   };
-  // Todoist's answer carries no FlowDay estimate and a stale title; only the order fields count.
+  // The answer carries no estimate and a stale title; only the order fields count.
   const after = applyConfirmed(planned, {
     reordered: [
       {

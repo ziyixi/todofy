@@ -3,12 +3,7 @@ import { hasPlanningFlag, startDate, taskIndex } from "./domain";
 import { words } from "./i18n";
 import { monthDay, readableDate, shortDay } from "./PlanningCalendar";
 import { ACTIVE_LABEL } from "./weekly-review";
-import type {
-  FlowDayPlan,
-  Language,
-  PlanningTask,
-  TaskDependency,
-} from "./model";
+import type { DayQueue, Language, PlanningTask, TaskDependency } from "./model";
 
 /**
  * Where a task with a deadline stands in its life: in progress, past its deadline, in its start
@@ -60,7 +55,7 @@ export function isDue(state: DeadlineState): boolean {
  */
 export function unplannedDue(
   tasks: readonly PlanningTask[],
-  days: readonly FlowDayPlan[],
+  days: readonly DayQueue[],
   today: string,
   dependencies: readonly TaskDependency[] = [],
 ): { past: number; window: number } {

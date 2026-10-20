@@ -59,7 +59,7 @@ import { quickTray, unscheduledCommitments } from "./weekly-review";
 import { words } from "./i18n";
 import type {
   Area,
-  FlowDayPlan,
+  DayPlan,
   FocusState,
   Language,
   PlanState,
@@ -70,8 +70,9 @@ import type {
 
 interface Props {
   plan: PlanState;
-  days: FlowDayPlan[];
-  flowTasks: FocusState["flowTasks"];
+  days: DayPlan[];
+  /** Titles of queued tasks Plan's list leaves out. */
+  focusTasks: FocusState["tasks"];
   timer?: FocusState["timer"];
   currentDate: string;
   language: Language;
@@ -122,7 +123,7 @@ export function PlanningWeek(props: Props) {
   const {
     plan,
     days,
-    flowTasks,
+    focusTasks,
     timer,
     currentDate,
     language,
@@ -312,7 +313,7 @@ export function PlanningWeek(props: Props) {
           return;
         const id = source.taskId;
         const from = days.find((day) => day.date === source.sourceDate);
-        // The card shows in its new place at once and waits there until FlowDay confirms.
+        // The card shows in its new place at once and waits there until Tasks confirms.
         void run(() => actions.moveTaskToDay(id, from, day, target?.beforeId), {
           pending: [pendingStep(day.date, id)],
           predict: predictMove(id, from?.date, day.date, target?.beforeId),
@@ -511,7 +512,7 @@ export function PlanningWeek(props: Props) {
         <PlanningCalendar
           plan={plan}
           days={days}
-          flowTasks={flowTasks}
+          focusTasks={focusTasks}
           timer={timer}
           currentDate={currentDate}
           language={language}
@@ -522,7 +523,7 @@ export function PlanningWeek(props: Props) {
           completeTask={completeTask}
           onWeekChange={onWeekChange}
           onRemove={(day, id) =>
-            // The card stays, marked pending, until FlowDay confirms the removal.
+            // The card stays, marked pending, until Tasks confirms the removal.
             void run(() => actions.removeFromDay(id, day.date), {
               pending: [pendingStep(day.date, id)],
             })
@@ -573,7 +574,7 @@ export function PlanningWeek(props: Props) {
               }
             >
               <strong>
-                {taskTitle(id, task?.title ?? flowTasks[id]?.title, language)}
+                {taskTitle(task?.title ?? focusTasks[id]?.title, language)}
               </strong>
               {/* A quick task or a lone commitment is its own outcome: no second line. */}
               {outcome && outcome.id !== id && (
@@ -718,7 +719,7 @@ function TrayStep({
   index: number;
   /** Its place among its parent's children, which a reorder writes. */
   position: number;
-  days: FlowDayPlan[];
+  days: DayPlan[];
   timer?: FocusState["timer"];
   language: Language;
   busy: boolean;

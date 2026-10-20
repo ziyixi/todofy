@@ -207,7 +207,7 @@ it("queues day drags in order and rolls back every pending change when one fails
       beforeId: "layout",
     },
   );
-  // Both drags show at once; FlowDay sees them strictly one after another.
+  // Both drags show at once; Tasks sees them strictly one after another.
   expect(ids("2026-10-15")).toEqual(["cleanup", "layout"]);
   expect(ids("2026-10-12")).toEqual([]);
   expect(day("2026-10-15").querySelectorAll("[aria-busy=true]")).toHaveLength(
@@ -241,7 +241,7 @@ it("queues day drags in order and rolls back every pending change when one fails
   expect(document.querySelectorAll("[aria-busy=true]")).toHaveLength(0);
 });
 
-it("keeps a removed card in place and pending until FlowDay confirms the removal", async () => {
+it("keeps a removed card in place and pending until Tasks confirms the removal", async () => {
   const actions = createPrototype();
   const queue = hold(actions, "removeFromDay");
   await mountPlan(actions);
@@ -375,7 +375,7 @@ it("keeps a step another tab added to a shown day when a step is removed from it
   const actions = createPrototype();
   await mountPlan(actions);
   fireEvent.click(screen.getByRole("tab", { name: "Week" }));
-  // FlowDay in another tab; this board has not read the day again.
+  // Another tab queues a step; this board has not read the day again.
   await actions.addToDay("layout", "2026-10-13");
   fireEvent.click(removeFrom("2026-10-13", "Write the introduction"));
   await waitFor(() =>

@@ -23,7 +23,7 @@ async function props(): Promise<PlanViewProps> {
   return {
     plan,
     days,
-    flowTasks: focus.flowTasks,
+    focusTasks: focus.tasks,
     currentDate: focus.date,
     language: "en",
     busy: false,
@@ -141,7 +141,7 @@ it("keeps week navigation usable during a save without changing the current comm
   expect(screen.getByText("3/5 work · 1/3 personal")).toBeTruthy();
 });
 
-it("distinguishes two planning outcomes under the same project and retains local or unavailable queue identities", async () => {
+it("distinguishes two planning outcomes under the same project and keeps queued tasks Plan does not list", async () => {
   const data = await props();
   const parent = data.plan.tasks[0]!;
   data.plan.tasks.push({
@@ -156,11 +156,14 @@ it("distinguishes two planning outcomes under the same project and retains local
       ? { ...task, parentId: "project" }
       : task,
   );
-  data.days[1]!.taskIds = ["copy", "outline", "local-keep", "missing"];
-  data.flowTasks["local-keep"] = {
-    title: "Local planning note",
-    local: true,
+  data.days[1]!.taskIds = ["copy", "outline", "unlisted", "missing"];
+  // A task Plan's list leaves out has its title from Tasks' Focus read.
+  data.focusTasks["unlisted"] = {
+    title: "Synthetic unlisted step",
+    parentId: "elsewhere",
+    parentTitle: "Synthetic other outcome",
     estimatedMinutes: 15,
+    completed: false,
   };
   render(<PlanView {...data} />);
   openWeek();
@@ -184,10 +187,12 @@ it("distinguishes two planning outcomes under the same project and retains local
   expect(card("outline").style.getPropertyValue("--area-color")).toBe(
     "var(--plus-area-work)",
   );
-  expect(card("local-keep").style.getPropertyValue("--area-color")).toBe(
+  expect(card("unlisted").style.getPropertyValue("--area-color")).toBe(
     "var(--plus-area-none)",
   );
-  expect(card("local-keep").textContent).toContain("Local planning note");
+  expect(card("unlisted").textContent).toContain("Synthetic unlisted step");
+  expect(card("unlisted").textContent).toContain("Synthetic other outcome");
+  expect(card("unlisted").textContent).toContain("15m");
   expect(card("missing").textContent).toContain("Task unavailable");
 });
 
@@ -249,7 +254,8 @@ it("keeps timed steps readable while preventing their move, and marks rather tha
   task.estimatedMinutes = 120;
   data.timer = {
     taskId: "copy",
-    flowDate: data.currentDate,
+    day: data.currentDate,
+    area: "work",
     status: "paused",
     elapsedSeconds: 60,
     startedAt: "2026-10-13T10:00:00Z",

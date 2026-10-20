@@ -3,9 +3,10 @@ import { displayedTitle } from "./domain";
 import { words } from "./i18n";
 import type { Language, PlanningTask } from "./model";
 
+/** Completes a task; `focusDay` is the day whose Focus queue marks it done (default: Focus's day). */
 export type CompletePlanningTask = (
   task: PlanningTask,
-  flowDate?: string,
+  focusDay?: string,
 ) => void;
 
 export function CompleteTaskButton({

@@ -3,8 +3,9 @@ import { BetNotSaved, betText, weeklyBet, withBets } from "../src/bets";
 import { addDays } from "../src/domain";
 import { withLaneOrder } from "../src/plan-updates";
 import type {
+  DayPlan,
+  FocusEntry,
   FocusState,
-  FlowDayPlan,
   PlanMetadata,
   PlanState,
   PlanUpdate,
@@ -50,9 +51,9 @@ export function createPrototype(
 ): PlusActions {
   let plan: PlanState = {
     week: "2026-10-12",
+    today,
     timezone: "America/Los_Angeles",
     configured: true,
-    flowdayUrl: "https://flowday.example.test",
     managedLabels: [],
     mailboxPendingCount: 2,
     reviewTaskId: "weekly-review",
@@ -244,10 +245,11 @@ export function createPrototype(
     timerEtag: "fixture",
     taskIds: ["copy", "outline", "receipt"],
     completedTaskIds: [],
+    entries: [],
     estimates: {},
-    flowTasks: {},
+    tasks: {},
   };
-  let days: FlowDayPlan[] = Array.from({ length: 7 }, (_, index) => ({
+  let days: DayPlan[] = Array.from({ length: 7 }, (_, index) => ({
     date: `2026-10-${12 + index}`,
     taskIds:
       index === 0
@@ -258,6 +260,7 @@ export function createPrototype(
             ? ["cleanup"]
             : [],
     completedTaskIds: [],
+    entries: [],
   }));
   function weekDays(week: string) {
     return Array.from({ length: 7 }, (_, index) => {
@@ -266,7 +269,12 @@ export function createPrototype(
       const value = date.toISOString().slice(0, 10);
       const existing = days.find((day) => day.date === value);
       if (existing) return existing;
-      const day = { date: value, taskIds: [], completedTaskIds: [] };
+      const day = {
+        date: value,
+        taskIds: [],
+        completedTaskIds: [],
+        entries: [],
+      };
       days = [...days, day];
       return day;
     });
@@ -367,7 +375,10 @@ export function createPrototype(
       };
       return structuredClone(plan.tasks.find((task) => task.id === item.id)!);
     },
-    async completeTask(item, _requestId, flowDate) {
+    async completeTask(item, _requestId, focusDay) {
+      // As Tasks settles a completion: a related session's day, else the given day or today.
+      const settled =
+        focus.timer?.taskId === item.id ? focus.timer.day : focusDay || today;
       plan = {
         ...plan,
         tasks: plan.tasks.filter((task) => task.id !== item.id),
@@ -377,12 +388,11 @@ export function createPrototype(
         timer: focus.timer?.taskId === item.id ? undefined : focus.timer,
       };
       days = days.map((day) =>
-        day.date === flowDate
+        day.date === settled && day.taskIds.includes(item.id)
           ? {
               ...day,
-              completedTaskIds: [
-                ...new Set([...day.completedTaskIds, item.id]),
-              ],
+              taskIds: day.taskIds.filter((id) => id !== item.id),
+              completedTaskIds: [...day.completedTaskIds, item.id],
             }
           : day,
       );
@@ -476,7 +486,7 @@ export function createPrototype(
       };
       return { estimate: { taskId, minutes } };
     },
-    async timer(action, taskId, target) {
+    async timer(action, taskId, _focus, _targetSeconds, area = "unassigned") {
       const seconds = focus.timer
         ? focus.timer.elapsedSeconds +
           (focus.timer.status === "running"
@@ -493,10 +503,9 @@ export function createPrototype(
             ? undefined
             : {
                 taskId,
-                flowDate:
-                  action === "start"
-                    ? target.date
-                    : (focus.timer?.flowDate ?? target.date),
+                // Start counts on Tasks' today.
+                day: action === "start" ? today : (focus.timer?.day ?? today),
+                area: action === "start" ? area : (focus.timer?.area ?? area),
                 status: action === "pause" ? "paused" : "running",
                 elapsedSeconds: seconds,
                 startedAt: new Date().toISOString(),
@@ -504,6 +513,53 @@ export function createPrototype(
               },
       };
       return { timerEtag: focus.timerEtag, timer: focus.timer };
+    },
+    async readFocus(start, end) {
+      const range: DayPlan[] = [];
+      for (let date = start; date <= end; date = addDays(date, 1)) {
+        let day = days.find((item) => item.date === date);
+        if (!day) {
+          day = { date, taskIds: [], completedTaskIds: [], entries: [] };
+          days = [...days, day];
+        }
+        range.push(day);
+      }
+      return structuredClone({ days: range, tasks: {}, today });
+    },
+    async addEntry(entry) {
+      const saved: FocusEntry = {
+        ...entry,
+        id: crypto.randomUUID(),
+        source: "manual",
+        etag: "1",
+      };
+      days = days.map((day) =>
+        day.date === saved.date
+          ? { ...day, entries: [...day.entries, saved] }
+          : day,
+      );
+      return structuredClone({ savedEntry: saved });
+    },
+    async updateEntry(entry, seconds) {
+      const saved = {
+        ...entry,
+        seconds,
+        etag: String(Number(entry.etag) + 1),
+      };
+      days = days.map((day) => ({
+        ...day,
+        entries: day.entries.map((item) =>
+          item.id === entry.id ? saved : item,
+        ),
+      }));
+      return structuredClone({ savedEntry: saved });
+    },
+    async deleteEntry(entry) {
+      days = days.map((day) => ({
+        ...day,
+        entries: day.entries.filter((item) => item.id !== entry.id),
+      }));
+      return { deletedEntry: { id: entry.id, date: entry.date } };
     },
     async reorderTasks(taskIds, movedId, lane) {
       // As Todofy reorders: the moved task's siblings among these take their existing positions in

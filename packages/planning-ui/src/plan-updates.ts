@@ -5,8 +5,10 @@ import { ACTIVE_LABEL, isLastDay } from "./weekly-review";
 import type {
   Area,
   Confirmed,
+  DayPlan,
+  DayQueue,
   DependencyResult,
-  FlowDayPlan,
+  FocusEntry,
   LaneId,
   PlanState,
   PlanningTask,
@@ -19,15 +21,47 @@ import type {
 /** Data at least this old is read again when the view comes back. */
 export const REREAD_AFTER_MS = 60_000;
 
-function withFlows(data: PlusData, flows: FlowDayPlan[]): PlusData {
-  const today = flows.find((day) => day.date === data.focus.date);
-  return {
-    ...data,
-    days: data.days.map(
-      (day) => flows.find((next) => next.date === day.date) ?? day,
-    ),
-    focus: today ? { ...data.focus, ...today } : data.focus,
+/** Confirmed queues replace the days' queues; their records stay. */
+function withDays(data: PlusData, queues: DayQueue[]): PlusData {
+  const queue = <Day extends DayPlan>(day: Day): Day => {
+    const next = queues.find((item) => item.date === day.date);
+    return next
+      ? {
+          ...day,
+          taskIds: next.taskIds,
+          completedTaskIds: next.completedTaskIds,
+        }
+      : day;
   };
+  return { ...data, days: data.days.map(queue), focus: queue(data.focus) };
+}
+
+/**
+ * A saved record replaces the one with its ID on its day, or joins the day's records; without
+ * `entry`, the record with `removed`'s ID leaves its day.
+ */
+function withEntry(
+  data: PlusData,
+  entry: FocusEntry | undefined,
+  removed?: { id: string; date: string },
+): PlusData {
+  const target = entry ?? removed;
+  if (!target) return data;
+  const records = <Day extends DayPlan>(day: Day): Day => {
+    if (day.date !== target.date) return day;
+    if (!entry)
+      return {
+        ...day,
+        entries: day.entries.filter((item) => item.id !== target.id),
+      };
+    return {
+      ...day,
+      entries: day.entries.some((item) => item.id === entry.id)
+        ? day.entries.map((item) => (item.id === entry.id ? entry : item))
+        : [...day.entries, entry],
+    };
+  };
+  return { ...data, days: data.days.map(records), focus: records(data.focus) };
 }
 
 function withTasks(data: PlusData, tasks: PlanningTask[]): PlusData {
@@ -146,12 +180,12 @@ export function withEstimate(
 export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
   if (!confirmed) return data;
   if (Array.isArray(confirmed)) {
-    const items: (FlowDayPlan | PlanningTask | WeeklyBet)[] = confirmed;
+    const items: (DayQueue | PlanningTask | WeeklyBet)[] = confirmed;
     return withWeeklyBets(
       withTasks(
-        withFlows(
+        withDays(
           data,
-          items.filter((item): item is FlowDayPlan => "date" in item),
+          items.filter((item): item is DayQueue => "date" in item),
         ),
         items.filter((item): item is PlanningTask => "id" in item),
       ),
@@ -160,15 +194,21 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
   }
   if ("weekStart" in confirmed) return withWeeklyBets(data, [confirmed]);
   if ("timerEtag" in confirmed)
-    return {
-      ...data,
-      focus: {
-        ...data.focus,
-        timerEtag: confirmed.timerEtag,
-        timer: confirmed.timer,
-        finishedPomodoro: confirmed.finishedPomodoro,
+    return withEntry(
+      {
+        ...data,
+        focus: {
+          ...data.focus,
+          timerEtag: confirmed.timerEtag,
+          timer: confirmed.timer,
+          finishedPomodoro: confirmed.finishedPomodoro,
+        },
       },
-    };
+      confirmed.entry,
+    );
+  if ("savedEntry" in confirmed) return withEntry(data, confirmed.savedEntry);
+  if ("deletedEntry" in confirmed)
+    return withEntry(data, undefined, confirmed.deletedEntry);
   if ("reordered" in confirmed) return withReorder(data, confirmed);
   if ("estimate" in confirmed)
     return withEstimate(
@@ -191,7 +231,7 @@ export function withNextWeek(
   saved: PlanningTask,
 ): PlusData {
   const { plan } = data;
-  if (!isLastDay(plan.week, data.focus.date)) return data;
+  if (!isLastDay(plan.week, plan.today)) return data;
   const others = plan.nextWeekTaskIds.filter((id) => id !== saved.id);
   const chosen = update.stage === "committed";
   const marked = saved.stage === "committed";
@@ -348,7 +388,7 @@ export function predictMove(
   targetDate: string,
   beforeId?: string,
 ) {
-  const move = <Day extends FlowDayPlan>(day: Day): Day => {
+  const move = <Day extends DayQueue>(day: Day): Day => {
     if (day.date === targetDate) {
       const taskIds = day.taskIds.filter((id) => id !== taskId);
       const before = beforeId ? taskIds.indexOf(beforeId) : -1;

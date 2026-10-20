@@ -8,7 +8,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("shows cleaned parent context and local records with execution controls only", async () => {
+it("shows cleaned parent context, and a task Plan does not list from Tasks' read, with execution controls only", async () => {
   const { plan, focus } = await createPrototype().load();
   const parent = plan.tasks.find((task) => task.id === "release")!;
   parent.title = "[TASK] Synthetic outcome <k:synthetic.root>";
@@ -22,11 +22,13 @@ it("shows cleaned parent context and local records with execution controls only"
   const child = plan.tasks.find((task) => task.id === "copy")!;
   child.parentId = "phase";
   child.title = "[TASK] Synthetic leaf <k:synthetic.leaf>";
-  focus.taskIds.push("local-note");
-  focus.flowTasks["local-note"] = {
-    title: "Synthetic local note",
-    local: true,
+  focus.taskIds.push("unlisted");
+  focus.tasks["unlisted"] = {
+    title: "Synthetic unlisted step",
+    parentId: "elsewhere",
+    parentTitle: "[TASK] Synthetic other outcome",
     estimatedMinutes: 15,
+    completed: false,
   };
   const onTimer = vi.fn();
   const complete = vi.fn();
@@ -49,11 +51,18 @@ it("shows cleaned parent context and local records with execution controls only"
   expect(screen.getByText("Synthetic leaf", { exact: true })).toBeTruthy();
   expect(screen.queryByText(/\[TASK\]|<k:/)).toBeNull();
   expect(
-    screen.getByText("Synthetic local note", { exact: true }),
+    screen.getByText("Synthetic unlisted step", { exact: true }),
   ).toBeTruthy();
   expect(
+    screen.getByText("Synthetic other outcome", { exact: true }),
+  ).toBeTruthy();
+  expect(
+    document.querySelector('[data-task-id="unlisted"] .plus-focus-estimate')!
+      .textContent,
+  ).toBe("15m");
+  expect(
     screen.queryByRole("button", {
-      name: "Complete task: Synthetic local note",
+      name: "Complete task: Synthetic unlisted step",
     }),
   ).toBeNull();
   expect(
@@ -83,7 +92,8 @@ it("shows confirmed elapsed time and distinct pause, resume and stop controls", 
   const { plan, focus } = await createPrototype().load();
   focus.timer = {
     taskId: "copy",
-    flowDate: focus.date,
+    day: focus.date,
+    area: "work",
     status: "running",
     elapsedSeconds: 80,
     startedAt: new Date(Date.now() - 5000).toISOString(),

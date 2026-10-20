@@ -135,6 +135,9 @@ export function startDate(
   return date.toISOString().slice(0, 10);
 }
 
+/** The longest a count-up session counts, as Tasks saves it: a timer left running logs 4 hours. */
+export const COUNT_UP_SECONDS = 4 * 60 * 60;
+/** The session's time so far, capped as Tasks caps it: at a pomodoro's target, else at 4 hours. */
 export function elapsed(focus: FocusState, now = Date.now()): number {
   const timer = focus.timer;
   if (!timer) return 0;
@@ -143,9 +146,12 @@ export function elapsed(focus: FocusState, now = Date.now()): number {
     (timer.status === "running"
       ? Math.max(0, Math.floor((now - Date.parse(timer.startedAt)) / 1000))
       : 0);
-  return timer.mode === "pomodoro" && timer.targetSeconds
-    ? Math.min(seconds, timer.targetSeconds)
-    : seconds;
+  return Math.min(
+    seconds,
+    timer.mode === "pomodoro" && timer.targetSeconds
+      ? timer.targetSeconds
+      : COUNT_UP_SECONDS,
+  );
 }
 
 export function duration(seconds: number): string {

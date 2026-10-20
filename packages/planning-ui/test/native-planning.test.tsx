@@ -46,9 +46,9 @@ const task: PlanningTask = {
 const plan: PlanState = {
   tasks: [task],
   week: "2026-10-12",
+  today: "2026-10-13",
   timezone: "UTC",
   configured: true,
-  flowdayUrl: "",
   managedLabels: [],
   reviewTaskId: "",
   nextWeekTaskIds: [],
@@ -176,7 +176,7 @@ it("sends native flag writes in the existing update contract", async () => {
       },
     });
   };
-  const actions = createPlanningActions({ plus: send, flowday: send });
+  const actions = createPlanningActions({ plus: send, tasks: send });
   const updated = await actions.updateTask(task, { quick: true, onHold: true });
   expect(JSON.parse(calls[0]!.body!)).toMatchObject({
     quick: true,

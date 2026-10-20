@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   PlanningApp,
   createPlanningActions,
+  type PlusActions,
   type PlusSnapshot,
 } from "@ziyixi/planning-ui";
 import "@ziyixi/planning-ui/styles.css";
@@ -20,30 +21,25 @@ export default function PlanningPage({
   mutationRevision: number;
   onOpenTask: (id: string) => void;
   onSettings: () => void;
+  /** Completes in Tasks, which settles `focusDay`'s Focus queue in the same write. */
   onCompleteTask: (
     task: Task,
     requestId: string,
-    flowDate?: string,
+    focusDay?: string,
   ) => Promise<string | undefined>;
 }) {
-  const actions = useMemo(() => {
-    const actions = createPlanningActions({
-      plus: send,
-      flowday: (call) => send({ ...call, url: `/api/plus/flowday${call.url}` }),
-    });
+  const actions = useMemo<PlusActions>(() => {
+    // Todofy's planning API and Tasks' own Focus API, both on this origin.
+    const actions = createPlanningActions({ plus: send, tasks: send });
     return {
       ...actions,
-      async completeTask(
-        task: Parameters<typeof actions.completeTask>[0],
-        requestId: string,
-        flowDate?: string,
-      ) {
+      async completeTask(task, requestId, focusDay) {
         const current = await api.getTask({ name: `tasks/${task.id}` });
-        const error = await onCompleteTask(current, requestId, flowDate);
+        const error = await onCompleteTask(current, requestId, focusDay);
         if (error) throw new Error(error);
       },
       // Answers the duration Tasks saved, which Plan and Focus show without reading again.
-      async updateEstimate(id: string, minutes: number) {
+      async updateEstimate(id, minutes) {
         const task = await api.getTask({ name: `tasks/${id}` });
         const saved = await api.updateTask({
           requestId: crypto.randomUUID(),

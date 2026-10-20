@@ -12,19 +12,25 @@ import {
   type WeeklyBet as ApiWeeklyBet,
 } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 import {
-  CommandTimerRequest_Action,
-  FlowDayUiService,
-} from "@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb";
+  FocusEntry_Source,
+  FocusTimer_State,
+  type FocusDay as ApiFocusDay,
+  type FocusEntry as ApiFocusEntry,
+  type FocusTimer as ApiFocusTimer,
+} from "@ziyixi/proto/tasks/ui/v1/focus_pb";
 import {
-  TimerSession_State,
-  TimerSession_Mode,
-  type TimerSession,
-} from "@ziyixi/proto/flowday/ui/v1/time_entry_pb";
-import type { Flow } from "@ziyixi/proto/flowday/ui/v1/flow_pb";
+  CommandFocusTimerRequest_Action,
+  TasksUiService,
+} from "@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb";
 import { BET_AREAS, BetNotSaved } from "./bets";
+import { addDays } from "./domain";
 import type {
+  Area,
   BetArea,
-  FlowDayPlan,
+  DayPlan,
+  DayQueue,
+  FocusEntry,
+  FocusRange,
   FocusState,
   LaneId,
   PlanMetadata,
@@ -135,12 +141,12 @@ function laneOrder(order: ApiLaneOrder): ReorderResult["lane"] {
 function planMetadata(plan: ApiPlan): PlanMetadata {
   return {
     week: plan.weekStart,
+    today: plan.today,
     timezone: plan.timezone,
     configured: plan.enabled,
     ...(plan.mailboxPendingCount !== undefined
       ? { mailboxPendingCount: plan.mailboxPendingCount }
       : {}),
-    flowdayUrl: plan.flowdayUrl,
     managedLabels: plan.labels.map((label) => ({
       role: label.role,
       id: label.id,
@@ -158,74 +164,100 @@ function planMetadata(plan: ApiPlan): PlanMetadata {
     ),
   };
 }
-function timerSnapshot(session: TimerSession): TimerSnapshot {
-  const timerEtag = session.etag || "0";
+/** Tasks keeps "" for unassigned. */
+function area(value: string): Area {
+  return value === "work" || value === "personal" ? value : "unassigned";
+}
+function wireArea(value: Area | undefined): string {
+  return value === "work" || value === "personal" ? value : "";
+}
+function isoTime(time: { seconds: bigint } | undefined): string | undefined {
+  return time && new Date(Number(time.seconds) * 1000).toISOString();
+}
+function focusEntry(entry: ApiFocusEntry): FocusEntry {
+  const startedAt = isoTime(entry.startTime);
+  return {
+    id: entry.name.slice("focusEntries/".length),
+    taskId: entry.taskId,
+    date: entry.day,
+    seconds: entry.seconds,
+    ...(startedAt ? { startedAt } : {}),
+    source: entry.source === FocusEntry_Source.TIMER ? "timer" : "manual",
+    area: area(entry.area),
+    etag: entry.etag,
+  };
+}
+function dayQueue(day: ApiFocusDay): DayQueue {
+  return {
+    date: day.day,
+    taskIds: day.taskIds,
+    completedTaskIds: day.doneTaskIds,
+  };
+}
+function timerSnapshot(
+  timer: ApiFocusTimer,
+  entry?: ApiFocusEntry,
+): TimerSnapshot {
+  const timerEtag = timer.etag || "0";
+  const saved = entry ? { entry: focusEntry(entry) } : {};
   if (
-    !session.taskId ||
-    (session.state !== TimerSession_State.RUNNING &&
-      session.state !== TimerSession_State.PAUSED)
+    !timer.taskId ||
+    (timer.state !== FocusTimer_State.RUNNING &&
+      timer.state !== FocusTimer_State.PAUSED)
   )
     return {
       timerEtag,
-      ...(session.finishedPomodoroTaskId &&
-      session.finishedPomodoroTargetSeconds
+      ...(timer.finishedTaskId && timer.finishedSeconds
         ? {
             finishedPomodoro: {
-              taskId: session.finishedPomodoroTaskId,
-              targetSeconds: session.finishedPomodoroTargetSeconds,
+              taskId: timer.finishedTaskId,
+              targetSeconds: timer.finishedSeconds,
             },
           }
         : {}),
+      ...saved,
     };
   return {
     timerEtag,
     timer: {
-      taskId: session.taskId,
-      flowDate: session.flowDate,
-      status:
-        session.state === TimerSession_State.RUNNING ? "running" : "paused",
-      elapsedSeconds: session.savedSeconds,
-      ...(session.mode === TimerSession_Mode.POMODORO
-        ? {
-            mode: "pomodoro" as const,
-            targetSeconds: session.pomodoroTargetSeconds,
-          }
+      taskId: timer.taskId,
+      day: timer.day,
+      area: area(timer.area),
+      status: timer.state === FocusTimer_State.RUNNING ? "running" : "paused",
+      elapsedSeconds: timer.savedSeconds,
+      ...(timer.targetSeconds
+        ? { mode: "pomodoro" as const, targetSeconds: timer.targetSeconds }
         : {}),
-      startedAt: session.segmentStartTime
-        ? new Date(
-            Number(session.segmentStartTime.seconds) * 1000,
-          ).toISOString()
-        : new Date().toISOString(),
+      startedAt: isoTime(timer.segmentStartTime) ?? new Date().toISOString(),
       etag: timerEtag,
     },
-  };
-}
-function weekDates(weekStart: string): string[] {
-  return Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(`${weekStart}T12:00:00Z`);
-    date.setUTCDate(date.getUTCDate() + index);
-    return date.toISOString().slice(0, 10);
-  });
-}
-function flowPlan(flow: Flow): FlowDayPlan {
-  return {
-    date: flow.name.slice("flows/".length),
-    taskIds: flow.taskIds,
-    completedTaskIds: flow.completedTaskIds,
+    ...saved,
   };
 }
 /**
- * Adapts Todofy's planning API and FlowDay's focus API for Tasks. The host supplies authentication
- * and URL routing, and `updateEstimate`: an estimate is the task's duration in Tasks, never FlowDay's.
- * FlowDay's queues hold any task ID; FlowDay's own page syncs its mirror of the tasks.
+ * Adapts Todofy's planning API and Tasks' Focus API. The host supplies authentication and URL
+ * routing, `updateEstimate` (an estimate is the task's duration in Tasks) and `completeTask`, which
+ * completes in Tasks and settles Focus in the same write.
  */
 export function createPlanningActions(transports: {
   plus: HttpSend;
-  flowday: HttpSend;
-}): Omit<PlusActions, "updateEstimate"> {
-  const timerRequests = new Map<string, string>();
+  tasks: HttpSend;
+}): Omit<PlusActions, "updateEstimate" | "completeTask"> {
   const plus = createHttpClient(PlusService, transports.plus);
-  const flowday = createHttpClient(FlowDayUiService, transports.flowday);
+  const focus = createHttpClient(TasksUiService, transports.tasks);
+  // One request ID per identical write until it is confirmed, so a retry after a lost answer
+  // replays it instead of writing again.
+  const requests = new Map<string, string>();
+  async function once<T>(
+    key: string,
+    write: (requestId: string) => Promise<T>,
+  ): Promise<T> {
+    const requestId = requests.get(key) ?? crypto.randomUUID();
+    requests.set(key, requestId);
+    const result = await write(requestId);
+    requests.delete(key);
+    return result;
+  }
   async function loadPlanningTasks(): Promise<PlanningTask[]> {
     const tasks: PlanningTask[] = [];
     let pageToken = "";
@@ -237,85 +269,84 @@ export function createPlanningActions(transports: {
     }
     throw new Error("Task list is incomplete. Counts have not been shown.");
   }
-  async function loadFlowTasks() {
-    const flowTasks: FocusState["flowTasks"] = {};
-    let pageToken = "";
-    // The gateway caps a FlowDay page at 100 tasks.
-    for (let page = 0; page < 20; page++) {
-      const result = await flowday.listTasks({ pageSize: 100, pageToken });
-      for (const task of result.tasks) {
-        const id = task.name.slice("tasks/".length);
-        // A Tasks task's estimate is its duration (load); only FlowDay's own tasks have one here.
-        flowTasks[id] = task.todoistId
-          ? { title: task.title, local: false }
-          : {
-              title: task.title,
-              local: true,
-              estimatedMinutes: task.estimatedMinutes,
-            };
-      }
-      pageToken = result.nextPageToken;
-      if (!pageToken) return flowTasks;
-    }
-    throw new Error(
-      "FlowDay task list is incomplete. Refresh before planning.",
-    );
+  /** At most 7 days, which one ListFocusDays reads. */
+  async function readDays(start: string, end: string): Promise<FocusRange> {
+    const result = await focus.listFocusDays({ startDay: start, endDay: end });
+    const days = result.days.map((day): DayPlan => ({
+      ...dayQueue(day),
+      entries: [],
+    }));
+    for (const entry of result.entries)
+      days
+        .find((day) => day.date === entry.day)
+        ?.entries.push(focusEntry(entry));
+    const tasks: FocusRange["tasks"] = {};
+    for (const task of result.tasks)
+      tasks[task.taskId] = {
+        title: task.title,
+        parentId: task.parentId,
+        parentTitle: task.parentTitle,
+        ...(task.durationMinutes
+          ? { estimatedMinutes: task.durationMinutes }
+          : {}),
+        completed: task.completed,
+      };
+    return { days, tasks, today: result.today };
   }
-  // A queue shown on screen may be out of date (another tab, an earlier queued write), and
-  // UpdateFlow keeps the last write, so one-step edits start from FlowDay's current queue.
-  async function editDay(date: string, edit: (taskIds: string[]) => string[]) {
-    const current = await flowday.getFlow({ name: `flows/${date}` });
-    const taskIds = edit(current.taskIds);
-    if (taskIds.length === current.taskIds.length) return [flowPlan(current)];
-    const confirmed = await flowday.updateFlow({
-      flow: { name: `flows/${date}`, taskIds },
-      updateMask: { paths: ["task_ids"] },
-    });
-    return [flowPlan(confirmed)];
-  }
-  async function loadDays(weekStart: string): Promise<FlowDayPlan[]> {
-    const dates = weekDates(weekStart);
-    const flows = await Promise.all(
-      dates.map((date) => flowday.getFlow({ name: `flows/${date}` })),
+  async function moveStep(
+    taskId: string,
+    sourceDay: string,
+    destinationDay: string,
+    beforeTaskId = "",
+  ): Promise<DayQueue[]> {
+    const result = await once(
+      `move:${taskId}:${sourceDay}:${destinationDay}:${beforeTaskId}`,
+      (requestId) =>
+        focus.moveFocusStep({
+          requestId,
+          taskId,
+          sourceDay,
+          destinationDay,
+          beforeTaskId,
+        }),
     );
-    return flows.map(flowPlan);
+    return result.days.map(dayQueue);
+  }
+  async function loadDays(weekStart: string): Promise<DayPlan[]> {
+    return (await readDays(weekStart, addDays(weekStart, 6))).days;
   }
   return {
     loadDays,
     async load(weekStart) {
-      const [metadata, tasks, flowTasks] = await Promise.all([
+      const [metadata, tasks, timer, shown] = await Promise.all([
         plus.readPlan({}),
         loadPlanningTasks(),
-        loadFlowTasks(),
+        focus.getFocusTimer({ name: "focusTimer" }),
+        weekStart ? readDays(weekStart, addDays(weekStart, 6)) : undefined,
       ]);
       if (!metadata.plan) throw new Error("Planning metadata is missing.");
       const plan = metadata.plan;
-      const displayedWeek = weekStart || plan.weekStart;
-      const includesToday = weekDates(displayedWeek).includes(plan.today);
-      const [days, timer, todayFlow] = await Promise.all([
-        loadDays(displayedWeek),
-        flowday.getTimerSession({ name: "timerSession" }),
-        includesToday
-          ? undefined
-          : flowday.getFlow({ name: `flows/${plan.today}` }),
-      ]);
-      const today =
-        days.find((day) => day.date === plan.today) ??
-        (todayFlow && flowPlan(todayFlow));
+      const week =
+        shown ?? (await readDays(plan.weekStart, addDays(plan.weekStart, 6)));
+      // Focus is on Tasks' today, which the displayed week may not include.
+      const current = week.days.some((day) => day.date === week.today)
+        ? week
+        : await readDays(week.today, week.today);
+      const today = current.days.find((day) => day.date === week.today);
       if (!today) throw new Error("Today's planning day is missing.");
-      // A task's duration is its only estimate; FlowDay's mirror may still be catching up.
+      // A task's duration in Tasks is its only estimate.
       const estimates: Record<string, number> = {};
       for (const task of tasks) estimates[task.id] = task.estimatedMinutes ?? 0;
-      const focus: FocusState = {
+      const focusState: FocusState = {
         ...today,
         ...timerSnapshot(timer),
         estimates,
-        flowTasks,
+        tasks: { ...week.tasks, ...current.tasks },
       };
       return {
         plan: { ...planMetadata(plan), tasks },
-        focus,
-        days,
+        focus: focusState,
+        days: week.days,
       };
     },
     async readPlan() {
@@ -374,9 +405,6 @@ export function createPlanningActions(transports: {
         estimatedMinutes: task.estimatedMinutes,
       };
     },
-    async completeTask(task, requestId, flowDate) {
-      await plus.completeTask({ taskId: task.id, requestId, flowDate });
-    },
     async setDependency(taskId, prerequisiteId, waits) {
       try {
         const result = await plus.setTaskDependency({
@@ -405,79 +433,101 @@ export function createPlanningActions(transports: {
       };
     },
     async addToDay(taskId, date) {
-      return editDay(date, (taskIds) =>
-        taskIds.includes(taskId) ? taskIds : [...taskIds, taskId],
-      );
+      return moveStep(taskId, "", date);
     },
     async removeFromDay(taskId, date) {
-      return editDay(date, (taskIds) => taskIds.filter((id) => id !== taskId));
+      return moveStep(taskId, date, "");
     },
     async moveTaskToDay(taskId, source, target, beforeId) {
       if (source?.date === target.date && beforeId === taskId) return [];
-      let confirmedSource: FlowDayPlan | undefined;
-      let destination: Flow;
-      if (source && source.date !== target.date) {
-        const moved = await flowday.rolloverFlow({
-          name: `flows/${source.date}`,
-          destination: `flows/${target.date}`,
-          taskIds: [taskId],
-        });
-        if (!moved.flow || !moved.destinationFlow)
-          throw new Error("The moved day queues could not be read.");
-        confirmedSource = flowPlan(moved.flow);
-        destination = moved.destinationFlow;
-      } else {
-        destination = await flowday.getFlow({ name: `flows/${target.date}` });
-      }
-      if (source && !destination.taskIds.includes(taskId))
-        throw new Error("This step has moved. Refresh the plan and try again.");
-      const taskIds = destination.taskIds.filter((id) => id !== taskId);
-      const before = beforeId ? taskIds.indexOf(beforeId) : -1;
-      taskIds.splice(before < 0 ? taskIds.length : before, 0, taskId);
-      if (
-        taskIds.every((id, index) => destination.taskIds[index] === id) &&
-        taskIds.length === destination.taskIds.length
-      )
-        return confirmedSource ? [confirmedSource, flowPlan(destination)] : [];
-      const confirmed = await flowday.updateFlow({
-        flow: { name: `flows/${target.date}`, taskIds },
-        updateMask: { paths: ["task_ids"] },
-      });
-      const confirmedTarget = flowPlan(confirmed);
-      return confirmedSource
-        ? [confirmedSource, confirmedTarget]
-        : [confirmedTarget];
+      return moveStep(taskId, source?.date ?? "", target.date, beforeId);
     },
     async readTimer() {
-      return timerSnapshot(
-        await flowday.getTimerSession({ name: "timerSession" }),
-      );
+      return timerSnapshot(await focus.getFocusTimer({ name: "focusTimer" }));
     },
-    async timer(action, taskId, focus, targetSeconds) {
+    async timer(action, taskId, state, targetSeconds, taskArea) {
       const actions = {
-        start: CommandTimerRequest_Action.START,
-        pause: CommandTimerRequest_Action.PAUSE,
-        resume: CommandTimerRequest_Action.RESUME,
-        stop: CommandTimerRequest_Action.STOP,
-        finish: CommandTimerRequest_Action.FINISH_POMODORO,
+        start: CommandFocusTimerRequest_Action.START,
+        pause: CommandFocusTimerRequest_Action.PAUSE,
+        resume: CommandFocusTimerRequest_Action.RESUME,
+        stop: CommandFocusTimerRequest_Action.STOP,
+        finish: CommandFocusTimerRequest_Action.FINISH,
       };
-      const key = `${action}:${taskId}:${focus.timerEtag}:${targetSeconds ?? 0}`;
-      const requestId = timerRequests.get(key) ?? crypto.randomUUID();
-      timerRequests.set(key, requestId);
-      const confirmed = await flowday.commandTimer({
-        name: "timerSession",
-        requestId,
-        etag: focus.timerEtag,
-        action: actions[action],
-        ...(action === "start" && targetSeconds
-          ? { mode: TimerSession_Mode.POMODORO, targetSeconds }
-          : {}),
-        taskId,
-        flowDate:
-          action === "start" ? focus.date : focus.timer?.flowDate || focus.date,
-      });
-      timerRequests.delete(key);
-      return timerSnapshot(confirmed);
+      const start = action === "start";
+      const confirmed = await once(
+        `timer:${action}:${taskId}:${state.timerEtag}:${start ? `${targetSeconds ?? 0}:${wireArea(taskArea)}` : ""}`,
+        (requestId) =>
+          focus.commandFocusTimer({
+            name: "focusTimer",
+            requestId,
+            etag: state.timerEtag,
+            action: actions[action],
+            taskId,
+            ...(start
+              ? {
+                  ...(targetSeconds ? { targetSeconds } : {}),
+                  area: wireArea(taskArea),
+                }
+              : {}),
+          }),
+      );
+      if (!confirmed.timer) throw new Error("The timer could not be read.");
+      return timerSnapshot(confirmed.timer, confirmed.entry);
+    },
+    async readFocus(start, end) {
+      // One ListFocusDays reads at most 7 days; a month is at most 6 of them, read together.
+      const starts: string[] = [];
+      for (let day = start; day <= end; day = addDays(day, 7)) starts.push(day);
+      const ranges = await Promise.all(
+        starts.map((day) => {
+          const last = addDays(day, 6);
+          return readDays(day, last < end ? last : end);
+        }),
+      );
+      return {
+        days: ranges.flatMap((range) => range.days),
+        tasks: Object.assign({}, ...ranges.map((range) => range.tasks)),
+        today: ranges[0]?.today ?? "",
+      };
+    },
+    async addEntry(entry) {
+      const saved = await once(
+        `add:${entry.taskId}:${entry.date}:${entry.seconds}:${entry.area}`,
+        (requestId) =>
+          focus.createFocusEntry({
+            requestId,
+            focusEntry: {
+              taskId: entry.taskId,
+              day: entry.date,
+              seconds: entry.seconds,
+              area: wireArea(entry.area),
+            },
+          }),
+      );
+      return { savedEntry: focusEntry(saved) };
+    },
+    async updateEntry(entry, seconds) {
+      const saved = await once(
+        `update:${entry.id}:${entry.etag}:${seconds}`,
+        (requestId) =>
+          focus.updateFocusEntry({
+            requestId,
+            etag: entry.etag,
+            focusEntry: { name: `focusEntries/${entry.id}`, seconds },
+            updateMask: { paths: ["seconds"] },
+          }),
+      );
+      return { savedEntry: focusEntry(saved) };
+    },
+    async deleteEntry(entry) {
+      await once(`delete:${entry.id}:${entry.etag}`, (requestId) =>
+        focus.deleteFocusEntry({
+          name: `focusEntries/${entry.id}`,
+          etag: entry.etag,
+          requestId,
+        }),
+      );
+      return { deletedEntry: { id: entry.id, date: entry.date } };
     },
     async reorderTasks(taskIds, movedId, lane, requestId) {
       const result = await plus.reorderTasks({

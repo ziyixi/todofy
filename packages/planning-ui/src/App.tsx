@@ -123,9 +123,9 @@ export function App({
   const busy = waiting > 0 || stale;
   const [weekLoading, setWeekLoading] = useState(false);
   const [reading, setReading] = useState(0);
-  // One queue runs every write in order: FlowDay queue updates keep the last write without an
-  // etag, and a later task write needs the etag an earlier one returns. A failure advances
-  // the epoch, which drops the writes queued behind it.
+  // One queue runs every write in order: a later task write needs the etag an earlier one
+  // returns, and a queue move places a step among the steps earlier moves left. A failure
+  // advances the epoch, which drops the writes queued behind it.
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const writes = useRef({ queued: 0, settled: 0, epoch: 0 });
   const rereadAfterWrites = useRef(false);
@@ -133,7 +133,11 @@ export function App({
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
   // Focus's quiet line opens Plan at Start now.
   const [showStart, setShowStart] = useState(false);
-  const completionIds = useRef(new Map<string, string>());
+  // Each task's completion keeps its first request ID and Focus day until it is confirmed, so a
+  // retry, from any view, resends both and a lost answer replays instead of completing again.
+  const completionIds = useRef(
+    new Map<string, { requestId: string; focusDay: string }>(),
+  );
   // Confirmed completions stay visible but disabled until a re-read shows the result.
   const [completing, setCompleting] = useState<ReadonlySet<string>>(new Set());
   const dialog = useRef<HTMLDialogElement>(null);
@@ -336,7 +340,7 @@ export function App({
         return;
       if (
         localDate(new Date().toISOString(), confirmed.plan.timezone) !==
-        confirmed.focus.date
+        confirmed.plan.today
       ) {
         await revalidate();
         return;
@@ -377,7 +381,7 @@ export function App({
   }, [
     actions,
     confirmed?.plan.timezone,
-    confirmed?.focus.date,
+    confirmed?.plan.today,
     reading,
     revalidate,
     text.lastError,
@@ -466,21 +470,20 @@ export function App({
     if (!data) return;
     void run(() => actions.timer(action, taskId, data.focus, targetSeconds));
   }
-  /** Completes in Focus by default; an empty day (the weekly review task) settles no FlowDay day. */
-  function complete(
-    task: PlanningTask,
-    flowDate = data?.focus.timer?.taskId === task.id
-      ? data.focus.timer.flowDate
-      : (data?.focus.date ?? ""),
-  ) {
-    let id = completionIds.current.get(task.id);
-    if (!id) {
-      id = crypto.randomUUID();
-      completionIds.current.set(task.id, id);
+  /**
+   * Completes in Tasks, which marks the task done in `focusDay`'s queue: Focus's day by default, a
+   * calendar card's own day, and Tasks' today for an empty one (the weekly review task). A related
+   * timer settles on its own day.
+   */
+  function complete(task: PlanningTask, focusDay = data?.focus.date ?? "") {
+    let completion = completionIds.current.get(task.id);
+    if (!completion) {
+      completion = { requestId: crypto.randomUUID(), focusDay };
+      completionIds.current.set(task.id, completion);
     }
-    const requestId = id;
+    const { requestId, focusDay: day } = completion;
     return run(async () => {
-      await actions.completeTask(task, requestId, flowDate);
+      await actions.completeTask(task, requestId, day);
       // Tasks may advance a recurring task, so only the following re-read shows the result.
       completionIds.current.delete(task.id);
       setCompleting((current) => new Set(current).add(task.id));
@@ -538,8 +541,7 @@ export function App({
         <strong>
           {timerTask
             ? displayedTitle(timerTask.title)
-            : (data.focus.flowTasks[data.focus.timer.taskId]?.title ??
-              text.focus)}
+            : (data.focus.tasks[data.focus.timer.taskId]?.title ?? text.focus)}
         </strong>
       </div>
       <output>
@@ -636,9 +638,9 @@ export function App({
               <PlanView
                 plan={data.plan}
                 days={data.days}
-                flowTasks={data.focus.flowTasks}
+                focusTasks={data.focus.tasks}
                 timer={data.focus.timer}
-                currentDate={data.focus.date}
+                currentDate={data.plan.today}
                 onWeekChange={changeWeek}
                 language={language}
                 busy={busy || weekLoading || !data.plan.configured}
@@ -735,7 +737,7 @@ export function App({
             run={run}
             actions={planActions}
             todayTaskIds={data.focus.taskIds}
-            today={data.focus.date}
+            today={data.plan.today}
             addFocus={(id) => void addFocus(id, data.focus)}
             onOpenTask={onOpenTask}
             onOpenDependency={setSelectedId}

@@ -57,9 +57,9 @@ it("keeps confirmed reorder etags for the next write while preserving task prope
     plan: {
       tasks: [task, sibling, unrelated],
       week: "2026-10-19",
+      today: "2026-10-19",
       timezone: "UTC",
       configured: true,
-      flowdayUrl: "",
       managedLabels: [],
       reviewTaskId: "",
       nextWeekTaskIds: [],
@@ -71,9 +71,10 @@ it("keeps confirmed reorder etags for the next write while preserving task prope
       date: "2026-10-19",
       taskIds: [],
       completedTaskIds: [],
+      entries: [],
       timerEtag: "0",
       estimates: {},
-      flowTasks: {},
+      tasks: {},
     },
     days: [],
   };

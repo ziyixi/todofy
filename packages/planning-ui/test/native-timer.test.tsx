@@ -37,9 +37,9 @@ const data = (): PlusData => ({
       },
     ],
     week: "2026-10-12",
+    today: "2026-10-17",
     timezone: "UTC",
     configured: true,
-    flowdayUrl: "",
     managedLabels: [],
     reviewTaskId: "",
     nextWeekTaskIds: [],
@@ -51,9 +51,10 @@ const data = (): PlusData => ({
     date: "2026-10-17",
     taskIds: ["step"],
     completedTaskIds: [],
+    entries: [],
     timerEtag: "1",
     estimates: {},
-    flowTasks: {},
+    tasks: {},
   },
   days: [],
 });
@@ -65,13 +66,14 @@ const props = (actions: PlusActions) => ({
   onSettings: vi.fn(),
 });
 
-it("opens native start windows exactly x days ahead and caps a hydrated pomodoro", () => {
+it("opens native start windows exactly x days ahead and caps a hydrated session as Tasks does", () => {
   expect(startDate("2026-11-01", 21, true)).toBe("2026-10-11");
   const focus = {
     ...data().focus,
     timer: {
       taskId: "step",
-      flowDate: "2026-10-17",
+      day: "2026-10-17",
+      area: "work" as const,
       status: "running" as const,
       mode: "pomodoro" as const,
       targetSeconds: 60,
@@ -81,6 +83,14 @@ it("opens native start windows exactly x days ahead and caps a hydrated pomodoro
     },
   };
   expect(elapsed(focus, Date.parse("2026-10-17T12:30:00Z"))).toBe(60);
+  // Counting up stops at 4 hours, the most a session saves.
+  const { mode: _mode, targetSeconds: _target, ...countUp } = focus.timer;
+  expect(
+    elapsed({ ...focus, timer: countUp }, Date.parse("2026-10-18T12:00:00Z")),
+  ).toBe(4 * 60 * 60);
+  expect(
+    elapsed({ ...focus, timer: countUp }, Date.parse("2026-10-17T12:30:00Z")),
+  ).toBe(40 + 30 * 60);
 });
 
 it("starts the selected pomodoro through the existing action and finishes a reloaded expired timer", async () => {
@@ -102,7 +112,8 @@ it("starts the selected pomodoro through the existing action and finishes a relo
   cleanup();
   loaded.focus.timer = {
     taskId: "step",
-    flowDate: "2026-10-17",
+    day: "2026-10-17",
+    area: "work",
     status: "running",
     mode: "pomodoro",
     targetSeconds: 60,
@@ -142,7 +153,8 @@ it("reads another window's timer while visible without reloading task lists, the
     timerEtag: "other-window",
     timer: {
       taskId: "step",
-      flowDate: loaded.focus.date,
+      day: loaded.focus.date,
+      area: "work",
       status: "paused",
       elapsedSeconds: 42,
       startedAt: "",

@@ -16,7 +16,7 @@ import type { ReviewProgress } from "./weekly-review";
 import type {
   RunOperation,
   Area,
-  FlowDayPlan,
+  DayPlan,
   FocusState,
   Language,
   PlanState,
@@ -26,8 +26,9 @@ import type {
 
 export interface PlanViewProps {
   plan: PlanState;
-  days: FlowDayPlan[];
-  flowTasks: FocusState["flowTasks"];
+  days: DayPlan[];
+  /** Titles of queued tasks Plan's list leaves out. */
+  focusTasks: FocusState["tasks"];
   timer?: FocusState["timer"];
   currentDate: string;
   language: Language;

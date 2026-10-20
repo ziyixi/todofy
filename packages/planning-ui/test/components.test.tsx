@@ -11,7 +11,7 @@ import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { PlanView } from "../src/PlanView";
 import { createPrototype } from "./fixture";
-import type { FlowDayPlan, PlusData } from "../src/model";
+import type { DayPlan, PlusData } from "../src/model";
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () {
     this.setAttribute("open", "");
@@ -72,7 +72,7 @@ it("shows a step's own start window in Start now while its parent occupies the c
       plan={plan}
       days={days}
       currentDate={focus.date}
-      flowTasks={focus.flowTasks}
+      focusTasks={focus.tasks}
       onWeekChange={vi.fn()}
       language="en"
       busy={false}
@@ -113,7 +113,7 @@ it("shows every commitment in Week, eleven of them included, each with its compl
       plan={plan}
       days={days}
       currentDate={focus.date}
-      flowTasks={focus.flowTasks}
+      focusTasks={focus.tasks}
       onWeekChange={vi.fn()}
       language="en"
       busy={false}
@@ -197,14 +197,15 @@ it("retries uncertain completion with the same request identity and keeps failed
   );
   expect(complete.mock.calls[0]?.[1]).toBe(complete.mock.calls[1]?.[1]);
 });
-it("settles an active task using the timer’s original flow day after midnight", async () => {
+it("completes on Focus's day and leaves a timer's own day to Tasks after midnight", async () => {
   const actions = createPrototype();
   const original = actions.load;
   actions.load = async () => {
     const data = await original();
     data.focus.timer = {
       taskId: "copy",
-      flowDate: "2026-10-12",
+      day: "2026-10-12",
+      area: "work",
       status: "paused",
       elapsedSeconds: 30,
       startedAt: "2026-10-12T23:59:00Z",
@@ -227,15 +228,16 @@ it("settles an active task using the timer’s original flow day after midnight"
     await screen.findByLabelText("Complete task: Write the introduction"),
   );
   await waitFor(() => expect(complete).toHaveBeenCalled());
-  expect(complete.mock.calls[0]?.[2]).toBe("2026-10-12");
+  // Tasks settles the session on its own day in the same write.
+  expect(complete.mock.calls[0]?.[2]).toBe("2026-10-13");
 });
 
 it("keeps a confirmed refresh when older duplicate week reads finish late", async () => {
   const actions = createPrototype();
   const staleFuture = await actions.loadDays("2026-10-19");
-  const requests: ((days: FlowDayPlan[]) => void)[] = [];
+  const requests: ((days: DayPlan[]) => void)[] = [];
   actions.loadDays = vi.fn(
-    () => new Promise<FlowDayPlan[]>((resolve) => requests.push(resolve)),
+    () => new Promise<DayPlan[]>((resolve) => requests.push(resolve)),
   );
   render(
     <App
@@ -361,7 +363,7 @@ it("selects a Week commitment on a click, keeps it selected, and opens its panel
       plan={plan}
       days={days}
       currentDate={focus.date}
-      flowTasks={focus.flowTasks}
+      focusTasks={focus.tasks}
       onWeekChange={vi.fn()}
       language="en"
       busy={false}

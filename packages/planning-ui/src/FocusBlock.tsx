@@ -40,14 +40,11 @@ export function FocusBlock({
   complete,
 }: Props) {
   const text = words(language);
-  let fallbackTitle = text.missingTask;
-  if (taskId.startsWith("__flowday_misc__"))
-    fallbackTitle = language === "zh" ? "杂项时间" : "Miscellaneous time";
-  const title = displayedTitle(
-    task?.title ?? focus.flowTasks[taskId]?.title ?? fallbackTitle,
-  );
+  // A task Plan does not list has its title and parent from Tasks' Focus read.
+  const known = focus.tasks[taskId];
+  const title = displayedTitle(task?.title ?? known?.title ?? text.missingTask);
   const timer =
-    focus.timer?.taskId === taskId && focus.timer.flowDate === focus.date
+    focus.timer?.taskId === taskId && focus.timer.day === focus.date
       ? focus.timer
       : undefined;
   let status = "";
@@ -92,7 +89,7 @@ export function FocusBlock({
             )}
           </button>
         ) : (
-          // FlowDay rows keep their title in line with the rows above.
+          // A task Plan does not list keeps its title in line with the rows above.
           <span className="plus-checkbox-slot" aria-hidden="true" />
         )}
         <div className="plus-focus-block-content">
@@ -124,11 +121,9 @@ export function FocusBlock({
               {displayedTitle(outcome.title)}
             </span>
           )}
-          {!task && (
+          {!task && known?.parentTitle && (
             <span className="plus-focus-parent">
-              {focus.flowTasks[taskId]?.local || taskId.startsWith("__flowday_")
-                ? text.local
-                : text.missingTask}
+              {displayedTitle(known.parentTitle)}
             </span>
           )}
           <div className="plus-focus-block-footer">
@@ -141,16 +136,6 @@ export function FocusBlock({
               >
                 <Elapsed focus={focus} />
               </output>
-            )}
-            {!task && plan.flowdayUrl && (
-              <a
-                className="plus-text-button"
-                href={plan.flowdayUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {text.openFlowday}
-              </a>
             )}
           </div>
         </div>

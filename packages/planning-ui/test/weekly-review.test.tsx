@@ -53,7 +53,7 @@ async function props(
   return {
     plan,
     days,
-    flowTasks: focus.flowTasks,
+    focusTasks: focus.tasks,
     currentDate: focus.date,
     language: "en",
     busy: false,
@@ -663,8 +663,9 @@ it("completes the review task only when Finish review is clicked, outside Focus"
   expect(complete).not.toHaveBeenCalled();
   fireEvent.click(review.getByRole("button", { name: "Finish review" }));
   await waitFor(() => expect(complete).toHaveBeenCalledOnce());
-  const [task, requestId, flowDate] = complete.mock.calls[0]!;
-  expect([task.id, typeof requestId, flowDate]).toEqual([
+  // No day: Tasks marks it done in its own today's queue, if it is queued there.
+  const [task, requestId, focusDay] = complete.mock.calls[0]!;
+  expect([task.id, typeof requestId, focusDay]).toEqual([
     "weekly-review",
     "string",
     "",
@@ -706,10 +707,14 @@ it("maps a task's last change and the review IDs from the API", async () => {
           { id: "b", title: "Synthetic b" },
         ],
       });
-    if (path.endsWith("/timerSession"))
-      return Response.json({ name: "timerSession", etag: "0" });
-    if (path.endsWith("/tasks")) return Response.json({ tasks: [] });
-    return Response.json({ name: path.slice(path.indexOf("flows/")) });
+    if (path === "/api/tasks/v1/focusTimer")
+      return Response.json({ name: "focusTimer", etag: "1" });
+    return Response.json({
+      days: [12, 13, 14, 15, 16, 17, 18].map((day) => ({
+        day: `2026-10-${day}`,
+      })),
+      today: "2026-10-13",
+    });
   });
   const { plan } = await api.load();
   expect([plan.reviewTaskId, plan.nextWeekTaskIds]).toEqual([

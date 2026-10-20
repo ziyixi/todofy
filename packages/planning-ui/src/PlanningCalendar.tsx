@@ -13,7 +13,7 @@ import { PendingMark } from "./StatusMarks";
 import { words } from "./i18n";
 import { isoWeek } from "./weekly-review";
 import type {
-  FlowDayPlan,
+  DayPlan,
   FocusState,
   Language,
   PlanState,
@@ -21,8 +21,9 @@ import type {
 } from "./model";
 interface Props {
   plan: PlanState;
-  days: FlowDayPlan[];
-  flowTasks: FocusState["flowTasks"];
+  days: DayPlan[];
+  /** Titles and estimates of queued tasks Plan's list leaves out. */
+  focusTasks: FocusState["tasks"];
   timer?: FocusState["timer"];
   currentDate: string;
   language: Language;
@@ -33,12 +34,12 @@ interface Props {
   editTask: (task: PlanningTask) => void;
   completeTask: CompletePlanningTask;
   onWeekChange: (week: string) => void;
-  onRemove: (day: FlowDayPlan, id: string) => void;
+  onRemove: (day: DayPlan, id: string) => void;
 }
 export function PlanningCalendar({
   plan,
   days,
-  flowTasks,
+  focusTasks,
   timer,
   currentDate,
   language,
@@ -129,7 +130,7 @@ export function PlanningCalendar({
             key={day.date}
             day={day}
             plan={plan}
-            flowTasks={flowTasks}
+            focusTasks={focusTasks}
             timer={timer}
             today={currentDate}
             selected={index === dayIndex}
@@ -156,7 +157,7 @@ function DatePicker({
   busy,
   onSelect,
 }: {
-  day: FlowDayPlan;
+  day: DayPlan;
   selected: boolean;
   language: Language;
   busy: boolean;
@@ -187,7 +188,7 @@ function DatePicker({
 function CalendarDay({
   day,
   plan,
-  flowTasks,
+  focusTasks,
   timer,
   today,
   selected,
@@ -201,9 +202,9 @@ function CalendarDay({
   onSelect,
   onRemove,
 }: {
-  day: FlowDayPlan;
+  day: DayPlan;
   plan: PlanState;
-  flowTasks: FocusState["flowTasks"];
+  focusTasks: FocusState["tasks"];
   timer?: FocusState["timer"];
   today: string;
   selected: boolean;
@@ -227,7 +228,7 @@ function CalendarDay({
   const ids = day.taskIds.filter((id) => !day.completedTaskIds.includes(id));
   const estimate = (id: string) =>
     taskIndex(plan.tasks).get(id)?.estimatedMinutes ??
-    flowTasks[id]?.estimatedMinutes;
+    focusTasks[id]?.estimatedMinutes;
   const minutes = ids.reduce((sum, id) => sum + (estimate(id) ?? 0), 0);
   const unknown = ids.filter((id) => estimate(id) === undefined).length;
   return (
@@ -254,7 +255,7 @@ function CalendarDay({
             id={id}
             day={day}
             plan={plan}
-            flowTask={flowTasks[id]}
+            focusTask={focusTasks[id]}
             timer={timer}
             language={language}
             busy={busy}
@@ -280,7 +281,7 @@ function CalendarStep({
   id,
   day,
   plan,
-  flowTask,
+  focusTask,
   timer,
   language,
   busy,
@@ -291,9 +292,9 @@ function CalendarStep({
   onRemove,
 }: {
   id: string;
-  day: FlowDayPlan;
+  day: DayPlan;
   plan: PlanState;
-  flowTask?: FocusState["flowTasks"][string];
+  focusTask?: FocusState["tasks"][string];
   timer?: FocusState["timer"];
   language: Language;
   busy: boolean;
@@ -308,8 +309,8 @@ function CalendarStep({
   const outcome = task
     ? outcomeForTask(task, plan.tasks, plan.managedLabels)
     : undefined;
-  const timing = timer?.taskId === id && timer.flowDate === day.date;
-  const title = taskTitle(id, task?.title ?? flowTask?.title, language);
+  const timing = timer?.taskId === id && timer.day === day.date;
+  const title = taskTitle(task?.title ?? focusTask?.title, language);
   const { ref, handleRef, isDragSource } = useDraggable({
     id: `week-step:${day.date}:${id}`,
     type: "planning-step",
@@ -323,12 +324,13 @@ function CalendarStep({
     collisionPriority: 2,
     data: { date: day.date, beforeId: id },
   });
-  const minutes = task?.estimatedMinutes ?? flowTask?.estimatedMinutes;
+  const minutes = task?.estimatedMinutes ?? focusTask?.estimatedMinutes;
+  // A task Plan does not list names its parent as Tasks' Focus read does.
   const parent = outcome
     ? outcome.id === id
       ? outcomeArea(outcome, plan.tasks, language)
       : displayedTitle(outcome.title)
-    : words(language).local;
+    : displayedTitle(focusTask?.parentTitle ?? "");
   return (
     <article
       ref={(element) => {
@@ -485,13 +487,11 @@ export function weekLabel(weekStart: string, language: Language): string {
     ? `第 ${week} 周 · ${from}起`
     : `Week ${week} · from ${from}`;
 }
+/** A task's shown title, or that it is unavailable. */
 export function taskTitle(
-  id: string,
   title: string | undefined,
   language: Language,
 ): string {
   if (title !== undefined) return displayedTitle(title);
-  if (id.startsWith("__flowday_misc__"))
-    return language === "zh" ? "杂项时间" : "Miscellaneous time";
   return words(language).missingTask;
 }

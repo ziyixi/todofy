@@ -24,7 +24,7 @@ async function planProps(language: Language): Promise<PlanViewProps> {
   return {
     plan,
     days,
-    flowTasks: focus.flowTasks,
+    focusTasks: focus.tasks,
     currentDate: focus.date,
     language,
     busy: false,
@@ -150,20 +150,23 @@ it("keeps an outcome card to a title and one left-aligned line, the deadline fir
   );
 });
 
-it("names a paused timer as a state, colours checkboxes by priority and keeps FlowDay rows aligned", async () => {
+it("names a paused timer as a state, colours checkboxes by priority and keeps unlisted rows aligned", async () => {
   const { plan, focus } = await createPrototype().load();
   focus.timer = {
     taskId: "copy",
-    flowDate: focus.date,
+    day: focus.date,
+    area: "work",
     status: "paused",
     elapsedSeconds: 85,
     startedAt: "",
     etag: "synthetic-timer",
   };
-  focus.taskIds.push("local-note");
-  focus.flowTasks["local-note"] = {
-    title: "Synthetic local note",
-    local: true,
+  focus.taskIds.push("unlisted");
+  focus.tasks["unlisted"] = {
+    title: "Synthetic unlisted step",
+    parentId: "",
+    parentTitle: "",
+    completed: false,
   };
   const props = {
     plan,
@@ -192,7 +195,7 @@ it("names a paused timer as a state, colours checkboxes by priority and keeps Fl
     slot("copy").querySelector(".plus-checkbox")!.getAttribute("data-priority"),
   ).toBe(String(copy.priority));
   expect(
-    slot("local-note")
+    slot("unlisted")
       .querySelector(".plus-checkbox-slot")!
       .getAttribute("aria-hidden"),
   ).toBe("true");

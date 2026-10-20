@@ -1,259 +1,193 @@
 import { expect, it } from "vitest";
 import { fakeActions } from "./transport";
 
-it("persists same-day sorting, cross-day movement and pool placement only in FlowDay queues", async () => {
-  const flows = new Map([
-    [
-      "2026-10-13",
-      { taskIds: ["local-one", "a", "b", "done"], completed: ["done"] },
-    ],
-    ["2026-10-14", { taskIds: ["local-two", "c"], completed: [] as string[] }],
+/**
+ * Tasks' MoveFocusStep over synthetic queues: no source adds, no destination removes, the same day
+ * reorders and two days move, before `before_task_id` or last. Its answer lists each changed day.
+ */
+function focusQueues(queues: Map<string, string[]>) {
+  const read = (day: string) => queues.get(day) ?? [];
+  return (body: {
+    task_id: string;
+    source_day?: string;
+    destination_day?: string;
+    before_task_id?: string;
+  }) => {
+    const { task_id: id, source_day: source, destination_day: target } = body;
+    if (source && !read(source).includes(id))
+      return { status: 400, error: "This step has moved." };
+    if (source)
+      queues.set(
+        source,
+        read(source).filter((item) => item !== id),
+      );
+    if (target) {
+      const queue = read(target).filter((item) => item !== id);
+      const before = body.before_task_id
+        ? queue.indexOf(body.before_task_id)
+        : -1;
+      queue.splice(before < 0 ? queue.length : before, 0, id);
+      queues.set(target, queue);
+    }
+    return {
+      days: [...new Set([source, target].filter(Boolean))].map((day) => ({
+        day,
+        task_ids: read(day!),
+      })),
+    };
+  };
+}
+
+it("writes same-day sorting, cross-day movement, pool placement and removal as one MoveFocusStep each", async () => {
+  const queues = new Map([
+    ["2026-10-13", ["other", "a", "b"]],
+    ["2026-10-14", ["other-two", "c"]],
   ]);
-  const writes: { path: string; body: Record<string, unknown> }[] = [];
-  const requests: { path: string; method: string }[] = [];
-  const read = (date: string) =>
-    flows.get(date) ?? { taskIds: [], completed: [] };
-  const wire = (date: string) => ({
-    name: `flows/${date}`,
-    task_ids: read(date).taskIds,
-    completed_task_ids: read(date).completed,
-  });
+  const move = focusQueues(queues);
+  const requests: {
+    path: string;
+    method: string;
+    body: Record<string, string>;
+  }[] = [];
   const api = fakeActions(async (input, init) => {
-    const path = new URL(String(input)).pathname;
-    requests.push({ path, method: init?.method ?? "GET" });
+    const url = new URL(String(input));
     const body = init?.body
-      ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+      ? (JSON.parse(String(init.body)) as Record<string, string>)
       : {};
-    const reply = (value: unknown) => Response.json(value);
-    if (path === "/api/plus/v1/plan:read")
-      return reply({
-        plan: {
-          week_start: "2026-10-12",
-          today: "2026-10-13",
-          timezone: "UTC",
-          enabled: true,
-        },
-      });
-    if (path === "/api/plus/v1/tasks")
-      return reply({
-        planning_tasks: ["a", "b", "c", "d"].map((id) => ({
-          id,
-          title: `Synthetic ${id}`,
-          deadline: "2026-10-30",
-          due: "2026-10-20",
-        })),
-      });
-    if (path.endsWith("/timerSession"))
-      return reply({ name: "timerSession", etag: "0" });
-    if (path.endsWith("/tasks"))
-      return reply({
-        tasks: ["a", "b", "c", "d", "done", "local-one", "local-two"].map(
-          (id) => ({
-            name: `tasks/${id}`,
-            todoist_id: id,
-            title: `Synthetic ${id}`,
-          }),
-        ),
-      });
-    const day = path.match(/\/flows\/(\d{4}-\d{2}-\d{2})/u)?.[1];
-    if (!day) throw new Error(`Unexpected request: ${path}`);
-    if (init?.method === "PATCH") {
-      writes.push({ path, body });
-      flows.set(day, { ...read(day), taskIds: body.task_ids as string[] });
-      return reply(wire(day));
+    requests.push({ path: url.pathname, method: init?.method ?? "GET", body });
+    if (url.pathname === "/api/tasks/v1/focusDays:moveStep") {
+      const answer = move(body as Parameters<typeof move>[0]);
+      return "error" in answer
+        ? Response.json(
+            {
+              error: {
+                code: 400,
+                status: "FAILED_PRECONDITION",
+                message: answer.error,
+              },
+            },
+            { status: 400 },
+          )
+        : Response.json(answer);
     }
-    if (path.endsWith(":rollover")) {
-      writes.push({ path, body });
-      const destination = String(body.destination).slice("flows/".length);
-      const requested = body.task_ids as string[];
-      const moving = read(day).taskIds.filter((id) => requested.includes(id));
-      flows.set(day, {
-        ...read(day),
-        taskIds: read(day).taskIds.filter((id) => !moving.includes(id)),
-      });
-      flows.set(destination, {
-        ...read(destination),
-        taskIds: [
-          ...moving,
-          ...read(destination).taskIds.filter((id) => !moving.includes(id)),
-        ],
-      });
-      return reply({ flow: wire(day), destination_flow: wire(destination) });
-    }
-    return reply(wire(day));
+    throw new Error(`Unexpected request: ${url.pathname}`);
   });
-  const initial = await api.load();
-  const tuesday = initial.days.find((day) => day.date === "2026-10-13")!;
-  const wednesday = initial.days.find((day) => day.date === "2026-10-14")!;
-  const thursday = initial.days.find((day) => day.date === "2026-10-15")!;
-  const mutationStart = requests.length;
-  const sorted = await api.moveTaskToDay("b", tuesday, tuesday, "a");
-  expect(sorted).toEqual([
-    {
-      date: tuesday.date,
-      taskIds: ["local-one", "b", "a", "done"],
-      completedTaskIds: ["done"],
-    },
+  const day = (date: string) => ({ date, taskIds: [], completedTaskIds: [] });
+  const tuesday = day("2026-10-13");
+  const wednesday = day("2026-10-14");
+  const thursday = day("2026-10-15");
+
+  expect(await api.moveTaskToDay("b", tuesday, tuesday, "a")).toEqual([
+    { date: tuesday.date, taskIds: ["other", "b", "a"], completedTaskIds: [] },
   ]);
-  expect(read(tuesday.date).taskIds).toEqual(["local-one", "b", "a", "done"]);
-  expect(writes.some((write) => write.path.endsWith(":rollover"))).toBe(false);
-  const crossStart = requests.length;
-  const moved = await api.moveTaskToDay("a", tuesday, wednesday, "c");
-  expect(moved).toEqual([
-    {
-      date: tuesday.date,
-      taskIds: ["local-one", "b", "done"],
-      completedTaskIds: ["done"],
-    },
+  expect(await api.moveTaskToDay("a", tuesday, wednesday, "c")).toEqual([
+    { date: tuesday.date, taskIds: ["other", "b"], completedTaskIds: [] },
     {
       date: wednesday.date,
-      taskIds: ["local-two", "a", "c"],
+      taskIds: ["other-two", "a", "c"],
       completedTaskIds: [],
     },
   ]);
-  expect(requests.slice(crossStart).map((request) => request.method)).toEqual([
-    "POST",
-    "PATCH",
+  expect(await api.moveTaskToDay("d", undefined, thursday)).toEqual([
+    { date: thursday.date, taskIds: ["d"], completedTaskIds: [] },
   ]);
-  expect(read(tuesday.date)).toEqual({
-    taskIds: ["local-one", "b", "done"],
-    completed: ["done"],
-  });
-  expect(read(wednesday.date).taskIds).toEqual(["local-two", "a", "c"]);
-  flows.set(thursday.date, { taskIds: ["local-unplanned"], completed: [] });
-  const placed = await api.moveTaskToDay("d", undefined, thursday);
-  expect(placed).toEqual([
-    {
-      date: thursday.date,
-      taskIds: ["local-unplanned", "d"],
-      completedTaskIds: [],
-    },
+  expect(await api.addToDay("e", tuesday.date)).toEqual([
+    { date: tuesday.date, taskIds: ["other", "b", "e"], completedTaskIds: [] },
   ]);
-  expect(read(thursday.date).taskIds).toEqual(["local-unplanned", "d"]);
-
-  const friday = initial.days.find((day) => day.date === "2026-10-16")!;
-  const rolloverStart = requests.length;
-  const withoutReorder = await api.moveTaskToDay("b", tuesday, friday);
-  expect(withoutReorder).toEqual([
-    {
-      date: tuesday.date,
-      taskIds: ["local-one", "done"],
-      completedTaskIds: ["done"],
-    },
-    { date: friday.date, taskIds: ["b"], completedTaskIds: [] },
+  expect(await api.removeFromDay("other", tuesday.date)).toEqual([
+    { date: tuesday.date, taskIds: ["b", "e"], completedTaskIds: [] },
   ]);
-  expect(
-    requests.slice(rolloverStart).map((request) => request.method),
-  ).toEqual(["POST"]);
+  // A drop on itself writes nothing.
   const noOpStart = requests.length;
-  expect(await api.moveTaskToDay("b", friday, friday, "b")).toEqual([]);
+  expect(await api.moveTaskToDay("b", tuesday, tuesday, "b")).toEqual([]);
   expect(requests).toHaveLength(noOpStart);
-
-  // Another tab adds a step; one-step edits start from FlowDay's queue, so they keep it.
-  flows.set(tuesday.date, {
-    ...read(tuesday.date),
-    taskIds: [...read(tuesday.date).taskIds, "local-other"],
-  });
-  const queueStart = requests.length;
-  expect(await api.addToDay("local-extra", tuesday.date)).toEqual([
-    {
-      date: tuesday.date,
-      taskIds: ["local-one", "done", "local-other", "local-extra"],
-      completedTaskIds: ["done"],
-    },
+  expect(
+    requests.map(({ method, path, body }) => {
+      const { request_id: requestId, ...rest } = body;
+      expect(requestId).toMatch(/^[0-9a-f-]{36}$/u);
+      return [method, path, rest];
+    }),
+  ).toEqual([
+    [
+      "POST",
+      "/api/tasks/v1/focusDays:moveStep",
+      {
+        task_id: "b",
+        source_day: "2026-10-13",
+        destination_day: "2026-10-13",
+        before_task_id: "a",
+      },
+    ],
+    [
+      "POST",
+      "/api/tasks/v1/focusDays:moveStep",
+      {
+        task_id: "a",
+        source_day: "2026-10-13",
+        destination_day: "2026-10-14",
+        before_task_id: "c",
+      },
+    ],
+    [
+      "POST",
+      "/api/tasks/v1/focusDays:moveStep",
+      { task_id: "d", destination_day: "2026-10-15" },
+    ],
+    [
+      "POST",
+      "/api/tasks/v1/focusDays:moveStep",
+      { task_id: "e", destination_day: "2026-10-13" },
+    ],
+    [
+      "POST",
+      "/api/tasks/v1/focusDays:moveStep",
+      { task_id: "other", source_day: "2026-10-13" },
+    ],
   ]);
-  const removed = await api.removeFromDay("local-one", tuesday.date);
-  expect(removed).toEqual([
-    {
-      date: tuesday.date,
-      taskIds: ["done", "local-other", "local-extra"],
-      completedTaskIds: ["done"],
-    },
-  ]);
-  // A step already in the queue (or already removed) is not written again.
-  expect(await api.addToDay("local-extra", tuesday.date)).toEqual(removed);
-  expect(await api.removeFromDay("local-one", tuesday.date)).toEqual(removed);
-  expect(requests.slice(queueStart).map((request) => request.method)).toEqual([
-    "GET",
-    "PATCH",
-    "GET",
-    "PATCH",
-    "GET",
-    "GET",
-  ]);
-  expect(
-    requests
-      .slice(mutationStart)
-      .every((request) =>
-        request.path.startsWith("/api/plus/flowday/api/v1/flows/"),
-      ),
-  ).toBe(true);
-  const reloaded = await api.load();
-  expect(
-    reloaded.days.find((day) => day.date === wednesday.date)?.taskIds,
-  ).toEqual(["local-two", "a", "c"]);
-  expect(
-    reloaded.plan.tasks.every(
-      (task) => task.due === "2026-10-20" && task.deadline === "2026-10-30",
-    ),
-  ).toBe(true);
-  expect(
-    writes.every(
-      (write) =>
-        write.path.startsWith("/api/plus/flowday/") &&
-        !Object.hasOwn(write.body, "due") &&
-        !Object.hasOwn(write.body, "deadline"),
-    ),
-  ).toBe(true);
+  // Each confirmed move had its own request ID.
+  expect(new Set(requests.map(({ body }) => body.request_id)).size).toBe(5);
+  // Tasks' refusal reaches the caller, and nothing is changed in the meantime.
+  await expect(api.removeFromDay("other", tuesday.date)).rejects.toThrow(
+    "This step has moved.",
+  );
 });
 
-it("answers the new steps' IDs and queues them without a FlowDay sync", async () => {
+it("retries a move whose answer was lost with the same request ID", async () => {
+  const ids: string[] = [];
+  const api = fakeActions(async (_input, init) => {
+    ids.push(JSON.parse(String(init?.body)).request_id);
+    if (ids.length === 1) throw new TypeError("Synthetic response loss");
+    return Response.json({ days: [{ day: "2026-10-13", task_ids: ["a"] }] });
+  });
+  await expect(api.addToDay("a", "2026-10-13")).rejects.toThrow();
+  await api.addToDay("a", "2026-10-13");
+  // A different move is a different request.
+  await api.addToDay("a", "2026-10-14");
+  expect(ids[1]).toBe(ids[0]);
+  expect(ids[2]).not.toBe(ids[0]);
+});
+
+it("answers the new steps' IDs, which Tasks can queue at once", async () => {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
-  // Tasks lists two new steps; FlowDay's mirror has neither yet.
-  const listed = ["outcome", "step-1", "step-2"];
   const api = fakeActions(async (input, init) => {
     const path = new URL(String(input)).pathname;
     const body = init?.body
       ? (JSON.parse(String(init.body)) as Record<string, unknown>)
       : {};
     requests.push({ path, body });
-    const reply = (value: unknown) => Response.json(value);
-    if (path === "/api/plus/v1/plan:read")
-      return reply({
-        plan: {
-          week_start: "2026-10-12",
-          today: "2026-10-13",
-          timezone: "UTC",
-          enabled: true,
-        },
-      });
     if (path === "/api/plus/v1/tasks:appendTaskSteps")
-      return reply({ task_ids: ["step-1"] });
-    if (path === "/api/plus/v1/tasks")
-      return reply({
-        planning_tasks: listed.map((id) => ({
-          id,
-          title: `Synthetic ${id}`,
-        })),
+      return Response.json({ task_ids: ["step-1"] });
+    if (path === "/api/tasks/v1/focusDays:moveStep")
+      return Response.json({
+        days: [{ day: body.destination_day, task_ids: [body.task_id] }],
       });
-    if (path.endsWith("/timerSession"))
-      return reply({ name: "timerSession", etag: "0" });
-    if (path.endsWith("/api/v1/tasks"))
-      return reply({
-        tasks: [{ name: "tasks/outcome", todoist_id: "outcome", title: "x" }],
-      });
-    const day = path.match(/\/flows\/(\d{4}-\d{2}-\d{2})/u)?.[1];
-    if (!day) throw new Error(`Unexpected request: ${path}`);
-    return reply({
-      name: `flows/${day}`,
-      task_ids: (body.task_ids as string[] | undefined) ?? [],
-    });
+    throw new Error(`Unexpected request: ${path}`);
   });
-  const outcome = (await api.load()).plan.tasks[0]!;
+  const outcome = { id: "outcome" } as Parameters<typeof api.createSteps>[0];
   expect(
     await api.createSteps(
       outcome,
-      [{ title: "Synthetic step 1" }],
+      [{ title: "Synthetic step 1", estimatedMinutes: 30 }],
       "11111111-1111-4111-8111-111111111111",
     ),
   ).toEqual(["step-1"]);
@@ -262,15 +196,16 @@ it("answers the new steps' IDs and queues them without a FlowDay sync", async ()
     body: {
       parent_id: "outcome",
       request_id: "11111111-1111-4111-8111-111111111111",
-      steps: [{ title: "Synthetic step 1" }],
+      steps: [{ title: "Synthetic step 1", estimated_minutes: 30 }],
     },
   });
-  // FlowDay's queues take any task ID: no sync before either write.
-  await api.addToDay("step-1", "2026-10-13");
-  await api.addToDay("step-2", "2026-10-14");
-  expect(requests.some((request) => request.path.endsWith(":sync"))).toBe(
-    false,
-  );
+  expect(await api.addToDay("step-1", "2026-10-13")).toEqual([
+    { date: "2026-10-13", taskIds: ["step-1"], completedTaskIds: [] },
+  ]);
+  expect(requests.map((request) => request.path)).toEqual([
+    "/api/plus/v1/tasks:appendTaskSteps",
+    "/api/tasks/v1/focusDays:moveStep",
+  ]);
 });
 
 it("maps Todoist's sibling order and the saved lane orders, and sends a reorder with the moved task", async () => {

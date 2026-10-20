@@ -6,7 +6,7 @@ import { FocusBlock } from "./FocusBlock";
 import { pendingStep } from "./plan-updates";
 import { words } from "./i18n";
 import type {
-  FlowDayPlan,
+  DayPlan,
   FocusState,
   Language,
   PlanState,
@@ -17,7 +17,7 @@ interface Props {
   plan: PlanState;
   focus: FocusState;
   /** The queues the quiet deadline line looks in: this week's, or only today's. */
-  days?: readonly FlowDayPlan[];
+  days?: readonly DayPlan[];
   /** Opens Plan › Review with Start now focused. */
   onShowStart?: () => void;
   language: Language;
@@ -59,7 +59,7 @@ export function FocusView({
   const minutesOf = (id: string) =>
     focus.estimates[id] ??
     byId.get(id)?.estimatedMinutes ??
-    focus.flowTasks[id]?.estimatedMinutes ??
+    focus.tasks[id]?.estimatedMinutes ??
     0;
   const totalMinutes = queue.reduce((sum, id) => sum + minutesOf(id), 0);
   const unknown = queue.filter((id) => !minutesOf(id)).length;

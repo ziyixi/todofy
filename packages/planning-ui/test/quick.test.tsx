@@ -119,7 +119,7 @@ it("shows Week's quick tasks as a quiet line of equal one-line cards under Next 
     <PlanView
       plan={data.plan}
       days={data.days}
-      flowTasks={data.focus.flowTasks}
+      focusTasks={data.focus.tasks}
       currentDate={data.focus.date}
       language="en"
       busy={false}
@@ -192,7 +192,7 @@ it("shows no Quick line without a quick task to plan", async () => {
     <PlanView
       plan={data.plan}
       days={data.days}
-      flowTasks={data.focus.flowTasks}
+      focusTasks={data.focus.tasks}
       currentDate={data.focus.date}
       language="zh"
       busy={false}

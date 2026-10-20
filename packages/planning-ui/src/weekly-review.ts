@@ -6,7 +6,7 @@ import {
   outcomeSteps,
   PARKED_LABEL,
 } from "./planning-outcomes";
-import type { FlowDayPlan, Language, PlanState, PlanningTask } from "./model";
+import type { DayQueue, Language, PlanState, PlanningTask } from "./model";
 
 // The literal label names Todofy's filters already use (Must Start, Candidate If); never created here.
 export const WAITING_LABELS = ["waiting", "blocked"];
@@ -73,7 +73,7 @@ export function withoutLead(tasks: readonly PlanningTask[]): PlanningTask[] {
 /** Commitments with nothing open scheduled in these days: neither the outcome nor any of its steps. */
 export function unscheduledCommitments(
   plan: PlanState,
-  days: readonly FlowDayPlan[],
+  days: readonly DayQueue[],
 ): PlanningTask[] {
   const scheduled = new Set(
     days.flatMap((day) =>
@@ -133,7 +133,7 @@ export function quickTasks(
 export function quickTray(
   plan: Pick<PlanState, "tasks" | "timezone">,
   today: string,
-  days: readonly FlowDayPlan[],
+  days: readonly DayQueue[],
   steps: readonly PlanningTask[],
 ): PlanningTask[] {
   const queued = new Set(

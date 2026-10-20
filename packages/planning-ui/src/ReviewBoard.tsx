@@ -51,7 +51,7 @@ import { untouchedText } from "./weekly-review";
 import { words } from "./i18n";
 import type {
   Area,
-  FlowDayPlan,
+  DayPlan,
   LaneId,
   Language,
   PlanState,
@@ -210,7 +210,7 @@ interface Props {
   plan: PlanState;
   /** Each task's one lane, from boardLanes. */
   lanes: BoardLanes;
-  days: FlowDayPlan[];
+  days: DayPlan[];
   area: Area | "all";
   currentDate: string;
   language: Language;

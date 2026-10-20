@@ -90,7 +90,7 @@ async function setup(
   const props: PlanViewProps = {
     plan: data.plan,
     days: data.days,
-    flowTasks: data.focus.flowTasks,
+    focusTasks: data.focus.tasks,
     currentDate: data.focus.date,
     language: "en",
     busy: false,
