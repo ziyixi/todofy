@@ -474,6 +474,7 @@ export function createPrototype(
         ...focus,
         estimates: { ...focus.estimates, [taskId]: minutes },
       };
+      return { estimate: { taskId, minutes } };
     },
     async timer(action, taskId, target) {
       const seconds = focus.timer

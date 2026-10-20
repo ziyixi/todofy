@@ -116,6 +116,32 @@ function withReorder(data: PlusData, result: ReorderResult): PlusData {
   };
 }
 
+/**
+ * A task's estimate as the host saves it: its duration, none for 0. Focus reads its own copy of
+ * the estimates first, so that copy changes too.
+ */
+export function withEstimate(
+  data: PlusData,
+  taskId: string,
+  minutes: number,
+): PlusData {
+  return {
+    ...data,
+    plan: {
+      ...data.plan,
+      tasks: data.plan.tasks.map((task) =>
+        task.id === taskId
+          ? { ...task, estimatedMinutes: minutes > 0 ? minutes : undefined }
+          : task,
+      ),
+    },
+    focus: {
+      ...data.focus,
+      estimates: { ...data.focus.estimates, [taskId]: minutes },
+    },
+  };
+}
+
 /** Shows a write's confirmed server result without reading everything again. */
 export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
   if (!confirmed) return data;
@@ -144,6 +170,12 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
       },
     };
   if ("reordered" in confirmed) return withReorder(data, confirmed);
+  if ("estimate" in confirmed)
+    return withEstimate(
+      data,
+      confirmed.estimate.taskId,
+      confirmed.estimate.minutes,
+    );
   if ("id" in confirmed) return withTasks(data, [confirmed]);
   return withDependencies(data, confirmed);
 }
@@ -170,7 +202,7 @@ export function withNextWeek(
   };
 }
 
-/** Void results (completion, new steps, estimates) are shown only by a re-read. */
+/** Void results (completion, new steps) are shown only by a re-read. */
 export function rereadsAfter(confirmed: Confirmed): boolean {
   return !confirmed;
 }
@@ -286,6 +318,11 @@ export function predictChildOrder(
       }),
     },
   });
+}
+
+/** Shows a new estimate at once (withEstimate); the saved one replaces it. */
+export function predictEstimate(taskId: string, minutes: number) {
+  return (data: PlusData): PlusData => withEstimate(data, taskId, minutes);
 }
 
 /** Shows a stage drag at once (withStage); the confirmed task (labels, etag) replaces it. */

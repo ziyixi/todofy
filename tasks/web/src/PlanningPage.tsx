@@ -42,14 +42,16 @@ export default function PlanningPage({
         const error = await onCompleteTask(current, requestId, flowDate);
         if (error) throw new Error(error);
       },
+      // Answers the duration Tasks saved, which Plan and Focus show without reading again.
       async updateEstimate(id: string, minutes: number) {
         const task = await api.getTask({ name: `tasks/${id}` });
-        await api.updateTask({
+        const saved = await api.updateTask({
           requestId: crypto.randomUUID(),
           etag: task.etag,
           task: { name: task.name, durationMinutes: minutes },
           updateMask: { paths: ["duration_minutes"] },
         });
+        return { estimate: { taskId: id, minutes: saved.durationMinutes } };
       },
     };
   }, [onCompleteTask]);

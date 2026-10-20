@@ -4,6 +4,7 @@ import {
   applyConfirmed,
   moved,
   predictChildOrder,
+  predictEstimate,
   predictLaneOrder,
   rereadsAfter,
   withNextWeek,
@@ -79,6 +80,33 @@ it("re-reads only after void results", async () => {
   expect(rereadsAfter([tasks[0]!])).toBe(false);
   expect(rereadsAfter([data.days[0]!])).toBe(false);
   expect(rereadsAfter({ timerEtag: "1" })).toBe(false);
+  expect(rereadsAfter({ estimate: { taskId: "copy", minutes: 60 } })).toBe(
+    false,
+  );
+});
+
+it("shows a saved estimate as its prediction did, and 0 as none", async () => {
+  const data = await createPrototype().load();
+  const minutes = (shown: typeof data) => [
+    shown.plan.tasks.find((task) => task.id === "copy")?.estimatedMinutes,
+    shown.focus.estimates.copy,
+  ];
+  const predicted = predictEstimate("copy", 60)(data);
+  const saved = applyConfirmed(data, {
+    estimate: { taskId: "copy", minutes: 60 },
+  });
+  expect(minutes(predicted)).toEqual([60, 60]);
+  expect(saved).toEqual(predicted);
+  // Every other task, the queues and the plan's settings stay as they were.
+  expect(saved.plan.tasks.filter((task) => task.id !== "copy")).toEqual(
+    data.plan.tasks.filter((task) => task.id !== "copy"),
+  );
+  expect(saved.days).toBe(data.days);
+  expect(
+    minutes(
+      applyConfirmed(saved, { estimate: { taskId: "copy", minutes: 0 } }),
+    ),
+  ).toEqual([undefined, 0]);
 });
 
 it("mirrors Sunday's next-week choices from confirmed planning writes until the next read", async () => {

@@ -117,6 +117,10 @@ export interface ReorderResult {
   /** The lane's saved order; absent when only the tasks' order changed. */
   lane?: { lane: LaneId; taskIds: string[] };
 }
+/** A saved estimate: the task's duration in the host's task store, 0 for none. */
+export interface EstimateResult {
+  estimate: { taskId: string; minutes: number };
+}
 /** A write's server-confirmed result; void means only a re-read can show it. */
 export type Confirmed =
   | void
@@ -127,7 +131,8 @@ export type Confirmed =
   | TimerSnapshot
   | WeeklyBet
   | WeeklyBet[]
-  | ReorderResult;
+  | ReorderResult
+  | EstimateResult;
 /**
  * A write shown before it is confirmed. Only the named cards wait, dimmed and fixed in place,
  * with the predicted change if any; a failure drops it again.
@@ -254,8 +259,11 @@ export interface PlusActions {
     target: FlowDayPlan,
     beforeId?: string,
   ): Promise<FlowDayPlan[]>;
-  /** Sets the task's duration in the host's task store; FlowDay mirrors it. */
-  updateEstimate(taskId: string, minutes: number): Promise<void>;
+  /**
+   * Sets the task's duration in the host's task store, 0 to clear it; FlowDay mirrors it. Answers
+   * the duration the store saved.
+   */
+  updateEstimate(taskId: string, minutes: number): Promise<EstimateResult>;
   /** The existing authoritative FlowDay timer, without rereading task lists. */
   readTimer?(): Promise<TimerSnapshot>;
   timer(
