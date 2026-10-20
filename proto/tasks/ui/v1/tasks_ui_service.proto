@@ -190,7 +190,9 @@ service TasksUiService {
     option (google.api.method_signature) = "name";
   }
   // Completes a task and its descendants. A recurring task records one occurrence, advances its dates and
-  // reopens its descendants for the next cycle.
+  // reopens its descendants for the next cycle. In the same batch, a running or paused timer on the task or a
+  // descendant saves its session as a record and goes idle, and the subtree's steps queued on that session's day,
+  // else on focus_day, are marked done.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc CompleteTask(CompleteTaskRequest) returns (Task) {
@@ -199,7 +201,8 @@ service TasksUiService {
       body: "*"
     };
   }
-  // Reopens the task and its completed ancestors; historical completion records remain available.
+  // Reopens the task and its completed ancestors; historical completion records remain available. Their Focus queue
+  // rows marked done by that completion are open again.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc ReopenTask(ReopenTaskRequest) returns (Task) {
@@ -599,6 +602,9 @@ message CompleteTaskRequest {
   string etag = 2 [(google.api.field_behavior) = REQUIRED];
   // Stable identity for this completion occurrence.
   string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The day whose Focus queue settles; empty means Tasks' today. A related running or paused timer settles on its
+  // own day.
+  string focus_day = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 // Input to ReopenTask.
 message ReopenTaskRequest {

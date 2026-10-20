@@ -30,6 +30,7 @@ function legacyForm(method: string, input: object): object {
   if (task && (method === 'createTask' || method === 'updateTask'))
     return { ...input, task: withoutEmpty(task, ['kind', 'effort']) };
   if (resource && method.endsWith(':filters')) return { ...input, resource: withoutEmpty(resource, ['color']) };
+  if (method === 'completeTask') return withoutEmpty(input, ['focusDay']);
   return input;
 }
 /**

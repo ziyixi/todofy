@@ -1,8 +1,10 @@
 /** Focus day queues, the timer and time records (src/focus*.ts) over the owner API and a real D1. Synthetic rows. */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { CompleteTaskRequestSchema } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
+import { fromWire } from '@ziyixi/proto/wire-json';
 import { localDate } from '@ziyixi/task-dates';
-import { startHarness, type Harness } from './harness.ts';
+import { objectReceiptHash, startHarness, type Harness } from './harness.ts';
 
 const ZONE = 'America/Los_Angeles';
 let harness: Harness;
@@ -414,4 +416,114 @@ test('a read binding reads Focus and cannot change it', async () => {
     body: JSON.stringify({ request_id: randomUUID(), task_id: 'any', destination_day: '2030-10-21' }),
   });
   expect(write.status).toBe(403);
+});
+
+async function complete(step: WireTask, focusDay?: string, action: 'complete' | 'reopen' = 'complete') {
+  const current = await ok<WireTask>(await harness.fetch(`/api/tasks/v1/${step.name}`));
+  return harness.mutate('POST', `/api/tasks/v1/${step.name}:${action}`, {
+    etag: current.etag,
+    request_id: randomUUID(),
+    ...(focusDay === undefined ? {} : { focus_day: focusDay }),
+  });
+}
+async function entriesOf(step: WireTask, day: string): Promise<WireEntry[]> {
+  return ((await read(day)).entries ?? []).filter((entry) => entry.task_id === step.id);
+}
+
+test('completing a timed step saves its session on the timer day and marks that day done', async () => {
+  const step = await task('Synthetic timed completion');
+  for (const day of [today(), '2030-10-27']) await ok(await move({ task_id: step.id, destination_day: day }));
+  await ok(await command('start', { task_id: step.id, area: 'work' }));
+  await elapse(1500);
+  await ok(await complete(step, '2030-10-27'));
+  expect(await entriesOf(step, today())).toEqual([
+    expect.objectContaining({ day: today(), seconds: 1500, source: 'timer', area: 'work' }),
+  ]);
+  expect((await queue(today())).done).toContain(step.id);
+  // Completed on the timer's day: the focus_day's row is on neither list.
+  expect(await queue('2030-10-27')).toEqual({ open: [], done: [] });
+  const idle = await timer();
+  expect(idle).toMatchObject({ state: 'idle' });
+  expect(idle.task_id).toBeUndefined();
+});
+
+test('completing a parent settles a session timing one of its steps', async () => {
+  const parent = await task('Synthetic outcome');
+  const step = await task('Synthetic timed child', { parent_id: parent.id, kind: 'step' });
+  await ok(await move({ task_id: step.id, destination_day: today() }));
+  await ok(await command('start', { task_id: step.id, target_seconds: 1500 }));
+  await elapse(3000);
+  await ok(await complete(parent));
+  const [saved] = await entriesOf(step, today());
+  expect(saved).toMatchObject({ seconds: 1500, source: 'timer' });
+  expect(saved?.area).toBeUndefined();
+  expect((await queue(today())).done).toContain(step.id);
+  expect((await timer()).state).toBe('idle');
+});
+
+test('without a related session, focus_day is settled, and Tasks today when it is empty', async () => {
+  const [planned, later] = [await task('Synthetic planned completion'), await task('Synthetic today completion')];
+  await ok(await move({ task_id: planned.id, destination_day: '2030-10-28' }));
+  await ok(await move({ task_id: later.id, destination_day: today() }));
+  const other = await task('Synthetic unrelated timer');
+  await ok(await command('start', { task_id: other.id }));
+  const running = await timer();
+  await ok(await complete(planned, '2030-10-28'));
+  await ok(await complete(later));
+  expect(await queue('2030-10-28')).toEqual({ open: [], done: [planned.id] });
+  expect((await queue(today())).done).toContain(later.id);
+  // The unrelated session keeps running, untouched.
+  expect(await timer()).toEqual(running);
+  expect(await entriesOf(planned, '2030-10-28')).toEqual([]);
+  await ok(await command('stop'));
+  expect(await refusal(await complete(await task('Synthetic bad day'), '2030-02-30'))).toBe('INVALID_ARGUMENT');
+});
+
+test('a recurring step is done on its day and stays open for the next date', async () => {
+  const step = await task('Synthetic daily step', { due_date: '2030-10-21', recurrence: 'every day' });
+  await ok(await move({ task_id: step.id, destination_day: '2030-10-29' }));
+  const next = await ok<{ completed?: boolean; due_date: string }>(await complete(step, '2030-10-29'));
+  expect(next.completed).toBeUndefined();
+  expect(await queue('2030-10-29')).toEqual({ open: [], done: [step.id] });
+  // Re-adding it to the same day plans it again.
+  await ok(await move({ task_id: step.id, destination_day: '2030-10-29' }));
+  expect(await queue('2030-10-29')).toEqual({ open: [step.id], done: [] });
+});
+
+test('reopening a step opens its row on the day its completion settled', async () => {
+  const parent = await task('Synthetic reopened outcome');
+  const step = await task('Synthetic reopened step', { parent_id: parent.id, kind: 'step' });
+  await ok(await move({ task_id: step.id, destination_day: '2030-10-30' }));
+  await ok(await move({ task_id: parent.id, destination_day: '2030-10-30' }));
+  await ok(await complete(parent, '2030-10-30'));
+  expect(await queue('2030-10-30')).toEqual({ open: [], done: [step.id, parent.id] });
+  await ok(await complete(step, undefined, 'reopen'));
+  expect(await queue('2030-10-30')).toEqual({ open: [step.id, parent.id], done: [] });
+});
+
+test('a completion receipt stored before focus_day existed still replays', async () => {
+  const step = await task('Synthetic legacy completion');
+  const requestId = randomUUID();
+  const decoded = fromWire(CompleteTaskRequestSchema, {
+    name: step.name,
+    etag: step.etag,
+    request_id: requestId,
+  }).message;
+  const legacy = Object.fromEntries(Object.entries(decoded).filter(([key]) => key !== 'focusDay'));
+  const stored = { name: step.name, id: step.id, title: 'Synthetic legacy completion', etag: '2', completed: true };
+  await harness.db
+    .prepare('INSERT INTO requests(id,fingerprint,response,created_at,revision_guard) VALUES(?,?,?,1,1)')
+    .bind(requestId, await objectReceiptHash('completeTask', legacy), JSON.stringify(stored))
+    .run();
+  const replayed = await harness.mutate('POST', `/api/tasks/v1/${step.name}:complete`, {
+    etag: step.etag,
+    request_id: requestId,
+  });
+  expect(await ok(replayed)).toMatchObject(stored);
+  const other = await harness.mutate('POST', `/api/tasks/v1/${step.name}:complete`, {
+    etag: step.etag,
+    request_id: requestId,
+    focus_day: '2030-10-21',
+  });
+  expect(await refusal(other)).toBe('INVALID_ARGUMENT');
 });

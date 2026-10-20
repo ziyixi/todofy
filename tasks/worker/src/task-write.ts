@@ -10,13 +10,15 @@ import type {
   ReopenTaskRequest,
 } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
-import { addDays, clampMonthEnd, daysBetween, nextOccurrence } from '@ziyixi/task-dates';
+import { addDays, clampMonthEnd, daysBetween, localDate, nextOccurrence } from '@ziyixi/task-dates';
 import { checkedId, resourceId, taskColumns, taskMessage, type TaskRow } from './model.ts';
 import { conflict, invalid, precondition } from './errors.ts';
 import { commit, fingerprint, replay } from './receipts.ts';
 import { getTask } from './task-read.ts';
 import { taskValues, validateTask } from './task-validation.ts';
 import { moveTaskDescendants } from './task-moves.ts';
+import { checkedDay } from './focus.ts';
+import { COUNT_UP_SECONDS } from './focus-timer.ts';
 
 function result(text: string) {
   return fromWire(TaskSchema, JSON.parse(text)).message;
@@ -29,6 +31,39 @@ function checkEtag(row: TaskRow, etag: string): void {
   if (String(row.revision) !== etag) conflict();
 }
 const subtree = `WITH RECURSIVE descendants(id) AS (SELECT id FROM tasks WHERE id=? AND deleted_at IS NULL UNION ALL SELECT t.id FROM tasks t JOIN descendants d ON t.parent_id=d.id WHERE t.deleted_at IS NULL)`;
+/** The timer's session when it times the completed task or one of its descendants. */
+const relatedTimer = `focus_timer WHERE id='timer' AND state<>'idle' AND task_id IN (SELECT id FROM descendants)`;
+
+/**
+ * A completion settles Focus in its own batch, with no extra read: a related session is saved as a record (when it
+ * reaches a minute) and stops, and the subtree's steps queued on that session's day, else on `day`, are done.
+ */
+function settleFocus(db: D1Database, id: string, day: string, now: number): D1PreparedStatement[] {
+  return [
+    db
+      .prepare(
+        `${subtree} INSERT INTO focus_entries(id,task_id,day,seconds,started_at,source,area,created_at,updated_at)
+        SELECT ?,task_id,day,seconds,started_at,'timer',area,?,? FROM (SELECT task_id,day,started_at,area,
+          CAST(MIN(saved_seconds+CASE WHEN state='running' THEN MAX(0,CAST((?-segment_start)/1000 AS INTEGER)) ELSE 0 END,
+            COALESCE(target_seconds,${String(COUNT_UP_SECONDS)}))/60 AS INTEGER)*60 AS seconds
+          FROM ${relatedTimer}) WHERE seconds>=60`,
+      )
+      .bind(id, crypto.randomUUID(), now, now, now),
+    db
+      .prepare(
+        `${subtree} UPDATE day_steps SET done_at=?,updated_at=? WHERE task_id IN (SELECT id FROM descendants)
+        AND done_at IS NULL AND deleted_at IS NULL AND day=COALESCE((SELECT day FROM ${relatedTimer}),?)`,
+      )
+      .bind(id, now, now, day),
+    db
+      .prepare(
+        `${subtree} UPDATE focus_timer SET state='idle',task_id='',day='',area='',target_seconds=NULL,started_at=NULL,
+        segment_start=NULL,saved_seconds=0,revision=revision+1,updated_at=? WHERE id='timer' AND state<>'idle'
+        AND task_id IN (SELECT id FROM descendants)`,
+      )
+      .bind(id, now),
+  ];
+}
 
 export async function createTask(db: D1Database, input: CreateTaskRequest, now: number) {
   const hash = await fingerprint('createTask', input);
@@ -181,6 +216,7 @@ export async function completeTask(db: D1Database, input: CompleteTaskRequest, n
   const previous = await replay(db, input.requestId, hash);
   if (previous !== null) return result(previous);
   const id = resourceId(input.name, 'tasks');
+  const focusDay = input.focusDay ? checkedDay(input.focusDay, 'focus_day') : localDate(now, zone);
   const old = await getTask(db, id);
   checkEtag(old, input.etag);
   if (old.completed) precondition('Task is already complete');
@@ -246,6 +282,7 @@ export async function completeTask(db: D1Database, input: CompleteTaskRequest, n
         'UPDATE tasks SET completed=?,completed_at=?,due_date=?,due_datetime=?,deadline=?,recurrence=?,revision=revision+1,updated_at=? WHERE id=?',
       )
       .bind(row.completed, now, row.due_date, row.due_datetime, row.deadline, row.recurrence, now, id),
+    ...settleFocus(db, id, focusDay, now),
   );
   return result(
     await commit(
@@ -278,14 +315,23 @@ export async function reopenTask(db: D1Database, input: ReopenTaskRequest, now: 
     revision: old.revision + 1,
     updated_at: now,
   };
+  const ancestors = `WITH RECURSIVE ancestors(id,depth) AS (SELECT parent_id,1 FROM tasks WHERE id=? AND parent_id<>'' UNION ALL SELECT t.parent_id,a.depth+1 FROM tasks t JOIN ancestors a ON t.id=a.id WHERE t.parent_id<>'' AND a.depth<32)`;
   const writes = [
+    // Queue rows this task's or an ancestor's completion marked done are open again; it reads completed_at first.
+    db
+      .prepare(
+        `${ancestors} UPDATE day_steps SET done_at=NULL,updated_at=? WHERE deleted_at IS NULL
+        AND done_at=(SELECT completed_at FROM tasks WHERE id=day_steps.task_id AND completed=1)
+        AND (task_id=? OR task_id IN (SELECT id FROM ancestors))`,
+      )
+      .bind(id, now, id),
     db
       .prepare('UPDATE tasks SET completed=0,completed_at=NULL,revision=revision+1,updated_at=? WHERE id=?')
       .bind(now, id),
     // A reopened child is active again, so its completed ancestors reopen with it.
     db
       .prepare(
-        `WITH RECURSIVE ancestors(id,depth) AS (SELECT parent_id,1 FROM tasks WHERE id=? AND parent_id<>'' UNION ALL SELECT t.parent_id,a.depth+1 FROM tasks t JOIN ancestors a ON t.id=a.id WHERE t.parent_id<>'' AND a.depth<32) UPDATE tasks SET completed=0,completed_at=NULL,revision=revision+1,updated_at=? WHERE id IN (SELECT id FROM ancestors) AND completed=1 AND deleted_at IS NULL`,
+        `${ancestors} UPDATE tasks SET completed=0,completed_at=NULL,revision=revision+1,updated_at=? WHERE id IN (SELECT id FROM ancestors) AND completed=1 AND deleted_at IS NULL`,
       )
       .bind(id, now),
   ];
