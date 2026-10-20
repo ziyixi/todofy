@@ -110,18 +110,21 @@ filters, scheduled dates, deadlines, recurrence and completion history live in i
 uses the generated `TasksUiService`; full task details load on demand and lists use bounded indexed pages.
 The PWA provides an offline notice and uses task data online.
 
-Plan, Focus and Mail reuse `packages/planning-ui`. Their planning and Mail requests cross the private
-`Planning` binding to Todofy; Todofy writes task changes through Tasks' provisioned `TasksApi`. Focus's day
-queues, timer and time records are Tasks' own (`proto/tasks/ui/v1/focus.proto`): a day drag is one Tasks
-`MoveFocusStep`, and a task completion settles its Focus day and a related timer in the same Tasks write. A
-task's estimate is its Tasks duration. FlowDay, which is being retired, still reads the native change feed
-through a separate read-only binding and keeps its own queues, timers and work records; Plan and Focus no
-longer use it.
+Plan, Focus and Mail reuse `packages/planning-ui`. Planning is Tasks' own: each task's stage, area, start-ahead
+days, flags and dependencies are task fields under its one etag, and GetPlan reads the weekly goals, the Review
+lane orders and next week's commitments (`proto/tasks/ui/v1/plan.proto`). Mail requests and the weekly review's
+two facts (`ReadWeeklyReview`) cross the private `Planning` binding to Todofy; Todofy writes task changes through
+Tasks' provisioned `TasksApi`. Focus's day queues, timer and time records are Tasks' own
+(`proto/tasks/ui/v1/focus.proto`): a day drag is one Tasks `MoveFocusStep`, and a task completion settles its
+Focus day and a related timer in the same Tasks write. A task's estimate is its Tasks duration. FlowDay, which is
+being retired, still reads the native change feed through a separate read-only binding and keeps its own queues,
+timers and work records; Plan and Focus no longer use it.
 
-Todofy retains weekly rollover, text Work/Personal Bets, dependencies, Review lane order and mail receipts.
-Unfinished previous-week commitments return to weekly candidates; counts stay soft limits. Mail filing
-uses the native Inbox, with an optional category's label and priority. The task UI replaces technical
-planning labels and favorites with those controls while retaining their underlying identities.
+Tasks reads the weekly rollover as a rule rather than a job: a commitment is for its week, and once that week ends
+it reads as a weekly candidate with no write. Counts stay soft limits. Todofy retains mail receipts and the weekly
+review task; its planning store is no longer written and leaves with its code in a later release. Mail filing uses
+the native Inbox, with an optional category's label and priority. The task UI replaces technical planning labels
+and favorites with those controls while retaining their underlying identities.
 
 Imported task IDs preserve mail and FlowDay references; planning identities change provider in place.
 Tasks is the only task store: no code reads or writes Todoist, and the original account remains intact as the

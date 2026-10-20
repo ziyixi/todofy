@@ -1,6 +1,6 @@
 # Tasks
 
-Personal task management for the Todofy cloud. Tasks owns tasks, projects, sections, labels, filters and completion history, and Focus's day queues, the timer and time records. Todofy keeps mail processing and planning facts.
+Personal task management for the Todofy cloud. Tasks owns tasks, projects, sections, labels, filters and completion history; each task's planning facts (stage, area, start ahead, flags) and dependencies; Plan's weekly goals and lane orders; and Focus's day queues, the timer and time records. Todofy keeps mail processing and the weekly review's two facts.
 
 ## Development status
 
@@ -44,7 +44,8 @@ A Task or Subtask describes an outcome. Add a Step beneath it to arrange an exec
 or select Standalone action to schedule the Task itself. Only these executable items expose a clock time
 and estimate. Quick actions are always standalone, including existing Quick tasks; no second checkbox is needed.
 A Step cannot contain children. Task details can add, complete, reopen or delete either kind
-of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites.
+of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites. A task waits
+for at most 5 tasks, the account holds at most 300 dependencies, and none may close a cycle.
 
 Completing a task completes its open children, recurring ones included. Completing a recurring task records
 one occurrence, moves its date and deadline to the next one and reopens its Subtasks and Steps for that cycle,
@@ -78,7 +79,7 @@ the web app's `lint`, `typecheck`, `test`, `build` and `test:browser` from their
 
 ## Boundaries
 
-The web app depends on the public proto API, never database rows or another application's source. The Worker validates writes and owns recurrence advancement. Shared planning components take an explicit actions interface. A drag into a day changes Tasks' day queue (one MoveFocusStep), not the task's due date or deadline.
+The web app depends on the public proto API, never database rows or another application's source. The Worker validates writes and owns recurrence advancement and the planning rules (the stage rollover, Review's lane, must start). A task, its planning facts and its dependencies are one resource with one etag: the task list and its details read them with the task, and one UpdateTask writes any of them. Plan is GetPlan (the weekly goals of three weeks, the arranged lanes and next week's commitments) beside the list of open tasks. Shared planning components take an explicit actions interface. A drag into a day changes Tasks' day queue (one MoveFocusStep), not the task's due date or deadline.
 
 Completing a task is one Tasks write: it saves the occurrence, marks the task and its Steps done in the
 day's Focus queue (Plan and Focus send their day; the task list none, which means Tasks' today), and saves

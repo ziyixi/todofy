@@ -62,8 +62,12 @@ reads leniently and writes. Todofy's UI calls it through `ts/http-client.ts`; th
 Steps (`step`), which require a Task/Subtask parent and cannot contain children. `Task.effort` is empty, `deep`
 or `shallow`. Both fields use the existing task CRUD, update masks, change feed and duplication contract.
 Recurrence remains the existing date-rule text on the wire; structured controls produce that value and the
-Tasks Worker advances it. Catalog counts describe the default task views. Todofy's `PlanningTask` projects
-kind and effort for Plan/Focus; planning state and dependency edges remain in Todofy's API. `focus.proto`
+Tasks Worker advances it. Catalog counts describe the default task views. A Task also carries its planning
+facts (`stage`, `area`, `lead_days`, `planning_flags`, written by UpdateTask's mask like any field), its
+`dependencies` (the whole set, written with `update_mask=dependencies`) and what Tasks derives for its today
+(`board_stage`, `must_start`, `missing_lead`). `plan.proto` is Plan: `GetPlan` answers the weekly goals of last,
+this and next week, the Review lane orders and next week's commitments; `UpdateWeeklyBet` writes one goal, and
+`ReorderTasks.lane_order` saves a lane's order with the moved siblings' positions. `focus.proto`
 (2026-10-19) is Focus, which Tasks owns: each day's queue of steps (`ListFocusDays` reads 1 to 7 days in one bounded
 answer, `MoveFocusStep` adds, removes, reorders or moves one step), the one timer (`GetFocusTimer`,
 `CommandFocusTimer`) and its time records (`CreateFocusEntry`, `UpdateFocusEntry`, `DeleteFocusEntry`).
@@ -129,8 +133,9 @@ within its noise; todofy-core's upload 542.7 → 554.0 KiB (gzip 151.2 → 153.5
 0.01 → 0.04 ms for a small one, 0.2 → 0.7 ms with 100 attachments, 0.9 ms either way for the largest; Todofy's UI
 bundle is unchanged (its types come from the OpenAPI document).
 
-Tasks' planning and Mail API is the separate `PlusService` in `todofy/ui/v1/plus_service.proto`,
-alongside Todofy's owner API; it keeps the retired Todoist Plus extension's name. Sharing a package
+Tasks' Mail API and the weekly review's two facts (`ReadWeeklyReview`) are the separate `PlusService` in
+`todofy/ui/v1/plus_service.proto`, alongside Todofy's owner API; it keeps the retired Todoist Plus extension's
+name. Its planning methods are no longer called and are retired with Todofy's planning code. Sharing a package
 reuses its existing Python generation. Tasks serves its `/api/plus/v1/` routes behind Access and
 CSRF and forwards them on Todofy's private Planning binding, which allows only the methods Tasks
 calls. Todofy's gateway also consumes FlowDay's generated UI service through FlowDay's restricted

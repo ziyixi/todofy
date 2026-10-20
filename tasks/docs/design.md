@@ -10,8 +10,8 @@ outside the approved scope.
 | Component | Owns | Interface |
 | --- | --- | --- |
 | Tasks web | Navigation, draft forms, selection and rendered views | Generated `TasksUiService` client, same-origin owner requests |
-| Tasks Worker and D1 | Task/Subtask and Step content, effort, catalog, dates, completion history, and Focus's day queues, timer and time records | Root `proto/tasks/ui/v1`, named `TasksApi`, read-only `Ops` |
-| Todofy | Mail, weekly choices, Bets, task dependencies and operation receipts | Named `Planning` binding, limited to the planning and Mail methods Tasks calls |
+| Tasks Worker and D1 | Task/Subtask and Step content, effort, catalog, dates, completion history, planning facts, dependencies, Plan's weekly goals and lane orders, and Focus's day queues, timer and time records | Root `proto/tasks/ui/v1`, named `TasksApi`, read-only `Ops` |
+| Todofy | Mail, the weekly review task and operation receipts | Named `Planning` binding, limited to the Mail methods and ReadWeeklyReview |
 | Shared planning UI | Plan, Focus and the optional Mail shortcut editor | Caller-supplied typed transport and navigation callbacks |
 
 Applications do not import each other's source or databases. `packages/planning-ui` compiles into
@@ -38,9 +38,8 @@ Completed visibility follows the current view. Child refreshes retain the render
 rows until their replacement arrives; collapsed branches make no background reads.
 
 Row metadata separates native `#...` properties from real labels with a divider and tag icons. Planning
-facts use bounded ID batches (100 per request), separately from the detail cache; a reserved text line
-prevents asynchronous flag arrival from changing row geometry. Opening a child branch reads only that branch.
-Task fields, effort and Deadline remain visible if the planning service is unavailable.
+facts come with each row, so they never arrive after it. Opening a child branch reads only that branch, and
+opening a task reads it once (GetTask), with its dependencies.
 
 The parent editor also saves Subtask and Step ordering on drag/drop within each group. The drop line
 supports insertion before or after another child and changes only `sort_order`. It uses custom child
@@ -86,16 +85,24 @@ their request identity after a lost response. Lists support selection, batch com
 order. A normal new task appends to its sibling list inside the D1 transaction; explicit positions remain
 available for planning writes. Cross-project moves preserve descendants and update parents before children.
 
-Native planning stages, areas, lead windows and status flags belong to Todofy’s `plan_task_state`. Ordinary
-labels remain content classifications in Tasks. The ordinary editor saves generic task fields first, reads a
-fresh planning etag and then saves changed planning fields. These are separate service writes: a planning
-failure does not roll back saved task content. Dependencies name prerequisite task IDs and derive Blocked
-from their completion state; there is no independent Blocked checkbox.
+Native planning stages, areas, lead windows and status flags are task columns (migration `0006_planning.sql`),
+written by the same UpdateTask as the task's content under one etag; ordinary labels remain content
+classifications. The rules are the Worker's (`worker/src/planning.ts`): a commitment is for a week
+(`committed_week`, the next one when chosen on a Sunday) and reads as `weekly` once that week has ended, with
+no write; newly parking a task clears its stage and `active`; Quick implies Standalone action; no deadline means
+no start-ahead days. Each Task answers its rolled `stage`, Review's lane (`board_stage`), `must_start` and
+`missing_lead` for Tasks' today.
 
-The one-time private conversion keeps each imported choice,
-removes its technical label membership and soft-retires the exact replaced labels and filters. Native planning
-does not require label mapping. The role projection lives in Core's native planning code
-(`core/plus.py`, `core/native_plan.py`); it does not define the native public label catalog.
+Dependencies (`task_dependencies`) name prerequisite task IDs and derive Blocked from their completion state;
+there is no independent Blocked checkbox. They are written as the task's whole set with
+`update_mask=dependencies`: at most 5 per task and 300 in the account, no cycle, an open prerequisite, all
+checked inside the write's batch. A removed edge is soft-deleted and revives when added again. Deleting a task
+removes the edges at both ends; completing one removes the edges of what it waited for.
+
+Plan's weekly goals (`weekly_bets`, one line per week and area, this and next week writable) and the owner's
+order of each Review lane (`plan_board`, one document) are read by GetPlan with next week's commitments, in
+one batch. A goal is a value write with no request ID: the saved text answers as saved; otherwise its etag must
+match. A lane order is saved by ReorderTasks with `lane_order`, beside the moved siblings' positions.
 Dragging a task into a planning day changes Tasks' day queue with one `MoveFocusStep`, preserving its task
 date and real deadline. A day holds at most 20 steps. Deleting a task, its project or its section takes its
 steps off every day in the same batch, so they never fill a day; its time records stay.
@@ -136,8 +143,8 @@ The Mail page reads only its bounded mail API and summaries expanded by the owne
 Focus or a task-project snapshot to discover mail. Optional tag/priority shortcuts are ordinary Tasks
 labels, separate from planning flags. Weekly review and GTD carryover count the pending Mail collection.
 
-Planning, filing and order writes use generated Tasks method/body requests; no Todoist path or fallback
-remains. A binding grants `read` or `read-write` access,
+Planning and order writes are Tasks' own; Todofy's filing writes use generated Tasks method/body requests.
+No Todoist path or fallback remains. A binding grants `read` or `read-write` access,
 so the Tasks implementation does not enumerate application names or understand mail categories.
 
 Bulk order updates use one Tasks request, one receipt and a bounded D1 transaction for all supplied etags.
@@ -149,7 +156,11 @@ They avoid one service call per task. Cloudflare documents a finite invocation c
 Task pages are limited to 100 rows. Lists return a short description preview; full descriptions load when
 a task opens. Indexed keyset pagination serves tasks, changes and history: a task cursor compares a row value
 and a task-ID lookup joins `json_each`, so both seek an index. Consumers advance their own change cursor.
-Plan/Focus code loads separately from the everyday task list. Timer rendering needs no server polling.
+Timer rendering needs no server polling.
+Plan is one GetPlan batch beside the pages of open tasks; each task row brings its planning facts and its
+dependencies (one correlated subquery), so nothing reads planning separately. `cpu.test.ts` bounds a page of
+100 planned tasks (60 waiting for 5 each), the fullest plan and a dependency write; `read-budget.test.ts` bounds
+the rows GetPlan and a task's dependencies read.
 
 Migration 0004 keeps reads independent of history. An open-roots index serves the Inbox and project roots
 without completed tasks, and a partial index counts only native completions, not imported occurrences.

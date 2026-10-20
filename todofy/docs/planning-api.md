@@ -1,12 +1,11 @@
 # Planning API
 
-`PlusService` (`proto/todofy/ui/v1/plus_service.proto`) is Tasks' planning and Mail API: Plan, Focus and Mail in
-Tasks read and write through it. Tasks keeps the tasks. Todofy keeps the planning facts Tasks does not hold (each
-task's saved stage and planning flags, the weekly Bets, dependencies, lane orders and next week's choices) and the
-mail summaries. Focus's day queues, timer and time records are Tasks' own (`proto/tasks/ui/v1/focus.proto`); Todofy
-holds none of them. The service keeps the name of the retired Todoist Plus extension
-([history](../../docs/history/todoist-plus.md)), because renaming a published service is a breaking change; its
-paths stay `/api/plus/v1/*`.
+`PlusService` (`proto/todofy/ui/v1/plus_service.proto`) is Tasks' Mail API and the weekly review's two facts. Tasks
+keeps the tasks and, since `0006_planning.sql`, their planning facts, dependencies, the weekly Bets and lane orders;
+Todofy keeps the mail summaries, and its old planning store until the cleanup release removes it. Focus's day
+queues, timer and time records are Tasks' own (`proto/tasks/ui/v1/focus.proto`); Todofy holds none of them. The
+service keeps the name of the retired Todoist Plus extension ([history](../../docs/history/todoist-plus.md)),
+because renaming a published service is a breaking change; its paths stay `/api/plus/v1/*`.
 
 ## Channel and allowlist
 
