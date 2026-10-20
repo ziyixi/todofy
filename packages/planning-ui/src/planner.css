@@ -46,7 +46,13 @@
   display: none;
   width: max-content;
   max-width: min(320px, calc(100vw - 32px));
-  padding: 6px 8px;
+  /* The 6px / 8px inset is a transparent border, not padding: the clamp's overflow is cut at the
+     padding edge, so a seventh line never peeks out under the sixth. The outline is the 1px edge. */
+  padding: 0;
+  border: solid transparent;
+  border-width: 6px 8px;
+  outline: 1px solid var(--plus-line);
+  outline-offset: -1px;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 6;
   overflow: hidden;
@@ -58,10 +64,13 @@
   white-space: normal;
   overflow-wrap: anywhere;
   background: var(--plus-bg);
-  border: 1px solid var(--plus-line);
   border-radius: 6px;
   box-shadow: var(--plus-shadow-2);
   pointer-events: none;
+}
+.planning-full-title[data-cut="end"] > .planning-full-title-bubble {
+  left: auto;
+  right: -1px;
 }
 button:is(:hover, :focus-visible)
   .planning-full-title[data-cut]

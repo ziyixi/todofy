@@ -362,6 +362,11 @@
 .planning-commitment > .planning-outcome-card {
   padding-right: 34px;
 }
+/* The complete button sits by the title; the meta line below it may use that width too. */
+.review-draggable > .planning-outcome-card .planning-outcome-meta,
+.planning-commitment > .planning-outcome-card .planning-outcome-meta {
+  margin-right: -25px;
+}
 .review-draggable > .planning-complete,
 .planning-commitment > .planning-complete {
   position: absolute;

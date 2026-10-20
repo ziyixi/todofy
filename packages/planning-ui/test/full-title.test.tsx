@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { FullTitle, markCut } from "../src/FullTitle";
 
 afterEach(cleanup);
@@ -87,4 +87,28 @@ it("measures again when the text changes, so the mark follows the new text", () 
   expect(
     button.querySelector(".planning-full-title")!.hasAttribute("data-cut"),
   ).toBe(false);
+});
+
+it("opens the bubble leftwards from a title too near the window's right edge", () => {
+  host("A long title near the right edge");
+  const button = screen.getByRole("button");
+  const title = button.querySelector<HTMLElement>(".planning-full-title")!;
+  const text = button.querySelector<HTMLElement>(".planning-full-title-text")!;
+  measure(text, { ...fits, scrollWidth: 240 });
+  Object.defineProperty(document.documentElement, "clientWidth", {
+    configurable: true,
+    value: 1440,
+  });
+  const at = (left: number) =>
+    vi
+      .spyOn(title, "getBoundingClientRect")
+      .mockReturnValue(DOMRect.fromRect({ x: left, width: 150, height: 16 }));
+  // Room for the widest bubble (320px) and the 16px margin: it opens rightwards.
+  at(1104);
+  fireEvent.pointerEnter(button);
+  expect(title.getAttribute("data-cut")).toBe("");
+  at(1105);
+  fireEvent.focus(button);
+  expect(title.getAttribute("data-cut")).toBe("end");
+  Reflect.deleteProperty(document.documentElement, "clientWidth");
 });

@@ -139,15 +139,13 @@ function QuickCard({
       </button>
       <button
         className="planning-quick-title"
+        // The edge colour says the area, and so does the name, after the whole title.
+        aria-label={`${title}${language === "zh" ? "，" : ", "}${text[effectiveArea(task, planTasks)]}`}
         onClick={() => editTask(task)}
         onPointerEnter={markCut}
         onFocus={markCut}
       >
         <FullTitle text={title} />
-        {/* The edge colour says the area; screen readers hear it. */}
-        <span className="plus-sr-only">
-          {`${language === "zh" ? "，" : ", "}${text[effectiveArea(task, planTasks)]}`}
-        </span>
       </button>
       <CompleteTaskButton
         task={task}
