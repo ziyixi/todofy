@@ -21,6 +21,62 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/*
+ * A title cut to one line (or its clamp, which the card sets on the text), and its full text in a
+ * bubble under it. The bubble shows on hover or keyboard focus of the button holding the title, only
+ * when markCut found the text cut (FullTitle.tsx), after a short wait; never during a drag. The
+ * outer span clips nothing, so no ancestor of the bubble may either.
+ */
+.planning-full-title {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+.planning-full-title-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.planning-full-title-bubble {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: -1px;
+  z-index: 5;
+  display: none;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 6px 8px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  color: var(--plus-text);
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  background: var(--plus-bg);
+  border: 1px solid var(--plus-line);
+  border-radius: 6px;
+  box-shadow: var(--plus-shadow-2);
+  pointer-events: none;
+}
+button:is(:hover, :focus-visible)
+  .planning-full-title[data-cut]
+  > .planning-full-title-bubble {
+  display: -webkit-box;
+  animation: planning-full-title-wait 350ms step-end both;
+}
+.planning-ui:has(.is-dragging) .planning-full-title-bubble {
+  display: none;
+}
+@keyframes planning-full-title-wait {
+  from {
+    visibility: hidden;
+  }
+}
 @media (max-width: 1400px) {
   .plus-root.plus-root-plan {
     width: calc(100% - 40px);
