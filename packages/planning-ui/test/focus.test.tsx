@@ -70,20 +70,34 @@ it("shows cleaned parent context, and a task Plan does not list from Tasks' read
       name: /Choose tasks|Drag step|Remove from day|Move up|Move down/,
     }),
   ).toBeNull();
-  // The only choice is the timer's length.
+  // The only choice is the timer's length, and counting up comes first.
   expect(
     screen
       .getAllByRole("combobox")
       .map((select) => select.getAttribute("aria-label")),
   ).toEqual(["Timer duration"]);
+  const length = screen.getByRole<HTMLSelectElement>("combobox", {
+    name: "Timer duration",
+  });
+  expect([...length.options].map((option) => option.text)).toEqual([
+    "Count up",
+    "25 min",
+    "50 min",
+  ]);
+  expect(length.value).toBe("0");
   fireEvent.click(
     screen.getByRole("button", { name: "Start: Synthetic leaf" }),
   );
   expect(
     screen.getByRole("button", { name: "Start: Synthetic leaf" }).textContent,
   ).toBe("Start");
-  // A 25-minute pomodoro unless another length is chosen.
-  expect(onTimer).toHaveBeenCalledWith("start", "copy", 25 * 60);
+  // Counting up unless a pomodoro is chosen, with the area the step takes from its outcome.
+  expect(onTimer).toHaveBeenLastCalledWith("start", "copy", undefined, "work");
+  fireEvent.change(length, { target: { value: String(25 * 60) } });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Start: Synthetic leaf" }),
+  );
+  expect(onTimer).toHaveBeenLastCalledWith("start", "copy", 25 * 60, "work");
   expect(complete).not.toHaveBeenCalled();
 });
 
@@ -167,4 +181,32 @@ it("sends an empty today queue back to Plan instead of presenting another task p
   fireEvent.click(screen.getByRole("button", { name: "Adjust plan" }));
   expect(onOpenPlan).toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "Choose tasks" })).toBeNull();
+});
+
+it("starts a step whose outcome has no area as unassigned, which Tasks keeps as no area", async () => {
+  const { plan, focus } = await createPrototype().load();
+  for (const task of plan.tasks)
+    if (task.id === "copy" || task.id === "release") task.area = "unassigned";
+  const onTimer = vi.fn();
+  render(
+    <FocusView
+      plan={plan}
+      focus={focus}
+      language="en"
+      busy={false}
+      editTask={vi.fn()}
+      complete={vi.fn()}
+      onOpenPlan={vi.fn()}
+      onTimer={onTimer}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Start: Write the introduction" }),
+  );
+  expect(onTimer).toHaveBeenCalledWith(
+    "start",
+    "copy",
+    undefined,
+    "unassigned",
+  );
 });

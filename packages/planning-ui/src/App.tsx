@@ -35,6 +35,7 @@ import { WeeklyGoals } from "./WeeklyGoals";
 import { localDate } from "./mail";
 import type { PlanViewPatch, PlanViewState } from "./plan-view-state";
 import type {
+  Area,
   Language,
   PendingChange,
   PlanState,
@@ -462,13 +463,17 @@ export function App({
       },
     );
   }
+  /** One timer command; Start also sends its pomodoro length (none counts up) and the task's area. */
   function commandTimer(
     action: "start" | "pause" | "resume" | "stop" | "finish",
     taskId: string,
     targetSeconds?: number,
+    area?: Area,
   ) {
     if (!data) return;
-    void run(() => actions.timer(action, taskId, data.focus, targetSeconds));
+    void run(() =>
+      actions.timer(action, taskId, data.focus, targetSeconds, area),
+    );
   }
   /**
    * Completes in Tasks, which marks the task done in `focusDay`'s queue: Focus's day by default, a

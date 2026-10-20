@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
-import { formattedMinutes, taskIndex } from "./domain";
+import { effectiveArea, formattedMinutes, taskIndex } from "./domain";
 import { unplannedDue, unplannedText } from "./deadlines";
 import { FocusBlock } from "./FocusBlock";
 import { pendingStep } from "./plan-updates";
 import { words } from "./i18n";
 import type {
+  Area,
   DayPlan,
   FocusState,
   Language,
@@ -29,10 +30,12 @@ interface Props {
   editTask: (task: PlanningTask) => void;
   complete: (task: PlanningTask) => void;
   onOpenPlan: () => void;
+  /** A timer command; Start sends the chosen pomodoro length, none to count up, and the task's area. */
   onTimer: (
     action: "start" | "pause" | "resume" | "stop",
     taskId: string,
     targetSeconds?: number,
+    area?: Area,
   ) => void;
 }
 
@@ -51,7 +54,8 @@ export function FocusView({
   onTimer,
 }: Props) {
   const text = words(language);
-  const [targetSeconds, setTargetSeconds] = useState(25 * 60);
+  // Counting up is the default: Start, work, then complete the step, which saves its time.
+  const [targetSeconds, setTargetSeconds] = useState(0);
   const byId = taskIndex(plan.tasks);
   const queue = focus.taskIds.filter(
     (id) => !focus.completedTaskIds.includes(id),
@@ -94,10 +98,14 @@ export function FocusView({
               disabled={busy || Boolean(focus.timer)}
               onChange={(event) => setTargetSeconds(Number(event.target.value))}
             >
-              <option value={25 * 60}>25 min</option>
-              <option value={50 * 60}>50 min</option>
               <option value={0}>
                 {language === "zh" ? "正计时" : "Count up"}
+              </option>
+              <option value={25 * 60}>
+                {language === "zh" ? "25 分钟" : "25 min"}
+              </option>
+              <option value={50 * 60}>
+                {language === "zh" ? "50 分钟" : "50 min"}
               </option>
             </select>
           </label>
@@ -137,11 +145,17 @@ export function FocusView({
                 completing?.has(id) ||
                 pending?.has(pendingStep(focus.date, id)),
               )}
-              onTimer={(action, taskId) =>
-                action === "start"
-                  ? onTimer(action, taskId, targetSeconds)
-                  : onTimer(action, taskId)
-              }
+              onTimer={(action, taskId) => {
+                const task = byId.get(taskId);
+                if (action !== "start") onTimer(action, taskId);
+                else if (task)
+                  onTimer(
+                    action,
+                    taskId,
+                    targetSeconds || undefined,
+                    effectiveArea(task, plan.tasks),
+                  );
+              }}
               editTask={editTask}
               complete={complete}
               index={index}

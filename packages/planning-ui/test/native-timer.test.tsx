@@ -104,11 +104,20 @@ it("starts the selected pomodoro through the existing action and finishes a relo
   } as unknown as PlusActions;
   render(<App {...props(actions)} />);
   await act(async () => {});
+  fireEvent.change(screen.getByRole("combobox", { name: "Timer duration" }), {
+    target: { value: "1500" },
+  });
   fireEvent.click(
     screen.getByRole("button", { name: "Start: Synthetic focused step" }),
   );
   await act(async () => {});
-  expect(timer).toHaveBeenCalledWith("start", "step", expect.anything(), 1500);
+  expect(timer).toHaveBeenCalledWith(
+    "start",
+    "step",
+    expect.anything(),
+    1500,
+    "work",
+  );
   cleanup();
   loaded.focus.timer = {
     taskId: "step",
