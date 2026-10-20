@@ -159,6 +159,23 @@ is one request; completing a card is one CompleteTask, then one reload wave.
   - The import copies facts once: its SQL ends by recording when it ran in `plan_board.created_at` (0 until then),
     so a second apply never brings back a fact the owner cleared in Tasks.
   - Without the archived-project rule, the estimate's etag or the import's run record, the matching new test fails.
+- **First-request CPU (2026-10-20 UTC), done.** The branch's CI run 39459937383 failed only `cpu.test.ts`, twice:
+  an isolate's first read of the fullest Focus week and its first page of planned tasks read 10.01 reference ms
+  against their bound of 10 (the first task page 8.51). Inspector profiles of the first request (50 µs samples)
+  put about 4.6 ms above the warm request: lazy compilation of the request path (about 2.4 ms; V8's `--no-lazy`
+  removed it), the wire codec's rule walk over every field of an answer no rule applies to (1.1 ms first, 0.7
+  warm), descriptor options read on first use, the account zone's first Intl formatter (0.16 ms) and per-row date
+  parsing (0.5 ms warm). The Access JWT path (certs fetch, one key import, the RS256 check) cost about 1 ms first and
+  0.25 warm; its key cache is already per isolate, and the global scope can neither fetch nor build a Response.
+  - Fixed without touching the tests: the rule check skips a type no rule reaches, and the codec keeps each type's
+    field order and names (`proto/ts`); the transcoder reads the codec's descriptor tables at construction
+    (`prepareWire`); `task-dates` parses a day once; planning derives the week and horizon once per day; Tasks'
+    `warmUp` (index.ts calls it with the account's zone) creates that zone's formatter, reads a request strictly
+    and runs `listTasks` whole over synthetic rows through a stub D1.
+  - Four interleaved local runs of `cpu.test.ts` (medians of three isolates, reference ms, first run): the task page
+    7.03 → 5.22, the Focus week 7.99 → 5.52, planned tasks 8.90 → 5.77; warm medians down or within their spread.
+  - Local checks at the fix: Tasks, Proto, Shared packages, Contracts, Mail Hero, FlowDay, Links, Watch, Dashboard,
+    Todofy static and all 498 Todofy runtime tests passed; a `proto/ts` change re-checks every TypeScript app in CI.
 
 ### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
 
