@@ -243,7 +243,7 @@ it("draws the breadcrumb's bar in the task's area colour", async () => {
   );
 });
 
-it("keeps timed steps readable while preventing their move, and warns rather than rejecting long steps", async () => {
+it("keeps timed steps readable while preventing their move, and marks rather than rejects long steps", async () => {
   const data = await props();
   const task = data.plan.tasks.find((task) => task.id === "copy")!;
   task.estimatedMinutes = 120;
@@ -262,9 +262,18 @@ it("keeps timed steps readable while preventing their move, and warns rather tha
       name: "Next steps: Ship the small website refresh",
     }),
   );
+  // The estimate in the warning colour is the whole cue: no sentence on the card.
   expect(
-    tray.getByText("Over 2 hours. You can keep it or split it further."),
-  ).toBeTruthy();
+    tray.queryByText("Over 2 hours. You can keep it or split it further."),
+  ).toBeNull();
+  expect(
+    document.querySelector(
+      '.planning-tray-step[data-task-id="copy"] .planning-step-long',
+    )?.textContent,
+  ).toBe("2h");
+  expect(
+    document.querySelectorAll(".planning-tray-step .planning-step-long"),
+  ).toHaveLength(1);
   expect(
     (
       tray.getByRole("button", {

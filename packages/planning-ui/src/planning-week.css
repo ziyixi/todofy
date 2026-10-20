@@ -135,12 +135,14 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
+/* A fixed 60px: 9 + 9 padding, 2 border, a 20px title line, 4 gap and a 16px meta line. */
 .planning-tray-step {
   position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  height: 60px;
   padding: 9px 10px;
   background: var(--plus-surface);
   border: 1px solid var(--plus-line);
@@ -148,20 +150,44 @@
   border-radius: 6px;
 }
 .planning-week .planning-step-title {
+  flex: 1;
+  min-width: 0;
   padding: 0;
   text-align: left;
-  display: grid;
-  min-width: 0;
   font-size: 14px;
-  line-height: 1.4;
-  flex: 1;
-  gap: 4px;
-  overflow-wrap: break-word;
 }
-.planning-step-title small {
+/* Next steps: one line of title and one of meta, each cut with an ellipsis, so no text (a long
+   URL too) changes the card's size. The title's own text is cut inside FullTitle. */
+.planning-tray-step .planning-step-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  line-height: 20px;
+}
+.planning-tray-step .planning-step-title > :not(.planning-full-title) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.planning-tray-step .planning-step-title > small {
   font-size: 12px;
-  color: var(--plus-muted);
+  line-height: 16px;
   font-weight: 400;
+  color: var(--plus-muted);
+}
+/* Two hours or more: the estimate in the warning colour is the whole cue. */
+.planning-step-long {
+  color: var(--plus-warning);
+}
+/* Calendar: at most three lines, since a day column clips; the full title is the tooltip. */
+.planning-calendar-step .planning-step-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .planning-week .planning-drag-handle {
   display: flex;

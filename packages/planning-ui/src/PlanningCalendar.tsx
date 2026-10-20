@@ -366,8 +366,10 @@ function CalendarStep({
         >
           <GripVertical size={14} />
         </button>
+        {/* Three lines at most; a day column clips, so the full title is the native tooltip. */}
         <button
           className="planning-step-title"
+          title={title}
           disabled={!task}
           onClick={() => task && editTask(task)}
         >

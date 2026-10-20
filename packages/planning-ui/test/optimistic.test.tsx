@@ -852,7 +852,9 @@ function withNestedStep(actions: PlusActions) {
 /** Next steps' titles, in order. */
 function trayTitles() {
   return [...document.querySelectorAll(".planning-tray-step")].map(
-    (step) => step.querySelector(".planning-step-title span")?.textContent,
+    (step) =>
+      step.querySelector(".planning-step-title .planning-full-title-text")
+        ?.textContent,
   );
 }
 

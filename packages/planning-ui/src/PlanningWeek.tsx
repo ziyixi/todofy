@@ -43,6 +43,7 @@ import {
   predictMove,
 } from "./plan-updates";
 import { PendingMark } from "./StatusMarks";
+import { FullTitle, markCut } from "./FullTitle";
 import { QuickTasks } from "./QuickTasks";
 import { quickTray, unscheduledCommitments } from "./weekly-review";
 import { words } from "./i18n";
@@ -496,7 +497,9 @@ export function PlanningWeek(props: Props) {
 
 /**
  * One next step: a drag into a day plans it there, and one onto a sibling (the same parent and
- * project) puts it in that place in Todoist's order.
+ * project) puts it in that place in Todoist's order. A fixed 60px card: one line of title, whose
+ * full text floats on hover or focus, and one of estimate and days. An estimate of two hours or
+ * more is drawn in the warning colour, which is the whole cue.
  */
 function TrayStep({
   task,
@@ -593,19 +596,28 @@ function TrayStep({
       >
         <GripVertical size={14} />
       </button>
-      <button className="planning-step-title" onClick={() => editTask(task)}>
-        <span>{title}</span>
+      <button
+        className="planning-step-title"
+        onClick={() => editTask(task)}
+        onPointerEnter={markCut}
+        onFocus={markCut}
+      >
+        <FullTitle text={title} />
         <small>
-          {task.estimatedMinutes === undefined
-            ? text.unknown
-            : formattedMinutes(task.estimatedMinutes)}
+          {task.estimatedMinutes === undefined ? (
+            text.unknown
+          ) : (
+            <span
+              className={
+                task.estimatedMinutes >= 120 ? "planning-step-long" : undefined
+              }
+            >
+              {formattedMinutes(task.estimatedMinutes)}
+            </span>
+          )}
           {scheduled.length > 0 &&
             ` · ${scheduled.map((day) => shortDay(day.date, language)).join(", ")}`}
         </small>
-        {task.estimatedMinutes !== undefined &&
-          task.estimatedMinutes >= 120 && (
-            <small className="planning-step-warning">{text.longStep}</small>
-          )}
       </button>
       {pending && <PendingMark language={language} />}
       <CompleteTaskButton
