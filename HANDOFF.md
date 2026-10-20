@@ -85,11 +85,15 @@ The lead's production steps right after the release, in this order:
 
 ### Plan and Focus owner changes (`claude/plan-focus-ui`)
 
-**In progress, local only.** A branch from `origin/main` `b7b52e75` for the owner's ten Plan and Focus changes of
-2026-10-19, which ship in one release. Slices, in order: A (card layout and area colours), B (the Step panel and
-double-click), C (whole-row drag in Plan), D1 (Tasks' Focus backend) and D2 (planning-ui and the Tasks host switch
-to it) are done; D3 (Focus reorder, Completed and the Day/Week/Month views) remains. FlowDay keeps running untouched,
-nothing new uses it, and its queue and time data are not migrated (owner decision).
+**Done, local only; not pushed.** A branch from `origin/main` `b7b52e75` for the owner's ten Plan and Focus
+changes of 2026-10-19, which ship in one release. Slices, in order: A (card layout and area colours), B (the Step
+panel and double-click), C (whole-row drag in Plan), D1 (Tasks' Focus backend), D2 (planning-ui and the Tasks host
+switch to it) and D3 (Focus reorder, Completed and the Day/Week/Month views) are all done. FlowDay keeps running
+untouched, nothing new uses it, and its queue and time data are not migrated (owner decision). To ship: merge
+`origin/main` again if it has moved, rerun the jobs `ci_changes.py` selects (every check, since D1 changed the Tasks
+API and D2 `.github/scripts`), push, wait for the complete gate and fast-forward `main` to the same green SHA. Tasks
+applies migration `0005`; FlowDay's checks and deploy run because `proto/tasks/ui/` changed, and its deploy changes
+nothing it does.
 
 - **Slice A (2026-10-20 UTC).** Plan and Focus cards are coloured by area (Work slate, Personal ochre, Unassigned
   none) with legend dots; outcome cards are 77px with one left-aligned meta line, the deadline first in a two-part
@@ -137,6 +141,14 @@ nothing new uses it, and its queue and time data are not migrated (owner decisio
   `.github/scripts` tests); its decide step again could not run locally. The other apps' code is unchanged since
   the D1 runs above. The Tasks Worker bundle stays 130.5 of 132 KiB. The web's shared `api` chunk (124 kB) folded
   into its index (590 to 698 kB); the two together went from 714 to 698 kB, 230 to 223 kB gzip.
+  For slice D3 `ci_changes.py` selects Changes, Shared packages, Contracts and Tasks for its own commits (D3 touches
+  planning-ui, Tasks' browser tests and docs). On macOS these passed: Shared packages (planning-ui's 266 unit tests
+  in 37 files), Contracts, and Tasks (the Worker's 18 runtime files and 80 tests unchanged; the web's lint,
+  typecheck, 65 unit tests, build and all 102 Playwright tests, including the new `focus-time.spec.ts` and the Focus
+  reorder journey in `planning-drag.spec.ts`). Changes' test steps and the 453 `.github/scripts` tests passed; its
+  decide step again could not run locally. The count-up journey waits past a minute, because Tasks saves only a
+  session of a minute or more. Plan and Focus's lazy chunk grew from 118.9 to 137.3 kB (37.3 to 43.0 kB gzip) and its
+  CSS from 43.9 to 51.5 kB; the main chunk is unchanged at 698 kB.
 - **Slice D1 (2026-10-20 UTC).** Tasks owns Focus; nothing calls it until D2. Migration `0005_focus.sql` adds day
   queues (`day_steps`), time records (`focus_entries`) and the one timer row (`focus_timer`), never hard-deleted.
   `proto/tasks/ui/v1/focus.proto` and seven methods: `ListFocusDays` (1-7 days, their records, every task they name
@@ -160,9 +172,20 @@ nothing new uses it, and its queue and time data are not migrated (owner decisio
   in `tasks/` or `packages/planning-ui/` uses FlowDay; the one-time estimate backfill (`tasks/tools/estimate-backfill.ts`
   and its `backup.md` section) stays until it has run, and `backup.md`'s FlowDay mirror reset stays while FlowDay
   runs. Browser journeys keep Focus in the dev server's D1 (`planning-stub.ts` `seedFocus`).
+- **Slice D3 (2026-10-20 UTC).** Focus has Day, Week and Month tabs with previous/next and Today; the page
+  header follows the view and date, and Focus always opens on today's Day. Count up is the default timer and Start
+  sends the step's area. Each card's one time number is its logged time ("Est. 30m · 35m logged", ticking as a
+  clock while its session runs, inside a small `LoggedTime`), which opens the day's records (`FocusEntries.tsx`):
+  change whole minutes, add time or delete, each write through the App's queue (`pendingEntry`). Other days are
+  read-only, though today's and past days' records still change. A header checkbox shows the day's completed steps
+  after the open ones, off on every visit. Week shows logged time by area, steps done, time against the estimate, a
+  bar a day stacked by area and where the time went (grouped by each step's parent); Month a shaded calendar of its
+  days (`focus-stats.ts`). Other ranges are read with `readFocus`, kept while Focus is open and read again after
+  each confirmed write. Today's open steps reorder by their whole row (one `MoveFocusStep` within the day).
 - **Owner, with this release (D1-D3):** stop any FlowDay timer that is running before it. Afterwards this week's
-  day queues are empty, because nothing is migrated: arrange the week once in Plan › Week. FlowDay's own site keeps
-  working until its decommission; nothing reads it any more.
+  day queues are empty, because nothing is migrated: arrange the week once in Plan › Week. Focus now counts up by
+  default: Start, work, then ✓ saves the time; each step's logged time opens its records. Focus cards drag by their
+  whole row. FlowDay's own site keeps working until its decommission; nothing reads it any more.
 - **Known limit.** With all seven Review lanes at a 1440px window (six cards a row, about 155px each) the step counts
   end in an ellipsis; the cards keep their 77px.
 
