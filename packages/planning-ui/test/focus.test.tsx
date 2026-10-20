@@ -410,6 +410,52 @@ it("shows another day read-only, where a past day's records still change and a f
   ).toBeTruthy();
 });
 
+it("keeps a day's records of steps that left its queue under Other time, where they still change", async () => {
+  const { props } = await views();
+  // Monday's step moved on after its 20 minutes; today has 15 minutes on Wednesday's step.
+  await props.actions.removeFromDay("layout", "2026-10-12");
+  await props.actions.addEntry({
+    taskId: "cleanup",
+    date: "2026-10-13",
+    seconds: 15 * 60,
+    area: "work",
+  });
+  const { focus } = await props.actions.load();
+  const { rerender } = render(
+    <FocusView {...props} focus={focus} date="2026-10-12" />,
+  );
+  expect(
+    await screen.findByText("No steps planned for this day."),
+  ).toBeTruthy();
+  let other = screen.getByRole("region", { name: "Other time" });
+  expect(
+    within(other).getByRole("button", {
+      name: "20m logged (Check the layout on a phone)",
+    }),
+  ).toBeTruthy();
+  // Today: the card follows the open queue, read-only, and the summary adds up with it.
+  rerender(<FocusView {...props} focus={focus} />);
+  const queue = await screen.findByRole("list", { name: "Today's steps" });
+  expect(queue.querySelector('[data-task-id="cleanup"]')).toBeNull();
+  other = screen.getByRole("region", { name: "Other time" });
+  expect(
+    queue.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    within(other).getByRole("button", {
+      name: "15m logged (Clear out the old development branch)",
+    }),
+  ).toBeTruthy();
+  expect(
+    within(other).queryByRole("button", {
+      name: /^(Start|Complete task|Move step):/u,
+    }),
+  ).toBeNull();
+  expect(
+    document.querySelector(".plus-focus-totals")!.textContent,
+  ).toContain("15m logged");
+});
+
 it("draws Week as a bar a day, each named in full, which opens that day", async () => {
   const { props, onNavigate } = await views();
   render(<FocusView {...props} tab="week" date="2026-10-14" />);

@@ -109,6 +109,7 @@ const en = {
   // Focus's logged time and its records.
   est: (minutes: string) => `Est. ${minutes}`,
   logged: (time: string) => `${time} logged`,
+  otherTime: "Other time",
   logTime: "Log time",
   timeRecords: "Time records",
   minutesAt: (time: string) => `Minutes, ${time}`,
@@ -251,6 +252,7 @@ const zh: typeof en = {
     "在 Plan 中周日选的承诺会留到下周，其余的周一照常重置。目标按周保存，不会被清除。",
   est: (minutes: string) => `预计 ${minutes}`,
   logged: (time: string) => `已用 ${time}`,
+  otherTime: "其他用时",
   logTime: "记录时间",
   timeRecords: "用时记录",
   minutesAt: (time: string) => `分钟，${time}`,

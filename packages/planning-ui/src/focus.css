@@ -354,10 +354,14 @@
   flex: 1;
   border-top: 1px solid var(--plus-line);
 }
-/* Dimmed part by part, not as a whole, so an open records popover stays opaque and on top. */
+/* Dimmed part by part, not as a whole, so an open records popover stays opaque and on top. Steps
+   in Other time, which left the day's queue, are as quiet, without the strike-through. */
 .plus-focus-block.is-done > .plus-checkbox,
-.plus-focus-block.is-done :is(.plus-focus-block-top, .plus-focus-parent),
-.plus-focus-block.is-done .plus-focus-block-footer > :not(.plus-focus-entries) {
+:is(.plus-focus-block.is-done, .plus-focus-other .plus-focus-block)
+  :is(.plus-focus-block-top, .plus-focus-parent),
+:is(.plus-focus-block.is-done, .plus-focus-other .plus-focus-block)
+  .plus-focus-block-footer
+  > :not(.plus-focus-entries) {
   opacity: 0.72;
 }
 .plus-root .plus-focus-block.is-done .plus-focus-title {

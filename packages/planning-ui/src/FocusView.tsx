@@ -403,6 +403,7 @@ function FocusDay({
 }) {
   const text = words(language);
   const doneHeading = useId();
+  const otherHeading = useId();
   // The drag instructions every grip names.
   const hintId = useId();
   const list = useRef<HTMLOListElement>(null);
@@ -439,6 +440,13 @@ function FocusDay({
   const totalMinutes = queue.reduce((sum, id) => sum + minutesOf(id), 0);
   // The day's records, and the session when it counts on this day.
   const logged = day.entries.reduce((sum, entry) => sum + entry.seconds, 0);
+  // Steps with records here that left the day's queue (moved on, removed): their time still counts
+  // and stays editable, so every record of the day has a card.
+  const others = future
+    ? []
+    : [...new Set(day.entries.map((entry) => entry.taskId))].filter(
+        (id) => !day.taskIds.includes(id) && !day.completedTaskIds.includes(id),
+      );
   const session = focus.timer?.day === day.date ? focus : undefined;
   const unknown = queue.filter((id) => !minutesOf(id)).length;
   let stepLabel = language === "zh" ? "个步骤" : "steps";
@@ -676,6 +684,19 @@ function FocusDay({
           <ul className="plus-focus-stack">
             {day.completedTaskIds.map((id, index) => (
               <FocusBlock key={id} {...block(id, index, "done")} />
+            ))}
+          </ul>
+        </section>
+      )}
+      {others.length > 0 && (
+        <section className="plus-focus-other" aria-labelledby={otherHeading}>
+          <h2 id={otherHeading} className="plus-focus-divider">
+            {text.otherTime}
+          </h2>
+          {/* Read-only: only their records change here. */}
+          <ul className="plus-focus-stack">
+            {others.map((id, index) => (
+              <FocusBlock key={id} {...block(id, index, "readonly")} />
             ))}
           </ul>
         </section>
