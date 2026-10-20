@@ -110,11 +110,13 @@ filters, scheduled dates, deadlines, recurrence and completion history live in i
 uses the generated `TasksUiService`; full task details load on demand and lists use bounded indexed pages.
 The PWA provides an offline notice and uses task data online.
 
-Plan, Focus and Mail reuse `packages/planning-ui`. Their same-origin requests cross the private `Planning`
-binding to Todofy; Todofy writes task changes through Tasks' provisioned `TasksApi`. FlowDay reads the
-native change feed through a separate read-only binding and keeps its own queues, timers and work records.
-A task's estimate is its Tasks duration, which FlowDay mirrors read-only. Todofy reaches FlowDay's existing `NativeFocusEntrypoint` through a service binding. A day
-drag changes only FlowDay's queue; a confirmed task completion precedes timer settlement.
+Plan, Focus and Mail reuse `packages/planning-ui`. Their planning and Mail requests cross the private
+`Planning` binding to Todofy; Todofy writes task changes through Tasks' provisioned `TasksApi`. Focus's day
+queues, timer and time records are Tasks' own (`proto/tasks/ui/v1/focus.proto`): a day drag is one Tasks
+`MoveFocusStep`, and a task completion settles its Focus day and a related timer in the same Tasks write. A
+task's estimate is its Tasks duration. FlowDay, which is being retired, still reads the native change feed
+through a separate read-only binding and keeps its own queues, timers and work records; Plan and Focus no
+longer use it.
 
 Todofy retains weekly rollover, text Work/Personal Bets, dependencies, Review lane order and mail receipts.
 Unfinished previous-week commitments return to weekly candidates; counts stay soft limits. Mail filing

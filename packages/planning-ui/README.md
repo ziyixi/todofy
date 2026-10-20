@@ -1,16 +1,17 @@
 # Planning UI
 
 Plan, Focus and the Mail categories dialog of Tasks. Components and operation handling live here; Tasks owns
-navigation, authentication, the estimate write and persistence of non-content view preferences. No
-credentials, network origin or task deep link is stored in this package.
+navigation, authentication, the estimate and completion writes and persistence of non-content view
+preferences. No credentials, network origin or task deep link is stored in this package.
 
 ```tsx
 import { PlanningApp, createPlanningActions } from "@ziyixi/planning-ui";
 import "@ziyixi/planning-ui/styles.css";
 
 const actions = {
-  ...createPlanningActions({ plus: sendPlus, flowday: sendFlowday }),
+  ...createPlanningActions({ plus: sendPlus, tasks: sendTasks }),
   updateEstimate, // writes the task's duration in Tasks
+  completeTask, // completes in Tasks, which settles the Focus day in the same write
 };
 
 <div className="planning-ui">
@@ -22,8 +23,8 @@ const actions = {
 ```
 
 Transports receive the root proto `HttpCall` and return a `Response`. Tasks sends `PlusService` calls to its
-same-origin `/api/plus/v1/*` with CSRF, and FlowDay's focus methods to `/api/plus/flowday/*`; Todofy's
-private Planning channel forwards only the methods Tasks uses. Host callbacks open the full task editor and
+same-origin `/api/plus/v1/*` with CSRF, which Todofy's private Planning channel forwards (only the methods
+Tasks uses), and its own `TasksUiService` Focus methods to `/api/tasks/v1/*`. Host callbacks open the full task editor and
 Tasks' Mail page. `snapshot`/`onSnapshot` keep confirmed content in page memory; `planView`/`onPlanView`
 optionally remember IDs and view choices, never task text.
 
@@ -42,19 +43,22 @@ and its planning flags (`waiting`, `parked`, `active`, …), never its ordinary 
 blocked status; Waiting remains available for something outside the task graph. The start-ahead field
 accepts 0–365 calendar days and Start now opens exactly that many days before the deadline.
 
-Focus uses FlowDay's existing server session and command receipts for count-up and 25/50-minute timers.
-Reloads hydrate the same session; pause/resume keeps its original flow date. Visible pages read only the timer
-once per minute and refresh the task view at account midnight. Finishing a pomodoro uses the existing atomic
-FlowDay finish command, which caps recorded time even if the browser was closed when the countdown ended.
-A task's estimate is its Tasks duration: the host supplies `updateEstimate`, which writes Tasks and answers the
-saved duration (`{ estimate }`), and FlowDay's mirrored copy is never read. A Step opens a panel that sets only
-its time (`StepEditor`); tasks open the full planning panel. Only FlowDay's local tasks keep an estimate of
-their own. A day queue write goes straight to FlowDay's queue; it never waits for FlowDay's mirror to know the
-task.
+Focus keeps its day queues, the one timer and time records in Tasks (`proto/tasks/ui/v1/focus.proto`). The
+timer counts up or runs a 25/50-minute pomodoro; Start counts on Tasks' today, reloads hydrate the same
+session, and pause/resume keeps its day. Visible pages read only the timer once per minute and refresh the
+task view at account midnight. Stop and a pomodoro's Finish save the session as one record of whole minutes;
+Finish caps it at the target and count-up stops at four hours, even if the browser was closed. Each queue
+change is one `MoveFocusStep`, and every write keeps its request ID until confirmed, so a lost answer replays.
+`readFocus` reads any range in reads of at most seven days, and records are added, changed and deleted with
+`addEntry`, `updateEntry` and `deleteEntry`. Plan counts from Todofy's today (`PlanState.today`), Focus from
+Tasks' today (`FocusState.date`); in one time zone they are the same date. A task's estimate is its Tasks
+duration: the host supplies `updateEstimate`, which writes Tasks and answers the saved duration
+(`{ estimate }`). A Step opens a panel that sets only its time (`StepEditor`); tasks open the full planning
+panel.
 
 Review keeps candidate columns together and gives Committed a separate full-width row of horizontal cards.
 Every Plan and Focus card's left edge is its area's colour (Work slate, Personal ochre, Unassigned none), and
 the area filters' Work and Personal dots are the legend.
-Plan's outcome, Step, Quick and calendar checkboxes use the same completion receipts and settlement as Focus;
-calendar cards pass their own flow date. Quick actions always qualify as standalone, even when an older
+Plan's outcome, Step, Quick and calendar checkboxes complete like Focus, in one Tasks write with a Focus
+day: calendar cards pass their own day, the rest Focus's. A retry resends the first request ID and day. Quick actions always qualify as standalone, even when an older
 response contains only the Quick flag. Ordinary labels do not imply planning properties.

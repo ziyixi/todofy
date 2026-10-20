@@ -10,17 +10,16 @@ outside the approved scope.
 | Component | Owns | Interface |
 | --- | --- | --- |
 | Tasks web | Navigation, draft forms, selection and rendered views | Generated `TasksUiService` client, same-origin owner requests |
-| Tasks Worker and D1 | Task/Subtask and Step content, effort, catalog, dates and completion history | Root `proto/tasks/ui/v1`, named `TasksApi`, read-only `Ops` |
+| Tasks Worker and D1 | Task/Subtask and Step content, effort, catalog, dates, completion history, and Focus's day queues, timer and time records | Root `proto/tasks/ui/v1`, named `TasksApi`, read-only `Ops` |
 | Todofy | Mail, weekly choices, Bets, task dependencies and operation receipts | Named `Planning` binding, limited to the planning and Mail methods Tasks calls |
-| FlowDay | Daily queues, time blocks, timers and time records | Named native Focus binding (task list, day queues and timer only); read-only task mirror |
 | Shared planning UI | Plan, Focus and the optional Mail shortcut editor | Caller-supplied typed transport and navigation callbacks |
 
 Applications do not import each other's source or databases. `packages/planning-ui` compiles into
-Tasks; `packages/task-dates` supplies the date parser used by the Tasks Worker and import tools. FlowDay
-receives read-only access to Tasks. Todofy receives the provisioned task API; other bindings are rejected.
+Tasks; `packages/task-dates` supplies the date parser used by the Tasks Worker and import tools. A `read`
+binding may only read Tasks; Todofy receives the provisioned task API; other bindings are rejected.
 
-Tasks is the only task source; no consumer reads or writes Todoist. Existing FlowDay task IDs and planning
-internal IDs survived the cutover.
+Tasks is the only task source; no consumer reads or writes Todoist. Existing task IDs and planning internal
+IDs survived the cutover.
 
 ## Task interface
 
@@ -94,28 +93,26 @@ The one-time private conversion keeps each imported choice,
 removes its technical label membership and soft-retires the exact replaced labels and filters. Native planning
 does not require label mapping. The role projection lives in Core's native planning code
 (`core/plus.py`, `core/native_plan.py`); it does not define the native public label catalog.
-Dragging a task into a planning day changes the FlowDay queue, preserving its task date and real deadline.
+Dragging a task into a planning day changes Tasks' day queue with one `MoveFocusStep`, preserving its task
+date and real deadline. A day holds at most 20 steps.
 Native task edits invalidate the mounted planning snapshot through the existing refresh path.
 Plan keeps the candidate columns vertically stacked within their existing desktop row. Committed alone
 spans the row below, with horizontal cards aligned to those columns; narrow layouts keep the existing
 paired/single-column behavior. Review cards, the commitment overview, next Steps, Quick and scheduled
-Steps reuse the existing completion operation. A calendar completion supplies its actual FlowDay date.
-The Tasks host reuses the generic list completion path: original etag/request proof, descendant timer
-settlement on its own day, and count/cache invalidation even if Focus subsequently warns. Repeated queued
-commands retain their first task revision; a finish operation cannot become a Reopen after a fresh read.
+Steps reuse the existing completion operation. A calendar completion supplies its own day as `focus_day`;
+the others supply Focus's day. The Tasks host reuses the generic list completion path: original etag and
+request proof, and count/cache invalidation. Repeated queued commands retain their first task revision and
+Focus day; a finish operation cannot become a Reopen after a fresh read.
 
 ## Focus completion
 
-Focus uses FlowDay's existing persisted timer session, pause/resume and elapsed-time rules. Completing from
-an ordinary task list or parent detail first commits through the generic Tasks API. The same completion
-request ID and original task etag then prove that occurrence to Todofy, which reuses the existing FlowDay
-settlement path. A related running or paused descendant timer keeps its original flow day during settlement;
-an unrelated timer is left alone. Without a related timer, only an existing entry in today's queue is settled.
-Completing an unplanned task does not add it to the queue.
-
-If Focus cannot confirm settlement, the task stays completed and the UI warns the owner to open Focus and
-refresh. The failure does not repeat or undo the generic completion. Tasks owns the completion receipt;
-Todofy coordinates planning and settlement; FlowDay owns the timer and time records.
+Focus keeps one timer in Tasks (`focusTimer`): Start counts on Tasks' today, Pause and Resume keep the
+session, and Stop or a pomodoro's Finish saves it as one record of whole minutes when it reached a minute.
+Count-up stops at four hours. Completing a task, from any list, Plan or Focus, is one Tasks `CompleteTask`
+batch: the occurrence, the task and its Steps marked done in `focus_day`'s queue (empty: Tasks' today), and a
+related running or paused session on the task or a descendant saved as a record and stopped, its Steps marked
+on the session's own day. An unrelated timer is left alone, and completing an unplanned task adds it to no
+queue. Reopening opens the queue rows that completion marked. There is no separate settlement step to fail.
 
 ## Native Mail and planning calls
 
@@ -127,7 +124,7 @@ summary is available through `/?mail=<eventId>#/mail`, including after filing; a
 back to it rather than discarding the tail.
 
 The Mail page reads only its bounded mail API and summaries expanded by the owner. It does not load Plan,
-FlowDay or a task-project snapshot to discover mail. Optional tag/priority shortcuts are ordinary Tasks
+Focus or a task-project snapshot to discover mail. Optional tag/priority shortcuts are ordinary Tasks
 labels, separate from planning flags. Weekly review and GTD carryover count the pending Mail collection.
 
 Planning, filing and order writes use generated Tasks method/body requests; no Todoist path or fallback

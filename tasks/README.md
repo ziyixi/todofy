@@ -1,6 +1,6 @@
 # Tasks
 
-Personal task management for the Todofy cloud. Tasks owns tasks, projects, sections, labels, filters and completion history. Todofy keeps mail processing and planning facts; FlowDay keeps daily queues and time records.
+Personal task management for the Todofy cloud. Tasks owns tasks, projects, sections, labels, filters and completion history, and Focus's day queues, the timer and time records. Todofy keeps mail processing and planning facts.
 
 ## Development status
 
@@ -75,11 +75,12 @@ the web app's `lint`, `typecheck`, `test`, `build` and `test:browser` from their
 
 ## Boundaries
 
-The web app depends on the public proto API, never database rows or another application's source. The Worker validates writes and owns recurrence advancement. Shared planning components take an explicit actions interface. A drag into a day changes the FlowDay queue, not the task's due date or deadline.
+The web app depends on the public proto API, never database rows or another application's source. The Worker validates writes and owns recurrence advancement. Shared planning components take an explicit actions interface. A drag into a day changes Tasks' day queue (one MoveFocusStep), not the task's due date or deadline.
 
-Completing a task first saves its occurrence in Tasks, then uses the existing Todofy/FlowDay settlement
-path for a related timer or day-queue entry. A Focus failure leaves the completed task saved and shows a
-warning; an unrelated timer keeps running.
+Completing a task is one Tasks write: it saves the occurrence, marks the task and its Steps done in the
+day's Focus queue (Plan and Focus send their day; the task list none, which means Tasks' today), and saves
+a related running or paused timer session as a record on that session's own day. An unrelated timer keeps
+running. Reopening opens those queue rows again.
 
 Lists are bounded and indexed. Completion history is separate from active tasks. Consumers use a paged change feed; the browser does not poll to animate a timer. Imports run in batches. There is no new queue, scheduler or multi-provider framework.
 
