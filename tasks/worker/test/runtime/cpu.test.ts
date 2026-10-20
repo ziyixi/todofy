@@ -5,6 +5,8 @@ import {
   CPU_TEST_TIMEOUT_MS,
   measureInIsolates,
 } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
+import { localDate } from '@ziyixi/task-dates';
+import { betWeeks, LANES, mondayOf } from '../../src/planning.ts';
 import { seedWorstWeek, WEEK_ENTRIES, WEEK_STEPS } from './focus-week.ts';
 import { startHarness } from './harness.ts';
 
@@ -58,9 +60,7 @@ test(
           .bind('Synthetic long description. '.repeat(550), Date.now(), Date.now(), JSON.stringify(rows))
           .run();
         await harness.db
-          .prepare(
-            'INSERT INTO tasks(id,title,description,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?)',
-          )
+          .prepare('INSERT INTO tasks(id,title,description,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?)')
           .bind(
             'copy-cpu-root',
             'Synthetic hundred-task template',
@@ -95,7 +95,11 @@ test(
           )
           .bind(
             'f'.repeat(64),
-            JSON.stringify({ id: 'synthetic', title: 'Synthetic receipt', description: 'Receipt "text".\n'.repeat(1000) }),
+            JSON.stringify({
+              id: 'synthetic',
+              title: 'Synthetic receipt',
+              description: 'Receipt "text".\n'.repeat(1000),
+            }),
             Date.now(),
             JSON.stringify(Array.from({ length: 100 }, (_, index) => index)),
           )
@@ -128,11 +132,7 @@ test(
             () => read('/api/tasks/v1/tasks?view=all&page_size=100'),
             7,
           ),
-          await meter.measure(
-            '100 current change records',
-            () => read('/api/tasks/v1/changes?page_size=100'),
-            7,
-          ),
+          await meter.measure('100 current change records', () => read('/api/tasks/v1/changes?page_size=100'), 7),
         ];
         const writer = await harness.mf.getWorker('tasks-read-write');
         const backupPage = async (table: string, range: { after: number; through: number } | null) => {
@@ -154,8 +154,16 @@ test(
         );
         const receipts = await range('SELECT 0 AS after, max(rowid) AS through FROM requests');
         measurements.push(
-          await meter.measure('backup page of 100 tasks with 15 KB descriptions', () => backupPage('tasks', longTasks), 7),
-          await meter.measure('backup page of 100 tasks with 48 KB descriptions', () => backupPage('tasks', wideTasks), 7),
+          await meter.measure(
+            'backup page of 100 tasks with 15 KB descriptions',
+            () => backupPage('tasks', longTasks),
+            7,
+          ),
+          await meter.measure(
+            'backup page of 100 tasks with 48 KB descriptions',
+            () => backupPage('tasks', wideTasks),
+            7,
+          ),
           await meter.measure('backup page of 100 receipts of 16 KB', () => backupPage('requests', receipts), 7),
         );
         const csrf = await harness.fetch('/api/tasks/csrf');
@@ -163,7 +171,7 @@ test(
         let reorderBatch = 0;
         measurements.push(
           await meter.measure(
-            'atomically reorder 100 tasks without reading their descriptions',
+            'atomically reorder 100 tasks and answer them without their descriptions',
             async () => {
               const offset = reorderBatch++ * 100;
               const positions = Array.from({ length: 100 }, (_, index) => ({
@@ -185,7 +193,7 @@ test(
                 }),
               });
               expect(response.status, await response.clone().text()).toBe(200);
-              expect(await response.json()).toEqual({});
+              expect((await response.json<{ tasks: unknown[] }>()).tasks).toHaveLength(100);
             },
             3,
           ),
@@ -270,6 +278,154 @@ test(
     for (const measurement of result.reference.values()) {
       expect(measurement.first, measurement.label).toBeLessThan(10);
       if (measurement.label !== FIRST_WEEK_READ) expect(measurement.median, measurement.label).toBeLessThan(8);
+    }
+  },
+  CPU_TEST_TIMEOUT_MS,
+);
+
+/**
+ * Planning's worst reads and its dependency write: a page of 100 tasks with long titles and every planning flag, 60
+ * of them waiting for 5 of the others (the 300 dependencies a store keeps at most, each with its prerequisite's
+ * title), the fullest plan (6 Bets of 160 characters, 7 lanes of 100 tasks and 100 next-week choices), then a
+ * dependency added and removed among 300.
+ */
+const FIRST_PLANNING_PAGE = 'first authenticated page of planned tasks';
+async function seedPlanning(db: D1Database) {
+  const flags = JSON.stringify(['quick', 'waiting', 'parked', 'active', 'onhold', 'routine', 'task']);
+  const tasks = Array.from({ length: 100 }, (_, index) => ({
+    id: index < 60 ? `waiter-${String(index).padStart(3, '0')}` : `prerequisite-${String(index - 60).padStart(3, '0')}`,
+    title: `Synthetic planned task ${String(index)} ` + 'title '.repeat(70),
+    order: index,
+  }));
+  await db
+    .prepare(
+      `INSERT INTO tasks(id,title,sort_order,deadline,stage,committed_week,area,lead_days,planning_flags,created_at,updated_at)
+      SELECT value->>'id',value->>'title',value->>'order','2099-01-09','committed','2099-01-05','work',3,?,1,1 FROM json_each(?)`,
+    )
+    .bind(flags, JSON.stringify(tasks))
+    .run();
+  const edges = Array.from({ length: 300 }, (_, index) => ({
+    task: `waiter-${String(Math.floor(index / 5)).padStart(3, '0')}`,
+    prerequisite: `prerequisite-${String((Math.floor(index / 5) + (index % 5)) % 40).padStart(3, '0')}`,
+  }));
+  await db
+    .prepare(
+      `INSERT INTO task_dependencies(task_id,prerequisite_id,created_at,updated_at)
+      SELECT value->>'task',value->>'prerequisite',key,key FROM json_each(?)`,
+    )
+    .bind(JSON.stringify(edges))
+    .run();
+  const week = mondayOf(localDate(Date.now(), 'America/Los_Angeles'));
+  await db
+    .prepare(
+      `INSERT INTO weekly_bets(week_start,area,text,created_at,updated_at)
+      SELECT w.value,a.value,?,1,1 FROM json_each(?) w, json_each('["work","personal"]') a`,
+    )
+    .bind('目标'.repeat(80), JSON.stringify(betWeeks(week)))
+    .run();
+  const lanes = Object.fromEntries(LANES.map((lane) => [lane, tasks.map((task) => task.id)]));
+  await db.prepare("UPDATE plan_board SET lanes=? WHERE id='board'").bind(JSON.stringify(lanes)).run();
+}
+
+test(
+  "planning's fullest reads and a dependency write stay within the request bounds",
+  async () => {
+    const owner = await syntheticOwner();
+    const result = await measureInIsolates(
+      COLD_ISOLATES,
+      async () => {
+        const harness = await startHarness({
+          inspectorPort: 0,
+          bypass: false,
+          jwks: owner.jwks,
+          ownerToken: owner.token,
+        });
+        await seedPlanning(harness.db);
+        const meter = await connectCpuMeter(harness.mf, 'tasks');
+        return {
+          harness,
+          meter,
+          async dispose() {
+            meter.close();
+            await harness.dispose();
+          },
+        };
+      },
+      async ({ harness, meter }) => {
+        const read = async (path: string, check: (body: string) => void) => {
+          const response = await harness.fetch(path);
+          const body = await response.text();
+          expect(response.status, body.slice(0, 200)).toBe(200);
+          check(body);
+        };
+        const page = () =>
+          read('/api/tasks/v1/tasks?view=all&page_size=100', (body) => {
+            const tasks = (JSON.parse(body) as { tasks: { dependencies?: unknown[] }[] }).tasks;
+            expect(tasks.map((task) => task.dependencies?.length ?? 0)).toEqual(
+              Array.from({ length: 100 }, (_, index) => (index < 60 ? 5 : 0)),
+            );
+          });
+        const plan = () =>
+          read('/api/tasks/v1/plan', (body) => {
+            const answer = JSON.parse(body) as {
+              weekly_bets: unknown[];
+              lane_orders: unknown[];
+              next_week_task_ids: unknown[];
+            };
+            expect([answer.weekly_bets.length, answer.lane_orders.length, answer.next_week_task_ids.length]).toEqual([
+              6, 7, 100,
+            ]);
+          });
+        const measurements = [
+          await meter.measure(FIRST_PLANNING_PAGE, page, 1),
+          await meter.measure('100 tasks with every planning flag, 60 of them waiting for 5', page, 7),
+          await meter.measure('the fullest plan: 6 Bets, 7 lanes of 100 and 100 next-week choices', plan, 7),
+        ];
+        // 299 dependencies remain: the first waiter waits for one less.
+        await harness.db
+          .prepare(
+            "UPDATE task_dependencies SET deleted_at=1 WHERE task_id='waiter-000' AND prerequisite_id='prerequisite-004'",
+          )
+          .run();
+        const csrf = await harness.fetch('/api/tasks/csrf');
+        const { token } = await csrf.json<{ token: string }>();
+        let etag = '1';
+        let writes = 0;
+        measurements.push(
+          await meter.measure(
+            'add or remove a dependency among 300, through the waiting chain it checks',
+            async () => {
+              const wanted = writes++ % 2 === 0 ? [{ prerequisite_id: 'waiter-000' }] : [];
+              const response = await harness.fetch(
+                `/api/tasks/v1/tasks/prerequisite-039?etag=${etag}&request_id=${crypto.randomUUID()}&update_mask=dependencies`,
+                {
+                  method: 'PATCH',
+                  headers: {
+                    'content-type': 'application/json',
+                    origin: 'https://tasks.example.test',
+                    'x-csrf-token': token,
+                    cookie: (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '',
+                  },
+                  body: JSON.stringify({ name: 'tasks/prerequisite-039', dependencies: wanted }),
+                },
+              );
+              const body = await response.text();
+              expect(response.status, body.slice(0, 200)).toBe(200);
+              const task = JSON.parse(body) as { etag: string; dependencies?: unknown[] };
+              expect(task.dependencies ?? []).toHaveLength(wanted.length);
+              etag = task.etag;
+            },
+            7,
+          ),
+        );
+        return measurements;
+      },
+    );
+    for (const measurement of result.reference.values())
+      console.log(JSON.stringify({ event: 'tasks_cpu', ...measurement }));
+    for (const measurement of result.reference.values()) {
+      expect(measurement.first, measurement.label).toBeLessThan(10);
+      if (measurement.label !== FIRST_PLANNING_PAGE) expect(measurement.median, measurement.label).toBeLessThan(8);
     }
   },
   CPU_TEST_TIMEOUT_MS,

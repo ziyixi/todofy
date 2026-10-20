@@ -11,6 +11,8 @@
  *   verify  compare the restored database's row counts with the manifest and check that its migration is applied.
  *
  * A backup made before 0005_focus.sql has no Focus tables; it restores with them empty and the migration's idle timer.
+ * One made before 0006_planning.sql has no planning columns or tables: its tasks take the columns' defaults (no
+ * planning facts) and the tables restore empty, but for the migration's empty Review board.
  *
  *   node tools/backup-restore.ts config --database-name tasks-restore --database-id <uuid> --out <outside>/restore.toml
  *   node tools/backup-restore.ts sql --in <download dir> --out <outside>/tasks-restore.sql
@@ -46,9 +48,21 @@ export const RESTORE_ORDER = [
   'day_steps',
   'focus_entries',
   'focus_timer',
+  'task_dependencies',
+  'weekly_bets',
+  'plan_board',
 ];
 /** The tables 0005_focus.sql added. Older backups lack all three; the migration seeds the one timer row. */
 export const FOCUS_TABLES = ['day_steps', 'focus_entries', 'focus_timer'];
+/** The tables 0006_planning.sql added. Older backups lack all three; the migration seeds the one board row. */
+export const PLANNING_TABLES = ['task_dependencies', 'weekly_bets', 'plan_board'];
+/** The tables later migrations added, oldest first: a backup lacks every table added after it was made. */
+const ADDED = [
+  { migration: '0005_focus.sql', tables: FOCUS_TABLES },
+  { migration: '0006_planning.sql', tables: PLANNING_TABLES },
+];
+/** The one row a migration seeds, which a backed-up row of that table replaces. */
+const SEEDED = ['focus_timer', 'plan_board'];
 
 export class RestoreError extends Error {}
 
@@ -88,8 +102,8 @@ export function readBackup(root: string): Backup {
     throw new RestoreError('manifest.json has no tasks section: the backup was made before Tasks was in it');
   const names = section.tables.map((table) => table.name);
   const given = [...names].sort().join();
-  const beforeFocus = RESTORE_ORDER.filter((name) => !FOCUS_TABLES.includes(name));
-  if (given !== [...RESTORE_ORDER].sort().join() && given !== beforeFocus.sort().join())
+  const generations = ADDED.map((_, index) => ADDED.slice(index).flatMap((added) => added.tables));
+  if (![[], ...generations].some((later) => given === RESTORE_ORDER.filter((name) => !later.includes(name)).sort().join()))
     throw new RestoreError(`unexpected Tasks tables: ${names.join(', ')}`);
   section.tables.sort((a, b) => RESTORE_ORDER.indexOf(a.name) - RESTORE_ORDER.indexOf(b.name));
   const rows = new Map<string, Row[]>();
@@ -194,13 +208,14 @@ function missingReferences(rows: Map<string, Row[]>): string[] {
   return missing;
 }
 
-/** The Focus tables a backup lacks, with the rows a migrated database holds in them: none, and the idle timer. */
-export function missingFocusTables(section: TasksSection): { name: string; rows: number }[] {
+/** The tables a backup lacks, with the rows a migrated database holds in them: none, or the one seeded row. */
+export function missingTables(section: TasksSection): { name: string; rows: number; migration: string }[] {
   const names = new Set(section.tables.map((table) => table.name));
-  return FOCUS_TABLES.filter((name) => !names.has(name)).map((name) => ({
-    name,
-    rows: name === 'focus_timer' ? 1 : 0,
-  }));
+  return ADDED.flatMap(({ migration, tables }) =>
+    tables
+      .filter((name) => !names.has(name))
+      .map((name) => ({ name, rows: SEEDED.includes(name) ? 1 : 0, migration })),
+  );
 }
 
 /** The restore SQL: every row once, as an INSERT that a re-run leaves alone. */
@@ -216,8 +231,8 @@ export function restoreSql({ section, rows }: Backup): { sql: string; statements
     const values = rows.get(table.name) ?? [];
     const ordered = table.name === 'projects' || table.name === 'tasks' ? parentsFirst(table.name, values) : values;
     const insert = `INSERT INTO ${table.name}(${table.columns.join(',')}) VALUES`;
-    // The migration seeded an idle timer; the backed-up one, running or not, takes its place.
-    if (table.name === 'focus_timer' && ordered.length) lines.push('DELETE FROM focus_timer;');
+    // The migration seeded an idle timer and an empty board; the backed-up ones take their place.
+    if (SEEDED.includes(table.name) && ordered.length) lines.push(`DELETE FROM ${table.name};`);
     for (const row of ordered) {
       const statement = `${insert}(${table.columns.map((column) => literal(row[column])).join(',')}) ON CONFLICT DO NOTHING;`;
       if (Buffer.byteLength(statement) > MAX_STATEMENT_BYTES)
@@ -272,7 +287,7 @@ function verifyLines(section: TasksSection, found: Row): { ok: boolean; lines: s
   const applied = JSON.parse(found.migrations as string) as string[];
   let ok = applied.includes(section.schema_version);
   const lines = [`${ok ? 'PASS' : 'FAIL'} schema_version ${section.schema_version}${ok ? '' : ' (not applied)'}`];
-  for (const table of [...section.tables, ...missingFocusTables(section)]) {
+  for (const table of [...section.tables, ...missingTables(section)]) {
     const matches = found[table.name] === table.rows;
     ok &&= matches;
     lines.push(`${matches ? 'PASS' : 'FAIL'} ${table.name} rows=${String(found[table.name])}/${String(table.rows)}`);
@@ -282,7 +297,7 @@ function verifyLines(section: TasksSection, found: Row): { ok: boolean; lines: s
 
 function verify(root: string, args: string[]): { ok: boolean; lines: string[] } {
   const { section } = readBackup(root);
-  const counts = [...section.tables, ...missingFocusTables(section)].map(
+  const counts = [...section.tables, ...missingTables(section)].map(
     (table) => `(SELECT count(*) FROM ${table.name}) AS ${table.name}`,
   );
   const query = `SELECT (SELECT json_group_array(name) FROM d1_migrations) AS migrations, ${counts.join(', ')}`;
@@ -333,9 +348,13 @@ async function main(): Promise<boolean> {
     const { start, end } = backup.section.change_sequence;
     lines = backup.section.tables.map((table) => `PASS ${table.name} rows=${String(table.rows)}`);
     lines.push(`statements=${String(statements)}`);
-    const absent = missingFocusTables(backup.section).map((table) => table.name);
-    if (absent.length)
-      lines.push(`NOTE ${absent.join(', ')}: not in this backup (made before 0005_focus.sql); they restore as migrated`);
+    for (const migration of ADDED.map((added) => added.migration)) {
+      const absent = missingTables(backup.section).filter((table) => table.migration === migration);
+      if (absent.length)
+        lines.push(
+          `NOTE ${absent.map((table) => table.name).join(', ')}: not in this backup (made before ${migration}); they restore as migrated`,
+        );
+    }
     if (start !== end)
       lines.unshift(
         `WARN Tasks changed while the backup ran (change ${String(start)} to ${String(end)}): rows may mix both`,

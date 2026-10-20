@@ -102,6 +102,15 @@ test('a plan and its pages hold every row of every table', async () => {
         "INSERT INTO focus_entries(id,task_id,day,seconds,started_at,source,area,created_at,updated_at) VALUES('synthetic-entry',?,'2030-10-21',1500,1,'timer','work',2,2)",
       )
       .bind(child.id),
+    // A dependency and a Bet; the migration seeds the Review board.
+    harness.db
+      .prepare(
+        'INSERT INTO task_dependencies(task_id,prerequisite_id,baseline_count,created_at,updated_at) VALUES(?,?,0,3,3)',
+      )
+      .bind(parent.id, child.id),
+    harness.db.prepare(
+      "INSERT INTO weekly_bets(week_start,area,text,created_at,updated_at) VALUES('2030-10-21','work','Synthetic goal',3,3)",
+    ),
   ]);
 
   const planned = await plan();

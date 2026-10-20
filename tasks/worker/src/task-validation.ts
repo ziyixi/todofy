@@ -24,6 +24,11 @@ export function taskValues(
     recurrence: task.recurrence.trim(),
     kind: task.kind || 'task',
     effort: task.effort || '',
+    stage: task.stage || 'none',
+    committed_week: '',
+    area: task.area || 'unassigned',
+    lead_days: task.leadDays,
+    planning_flags: JSON.stringify(task.planningFlags),
   };
 }
 export function validateTaskFields(row: TaskRow): string[] {

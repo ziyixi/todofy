@@ -1,0 +1,74 @@
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: weeks and days are account-local calendar date text, YYYY-MM-DD, like Task.due_date. --)
+// Plan, which Tasks owns: the account week, the weekly Bets, the Review lanes the owner arranged and next week's
+// choices. A task's own planning facts (stage, area, lead days, flags and dependencies) are fields of Task.
+syntax = "proto3";
+
+package tasks.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "PlanProto";
+option java_package = "science.ziyixi.tasks.ui.v1";
+
+// The account's planning week, read in one answer.
+// (-- api-linter: core::0122::embedded-resource=disabled
+//     aip.dev/not-precedent: Plan shows the week's few Bets with their text and etags, read in the same batch. --)
+message Plan {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/Plan"
+    pattern: "plan"
+    singular: "plan"
+    plural: "plans"
+  };
+
+  // Always plan.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The account's IANA time zone, which today and week_start count in.
+  string time_zone = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Tasks' today, YYYY-MM-DD.
+  string today = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Monday of today's week, YYYY-MM-DD.
+  string week_start = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Work and Personal Bets of the previous, this and the next week, at most six, by week then area; a week and
+  // area with none is absent.
+  repeated WeeklyBet weekly_bets = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Review lanes the owner arranged, in board order, each first to last; a lane never arranged is absent.
+  repeated LaneOrder lane_orders = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most 100 open tasks committed for a later week: a commitment chosen on this week's Sunday.
+  repeated string next_week_task_ids = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One week's Work or Personal Bet: the owner's line of text, tied to no task.
+message WeeklyBet {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/WeeklyBet"
+    pattern: "weeklyBets/{weekly_bet}"
+    singular: "weeklyBet"
+    plural: "weeklyBets"
+  };
+
+  // weeklyBets/{week_start}-{area}, for example weeklyBets/2026-10-19-work.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The Monday of its week.
+  string week_start = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // work or personal.
+  string area = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // One line of at most 160 UTF-16 code units, whitespace collapsed; empty means no Bet.
+  string text = 4 [(google.api.field_behavior) = OPTIONAL];
+  // The saved Bet's etag, empty while the week and area have none.
+  string etag = 5 [(google.api.field_behavior) = OPTIONAL];
+  // When the text was last saved.
+  google.protobuf.Timestamp update_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The owner's order of one Review lane.
+message LaneOrder {
+  // start, waiting, parked, quarterly, monthly, weekly or committed.
+  string lane = 1 [(google.api.field_behavior) = REQUIRED];
+  // Task IDs first to last, at most 100. A task is in one lane: arranging a lane takes its tasks out of the others.
+  repeated string task_ids = 2 [(google.api.field_behavior) = REQUIRED];
+}

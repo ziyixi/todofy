@@ -74,12 +74,14 @@ export async function commit(
   },
   writes: D1PreparedStatement[],
 ): Promise<string> {
+  // plan_board is one row that is never deleted.
+  const deletedAt = input.table === 'plan_board' ? 'NULL' : 'deleted_at';
   const condition =
     input.revision === null
       ? `NOT EXISTS(SELECT 1 FROM ${input.table} WHERE id=?)`
       : input.revision === 'live'
-        ? `EXISTS(SELECT 1 FROM ${input.table} WHERE id=? AND deleted_at IS NULL)`
-        : `EXISTS(SELECT 1 FROM ${input.table} WHERE id=? AND revision=? AND deleted_at IS NULL)`;
+        ? `EXISTS(SELECT 1 FROM ${input.table} WHERE id=? AND ${deletedAt} IS NULL)`
+        : `EXISTS(SELECT 1 FROM ${input.table} WHERE id=? AND revision=? AND ${deletedAt} IS NULL)`;
   const guard = db
     .prepare(
       `INSERT INTO requests(id,fingerprint,response,created_at,revision_guard) VALUES(?,?,?,?,CASE WHEN ${condition} THEN 1 ELSE 0 END)`,
@@ -101,7 +103,7 @@ export async function commit(
     if (previous !== null) return previous;
     const current = await storage(() =>
       db
-        .prepare(`SELECT revision,deleted_at FROM ${input.table} WHERE id=?`)
+        .prepare(`SELECT revision,${deletedAt} AS deleted_at FROM ${input.table} WHERE id=?`)
         .bind(input.id)
         .first<{ revision: number; deleted_at: number | null }>(),
     );

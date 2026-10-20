@@ -83,6 +83,41 @@ message Task {
   string kind = 29 [(google.api.field_behavior) = OPTIONAL];
   // deep or shallow; empty means no effort preference.
   string effort = 30 [(google.api.field_behavior) = OPTIONAL];
+  // Planning stage: none, quarterly, monthly, weekly or committed; empty on create means none. A commitment for a
+  // week that has ended reads as weekly, and a Quick task's weekly or monthly stage reads as none.
+  string stage = 31 [(google.api.field_behavior) = OPTIONAL];
+  // work, personal or unassigned; empty on create means unassigned.
+  string area = 32 [(google.api.field_behavior) = OPTIONAL];
+  // Days before the deadline to start, 0 to 365. A write that leaves no deadline stores 0.
+  int32 lead_days = 33 [(google.api.field_behavior) = OPTIONAL];
+  // Planning flags: quick, waiting, parked, active, onhold, routine or task (a standalone action). blocked is
+  // refused: dependencies say what blocks a task. quick implies task, and newly setting parked clears the stage
+  // and active.
+  repeated string planning_flags = 34 [(google.api.field_behavior) = OPTIONAL];
+  // What the task waits for, at most 5, oldest first. Through UpdateTask (mask dependencies) it replaces the set by
+  // prerequisite_id: each new prerequisite is another open task that does not wait for this one through
+  // dependencies that hold, and at most 300 dependencies exist in all. At a limit, this task's oldest done
+  // dependency gives way. A deleted prerequisite is left out.
+  repeated TaskDependency dependencies = 35 [(google.api.field_behavior) = OPTIONAL];
+  // The Review lane stage: stage, or weekly for an unstaged task scheduled, or with a deadline, before seven days
+  // from today that has no task, quick, onhold or routine flag.
+  string board_stage = 36 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The deadline has passed, or is within lead_days while the task is not waiting; never for an active or parked
+  // task.
+  bool must_start = 37 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A deadline without lead days on a task that is neither active nor parked.
+  bool missing_lead = 38 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One task another task waits for.
+message TaskDependency {
+  // The task waited for.
+  string prerequisite_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Its current title.
+  string title = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // It is completed, or it repeats and was completed again since the dependency was added. A done dependency
+  // holds nothing back.
+  bool done = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // The owner's project.

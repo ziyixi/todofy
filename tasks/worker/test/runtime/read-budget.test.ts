@@ -5,6 +5,7 @@ import { create } from '@ziyixi/proto/protobuf';
 import { ProjectSchema, SectionSchema } from '@ziyixi/proto/tasks/ui/v1/task_pb';
 import {
   GetFocusTimerRequestSchema,
+  GetPlanRequestSchema,
   ListFocusDaysRequestSchema,
   ListTasksRequestSchema,
   UpdateProjectRequestSchema,
@@ -13,6 +14,7 @@ import {
 import { saveCatalog } from '../../src/catalog.ts';
 import { listFocusDays } from '../../src/focus.ts';
 import { getFocusTimer } from '../../src/focus-timer.ts';
+import { getPlan } from '../../src/plan.ts';
 import { getTask, listTasks } from '../../src/task-read.ts';
 import { seedWorstWeek, WEEK_ENTRIES, WEEK_STEPS } from './focus-week.ts';
 import { measuredReads, startHarness, type Harness } from './harness.ts';
@@ -48,7 +50,10 @@ async function addTasks(
   fields: { completed: number; due?: string; recurrence?: string; project?: string; section?: string },
 ) {
   // Interleave open and completed rows in one sort order, as imported history is.
-  const data = Array.from({ length: count }, (_, index) => ({ id: `${prefix}-${String(index)}`, order: index * 2 + 1 }));
+  const data = Array.from({ length: count }, (_, index) => ({
+    id: `${prefix}-${String(index)}`,
+    order: index * 2 + 1,
+  }));
   await harness.db
     .prepare(
       `INSERT INTO tasks(id,title,project_id,section_id,completed,due_date,recurrence,label_ids,sort_order,created_at,updated_at)
@@ -77,7 +82,10 @@ async function addHistory(round: number) {
     .run();
 }
 async function revision(table: string, id: string): Promise<string> {
-  const row = await harness.db.prepare(`SELECT revision FROM ${table} WHERE id=?`).bind(id).first<{ revision: number }>();
+  const row = await harness.db
+    .prepare(`SELECT revision FROM ${table} WHERE id=?`)
+    .bind(id)
+    .first<{ revision: number }>();
   return String(row?.revision);
 }
 async function measure(read: (db: D1Database) => Promise<unknown>) {
@@ -119,9 +127,12 @@ test('a later page and an ID lookup seek their index', async () => {
   const page = await measure((db) => list(db, { view: 'all', pageSize: 50, pageToken: first.nextPageToken }));
   const lookup = await measure((db) => list(db, { view: 'all', taskIds: ['section-99'] }));
   stdout.write(JSON.stringify({ event: 'tasks_read_page_and_lookup', opening, page, lookup }) + '\n');
-  // A later page reads what the first does, not every row before its cursor.
+  // A later page reads what the first does, not every row before its cursor. Each row is about two: itself and its
+  // dependencies' seek, which finds none (measured 2026-10-20: 51 rows before planning facts moved into Tasks, 102 after).
+  expect(opening.rowsRead).toBeLessThanOrEqual(2 * 50 + 2);
   expect(page.rowsRead).toBeLessThanOrEqual(opening.rowsRead + 2);
-  expect(lookup.rowsRead).toBeLessThan(2 * (1 + 1));
+  // The task, its counts and its dependencies' seek, which finds none.
+  expect(lookup.rowsRead).toBeLessThanOrEqual(4);
   const descending = await list(harness.db, { view: 'all', pageSize: 50, orderBy: 'sort_order desc' });
   const next = await list(harness.db, {
     view: 'all',
@@ -144,7 +155,14 @@ async function renameSection(db: D1Database, id: string) {
     db,
     'sections',
     SectionSchema,
-    { requestId: request.requestId, id: '', etag: request.etag, resource: section, updateMask: { paths: ['title'] }, request },
+    {
+      requestId: request.requestId,
+      id: '',
+      etag: request.etag,
+      resource: section,
+      updateMask: { paths: ['title'] },
+      request,
+    },
     false,
     NOW,
   );
@@ -237,4 +255,45 @@ test('the fullest Focus week reads a bounded number of rows, and the timer poll 
   // A few index steps more, not the other week's 1,000 rows.
   expect(Math.abs(again.rowsRead - week.rowsRead)).toBeLessThanOrEqual(10);
   expect(poll.rowsRead).toBe(1);
+});
+
+test("a task's five dependencies and the plan read a bounded number of rows; next week seeks tasks_committed", async () => {
+  const waiter = 'section-0';
+  const prerequisites = ['section-10', 'section-20', 'section-30', 'section-40', 'recurring-0'];
+  const plain = await measure((db) => getTask(db, 'section-1'));
+  await harness.db
+    .prepare(
+      `INSERT INTO task_dependencies(task_id,prerequisite_id,created_at,updated_at) SELECT ?,value,1,1 FROM json_each(?)`,
+    )
+    .bind(waiter, JSON.stringify(prerequisites))
+    .run();
+  await harness.db
+    .prepare(
+      "UPDATE tasks SET stage='committed',committed_week='2030-04-22' WHERE id IN (SELECT value FROM json_each(?))",
+    )
+    .bind(JSON.stringify(prerequisites))
+    .run();
+  const linked = await measure(async (db) => {
+    expect((await getTask(db, waiter)).dependencies).toBeTruthy();
+  });
+  const plan = await measure(async (db) => {
+    expect((await getPlan(db, create(GetPlanRequestSchema, { name: 'plan' }), ZONE, NOW)).nextWeekTaskIds).toHaveLength(
+      5,
+    );
+  });
+  stdout.write(JSON.stringify({ event: 'tasks_planning_reads', plain, linked, plan }) + '\n');
+  // Each prerequisite is a primary-key row, and the recurring one's completions are counted through their index.
+  expect(linked.rowsRead - plain.rowsRead).toBeLessThanOrEqual(5 * 3);
+  expect(plan.statements).toBe(3);
+  // D1 never runs ANALYZE by itself, so the read names the partial index (src/plan.ts), and it seeks it in order.
+  const steps = await harness.db
+    .prepare(
+      "EXPLAIN QUERY PLAN SELECT id FROM tasks INDEXED BY tasks_committed WHERE stage='committed' AND deleted_at IS NULL AND committed_week>? AND completed=0 ORDER BY committed_week LIMIT 100",
+    )
+    .bind('2030-04-15')
+    .all<{ detail: string }>();
+  const detail = steps.results.map((step) => step.detail).join('\n');
+  expect(detail).toMatch(/SEARCH tasks USING INDEX tasks_committed \(committed_week>\?\)/);
+  expect(detail).not.toMatch(/TEMP B-TREE/);
+  expect(plan.rowsRead).toBeLessThanOrEqual(10);
 });

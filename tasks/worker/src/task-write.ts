@@ -17,14 +17,29 @@ import { commit, fingerprint, replay } from './receipts.ts';
 import { getTask } from './task-read.ts';
 import { taskValues, validateTask } from './task-validation.ts';
 import { moveTaskDescendants } from './task-moves.ts';
-import { checkedDay } from './focus.ts';
+import { checkedDay, commitChecked, type Check } from './focus.ts';
 import { COUNT_UP_SECONDS } from './focus-timer.ts';
+import { plannedRow } from './planning.ts';
+import { dependencyUpdate } from './task-dependencies.ts';
+
+/** Every column a task write stores: the client's fields and the week a commitment is for. */
+const storedColumns = [...taskColumns, 'committed_week'] as const;
+/** The planning columns of a new task, before its own values. */
+const unplanned = {
+  stage: 'none',
+  committed_week: '',
+  area: 'unassigned',
+  lead_days: 0,
+  planning_flags: '[]',
+  deadline: '',
+  due_date: '',
+};
 
 function result(text: string) {
   return fromWire(TaskSchema, JSON.parse(text)).message;
 }
-function serialize(row: TaskRow): string {
-  return JSON.stringify(toWire(TaskSchema, taskMessage(row)));
+function serialize(row: TaskRow, today: string): string {
+  return JSON.stringify(toWire(TaskSchema, taskMessage(row, today)));
 }
 function checkEtag(row: TaskRow, etag: string): void {
   if (!etag) invalid('An etag is required');
@@ -65,14 +80,17 @@ function settleFocus(db: D1Database, id: string, day: string, now: number): D1Pr
   ];
 }
 
-export async function createTask(db: D1Database, input: CreateTaskRequest, now: number) {
+export async function createTask(db: D1Database, input: CreateTaskRequest, now: number, zone: string) {
   const hash = await fingerprint('createTask', input);
   const previous = await replay(db, input.requestId, hash);
   if (previous !== null) return result(previous);
   if (!input.task) invalid();
+  if (input.task.dependencies.length) invalid('Dependencies are added by UpdateTask');
+  const today = localDate(now, zone);
   const id = input.taskId ? checkedId(input.taskId) : crypto.randomUUID();
+  const given = taskValues(input.task);
   const row: TaskRow = {
-    ...taskValues(input.task),
+    ...plannedRow(unplanned, given, today, given.stage !== 'none'),
     id,
     revision: 1,
     created_at: now,
@@ -88,7 +106,7 @@ export async function createTask(db: D1Database, input: CreateTaskRequest, now: 
   }
   row.recurrence = clampMonthEnd(row.recurrence, row.due_date);
   await validateTask(db, row);
-  const columns = ['id', ...taskColumns, 'created_at', 'updated_at'];
+  const columns = ['id', ...storedColumns, 'created_at', 'updated_at'];
   const append = input.task.sortOrder === undefined;
   const values = columns.flatMap((column) =>
     column === 'sort_order' && append
@@ -116,7 +134,7 @@ export async function createTask(db: D1Database, input: CreateTaskRequest, now: 
         table: 'tasks',
         id,
         revision: null,
-        response: serialize(row),
+        response: serialize(row, today),
         now,
       },
       writes,
@@ -126,20 +144,22 @@ export async function createTask(db: D1Database, input: CreateTaskRequest, now: 
   if (stored === null) throw new Error('Committed task receipt is missing');
   return result(stored);
 }
-export async function updateTask(db: D1Database, input: UpdateTaskRequest, now: number) {
+export async function updateTask(db: D1Database, input: UpdateTaskRequest, now: number, zone: string) {
   const hash = await fingerprint('updateTask', input);
   const previous = await replay(db, input.requestId, hash);
   if (previous !== null) return result(previous);
   if (!input.task) invalid();
+  const today = localDate(now, zone);
   const id = resourceId(input.task.name, 'tasks');
   const old = await getTask(db, id);
   checkEtag(old, input.etag);
   if (!input.updateMask?.paths.length) invalid('An explicit update_mask is required');
   const requested = updatePaths(input.updateMask);
-  const paths = requested === '*' ? taskColumns : requested;
+  const paths: readonly string[] = requested === '*' ? taskColumns : requested;
   const values = taskValues(input.task);
   const updated = { ...old };
   for (const field of paths) {
+    if (field === 'dependencies') continue;
     if (!(taskColumns as readonly string[]).includes(field)) invalid('Unsupported update field');
     const column = field as (typeof taskColumns)[number];
     Object.assign(updated, { [column]: values[column] });
@@ -153,22 +173,34 @@ export async function updateTask(db: D1Database, input: UpdateTaskRequest, now: 
     if (!paths.includes('section_id') && !updated.parent_id) updated.section_id = '';
     if (!paths.includes('parent_id')) updated.parent_id = '';
   }
-  const row = { ...updated, revision: old.revision + 1, updated_at: now };
+  const row = { ...plannedRow(old, updated, today, paths.includes('stage')), revision: old.revision + 1, updated_at: now };
   row.recurrence = clampMonthEnd(row.recurrence, row.due_date);
   await validateTask(db, row, old);
   row.project_archived = 0;
   const writes = [
     db
       .prepare(
-        `UPDATE tasks SET ${taskColumns.map((c) => `${c}=?`).join(',')},revision=revision+1,updated_at=? WHERE id=?`,
+        `UPDATE tasks SET ${storedColumns.map((c) => `${c}=?`).join(',')},revision=revision+1,updated_at=? WHERE id=?`,
       )
-      .bind(...taskColumns.map((c) => row[c]), now, id),
+      .bind(...storedColumns.map((c) => row[c]), now, id),
   ];
   if (row.project_id !== old.project_id) {
     writes.push(...await moveTaskDescendants(db, id, row.project_id, now));
   }
+  let checks: Check[] = [];
+  if (paths.includes('dependencies')) {
+    const change = await dependencyUpdate(
+      db,
+      old,
+      input.task.dependencies.map((dependency) => dependency.prerequisiteId),
+      now,
+    );
+    writes.push(...change.writes);
+    checks = change.checks;
+    row.dependencies = change.dependencies;
+  }
   return result(
-    await commit(
+    await commitChecked(
       db,
       {
         requestId: input.requestId,
@@ -176,10 +208,11 @@ export async function updateTask(db: D1Database, input: UpdateTaskRequest, now: 
         table: 'tasks',
         id,
         revision: old.revision,
-        response: serialize(row),
+        response: serialize(row, today),
         now,
       },
       writes,
+      checks,
     ),
   );
 }
@@ -208,6 +241,19 @@ export async function deleteTask(db: D1Database, input: DeleteTaskRequest, now: 
           `${subtree} UPDATE day_steps SET deleted_at=?,updated_at=? WHERE task_id IN (SELECT id FROM descendants) AND deleted_at IS NULL`,
         )
         .bind(id, now, now),
+      // So are the dependencies the subtree's tasks have or are waited for by.
+      db
+        .prepare(
+          `${subtree} UPDATE task_dependencies SET deleted_at=?,updated_at=? WHERE task_id IN (SELECT id FROM descendants)
+          AND deleted_at IS NULL`,
+        )
+        .bind(id, now, now),
+      db
+        .prepare(
+          `${subtree} UPDATE task_dependencies SET deleted_at=?,updated_at=? WHERE prerequisite_id IN
+          (SELECT id FROM descendants) AND deleted_at IS NULL`,
+        )
+        .bind(id, now, now),
       db
         .prepare(
           `${subtree} UPDATE tasks SET deleted_at=?,updated_at=?,revision=revision+1 WHERE id IN (SELECT id FROM descendants)`,
@@ -222,7 +268,8 @@ export async function completeTask(db: D1Database, input: CompleteTaskRequest, n
   const previous = await replay(db, input.requestId, hash);
   if (previous !== null) return result(previous);
   const id = resourceId(input.name, 'tasks');
-  const focusDay = input.focusDay ? checkedDay(input.focusDay, 'focus_day') : localDate(now, zone);
+  const today = localDate(now, zone);
+  const focusDay = input.focusDay ? checkedDay(input.focusDay, 'focus_day') : today;
   const old = await getTask(db, id);
   checkEtag(old, input.etag);
   if (old.completed) precondition('Task is already complete');
@@ -280,7 +327,15 @@ export async function completeTask(db: D1Database, input: CompleteTaskRequest, n
           `${subtree} UPDATE tasks SET completed=1,completed_at=?,revision=revision+1,updated_at=? WHERE id IN (SELECT id FROM descendants) AND id<>? AND completed=0`,
         )
         .bind(id, now, now, id),
+      // The completed tasks wait for nothing any more; a recurring one keeps its dependencies.
+      db
+        .prepare(
+          `${subtree} UPDATE task_dependencies SET deleted_at=?,updated_at=? WHERE task_id IN (SELECT id FROM descendants)
+          AND deleted_at IS NULL`,
+        )
+        .bind(id, now, now),
     ];
+    row.dependencies = '[]';
   }
   writes.push(
     db
@@ -299,17 +354,18 @@ export async function completeTask(db: D1Database, input: CompleteTaskRequest, n
         table: 'tasks',
         id,
         revision: old.revision,
-        response: serialize(row),
+        response: serialize(row, today),
         now,
       },
       writes,
     ),
   );
 }
-export async function reopenTask(db: D1Database, input: ReopenTaskRequest, now: number) {
+export async function reopenTask(db: D1Database, input: ReopenTaskRequest, now: number, zone: string) {
   const hash = await fingerprint('reopenTask', input);
   const previous = await replay(db, input.requestId, hash);
   if (previous !== null) return result(previous);
+  const today = localDate(now, zone);
   const id = resourceId(input.name, 'tasks');
   const old = await getTask(db, id);
   checkEtag(old, input.etag);
@@ -350,7 +406,7 @@ export async function reopenTask(db: D1Database, input: ReopenTaskRequest, now: 
         table: 'tasks',
         id,
         revision: old.revision,
-        response: serialize(row),
+        response: serialize(row, today),
         now,
       },
       writes,

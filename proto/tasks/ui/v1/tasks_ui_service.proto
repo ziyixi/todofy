@@ -3,14 +3,15 @@
 // (-- api-linter: core::0155::request-id-format=disabled
 //     aip.dev/not-precedent: existing planning commands use UUIDv5; runtime accepts UUIDv4 and UUIDv5,
 //     preserving frozen retry identities instead of replacing them with random IDs. --)
-// Native Tasks owner API. Tasks owns task content and Focus: each day's queue of steps, the one timer and the time
-// records (focus.proto). Access is verified before reading a body; mutations also require same-origin
+// Native Tasks owner API. Tasks owns task content, planning facts and dependencies (task.proto), Plan (plan.proto)
+// and Focus: each day's queue of steps, the one timer and the time records (focus.proto). Access is verified before reading a body; mutations also require same-origin
 // Origin and the signed tasks_csrf token. The TasksApi service binding uses the same protobuf messages
 // without exposing a machine-auth route: a `read` binding may only read, and a `read-write`
 // binding (Todofy) may also write and call the machine-only exportBackup method that Todofy's weekly backup
 // pages every table through. Bodies are bounded to 64 KiB.
-// Every mutation requires a UUIDv4 or UUIDv5 request_id. Exact replays return the original response; reusing it for
-// different input is rejected. Updates require the current etag and an explicit update_mask.
+// Every mutation but UpdateWeeklyBet requires a UUIDv4 or UUIDv5 request_id. Exact replays return the original
+// response; reusing it for different input is rejected. Updates require the current etag and an explicit update_mask.
+// UpdateWeeklyBet is a value write: sending the saved text again answers it as saved.
 syntax = "proto3";
 
 package tasks.ui.v1;
@@ -23,6 +24,7 @@ import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 import "tasks/ui/v1/focus.proto";
+import "tasks/ui/v1/plan.proto";
 import "tasks/ui/v1/task.proto";
 
 option java_multiple_files = true;
@@ -220,8 +222,8 @@ service TasksUiService {
       body: "*"
     };
   }
-  // Atomically changes only the listed tasks' positions, at most 100, under one request receipt.
-  // The caller keeps its list and reads confirmed rows afterwards; no full task bodies are returned.
+  // Atomically changes only the listed tasks' positions, at most 100, and with lane_order one Review lane's order,
+  // under one request receipt. Answers the repositioned tasks with their new etags.
   rpc ReorderTasks(ReorderTasksRequest) returns (ReorderTasksResponse) {
     option (google.api.http) = {
       post: "/api/tasks/v1/tasks:reorder"
@@ -244,7 +246,8 @@ service TasksUiService {
     };
   }
   // Every day of a range of 1 to 7 days, even an empty one, with the records counted on them, every task either
-  // names and Tasks' today. A day holds at most 20 queued steps and 30 records, so the answer is bounded.
+  // names and Tasks' today. A day holds at most 20 queued steps and 30 records, so the answer is bounded. No range
+  // reads the week of Tasks' today.
   rpc ListFocusDays(ListFocusDaysRequest) returns (ListFocusDaysResponse) {
     option (google.api.http) = {get: "/api/tasks/v1/focusDays"};
   }
@@ -299,6 +302,24 @@ service TasksUiService {
   rpc DeleteFocusEntry(DeleteFocusEntryRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {delete: "/api/tasks/v1/{name=focusEntries/*}"};
     option (google.api.method_signature) = "name";
+  }
+  // The planning week: its Bets, the arranged Review lanes and next week's choices, in one batch.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetPlan(GetPlanRequest) returns (Plan) {
+    option (google.api.http) = {get: "/api/tasks/v1/{name=plan}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Saves a Bet's text over the etag shown, creating it when the week and area have none. Only this week's and
+  // the next week's Bets take a write.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateWeeklyBet(UpdateWeeklyBetRequest) returns (WeeklyBet) {
+    option (google.api.http) = {
+      patch: "/api/tasks/v1/{weekly_bet.name=weeklyBets/*}"
+      body: "weekly_bet"
+    };
+    option (google.api.method_signature) = "weekly_bet,update_mask";
   }
 }
 
@@ -723,13 +744,20 @@ message TaskPosition {
 }
 // A bounded atomic order update, with every task's revision checked together.
 message ReorderTasksRequest {
-  // One to 100 distinct task names and their positions.
+  // Up to 100 distinct task names and their positions; empty only with lane_order.
   repeated TaskPosition positions = 1 [(google.api.field_behavior) = REQUIRED];
   // UUIDv4 or UUIDv5 reused for an exact retry.
   string request_id = 2 [(google.api.field_behavior) = REQUIRED];
+  // A Review lane's new order, saved in the same write. A task in it leaves every other lane.
+  LaneOrder lane_order = 3 [(google.api.field_behavior) = OPTIONAL];
 }
-// The order update was persisted. Read the affected tasks for their new revisions.
-message ReorderTasksResponse {}
+// The order update was persisted.
+message ReorderTasksResponse {
+  // The repositioned tasks with their new etags, in the order of positions; a task deleted since is left out.
+  repeated Task tasks = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The lane's saved order when lane_order was set: its first 100 open tasks, each once.
+  LaneOrder lane_order = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
 // Parsed date shown to the owner before saving.
 message PreviewDateResponse {
   // YYYY-MM-DD.
@@ -751,7 +779,7 @@ message PreviewDateResponse {
 // (-- api-linter: core::0132::request-unknown-fields=disabled
 //     aip.dev/not-precedent: the range of days is the read; a day has no page order to resume. --)
 message ListFocusDaysRequest {
-  // The first day, YYYY-MM-DD.
+  // The first day, YYYY-MM-DD. Empty, with an empty end_day, reads the week (Monday to Sunday) of Tasks' today.
   // (-- api-linter: core::0132::request-required-fields=disabled
   //     aip.dev/not-precedent: the range of days is the read; without it there is nothing to list. --)
   string start_day = 1 [(google.api.field_behavior) = REQUIRED];
@@ -881,4 +909,19 @@ message DeleteFocusEntryRequest {
   string etag = 2 [(google.api.field_behavior) = OPTIONAL];
   // One UUIDv4 or UUIDv5 for this user action; required.
   string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+// Read the plan.
+message GetPlanRequest {
+  // Always plan.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/Plan"
+  ];
+}
+// Input to UpdateWeeklyBet.
+message UpdateWeeklyBetRequest {
+  // The Bet's name, its new text and the etag shown (empty when it had none).
+  WeeklyBet weekly_bet = 1 [(google.api.field_behavior) = REQUIRED];
+  // text, the only field that changes; empty means text.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
 }

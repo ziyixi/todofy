@@ -2,6 +2,7 @@ import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import {
   TaskSchema,
+  TaskDependencySchema,
   ProjectSchema,
   SectionSchema,
   LabelSchema,
@@ -13,8 +14,17 @@ import {
   type SavedFilter,
 } from '@ziyixi/proto/tasks/ui/v1/task_pb';
 import { invalid } from './errors.ts';
+import { planningView } from './planning.ts';
 
-export type Table = 'tasks' | 'projects' | 'sections' | 'labels' | 'filters' | 'focus_entries' | 'focus_timer';
+export type Table =
+  | 'tasks'
+  | 'projects'
+  | 'sections'
+  | 'labels'
+  | 'filters'
+  | 'focus_entries'
+  | 'focus_timer'
+  | 'plan_board';
 export type CatalogTable = 'projects' | 'sections' | 'labels' | 'filters';
 export interface BaseRow {
   id: string;
@@ -40,6 +50,11 @@ export interface TaskRow extends BaseRow {
   recurrence: string;
   kind: string;
   effort: string;
+  stage: string;
+  committed_week: string;
+  area: string;
+  lead_days: number;
+  planning_flags: string;
   completed: number;
   completed_at: number | null;
   project_archived?: number;
@@ -47,6 +62,8 @@ export interface TaskRow extends BaseRow {
   completed_count?: number;
   child_count?: number;
   completed_child_count?: number;
+  /** JSON from `dependencyList`: [{prerequisite_id,title,done}], oldest first. */
+  dependencies?: string;
 }
 export interface CatalogRow extends BaseRow {
   parent_id?: string;
@@ -74,6 +91,10 @@ export const taskColumns = [
   'recurrence',
   'kind',
   'effort',
+  'stage',
+  'area',
+  'lead_days',
+  'planning_flags',
 ] as const;
 export const catalogColumns = {
   projects: ['title', 'parent_id', 'color', 'favorite', 'archived', 'inbox', 'sort_order'],
@@ -85,6 +106,7 @@ export function taskProjection(includeDescription: boolean, prefix = 't.'): stri
   const columns = [
     'id',
     ...taskColumns,
+    'committed_week',
     'completed',
     'completed_at',
     'project_archived',
@@ -105,6 +127,18 @@ export const childCounts = `(SELECT p.title FROM tasks p WHERE p.id=t.parent_id)
   t.completed_base_count+(SELECT count(*) FROM completions h WHERE h.task_id=t.id AND h.imported=0) AS completed_count,
   (SELECT count(*) FROM tasks c WHERE c.parent_id=t.id AND c.deleted_at IS NULL) AS child_count,
   (SELECT count(*) FROM tasks c WHERE c.parent_id=t.id AND c.deleted_at IS NULL AND c.completed=1) AS completed_child_count`;
+/** Whether a prerequisite is done: completed, or recurring and completed again since the dependency was added. */
+export const prerequisiteDone = `(p.completed=1 OR (p.recurrence<>'' AND p.completed_base_count+(SELECT count(*)
+  FROM completions h WHERE h.task_id=p.id AND h.imported=0)>d.baseline_count))`;
+/** A row's dependencies on live tasks, oldest first: one primary-key seek for a task that has none. */
+export const dependencyList = `(SELECT json_group_array(json_object('prerequisite_id',id,'title',title,'done',done))
+  FROM (SELECT p.id,p.title,${prerequisiteDone} AS done FROM task_dependencies d JOIN tasks p ON p.id=d.prerequisite_id
+  WHERE d.task_id=t.id AND d.deleted_at IS NULL AND p.deleted_at IS NULL ORDER BY d.created_at,d.rowid)) AS dependencies`;
+export interface DependencyRow {
+  prerequisite_id: string;
+  title: string;
+  done: number | boolean;
+}
 export function resourceId(name: string, table: Table): string {
   const prefix = `${table}/`;
   if (!name.startsWith(prefix)) invalid();
@@ -125,7 +159,10 @@ function base(row: BaseRow, table: Table) {
     updateTime: timestampFromMs(row.updated_at),
   };
 }
-export function taskMessage(row: TaskRow): Task {
+/** `today` is Tasks' today, which the planning rollover and the derived planning fields count from. */
+export function taskMessage(row: TaskRow, today: string): Task {
+  const dependencies = JSON.parse(row.dependencies ?? '[]') as DependencyRow[];
+  const planning = planningView(row, today);
   return create(TaskSchema, {
     ...base(row, 'tasks'),
     description: row.description,
@@ -150,6 +187,20 @@ export function taskMessage(row: TaskRow): Task {
     childCount: row.child_count ?? 0,
     completedChildCount: row.completed_child_count ?? 0,
     ...(row.completed_at === null ? {} : { completeTime: timestampFromMs(row.completed_at) }),
+    stage: planning.stage,
+    area: row.area,
+    leadDays: row.lead_days,
+    planningFlags: planning.flags,
+    dependencies: dependencies.map((value) =>
+      create(TaskDependencySchema, {
+        prerequisiteId: value.prerequisite_id,
+        title: value.title,
+        done: Boolean(value.done),
+      }),
+    ),
+    boardStage: planning.boardStage,
+    mustStart: planning.mustStart,
+    missingLead: planning.missingLead,
   });
 }
 export function catalogMessage(table: 'projects', row: CatalogRow): Project;

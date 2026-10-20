@@ -50,7 +50,7 @@ export const BACKUP_TABLES: readonly BackupTable[] = [
       'id', 'title', 'description', 'project_id', 'section_id', 'parent_id', 'label_ids', 'priority', 'sort_order',
       'due_date', 'due_datetime', 'due_timezone', 'deadline', 'duration_minutes', 'recurrence', 'completed',
       'completed_at', 'project_archived', 'completed_base_count', 'revision', 'created_at', 'updated_at', 'deleted_at',
-      'kind', 'effort',
+      'kind', 'effort', 'stage', 'committed_week', 'area', 'lead_days', 'planning_flags',
     ],
     key: ['id'],
   },
@@ -85,6 +85,21 @@ export const BACKUP_TABLES: readonly BackupTable[] = [
       'id', 'state', 'task_id', 'day', 'area', 'target_seconds', 'started_at', 'segment_start', 'saved_seconds',
       'finished_task_id', 'finished_seconds', 'revision', 'created_at', 'updated_at', 'deleted_at',
     ],
+    key: ['id'],
+  },
+  {
+    name: 'task_dependencies',
+    columns: ['task_id', 'prerequisite_id', 'baseline_count', 'created_at', 'updated_at', 'deleted_at'],
+    key: ['task_id', 'prerequisite_id'],
+  },
+  {
+    name: 'weekly_bets',
+    columns: ['week_start', 'area', 'text', 'revision', 'created_at', 'updated_at'],
+    key: ['week_start', 'area'],
+  },
+  {
+    name: 'plan_board',
+    columns: ['id', 'lanes', 'revision', 'created_at', 'updated_at'],
     key: ['id'],
   },
 ];

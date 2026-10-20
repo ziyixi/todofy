@@ -23,6 +23,7 @@ import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import { addDays, daysBetween, localDate, validDate } from '@ziyixi/task-dates';
 import { invalid, missing, precondition, storage } from './errors.ts';
 import { checkedId } from './model.ts';
+import { mondayOf } from './planning.ts';
 import { commit, fingerprint, replay } from './receipts.ts';
 
 /**
@@ -134,8 +135,10 @@ export async function commitChecked(
 }
 
 export async function listFocusDays(db: D1Database, input: ListFocusDaysRequest, zone: string, now: number) {
-  const start = checkedDay(input.startDay, 'start_day');
-  const end = checkedDay(input.endDay, 'end_day');
+  // No range reads the week of Tasks' today, so Plan's first read needs no other answer first.
+  const week = input.startDay || input.endDay ? '' : mondayOf(localDate(now, zone));
+  const start = week || checkedDay(input.startDay, 'start_day');
+  const end = week ? addDays(week, 6) : checkedDay(input.endDay, 'end_day');
   const span = daysBetween(start, end);
   if (span < 0 || span > 6) invalid('Read 1 to 7 days');
   const range = [start, end];

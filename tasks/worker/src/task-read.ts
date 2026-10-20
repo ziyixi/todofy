@@ -4,7 +4,7 @@ import { ListTasksResponseSchema, type ListTasksRequest } from '@ziyixi/proto/ta
 import { addDays, localDate, validDate } from '@ziyixi/task-dates';
 import { invalid, missing, storage } from './errors.ts';
 import { taskFilter } from './filters.ts';
-import { childCounts, taskProjection, checkedId, taskMessage, type TaskRow } from './model.ts';
+import { childCounts, dependencyList, taskProjection, checkedId, taskMessage, type TaskRow } from './model.ts';
 
 export function pageSize(value: number, fallback = 50): number {
   if (!Number.isInteger(value) || value < 0) invalid('Invalid page size');
@@ -13,14 +13,15 @@ export function pageSize(value: number, fallback = 50): number {
 export async function getTask(db: D1Database, id: string): Promise<TaskRow> {
   const row = await storage(() =>
     db
-      .prepare(`SELECT t.*,${childCounts} FROM tasks t WHERE t.id=? AND t.deleted_at IS NULL`)
+      .prepare(`SELECT t.*,${childCounts},${dependencyList} FROM tasks t WHERE t.id=? AND t.deleted_at IS NULL`)
       .bind(checkedId(id))
       .first<TaskRow>(),
   );
   return row ?? missing();
 }
 export async function listTasks(db: D1Database, request: ListTasksRequest, zone: string, now: number) {
-  const today = request.date || localDate(now, zone);
+  const accountToday = localDate(now, zone);
+  const today = request.date || accountToday;
   if (!validDate(today)) invalid('Invalid reference date');
   const view = request.view || 'inbox';
   const conditions = ['t.deleted_at IS NULL'];
@@ -145,7 +146,7 @@ export async function listTasks(db: D1Database, request: ListTasksRequest, zone:
   const rows = await storage(() =>
     db
       .prepare(
-        `SELECT ${taskProjection(request.includeDescription)},${childCounts} FROM ${source} WHERE ${conditions.join(' AND ')} ORDER BY t.${column} ${direction},t.id ${direction} LIMIT ?`,
+        `SELECT ${taskProjection(request.includeDescription)},${childCounts},${dependencyList} FROM ${source} WHERE ${conditions.join(' AND ')} ORDER BY t.${column} ${direction},t.id ${direction} LIMIT ?`,
       )
       .bind(...values, size + 1)
       .all<TaskRow>(),
@@ -155,7 +156,7 @@ export async function listTasks(db: D1Database, request: ListTasksRequest, zone:
   const key = last ? ((last as unknown as Record<string, string | number>)[column] ?? '') : '';
   return create(ListTasksResponseSchema, {
     tasks: page.map((row) => {
-      const task = taskMessage(row);
+      const task = taskMessage(row, accountToday);
       if (!request.includeDescription) task.description = '';
       return task;
     }),

@@ -11,7 +11,15 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
-import { FOCUS_TABLES, RESTORE_ORDER, RestoreError, readBackup, restoreConfig, restoreSql } from '../backup-restore.ts';
+import {
+  FOCUS_TABLES,
+  PLANNING_TABLES,
+  RESTORE_ORDER,
+  RestoreError,
+  readBackup,
+  restoreConfig,
+  restoreSql,
+} from '../backup-restore.ts';
 
 const TOOL = fileURLToPath(new URL('../backup-restore.ts', import.meta.url));
 const MIGRATIONS = fileURLToPath(new URL('../../migrations/', import.meta.url));
@@ -59,6 +67,13 @@ function seed(db) {
       ('e-timer','t-done','2026-10-19',1500,5,'timer','work',7,7),('e-manual','t-child','2026-10-18',900,NULL,'manual','',3,3);
     UPDATE focus_timer SET state='running',task_id='t-child',day='2026-10-19',area='personal',started_at=10,
       segment_start=12,saved_seconds=60,revision=3,updated_at=12 WHERE id='timer';
+    UPDATE tasks SET stage='committed',committed_week='2026-10-19',area='work',lead_days=3,deadline='2026-10-23',
+      planning_flags='["active"]' WHERE id='t-parent';
+    INSERT INTO task_dependencies(task_id,prerequisite_id,baseline_count,created_at,updated_at,deleted_at) VALUES
+      ('t-parent','t-done',0,2,2,NULL),('t-child','t-parent',4,3,5,5);
+    INSERT INTO weekly_bets(week_start,area,text,revision,created_at,updated_at) VALUES
+      ('2026-10-19','work','Synthetic “goal” it''s',2,1,3);
+    UPDATE plan_board SET lanes='{"committed":["t-parent"]}',revision=4,created_at=1,updated_at=6 WHERE id='board';
   `);
   db.prepare("INSERT INTO tasks(id,title,description,created_at,updated_at) VALUES('t-nul','NUL',?,1,1)").run(
     "a\0b “quoted” it's\n第二行",
@@ -72,10 +87,21 @@ function columns(db, table) {
     .map((column) => column.name);
 }
 
-/** What Todofy's job stores for the Tasks section: two parts per table, skipping the rows `skip` names. */
-function backupOf(db, root, { skip = () => false, change = { start: 3, end: 3 }, tables: names = RESTORE_ORDER } = {}) {
+/** The tasks columns 0006_planning.sql added, which an older backup's tasks lack. */
+const PLANNING_COLUMNS = ['stage', 'committed_week', 'area', 'lead_days', 'planning_flags'];
+/**
+ * What Todofy's job stores for the Tasks section: two parts per table, skipping the rows `skip` names. A backup made
+ * before 0006_planning.sql has neither its tables nor its tasks columns (`beforePlanning`).
+ */
+function backupOf(
+  db,
+  root,
+  { skip = () => false, change = { start: 3, end: 3 }, tables: names = RESTORE_ORDER, beforePlanning = false } = {},
+) {
   const tables = names.map((name) => {
-    const names = columns(db, name);
+    const names = columns(db, name).filter(
+      (column) => !(beforePlanning && name === 'tasks' && PLANNING_COLUMNS.includes(column)),
+    );
     const rows = db
       .prepare(`SELECT ${names.join(',')} FROM ${name} ORDER BY rowid`)
       .all()
@@ -97,7 +123,12 @@ function backupOf(db, root, { skip = () => false, change = { start: 3, end: 3 },
 }
 
 function dump(db) {
-  const keys = { completions: 'sequence', day_steps: 'day,task_id' };
+  const keys = {
+    completions: 'sequence',
+    day_steps: 'day,task_id',
+    task_dependencies: 'task_id,prerequisite_id',
+    weekly_bets: 'week_start,area',
+  };
   return Object.fromEntries(
     [...RESTORE_ORDER, 'task_labels'].map((name) => [
       name,
@@ -132,8 +163,8 @@ test('every table but the derived ones is restored, in an order its references a
 test('a backup round-trips with its ids, revisions, sequences and labels, and a re-run changes nothing', () =>
   withBackup((root, source) => {
     const { sql, statements } = restoreSql(readBackup(root));
-    // Every row, and one DELETE of the migration's idle timer before the backed-up one.
-    assert.equal(statements, 4 + 1 + 2 + 1 + 5 + 2 + 1 + 2 + 2 + 1 + 1);
+    // Every row, and one DELETE of the migration's idle timer and of its empty board before the backed-up ones.
+    assert.equal(statements, 4 + 1 + 2 + 1 + 5 + 2 + 1 + 2 + 2 + 1 + 1 + 2 + 1 + 1 + 1);
     const lines = sql.split('\n');
     const at = (id) => lines.findIndex((line) => line.startsWith('INSERT INTO tasks(') && line.includes(`'${id}'`));
     assert.ok(at('t-parent') < at('t-child'), 'the parent, stored after its child, is inserted first');
@@ -144,9 +175,13 @@ test('a backup round-trips with its ids, revisions, sequences and labels, and a 
     assert.deepEqual(dump(target), dump(source));
     assert.ok(target.prepare('SELECT count(*) AS n FROM changes').get().n > 0, 'the inserts rebuilt the change feed');
     assert.equal(target.prepare("SELECT state FROM focus_timer WHERE id='timer'").get().state, 'running');
+    assert.equal(target.prepare("SELECT revision FROM plan_board WHERE id='board'").get().revision, 4);
     target.exec("INSERT INTO completions(id,task_id,title,completed_at) VALUES('c-new','t-done','Done',8)");
     assert.equal(target.prepare("SELECT sequence FROM completions WHERE id='c-new'").get().sequence, 10);
   }));
+
+const BEFORE_FOCUS = RESTORE_ORDER.filter((name) => !FOCUS_TABLES.includes(name) && !PLANNING_TABLES.includes(name));
+const BEFORE_PLANNING = RESTORE_ORDER.filter((name) => !PLANNING_TABLES.includes(name));
 
 test('a backup made before the Focus tables restores them empty, with the idle timer', () =>
   withBackup(
@@ -154,14 +189,13 @@ test('a backup made before the Focus tables restores them empty, with the idle t
       const backup = readBackup(root);
       assert.deepEqual(
         backup.section.tables.map((table) => table.name),
-        RESTORE_ORDER.filter((name) => !FOCUS_TABLES.includes(name)),
+        BEFORE_FOCUS,
       );
       const target = migrated();
       target.exec(restoreSql(backup).sql);
       const restored = dump(target);
       const before = dump(source);
-      for (const name of RESTORE_ORDER.filter((table) => !FOCUS_TABLES.includes(table)))
-        assert.deepEqual(restored[name], before[name], name);
+      for (const name of BEFORE_FOCUS) assert.deepEqual(restored[name], before[name], name);
       assert.deepEqual(restored.day_steps, []);
       assert.deepEqual(restored.focus_entries, []);
       assert.deepEqual(
@@ -169,13 +203,49 @@ test('a backup made before the Focus tables restores them empty, with the idle t
         [{ id: 'timer', state: 'idle', task_id: '', revision: 1 }],
       );
     },
-    { tables: RESTORE_ORDER.filter((name) => !FOCUS_TABLES.includes(name)) },
+    { tables: BEFORE_FOCUS },
+  ));
+
+test('a backup made before planning moved into Tasks restores no planning facts, and the empty board', () =>
+  withBackup(
+    (root, source) => {
+      const backup = readBackup(root);
+      assert.deepEqual(
+        backup.section.tables.map((table) => table.name),
+        BEFORE_PLANNING,
+      );
+      const target = migrated();
+      target.exec(restoreSql(backup).sql);
+      const restored = dump(target);
+      const before = dump(source);
+      for (const name of BEFORE_PLANNING.filter((table) => table !== 'tasks'))
+        assert.deepEqual(restored[name], before[name], name);
+      const unplanned = (row) => ({
+        ...row,
+        stage: 'none',
+        committed_week: '',
+        area: 'unassigned',
+        lead_days: 0,
+        planning_flags: '[]',
+      });
+      assert.deepEqual(
+        restored.tasks.map((row) => ({ ...row })),
+        before.tasks.map(unplanned),
+      );
+      assert.deepEqual(restored.task_dependencies, []);
+      assert.deepEqual(restored.weekly_bets, []);
+      assert.deepEqual(
+        restored.plan_board.map(({ id, lanes, revision }) => ({ id, lanes, revision })),
+        [{ id: 'board', lanes: '{}', revision: 1 }],
+      );
+    },
+    { tables: BEFORE_PLANNING, beforePlanning: true },
   ));
 
 test('a backup with only some of the Focus tables is refused', () =>
   withBackup(
     (root) => {
-      assert.throws(() => readBackup(root), /unexpected Tasks tables: .*day_steps, focus_entries$/);
+      assert.throws(() => readBackup(root), /unexpected Tasks tables: .*day_steps, focus_entries, task_dependencies/);
     },
     { tables: RESTORE_ORDER.filter((name) => name !== 'focus_timer') },
   ));
@@ -264,15 +334,19 @@ test('the CLI restores and verifies a backup made before the Focus tables', () =
     (root) => {
       const out = join(root, 'restore.sql');
       const written = execFileSync('node', [TOOL, 'sql', '--in', root, '--out', out], { encoding: 'utf8' });
-      assert.match(written, /\nNOTE day_steps, focus_entries, focus_timer: not in this backup/);
+      assert.match(written, /\nNOTE day_steps, focus_entries, focus_timer: not in this backup \(made before 0005/);
+      assert.match(
+        written,
+        /\nNOTE task_dependencies, weekly_bets, plan_board: not in this backup \(made before 0006/,
+      );
       const passed = loaded(root, out).verify();
       assert.equal(passed.status, 0, passed.stderr);
       assert.match(
         passed.stdout,
-        /PASS requests rows=1\/1\nPASS day_steps rows=0\/0\nPASS focus_entries rows=0\/0\nPASS focus_timer rows=1\/1\nverify PASS\n$/,
+        /PASS requests rows=1\/1\nPASS day_steps rows=0\/0\nPASS focus_entries rows=0\/0\nPASS focus_timer rows=1\/1\nPASS task_dependencies rows=0\/0\nPASS weekly_bets rows=0\/0\nPASS plan_board rows=1\/1\nverify PASS\n$/,
       );
     },
-    { tables: RESTORE_ORDER.filter((name) => !FOCUS_TABLES.includes(name)) },
+    { tables: BEFORE_FOCUS, beforePlanning: true },
   ));
 
 test('the CLI writes the SQL owner-only, warns about a moving snapshot and verifies the loaded database', () =>
@@ -290,7 +364,7 @@ test('the CLI writes the SQL owner-only, warns about a moving snapshot and verif
       assert.match(passed.stdout, new RegExp(`PASS schema_version ${FILES.at(-1)}\n`));
       assert.match(
         passed.stdout,
-        /PASS requests rows=1\/1\nPASS day_steps rows=2\/2\nPASS focus_entries rows=2\/2\nPASS focus_timer rows=1\/1\nverify PASS\n$/,
+        /PASS requests rows=1\/1\nPASS day_steps rows=2\/2\nPASS focus_entries rows=2\/2\nPASS focus_timer rows=1\/1\nPASS task_dependencies rows=2\/2\nPASS weekly_bets rows=1\/1\nPASS plan_board rows=1\/1\nverify PASS\n$/,
       );
       new DatabaseSync(file).exec('DELETE FROM requests');
       const failed = verify();

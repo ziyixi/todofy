@@ -47,7 +47,12 @@ test('one reorder atomically permutes 100 positions, preserves unlisted tasks an
   const body = { positions, request_id: randomUUID() };
   const response = await harness.mutate('POST', '/api/tasks/v1/tasks:reorder', body);
   expect(response.status, await response.clone().text()).toBe(200);
-  expect(await response.json()).toEqual({});
+  // The answer is the repositioned tasks in the order given, at their new etags, without descriptions.
+  const answer = await response.json<{ tasks: { id: string; etag: string; sort_order: number; description?: string }[] }>();
+  expect(answer.tasks.map((task) => [task.id, task.etag, task.sort_order])).toEqual(
+    positions.map((position) => [position.name.slice('tasks/'.length), '2', position.sort_order]),
+  );
+  expect(answer.tasks.every((task) => task.description === undefined)).toBe(true);
   const after = await stored('hundred');
   expect(after.map((row) => row.id)).toEqual([...rows].reverse().map((row) => row.id));
   expect(after.every((row) => row.revision === 2 && row.description === 'Keep full stored description')).toBe(
@@ -61,7 +66,9 @@ test('one reorder atomically permutes 100 positions, preserves unlisted tasks an
       description: 'Keep full stored description',
     },
   ]);
-  expect((await harness.mutate('POST', '/api/tasks/v1/tasks:reorder', body)).status).toBe(200);
+  const replayed = await harness.mutate('POST', '/api/tasks/v1/tasks:reorder', body);
+  expect(replayed.status).toBe(200);
+  expect(await replayed.json()).toEqual(answer);
   expect(await stored('hundred')).toEqual(after);
   const changes = await harness.db
     .prepare('SELECT count(*) n FROM changes WHERE resource_id LIKE ?')
@@ -141,7 +148,7 @@ test('the transactional guard rejects a non-first task changed after the pre-rea
     })),
     request_id: randomUUID(),
   }).message;
-  await expect(reorderTasks(db, input, Date.now())).rejects.toMatchObject({
+  await expect(reorderTasks(db, input, Date.now(), 'UTC')).rejects.toMatchObject({
     reason: 'ETAG_MISMATCH',
   });
   const after = await stored('raced');

@@ -1,4 +1,5 @@
 import { TaskSchema } from "@ziyixi/proto/tasks/ui/v1/task_pb";
+import { localDate } from "@ziyixi/task-dates";
 import type { DuplicateTaskRequest } from "@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb";
 import { fromWire, toWire } from "@ziyixi/proto/wire-json";
 import { conflict, invalid, precondition, storage } from "./errors.ts";
@@ -17,10 +18,12 @@ const withinLimit = `(SELECT count(*) FROM family)<=${String(MAX_COPY_TASKS)}
   AND NOT EXISTS(SELECT 1 FROM tasks t JOIN family f ON t.parent_id=f.id
     WHERE f.depth=31 AND t.deleted_at IS NULL AND t.completed=0)`;
 
+/** A copy keeps its planning facts but no dependencies, and a copied commitment reads as weekly. */
 export async function duplicateTask(
   db: D1Database,
   input: DuplicateTaskRequest,
   now: number,
+  zone: string,
 ) {
   const hash = await fingerprint("duplicateTask", input);
   const previous = await replay(db, input.requestId, hash);
@@ -50,6 +53,8 @@ export async function duplicateTask(
     revision: 1,
     created_at: now,
     updated_at: now,
+    committed_week: "",
+    dependencies: "[]",
   };
   await validateTask(db, row);
   const columns = ["id", ...taskColumns, "created_at", "updated_at"];
@@ -69,7 +74,9 @@ export async function duplicateTask(
       table: "tasks",
       id: sourceId,
       revision: source.revision,
-      response: JSON.stringify(toWire(TaskSchema, taskMessage(row))),
+      response: JSON.stringify(
+        toWire(TaskSchema, taskMessage(row, localDate(now, zone))),
+      ),
       now,
     },
     [

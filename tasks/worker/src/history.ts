@@ -13,7 +13,7 @@ import { checkedId, taskMessage, taskProjection, childCounts, type TaskRow } fro
 import { invalid, precondition, storage } from './errors.ts';
 import { pageSize } from './task-read.ts';
 
-export async function listChanges(db: D1Database, input: ListChangesRequest) {
+export async function listChanges(db: D1Database, input: ListChangesRequest, today: string) {
   const cursor = input.pageToken || '0';
   if (!/^\d{1,15}$/.test(cursor)) invalid('Invalid change cursor');
   const size = pageSize(input.pageSize, 100);
@@ -56,7 +56,7 @@ export async function listChanges(db: D1Database, input: ListChangesRequest) {
         cursor: String(r.sequence),
         name: `${r.resource}/${r.resource_id}`,
         deleted: r.resource === 'tasks' ? !task : r.deleted === 1,
-        ...(task && r.resource === 'tasks' ? { task: { ...taskMessage(task), description: '' } } : {}),
+        ...(task && r.resource === 'tasks' ? { task: { ...taskMessage(task, today), description: '' } } : {}),
       });
     }),
     nextPageToken: String(page.at(-1)?.sequence ?? cursor),
