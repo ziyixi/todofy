@@ -609,3 +609,38 @@ it("Plan's finish action cannot turn into Reopen when a fresh read finds the tas
   expect(close).toHaveBeenCalledOnce();
   expect(reopen).not.toHaveBeenCalled();
 });
+
+it("keeps Plan's completion action across Plan and Focus, and reads Plan again only for writes Plan did not issue", async () => {
+  const task = create(TaskSchema, {
+    id: "synthetic",
+    name: "tasks/synthetic",
+    etag: "1",
+  });
+  vi.spyOn(api, "completeTask").mockResolvedValue(
+    create(TaskSchema, { ...task, etag: "2", completed: true }),
+  );
+  const list = listView();
+  const { result, rerender } = renderHook(
+    (route: Route) => useTaskActions(route, "sort_order", list),
+    { initialProps: { page: "plan", id: "" } as Route },
+  );
+  const finish = result.current.finishTask;
+  rerender({ page: "focus", id: "" });
+  expect(result.current.finishTask).toBe(finish);
+  // Plan reads its own completion back, so it counts for the sidebar's counts only.
+  await act(async () => {
+    await finish(task, crypto.randomUUID(), "2026-10-19");
+  });
+  expect([
+    result.current.mutationRevision,
+    result.current.planRevision,
+  ]).toEqual([1, 0]);
+  // A completion from the task dialog opened over Plan is one Plan did not issue.
+  await act(async () => {
+    await result.current.complete(task);
+  });
+  expect([
+    result.current.mutationRevision,
+    result.current.planRevision,
+  ]).toEqual([2, 1]);
+});

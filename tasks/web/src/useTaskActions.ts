@@ -24,7 +24,15 @@ export function useTaskActions(
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [notice, setNotice] = useState("");
+  // Every confirmed write, after which the sidebar's counts are read again.
   const [mutationRevision, setMutationRevision] = useState(0);
+  // The writes Plan and Focus did not issue, after which they read again. They read their own writes back
+  // themselves, so a completion from Plan is read once, not again for this revision.
+  const [planRevision, setPlanRevision] = useState(0);
+  // Read when a completion is confirmed, so the completion actions keep one identity as the page changes:
+  // a new finishTask would make Plan read again when the owner switches between Plan and Focus.
+  const page = useRef(route.page);
+  page.current = route.page;
   const completionRequests = useRef(
     new Map<string, { requestId: string; etag: string }>(),
   );
@@ -33,6 +41,7 @@ export function useTaskActions(
   );
   const taskChanged = useCallback(() => {
     setMutationRevision((revision) => revision + 1);
+    setPlanRevision((revision) => revision + 1);
   }, []);
   async function saveTask(
     draft: TaskDraft,
@@ -126,19 +135,25 @@ export function useTaskActions(
     },
     [],
   );
+  /** `planned` is a completion from Plan or Focus, with its request ID and Focus day. */
   const applyCompletion = useCallback(
     async (
       task: Task,
       reopen: boolean,
-      focusDay?: string,
-      requestId?: string,
+      planned?: { requestId: string; focusDay?: string },
     ): Promise<string | undefined> => {
       setBusyIds((current) => new Set([...current, task.id]));
       setNotice("");
       try {
-        const result = await writeCompletion(task, reopen, requestId, focusDay);
-        taskChanged();
-        if (result.completed === (route.page === "completed"))
+        const result = await writeCompletion(
+          task,
+          reopen,
+          planned?.requestId,
+          planned?.focusDay,
+        );
+        if (planned) setMutationRevision((revision) => revision + 1);
+        else taskChanged();
+        if (result.completed === (page.current === "completed"))
           list.replace(result);
         else list.remove(task.id);
         const confirmedMessage = reopen
@@ -148,7 +163,7 @@ export function useTaskActions(
             : "Task completed";
         let notice = confirmedMessage;
         try {
-          if (!isPlanning(route.page) && route.page !== "catalog")
+          if (!isPlanning(page.current) && page.current !== "catalog")
             await list.refresh();
         } catch {
           notice = `${confirmedMessage}. The task list could not refresh. Refresh the view.`;
@@ -165,21 +180,14 @@ export function useTaskActions(
         );
       }
     },
-    [
-      route.page,
-      list.replace,
-      list.remove,
-      list.refresh,
-      taskChanged,
-      writeCompletion,
-    ],
+    [list.replace, list.remove, list.refresh, taskChanged, writeCompletion],
   );
   function complete(task: Task) {
     return applyCompletion(task, task.completed);
   }
   const finishTask = useCallback(
     (task: Task, requestId: string, focusDay?: string) =>
-      applyCompletion(task, false, focusDay, requestId),
+      applyCompletion(task, false, { requestId, focusDay }),
     [applyCompletion],
   );
   async function patchTask(
@@ -505,6 +513,7 @@ export function useTaskActions(
     notice,
     setNotice,
     mutationRevision,
+    planRevision,
     taskChanged,
     setPriority,
     scheduleTask,

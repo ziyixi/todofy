@@ -12,13 +12,14 @@ import { usePlanView } from "./usePlanView";
 
 export default function PlanningPage({
   page,
-  mutationRevision,
+  refreshRevision,
   onOpenTask,
   onSettings,
   onCompleteTask,
 }: {
   page: "plan" | "focus";
-  mutationRevision: number;
+  /** Changes after each task write Plan did not issue (useTaskActions' planRevision). */
+  refreshRevision: number;
   onOpenTask: (id: string) => void;
   onSettings: () => void;
   /** Completes in Tasks, which settles `focusDay`'s Focus queue in the same write. */
@@ -62,7 +63,7 @@ export default function PlanningPage({
     <div className="planning-ui">
       <PlanningApp
         actions={actions}
-        refreshRevision={mutationRevision}
+        refreshRevision={refreshRevision}
         review={review}
         view={page}
         language="en"

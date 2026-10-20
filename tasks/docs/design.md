@@ -98,7 +98,9 @@ does not require label mapping. The role projection lives in Core's native plann
 Dragging a task into a planning day changes Tasks' day queue with one `MoveFocusStep`, preserving its task
 date and real deadline. A day holds at most 20 steps. Deleting a task, its project or its section takes its
 steps off every day in the same batch, so they never fill a day; its time records stay.
-Native task edits invalidate the mounted planning snapshot through the existing refresh path.
+A task write Plan did not issue (the task dialog, the list) makes a mounted Plan or Focus read again once. Plan
+reads its own writes back itself, so completing a card costs one read, and switching between Plan and Focus
+reads nothing (`request-counts.spec.ts`).
 Plan keeps the candidate columns vertically stacked within their existing desktop row. Committed alone
 spans the row below, with horizontal cards aligned to those columns; narrow layouts keep the existing
 paired/single-column behavior. Review cards, the commitment overview, next Steps, Quick and scheduled

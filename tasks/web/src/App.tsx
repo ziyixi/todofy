@@ -310,7 +310,7 @@ export function App() {
               <PlanningPage
                 onCompleteTask={actions.finishTask}
                 page={route.page}
-                mutationRevision={actions.mutationRevision}
+                refreshRevision={actions.planRevision}
                 onOpenTask={(id) => void openTask(id)}
                 onSettings={() => {
                   window.location.hash = "/plan";
