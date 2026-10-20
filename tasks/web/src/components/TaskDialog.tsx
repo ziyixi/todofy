@@ -49,6 +49,7 @@ export function TaskDialog({
   catalog: Catalog;
   defaults?: Partial<TaskDraft>;
   onClose: () => void;
+  /** One write of the task, after which the host reads the list, the catalog and Plan again. */
   onSave: (
     draft: TaskDraft,
     original?: Task,
@@ -58,6 +59,7 @@ export function TaskDialog({
   onDelete: (task: Task) => Promise<void>;
   onOpen: (id: string) => void;
   onComplete: (task: Task) => Promise<string | undefined>;
+  /** A write the dialog sent itself (a child, a step, a dependency): the host reads again. */
   onChildAdded: () => void;
 }) {
   const [currentTask, setCurrentTask] = useState(task);
@@ -98,12 +100,10 @@ export function TaskDialog({
         saveRequestId.current,
         planningChanges(planning.draft, planningDraft(currentTask)),
       );
-      const changed = saved !== currentTask;
       setCurrentTask(saved);
       setDraft(taskDraft(saved));
       planning.setDraft(planningDraft(saved));
       saveRequestId.current = crypto.randomUUID();
-      if (changed) onChildAdded();
       if (task) setSaveComplete(true);
       else onClose();
     } catch (reason) {

@@ -77,6 +77,13 @@ async function csrfToken(): Promise<string> {
     });
   return csrf;
 }
+/**
+ * Fetches the session's CSRF token at startup, beside the first reads, so the first write does not
+ * wait for it. A failure leaves it to that write, which fetches it again.
+ */
+export function prepareWrites(): void {
+  csrfToken().catch(() => undefined);
+}
 export async function send(call: HttpCall): Promise<Response> {
   const mutation = !["GET", "HEAD"].includes(call.httpMethod);
   const headers = new Headers({ Accept: "application/json" });

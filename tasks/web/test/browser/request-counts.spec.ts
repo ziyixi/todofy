@@ -112,3 +112,43 @@ test("opening a task reads it once, its children only when it has some, and noth
   // The rows and the dialog read their planning facts from the task itself.
   expect(todofy).toEqual([]);
 });
+
+test("a dialog save on a list page writes once and reads the list and the catalog once, with the token read at load", async ({
+  page,
+  request,
+}) => {
+  const task = await createTask(request, {
+    title: `Synthetic counted save ${crypto.randomUUID()}`,
+  });
+  const sent: string[] = [];
+  page.on("request", (event) => {
+    const { pathname } = new URL(event.url());
+    if (pathname.startsWith("/api/tasks/"))
+      sent.push(`${event.method()} ${pathname}`);
+  });
+  await page.goto(`/?task=${task.id}#/inbox`);
+  const dialog = page.getByRole("dialog", {
+    name: "Task details",
+    exact: true,
+  });
+  const stage = dialog.getByRole("combobox", {
+    name: "Planning stage",
+    exact: true,
+  });
+  await expect(stage).toBeVisible();
+  await settled(page);
+  // The session's token is read while the page loads, beside its first reads, not on a write's path.
+  expect(sent.filter((line) => line === "GET /api/tasks/csrf")).toHaveLength(1);
+  sent.length = 0;
+  await stage.selectOption("weekly");
+  await dialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await settled(page);
+  expect(sent.sort()).toEqual([
+    "GET /api/tasks/v1/catalog",
+    "GET /api/tasks/v1/tasks",
+    `PATCH /api/tasks/v1/tasks/${task.id}`,
+  ]);
+});
