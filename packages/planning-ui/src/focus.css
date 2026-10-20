@@ -1,3 +1,23 @@
+/* Focus's Completed checkbox in the page header, as the task list's own toggle: small and muted. */
+.plus-header-actions {
+  align-items: center;
+}
+.plus-completed-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--plus-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.plus-root .plus-completed-toggle input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--plus-accent);
+}
 .plus-focus-summary {
   display: flex;
   align-items: center;
@@ -207,6 +227,39 @@
 }
 .plus-focus-timer-action.is-primary {
   color: var(--plus-accent) !important;
+}
+/* The day's completed steps, after the queue: muted and struck through, with what they logged. */
+.plus-root .plus-focus-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 10px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--plus-muted);
+}
+.plus-focus-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--plus-line);
+}
+/* Dimmed part by part, not as a whole, so an open records popover stays opaque and on top. */
+.plus-focus-block.is-done > .plus-checkbox,
+.plus-focus-block.is-done :is(.plus-focus-block-top, .plus-focus-parent),
+.plus-focus-block.is-done .plus-focus-block-footer > :not(.plus-focus-entries) {
+  opacity: 0.72;
+}
+.plus-root .plus-focus-block.is-done .plus-focus-title {
+  color: var(--plus-muted) !important;
+  text-decoration: line-through;
+}
+.plus-checkbox.is-done {
+  border-color: var(--plus-accent-fill) !important;
+  background: var(--plus-accent-fill);
+  color: var(--plus-on-accent);
+}
+.plus-checkbox.is-done svg {
+  opacity: 1;
 }
 .plus-focus-empty {
   padding: 24px 0;

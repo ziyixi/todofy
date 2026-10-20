@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { effectiveArea, formattedMinutes, taskIndex } from "./domain";
 import { unplannedDue, unplannedText } from "./deadlines";
@@ -34,6 +34,10 @@ interface Props {
   /** Record writes go through the App's queue. */
   actions: PlusActions;
   run: RunOperation;
+  /** The header's Completed checkbox: the day's completed steps follow the open ones. */
+  showCompleted?: boolean;
+  /** Opens Tasks' own task dialog, where a completed step can be reopened. */
+  onOpenTask: (id: string) => void;
   editTask: (task: PlanningTask) => void;
   complete: (task: PlanningTask) => void;
   onOpenPlan: () => void;
@@ -57,12 +61,15 @@ export function FocusView({
   completing,
   actions,
   run,
+  showCompleted = false,
+  onOpenTask,
   editTask,
   complete,
   onOpenPlan,
   onTimer,
 }: Props) {
   const text = words(language);
+  const doneHeading = useId();
   // Counting up is the default: Start, work, then complete the step, which saves its time.
   const [targetSeconds, setTargetSeconds] = useState(0);
   const byId = taskIndex(plan.tasks);
@@ -203,11 +210,38 @@ export function FocusView({
           {openPlan}
         </section>
       )}
-      {focus.completedTaskIds.length > 0 && (
-        <p className="plus-footer-note">
-          {focus.completedTaskIds.length}{" "}
-          {language === "zh" ? "已完成" : "completed today"}
-        </p>
+      {showCompleted && focus.completedTaskIds.length > 0 && (
+        <section className="plus-focus-done" aria-labelledby={doneHeading}>
+          <h2 id={doneHeading} className="plus-focus-divider">
+            {text.completed}
+          </h2>
+          {/* Never inside the queue: completed steps are not reordered or started. */}
+          <ul className="plus-focus-stack">
+            {focus.completedTaskIds.map((id, index) => (
+              <FocusBlock
+                key={id}
+                mode="done"
+                taskId={id}
+                task={byId.get(id)}
+                plan={plan}
+                focus={focus}
+                date={focus.date}
+                records={focus.entries.filter((entry) => entry.taskId === id)}
+                language={language}
+                busy={busy}
+                pending={pending}
+                actions={actions}
+                writeRecord={writeRecord}
+                onTimer={onTimer}
+                editTask={editTask}
+                complete={complete}
+                onOpenTask={onOpenTask}
+                index={index}
+                minutes={minutesOf(id)}
+              />
+            ))}
+          </ul>
+        </section>
       )}
     </>
   );

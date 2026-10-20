@@ -75,6 +75,7 @@ async function setup(unlisted?: FocusTaskInfo) {
       onTimer={vi.fn()}
       actions={actions}
       run={run}
+      onOpenTask={vi.fn()}
     />,
   );
   return { focus, entries, changes, writes };

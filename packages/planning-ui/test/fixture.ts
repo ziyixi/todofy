@@ -383,9 +383,23 @@ export function createPrototype(
         ...plan,
         tasks: plan.tasks.filter((task) => task.id !== item.id),
       };
+      // Tasks' Focus read still names it, now completed, with its title and parent.
+      const parent = plan.tasks.find((task) => task.id === item.parentId);
       focus = {
         ...focus,
         timer: focus.timer?.taskId === item.id ? undefined : focus.timer,
+        tasks: {
+          ...focus.tasks,
+          [item.id]: {
+            title: item.title,
+            parentId: item.parentId,
+            parentTitle: parent?.title ?? "",
+            ...(item.estimatedMinutes
+              ? { estimatedMinutes: item.estimatedMinutes }
+              : {}),
+            completed: true,
+          },
+        },
       };
       days = days.map((day) =>
         day.date === settled && day.taskIds.includes(item.id)

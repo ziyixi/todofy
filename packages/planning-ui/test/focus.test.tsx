@@ -4,9 +4,11 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createPrototype } from "./fixture";
+import { App } from "../src/App";
 import { FocusView } from "../src/FocusView";
 
 afterEach(() => {
@@ -51,6 +53,7 @@ it("shows cleaned parent context, and a task Plan does not list from Tasks' read
       onTimer={onTimer}
       actions={createPrototype()}
       run={vi.fn()}
+      onOpenTask={vi.fn()}
     />,
   );
   const context = screen.getByText("Synthetic outcome", { exact: true });
@@ -148,6 +151,7 @@ it("shows one logged time per card, ticking while its session runs, and distinct
     onTimer,
     actions: createPrototype(),
     run: vi.fn(),
+    onOpenTask: vi.fn(),
   };
   const { rerender } = render(<FocusView {...props} />);
   const card = document.querySelector('[data-task-id="copy"]')!;
@@ -219,6 +223,7 @@ it("sends an empty today queue back to Plan instead of presenting another task p
       onTimer={vi.fn()}
       actions={createPrototype()}
       run={vi.fn()}
+      onOpenTask={vi.fn()}
     />,
   );
   expect(screen.getByText("No steps planned for today.")).toBeTruthy();
@@ -244,6 +249,7 @@ it("starts a step whose outcome has no area as unassigned, which Tasks keeps as 
       onTimer={onTimer}
       actions={createPrototype()}
       run={vi.fn()}
+      onOpenTask={vi.fn()}
     />,
   );
   fireEvent.click(
@@ -255,4 +261,75 @@ it("starts a step whose outcome has no area as unassigned, which Tasks keeps as 
     undefined,
     "unassigned",
   );
+});
+
+it("shows the day's completed steps after the open ones only while Completed is checked, off on every visit", async () => {
+  const actions = createPrototype();
+  const { plan } = await actions.load();
+  // "copy" was completed from today's queue earlier, with 35 minutes logged.
+  await actions.completeTask(
+    plan.tasks.find((task) => task.id === "copy")!,
+    "synthetic-request",
+    "2026-10-13",
+  );
+  await actions.addEntry({
+    taskId: "copy",
+    date: "2026-10-13",
+    seconds: 35 * 60,
+    area: "work",
+  });
+  const onOpenTask = vi.fn();
+  const props = {
+    actions,
+    language: "en" as const,
+    onOpenTask,
+    onSettings: vi.fn(),
+  };
+  const mounted = render(<App {...props} view="focus" />);
+  const toggle = await screen.findByRole("checkbox", { name: "Completed" });
+  expect((toggle as HTMLInputElement).checked).toBe(false);
+  const queue = screen.getByRole("list", { name: "Today's steps" });
+  expect(queue.querySelector('[data-task-id="copy"]')).toBeNull();
+  expect(document.querySelector('[data-task-id="copy"]')).toBeNull();
+  // No "completed today" line replaces it.
+  expect(screen.queryByText(/completed today/u)).toBeNull();
+  fireEvent.click(toggle);
+  const done = document.querySelector<HTMLElement>('[data-task-id="copy"]')!;
+  // After the queue, in a list of their own, with the real title and the time logged.
+  expect(queue.contains(done)).toBe(false);
+  expect(
+    queue.compareDocumentPosition(done) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(done.closest("ul")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Completed" })).toBeTruthy();
+  expect(done.querySelector('[role="img"]')!.getAttribute("aria-label")).toBe(
+    "Completed",
+  );
+  expect(done.querySelector(".plus-focus-block-footer")!.textContent).toMatch(
+    /^Est\. 30m·35m logged/u,
+  );
+  // No Start, no complete; its title opens Tasks' own dialog.
+  expect(done.querySelectorAll(".plus-focus-timer-action")).toHaveLength(0);
+  fireEvent.click(
+    within(done).getByRole("button", { name: "Write the introduction" }),
+  );
+  expect(onOpenTask).toHaveBeenCalledWith("copy");
+  // Leaving Focus and coming back, or a new visit, starts unchecked again.
+  mounted.rerender(<App {...props} view="plan" />);
+  mounted.rerender(<App {...props} view="focus" />);
+  expect(
+    (screen.getByRole("checkbox", { name: "Completed" }) as HTMLInputElement)
+      .checked,
+  ).toBe(false);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Completed" }));
+  mounted.unmount();
+  render(<App {...props} view="focus" />);
+  expect(
+    (
+      (await screen.findByRole("checkbox", {
+        name: "Completed",
+      })) as HTMLInputElement
+    ).checked,
+  ).toBe(false);
+  expect(document.querySelector('[data-task-id="copy"]')).toBeNull();
 });

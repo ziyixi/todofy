@@ -20,6 +20,8 @@ import { areaColor, outcomeForTask } from "./planning-outcomes";
 import { PendingMark } from "./StatusMarks";
 
 interface Props {
+  /** An open step of the queue, or one completed from it: no timer, its title opens Tasks. */
+  mode?: "open" | "done";
   taskId: string;
   task?: PlanningTask;
   plan: PlanState;
@@ -44,9 +46,11 @@ interface Props {
   ) => void;
   editTask: (task: PlanningTask) => void;
   complete: (task: PlanningTask) => void;
+  onOpenTask?: (id: string) => void;
 }
 
 export function FocusBlock({
+  mode = "open",
   taskId,
   task,
   plan,
@@ -64,8 +68,10 @@ export function FocusBlock({
   onTimer,
   editTask,
   complete,
+  onOpenTask,
 }: Props) {
   const text = words(language);
+  const done = mode === "done";
   // A task Plan does not list has its title and parent from Tasks' Focus read.
   const known = focus.tasks[taskId];
   const title = displayedTitle(task?.title ?? known?.title ?? text.missingTask);
@@ -74,9 +80,9 @@ export function FocusBlock({
     focus.timer?.taskId === taskId && focus.timer.day === date
       ? focus
       : undefined;
-  const timer = session?.timer;
+  const timer = done ? undefined : session?.timer;
   let status = "";
-  if (index === 0) status = language === "zh" ? "下一步" : "Up next";
+  if (index === 0 && !done) status = language === "zh" ? "下一步" : "Up next";
   let timerAction: "start" | "pause" | "resume" = "start";
   if (timer) {
     status = text.paused;
@@ -104,11 +110,19 @@ export function FocusBlock({
   return (
     <li className="plus-focus-slot" data-task-id={taskId}>
       <article
-        className={`plus-focus-block ${timer ? "is-current" : ""} ${settling ? "is-pending" : ""}`}
+        className={`plus-focus-block ${timer ? "is-current" : ""} ${settling ? "is-pending" : ""} ${done ? "is-done" : ""}`}
         style={{ "--area-color": color } as CSSProperties}
         aria-busy={settling || undefined}
       >
-        {task ? (
+        {done ? (
+          <span
+            className="plus-checkbox is-done"
+            role="img"
+            aria-label={text.completed}
+          >
+            <Check size={13} />
+          </span>
+        ) : task ? (
           <button
             className="plus-checkbox"
             // Todoist's priority ring: the API's priority 4 is P1.
@@ -129,7 +143,15 @@ export function FocusBlock({
         )}
         <div className="plus-focus-block-content">
           <div className="plus-focus-block-top">
-            {task ? (
+            {done ? (
+              // The planning panel needs an open task; Tasks' own dialog can reopen this one.
+              <button
+                className="plus-focus-title"
+                onClick={() => onOpenTask?.(taskId)}
+              >
+                {title}
+              </button>
+            ) : task ? (
               <button
                 className="plus-focus-title"
                 onClick={() => editTask(task)}
@@ -187,7 +209,7 @@ export function FocusBlock({
             )}
           </div>
         </div>
-        {task && (
+        {task && !done && (
           <div className="plus-focus-timer-controls">
             <button
               className="plus-focus-timer-action is-primary"

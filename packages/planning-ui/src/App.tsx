@@ -134,6 +134,13 @@ export function App({
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
   // Focus's quiet line opens Plan at Start now.
   const [showStart, setShowStart] = useState(false);
+  // Focus's Completed checkbox, like the task list's: off on every visit and never remembered.
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [visited, setVisited] = useState(view);
+  if (visited !== view) {
+    setVisited(view);
+    setShowCompleted(false);
+  }
   // Each task's completion keeps its first request ID and Focus day until it is confirmed, so a
   // retry, from any view, resends both and a lost answer replays instead of completing again.
   const completionIds = useRef(
@@ -607,6 +614,16 @@ export function App({
           </div>
         </div>
         <div className="plus-header-actions">
+          {view === "focus" && (
+            <label className="plus-completed-toggle">
+              <input
+                type="checkbox"
+                checked={showCompleted}
+                onChange={(event) => setShowCompleted(event.target.checked)}
+              />
+              {text.completed}
+            </label>
+          )}
           <button
             className="plus-icon"
             aria-label={text.refresh}
@@ -683,6 +700,8 @@ export function App({
               completing={completing}
               actions={planActions}
               run={run}
+              showCompleted={showCompleted}
+              onOpenTask={onOpenTask}
               editTask={openTask}
               complete={(task) => void complete(task)}
               onOpenPlan={() => onViewChange?.("plan")}
