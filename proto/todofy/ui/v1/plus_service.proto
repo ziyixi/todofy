@@ -1,5 +1,5 @@
-// Tasks' planning and Mail API. Tasks checks owner Access, Origin and CSRF, then calls it on Todofy's private
-// Planning channel, which serves only these methods; no public host routes it.
+// Tasks' Mail API and the weekly review's two Todofy facts. Tasks checks owner Access, Origin and CSRF, then calls
+// it on Todofy's private Planning channel, which serves only these methods; no public host routes it.
 syntax = "proto3";
 package todofy.ui.v1;
 
@@ -13,92 +13,11 @@ option java_multiple_files = true;
 option java_outer_classname = "PlusServiceProto";
 option java_package = "science.ziyixi.todofy.ui.v1";
 
-// Plan, Focus and Mail in Tasks: the tasks live in Tasks, and the facts Tasks does not keep (Bets, dependencies,
-// lane orders, next week's choices, mail summaries and categories) in Todofy's planning store. The name is kept
-// from the retired Todoist Plus extension: renaming a published service is a breaking change.
+// Mail in Tasks: the mail summaries and categories Todofy keeps, and the weekly review's two Todofy facts. Plan and
+// Focus are Tasks' own API (tasks.ui.v1); the planning methods were retired (retired.json). The name is kept from
+// the retired Todoist Plus extension: renaming a published service is a breaking change.
 service PlusService {
   option (google.api.default_host) = "todofy.ziyixi.science";
-  // The account week and the planning metadata, without task content.
-  // (-- api-linter: core::0131::synonyms=disabled
-  //     aip.dev/not-precedent: returns a projection of Tasks and the planning store, not a resource in this
-  //     service. --)
-  rpc ReadPlan(ReadPlanRequest) returns (ReadPlanResponse) {
-    option (google.api.http) = {get: "/api/plus/v1/plan:read"};
-  }
-  // A bounded page of the active tasks in Tasks with their planning fields. Read all pages before showing counts.
-  rpc ListPlanningTasks(ListPlanningTasksRequest) returns (ListPlanningTasksResponse) {
-    option (google.api.http) = {get: "/api/plus/v1/tasks"};
-  }
-  // Changes only the given planning fields of one task: its saved stage, area and planning flags, which Tasks
-  // keeps apart from the task's tags.
-  // (-- api-linter: core::0134::synonyms=disabled
-  //     aip.dev/not-precedent: this action changes a task's planning facts, not a stored Plan resource. --)
-  rpc SetTaskPlan(SetTaskPlanRequest) returns (SetTaskPlanResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/tasks:setTaskPlan"
-      body: "*"
-    };
-  }
-  // Appends up to 20 steps under one task, under a receipt, so a repeat creates none twice.
-  rpc AppendTaskSteps(AppendTaskStepsRequest) returns (AppendTaskStepsResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/tasks:appendTaskSteps"
-      body: "*"
-    };
-  }
-  // Sets the deadline and the start-ahead days together, leaving the scheduled date unchanged.
-  // (-- api-linter: core::0134::synonyms=disabled
-  //     aip.dev/not-precedent: this action updates a task's deadline and lead together. --)
-  rpc SetTaskLead(SetTaskLeadRequest) returns (SetTaskLeadResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/tasks:setTaskLead"
-      body: "*"
-    };
-  }
-  // Completes one task in Tasks, or advances one recurrence; with a flow_date, then settles FlowDay's Focus for
-  // it.
-  rpc CompleteTask(CompleteTaskRequest) returns (CompleteTaskResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/tasks:completeTask"
-      body: "*"
-    };
-  }
-  // Adds or removes one dependency between two tasks. Kept only in Todofy's planning store: no task in Tasks
-  // changes. A value write without a receipt: adding a dependency that still holds keeps it as it is, and adding
-  // one that is done starts it over from the prerequisite's current completed_count.
-  // (-- api-linter: core::0134::synonyms=disabled
-  //     aip.dev/not-precedent: adds or removes one link between two tasks of Tasks, not a stored resource. --)
-  rpc SetTaskDependency(SetTaskDependencyRequest) returns (SetTaskDependencyResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/tasks:setTaskDependency"
-      body: "*"
-    };
-  }
-  // Settles the dependencies of tasks that a complete task read no longer lists, after Tasks confirms they are
-  // not active: a task that waited has its dependencies removed; a prerequisite is recorded as completed, or,
-  // when it was deleted or Tasks does not say how it closed, the dependencies on it are removed. A task recorded
-  // closed that Tasks lists again is open again. Todofy's store only; Tasks is only read.
-  rpc ResolveDependencies(ResolveDependenciesRequest) returns (ResolveDependenciesResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/tasks:resolveDependencies"
-      body: "*"
-    };
-  }
-  // Counts that check the planning store after a restore or a migration, never its content. The restore
-  // runbook opens it on the Tasks host.
-  rpc VerifyPlanStore(VerifyPlanStoreRequest) returns (VerifyPlanStoreResponse) {
-    option (google.api.http) = {get: "/api/plus/v1/plan:verifyPlanStore"};
-  }
-  // Saves one week's Work or Personal Bet: the owner's own line of text, kept in Todofy's planning
-  // store and never written to a task. Only this account week and the next one take a write.
-  // (-- api-linter: core::0134::synonyms=disabled
-  //     aip.dev/not-precedent: saves the whole one-line text by compare-and-set, with no update mask. --)
-  rpc SetWeeklyBet(SetWeeklyBetRequest) returns (SetWeeklyBetResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/weeklyBets:setWeeklyBet"
-      body: "*"
-    };
-  }
   // The Mail inbox: summarised mail still awaiting a decision, newest first, independent of any task. The full
   // summary is read on demand (ReadMailSummary).
   rpc ListMailItems(ListMailItemsRequest) returns (ListMailItemsResponse) {
@@ -150,118 +69,10 @@ service PlusService {
   rpc ReadWeeklyReview(ReadWeeklyReviewRequest) returns (ReadWeeklyReviewResponse) {
     option (google.api.http) = {get: "/api/plus/v1/weeklyReview:read"};
   }
-  // Reorders tasks. The given order of one Review lane is kept in Todofy's planning store. In Tasks, the moved
-  // task's siblings among the given tasks (same project, section and parent) have their existing positions
-  // permuted into the given order in one atomic write; no other task changes, and Waiting and Parked never
-  // change Tasks. One write under a receipt, and none when nothing changes.
-  rpc ReorderTasks(ReorderTasksRequest) returns (ReorderTasksResponse) {
-    option (google.api.http) = {
-      post: "/api/plus/v1/tasks:reorder"
-      body: "*"
-    };
-  }
 }
 
-// A planning role bound to a label. Plan.labels is always empty: planning roles are facts in Todofy's
-// planning store, never task labels.
-message LabelMapping {
-  // Logical role: office, home, quarter, committed, focus, candiate or lead_*.
-  string role = 1;
-  // The label's ID.
-  string id = 2;
-  // The label's current name.
-  string label = 3;
-}
-// One of the owner's labels in Tasks, which a mail category can use.
-message AvailableLabel {
-  // The Tasks label ID.
-  string id = 1;
-  // Exact current name; identity selection uses id.
-  string label = 2;
-}
-// Account-local planning settings.
-message Plan {
-  // The account's IANA time zone, from the Tasks catalog.
-  // (-- api-linter: core::0143::standardized-codes=disabled
-  //     aip.dev/not-precedent: the published field name, kept for existing clients. --)
-  string timezone = 1;
-  // Monday's account-local calendar date, YYYY-MM-DD.
-  string week_start = 2;
-  // Whether the planning store is initialized, which enables planning writes and the weekly reset.
-  bool enabled = 3;
-  // Always empty: planning roles are not labels.
-  repeated LabelMapping labels = 4;
-  // Always empty: Tasks hides no filter for planning.
-  repeated string hidden_filter_ids = 5;
-  // Always empty: no label needs to be created.
-  repeated string missing_labels = 6;
-  // Fingerprint of the planning mode and the time zone.
-  string etag = 7;
-  // Account-local YYYY-MM-DD for deadline calculations.
-  string today = 8;
-  // An owner FlowDay link for a Focus item that is not a Tasks task; Todofy sends none.
-  string flowday_url = 9;
-  // The owner's labels in Tasks, at most 500. No credential or other account metadata.
-  repeated AvailableLabel available_labels = 10;
-  // The Tasks project of Todofy's mail tasks (TODOIST_DEFAULT_PROJECT_ID), for the weekly review's inbox
-  // line. Empty when none is configured.
-  string inbox_project_id = 11;
-  // Newest weekly review task Todofy created, for this or the previous ISO week; empty when
-  // there is none. It may already be completed: only the active task list says it is open.
-  string review_task_id = 12;
-  // At most 100 tasks recorded for the next week: a commitment chosen on this week's
-  // last day, which the coming Monday reset leaves in place.
-  repeated string next_week_task_ids = 13;
-  // Every dependency, at most 300, IDs only. Left out of the BASIC view.
-  repeated TaskDependency dependencies = 14;
-  // The Work and Personal Bets saved for the previous, this and the next account week,
-  // at most six; a week and area with none is absent.
-  repeated WeeklyBet weekly_bets = 15;
-  // The Review lanes the owner arranged (ReorderTasks), each with its tasks first to last, at
-  // most 100 each. A lane never arranged is absent. Left out of the BASIC view.
-  repeated LaneOrder lane_orders = 16;
-  // Always true: planning facts are kept apart from ordinary task labels.
-  bool native_planning = 17;
-  // Native Mail entries still awaiting a decision; present in the full planning view.
-  optional int32 mailbox_pending_count = 18;
-}
-// The owner's order of one Review lane.
-message LaneOrder {
-  // start, waiting, parked, quarterly, monthly, weekly or committed.
-  string lane = 1;
-  // Tasks task IDs, at most 100; Plan skips one that is no longer in the lane.
-  repeated string task_ids = 2;
-}
-// One task waits for another: task_id should not start before prerequisite_id is done. IDs are Tasks task IDs;
-// Todofy stores the link by its own task identities (plan_tasks).
-message TaskDependency {
-  // The task that waits.
-  string task_id = 1;
-  // The task it waits for.
-  string prerequisite_id = 2;
-  // The prerequisite's completed_count when the dependency was added: a recurring prerequisite, which stays
-  // active, satisfies it with its next completion (a count above this one).
-  int32 baseline_completed_count = 3;
-  // Todofy confirmed that the prerequisite was completed, not deleted. The active task list comes first: a
-  // prerequisite listed there is not done, whatever this says.
-  bool done = 4;
-}
-// One week's Work or Personal Bet: the owner's line of text, independent of any task.
-message WeeklyBet {
-  // The account-local Monday of the week, YYYY-MM-DD.
-  // (-- api-linter: core::0142::time-field-type=disabled
-  //     aip.dev/not-precedent: an account-local calendar day, the same key as Plan.week_start. --)
-  string week_start = 1;
-  // work or personal.
-  string area = 2;
-  // One line of at most 160 UTF-16 code units, whitespace collapsed; empty means no Bet.
-  string text = 3;
-  // Compare-and-set version sent back by SetWeeklyBet; empty while the week and area have none.
-  string etag = 4;
-  // When the text was last saved.
-  google.protobuf.Timestamp update_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-// An active task in Tasks with its planning fields from Todofy's planning store. No description.
+// A task in Tasks as ConvertMailItem answers it: only id, title and project_id are set. The other fields were the
+// retired planning methods'; they stay for the wire. No description.
 message PlanningTask {
   // The Tasks task ID; never a title match or temporary browser ID.
   string id = 1;
@@ -320,235 +131,6 @@ message PlanningTask {
   string kind = 25;
   // The Tasks effort: deep, shallow or empty.
   string effort = 26;
-}
-// Reads the singleton plan.
-message ReadPlanRequest {
-  // FULL by default (UNSPECIFIED), or BASIC.
-  PlanView view = 1 [(google.api.field_behavior) = OPTIONAL];
-}
-// Account metadata without task content.
-message ReadPlanResponse {
-  // Current account planning metadata.
-  Plan plan = 1;
-}
-// A page of active tasks; maximum page_size is 200.
-message ListPlanningTasksRequest {
-  // Default 100, maximum 200.
-  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  // Opaque cursor from the preceding response.
-  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
-  // Restrict the page to these exact task IDs, at most 100; empty lists active tasks normally.
-  // (-- api-linter: core::0132::request-unknown-fields=disabled
-  //     aip.dev/not-precedent: bounded identity lookup lets the task editor read one planning projection. --)
-  repeated string task_ids = 3 [(google.api.field_behavior) = OPTIONAL];
-}
-// A page is never a complete task count when next_page_token is present.
-message ListPlanningTasksResponse {
-  // Tasks from this page.
-  repeated PlanningTask planning_tasks = 1;
-  // Empty only when all active tasks have been returned.
-  string next_page_token = 2;
-}
-// A deliberate planning change. Omitted optional fields remain unchanged.
-message SetTaskPlanRequest {
-  // The Tasks task ID.
-  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
-  // Fingerprint of the task shown to the user.
-  string etag = 2 [(google.api.field_behavior) = REQUIRED];
-  // UUID reused when repeating this action.
-  string request_id = 3 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-  // none, quarterly, monthly, weekly or committed.
-  optional string stage = 4;
-  // work, personal or unassigned.
-  optional string area = 5;
-  // Deprecated: the weekly Bets are text (SetWeeklyBet). A request that sets it is refused
-  // (BAD_REQUEST) and writes nothing.
-  optional bool bet = 6 [deprecated = true];
-  // The in-progress flag.
-  optional bool active = 7;
-  // The set-aside flag; setting it also clears the stage and the in-progress flag.
-  optional bool parked = 8;
-  // A short, independent action shown in the Quick row.
-  optional bool quick = 9;
-  // Waiting for something outside this task's dependencies.
-  optional bool waiting = 10;
-  // Routine work, excluded from automatic date candidates.
-  optional bool routine = 11;
-  // Hold this task outside automatic date candidates.
-  optional bool on_hold = 12;
-  // True is refused (BAD_REQUEST): blocked state comes from unresolved dependencies.
-  optional bool blocked = 13;
-  // An ordinary task that can also be scheduled as a step.
-  optional bool single_action = 14;
-}
-// The task after a successful planning change.
-message SetTaskPlanResponse {
-  // Current task values.
-  PlanningTask task = 1;
-}
-// A child title and optional estimate.
-message TaskStep {
-  // Nonempty title, at most 500 characters.
-  string title = 1 [(google.api.field_behavior) = REQUIRED];
-  // Absent is unknown. Two hours and above are a UI warning, not rejected.
-  optional int32 estimated_minutes = 2;
-}
-// Creates only explicitly submitted child tasks, with at most 20 per action.
-message AppendTaskStepsRequest {
-  // An existing Tasks task.
-  string parent_id = 1 [(google.api.field_behavior) = REQUIRED];
-  // Stable action UUID.
-  string request_id = 2 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-  // In entered order.
-  repeated TaskStep steps = 3 [(google.api.field_behavior) = REQUIRED];
-}
-// The Tasks IDs of the created steps, in entered order.
-message AppendTaskStepsResponse {
-  // Created child IDs in entered order.
-  repeated string task_ids = 1;
-}
-// Sets lead and deadline together; an empty deadline explicitly clears it.
-message SetTaskLeadRequest {
-  // An existing Tasks task.
-  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
-  // Fingerprint of the task shown to the user.
-  string etag = 2 [(google.api.field_behavior) = REQUIRED];
-  // Stable action UUID.
-  string request_id = 3 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-  // True calendar deadline YYYY-MM-DD, or empty to clear.
-  string deadline = 4 [(google.api.field_behavior) = OPTIONAL];
-  // 0 clears; any integer from 1 to 365 days.
-  int32 lead_days = 5 [(google.api.field_behavior) = OPTIONAL];
-}
-// Updated deadline and planning values.
-message SetTaskLeadResponse {
-  // Current task values.
-  PlanningTask task = 1;
-}
-// Completes one task in Tasks, with Tasks' recurrence behaviour.
-message CompleteTaskRequest {
-  // Task ID, never a parent automatically chosen by the server.
-  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
-  // Stable action UUID protects a recurring task from advancing twice.
-  string request_id = 2 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-  // Focus day to settle after Tasks confirms completion; empty outside Focus.
-  // (-- api-linter: core::0142::time-field-type=disabled
-  //     aip.dev/not-precedent: account-local calendar day, not an instant; same field as FlowDay. --)
-  string flow_date = 3 [(google.api.field_behavior) = OPTIONAL];
-  // Replay the generic completion's exact etag and request_id before settling Focus.
-  string task_etag = 4 [(google.api.field_behavior) = OPTIONAL];
-  // The completed task or a completed descendant whose active timer must settle.
-  string flow_task_id = 5 [(google.api.field_behavior) = OPTIONAL];
-}
-// Acknowledges the completion Tasks confirmed.
-message CompleteTaskResponse {
-  // The completed task.
-  string task_id = 1;
-}
-// Adds or removes one dependency between two active tasks.
-message SetTaskDependencyRequest {
-  // The task that waits.
-  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
-  // The task it waits for: another active task, not one that already waits for task_id, directly or through
-  // others, by dependencies that are not done. A recurring prerequisite needs its completed_count from Tasks.
-  string prerequisite_id = 2 [(google.api.field_behavior) = REQUIRED];
-  // True adds the dependency, false (the default) removes it. A task waits for at most 5 tasks that are not
-  // done, and there are at most 300 dependencies in all; at either limit, the task's oldest done dependency
-  // gives way to the new one.
-  bool waits = 3 [(google.api.field_behavior) = OPTIONAL];
-  // Stable action UUID, for the transport; a dependency write is idempotent by value.
-  string request_id = 4 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-}
-// The dependencies of task_id after the write.
-message SetTaskDependencyResponse {
-  // What the task waits for now.
-  repeated TaskDependency dependencies = 1;
-}
-// Tasks a complete read of the active tasks did not list, which appear in dependencies.
-message ResolveDependenciesRequest {
-  // Stable action UUID, for the transport; settling is idempotent by value.
-  string request_id = 1 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-  // At most 20 Tasks task IDs.
-  repeated string task_ids = 2 [(google.api.field_behavior) = REQUIRED];
-}
-// Every dependency after settling, and the tasks that no longer wait because what they waited for was deleted.
-message ResolveDependenciesResponse {
-  // Every dependency, as in Plan.dependencies.
-  repeated TaskDependency dependencies = 1;
-  // Tasks whose dependency on a deleted task was removed in this call, for a one-time notice.
-  repeated string dropped_task_ids = 2;
-  // Tasks whose dependency was removed in this call because what they waited for left the active list while
-  // Tasks still has it open (a task in an archived project, say), for a one-time notice that says only that.
-  repeated string released_task_ids = 3;
-}
-// Reads the planning store's counts.
-message VerifyPlanStoreRequest {}
-// Rows per planning table, to compare with a backup manifest, and the rows that break one of the store's rules.
-// Every rule count is zero in a healthy store; an absent count is zero.
-message VerifyPlanStoreResponse {
-  // Rows of plan_settings.
-  int32 settings_row_count = 1;
-  // Rows of plan_tasks, Todofy's task identities.
-  int32 task_row_count = 2;
-  // Rows of plan_marks.
-  int32 mark_row_count = 3;
-  // Rows of plan_edges.
-  int32 edge_row_count = 4;
-  // Rows of plan_notes.
-  int32 note_row_count = 5;
-  // Rows of plan_categories.
-  int32 category_row_count = 6;
-  // Marks whose task identity is missing.
-  int32 orphan_mark_count = 7;
-  // Edges either of whose task identities is missing.
-  int32 orphan_edge_count = 8;
-  // Rows whose setting key, provider, kind or scheme this build does not know, and settings that are not a JSON
-  // object.
-  int32 unknown_value_count = 9;
-  // Tasks over the dependency limit, a dependency total over its limit, and schemes over the active category limit.
-  int32 limit_violation_count = 10;
-  // Rows of native plan_task_state.
-  int32 state_row_count = 11;
-  // Native planning state whose task identity is missing.
-  int32 orphan_state_count = 12;
-}
-// Saves the text of one week's Bet. Sending the text already saved answers it as saved,
-// whatever the etag, so a repeated request is safe without a request ID.
-message SetWeeklyBetRequest {
-  // The account-local Monday of this account week or the next one, YYYY-MM-DD.
-  // (-- api-linter: core::0142::time-field-type=disabled
-  //     aip.dev/not-precedent: an account-local calendar day, the same key as Plan.week_start. --)
-  string week_start = 1 [(google.api.field_behavior) = REQUIRED];
-  // work or personal.
-  string area = 2 [(google.api.field_behavior) = REQUIRED];
-  // The new text; empty clears the Bet. Saved as one line, whitespace collapsed, at most
-  // 160 UTF-16 code units.
-  string text = 3 [(google.api.field_behavior) = OPTIONAL];
-  // The etag of the Bet shown, empty when there was none.
-  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
-}
-// The Bet as saved.
-message SetWeeklyBetResponse {
-  // Current values.
-  WeeklyBet weekly_bet = 1;
 }
 
 // A reference into Tasks, by its own ID.
@@ -645,7 +227,7 @@ message ConvertMailItemRequest {
 }
 // The converted task; the full source summary remains available through ReadMailSummary.
 message ConvertMailItemResponse {
-  // The confirmed generic Inbox task.
+  // The confirmed generic Inbox task: its ID, title and project.
   PlanningTask task = 1;
 }
 // Deletes a bounded set of pending native summaries only.
@@ -711,30 +293,8 @@ message ReadWeeklyReviewResponse {
   // Mail entries still awaiting a decision.
   int32 mailbox_pending_count = 2;
 }
-// A new order of tasks: one Review lane's, or a parent's sub-tasks.
-message ReorderTasksRequest {
-  // UUID reused when repeating this action.
-  string request_id = 1 [
-    (google.api.field_behavior) = OPTIONAL,
-    (google.api.field_info).format = UUID4
-  ];
-  // 1 to 100 distinct Tasks task IDs in their new order.
-  repeated string task_ids = 2 [(google.api.field_behavior) = REQUIRED];
-  // A LaneOrder lane, or empty to change only the order in Tasks.
-  string lane = 3 [(google.api.field_behavior) = OPTIONAL];
-  // The task the owner moved, one of task_ids.
-  string task_id = 4 [(google.api.field_behavior) = REQUIRED];
-}
-// The tasks and the lane after the new order.
-message ReorderTasksResponse {
-  // The given tasks that are active, in the given order, as Tasks lists them now.
-  repeated PlanningTask tasks = 1;
-  // The lane's saved order; absent when lane is empty.
-  LaneOrder lane_order = 2;
-}
 
-// A priority in the domain's order, P1 the most urgent, as in Tasks. PlanningTask.priority carries the API
-// order, 5 - n.
+// A priority in the domain's order, P1 the most urgent, as in Tasks.
 enum Priority {
   // Never written.
   PRIORITY_UNSPECIFIED = 0;
@@ -748,7 +308,8 @@ enum Priority {
   PRIORITY_P4 = 4;
 }
 
-// How much of the plan an answer carries (AIP-157).
+// How much of the plan an answer carried (AIP-157). Unused since ReadPlan was retired; it stays because retired.json
+// has no kind for a top-level enum.
 enum PlanView {
   // FULL, the answer before views existed.
   PLAN_VIEW_UNSPECIFIED = 0;

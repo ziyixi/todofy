@@ -135,11 +135,11 @@ bundle is unchanged (its types come from the OpenAPI document).
 
 Tasks' Mail API and the weekly review's two facts (`ReadWeeklyReview`) are the separate `PlusService` in
 `todofy/ui/v1/plus_service.proto`, alongside Todofy's owner API; it keeps the retired Todoist Plus extension's
-name. Its planning methods are no longer called and are retired with Todofy's planning code. Sharing a package
-reuses its existing Python generation. Tasks serves its `/api/plus/v1/` routes behind Access and
-CSRF and forwards them on Todofy's private Planning binding, which allows only the methods Tasks
-calls. Todofy's gateway also consumes FlowDay's generated UI service through FlowDay's restricted
-`NativeFocusEntrypoint`. See [`todofy/docs/planning-api.md`](../todofy/docs/planning-api.md).
+name. Its planning methods and `CompleteTask` were retired (`retired.json`, 2026-10-20) when planning moved into
+Tasks (`tasks/ui/v1`); `PlanningTask` stays for `ConvertMailItem`'s answer and `PlanView` stays unused, since
+`retired.json` has no kind for a top-level enum. Sharing a package reuses its existing Python generation. Tasks
+serves its `/api/plus/v1/` routes behind Access and CSRF and forwards them on Todofy's private Planning binding,
+which allows only the methods Tasks calls. See [`todofy/docs/planning-api.md`](../todofy/docs/planning-api.md).
 
 ## Rules
 
