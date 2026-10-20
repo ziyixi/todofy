@@ -46,28 +46,6 @@ async function externalRename(
   );
   expect(response.status(), await response.text()).toBe(200);
 }
-async function plan(page: Page) {
-  await page.route("**/api/plus/v1/plan:read", (route) =>
-    route.fulfill({
-      json: { plan: { native_planning: true, dependencies: [] } },
-    }),
-  );
-  await page.route("**/api/plus/v1/tasks?**", (route) => {
-    const id = new URL(route.request().url()).searchParams.get("task_ids");
-    return route.fulfill({
-      json: {
-        planning_tasks: [
-          {
-            id,
-            etag: "synthetic-detail-cache",
-            explicit_stage: "none",
-            area: "unassigned",
-          },
-        ],
-      },
-    });
-  });
-}
 async function open(page: Page, title: string) {
   await page.getByText(title, { exact: true }).click();
   const dialog = page.getByRole("dialog", {
@@ -78,15 +56,14 @@ async function open(page: Page, title: string) {
   return dialog;
 }
 
-test("only a full detail reply seeds reopening; own writes and focus invalidate it without replacing an edited draft", async ({
+test("the dialog opens on the full GetTask reply, each open reads the task again, and an edited draft outlives an external change until its save is refused", async ({
   page,
   request,
 }) => {
-  const title = `Synthetic detail cache ${crypto.randomUUID()}`;
+  const title = `Synthetic detail read ${crypto.randomUUID()}`;
   const description =
     "Full synthetic detail. ".repeat(50) + "Unique full-description tail.";
   const task = await make(request, title, description);
-  await plan(page);
   let reads = 0;
   let release!: () => void;
   let started!: () => void;
@@ -125,47 +102,13 @@ test("only a full detail reply seeds reopening; own writes and focus invalidate 
   await dialog
     .getByRole("button", { name: "Close dialog", exact: true })
     .click();
-  await open(page, title);
-  await expect(dialog.locator(".description-preview")).toContainText(
-    "Unique full-description tail.",
-  );
-  expect(reads).toBe(1);
-  const ownTitle = `${title} edited`;
-  await dialog
-    .getByRole("textbox", { name: "Task name", exact: true })
-    .fill(ownTitle);
-  await dialog
-    .getByRole("button", { name: "Save changes", exact: true })
-    .click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
-  await expect(dialog).not.toBeVisible();
-  await open(page, ownTitle);
-  expect(reads).toBe(2);
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
+  // No page cache: a change made elsewhere shows on the next open.
   await externalRename(request, task.id, `${title} external`);
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await open(page, ownTitle);
+  await open(page, title);
   await expect(
     dialog.getByRole("textbox", { name: "Task name", exact: true }),
   ).toHaveValue(`${title} external`);
-  expect(reads).toBe(3);
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
-  await externalRename(request, task.id, `${title} visibility refresh`);
-  await page.evaluate(() =>
-    document.dispatchEvent(new Event("visibilitychange")),
-  );
-  await open(page, ownTitle);
-  await expect(
-    dialog.getByRole("textbox", { name: "Task name", exact: true }),
-  ).toHaveValue(`${title} visibility refresh`);
-  expect(reads).toBe(4);
+  expect(reads).toBe(2);
   const unsaved = `${title} unsaved draft`;
   await dialog
     .getByRole("textbox", { name: "Task name", exact: true })
@@ -186,6 +129,7 @@ test("only a full detail reply seeds reopening; own writes and focus invalidate 
     await request.get(`/api/tasks/v1/tasks/${task.id}`)
   ).json()) as Task;
   expect(current.title).toBe(`${title} newer external`);
+  expect(reads).toBe(2);
 });
 
 test("a slower earlier task read cannot replace the task opened most recently", async ({
@@ -200,7 +144,6 @@ test("a slower earlier task read cannot replace the task opened most recently", 
     request,
     `Synthetic second quick ${crypto.randomUUID()}`,
   );
-  await plan(page);
   let release!: () => void;
   let started!: () => void;
   const held = new Promise<void>((resolve) => {

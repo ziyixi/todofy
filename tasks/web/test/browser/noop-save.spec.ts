@@ -18,29 +18,6 @@ test("saving unchanged task and planning fields writes nothing and does not relo
   );
   expect(created.status()).toBe(200);
   const task = await created.json();
-  await page.route("**/api/plus/v1/plan:read", (route) =>
-    route.fulfill({
-      json: { plan: { native_planning: true, dependencies: [] } },
-    }),
-  );
-  await page.route("**/api/plus/v1/tasks?**", (route) =>
-    route.fulfill({
-      json: {
-        planning_tasks: [
-          {
-            id: task.id,
-            etag: "synthetic-noop",
-            kind: "task",
-            explicit_stage: "none",
-            area: "unassigned",
-            planning_flags: [],
-            lead_days: 0,
-            deadline: "",
-          },
-        ],
-      },
-    }),
-  );
   let catalogReads = 0;
   let writes = 0;
   page.on("request", (event) => {

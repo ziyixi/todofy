@@ -1,18 +1,12 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Locator,
-  type Page,
-} from "@playwright/test";
-import {
+  addDays,
   addRecord,
-  createTask,
-  mondayOf,
   readFocus,
   stubPlanning,
   tasksToday,
   type Json,
+  type SeedTask,
 } from "./planning-stub";
 
 // Focus runs on Tasks' own today in the dev server's D1, so the page keeps the real clock.
@@ -21,60 +15,26 @@ test.afterEach(async ({ page }) => {
   await page.unrouteAll({ behavior: "wait" });
 });
 
-const outcome = (id: string, title: string, area: string): Json => ({
-  id,
-  kind: "task",
-  title,
-  area,
-  stage: "committed",
-  explicit_stage: "committed",
-  planning_flags: [],
-  etag: "1",
-});
-const step = (
-  id: string,
-  title: string,
-  parent: string,
-  minutes = 30,
-): Json => ({
-  id,
-  kind: "step",
-  title,
-  parent_id: parent,
-  area: "unassigned",
-  stage: "none",
-  explicit_stage: "none",
-  planning_flags: [],
-  etag: "1",
-  estimated_minutes: minutes,
-});
-const addDays = (day: string, days: number) =>
-  new Date(Date.parse(`${day}T12:00:00Z`) + days * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
-
 /**
- * Outcomes and their steps in the dev server's D1 under their real parents, so a completion, the
- * records and Week's groups all see them; the planning list names them with the same IDs.
+ * Outcomes and their steps, seeded in the dev server's D1 under their parents, so a completion,
+ * the records and Week's groups all see them.
  */
-async function plan(
-  request: APIRequestContext,
-  outcomes: { title: string; area: string; steps: string[] }[],
-) {
-  const tasks: Json[] = [];
+function plan(outcomes: { title: string; area: string; steps: string[] }[]) {
+  const tasks: SeedTask[] = [];
   const ids: Record<string, string> = {};
   for (const item of outcomes) {
-    const { id } = await createTask(request, { title: item.title });
-    tasks.push(outcome(id, item.title, item.area));
+    const id = crypto.randomUUID();
+    tasks.push({ id, title: item.title, area: item.area, stage: "committed" });
     ids[item.title] = id;
     for (const title of item.steps) {
-      const { id: stepId } = await createTask(request, {
+      const stepId = crypto.randomUUID();
+      tasks.push({
+        id: stepId,
         title,
         kind: "step",
         parent_id: id,
         duration_minutes: 30,
       });
-      tasks.push(step(stepId, title, id));
       ids[title] = stepId;
     }
   }
@@ -89,12 +49,11 @@ const sideways = (page: Page) =>
 
 test("counting up and completing a step saves its session as one record, which Completed shows", async ({
   page,
-  request,
 }) => {
   // Tasks saves a session of a minute or more, so this one runs past a minute.
   test.setTimeout(180_000);
   const today = await tasksToday();
-  const { tasks, ids } = await plan(request, [
+  const { tasks, ids } = plan([
     {
       title: "Synthetic Focus outcome",
       area: "work",
@@ -102,11 +61,7 @@ test("counting up and completing a step saves its session as one record, which C
     },
   ]);
   const counted = ids["Synthetic counted step"]!;
-  await stubPlanning(
-    page,
-    { today, plan: { week_start: mondayOf(today) }, tasks },
-    request,
-  );
+  await stubPlanning(page, { tasks });
   // Plan › Week still drops a step into a day: today, in Tasks' queue.
   await page.setViewportSize({ width: 1800, height: 1000 });
   await page.goto("/#/plan");
@@ -157,12 +112,17 @@ test("counting up and completing a step saves its session as one record, which C
   expect(
     await stepGrip.evaluate((node) => getComputedStyle(node).opacity),
   ).toBe("0");
-  await expect(logged).toHaveText(/^01:0\d logged/u, { timeout: 75_000 });
+  // Past 01:00 by a second, so Tasks' own count has reached a whole minute too.
+  await expect(logged).toHaveText(/^01:0[1-9] logged/u, { timeout: 75_000 });
   // Completing the step ends the session and saves its whole minutes in the same Tasks write.
   await step
     .getByRole("button", { name: "Complete task: Synthetic counted step" })
     .click();
   await expect(step).toHaveCount(0);
+  // The card leaves at once; the write lands after it.
+  await expect
+    .poll(async () => (await readFocus(today, today)).entries)
+    .toBeDefined();
   const read = await readFocus(today, today);
   expect(read.entries).toEqual([
     expect.objectContaining({
@@ -196,11 +156,10 @@ test("counting up and completing a step saves its session as one record, which C
 
 test("a step's records change and grow in place, on yesterday too, and the popover keeps every position", async ({
   page,
-  request,
 }) => {
   const today = await tasksToday();
   const yesterday = addDays(today, -1);
-  const { tasks, ids } = await plan(request, [
+  const { tasks, ids } = plan([
     {
       title: "Synthetic records outcome",
       area: "work",
@@ -209,8 +168,6 @@ test("a step's records change and grow in place, on yesterday too, and the popov
   ]);
   const recorded = ids["Synthetic recorded step"]!;
   const state = await stubPlanning(page, {
-    today,
-    plan: { week_start: mondayOf(today) },
     tasks,
     queues: {
       [today]: [recorded, ids["Synthetic step below"]!],
@@ -318,10 +275,9 @@ test("a step's records change and grow in place, on yesterday too, and the popov
 
 test("Week's totals and bars follow the records, and Month's day opens in Day", async ({
   page,
-  request,
 }, testInfo) => {
   const today = await tasksToday();
-  const { tasks, ids } = await plan(request, [
+  const { tasks, ids } = plan([
     {
       title: "Synthetic work outcome",
       area: "work",
@@ -336,8 +292,6 @@ test("Week's totals and bars follow the records, and Month's day opens in Day", 
   const work = ids["Synthetic work step"]!;
   const personal = ids["Synthetic personal step"]!;
   await stubPlanning(page, {
-    today,
-    plan: { week_start: mondayOf(today) },
     tasks,
     queues: { [today]: [work, personal] },
   });

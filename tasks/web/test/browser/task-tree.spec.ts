@@ -1,10 +1,5 @@
 import { dragTask, beginTaskDrag, dropTaskOn } from "./drag";
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Page,
-} from "@playwright/test";
+import { expect, test, type APIRequestContext } from "@playwright/test";
 
 async function creator(request: APIRequestContext, resource = "tasks") {
   const { token } = await (await request.get("/api/tasks/csrf")).json();
@@ -23,30 +18,6 @@ async function creator(request: APIRequestContext, resource = "tasks") {
       name: string;
     }>;
   };
-}
-async function planning(page: Page) {
-  await page.route("**/api/plus/v1/plan:read", (route) =>
-    route.fulfill({
-      json: { plan: { native_planning: true, dependencies: [] } },
-    }),
-  );
-  await page.route("**/api/plus/v1/tasks?**", (route) =>
-    route.fulfill({
-      json: {
-        planning_tasks: [
-          {
-            id: new URL(route.request().url()).searchParams.get("task_ids"),
-            etag: "synthetic-tree",
-            explicit_stage: "none",
-            area: "unassigned",
-            planning_flags: [],
-            lead_days: 0,
-            deadline: "",
-          },
-        ],
-      },
-    }),
-  );
 }
 
 test("subtasks start folded and load only on expansion, with nested steps, editing and completion", async ({
@@ -72,7 +43,6 @@ test("subtasks start folded and load only on expansion, with nested steps, editi
     duration_minutes: 30,
   });
   await create({ title: "Synthetic tree grandchild", parent_id: child.id });
-  await planning(page);
   const parentReads: string[] = [];
   page.on("request", (event) => {
     const id = new URL(event.url()).searchParams.get("parent_id");
@@ -184,7 +154,6 @@ test("adding the first child in details makes its parent expandable in the main 
   const parent = await create({
     title: `Synthetic first child parent ${crypto.randomUUID()}`,
   });
-  await planning(page);
   await page.goto("/#/inbox");
   await page.getByText(parent.title, { exact: true }).click();
   const dialog = page.getByRole("dialog", {
@@ -333,7 +302,6 @@ test("task details reorder both subtasks and steps by dragging and keep the save
     duration_minutes: 45,
     sort_order: 4,
   });
-  await planning(page);
   await page.goto("/#/inbox");
   await page
     .getByRole("combobox", { name: "Sort tasks", exact: true })
@@ -434,7 +402,6 @@ test("saving existing tasks, subtasks and steps preserves the editor, scroll and
     kind: "step",
     duration_minutes: 30,
   });
-  await planning(page);
   await page.setViewportSize({ width: 1280, height: 620 });
   let patches = 0;
   page.on("request", (r) => {

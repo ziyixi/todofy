@@ -1,40 +1,38 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { stubPlanning, type Json } from "./planning-stub";
+import {
+  addDays,
+  otherDays,
+  stubPlanning,
+  tasksToday,
+  type SeedTask,
+} from "./planning-stub";
 
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
 
 /** The widths Plan is checked at: the owner's 1440 window down to the narrow board. */
 const WIDTHS = [1440, 1024, 800, 680] as const;
 
-const task = (id: string, title: string, fields: Json = {}): Json => ({
-  id,
-  kind: "task",
-  title,
-  area: "work",
-  stage: "none",
-  explicit_stage: "none",
-  planning_flags: [],
-  etag: "1",
-  priority: 1,
-  ...fields,
-});
-const committed = (id: string, title: string, area: string, fields = {}) =>
-  task(id, title, {
-    area,
-    stage: "committed",
-    explicit_stage: "committed",
-    ...fields,
-  });
+const task = (
+  id: string,
+  title: string,
+  fields: Partial<SeedTask> = {},
+): SeedTask => ({ id, title, area: "work", ...fields });
+const committed = (
+  id: string,
+  title: string,
+  area: string,
+  fields: Partial<SeedTask> = {},
+) => task(id, title, { area, stage: "committed", ...fields });
 const step = (
   id: string,
   title: string,
   parent: string,
   minutes: number | undefined,
   order: number,
-): Json => ({
+): SeedTask => ({
   ...task(id, title, { kind: "step", parent_id: parent, area: "unassigned" }),
   sort_order: order,
-  ...(minutes === undefined ? {} : { estimated_minutes: minutes }),
+  ...(minutes === undefined ? {} : { duration_minutes: minutes }),
 });
 const quick = (id: string, title: string, area = "personal") =>
   task(id, title, { planning_flags: ["quick"], area });
@@ -52,14 +50,17 @@ const LONG_QUICK =
 const LONG_OUTCOME =
   "Migrate day queues off the old planner into Tasks D1 without losing the week's arrangement";
 
-/** Eleven commitments (Work, Personal and one Unassigned), six Review lanes and a long Quick list. */
-const TASKS: Json[] = [
-  committed("w1", "Ship native Focus time ledger", "work", { priority: 4 }),
-  committed("w2", "Q4 roadmap review", "work", { priority: 3 }),
+/**
+ * Eleven commitments (Work, Personal and one Unassigned), six Review lanes and a long Quick list,
+ * dated from Tasks' today.
+ */
+const tasks = (today: string): SeedTask[] => [
+  committed("w1", "Ship native Focus time ledger", "work", { priority: 1 }),
+  committed("w2", "Q4 roadmap review", "work", { priority: 2 }),
   committed("w3", LONG_OUTCOME, "work"),
   committed("w4", "Hire: second interview loop", "work"),
   // Work P3: its slate edge sits next to the blue P3 flag.
-  committed("w5", "Fix flaky CI", "work", { priority: 2 }),
+  committed("w5", "Fix flaky CI", "work", { priority: 3 }),
   committed("w6", "Write the performance pass design doc for Tasks", "work"),
   committed("p1", "Renew passport", "personal"),
   committed(
@@ -86,54 +87,43 @@ const TASKS: Json[] = [
   // The last chip in the row, by the window's right edge.
   quick("q7", "Call the bank about the duplicated card payment from the trip"),
   quick("q8", "Water the plants"),
-  task("qa", "Learn Rust for Workers", {
-    stage: "quarterly",
-    explicit_stage: "quarterly",
-  }),
-  task("ma", "Photo book 2026", {
-    area: "personal",
-    stage: "monthly",
-    explicit_stage: "monthly",
-  }),
-  task("wk", "Call grandma", {
-    area: "personal",
-    stage: "weekly",
-    explicit_stage: "weekly",
-  }),
+  task("qa", "Learn Rust for Workers", { stage: "quarterly" }),
+  task("ma", "Photo book 2026", { area: "personal", stage: "monthly" }),
+  task("wk", "Call grandma", { area: "personal", stage: "weekly" }),
   // Two waiting tasks whose statuses have two parts, the deadline first, and a parked one: with
   // them Review has six lanes, five columns at 1440.
   task("venue", "Hear back about the venue quote", {
     planning_flags: ["waiting"],
-    deadline: "2026-10-22",
-    update_time: "2026-09-20T16:00:00Z",
+    deadline: addDays(today, 9),
+    update_time: `${addDays(today, -23)}T16:00:00Z`,
   }),
   task("visa", "Lab access approval", {
     planning_flags: ["waiting"],
-    deadline: "2026-10-11",
-    update_time: "2026-09-25T16:00:00Z",
+    deadline: addDays(today, -2),
+    update_time: `${addDays(today, -18)}T16:00:00Z`,
   }),
   task("piano", "Learn piano", {
     area: "personal",
     planning_flags: ["parked"],
-    update_time: "2026-08-20T16:00:00Z",
+    update_time: `${addDays(today, -54)}T16:00:00Z`,
   }),
 ];
 
+/** Opens Plan on Tasks' today, which it answers; s7 is queued on another day of the week. */
 async function openPlan(page: Page, width: number) {
-  await page.clock.setFixedTime(new Date("2026-10-13T18:00:00Z"));
+  const today = await tasksToday();
+  const [other] = otherDays(today) as [string];
+  await page.clock.setFixedTime(new Date(`${today}T18:00:00Z`));
   await page.setViewportSize({ width, height: 900 });
   await stubPlanning(page, {
-    tasks: TASKS,
-    queues: {
-      "2026-10-12": ["s7"],
-      "2026-10-13": ["s1", "s3", "q1"],
-      "2026-10-14": ["s5"],
-    },
+    tasks: tasks(today),
+    queues: { [other]: ["s7"], [today]: ["s1", "s3", "q1"] },
   });
   await page.goto("/#/plan");
   await expect(
     page.getByRole("region", { name: "Weekly goals" }),
   ).toBeVisible();
+  return today;
 }
 const week = (page: Page) =>
   page.getByRole("tab", { name: "Week", exact: true });
@@ -222,14 +212,22 @@ for (const width of WIDTHS)
 test("a two-part status puts its deadline first, on one line", async ({
   page,
 }) => {
-  await openPlan(page, 1440);
+  const today = await openPlan(page, 1440);
+  // "Oct 22", with the year when it is not this one.
+  const due = addDays(today, 9);
+  const deadline = new Date(`${due}T12:00:00Z`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(due.slice(0, 4) === today.slice(0, 4) ? {} : { year: "numeric" }),
+    timeZone: "UTC",
+  });
   const waiting = page.getByRole("region", { name: "Waiting" });
   const status = (title: string) =>
     waiting
       .getByRole("button", { name: new RegExp(`^${title},`, "u") })
       .locator(".planning-outcome-status");
   await expect(status("Hear back about the venue quote")).toHaveText(
-    /^Deadline Oct 22 · No change in \d+ days$/u,
+    new RegExp(`^Deadline ${deadline} · No change in \\d+ days$`, "u"),
   );
   await expect(status("Lab access approval")).toHaveText(
     /^2 days late · No change in \d+ days$/u,

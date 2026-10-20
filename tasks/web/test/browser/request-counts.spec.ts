@@ -1,47 +1,30 @@
 import { expect, test, type Page } from "@playwright/test";
-import {
-  createTask,
-  stubPlanning,
-  type Json,
-  type PlanningState,
-} from "./planning-stub";
+import { createTask, planReads, stubPlanning } from "./planning-stub";
 
 // How many requests an interaction sends. Each count waits until the page has been idle for 500ms.
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
 
-const today = "2026-10-13";
-const planReads = (state: PlanningState) =>
-  state.requests.filter((request) => request.path === "/api/plus/v1/plan:read")
-    .length;
 async function settled(page: Page) {
   await page.waitForLoadState("networkidle");
 }
-function outcome(id: string, title: string): Json {
-  return {
-    id,
-    kind: "task",
-    title,
-    area: "work",
-    stage: "committed",
-    explicit_stage: "committed",
-    planning_flags: [],
-    etag: "1",
-  };
+/** Requests to Todofy (`/api/plus`), which neither a task list nor Plan sends outside the weekly review. */
+function todofyRequests(page: Page) {
+  const paths: string[] = [];
+  page.on("request", (event) => {
+    const url = new URL(event.url());
+    if (url.pathname.startsWith("/api/plus/")) paths.push(url.pathname);
+  });
+  return paths;
 }
 
 test("completing a card in Plan reads Plan once, and moving between Plan and Focus reads nothing", async ({
   page,
-  request,
 }) => {
-  const task = await createTask(request, {
-    title: "Synthetic counted outcome",
+  const task = { id: "counted-outcome", title: "Synthetic counted outcome" };
+  const state = await stubPlanning(page, {
+    tasks: [{ ...task, stage: "committed", area: "work" }],
   });
-  const state = await stubPlanning(
-    page,
-    { today, tasks: [outcome(task.id, task.title)] },
-    request,
-  );
-  await page.clock.setFixedTime(new Date(`${today}T18:00:00Z`));
+  await page.clock.setFixedTime(new Date(`${state.today}T18:00:00Z`));
   await page.goto("/#/plan");
   const committed = page.getByRole("region", {
     name: "Committed",
@@ -72,9 +55,11 @@ test("completing a card in Plan reads Plan once, and moving between Plan and Foc
   await settled(page);
   // Plan reads its own write back; the host's refresh after a write is only for the writes made elsewhere.
   expect(planReads(state)).toBe(2);
+  // Plan and Focus read Tasks only: Todofy answers just the weekly review, which stayed closed.
+  expect(state.requests).toEqual([]);
 });
 
-test("opening a task reads it once, and its children only when it has some", async ({
+test("opening a task reads it once, its children only when it has some, and nothing from Todofy", async ({
   page,
   request,
 }) => {
@@ -89,12 +74,7 @@ test("opening a task reads it once, and its children only when it has some", asy
     title: `Synthetic child ${suffix}`,
     parent_id: parent.id,
   });
-  await stubPlanning(page, {
-    tasks: [single, parent].map((task) => ({
-      ...outcome(task.id, task.title),
-      ...{ stage: "none", explicit_stage: "none" },
-    })),
-  });
+  const todofy = todofyRequests(page);
   const reads: string[] = [];
   page.on("request", (event) => {
     const url = new URL(event.url());
@@ -129,4 +109,6 @@ test("opening a task reads it once, and its children only when it has some", asy
     `get ${parent.id}`,
     `children ${parent.id}`,
   ]);
+  // The rows and the dialog read their planning facts from the task itself.
+  expect(todofy).toEqual([]);
 });

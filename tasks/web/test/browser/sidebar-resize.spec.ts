@@ -5,7 +5,7 @@ import {
   type Locator,
   type Page,
 } from "@playwright/test";
-import { seedFocus } from "./planning-stub";
+import { stubPlanning } from "./planning-stub";
 
 async function width(page: Page) {
   return (await page.locator(".sidebar").boundingBox())!.width;
@@ -79,76 +79,42 @@ test("navigation width stays bounded and a narrow window keeps the existing draw
 test("Plan Review and Week fit the window after navigation resizing", async ({
   page,
 }) => {
-  const labels = [
-    "office",
-    "home",
-    "quarter",
-    "candiate",
-    "focus",
-    "committed",
-  ].map((role) => ({ role, id: `layout-${role}`, label: role }));
-  await page.route("**/api/plus/**", async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    let data: unknown;
-    if (path === "/api/plus/v1/plan:read")
-      data = {
-        plan: {
-          timezone: "UTC",
-          week_start: "2026-10-12",
-          today: "2026-10-17",
-          enabled: true,
-          etag: "synthetic-layout",
-          labels,
-          available_labels: labels.map(({ id, label }) => ({ id, label })),
-        },
-      };
-    else if (path === "/api/plus/v1/tasks")
-      data = {
-        planning_tasks: [
-          {
-            id: "layout-commit",
-            title: "Synthetic committed outcome",
-            stage: "committed",
-            area: "work",
-            etag: "1",
-          },
-          {
-            id: "layout-step",
-            parent_id: "layout-commit",
-            title: "Synthetic executable next step",
-            stage: "none",
-            area: "work",
-            estimated_minutes: 45,
-            etag: "1",
-          },
-          {
-            id: "layout-quarter",
-            title: "Synthetic quarterly outcome",
-            stage: "quarterly",
-            area: "personal",
-            etag: "1",
-          },
-          {
-            id: "layout-month",
-            title: "Synthetic monthly outcome",
-            stage: "monthly",
-            area: "work",
-            etag: "1",
-          },
-          {
-            id: "layout-week",
-            title: "Synthetic weekly candidate",
-            stage: "weekly",
-            area: "personal",
-            etag: "1",
-          },
-        ],
-      };
-    else return route.continue();
-    return route.fulfill({ json: data });
+  await stubPlanning(page, {
+    tasks: [
+      {
+        id: "layout-commit",
+        title: "Synthetic committed outcome",
+        stage: "committed",
+        area: "work",
+      },
+      {
+        id: "layout-step",
+        kind: "step",
+        parent_id: "layout-commit",
+        title: "Synthetic executable next step",
+        area: "work",
+        duration_minutes: 45,
+      },
+      {
+        id: "layout-quarter",
+        title: "Synthetic quarterly outcome",
+        stage: "quarterly",
+        area: "personal",
+      },
+      {
+        id: "layout-month",
+        title: "Synthetic monthly outcome",
+        stage: "monthly",
+        area: "work",
+      },
+      {
+        id: "layout-week",
+        title: "Synthetic weekly candidate",
+        stage: "weekly",
+        area: "personal",
+      },
+    ],
   });
-  // Plan's week reads the dev server's Focus queues, which start empty.
-  await seedFocus();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/#/plan");
   await expect(

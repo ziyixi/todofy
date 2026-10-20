@@ -1,44 +1,48 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
-  createTask,
+  addDays,
+  otherDays,
   readFocus,
+  readPlan,
   stubPlanning,
   tasksToday,
   type Json,
+  type PlanningRequest,
   type PlanningState,
+  type SeedTask,
 } from "./planning-stub";
 
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
 
-const outcome = (id: string, title: string, fields: Json = {}): Json => ({
-  id,
-  kind: "task",
-  title,
-  area: "work",
-  stage: "committed",
-  explicit_stage: "committed",
-  planning_flags: [],
-  etag: "1",
-  ...fields,
-});
-const step = (id: string, title: string, parent: string): Json => ({
-  id,
-  kind: "step",
-  title,
-  parent_id: parent,
-  area: "unassigned",
-  stage: "none",
-  explicit_stage: "none",
-  planning_flags: [],
-  etag: "1",
-});
-const bodies = (state: PlanningState, path: string) =>
-  state.requests
-    .filter((request) => request.path === path)
-    .map((request) => request.body);
+const outcome = (
+  id: string,
+  title: string,
+  fields: Partial<SeedTask> = {},
+): SeedTask => ({ id, title, area: "work", stage: "committed", ...fields });
+const step = (
+  id: string,
+  title: string,
+  parent: string,
+  fields: Partial<SeedTask> = {},
+): SeedTask => ({ id, title, kind: "step", parent_id: parent, ...fields });
+/** The page's writes to Tasks at `path`, its query left out. */
+const sent = (state: PlanningState, path: string) =>
+  state.tasksRequests.filter(
+    (request) =>
+      request.method !== "GET" && request.path.split("?")[0] === path,
+  );
+/** A request's query parameter. */
+const query = (request: PlanningRequest, name: string) =>
+  new URLSearchParams(request.path.split("?")[1]).get(name);
+/** Every write the page sent, to Tasks or to Todofy. */
+const writes = (state: PlanningState) =>
+  [...state.tasksRequests, ...state.requests].filter(
+    (request) => request.method !== "GET",
+  );
 
-async function openPlan(page: Page, path = "/#/plan") {
-  await page.clock.setFixedTime(new Date("2026-10-13T18:00:00Z"));
+/** Opens Plan on Tasks' today, which the page's clock is set to. */
+async function openPlan(page: Page, state: PlanningState, path = "/#/plan") {
+  await page.clock.setFixedTime(new Date(`${state.today}T18:00:00Z`));
   await page.goto(path);
   await expect(
     page.getByRole("region", { name: "Weekly goals" }),
@@ -116,18 +120,15 @@ function geometry(dialog: Locator) {
 test("a weekly Bet is edited in place and saved once over its etag", async ({
   page,
 }) => {
+  const week = (await readPlan()).week_start as string;
   const state = await stubPlanning(page, {
     tasks: [outcome("launch", "Synthetic launch")],
-    bets: [
-      {
-        week_start: "2026-10-12",
-        area: "work",
-        text: "Synthetic work line",
-        etag: "2",
-      },
-    ],
+    bets: [{ week_start: week, area: "work", text: "Synthetic work line" }],
   });
-  await openPlan(page);
+  const { etag } = ((await readPlan()).weekly_bets as Json[]).find(
+    (bet) => bet.name === `weeklyBets/${week}-work`,
+  )!;
+  await openPlan(page, state);
   const goals = page.getByRole("region", { name: "Weekly goals" });
   await goals
     .getByRole("button", { name: "Edit work goal: Synthetic work line" })
@@ -141,42 +142,28 @@ test("a weekly Bet is edited in place and saved once over its etag", async ({
       name: "Edit work goal: Synthetic work line for review",
     }),
   ).toBeFocused();
-  expect(bodies(state, "/api/plus/v1/weeklyBets:setWeeklyBet")).toEqual([
-    {
-      week_start: "2026-10-12",
-      area: "work",
-      text: "Synthetic work line for review",
-      etag: "2",
-    },
-  ]);
+  // The masked body holds the text; the etag shown goes beside it.
+  const saved = sent(state, `/api/tasks/v1/weeklyBets/${week}-work`);
+  expect(
+    saved.map((request) => [request.body, query(request, "etag")]),
+  ).toEqual([[{ text: "Synthetic work line for review" }, etag]]);
 });
 
 test("a dependency is added in the details, and completing its prerequisite in Focus settles it", async ({
   page,
-  request,
 }) => {
-  // Focus completes the step in Tasks' own D1, on Tasks' today, and the planning list then leaves it out.
-  const { id: venue } = await createTask(request, {
-    title: "Synthetic venue booking",
+  // Focus completes the step in Tasks' own D1, on Tasks' today.
+  const venue = crypto.randomUUID();
+  const call = crypto.randomUUID();
+  const state = await stubPlanning(page, {
+    tasks: [
+      outcome("launch", "Synthetic launch"),
+      outcome(venue, "Synthetic venue booking"),
+      step(call, "Synthetic venue call", venue),
+    ],
+    queues: { [await tasksToday()]: [call] },
   });
-  const { id: call } = await createTask(request, {
-    title: "Synthetic venue call",
-    kind: "step",
-    parent_id: venue,
-  });
-  const state = await stubPlanning(
-    page,
-    {
-      tasks: [
-        outcome("launch", "Synthetic launch"),
-        outcome(venue, "Synthetic venue booking"),
-        step(call, "Synthetic venue call", venue),
-      ],
-      queues: { [await tasksToday()]: [call] },
-    },
-    request,
-  );
-  await openPlan(page);
+  await openPlan(page, state);
   const dialog = await details(page, "Synthetic launch");
   const section = dialog.locator(".plus-dependencies");
   await section.getByRole("button", { name: "Add a dependency" }).click();
@@ -186,16 +173,15 @@ test("a dependency is added in the details, and completing its prerequisite in F
   await expect(search).toBeFocused();
   await search.fill("venue call");
   await search.press("Enter");
+  // One UpdateTask of the waiting task's dependencies, the whole set.
   await expect
-    .poll(() => bodies(state, "/api/plus/v1/tasks:setTaskDependency"))
-    .toEqual([
-      {
-        task_id: "launch",
-        prerequisite_id: call,
-        waits: true,
-        request_id: expect.any(String),
-      },
-    ]);
+    .poll(() =>
+      sent(state, "/api/tasks/v1/tasks/launch").map((write) => [
+        query(write, "update_mask"),
+        write.body,
+      ]),
+    )
+    .toEqual([["dependencies", { dependencies: [{ prerequisite_id: call }] }]]);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   // A committed task that waits keeps its lane and says so.
   const waiting = page.getByRole("button", {
@@ -211,39 +197,43 @@ test("a dependency is added in the details, and completing its prerequisite in F
   await expect(
     slot.getByRole("button", { name: /^Complete task:/u }),
   ).toHaveCount(0);
-  // Review asks Todofy about the prerequisite the read no longer lists, once.
+  // A done prerequisite holds nothing: Plan says so with no call to Todofy.
   await page.getByRole("link", { name: "Plan", exact: true }).click();
-  await expect
-    .poll(() => bodies(state, "/api/plus/v1/tasks:resolveDependencies"))
-    .toEqual([{ task_ids: [call], request_id: expect.any(String) }]);
   await expect(waiting).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /^Synthetic launch,/u }).first(),
+  ).toBeVisible();
+  expect(state.requests).toEqual([]);
 });
 
-test("a deadline and its start-ahead days are saved in one SetTaskLead", async ({
+test("a deadline and its start-ahead days are saved in one UpdateTask", async ({
   page,
+  request,
 }) => {
   const state = await stubPlanning(page, {
     tasks: [outcome("report", "Synthetic report")],
   });
-  await openPlan(page);
+  const { etag } = (await (
+    await request.get("/api/tasks/v1/tasks/report")
+  ).json()) as Json;
+  const deadline = addDays(state.today, 10);
+  await openPlan(page, state);
   const dialog = await details(page, "Synthetic report");
-  await dialog.getByLabel("Deadline", { exact: true }).fill("2026-10-23");
+  await dialog.getByLabel("Deadline", { exact: true }).fill(deadline);
   await dialog.getByRole("spinbutton", { name: /^Start ahead/u }).fill("3");
   await dialog
     .locator(".plus-deadline-fields")
     .getByRole("button", { name: "Save", exact: true })
     .click();
   await expect
-    .poll(() => bodies(state, "/api/plus/v1/tasks:setTaskLead"))
-    .toEqual([
-      {
-        task_id: "report",
-        etag: "1",
-        request_id: expect.any(String),
-        deadline: "2026-10-23",
-        lead_days: 3,
-      },
-    ]);
+    .poll(() =>
+      sent(state, "/api/tasks/v1/tasks/report").map((write) => [
+        query(write, "update_mask"),
+        query(write, "etag"),
+        write.body,
+      ]),
+    )
+    .toEqual([["deadline,lead_days", etag, { deadline, lead_days: 3 }]]);
   await expect(
     dialog.getByRole("spinbutton", { name: /^Start ahead/u }),
   ).toHaveValue("3");
@@ -251,29 +241,25 @@ test("a deadline and its start-ahead days are saved in one SetTaskLead", async (
 
 test("Week schedules a step into a day and moves it to another, one Tasks MoveFocusStep each", async ({
   page,
-  request,
 }) => {
-  // Tasks' queues hold its own tasks.
-  const { id: intro } = await createTask(request, {
-    title: "Synthetic introduction",
-  });
+  const intro = "intro";
   const state = await stubPlanning(page, {
     tasks: [
       outcome("website", "Synthetic website refresh"),
       step(intro, "Synthetic introduction", "website"),
     ],
   });
+  // Two days of this week other than today.
+  const [first, second] = otherDays(state.today) as [string, string];
   // Wide enough for all seven days side by side.
   await page.setViewportSize({ width: 1800, height: 1000 });
-  await openPlan(page);
+  await openPlan(page, state);
   await page.getByRole("tab", { name: "Week", exact: true }).click();
   const tray = page.getByRole("region", {
     name: "Next steps: Synthetic website refresh",
   });
-  const thursday = page.locator(
-    '.planning-calendar-day[data-date="2026-10-15"]',
-  );
-  const friday = page.locator('.planning-calendar-day[data-date="2026-10-16"]');
+  const thursday = page.locator(`.planning-calendar-day[data-date="${first}"]`);
+  const friday = page.locator(`.planning-calendar-day[data-date="${second}"]`);
   await drag(
     page,
     tray.getByRole("button", { name: "Drag step: Synthetic introduction" }),
@@ -282,7 +268,7 @@ test("Week schedules a step into a day and moves it to another, one Tasks MoveFo
   const queue = async (date: string) =>
     ((await readFocus(date, date)).days as { task_ids?: string[] }[])[0]
       ?.task_ids ?? [];
-  await expect.poll(() => queue("2026-10-15")).toEqual([intro]);
+  await expect.poll(() => queue(first)).toEqual([intro]);
   await expect(page.locator(".plus-page-header .plus-spin")).toHaveCount(0);
   await drag(
     page,
@@ -291,31 +277,22 @@ test("Week schedules a step into a day and moves it to another, one Tasks MoveFo
     }),
     friday.locator(".planning-day-end"),
   );
-  await expect.poll(() => queue("2026-10-16")).toEqual([intro]);
-  expect(await queue("2026-10-15")).toEqual([]);
-  // The task's dates and Todofy's plan are untouched.
-  expect(state.requests.filter((request) => request.method !== "GET")).toEqual(
-    [],
-  );
+  await expect.poll(() => queue(second)).toEqual([intro]);
+  expect(await queue(first)).toEqual([]);
+  // The task itself is untouched: two MoveFocusStep are the only writes.
   expect(
-    state.tasksRequests
-      .filter((request) => request.method !== "GET")
-      .map(({ path, body: { request_id: requestId, ...body } }) => {
-        expect(requestId).toMatch(/^[0-9a-f-]{36}$/u);
-        return [path, body];
-      }),
+    writes(state).map(({ path, body: { request_id: requestId, ...body } }) => {
+      expect(requestId).toMatch(/^[0-9a-f-]{36}$/u);
+      return [path, body];
+    }),
   ).toEqual([
     [
       "/api/tasks/v1/focusDays:moveStep",
-      { task_id: intro, destination_day: "2026-10-15" },
+      { task_id: intro, destination_day: first },
     ],
     [
       "/api/tasks/v1/focusDays:moveStep",
-      {
-        task_id: intro,
-        source_day: "2026-10-15",
-        destination_day: "2026-10-16",
-      },
+      { task_id: intro, source_day: first, destination_day: second },
     ],
   ]);
 });
@@ -328,13 +305,10 @@ test("the keyboard moves a Committed card along its row, Escape puts it back, an
       outcome("parent", "Synthetic weekly outcome", { sort_order: 1 }),
       outcome("launch", "Synthetic launch", { sort_order: 2 }),
       outcome("audit", "Synthetic audit", { sort_order: 3 }),
-      outcome("candidate", "Synthetic week candidate", {
-        stage: "weekly",
-        explicit_stage: "weekly",
-      }),
+      outcome("candidate", "Synthetic week candidate", { stage: "weekly" }),
     ],
   });
-  await openPlan(page);
+  await openPlan(page, state);
   const committed = page.getByRole("region", {
     name: "Committed",
     exact: true,
@@ -345,8 +319,6 @@ test("the keyboard moves a Committed card along its row, Escape puts it back, an
       .evaluateAll((nodes) =>
         nodes.map((node) => node.getAttribute("data-outcome-id")),
       );
-  const writes = () =>
-    state.requests.filter((request) => request.method !== "GET");
   const handle = committed.getByRole("button", {
     name: /^Move outcome: Synthetic weekly outcome/u,
   });
@@ -362,7 +334,7 @@ test("the keyboard moves a Committed card along its row, Escape puts it back, an
   ).toHaveCount(0);
   await expect(handle).toBeFocused();
   expect(await order()).toEqual(["parent", "launch", "audit"]);
-  expect(writes()).toEqual([]);
+  expect(writes(state)).toEqual([]);
   // The cards sit side by side: Right two, Left one, dropped after the launch card.
   await page.keyboard.press("Space");
   await expect(committed.locator(".is-dragging")).toHaveCount(1);
@@ -377,12 +349,11 @@ test("the keyboard moves a Committed card along its row, Escape puts it back, an
   await expect.poll(order).toEqual(["launch", "parent", "audit"]);
   await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
   await expect(handle).toBeFocused();
-  expect(bodies(state, "/api/plus/v1/tasks:reorder")).toEqual([
-    expect.objectContaining({
-      task_ids: ["launch", "parent", "audit"],
-      lane: "committed",
-    }),
-  ]);
+  expect(
+    sent(state, "/api/tasks/v1/tasks:reorder").map(
+      (write) => write.body.lane_order,
+    ),
+  ).toEqual([{ lane: "committed", task_ids: ["launch", "parent", "audit"] }]);
   await expect(
     page.locator("[data-dnd-overlay][data-dnd-dragging]"),
   ).toHaveCount(0);
@@ -398,17 +369,22 @@ test("the keyboard moves a Committed card along its row, Escape puts it back, an
     committed.locator('[data-outcome-id="candidate"]'),
   ).toBeVisible();
   await expect
-    .poll(() => bodies(state, "/api/plus/v1/tasks:setTaskPlan").at(-1))
-    .toMatchObject({ task_id: "candidate", stage: "committed" });
+    .poll(() =>
+      sent(state, "/api/tasks/v1/tasks/candidate").map((write) => [
+        query(write, "update_mask"),
+        write.body,
+      ]),
+    )
+    .toEqual([["stage", { stage: "committed" }]]);
 });
 
 test("the weekly review link opens the checklist once and clears its parameter", async ({
   page,
 }) => {
-  await stubPlanning(page, {
+  const state = await stubPlanning(page, {
     tasks: [outcome("launch", "Synthetic launch")],
   });
-  await openPlan(page, "/?review=1#/plan");
+  await openPlan(page, state, "/?review=1#/plan");
   const review = page.getByRole("region", { name: "Weekly review" });
   await expect(review).toBeVisible();
   await expect.poll(() => new URL(page.url()).search).toBe("");
@@ -435,23 +411,16 @@ test("a Step's panel sets only its time in Tasks, and shows it again when reopen
   page,
   request,
 }) => {
-  const { id: parent } = await createTask(request, {
-    title: "Synthetic outcome",
-  });
-  const { id: draft } = await createTask(request, {
-    title: "Synthetic draft",
-    kind: "step",
-    parent_id: parent,
-    duration_minutes: 30,
-  });
+  const parent = crypto.randomUUID();
+  const draft = crypto.randomUUID();
   const state = await stubPlanning(page, {
     tasks: [
       outcome(parent, "Synthetic outcome"),
-      { ...step(draft, "Synthetic draft", parent), estimated_minutes: 30 },
+      step(draft, "Synthetic draft", parent, { duration_minutes: 30 }),
     ],
   });
   const writes = taskWrites(page);
-  await openPlan(page);
+  await openPlan(page, state);
   await page.getByRole("tab", { name: "Week", exact: true }).click();
   const title = page
     .getByRole("region", { name: "Next steps: Synthetic outcome" })
@@ -475,8 +444,14 @@ test("a Step's panel sets only its time in Tasks, and shows it again when reopen
     "true",
   );
   const firstOpen = await geometry(dialog);
+  // Plan's reads: GetPlan and its list of open tasks.
   const reads = () =>
-    state.requests.filter((item) => item.path === "/api/plus/v1/tasks").length;
+    state.tasksRequests.filter(
+      (item) =>
+        item.method === "GET" &&
+        (item.path === "/api/tasks/v1/plan" ||
+          item.path.startsWith("/api/tasks/v1/tasks?view=all&page_size")),
+    ).length;
   const readsBefore = reads();
 
   const sixty = dialog.getByRole("button", { name: "60 min" });
@@ -518,10 +493,11 @@ test("a Step's panel sets only its time in Tasks, and shows it again when reopen
 test("Add steps sends each new step with the time chosen beside it", async ({
   page,
 }) => {
+  const website = crypto.randomUUID();
   const state = await stubPlanning(page, {
-    tasks: [outcome("website", "Synthetic website refresh")],
+    tasks: [outcome(website, "Synthetic website refresh")],
   });
-  await openPlan(page);
+  await openPlan(page, state);
   await page.getByRole("tab", { name: "Week", exact: true }).click();
   const tray = page.getByRole("region", {
     name: "Next steps: Synthetic website refresh",
@@ -548,13 +524,15 @@ test("Add steps sends each new step with the time chosen beside it", async ({
   await expect(input).toBeVisible();
   await input.fill("Synthetic outline");
   await input.press("Enter");
+  // One CreateTask: a step under the outcome, its time its duration.
   await expect
-    .poll(() => bodies(state, "/api/plus/v1/tasks:appendTaskSteps"))
+    .poll(() => sent(state, "/api/tasks/v1/tasks").map((write) => write.body))
     .toEqual([
       {
-        parent_id: "website",
-        request_id: expect.any(String),
-        steps: [{ title: "Synthetic outline", estimated_minutes: 60 }],
+        title: "Synthetic outline",
+        parent_id: website,
+        kind: "step",
+        duration_minutes: 60,
       },
     ]);
   // The read lists it as a step card with its time; the choice stays for the next.
@@ -581,20 +559,18 @@ test("a double-click opens the panel: a Committed card stays selected, and the r
     tasks: [
       outcome("launch", "Synthetic launch"),
       outcome("audit", "Synthetic audit"),
-      {
-        ...step("intro", "Synthetic introduction", "launch"),
-        estimated_minutes: 30,
-      },
+      step("intro", "Synthetic introduction", "launch", {
+        duration_minutes: 30,
+      }),
       outcome("ink", "Synthetic printer ink", {
         stage: "none",
-        explicit_stage: "none",
         planning_flags: ["quick"],
         area: "personal",
       }),
     ],
   });
-  const writes = taskWrites(page);
-  await openPlan(page);
+  const patches = taskWrites(page);
+  await openPlan(page, state);
   await page.getByRole("tab", { name: "Week", exact: true }).click();
   const grid = page.locator(".planning-commitment-grid");
   const open = page.locator("dialog.plus-dialog[open]");
@@ -654,6 +630,6 @@ test("a double-click opens the panel: a Committed card stays selected, and the r
       .getByRole("region", { name: "Next steps: Synthetic launch" })
       .getByRole("button", { name: /^Synthetic introduction/u }),
   ).toContainText("30m");
-  expect(writes).toEqual([]);
-  expect(state.requests.filter((item) => item.method !== "GET")).toEqual([]);
+  expect(patches).toEqual([]);
+  expect(writes(state)).toEqual([]);
 });

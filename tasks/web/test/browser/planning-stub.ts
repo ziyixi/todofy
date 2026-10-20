@@ -12,83 +12,163 @@ export interface PlanningRequest {
   body: Json;
   authorization: string | null;
 }
-/** What the synthetic Todofy planning API holds; tests read and change it in place. */
+/** A task as a test seeds it in the dev server's D1, by its own ID, with its planning facts. */
+export interface SeedTask {
+  id: string;
+  title: string;
+  kind?: "task" | "step";
+  parent_id?: string;
+  /** The saved stage; Plan's lane comes from it and the dates (Task.board_stage). */
+  stage?: string;
+  area?: string;
+  planning_flags?: string[];
+  deadline?: string;
+  lead_days?: number;
+  due_date?: string;
+  duration_minutes?: number;
+  /** Tasks' order: 1 is P1. */
+  priority?: number;
+  sort_order?: number;
+  /** The tasks it waits for, by ID. */
+  dependencies?: string[];
+  /** When Plan's list says it last changed; D1 sets the real time on every write. */
+  update_time?: string;
+}
+/** What a planning test runs on: its tasks in D1, Tasks' today, and every request the page sent. */
 export interface PlanningState {
+  /** Tasks' today and its week's Monday, by the dev server's clock. */
   today: string;
-  /** Plan fields over the defaults (a native plan for the week of 2026-10-12). */
-  plan: Json;
-  tasks: Json[];
-  bets: Json[];
-  dependencies: Json[];
+  week: string;
+  /** Synthetic Mail that Todofy keeps; tests change it in place. */
   mail: Json[];
   summaries: Record<string, string>;
+  /** The page's requests to Todofy's `/api/plus/**`, which this module answers. */
   requests: PlanningRequest[];
-  /** The page's requests to the dev server's own Tasks API, which holds Focus. */
+  /** The page's requests to the dev server's own Tasks API. */
   tasksRequests: PlanningRequest[];
 }
-export interface PlanningSeed extends Partial<
-  Omit<PlanningState, "requests" | "tasksRequests">
-> {
-  /**
-   * Day queues to put in the dev server's D1 through MoveFocusStep, first to last. Each step's
-   * task is made there first when it is missing (seedFocus).
-   */
+export interface PlanningSeed {
+  tasks?: SeedTask[];
+  /** This and next week's Bets; every other Bet of those weeks is cleared first. */
+  bets?: { week_start: string; area: string; text: string }[];
+  /** Review lanes' orders; every arranged lane is cleared first. */
+  laneOrders?: { lane: string; task_ids: string[] }[];
+  mail?: Json[];
+  summaries?: Record<string, string>;
+  /** The weekly review's two Todofy facts. */
+  review?: { review_task_id?: string; mailbox_pending_count?: number };
+  /** Day queues of seeded tasks, put in the dev server's D1 through MoveFocusStep, first to last. */
   queues?: Record<string, string[]>;
-  /** Tasks a test drops into a day, which Tasks' queues need in its D1 as well. */
-  inTasks?: string[];
 }
 
 const ORIGIN = "http://127.0.0.1:8798";
-
-function refusal(code: number, status: string, reason: string) {
-  return {
-    status: code,
-    json: {
-      error: {
-        code,
-        status,
-        message: "Synthetic refusal",
-        details: [
-          {
-            "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-            reason,
-            domain: "todofy.ziyixi.science",
-          },
-        ],
-      },
-    },
-  };
-}
+/** The synthetic project seeded tasks live in, so the Inbox stays as other specs left it. */
+const PROJECT = "synthetic-planning";
+const LANES = [
+  "start",
+  "waiting",
+  "parked",
+  "quarterly",
+  "monthly",
+  "weekly",
+  "committed",
+];
+/** The fields a seed writes; a seeded task that exists already takes them again. */
+const SEEDED: readonly (keyof SeedTask)[] = [
+  "title",
+  "kind",
+  "parent_id",
+  "stage",
+  "area",
+  "planning_flags",
+  "deadline",
+  "lead_days",
+  "due_date",
+  "duration_minutes",
+  "priority",
+  "sort_order",
+];
 
 /**
- * Answers `/api/plus/**` in the page as Todofy's planning API does for Tasks, from synthetic data
- * only. Every request is recorded; an unknown one fails with 500. Focus is the dev server's own:
- * its timer is stopped and the queues of the plan's week and of Tasks' today are emptied, then
- * filled from `queues` (seedFocus). With `tasksIn`, the task list leaves out a task the dev
- * server's D1 holds completed, as Todofy's list of Tasks' open tasks does.
+ * Plan and Focus run on the dev server's own Tasks API and D1, as in production: this seeds a test's
+ * tasks there with their planning facts, dependencies, Bets, lane orders and Focus queues, all
+ * through the API. Each seeded task keeps its ID across tests: one that exists already is reopened
+ * and written again. The dev server's D1 is shared by every spec, so Plan's list of open tasks is
+ * narrowed to the seeded ones, as a fresh database would hold them. Only Todofy's half is
+ * synthetic: the weekly review's two facts and Mail (`/api/plus/**`); an unknown request fails with
+ * 500. Every request is recorded.
  */
 export async function stubPlanning(
   page: Page,
-  { queues = {}, inTasks = [], ...seed }: PlanningSeed = {},
-  tasksIn?: APIRequestContext,
+  {
+    tasks = [],
+    bets = [],
+    laneOrders = [],
+    queues = {},
+    review = {},
+    ...seed
+  }: PlanningSeed = {},
 ): Promise<PlanningState> {
+  const today = await tasksToday();
   const state: PlanningState = {
-    today: "2026-10-13",
-    plan: {},
-    tasks: [],
-    bets: [],
-    dependencies: [],
-    mail: [],
-    summaries: {},
+    today,
+    week: mondayOf(today),
+    mail: seed.mail ?? [],
+    summaries: seed.summaries ?? {},
     requests: [],
     tasksRequests: [],
-    ...seed,
   };
-  await seedFocus(
-    queues,
-    String(state.plan.week_start ?? "2026-10-12"),
-    state.tasks,
-    inTasks,
+  await withTasks(async (api) => {
+    const plan = (await api.read("/api/tasks/v1/plan"))!;
+    for (const order of (plan.lane_orders as Json[] | undefined) ?? [])
+      if (LANES.includes(String(order.lane)))
+        await api.write("/api/tasks/v1/tasks:reorder", {
+          positions: [],
+          request_id: crypto.randomUUID(),
+          lane_order: { lane: order.lane, task_ids: [] },
+        });
+    for (const bet of (plan.weekly_bets as Json[] | undefined) ?? [])
+      if (bet.text && bet.week_start !== addDays(state.week, -7))
+        await api.patch(
+          `/api/tasks/v1/${String(bet.name)}?update_mask=text&etag=${String(bet.etag)}`,
+          {
+            text: "",
+          },
+        );
+    if (tasks.length) await ensureProject(api);
+    for (const task of tasks) await upsert(api, task);
+    for (const task of tasks) {
+      const saved = (await api.read(`/api/tasks/v1/tasks/${task.id}`))!;
+      const wanted = task.dependencies ?? [];
+      if (wanted.length || (saved.dependencies as Json[] | undefined)?.length)
+        await api.patch(
+          `/api/tasks/v1/tasks/${task.id}?etag=${String(saved.etag)}&request_id=${crypto.randomUUID()}&update_mask=dependencies`,
+          { dependencies: wanted.map((id) => ({ prerequisite_id: id })) },
+        );
+    }
+    for (const bet of bets) {
+      const name = `weeklyBets/${bet.week_start}-${bet.area}`;
+      const current = (await api.read("/api/tasks/v1/plan"))!.weekly_bets as
+        Json[] | undefined;
+      const etag = current?.find((saved) => saved.name === name)?.etag ?? "";
+      await api.patch(
+        `/api/tasks/v1/${name}?update_mask=text&etag=${String(etag)}`,
+        { text: bet.text },
+      );
+    }
+    for (const order of laneOrders)
+      await api.write("/api/tasks/v1/tasks:reorder", {
+        positions: [],
+        request_id: crypto.randomUUID(),
+        lane_order: order,
+      });
+  });
+  await seedFocus(queues);
+  const seeded = new Set(tasks.map((task) => task.id));
+  const aged = new Map(
+    tasks.flatMap((task) =>
+      task.update_time ? [[task.id, task.update_time]] : [],
+    ),
   );
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -100,7 +180,41 @@ export async function stubPlanning(
       authorization: request.headers()["authorization"] ?? null,
     });
   });
-  const task = (id: unknown) => state.tasks.find((item) => item.id === id);
+  // Plan's ListTasks pages (view=all, no IDs and no search) list only this test's tasks and the
+  // ones the page adds under them, with the seeded ages.
+  await page.route("**/api/tasks/v1/tasks?*", async (route) => {
+    const url = new URL(route.request().url());
+    if (
+      route.request().method() !== "GET" ||
+      url.searchParams.get("view") !== "all" ||
+      url.searchParams.has("task_ids") ||
+      url.searchParams.get("query")
+    )
+      return route.fallback();
+    const response = await route.fetch();
+    const listed = (await response.json()) as { tasks?: Json[] };
+    const kept = new Set(seeded);
+    for (let grown = true; grown;) {
+      grown = false;
+      for (const task of listed.tasks ?? [])
+        if (!kept.has(String(task.id)) && kept.has(String(task.parent_id))) {
+          kept.add(String(task.id));
+          grown = true;
+        }
+    }
+    await route.fulfill({
+      response,
+      json: {
+        ...listed,
+        tasks: (listed.tasks ?? [])
+          .filter((task) => kept.has(String(task.id)))
+          .map((task) => ({
+            ...task,
+            update_time: aged.get(String(task.id)) ?? task.update_time,
+          })),
+      },
+    });
+  });
   await page.route("**/api/plus/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -115,156 +229,11 @@ export async function stubPlanning(
       body,
       authorization: request.headers()["authorization"] ?? null,
     });
-    const answer = async (): Promise<
-      { status?: number; json: unknown } | undefined
-    > => {
-      if (path === "/api/plus/v1/plan:read")
+    const answer = (): { status?: number; json: unknown } | undefined => {
+      if (path === "/api/plus/v1/weeklyReview:read")
         return {
-          json: {
-            plan: {
-              timezone: "America/Los_Angeles",
-              week_start: "2026-10-12",
-              today: state.today,
-              enabled: true,
-              native_planning: true,
-              etag: "native-plan",
-              inbox_project_id: "mail",
-              labels: [],
-              available_labels: [],
-              mailbox_pending_count: state.mail.length,
-              weekly_bets: state.bets,
-              dependencies: state.dependencies,
-              ...state.plan,
-            },
-          },
+          json: { mailbox_pending_count: state.mail.length, ...review },
         };
-      if (path === "/api/plus/v1/tasks")
-        return {
-          json: {
-            planning_tasks: tasksIn
-              ? await stillOpen(tasksIn, state.tasks)
-              : state.tasks,
-          },
-        };
-      if (path === "/api/plus/v1/tasks:setTaskPlan") {
-        const saved = task(body.task_id)!;
-        if (body.stage !== undefined) {
-          saved.stage = body.stage;
-          saved.explicit_stage = body.stage;
-        }
-        const flags = new Set(saved.planning_flags as string[]);
-        for (const flag of ["quick", "active"] as const)
-          if (body[flag] !== undefined) {
-            if (body[flag]) flags.add(flag);
-            else flags.delete(flag);
-          }
-        saved.planning_flags = [...flags];
-        saved.etag = String(Number(saved.etag) + 1);
-        return { json: { task: saved } };
-      }
-      if (path === "/api/plus/v1/tasks:reorder") {
-        // The listed siblings take positions in the given order; a lane's order is saved with the plan.
-        const ids = body.task_ids as string[];
-        const lane = String(body.lane ?? "");
-        const reordered = ids.flatMap((id, index) => {
-          const saved = task(id);
-          if (!saved) return [];
-          saved.sort_order = index + 1;
-          saved.etag = String(Number(saved.etag) + 1);
-          return [saved];
-        });
-        if (!lane) return { json: { tasks: reordered } };
-        const orders = (state.plan.lane_orders as Json[] | undefined) ?? [];
-        state.plan = {
-          ...state.plan,
-          lane_orders: [
-            ...orders.filter((order) => order.lane !== lane),
-            { lane, task_ids: ids },
-          ],
-        };
-        return {
-          json: { tasks: reordered, lane_order: { lane, task_ids: ids } },
-        };
-      }
-      if (path === "/api/plus/v1/tasks:setTaskLead") {
-        const saved = task(body.task_id);
-        if (!saved || saved.etag !== body.etag)
-          return refusal(409, "ABORTED", "ETAG_MISMATCH");
-        saved.deadline = body.deadline;
-        saved.lead_days = body.lead_days ?? 0;
-        saved.missing_lead = false;
-        saved.etag = String(Number(saved.etag) + 1);
-        return { json: { task: saved } };
-      }
-      if (path === "/api/plus/v1/tasks:appendTaskSteps") {
-        // As Todofy appends them: steps under the parent, in entered order, listed by the next read.
-        const steps = body.steps as Json[];
-        const ids = steps.map(
-          (_, index) =>
-            `${String(body.parent_id)}-step-${state.tasks.length + index}`,
-        );
-        state.tasks.push(
-          ...steps.map((item, index) => ({
-            id: ids[index],
-            kind: "step",
-            title: item.title,
-            parent_id: body.parent_id,
-            area: "unassigned",
-            stage: "none",
-            explicit_stage: "none",
-            planning_flags: [],
-            etag: "1",
-            ...(item.estimated_minutes
-              ? { estimated_minutes: item.estimated_minutes }
-              : {}),
-          })),
-        );
-        return { json: { task_ids: ids } };
-      }
-      if (path === "/api/plus/v1/weeklyBets:setWeeklyBet") {
-        const same = (bet: Json) =>
-          bet.week_start === body.week_start && bet.area === body.area;
-        const saved = state.bets.find(same) ?? {};
-        if ((body.etag ?? "") !== (saved.etag ?? ""))
-          return refusal(409, "ABORTED", "ETAG_MISMATCH");
-        const bet = {
-          week_start: body.week_start,
-          area: body.area,
-          text: body.text,
-          etag: String(Number(saved.etag ?? 0) + 1),
-        };
-        state.bets = [...state.bets.filter((item) => !same(item)), bet];
-        return { json: { weekly_bet: bet } };
-      }
-      if (path === "/api/plus/v1/tasks:setTaskDependency") {
-        const same = (dependency: Json) =>
-          dependency.task_id === body.task_id &&
-          dependency.prerequisite_id === body.prerequisite_id;
-        state.dependencies = [
-          ...state.dependencies.filter((dependency) => !same(dependency)),
-          ...(body.waits
-            ? [{ task_id: body.task_id, prerequisite_id: body.prerequisite_id }]
-            : []),
-        ];
-        return {
-          json: {
-            dependencies: state.dependencies.filter(
-              (dependency) => dependency.task_id === body.task_id,
-            ),
-          },
-        };
-      }
-      if (path === "/api/plus/v1/tasks:resolveDependencies") {
-        // As Todofy settles them: a prerequisite that left the list was completed.
-        for (const dependency of state.dependencies)
-          if (
-            (body.task_ids as string[]).includes(
-              String(dependency.prerequisite_id),
-            )
-          )
-            dependency.done = true;
-        return { json: { dependencies: state.dependencies } };
-      }
       if (path === "/api/plus/v1/mailItems")
         return {
           json: {
@@ -288,9 +257,8 @@ export async function stubPlanning(
       }
       return undefined;
     };
-    const response = await answer();
     await route.fulfill(
-      response ?? {
+      answer() ?? {
         status: 500,
         json: { error: { message: `Unexpected synthetic request ${path}` } },
       },
@@ -299,14 +267,79 @@ export async function stubPlanning(
   return state;
 }
 
-async function stillOpen(request: APIRequestContext, tasks: Json[]) {
-  const open = await Promise.all(
-    tasks.map(async (task) => {
-      const saved = await request.get(`/api/tasks/v1/tasks/${String(task.id)}`);
-      return !saved.ok() || !(await saved.json()).completed;
-    }),
+async function ensureProject(api: TasksApi) {
+  const catalog = (await api.read("/api/tasks/v1/catalog"))!;
+  if (
+    !(catalog.projects as Json[] | undefined)?.some(
+      (project) => project.id === PROJECT,
+    )
+  )
+    await api.write(
+      `/api/tasks/v1/projects?project_id=${PROJECT}&request_id=${crypto.randomUUID()}`,
+      {
+        title: "Synthetic planning",
+      },
+    );
+}
+
+/** How many times the page read GetPlan. */
+export function planReads(state: PlanningState): number {
+  return state.tasksRequests.filter(
+    (request) =>
+      request.method === "GET" && request.path === "/api/tasks/v1/plan",
+  ).length;
+}
+
+/** Writes a seeded task in D1 under its own ID: created, or reopened and written again. */
+async function upsert(api: TasksApi, task: SeedTask) {
+  const id = task.id;
+  const fields = Object.fromEntries(
+    SEEDED.flatMap((key) =>
+      task[key] === undefined ? [] : [[key, task[key]]],
+    ),
   );
-  return tasks.filter((_, index) => open[index]);
+  // A step's project is its parent's.
+  const top = !task.parent_id;
+  const values: Json = {
+    kind: "task",
+    ...(top ? { project_id: PROJECT } : {}),
+    stage: "none",
+    area: "unassigned",
+    planning_flags: [],
+    ...fields,
+  };
+  let saved = await api.read(`/api/tasks/v1/tasks/${id}`);
+  if (!saved) {
+    await api.write(
+      `/api/tasks/v1/tasks?task_id=${id}&request_id=${crypto.randomUUID()}`,
+      values,
+    );
+    return;
+  }
+  if (saved.completed)
+    saved = await api.write(`/api/tasks/v1/tasks/${id}:reopen`, {
+      etag: saved.etag,
+      request_id: crypto.randomUUID(),
+    });
+  const mask = [
+    ...SEEDED.filter(
+      (field) => field !== "sort_order" || "sort_order" in values,
+    ),
+    ...(top ? ["project_id"] : []),
+  ];
+  await api.patch(
+    `/api/tasks/v1/tasks/${id}?etag=${String(saved.etag)}&request_id=${crypto.randomUUID()}&update_mask=${mask.join(",")}`,
+    {
+      title: "",
+      parent_id: "",
+      deadline: "",
+      lead_days: 0,
+      due_date: "",
+      duration_minutes: 0,
+      priority: 4,
+      ...values,
+    },
+  );
 }
 
 /**
@@ -333,6 +366,7 @@ export async function createTask(
 interface TasksApi {
   read(path: string): Promise<Json | undefined>;
   write(path: string, data: Json): Promise<Json>;
+  patch(path: string, data: Json): Promise<Json>;
   remove(path: string): Promise<void>;
 }
 async function withTasks<T>(use: (api: TasksApi) => Promise<T>): Promise<T> {
@@ -354,6 +388,17 @@ async function withTasks<T>(use: (api: TasksApi) => Promise<T>): Promise<T> {
         expect(response.status(), `POST ${path}`).toBe(200);
         return response.json();
       },
+      async patch(path, data) {
+        const response = await context.patch(path, {
+          headers: { "x-csrf-token": token, origin: ORIGIN },
+          data,
+        });
+        expect(
+          response.status(),
+          `PATCH ${path}: ${await response.text()}`,
+        ).toBe(200);
+        return response.json();
+      },
       async remove(path) {
         const response = await context.delete(path, {
           headers: { "x-csrf-token": token, origin: ORIGIN },
@@ -365,7 +410,7 @@ async function withTasks<T>(use: (api: TasksApi) => Promise<T>): Promise<T> {
     await context.dispose();
   }
 }
-const addDays = (day: string, days: number) =>
+export const addDays = (day: string, days: number) =>
   new Date(Date.parse(`${day}T12:00:00Z`) + days * 86_400_000)
     .toISOString()
     .slice(0, 10);
@@ -376,6 +421,17 @@ export function mondayOf(day: string): string {
 /** Tasks' today: the day Focus shows, the timer counts on and an empty focus_day settles. */
 export async function tasksToday(): Promise<string> {
   return String((await readFocus("2026-01-05", "2026-01-05")).today);
+}
+/** The days of `today`'s week other than today, Monday first. */
+export function otherDays(today: string): string[] {
+  const week = mondayOf(today);
+  return [0, 1, 2, 3, 4, 5, 6]
+    .map((offset) => addDays(week, offset))
+    .filter((day) => day !== today);
+}
+/** GetPlan from the dev server, as its wire JSON. */
+export async function readPlan(): Promise<Json> {
+  return withTasks(async (api) => (await api.read("/api/tasks/v1/plan"))!);
 }
 /** ListFocusDays from the dev server, as its wire JSON. */
 export async function readFocus(start: string, end: string): Promise<Json> {
@@ -422,18 +478,10 @@ export async function addRecord(
 }
 /**
  * Puts the dev server's Focus in a known state, as a planning test begins: the timer stopped, and
- * every step (open or done) taken off the queues of `week`, of Tasks' today and of each seeded
- * day, with those weeks' time records deleted. Then each day of `queues` gets its steps, first to
- * last. Each queued task, and each of
- * `inTasks`, is made in D1 when it is missing, under its own ID, titled as in `tasks`, and inside
- * one synthetic parent so the Inbox gains one row; a completed one is reopened.
+ * every step (open or done) taken off the queues of Tasks' today's week and of each seeded day's,
+ * with those weeks' time records deleted. Then each day of `queues` gets its steps, first to last.
  */
-export async function seedFocus(
-  queues: Record<string, string[]> = {},
-  week = "2026-10-12",
-  tasks: Json[] = [],
-  inTasks: string[] = [],
-): Promise<void> {
+async function seedFocus(queues: Record<string, string[]>): Promise<void> {
   await withTasks(async (api) => {
     const timer = (await api.read("/api/tasks/v1/focusTimer"))!;
     if (timer.state === "running" || timer.state === "paused")
@@ -448,7 +496,7 @@ export async function seedFocus(
       ))!.today,
     );
     const weeks = new Set(
-      [week, today, ...Object.keys(queues)].map((day) => mondayOf(day)),
+      [today, ...Object.keys(queues)].map((day) => mondayOf(day)),
     );
     for (const monday of weeks) {
       const read = (await api.read(
@@ -469,8 +517,6 @@ export async function seedFocus(
           `/api/tasks/v1/${String(entry.name)}?etag=${String(entry.etag)}&request_id=${crypto.randomUUID()}`,
         );
     }
-    const ids = [...new Set([...Object.values(queues).flat(), ...inTasks])];
-    if (ids.length) await ensureTasks(api, ids, tasks);
     for (const [day, steps] of Object.entries(queues))
       for (const id of steps)
         await api.write("/api/tasks/v1/focusDays:moveStep", {
@@ -479,24 +525,4 @@ export async function seedFocus(
           destination_day: day,
         });
   });
-}
-const SEEDS = "synthetic-planning-seeds";
-async function ensureTasks(api: TasksApi, ids: string[], tasks: Json[]) {
-  const create = (id: string, data: Json) =>
-    api.write(
-      `/api/tasks/v1/tasks?task_id=${id}&request_id=${crypto.randomUUID()}`,
-      data,
-    );
-  if (!(await api.read(`/api/tasks/v1/tasks/${SEEDS}`)))
-    await create(SEEDS, { title: "Synthetic planning seeds" });
-  for (const id of ids) {
-    const saved = await api.read(`/api/tasks/v1/tasks/${id}`);
-    const title = tasks.find((task) => task.id === id)?.title ?? id;
-    if (!saved) await create(id, { title, parent_id: SEEDS });
-    else if (saved.completed)
-      await api.write(`/api/tasks/v1/tasks/${id}:reopen`, {
-        etag: saved.etag,
-        request_id: crypto.randomUUID(),
-      });
-  }
 }

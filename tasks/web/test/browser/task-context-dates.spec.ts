@@ -90,69 +90,29 @@ test("context date input saves calendar dates while Steps stay out of ordinary s
   expect(retained.parent_id).toBe(task.id);
 });
 
-test("clearing a deadline through its context menu clears native start-ahead after the D1 write", async ({
+test("clearing a deadline through its context menu clears its start-ahead days in the same write", async ({
   page,
   request,
 }) => {
   const task = await createTask(request, {
     title: `Synthetic context deadline ${crypto.randomUUID()}`,
     deadline: "2044-04-08",
+    lead_days: 14,
   });
-  let leadDays = 14;
-  let reads = 0;
-  await page.route("**/api/plus/v1/tasks?**", async (route) => {
-    const url = new URL(route.request().url());
-    // The row metadata batch may read before the write; the mutation preflight must read after it.
-    if (url.searchParams.get("page_size") === "1") {
-      reads++;
-      const current = await (
-        await request.get(`/api/tasks/v1/tasks/${task.id}`)
-      ).json();
-      expect(current.deadline || "").toBe("");
-    }
-    await route.fulfill({
-      json: {
-        planning_tasks: url.searchParams.getAll("task_ids").map((id) => ({
-          id,
-          title: task.title,
-          lead_days: id === task.id ? leadDays : 0,
-          etag: "fresh-context-planning",
-        })),
-      },
-    });
-  });
-  await page.route("**/api/plus/v1/tasks:setTaskLead", async (route) => {
-    const input = route.request().postDataJSON() as {
-      task_id: string;
-      deadline?: string;
-      lead_days?: number;
-      etag: string;
-    };
-    expect(input.task_id).toBe(task.id);
-    expect(input.etag).toBe("fresh-context-planning");
-    expect(input.deadline || "").toBe("");
-    leadDays = input.lead_days || 0;
-    await route.fulfill({
-      json: {
-        task: {
-          id: task.id,
-          title: task.title,
-          etag: "updated-context-planning",
-        },
-      },
-    });
+  const writes: string[] = [];
+  page.on("request", (event) => {
+    if (event.method() !== "GET") writes.push(new URL(event.url()).pathname);
   });
   await page.goto("/#/inbox");
-  expect(reads).toBe(0);
   const deadline = await openDateMenu(page, task.title, "deadline");
   await deadline
     .getByRole("button", { name: "No deadline", exact: true })
     .click();
   await expect(deadline).not.toBeVisible();
-  await expect.poll(() => leadDays).toBe(0);
-  expect(reads).toBe(1);
+  await expect.poll(() => writes).toEqual([`/api/tasks/v1/tasks/${task.id}`]);
   const saved = await (
     await request.get(`/api/tasks/v1/tasks/${task.id}`)
   ).json();
   expect(saved.deadline || "").toBe("");
+  expect(saved.lead_days ?? 0).toBe(0);
 });

@@ -25,13 +25,10 @@ interface SavedTask {
   deadline?: string;
   recurrence?: string;
   duration_minutes?: number;
-}
-interface SavedPlanning {
-  stage: string;
-  area: string;
-  flags: Set<string>;
-  leadDays: number;
-  revision: number;
+  stage?: string;
+  area?: string;
+  lead_days?: number;
+  planning_flags?: string[];
 }
 async function createTask(
   request: APIRequestContext,
@@ -59,143 +56,6 @@ async function savedTask(
   return response.json();
 }
 
-/** Only the planning service is synthetic. Task reads, saves, child writes and deletes reach real D1. */
-async function planningService(page: Page, request: APIRequestContext) {
-  const state = new Map<string, SavedPlanning>();
-  let dependencies: {
-    task_id: string;
-    prerequisite_id: string;
-    baseline_completed_count: number;
-    done: boolean;
-  }[] = [];
-  function planningState(id: string) {
-    let value = state.get(id);
-    if (!value) {
-      value = {
-        stage: "none",
-        area: "unassigned",
-        flags: new Set(),
-        leadDays: 0,
-        revision: 1,
-      };
-      state.set(id, value);
-    }
-    return value;
-  }
-  async function projection(id: string) {
-    const task = await savedTask(request, id);
-    const value = planningState(id);
-    return {
-      id,
-      title: task.title,
-      parent_id: task.parent_id || "",
-      kind: task.kind || "task",
-      effort: task.effort || "",
-      area: value.area,
-      stage: value.stage,
-      explicit_stage: value.stage,
-      planning_flags: [...value.flags],
-      lead_days: value.leadDays,
-      deadline: task.deadline || "",
-      etag: `synthetic-planning-${value.revision}`,
-    };
-  }
-  await page.route("**/api/plus/**", async (route) => {
-    const url = new URL(route.request().url());
-    let body: unknown;
-    if (url.pathname === "/api/plus/v1/plan:read") {
-      body = {
-        plan: {
-          timezone: "America/Los_Angeles",
-          week_start: "2030-01-07",
-          today: "2030-01-07",
-          enabled: true,
-          native_planning: true,
-          etag: "synthetic-plan",
-          dependencies,
-        },
-      };
-    } else if (url.pathname === "/api/plus/v1/tasks") {
-      const ids = url.searchParams.getAll("task_ids");
-      if (!ids.length) {
-        const response = await request.get(
-          "/api/tasks/v1/tasks?view=all&page_size=100",
-        );
-        const data = (await response.json()) as { tasks?: SavedTask[] };
-        ids.push(...(data.tasks || []).map((task) => task.id));
-      }
-      body = { planning_tasks: await Promise.all(ids.map(projection)) };
-    } else if (url.pathname === "/api/plus/v1/tasks:setTaskPlan") {
-      const input = route.request().postDataJSON() as Record<string, unknown>;
-      const id = String(input.task_id);
-      const value = planningState(id);
-      expect(input.etag).toBe(`synthetic-planning-${value.revision}`);
-      if (input.stage !== undefined) value.stage = String(input.stage);
-      if (input.area !== undefined) value.area = String(input.area);
-      for (const [field, flag] of [
-        ["single_action", "task"],
-        ["quick", "quick"],
-        ["active", "active"],
-        ["waiting", "waiting"],
-        ["on_hold", "onhold"],
-        ["routine", "routine"],
-        ["parked", "parked"],
-      ] as const) {
-        if (input[field] === true) value.flags.add(flag);
-        if (input[field] === false) value.flags.delete(flag);
-      }
-      value.revision += 1;
-      body = { task: await projection(id) };
-    } else if (url.pathname === "/api/plus/v1/tasks:setTaskDependency") {
-      const input = route.request().postDataJSON() as {
-        task_id: string;
-        prerequisite_id: string;
-        waits?: boolean;
-      };
-      dependencies = dependencies.filter(
-        (edge) =>
-          edge.task_id !== input.task_id ||
-          edge.prerequisite_id !== input.prerequisite_id,
-      );
-      if (input.waits)
-        dependencies.push({
-          task_id: input.task_id,
-          prerequisite_id: input.prerequisite_id,
-          baseline_completed_count: 0,
-          done: false,
-        });
-      body = { dependencies };
-    } else if (url.pathname === "/api/plus/v1/tasks:setTaskLead") {
-      const input = route.request().postDataJSON() as {
-        task_id: string;
-        etag: string;
-        deadline: string;
-        lead_days?: number;
-      };
-      const value = planningState(input.task_id);
-      expect(input.etag).toBe(`synthetic-planning-${value.revision}`);
-      expect(input.deadline).toBe(
-        (await savedTask(request, input.task_id)).deadline,
-      );
-      value.leadDays = input.lead_days || 0;
-      value.revision += 1;
-      body = { task: await projection(input.task_id) };
-    } else {
-      await route.fulfill({
-        status: 500,
-        json: {
-          error: {
-            message: `Unexpected synthetic planning request: ${url.pathname}`,
-          },
-        },
-      });
-      return;
-    }
-    await route.fulfill({ json: body });
-  });
-  return state;
-}
-
 async function openTask(page: Page, id: string, kind = "task") {
   await page.goto(`/?task=${id}#/inbox`);
   const dialog = page.getByRole("dialog", {
@@ -214,7 +74,6 @@ test("parent editors keep subtasks and executable steps separate and can delete 
   page,
   request,
 }) => {
-  await planningService(page, request);
   const parent = await createTask(
     request,
     `Synthetic grouped outcome ${crypto.randomUUID()}`,
@@ -316,7 +175,6 @@ test("ordinary task planning, effort and deadline lead are visible and survive s
   page,
   request,
 }) => {
-  const planning = await planningService(page, request);
   const task = await createTask(
     request,
     `Synthetic visible planning ${crypto.randomUUID()}`,
@@ -355,15 +213,17 @@ test("ordinary task planning, effort and deadline lead are visible and survive s
     .getByRole("button", { name: "Close dialog", exact: true })
     .click();
   await expect(dialog).not.toBeVisible();
+  // Content and planning are one write of the task in D1.
   const saved = await savedTask(request, task.id);
-  expect(saved.effort).toBe("deep");
-  expect(saved.deadline).toBe("2030-02-28");
-  expect(planning.get(task.id)).toMatchObject({
+  expect(saved).toMatchObject({
+    effort: "deep",
+    deadline: "2030-02-28",
     stage: "committed",
     area: "work",
-    leadDays: 14,
+    lead_days: 14,
+    planning_flags: ["task"],
+    etag: "2",
   });
-  expect(planning.get(task.id)!.flags.has("task")).toBe(true);
   // Closing the editor removes its task link, so reopen the task from a fresh page.
   await openTask(page, task.id);
   await expect(
@@ -390,7 +250,6 @@ test("Quick automatically enables standalone scheduling and keeps it checked aft
   page,
   request,
 }) => {
-  const planning = await planningService(page, request);
   const task = await createTask(
     request,
     `Synthetic Quick action ${crypto.randomUUID()}`,
@@ -416,7 +275,10 @@ test("Quick automatically enables standalone scheduling and keeps it checked aft
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
   await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  expect(planning.get(task.id)!.flags).toEqual(new Set(["task", "quick"]));
+  expect((await savedTask(request, task.id)).planning_flags).toEqual([
+    "quick",
+    "task",
+  ]);
   await dialog
     .getByRole("button", { name: "Close dialog", exact: true })
     .click();
@@ -436,7 +298,6 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   request,
 }) => {
   await page.setViewportSize({ width: 1080, height: 900 });
-  await planningService(page, request);
   const task = await createTask(
     request,
     `Synthetic calendar recurrence ${crypto.randomUUID()}`,
@@ -671,7 +532,6 @@ test("a named dependency blocks a task until its real prerequisite is completed"
   page,
   request,
 }) => {
-  await planningService(page, request);
   const task = await createTask(
     request,
     `Synthetic dependent outcome ${crypto.randomUUID()}`,
@@ -744,19 +604,16 @@ test("clearing a deadline clears its lead and Parked stays exclusive with a chos
   page,
   request,
 }) => {
-  const planning = await planningService(page, request);
   const task = await createTask(
     request,
     `Synthetic parked deadline ${crypto.randomUUID()}`,
-    { deadline: "2030-03-29" },
+    {
+      deadline: "2030-03-29",
+      area: "work",
+      planning_flags: ["parked"],
+      lead_days: 14,
+    },
   );
-  planning.set(task.id, {
-    stage: "none",
-    area: "work",
-    flags: new Set(["parked"]),
-    leadDays: 14,
-    revision: 1,
-  });
   const dialog = await openTask(page, task.id);
   const stage = dialog.getByRole("combobox", {
     name: "Planning stage",
@@ -794,12 +651,11 @@ test("clearing a deadline clears its lead and Parked stays exclusive with a chos
     .getByRole("button", { name: "Close dialog", exact: true })
     .click();
   await expect(dialog).not.toBeVisible();
-  expect((await savedTask(request, task.id)).deadline || "").toBe("");
-  expect(planning.get(task.id)).toMatchObject({
-    stage: "committed",
-    leadDays: 0,
-  });
-  expect(planning.get(task.id)!.flags.has("parked")).toBe(false);
+  const cleared = await savedTask(request, task.id);
+  expect(cleared.deadline || "").toBe("");
+  expect(cleared.stage).toBe("committed");
+  expect(cleared.lead_days ?? 0).toBe(0);
+  expect(cleared.planning_flags ?? []).not.toContain("parked");
   await openTask(page, task.id);
   await expect(stage).toHaveValue("committed");
   await expect(amount).toBeDisabled();
@@ -819,11 +675,10 @@ test("clearing a deadline clears its lead and Parked stays exclusive with a chos
   await expect(active).not.toBeChecked();
 });
 
-test("initial child and dependency reads finish before adding, so new children cannot be overwritten", async ({
+test("the initial children read finishes before adding, so new children cannot be overwritten", async ({
   page,
   request,
 }) => {
-  await planningService(page, request);
   const parent = await createTask(
     request,
     `Synthetic initial read ${crypto.randomUUID()}`,
@@ -834,20 +689,12 @@ test("initial child and dependency reads finish before adding, so new children c
     { parent_id: parent.id },
   );
   let releaseChildren!: () => void;
-  let releaseDependencies!: () => void;
   let childrenRequested!: () => void;
-  let dependenciesRequested!: () => void;
   const heldChildren = new Promise<void>((resolve) => {
     releaseChildren = resolve;
   });
-  const heldDependencies = new Promise<void>((resolve) => {
-    releaseDependencies = resolve;
-  });
   const readingChildren = new Promise<void>((resolve) => {
     childrenRequested = resolve;
-  });
-  const readingDependencies = new Promise<void>((resolve) => {
-    dependenciesRequested = resolve;
   });
   await page.route("**/api/tasks/v1/tasks?*", async (route) => {
     if (
@@ -858,14 +705,9 @@ test("initial child and dependency reads finish before adding, so new children c
     }
     await route.continue();
   });
-  await page.route("**/api/plus/v1/plan:read*", async (route) => {
-    dependenciesRequested();
-    await heldDependencies;
-    await route.fallback();
-  });
   try {
     const dialog = await openTask(page, parent.id);
-    await Promise.all([readingChildren, readingDependencies]);
+    await readingChildren;
     const children = dialog.getByRole("region", {
       name: "Subtasks and steps",
       exact: true,
@@ -886,7 +728,8 @@ test("initial child and dependency reads finish before adding, so new children c
       exact: true,
     });
     await expect(add).toBeDisabled();
-    await expect(addDependency).toBeDisabled();
+    // The task's dependencies came with GetTask: nothing to wait for.
+    await expect(addDependency).toBeEnabled();
     await name.press("Enter");
     const before = await request.get(
       `/api/tasks/v1/tasks?parent_id=${parent.id}`,
@@ -901,13 +744,10 @@ test("initial child and dependency reads finish before adding, so new children c
       children.getByRole("button", { name: existing.title, exact: true }),
     ).toBeVisible();
     await expect(add).toBeEnabled();
-    await expect(addDependency).toBeDisabled();
     await add.click();
     await expect(
       children.getByRole("button", { name: title, exact: true }),
     ).toBeVisible();
-    releaseDependencies();
-    await expect(addDependency).toBeEnabled();
     await page.reload();
     await expect(
       children.getByRole("button", { name: existing.title, exact: true }),
@@ -925,6 +765,5 @@ test("initial child and dependency reads finish before adding, so new children c
     ).toEqual([existing.title, title].sort());
   } finally {
     releaseChildren();
-    releaseDependencies();
   }
 });

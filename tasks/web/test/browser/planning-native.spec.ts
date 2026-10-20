@@ -1,101 +1,61 @@
 import { expect, test, type Locator } from "@playwright/test";
 import {
-  createTask,
-  mondayOf,
+  planReads,
   readFocus,
   readTimer,
-  seedFocus,
   stubPlanning,
   tasksToday,
+  type PlanningRequest,
+  type PlanningState,
+  type SeedTask,
 } from "./planning-stub";
 
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
 
+/** The page's writes to a task in Tasks, as [update_mask, body]. */
+const taskWrites = (state: PlanningState, id: string) =>
+  state.tasksRequests
+    .filter(
+      (request) =>
+        request.method === "PATCH" &&
+        request.path.split("?")[0] === `/api/tasks/v1/tasks/${id}`,
+    )
+    .map((request: PlanningRequest) => [
+      new URLSearchParams(request.path.split("?")[1]).get("update_mask"),
+      request.body,
+    ]);
+
 test("a native lane reorder keeps its siblings pending and the next stage drag saves on its first attempt", async ({
   page,
+  request,
 }) => {
-  const tasks = [
-    { id: "native-first", title: "Synthetic first outcome", sort_order: 1 },
-    { id: "native-second", title: "Synthetic second outcome", sort_order: 2 },
-  ].map((task) => ({
-    ...task,
-    kind: "task",
-    project_id: "inbox",
+  const outcome = (id: string, title: string, order: number): SeedTask => ({
+    id,
+    title,
     area: "work",
     stage: "weekly",
-    explicit_stage: "weekly",
-    etag: "1",
-  }));
-  let laneOrder = tasks.map((task) => task.id);
+    sort_order: order,
+  });
+  const state = await stubPlanning(page, {
+    tasks: [
+      outcome("native-first", "Synthetic first outcome", 1),
+      outcome("native-second", "Synthetic second outcome", 2),
+    ],
+    laneOrders: [
+      { lane: "weekly", task_ids: ["native-first", "native-second"] },
+    ],
+  });
   let releaseReorder: (() => void) | undefined;
   const heldReorder = new Promise<void>((resolve) => {
     releaseReorder = resolve;
   });
-  const stageWrites: Record<string, unknown>[] = [];
-  let taskReads = 0;
-  await page.route("**/api/plus/**", async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    if (path === "/api/plus/v1/plan:read") {
-      await route.fulfill({
-        json: {
-          plan: {
-            timezone: "America/Los_Angeles",
-            week_start: "2026-10-12",
-            today: "2026-10-13",
-            enabled: true,
-            native_planning: true,
-            etag: "native-plan",
-            lane_orders: [{ lane: "weekly", task_ids: laneOrder }],
-          },
-        },
-      });
-      return;
-    }
-    if (path === "/api/plus/v1/tasks") {
-      taskReads++;
-      await route.fulfill({ json: { planning_tasks: tasks } });
-      return;
-    }
-    if (path === "/api/plus/v1/tasks:reorder") {
-      const body = route.request().postDataJSON();
-      expect(body.task_ids).toEqual(["native-second", "native-first"]);
-      laneOrder = body.task_ids;
-      for (const task of tasks) {
-        task.sort_order = laneOrder.indexOf(task.id) + 1;
-        task.etag = "2";
-      }
-      await heldReorder;
-      await route.fulfill({
-        json: {
-          tasks,
-          lane_order: { lane: "weekly", task_ids: laneOrder },
-        },
-      });
-      return;
-    }
-    if (path === "/api/plus/v1/tasks:setTaskPlan") {
-      const body = route.request().postDataJSON();
-      stageWrites.push(body);
-      const task = tasks.find((task) => task.id === body.task_id)!;
-      if (body.etag !== task.etag) {
-        await route.fulfill({
-          status: 409,
-          json: {
-            error: {
-              status: "ABORTED",
-              message: "Synthetic task changed",
-            },
-          },
-        });
-        return;
-      }
-      task.stage = body.stage;
-      task.explicit_stage = body.stage;
-      task.etag = "3";
-      await route.fulfill({ json: { task } });
-      return;
-    }
-    throw new Error(`Unexpected synthetic request ${path}`);
+  await page.route("**/api/tasks/v1/tasks:reorder", async (route) => {
+    expect(route.request().postDataJSON().lane_order).toEqual({
+      lane: "weekly",
+      task_ids: ["native-second", "native-first"],
+    });
+    await heldReorder;
+    await route.continue();
   });
   async function drag(source: Locator, target: Locator) {
     await expect(
@@ -117,9 +77,7 @@ test("a native lane reorder keeps its siblings pending and the next stage drag s
     });
     await page.mouse.up();
   }
-  // Focus is the dev server's; its week starts empty.
-  await seedFocus();
-  await page.clock.setFixedTime(new Date("2026-10-13T18:00:00Z"));
+  await page.clock.setFixedTime(new Date(`${state.today}T18:00:00Z`));
   await page.goto("/#/plan");
   const week = page.getByRole("region", { name: "Week", exact: true });
   const month = page.getByRole("region", { name: "Month", exact: true });
@@ -147,86 +105,68 @@ test("a native lane reorder keeps its siblings pending and the next stage drag s
   await expect(
     week.locator(".planning-outcome-title .planning-full-title-text"),
   ).toHaveText(["Synthetic second outcome", "Synthetic first outcome"]);
-  expect(taskReads).toBe(1);
+  // The reorder's answer replaced both tasks: no read, and the next write is over the new etag.
+  expect(planReads(state)).toBe(1);
+  const { etag } = await (
+    await request.get("/api/tasks/v1/tasks/native-first")
+  ).json();
   await drag(firstHandle, month);
   await expect(month.locator('[data-outcome-id="native-first"]')).toBeVisible();
   await expect(month.locator(".review-draggable.is-pending")).toHaveCount(0);
-  expect(stageWrites).toHaveLength(1);
-  expect(stageWrites[0]).toMatchObject({
-    task_id: "native-first",
-    etag: "2",
-    stage: "monthly",
-  });
+  const stageWrites = () =>
+    state.tasksRequests.filter(
+      (write) =>
+        write.method === "PATCH" &&
+        write.path.startsWith("/api/tasks/v1/tasks/native-first?"),
+    );
+  expect(taskWrites(state, "native-first")).toEqual([
+    ["stage", { stage: "monthly" }],
+  ]);
+  expect(
+    new URLSearchParams(stageWrites()[0]!.path.split("?")[1]).get("etag"),
+  ).toBe(etag);
   await expect(page.getByRole("alert")).toHaveCount(0);
   await page.reload();
   await expect(month.locator('[data-outcome-id="native-first"]')).toBeVisible();
   await expect(week.locator('[data-outcome-id="native-second"]')).toBeVisible();
-  expect(stageWrites).toHaveLength(1);
+  expect(stageWrites()).toHaveLength(1);
 });
 
 test("native Plan, Focus timer and Mail use the owner transport without an extension connection", async ({
   page,
-  request,
 }) => {
-  // Focus is on Tasks' today, by the dev server's real clock; the plan's week holds it.
+  // Focus is on Tasks' today, by the dev server's real clock.
   const today = await tasksToday();
-  const { id: outcomeId } = await createTask(request, {
-    title: "Synthetic native weekly outcome",
+  const outcomeId = crypto.randomUUID();
+  const stepId = crypto.randomUUID();
+  const state = await stubPlanning(page, {
+    tasks: [
+      {
+        id: outcomeId,
+        title: "Synthetic native weekly outcome",
+        area: "work",
+        stage: "committed",
+      },
+      {
+        id: stepId,
+        kind: "step",
+        title: "Synthetic native next step",
+        parent_id: outcomeId,
+      },
+    ],
+    queues: { [today]: [stepId] },
+    mail: [
+      {
+        id: "native-message",
+        title: "Synthetic native mail",
+        etag: "mail-1",
+        receive_time: "2026-10-13T17:00:00Z",
+        brief: "Synthetic native brief",
+        has_summary: true,
+      },
+    ],
+    summaries: { "native-message": "Synthetic native summary" },
   });
-  const { id: stepId } = await createTask(request, {
-    title: "Synthetic native next step",
-    kind: "step",
-    parent_id: outcomeId,
-  });
-  const tasks: Record<string, unknown>[] = [
-    {
-      id: outcomeId,
-      kind: "task",
-      title: "Synthetic native weekly outcome",
-      area: "work",
-      stage: "committed",
-      explicit_stage: "committed",
-      labels: ["ordinary"],
-      planning_flags: [],
-      etag: "1",
-    },
-    {
-      id: stepId,
-      kind: "step",
-      title: "Synthetic native next step",
-      parent_id: outcomeId,
-      area: "unassigned",
-      stage: "none",
-      explicit_stage: "none",
-      planning_flags: [],
-      etag: "1",
-    },
-  ];
-  const state = await stubPlanning(
-    page,
-    {
-      today,
-      plan: { week_start: mondayOf(today) },
-      tasks,
-      queues: { [today]: [stepId] },
-      mail: [
-        {
-          id: "native-message",
-          title: "Synthetic native mail",
-          etag: "mail-1",
-          receive_time: "2026-10-13T17:00:00Z",
-          brief: "Synthetic native brief",
-          has_summary: true,
-        },
-      ],
-      summaries: { "native-message": "Synthetic native summary" },
-    },
-    request,
-  );
-  const writes = () =>
-    state.requests
-      .filter((request) => request.path === "/api/plus/v1/tasks:setTaskPlan")
-      .map((request) => request.body);
   await page.goto("/#/plan");
   await expect(
     page.getByText("Synthetic native weekly outcome", { exact: true }).first(),
@@ -269,12 +209,8 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
   await expect(moved).toBeVisible();
   // Dragging updates the card before the queued mutation reaches the transport.
   await expect
-    .poll(() => writes()[0])
-    .toMatchObject({
-      task_id: outcomeId,
-      stage: "monthly",
-    });
-  expect(tasks[0]!.labels).toEqual(["ordinary"]);
+    .poll(() => taskWrites(state, outcomeId)[0])
+    .toEqual(["stage", { stage: "monthly" }]);
   await moved.click();
   const details = page.getByRole("dialog");
   await details.getByText("Task options", { exact: true }).click();
@@ -285,9 +221,8 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
     details.getByRole("checkbox", { name: "Quick action", exact: true }),
   ).toBeChecked();
   await expect
-    .poll(() => writes()[1])
-    .toMatchObject({ task_id: outcomeId, quick: true });
-  expect(writes()[1]).not.toHaveProperty("labels");
+    .poll(() => taskWrites(state, outcomeId)[1])
+    .toEqual(["planning_flags", { planning_flags: ["quick"] }]);
   await details.getByRole("button", { name: "Close", exact: true }).click();
   await expect(
     page.getByRole("link", { name: "Planning settings", exact: true }),
@@ -351,15 +286,9 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
   expect(day[0]?.task_ids ?? []).not.toContain(stepId);
   expect(day[0]?.done_task_ids).toContain(stepId);
   expect((await readTimer()).state).toBe("idle");
-  // Focus writes nothing to Todofy: Plan's two task changes are its only writes there.
-  expect(
-    state.requests
-      .filter((request) => request.method !== "GET")
-      .map((request) => request.path),
-  ).toEqual([
-    "/api/plus/v1/tasks:setTaskPlan",
-    "/api/plus/v1/tasks:setTaskPlan",
-  ]);
+  // Plan and Focus write only to Tasks: Todofy has heard nothing yet.
+  expect(state.requests).toEqual([]);
+  expect(taskWrites(state, outcomeId)).toHaveLength(2);
   const mailStart = state.requests.length;
   await page.getByRole("link", { name: "Mail", exact: true }).click();
   await page.getByText("Synthetic native mail", { exact: true }).click();

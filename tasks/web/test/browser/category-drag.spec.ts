@@ -1,10 +1,5 @@
 import { dragTask } from "./drag";
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Page,
-} from "@playwright/test";
+import { expect, test, type APIRequestContext } from "@playwright/test";
 
 async function writer(request: APIRequestContext) {
   const { token } = await (await request.get("/api/tasks/csrf")).json();
@@ -23,22 +18,6 @@ async function writer(request: APIRequestContext) {
       title: string;
     }>;
   };
-}
-
-async function planning(page: Page) {
-  await page.route("**/api/plus/v1/tasks?**", (route) => {
-    const ids = new URL(route.request().url()).searchParams.getAll("task_ids");
-    return route.fulfill({
-      json: {
-        planning_tasks: ids.map((id) => ({
-          id,
-          etag: "synthetic-category",
-          explicit_stage: "none",
-          area: "unassigned",
-        })),
-      },
-    });
-  });
 }
 
 test("sidebar drops move a subtask family, add a label and schedule Today without changing its deadline", async ({
@@ -82,7 +61,6 @@ test("sidebar drops move a subtask family, add a label and schedule Today withou
     parent_id: child.id,
     kind: "step",
   });
-  await planning(page);
   await page.goto(`/#/project/${source.id}`);
   await page
     .getByRole("button", {
@@ -156,7 +134,7 @@ test("sidebar drops move a subtask family, add a label and schedule Today withou
   expect(descendant.parent_id).toBe(child.id);
 });
 
-test("native property metadata loads in a batch without shifting rows or masquerading as labels", async ({
+test("planning tags come with the rows, each task's own, and never masquerade as labels", async ({
   page,
   request,
 }) => {
@@ -165,73 +143,49 @@ test("native property metadata loads in a batch without shifting rows or masquer
     title: `Synthetic metadata ${crypto.randomUUID()}`,
   });
   const label = await write("labels", { title: "Synthetic ordinary label" });
+  const planned = {
+    stage: "committed",
+    area: "work",
+    planning_flags: ["routine", "task"],
+  };
   const parent = await write("tasks", {
     title: "Synthetic native properties",
     project_id: project.id,
     effort: "deep",
     deadline: "2040-04-22",
     label_ids: [label.id],
+    ...planned,
   });
-  const sibling = await write("tasks", {
+  await write("tasks", {
     title: "Synthetic metadata sibling",
     project_id: project.id,
   });
-  const child = await write("tasks", {
+  await write("tasks", {
     title: "Synthetic child properties",
     parent_id: parent.id,
+    ...planned,
   });
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const batches: string[][] = [];
-  await page.route("**/api/plus/v1/tasks?**", async (route) => {
-    const ids = new URL(route.request().url()).searchParams.getAll("task_ids");
-    batches.push(ids);
-    if (batches.length === 1) await held;
-    await route.fulfill({
-      json: {
-        planning_tasks: ids.map((id) => ({
-          id,
-          etag: "synthetic-metadata",
-          explicit_stage: "committed",
-          area: "work",
-          planning_flags: ["routine", "task"],
-        })),
-      },
-    });
+  const todofy: string[] = [];
+  page.on("request", (event) => {
+    const path = new URL(event.url()).pathname;
+    if (path.startsWith("/api/plus/")) todofy.push(path);
   });
   await page.goto(`/#/project/${project.id}`);
   const row = page
     .locator(".task-row")
     .filter({ has: page.getByText(parent.title, { exact: true }) });
+  const properties = row.locator(".task-native-properties");
   await expect(row).toBeVisible();
-  await expect.poll(() => batches.length).toBe(1);
-  expect(batches[0]).toEqual([parent.id, sibling.id]);
-  const before = await row.boundingBox();
-  const labelBefore = await row.locator(".task-real-labels").boundingBox();
-  await expect(row.locator(".task-native-properties")).toContainText("#Deep");
-  await expect(row.locator(".task-native-properties")).not.toContainText(
+  // The row's first paint has them: no second read, so no shift.
+  for (const tag of [
+    "#Deep",
     "#Routine",
-  );
-  release();
-  await expect(row.locator(".task-native-properties")).toContainText(
-    "#Routine",
-  );
-  await expect(row.locator(".task-native-properties")).toContainText(
     "#Standalone action",
-  );
-  await expect(row.locator(".task-native-properties")).toContainText(
     "#Committed",
-  );
-  await expect(row.locator(".task-native-properties")).toContainText(
     "Apr 22, 2040",
-  );
+  ])
+    await expect(properties).toContainText(tag);
   await expect(row.locator(".task-real-labels")).toHaveText(`#${label.title}`);
-  expect(await row.boundingBox()).toEqual(before);
-  expect(await row.locator(".task-real-labels").boundingBox()).toEqual(
-    labelBefore,
-  );
   await row
     .getByRole("button", {
       name: `Expand subtasks for ${parent.title}`,
@@ -245,7 +199,7 @@ test("native property metadata loads in a batch without shifting rows or masquer
   await expect(children.locator(".task-native-properties")).toContainText(
     "#Routine",
   );
-  expect(batches).toEqual([[parent.id, sibling.id], [child.id]]);
+  expect(todofy).toEqual([]);
   const persisted = await (
     await request.get(`/api/tasks/v1/tasks/${parent.id}`)
   ).json();

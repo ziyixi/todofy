@@ -1,14 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
-  createTask,
-  mondayOf,
+  addDays,
+  otherDays,
   readFocus,
   readTimer,
-  seedFocus,
   startTimer,
   stubPlanning,
   tasksToday,
-  type Json,
+  type SeedTask,
 } from "./planning-stub";
 
 test.afterEach(async ({ page }) => {
@@ -19,32 +18,32 @@ test("Plan completes an outcome in real D1, which stops its descendant's running
   page,
   request,
 }) => {
-  const { token } = await (await request.get("/api/tasks/csrf")).json();
-  const create = async (value: Record<string, unknown>) => {
-    const response = await request.post(
-      `/api/tasks/v1/tasks?request_id=${crypto.randomUUID()}`,
-      {
-        headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
-        data: value,
-      },
-    );
-    expect(response.status()).toBe(200);
-    return response.json() as Promise<{
-      id: string;
-      name: string;
-      etag: string;
-    }>;
-  };
-  const parent = await create({ title: "Synthetic Plan completion outcome" });
-  const child = await create({
-    title: "Synthetic running descendant",
-    parent_id: parent.id,
-    kind: "step",
-  });
+  const parent = { id: crypto.randomUUID(), name: "" };
+  parent.name = `tasks/${parent.id}`;
+  const child = crypto.randomUUID();
   // The child is queued on Tasks' today and its timer runs there.
   const today = await tasksToday();
-  await seedFocus({ [today]: [child.id] }, mondayOf(today));
-  await startTimer(child.id);
+  await stubPlanning(page, {
+    tasks: [
+      {
+        id: parent.id,
+        title: "Synthetic Plan completion outcome",
+        stage: "committed",
+        area: "work",
+      },
+      {
+        id: child,
+        title: "Synthetic running descendant",
+        kind: "step",
+        parent_id: parent.id,
+      },
+    ],
+    queues: { [today]: [child] },
+  });
+  await startTimer(child);
+  const { etag } = await (
+    await request.get(`/api/tasks/v1/tasks/${parent.id}`)
+  ).json();
   const genericWrites: { requestId: string; etag: string; focusDay: string }[] =
     [];
   page.on("request", (event) => {
@@ -56,53 +55,6 @@ test("Plan completes an outcome in real D1, which stops its descendant's running
       etag: body.etag,
       focusDay: body.focus_day,
     });
-  });
-  await page.route("**/api/plus/**", async (route) => {
-    const url = new URL(route.request().url());
-    let response: unknown;
-    if (url.pathname.endsWith("/plan:read"))
-      response = {
-        plan: {
-          native_planning: true,
-          enabled: true,
-          timezone: "America/Los_Angeles",
-          week_start: mondayOf(today),
-          today,
-          etag: "synthetic-plan",
-          labels: [],
-          available_labels: [],
-          dependencies: [],
-        },
-      };
-    else if (url.pathname === "/api/plus/v1/tasks") {
-      const tasks = await Promise.all(
-        [parent, child].map(async ({ id }) =>
-          (await request.get(`/api/tasks/v1/tasks/${id}`)).json(),
-        ),
-      );
-      response = {
-        planning_tasks: tasks
-          .filter((task) => !task.completed)
-          .map((task) => ({
-            ...task,
-            kind: task.kind || "task",
-            etag: "synthetic-planning",
-            stage: task.id === parent.id ? "committed" : "none",
-            explicit_stage: task.id === parent.id ? "committed" : "none",
-            area: "work",
-            planning_flags: [],
-          })),
-      };
-    } else {
-      await route.fulfill({
-        status: 500,
-        json: {
-          error: { message: `Unexpected synthetic request ${url.pathname}` },
-        },
-      });
-      return;
-    }
-    await route.fulfill({ json: response });
   });
   await page.goto("/#/plan");
   // The running session shows in the timer bar.
@@ -119,7 +71,7 @@ test("Plan completes an outcome in real D1, which stops its descendant's running
   // One Tasks write, on Focus's day; the session settles on its own day in it.
   expect(genericWrites[0]).toEqual({
     requestId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
-    etag: parent.etag,
+    etag,
     focusDay: today,
   });
   const saved = await (
@@ -132,7 +84,7 @@ test("Plan completes an outcome in real D1, which stops its descendant's running
     task_ids?: string[];
     done_task_ids?: string[];
   }[];
-  expect([day?.task_ids ?? [], day?.done_task_ids]).toEqual([[], [child.id]]);
+  expect([day?.task_ids ?? [], day?.done_task_ids]).toEqual([[], [child]]);
   await expect(page.locator(`[data-outcome-id="${parent.id}"]`)).toHaveCount(0);
   await expect(
     page.getByRole("status").filter({ hasText: "Task completed" }),
@@ -141,19 +93,22 @@ test("Plan completes an outcome in real D1, which stops its descendant's running
 
 test.describe("Plan's cards", () => {
   test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
-  const today = "2026-10-13";
-  const outcome = (id: string, title: string, fields: Json = {}): Json => ({
+  // Tasks' today, by the dev server's clock: the page's clock is set to it.
+  let today: string;
+  test.beforeAll(async () => {
+    today = await tasksToday();
+  });
+  const outcome = (
+    id: string,
+    title: string,
+    fields: Partial<SeedTask> = {},
+  ): SeedTask => ({
     id,
-    kind: "task",
     title,
     area: "work",
     stage: "committed",
-    explicit_stage: "committed",
-    planning_flags: [],
-    etag: "1",
     ...fields,
   });
-  const candidate = (stage: string) => ({ stage, explicit_stage: stage });
   async function openPlan(page: Page) {
     await page.clock.setFixedTime(new Date(`${today}T18:00:00Z`));
     await page.goto("/#/plan");
@@ -166,23 +121,22 @@ test.describe("Plan's cards", () => {
     page,
   }) => {
     const state = await stubPlanning(page, {
-      today,
       tasks: [
         outcome("launch", "Synthetic launch"),
         outcome("audit", "Synthetic audit"),
         outcome("venue", "Synthetic venue booking", { area: "personal" }),
         outcome("report", "Synthetic report"),
-        outcome("quarter", "Synthetic quarter outcome", candidate("quarterly")),
-        outcome("month", "Synthetic month outcome", candidate("monthly")),
-        outcome("week", "Synthetic week candidate", candidate("weekly")),
+        outcome("quarter", "Synthetic quarter outcome", { stage: "quarterly" }),
+        outcome("month", "Synthetic month outcome", { stage: "monthly" }),
+        outcome("week", "Synthetic week candidate", { stage: "weekly" }),
+        // Inside its start window: Tasks says it must start.
         outcome("claim", "Submit the expense claim", {
-          ...candidate("none"),
-          deadline: "2026-10-14",
+          stage: "none",
+          deadline: addDays(today, 1),
           lead_days: 3,
-          must_start: true,
         }),
         outcome("waiting", "Synthetic waiting task", {
-          ...candidate("none"),
+          stage: "none",
           planning_flags: ["waiting"],
         }),
       ],
@@ -262,7 +216,9 @@ test.describe("Plan's cards", () => {
       }),
     ).toBeFocused();
     expect(
-      state.requests.filter((request) => request.method !== "GET"),
+      [...state.requests, ...state.tasksRequests].filter(
+        (request) => request.method !== "GET",
+      ),
     ).toEqual([]);
   });
 
@@ -270,35 +226,23 @@ test.describe("Plan's cards", () => {
     page,
     request,
   }) => {
-    const parent = await createTask(request, {
+    const parent = {
+      id: crypto.randomUUID(),
       title: "Synthetic weekly outcome",
-    });
-    // One at a time: each CSRF read replaces the previous token.
-    const first = await createTask(request, {
-      title: "Synthetic first step",
+    };
+    const first = { id: crypto.randomUUID(), title: "Synthetic first step" };
+    const second = { id: crypto.randomUUID(), title: "Synthetic second step" };
+    const step = (task: { id: string; title: string }): SeedTask => ({
+      ...task,
       kind: "step",
       parent_id: parent.id,
     });
-    const second = await createTask(request, {
-      title: "Synthetic second step",
-      kind: "step",
-      parent_id: parent.id,
+    // The first step is scheduled on another day of this week than Tasks' today.
+    const [scheduled] = otherDays(today) as [string];
+    await stubPlanning(page, {
+      tasks: [outcome(parent.id, parent.title), step(first), step(second)],
+      queues: { [scheduled]: [first.id] },
     });
-    const step = (task: { id: string; title: string }): Json => ({
-      ...outcome(task.id, task.title, candidate("none")),
-      kind: "step",
-      parent_id: parent.id,
-      area: "unassigned",
-    });
-    await stubPlanning(
-      page,
-      {
-        today,
-        tasks: [outcome(parent.id, parent.title), step(first), step(second)],
-        queues: { [today]: [first.id] },
-      },
-      request,
-    );
     const completions: { id: string; requestId: string; focusDay: string }[] =
       [];
     page.on("request", (event) => {
@@ -326,7 +270,9 @@ test.describe("Plan's cards", () => {
       })
       .click();
     await expect(tray.locator(`[data-task-id="${second.id}"]`)).toHaveCount(0);
-    const day = page.locator(`.planning-calendar-day[data-date="${today}"]`);
+    const day = page.locator(
+      `.planning-calendar-day[data-date="${scheduled}"]`,
+    );
     await day
       .getByRole("button", {
         name: "Complete task: Synthetic first step",
@@ -357,13 +303,12 @@ test.describe("Plan's cards", () => {
     for (const write of completions)
       expect(write.requestId).toMatch(/^[a-f0-9-]{36}$/u);
     // A scheduled Step completes on its own day; the others on Focus's, Tasks' today.
-    const focusDay = await tasksToday();
     expect(completions.map((write) => write.focusDay)).toEqual([
-      focusDay,
       today,
-      focusDay,
+      scheduled,
+      today,
     ]);
-    const [queue] = (await readFocus(today, today)).days as {
+    const [queue] = (await readFocus(scheduled, scheduled)).days as {
       task_ids?: string[];
       done_task_ids?: string[];
     }[];
@@ -381,14 +326,13 @@ test.describe("Plan's cards", () => {
     page,
     request,
   }) => {
-    const task = await createTask(request, {
+    const task = {
+      id: crypto.randomUUID(),
       title: "Synthetic quarter outcome",
+    };
+    await stubPlanning(page, {
+      tasks: [outcome(task.id, task.title, { stage: "quarterly" })],
     });
-    await stubPlanning(
-      page,
-      { today, tasks: [outcome(task.id, task.title, candidate("quarterly"))] },
-      request,
-    );
     const attempts: { requestId: string; focusDay: string }[] = [];
     await page.route(`**/api/tasks/v1/tasks/${task.id}:complete`, (route) => {
       const body = route.request().postDataJSON();

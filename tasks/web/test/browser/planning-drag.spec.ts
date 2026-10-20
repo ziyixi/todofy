@@ -1,39 +1,33 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
-  mondayOf,
+  otherDays,
   readFocus,
   stubPlanning,
   tasksToday,
   type Json,
   type PlanningSeed,
   type PlanningState,
+  type SeedTask,
 } from "./planning-stub";
 
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
 
-const task = (id: string, title: string, fields: Json = {}): Json => ({
-  id,
-  kind: "task",
-  title,
-  area: "work",
-  stage: "committed",
-  explicit_stage: "committed",
-  planning_flags: [],
-  etag: "1",
-  ...fields,
-});
+const task = (
+  id: string,
+  title: string,
+  fields: Partial<SeedTask> = {},
+): SeedTask => ({ id, title, area: "work", stage: "committed", ...fields });
 const step = (id: string, title: string, parent: string, order: number) =>
   task(id, title, {
     kind: "step",
     parent_id: parent,
     area: "unassigned",
     stage: "none",
-    explicit_stage: "none",
-    estimated_minutes: 30,
+    duration_minutes: 30,
     sort_order: order,
   });
-/** Three commitments with two steps, one Quick task, and a step planned on Tuesday. */
-const TASKS: Json[] = [
+/** Three commitments with two steps, one Quick task, and a step planned on Tasks' today. */
+const TASKS: SeedTask[] = [
   task("launch", "Synthetic launch", { sort_order: 1 }),
   task("audit", "Synthetic audit", { sort_order: 2 }),
   task("desk", "Synthetic desk", { area: "personal", sort_order: 3 }),
@@ -41,19 +35,18 @@ const TASKS: Json[] = [
   step("layout", "Synthetic layout", "launch", 2),
   task("ink", "Synthetic printer ink", {
     stage: "none",
-    explicit_stage: "none",
     planning_flags: ["quick"],
     area: "personal",
   }),
 ];
 
+/** Plan on Tasks' today, by the dev server's clock, which the page's clock is set to. */
 async function openPlan(page: Page, seed: PlanningSeed = {}) {
-  await page.clock.setFixedTime(new Date("2026-10-13T18:00:00Z"));
+  const today = await tasksToday();
+  await page.clock.setFixedTime(new Date(`${today}T18:00:00Z`));
   const state = await stubPlanning(page, {
-    tasks: structuredClone(TASKS),
-    // The introduction is dropped into a day, so it is one of Tasks' tasks too.
-    queues: { "2026-10-13": ["layout"] },
-    inTasks: ["intro"],
+    tasks: TASKS,
+    queues: { [today]: ["layout"] },
     ...seed,
   });
   await page.goto("/#/plan");
@@ -64,8 +57,11 @@ async function openPlan(page: Page, seed: PlanningSeed = {}) {
 }
 const week = (page: Page) =>
   page.getByRole("tab", { name: "Week", exact: true }).click();
+/** Every write the page sent, to Tasks or to Todofy. */
 const writes = (state: PlanningState) =>
-  state.requests.filter((request) => request.method !== "GET");
+  [...state.tasksRequests, ...state.requests].filter(
+    (request) => request.method !== "GET",
+  );
 const dragging = (page: Page) =>
   page.locator("[data-dnd-overlay][data-dnd-dragging]");
 /** The middle of an element, in the page's coordinates. */
@@ -124,7 +120,7 @@ test("every Plan card drags by its body after 8px, and Escape puts it back", asy
   await dragsByBody(page, quick.locator(".planning-quick-title"), quick);
   // The meta line under the title: the card's body, no control at all.
   const calendar = page.locator(
-    '.planning-calendar-day[data-date="2026-10-13"] .planning-calendar-step',
+    `.planning-calendar-day[data-date="${state.today}"] .planning-calendar-step`,
   );
   await dragsByBody(
     page,
@@ -180,9 +176,13 @@ test("one Week commitment selects on a click, opens on a double-click and moves 
   await expect.poll(order).toEqual(["launch", "desk", "audit"]);
   await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
   expect(
-    writes(state).map((request) => [request.path, request.body.lane]),
-  ).toEqual([["/api/plus/v1/tasks:reorder", "committed"]]);
-  expect(writes(state)[0]!.body.task_ids).toEqual(["launch", "desk", "audit"]);
+    writes(state).map((request) => [request.path, request.body.lane_order]),
+  ).toEqual([
+    [
+      "/api/tasks/v1/tasks:reorder",
+      { lane: "committed", task_ids: ["launch", "desk", "audit"] },
+    ],
+  ]);
   // The drop was no click: the selection and the dialog are as they were.
   await expect(audit).toHaveClass(/is-selected/u);
   await expect(page.locator("dialog.plus-dialog[open]")).toHaveCount(0);
@@ -216,11 +216,8 @@ test("the keyboard moves a Week commitment from its grip, and focus stays on tha
     .toEqual(["audit", "launch", "desk"]);
   await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
   await expect(grip).toBeFocused();
-  expect(writes(state).map((request) => request.body)).toEqual([
-    expect.objectContaining({
-      task_ids: ["audit", "launch", "desk"],
-      lane: "committed",
-    }),
+  expect(writes(state).map((request) => request.body.lane_order)).toEqual([
+    { lane: "committed", task_ids: ["audit", "launch", "desk"] },
   ]);
   // A reload reads the saved order back.
   await page.reload();
@@ -310,7 +307,8 @@ test("small cards' grips show only on hover, and their titles never move", async
 test("on touch a card drags after a 250ms hold, and a quick swipe on it scrolls instead", async ({
   page,
 }) => {
-  await openPlan(page);
+  const { today } = await openPlan(page);
+  const [day] = otherDays(today) as [string];
   await week(page);
   // Playwright has no touch drag: Chromium's own touch input, through the DevTools protocol.
   const cdp = await page.context().newCDPSession(page);
@@ -333,17 +331,17 @@ test("on touch a card drags after a 250ms hold, and a quick swipe on it scrolls 
     .toBeLessThan(start.y - 40);
   await expect(dragging(page)).toHaveCount(0);
   await expect(page.locator(".planning-tray-step.is-dragging")).toHaveCount(0);
-  // Held for 250ms first, it drags into Wednesday.
-  const wednesday = page.locator(
-    '.planning-calendar-day[data-date="2026-10-14"] .planning-day-end',
+  // Held for 250ms first, it drags into that day.
+  const target = page.locator(
+    `.planning-calendar-day[data-date="${day}"] .planning-day-end`,
   );
-  await wednesday.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
   await title.scrollIntoViewIfNeeded();
   const from = await centre(title);
   await touch("touchStart", from.x, from.y);
   await page.waitForTimeout(350);
   await expect(page.locator(".planning-tray-step.is-dragging")).toHaveCount(1);
-  const to = await centre(wednesday);
+  const to = await centre(target);
   for (let index = 1; index <= 12; index++)
     await touch(
       "touchMove",
@@ -352,11 +350,7 @@ test("on touch a card drags after a 250ms hold, and a quick swipe on it scrolls 
     );
   await touch("touchEnd");
   await expect
-    .poll(
-      async () =>
-        ((await readFocus("2026-10-14", "2026-10-14")).days as Json[])[0]
-          ?.task_ids,
-    )
+    .poll(async () => ((await readFocus(day, day)).days as Json[])[0]?.task_ids)
     .toEqual(["intro"]);
   await expect(dragging(page)).toHaveCount(0);
 });
@@ -367,9 +361,7 @@ test("today's Focus steps drag by their whole row: one MoveFocusStep, kept after
   // Focus is on Tasks' own today in the dev server's D1, so this page keeps the real clock.
   const today = await tasksToday();
   const state = await stubPlanning(page, {
-    today,
-    plan: { week_start: mondayOf(today) },
-    tasks: structuredClone(TASKS),
+    tasks: TASKS,
     queues: { [today]: ["intro", "layout", "ink"] },
   });
   await page.goto("/#/focus");
@@ -407,7 +399,7 @@ test("today's Focus steps drag by their whole row: one MoveFocusStep, kept after
       before_task_id: "intro",
     },
   ]);
-  expect(writes(state)).toEqual([]);
+  expect(writes(state)).toEqual(moves);
   expect(((await readFocus(today, today)).days as Json[])[0]?.task_ids).toEqual(
     ["ink", "intro", "layout"],
   );

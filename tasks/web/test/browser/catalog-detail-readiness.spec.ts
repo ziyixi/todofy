@@ -35,20 +35,6 @@ test("a deep-linked task waits for its project and selected labels before openin
     project_id: project.id,
     label_ids: [label.id],
   });
-  await page.route("**/api/plus/v1/plan:read", (route) =>
-    route.fulfill({
-      json: { plan: { native_planning: true, dependencies: [] } },
-    }),
-  );
-  await page.route("**/api/plus/v1/tasks?**", (route) =>
-    route.fulfill({
-      json: {
-        planning_tasks: [
-          { id: task.id, explicit_stage: "none", area: "unassigned" },
-        ],
-      },
-    }),
-  );
   let releaseCatalog!: () => void;
   const catalogReady = new Promise<void>((resolve) => {
     releaseCatalog = resolve;
