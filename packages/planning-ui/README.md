@@ -46,9 +46,11 @@ Focus uses FlowDay's existing server session and command receipts for count-up a
 Reloads hydrate the same session; pause/resume keeps its original flow date. Visible pages read only the timer
 once per minute and refresh the task view at account midnight. Finishing a pomodoro uses the existing atomic
 FlowDay finish command, which caps recorded time even if the browser was closed when the countdown ended.
-A task's estimate is its Tasks duration: the host supplies `updateEstimate`, which writes Tasks, and FlowDay's
-mirrored copy is never read. Only FlowDay's local tasks keep an estimate of their own. A day queue write goes
-straight to FlowDay's queue; it never waits for FlowDay's mirror to know the task.
+A task's estimate is its Tasks duration: the host supplies `updateEstimate`, which writes Tasks and answers the
+saved duration (`{ estimate }`), and FlowDay's mirrored copy is never read. A Step opens a panel that sets only
+its time (`StepEditor`); tasks open the full planning panel. Only FlowDay's local tasks keep an estimate of
+their own. A day queue write goes straight to FlowDay's queue; it never waits for FlowDay's mirror to know the
+task.
 
 Review keeps candidate columns together and gives Committed a separate full-width row of horizontal cards.
 Every Plan and Focus card's left edge is its area's colour (Work slate, Personal ochre, Unassigned none), and
