@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-19 UTC. Keep this file focused on active work, open acceptance and dated compatibility constraints.
+Updated 2026-10-20 UTC. Keep this file focused on active work, open acceptance and dated compatibility constraints.
 Move completed rollout detail to a dated record and link it here. Repository rules are in [AGENTS](AGENTS.md);
 service entry points are in [README](README.md). Never put private content, credentials or raw production output here.
 
@@ -14,12 +14,21 @@ refinement and cutover, VPS recovery, Recall, Mailsort) in
 
 ### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
 
-A local branch from `f6c08aaf`, not pushed yet: the verified Tasks review fixes, Tasks' D1 in Todofy's weekly backup,
-the Tasks duration as the only estimate, the Planning channel allowlist, and the removal of the Todoist Plus extension
-and of every Todoist path in Todofy and FlowDay. It merges `origin/main` at `69ddb339`, keeping Codex's
-already-released October 18-19 Tasks and Plan work (inline subtasks, whole-row drag, Plan completion, the bounded
-native rollover) on the native-only path. By the owner's decision the end state ships at once: no compatibility
-window, staged rollout, flag or rollback machinery.
+**Ready to release.** A local branch from `f6c08aaf`, not pushed yet: the verified Tasks review fixes, Tasks' D1 in
+Todofy's weekly backup, the Tasks duration as the only estimate, the Planning channel allowlist, and the removal of
+the Todoist Plus extension and of every Todoist path in Todofy and FlowDay. It merges `origin/main` at `69ddb339`,
+keeping Codex's already-released October 18-19 Tasks and Plan work (inline subtasks, whole-row drag, Plan
+completion, the bounded native rollover) on the native-only path. By the owner's decision the end state ships at
+once: no compatibility window, staged rollout, flag or rollback machinery.
+
+Final local check on 2026-10-20 UTC, with `69ddb339` still the tip of `origin/main`: `ci_changes.py` selects every
+check job for the branch, and each passed on macOS: Changes' tests, Todofy static and runtime (all 512 runtime tests
+in one shard, the completeness check included), Tasks, FlowDay, Dashboard, Mail Hero, Links, Watch, Mailsort, Recall,
+Brief, Fleet, Website, Newsletter, Contracts, Shared packages, Infra and Proto. CI alone runs what macOS cannot: the
+Newsletter image (a linux/amd64 Docker build), Platform's kubectl checksum, AppArmor, runtime image and k3s steps
+(its contract tests passed), Newsletter's CJK font install and Mail Hero's GPG backup test. Locally, Website's
+export and Worker dry-run steps ran on another free port and Newsletter's steps with an empty `HOME`, as on a CI
+runner. If `origin/main` moves before the push, merge it again and rerun the jobs `ci_changes.py` selects.
 
 - **Before pushing,** in this order:
   1. This read-only check must print nothing. If a map is listed, set it again without `TODOIST_API_KEY` and
@@ -46,7 +55,7 @@ window, staged rollout, flag or rollback machinery.
   binding, and once it is green, FlowDay:
   `gh workflow run ci.yml --repo ziyixi/todofy --ref main -f app=todofy`, then the same with `-f app=flowday`.
 
-Right after the release, in this order:
+The lead's production steps right after the release, in this order:
 
 1. The rest of the one-time FlowDay estimate backfill: [commands and checks](tasks/docs/backup.md#one-time-flowday-estimate-backfill).
    Do not wait: it replaces a duration changed in Tasks since the push with the saved FlowDay value.
@@ -62,7 +71,10 @@ Right after the release, in this order:
    these fourteen; the three unmerged Recall experiment branches stay by the owner's earlier decision. Git refuses to
    delete a branch a worktree has checked out, so remove the worktree first (`git worktree list`).
    ```sh
-   for t in $(git tag -l 'todoist-plus-v*'); do gh release delete "$t" --cleanup-tag --yes --repo ziyixi/todofy; done
+   for t in $(gh release list --repo ziyixi/todofy --limit 100 --json tagName \
+       --jq '.[].tagName | select(startswith("todoist-plus-v"))'); do
+     gh release delete "$t" --cleanup-tag --yes --repo ziyixi/todofy
+   done
    git push origin --delete codex/cloud-recovery-tasks codex/plan-write-reliability codex/plan-write-verification \
      codex/plus-ui-refinement codex/plus-ui-refinement-verification \
      codex/tasks-dependency-layout codex/tasks-details-polish codex/tasks-layout-verification codex/tasks-native \
