@@ -33,8 +33,8 @@ cron */10 ----------> scheduled() -------------------------> wake() (RPC)
 | `TODOFY_PUBLIC_HOST` (`todofy.ziyixi.science`) | owner UI and its API todofy.ui.v1 under `/api/v1/*` ([`proto/todofy/ui/v1`](../proto/todofy/ui/v1), served by the shared transcoder) | Cloudflare Access app on the whole host, and the gateway verifies the Access JWT itself (RS256 signature, issuer, audience, expiry, not-before, subject, owner or alias); writes also need Origin, the CSRF token and a `request_id` |
 | each of `TODOFY_HOOKS_HOSTS` (`todofy-hooks.ziyixi.science`; `daily.ziyixi.science` is added at cutover so Mail Hero's and the newsletter's existing URLs keep working) | `POST /hooks/mail`, newsletter reports and `/health` | webhook: Bearer; newsletter: Basic; `/health` returns the build SHA without the Durable Object |
 
-Any other host or path is a 404. `workers.dev` and preview URLs are off. Tasks reaches the planning API only
-through the private Planning service binding ([planning API](#planning-api)).
+Any other host or path is a 404. `workers.dev` and preview URLs are off. Tasks reaches the Mail API only
+through the private Planning service binding ([Mail in Tasks](#mail-in-tasks)).
 
 ## Gemini model order
 
@@ -115,20 +115,21 @@ carries the week's counts, trends and links. The owner UI's GTD page shows the t
 carries the counters and the dashboard shows them as the "GTD 循环" flow
 ([docs/gtd-features.md](docs/gtd-features.md)).
 
-## Planning API
+## Mail in Tasks
 
-Plan, Focus and Mail in [Tasks](../tasks/README.md) use Todofy's planning API (`PlusService`), which Tasks reaches
-only through Todofy's private Planning service binding. Tasks keeps the tasks; Todofy keeps the planning facts
-(each task's saved stage and planning flags, the weekly Work and Personal Bets, dependencies and lane orders) and
-the mail summaries in D1. FlowDay owns the day queue and the shared timer. The alarm returns recorded
-previous-week commitments to weekly candidates after Monday 00:00 in the account timezone.
+[Tasks](../tasks/README.md) owns Plan and Focus: planning facts, dependencies, the weekly Bets, the Review lanes'
+order, the day queues and the timer are in its own D1. Its Mail page and Plan's weekly review use Todofy's
+`PlusService`, which Tasks reaches only through Todofy's private Planning service binding: the Mail methods, and
+`ReadWeeklyReview` for the newest review task and the pending mail count. Todofy keeps the mail summaries and the
+mail categories in D1.
 
 Mail lists the summarised mail still awaiting a decision, each with its one-sentence brief. Converting one makes
 an Inbox task in Tasks, with its category's tag and priority when one is chosen; deleting one deletes its summary
 and keeps the ledger row. Nothing else deletes a summary.
 
-The [planning API](docs/planning-api.md) covers the channel, receipts, pause controls and retry behavior; the
-retired Todoist Plus extension is in [its history](../docs/history/todoist-plus.md).
+The [planning API](docs/planning-api.md) covers the channel, receipts, pause controls and retry behavior, and the
+old planning tables that wait for Tasks' import to be verified; the retired Todoist Plus extension is in
+[its history](../docs/history/todoist-plus.md).
 
 ## Backups
 

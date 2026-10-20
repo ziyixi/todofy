@@ -417,9 +417,10 @@ it owns: `control(next_reminder_check, next_report, next_maintenance, todoist_bl
 column is no longer read), `llm_usage(day, reserved_tokens, used_tokens, calls)`,
 `llm_inflight(event_id, day, reserved)`, `report_requests(hour_bucket, count)`,
 `report_failures(kind, top_n, day, count)`; `gtd_state` (runtime/gtd.py) holds the GTD ledger's schedule,
-collection cursor, ops facts and HMAC key as one JSON document; `plus_receipts` (runtime/plus_receipts.py) the
-planning writes' replay receipts, IDs only once done, read for 30 days and never deleted. A release that still
-wrote Todoist left `todoist_calls`, `plus_cache` and the mail-brief tables; `DO_SCHEMA` drops them. Budget helpers used by R:
+collection cursor, ops facts and HMAC key as one JSON document; `plus_receipts` (runtime/plus_receipts.py) Mail's
+replay receipts, IDs only once done, read for 30 days and never deleted. A release that still
+wrote Todoist left `todoist_calls`, `plus_cache` and the mail-brief tables; `DO_SCHEMA` drops them. The planning
+writes Tasks took over left their receipts and `native_task_requests`, their operation journal; nothing reads them. Budget helpers used by R:
 ```python
 def reserve_tokens(self, tokens: int, now: int) -> bool
 def settle_tokens(self, reserved: int, used: int, now: int) -> None

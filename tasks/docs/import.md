@@ -200,54 +200,8 @@ Duplicate Todoist/native identities, missing open or referenced tasks, changed m
 
 ## Convert the old planning labels once
 
-Use this phase after the original task import. It is not an ongoing sync. Task bodies, ordinary labels, dates,
-completion history and the old Todoist account remain unchanged. Keep the same three pauses active and avoid
-editing Tasks during the short conversion window.
-
-Prepare private JSON from the paused native databases, containing only these fields:
-
-| Key | Source |
-| --- | --- |
-| `tasks` | Tasks `tasks`: `id`, `label_ids` (include historical rows) |
-| `labels` | Tasks live `labels`: `id`, `title` |
-| `filters` | Tasks live `filters`: `id`, `query` |
-| `mapping` | Todofy `plus_settings.mapping`, decoded as JSON |
-| `timezone`, `week_start` | The same saved settings row; retain the source calendar |
-| `now` | Capture time as Unix seconds |
-| `mailbox_task_ids` | Optional IDs of still-pending old Mail tasks that have a matching non-imported summary |
-
-For the last field, use the existing Mail eligibility rules: active, unplanned top-level tasks in the saved mail
-project, excluding review/clarified items. Intersect them with actual `summaries.task_id` values. Do not treat
-every old summary as pending. Omit the field when no legacy Mail adoption is needed.
-
-From the repository root, with Todofy's Python environment prepared:
-
-```sh
-cd todofy
-PYTHONPATH=worker .venv/bin/python tools/prepare_native_plan.py \
-  --input "$PRIVATE_DIR/native-metadata.json" --output "$PRIVATE_DIR/native-cutover"
-cd ..
-```
-
-The tool validates exact label identities and prints counts. It writes four owner-only SQL files. Keep and
-resume these exact files if interrupted; do not capture new metadata after retiring the old memberships.
-
-After branch CI passes, release that SHA with the pauses retained. Actions applies Tasks migration `0002` and
-Todofy migrations `0009`/`0010`. Execute the files in this order, using each application's explicit D1 config:
-
-1. `state.sql` → Todofy: seed stage, area, lead and flags while preserving internal planning IDs.
-2. Backfill imported filter colors from the private source snapshot only where `color=''`; leave existing
-   nonempty colors alone. Then `retire.sql` → Tasks: remove only replaced technical memberships and soft-delete
-   their exact label/filter resources.
-3. `mailbox.sql` → Todofy: keep matched pending legacy items visible; mark already handled old summaries as
-   triaged. New taskless summaries are untouched. Existing tasks are retained.
-4. Compare prepared counts with stored native state and retired IDs. Then `activate.sql` → Todofy enables
-   native planning and creates a missing account/week settings row without overwriting existing settings.
-
-Use the same `wrangler d1 execute DB --remote --file …` file-import path above for each application's config;
-write output to private logs. State and Mail preparation refuse to run after initialization, so activation is
-last. An empty new installation needs only the initialization statement with its own timezone/week start.
-
-Drain FlowDay's paged native feed, verify queue/time references and restore the recorded switches through
-Actions. Confirm Plan is configured without a label mapping and Mail lists summaries independently. New mail
-must not create Tasks automatically. Do not convert or delete real mail merely for acceptance.
+This phase ran once, after the original task import in October 2026: Todofy's `tools/prepare_native_plan.py`
+turned the old planning labels into Todofy's planning state and retired the replaced labels and filters. Planning
+moved into Tasks on 2026-10-20 (`tasks/migrations/0006_planning.sql`, with a one-time copy of Todofy's planning
+store: [backup.md](backup.md#one-time-planning-import)), and the tool left with Todofy's planning code; its procedure
+is in the repository's history before that release.

@@ -16,8 +16,7 @@ flowchart LR
   Todo -->|private TasksApi binding| Tasks[Tasks: native task store and PWA]
   Todo -->|reports, HTTPS Basic auth| News[Newsletter on VPS]
   Tasks -->|read-only change feed binding| Flow[FlowDay]
-  Tasks -->|private Planning binding| Todo
-  Todo -->|private NativeFocusEntrypoint binding| Flow
+  Tasks -->|private Planning binding: Mail| Todo
   Home[Home] -->|Ops bindings| MH
   Home -->|Ops bindings| Todo
   Home -->|Ops binding| Tasks
@@ -122,7 +121,8 @@ timers and work records; Plan and Focus no longer use it.
 
 Tasks reads the weekly rollover as a rule rather than a job: a commitment is for its week, and once that week ends
 it reads as a weekly candidate with no write. Counts stay soft limits. Todofy retains mail receipts and the weekly
-review task; its planning store is no longer written and leaves with its code in a later release. Mail filing uses
+review task, and serves no planning; its old planning tables wait only for Tasks' one-time import to be verified,
+then a Todofy migration drops them. Mail filing uses
 the native Inbox, with an optional category's label and priority. The task UI replaces technical planning labels
 and favorites with those controls while retaining their underlying identities.
 

@@ -237,8 +237,7 @@ when collection succeeded (§3). A 401/403 on the **task list** sets `todoist_bl
 as the footer lookup does (`classify_lookup`); on the optional completed list it does not (§11). 429
 honours `Retry-After` inside the 10-minute retry. Each call counts in `_count_todoist_calls` and writes a
 `Step.GTD` Analytics Engine point (step, outcome, code, latency only). D1 stays far under the Free
-50-queries-per-invocation limit (the review body adds one read, `OLDEST_TASKS`, and one statement,
-`plus_settings`, to its first batch).
+50-queries-per-invocation limit (the review body adds one read, `OLDEST_TASKS`).
 
 ## 7. Sunday review task
 
@@ -273,9 +272,8 @@ honours `Retry-After` inside the 10-minute retry. Each call counts in `_count_to
   report (`parse_failed`, `delivery_failed`, `pending_stale`, …, with their numeric metrics), which is the
   existing data Todofy may read. A Mail Hero `needs_review` counter plus a dashboard digest item is a
   separate, additive ops-v1 change. The dashboard link comes from the stored report's `dashboard_url`;
-  without one the line is left out. Once planning is set up (`plus_settings`, read in the body's
-  first batch), the links end with `周回顾：<TASKS_PUBLIC_URL>/?review=1#/plan`, which opens Plan's weekly
-  review checklist in Tasks.
+  without one the line is left out. The links end with `周回顾：<TASKS_PUBLIC_URL>/?review=1#/plan`, which
+  opens Plan's weekly review checklist in Tasks.
 - Schedule: outside Sunday 17:00 UTC – Monday 00:00 UTC nothing runs; inside it, a disabled or paused
   review is looked at again every 10 minutes (switching it on during the window still makes that week's
   task).
