@@ -31,12 +31,14 @@ const weekdays = {
 } as const;
 const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
+/** UTC midnight of a YYYY-MM-DD calendar day in milliseconds, parsed once; NaN when it is not a real day. */
+function dayTime(value: string): number {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return NaN;
+  const time = Date.parse(`${value}T00:00:00Z`);
+  return !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === value ? time : NaN;
+}
 export function validDate(value: string): boolean {
-  return (
-    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-    !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) &&
-    new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
-  );
+  return !Number.isNaN(dayTime(value));
 }
 const formatters = new Map<string, Intl.DateTimeFormat>();
 function formatter(zone: string): Intl.DateTimeFormat {
@@ -72,13 +74,16 @@ export function localDate(now: number, zone: string): string {
   }
 }
 export function addDays(date: string, days: number): string {
-  if (!validDate(date)) throw new TaskDateError('Invalid date');
-  return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
+  const time = dayTime(date);
+  if (Number.isNaN(time)) throw new TaskDateError('Invalid date');
+  return new Date(time + days * DAY).toISOString().slice(0, 10);
 }
 /** Calendar days from `from` to `to`, negative when `to` is earlier. */
 export function daysBetween(from: string, to: string): number {
-  if (!validDate(from) || !validDate(to)) throw new TaskDateError('Invalid date');
-  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY);
+  const start = dayTime(from);
+  const end = dayTime(to);
+  if (Number.isNaN(start) || Number.isNaN(end)) throw new TaskDateError('Invalid date');
+  return Math.round((end - start) / DAY);
 }
 function calendar(date: string): Date {
   return new Date(`${date}T00:00:00Z`);
