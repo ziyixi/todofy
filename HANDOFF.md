@@ -12,6 +12,38 @@ refinement and cutover, VPS recovery, Recall, Mailsort) in
 
 ## Current work
 
+### Tasks performance: planning in Tasks (`claude/tasks-planning`)
+
+**In progress, local only; not pushed.** A branch from `origin/main` `abd0da1a`, which holds the Plan and Focus
+release. It implements the performance design in one release, by the owner's choice without flags, staged rollout
+or a shadow phase: P0 front end, P1 planning facts in Tasks with a one-time import workflow, P2 Todofy cleanup
+(Todofy stops serving planning and drops its FlowDay proxy). P3, dropping Todofy's planning tables, follows once the
+import is verified.
+
+- **P0 (2026-10-20 UTC), done.** Front end only, plus one Worker header.
+  - The task dialog and Plan/Focus load with the app instead of on demand, which waited for their chunk and React's
+    300ms Suspense reveal. Locally in Chromium (dev server, synthetic data, 5 runs each) the first dialog open went
+    from 359-374 to 56-63 ms and Plan's shell from the Inbox from 329-333 to 19-21 ms. The main chunk grew from
+    698 kB (223.3 kB gzip) to 895 kB (285.1 kB gzip) and its CSS from 29.9 to 90.1 kB; Mail (11.9 kB), the catalog
+    editor (7.2 kB) and the description renderer (155.3 kB) still load on demand. The app's styles keep their old
+    cascade order: every element's computed style on synthetic Inbox, task details, Plan and Focus pages was the
+    same in both builds.
+  - Completing a card in Plan reads Plan once (it read twice more: `useTaskActions` now keeps `planRevision` for
+    the writes Plan did not issue), and switching between Plan and Focus reads nothing (`finishTask` changed
+    identity with the route). The dialog reads a task's children only when GetTask counts some.
+    `request-counts.spec.ts` guards these counts.
+  - A tab running an older bundle asks for a reload: every authenticated Tasks answer names its `BUILD_SHA` in
+    `x-tasks-build`, the web is built with the same commit, and a mismatch (or, where a build is unnamed, an
+    unknown-route answer) shows "Tasks was updated." with Reload in place of the page and its errors. Tabs opened
+    before this release do not have it yet; they need one manual reload after it. The Tasks Worker bundle is 130.8
+    of its own 132 KiB gzip budget (the platform allows 3 MiB): measure P1's planning code against it and raise
+    `tasks/deploy/bundle-size.mjs` with P1 if needed.
+  - **Checked locally on macOS.** `ci_changes.py` selects Changes, Tasks and Contracts. Tasks passed: the Worker's
+    lint, typecheck, unit tests and 19 runtime files (82 tests, the new `build.test.ts` included), the web's lint,
+    typecheck, 69 unit tests, build and all 105 Playwright tests (new: `request-counts.spec.ts`, `outdated.spec.ts`),
+    and the tools' and deploy tests. Contracts passed, and so did Changes' test steps; its decide step needs
+    GitHub's token, so `ci_changes.py` ran directly.
+
 ### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
 
 **Ready to release.** A local branch from `f6c08aaf`, not pushed yet: the verified Tasks review fixes, Tasks' D1 in
