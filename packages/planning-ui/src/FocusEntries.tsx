@@ -1,6 +1,7 @@
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
@@ -56,6 +57,9 @@ export function recordArea(
   const parent = info?.parentId ? byId.get(info.parentId) : undefined;
   return parent ? effectiveArea(parent, plan.tasks) : "unassigned";
 }
+
+/** The margin the popover keeps from the window's edges. */
+const EDGE = 16;
 
 const clocks = new Map<string, Intl.DateTimeFormat>();
 /** "09:40", in the account's time zone. */
@@ -183,6 +187,15 @@ function Records({
   const [adding, setAdding] = useState(false);
   // An added record closes its row; focus goes back to "Add time".
   const [added, setAdded] = useState(0);
+  // Where the column's edge leaves too little room on the right (a phone), it moves left, before
+  // it is drawn, so it never leaves the window or makes the page scroll sideways.
+  const [shift, setShift] = useState(0);
+  useLayoutEffect(() => {
+    const box = popover.current?.getBoundingClientRect();
+    if (!box) return;
+    const room = document.documentElement.clientWidth - EDGE - box.right;
+    if (room < 0) setShift(Math.max(room, EDGE - box.left));
+  }, []);
   useEffect(() => {
     popover.current?.focus({ preventScroll: true });
   }, []);
@@ -194,6 +207,7 @@ function Records({
     <div
       ref={popover}
       className="plus-focus-entries"
+      style={shift ? { left: shift } : undefined}
       role="dialog"
       aria-labelledby={heading}
       tabIndex={-1}

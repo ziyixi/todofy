@@ -72,7 +72,8 @@
   left: auto;
   right: -1px;
 }
-button:is(:hover, :focus-visible)
+/* Week's and Month's "Where the time went" rows are not buttons: hover alone shows theirs. */
+:is(button:is(:hover, :focus-visible), .plus-focus-group:hover)
   .planning-full-title[data-cut]
   > .planning-full-title-bubble {
   display: -webkit-box;

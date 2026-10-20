@@ -1,39 +1,86 @@
-import { useId, useState } from "react";
-import { ArrowLeft } from "lucide-react";
-import { effectiveArea, formattedMinutes, taskIndex } from "./domain";
+import { useEffect, useId, useRef, useState } from "react";
+import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  addDays,
+  effectiveArea,
+  formattedMinutes,
+  mondayOf,
+  monthStart,
+  taskIndex,
+} from "./domain";
 import { unplannedDue, unplannedText } from "./deadlines";
 import { FocusBlock } from "./FocusBlock";
 import type { RecordWrite } from "./FocusEntries";
-import { pendingStep } from "./plan-updates";
+import { FocusMonth } from "./FocusMonth";
+import { FocusWeek } from "./FocusWeek";
+import { pendingStep, withRecord } from "./plan-updates";
+import { monthLabel, readableDate, weekLabel } from "./PlanningCalendar";
 import { LoggedTime } from "./StatusMarks";
 import { words } from "./i18n";
 import type {
   Area,
   DayPlan,
+  DeletedEntry,
+  FocusRange,
   FocusState,
   Language,
   PlanState,
   PlanningTask,
   PlusActions,
   RunOperation,
+  SavedEntry,
 } from "./model";
+
+/** Focus's three views: one day's steps, a week's time and a month's. */
+export type FocusTab = "day" | "week" | "month";
+
+/** The first and last day a view shows around `date`. */
+export function focusRange(tab: FocusTab, date: string): [string, string] {
+  if (tab === "day") return [date, date];
+  if (tab === "week") {
+    const monday = mondayOf(date);
+    return [monday, addDays(monday, 6)];
+  }
+  const first = monthStart(date);
+  return [first, addDays(monthStart(date, 1), -1)];
+}
+
+/** The page header's line: the day, week or month Focus shows. */
+export function focusLabel(
+  tab: FocusTab,
+  date: string,
+  language: Language,
+): string {
+  if (tab === "day") return readableDate(date, language);
+  if (tab === "week") return weekLabel(mondayOf(date), language);
+  return monthLabel(date, language);
+}
 
 interface Props {
   plan: PlanState;
+  /** Tasks' today: its queue and records, and the timer. */
   focus: FocusState;
   /** The queues the quiet deadline line looks in: this week's, or only today's. */
   days?: readonly DayPlan[];
   /** Opens Plan › Review with Start now focused. */
   onShowStart?: () => void;
+  /** The view shown, Day unless another is chosen. */
+  tab?: FocusTab;
+  /** The day the view is around; today unless another is chosen. */
+  date?: string;
+  /** Shows another view or date. */
+  onNavigate?: (tab: FocusTab, date: string) => void;
   language: Language;
   busy: boolean;
   /** Day cards whose queue write is not yet confirmed. */
   pending?: ReadonlySet<string>;
   /** Completed task IDs that wait for the re-read showing the result. */
   completing?: ReadonlySet<string>;
-  /** Record writes go through the App's queue. */
+  /** Record writes go through the App's queue; other days are read with `readFocus`. */
   actions: PlusActions;
   run: RunOperation;
+  /** Confirmed writes so far: each one reads the days shown again. */
+  written?: number;
   /** The header's Completed checkbox: the day's completed steps follow the open ones. */
   showCompleted?: boolean;
   /** Opens Tasks' own task dialog, where a completed step can be reopened. */
@@ -50,9 +97,250 @@ interface Props {
   ) => void;
 }
 
-export function FocusView({
+/**
+ * Focus: Day, Week and Month with their dates. Today's Day is the page's own data; any other range
+ * is read from Tasks and kept while Focus is open, and what was shown stays, dimmed, until the next
+ * range arrives.
+ */
+export function FocusView(props: Props) {
+  const {
+    focus,
+    tab = "day",
+    onNavigate = () => {},
+    language,
+    actions,
+    run,
+    written = 0,
+  } = props;
+  const text = words(language);
+  const today = focus.date;
+  const date = props.date ?? today;
+  const [start, end] = focusRange(tab, date);
+  const onToday = tab === "day" && date === today;
+  const read = useFocusRange(actions, start, end, written, onToday);
+  const current: FocusRange | undefined = onToday
+    ? { days: [focus], tasks: focus.tasks, today }
+    : read.range;
+  // What each view showed last, kept on screen while its next range loads.
+  const last = useRef<Partial<Record<FocusTab, FocusRange>>>({});
+  useEffect(() => {
+    if (current) last.current[tab] = current;
+  });
+  const shown = current ?? last.current[tab];
+  const waiting = !current && Boolean(shown);
+  // Confirm-first: a record shows its new value once Tasks saved it; until then its row waits.
+  const writeRecord: RecordWrite = (key, write) =>
+    run(
+      async () => {
+        const result = await write();
+        read.merge(result);
+        return result;
+      },
+      { pending: [key] },
+    );
+  const openDay = (day: string) => onNavigate("day", day);
+  return (
+    <>
+      <FocusToolbar
+        tab={tab}
+        date={date}
+        today={today}
+        language={language}
+        onNavigate={onNavigate}
+      />
+      {read.failed && (
+        <div className="plus-error" role="alert">
+          <span>{text.loadFailed}</span>
+          <button onClick={read.retry}>{text.refresh}</button>
+        </div>
+      )}
+      {shown ? (
+        <div
+          className={`plus-focus-range ${waiting ? "is-loading" : ""}`}
+          aria-busy={(!onToday && read.loading) || undefined}
+          inert={waiting || undefined}
+        >
+          {tab === "day" ? (
+            <FocusDay
+              {...props}
+              day={shown.days[0]!}
+              tasks={shown.tasks}
+              writeRecord={writeRecord}
+            />
+          ) : tab === "week" ? (
+            <FocusWeek
+              range={shown}
+              today={today}
+              language={language}
+              onOpenDay={openDay}
+            />
+          ) : (
+            <FocusMonth
+              range={shown}
+              month={shown.days[0]!.date.slice(0, 7)}
+              today={today}
+              language={language}
+              onOpenDay={openDay}
+            />
+          )}
+        </div>
+      ) : (
+        !read.failed && (
+          <p className="plus-muted" role="status">
+            {text.loadingDays}
+          </p>
+        )
+      )}
+    </>
+  );
+}
+
+/**
+ * Focus days of a range from Tasks, kept per range while Focus is open. Each confirmed write reads
+ * the shown range again, so a stopped session's record or a completion shows; a record write also
+ * merges into every kept range at once.
+ */
+function useFocusRange(
+  actions: PlusActions,
+  start: string,
+  end: string,
+  written: number,
+  skip: boolean,
+) {
+  const cache = useRef(
+    new Map<string, { range: FocusRange; written: number }>(),
+  );
+  const [, setReads] = useState(0);
+  const [failed, setFailed] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const key = `${start}/${end}`;
+  const saved = skip ? undefined : cache.current.get(key);
+  const fresh = saved?.written === written;
+  useEffect(() => {
+    if (skip || fresh) return;
+    let current = true;
+    actions.readFocus(start, end).then(
+      (range) => {
+        if (!current) return;
+        cache.current.set(key, { range, written });
+        setFailed("");
+        setReads((count) => count + 1);
+      },
+      () => {
+        if (current) setFailed(key);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [actions, start, end, key, written, skip, fresh, attempt]);
+  return {
+    range: saved?.range,
+    loading: !skip && !fresh && failed !== key,
+    failed: !skip && failed === key,
+    retry() {
+      setFailed("");
+      setAttempt((count) => count + 1);
+    },
+    merge(result: SavedEntry | DeletedEntry) {
+      const entry = "savedEntry" in result ? result.savedEntry : undefined;
+      const removed =
+        "deletedEntry" in result ? result.deletedEntry : undefined;
+      for (const [range, value] of cache.current)
+        cache.current.set(range, {
+          ...value,
+          range: {
+            ...value.range,
+            days: value.range.days.map((day) =>
+              withRecord(day, entry, removed),
+            ),
+          },
+        });
+      setReads((count) => count + 1);
+    },
+  };
+}
+
+/** Day, Week and Month, then the previous and next day, week or month, and Today. */
+function FocusToolbar({
+  tab,
+  date,
+  today,
+  language,
+  onNavigate,
+}: {
+  tab: FocusTab;
+  date: string;
+  today: string;
+  language: Language;
+  onNavigate: (tab: FocusTab, date: string) => void;
+}) {
+  const text = words(language);
+  const step = (direction: number) => {
+    if (tab === "day") return addDays(date, direction);
+    if (tab === "week") return addDays(date, 7 * direction);
+    return monthStart(date, direction);
+  };
+  const [previous, next] = {
+    day: [text.previousDay, text.nextDay],
+    week: [text.previousWeek, text.nextWeek],
+    month: [text.previousMonth, text.nextMonth],
+  }[tab];
+  const there =
+    tab === "day"
+      ? date === today
+      : tab === "week"
+        ? mondayOf(date) === mondayOf(today)
+        : date.slice(0, 7) === today.slice(0, 7);
+  return (
+    <div className="plus-focus-toolbar">
+      <div
+        className="planning-view-tabs"
+        role="tablist"
+        aria-label={text.focusView}
+      >
+        {(["day", "week", "month"] as const).map((value) => (
+          <button
+            key={value}
+            role="tab"
+            aria-selected={tab === value}
+            onClick={() => onNavigate(value, date)}
+          >
+            {text[value]}
+          </button>
+        ))}
+      </div>
+      <nav
+        className="plus-focus-nav"
+        aria-label={language === "zh" ? "选择日期" : "Choose dates"}
+      >
+        <button aria-label={previous} onClick={() => onNavigate(tab, step(-1))}>
+          <ChevronLeft size={18} />
+        </button>
+        <button aria-label={next} onClick={() => onNavigate(tab, step(1))}>
+          <ChevronRight size={18} />
+        </button>
+        <button
+          className="plus-focus-today"
+          disabled={there}
+          onClick={() => onNavigate(tab, today)}
+        >
+          {text.today}
+        </button>
+      </nav>
+    </div>
+  );
+}
+
+/**
+ * One day's steps. Today they run: Start, the timer and completion. Any other day is read-only,
+ * though records of today and past days can still be changed.
+ */
+function FocusDay({
   plan,
   focus,
+  day,
+  tasks,
   days = [focus],
   onShowStart,
   language,
@@ -60,34 +348,35 @@ export function FocusView({
   pending,
   completing,
   actions,
-  run,
+  writeRecord,
   showCompleted = false,
   onOpenTask,
   editTask,
   complete,
   onOpenPlan,
   onTimer,
-}: Props) {
+}: Props & {
+  day: DayPlan;
+  tasks: FocusRange["tasks"];
+  writeRecord: RecordWrite;
+}) {
   const text = words(language);
   const doneHeading = useId();
   // Counting up is the default: Start, work, then complete the step, which saves its time.
   const [targetSeconds, setTargetSeconds] = useState(0);
+  const isToday = day.date === focus.date;
+  const future = day.date > focus.date;
   const byId = taskIndex(plan.tasks);
-  const queue = focus.taskIds.filter(
-    (id) => !focus.completedTaskIds.includes(id),
-  );
+  const queue = day.taskIds.filter((id) => !day.completedTaskIds.includes(id));
   const minutesOf = (id: string) =>
     focus.estimates[id] ??
     byId.get(id)?.estimatedMinutes ??
-    focus.tasks[id]?.estimatedMinutes ??
+    tasks[id]?.estimatedMinutes ??
     0;
   const totalMinutes = queue.reduce((sum, id) => sum + minutesOf(id), 0);
   // The day's records, and the session when it counts on this day.
-  const logged = focus.entries.reduce((sum, entry) => sum + entry.seconds, 0);
-  const session = focus.timer?.day === focus.date ? focus : undefined;
-  // Confirm-first: a record shows its new value once Tasks saved it; until then its row waits.
-  const writeRecord: RecordWrite = (key, write) =>
-    run(write, { pending: [key] });
+  const logged = day.entries.reduce((sum, entry) => sum + entry.seconds, 0);
+  const session = focus.timer?.day === day.date ? focus : undefined;
   const unknown = queue.filter((id) => !minutesOf(id)).length;
   let stepLabel = language === "zh" ? "个步骤" : "steps";
   if (language === "en" && queue.length === 1) stepLabel = "step";
@@ -99,58 +388,111 @@ export function FocusView({
       {language === "zh" ? "调整计划" : "Adjust plan"}
     </button>
   );
+  const block = (
+    id: string,
+    index: number,
+    mode: "today" | "readonly" | "done",
+  ) => (
+    <FocusBlock
+      key={id}
+      mode={mode}
+      taskId={id}
+      task={byId.get(id)}
+      known={tasks[id]}
+      plan={plan}
+      focus={focus}
+      date={day.date}
+      // A future day has nothing to log yet.
+      records={
+        future ? undefined : day.entries.filter((entry) => entry.taskId === id)
+      }
+      language={language}
+      busy={busy}
+      pending={pending}
+      actions={actions}
+      writeRecord={writeRecord}
+      settling={
+        mode === "today" &&
+        Boolean(completing?.has(id) || pending?.has(pendingStep(day.date, id)))
+      }
+      onTimer={(action, taskId) => {
+        const task = byId.get(taskId);
+        if (action !== "start") onTimer(action, taskId);
+        else if (task)
+          onTimer(
+            action,
+            taskId,
+            targetSeconds || undefined,
+            effectiveArea(task, plan.tasks),
+          );
+      }}
+      editTask={editTask}
+      complete={complete}
+      onOpenTask={onOpenTask}
+      index={index}
+      minutes={minutesOf(id)}
+    />
+  );
   return (
     <>
       <div className="plus-focus-summary">
-        <strong>{formattedMinutes(totalMinutes)}</strong>
-        <span>
-          {queue.length} {stepLabel}
-        </span>
-        {unknown > 0 && (
+        <div className="plus-focus-totals">
+          <strong>{formattedMinutes(totalMinutes)}</strong>
           <span>
-            {unknown} {text.unknown.toLowerCase()}
+            {queue.length} {stepLabel}
           </span>
-        )}
-        {(logged > 0 || session) && (
-          <span>
-            ·{" "}
-            <LoggedTime
-              seconds={logged}
-              session={session}
-              label={text.logged}
-            />
-          </span>
-        )}
+          {unknown > 0 && (
+            <span>
+              {unknown} {text.unknown.toLowerCase()}
+            </span>
+          )}
+          {(logged > 0 || session) && (
+            <span>
+              ·{" "}
+              <LoggedTime
+                seconds={logged}
+                session={session}
+                label={text.logged}
+              />
+            </span>
+          )}
+        </div>
         {queue.length > 0 && (
-          <label className="plus-focus-duration">
-            {language === "zh" ? "计时" : "Timer"}
-            <select
-              aria-label={language === "zh" ? "计时方式" : "Timer duration"}
-              value={targetSeconds}
-              disabled={busy || Boolean(focus.timer)}
-              onChange={(event) => setTargetSeconds(Number(event.target.value))}
-            >
-              <option value={0}>
-                {language === "zh" ? "正计时" : "Count up"}
-              </option>
-              <option value={25 * 60}>
-                {language === "zh" ? "25 分钟" : "25 min"}
-              </option>
-              <option value={50 * 60}>
-                {language === "zh" ? "50 分钟" : "50 min"}
-              </option>
-            </select>
-          </label>
+          <div className="plus-focus-controls">
+            {isToday && (
+              <label className="plus-focus-duration">
+                {language === "zh" ? "计时" : "Timer"}
+                <select
+                  aria-label={language === "zh" ? "计时方式" : "Timer duration"}
+                  value={targetSeconds}
+                  disabled={busy || Boolean(focus.timer)}
+                  onChange={(event) =>
+                    setTargetSeconds(Number(event.target.value))
+                  }
+                >
+                  <option value={0}>
+                    {language === "zh" ? "正计时" : "Count up"}
+                  </option>
+                  <option value={25 * 60}>
+                    {language === "zh" ? "25 分钟" : "25 min"}
+                  </option>
+                  <option value={50 * 60}>
+                    {language === "zh" ? "50 分钟" : "50 min"}
+                  </option>
+                </select>
+              </label>
+            )}
+            {openPlan}
+          </div>
         )}
-        {queue.length > 0 && openPlan}
       </div>
-      {focus.finishedPomodoro && (
+      {isToday && focus.finishedPomodoro && (
         <p className="plus-muted" role="status">
           {formattedMinutes(focus.finishedPomodoro.targetSeconds / 60)}{" "}
           {language === "zh" ? "专注已完成" : "focus completed"}
         </p>
       )}
-      {due.past + due.window > 0 && (
+      {isToday && due.past + due.window > 0 && (
         <button
           className="planning-runway plus-focus-runway"
           title={text.showInPlan}
@@ -162,84 +504,38 @@ export function FocusView({
       {queue.length > 0 ? (
         <ol
           className="plus-focus-stack"
-          aria-label={language === "zh" ? "今天的步骤" : "Today's steps"}
+          aria-label={
+            isToday
+              ? language === "zh"
+                ? "今天的步骤"
+                : "Today's steps"
+              : `${language === "zh" ? "步骤" : "Steps"}: ${readableDate(day.date, language)}`
+          }
         >
-          {queue.map((id, index) => (
-            <FocusBlock
-              key={id}
-              taskId={id}
-              task={byId.get(id)}
-              plan={plan}
-              focus={focus}
-              date={focus.date}
-              records={focus.entries.filter((entry) => entry.taskId === id)}
-              language={language}
-              busy={busy}
-              pending={pending}
-              actions={actions}
-              writeRecord={writeRecord}
-              settling={Boolean(
-                completing?.has(id) ||
-                pending?.has(pendingStep(focus.date, id)),
-              )}
-              onTimer={(action, taskId) => {
-                const task = byId.get(taskId);
-                if (action !== "start") onTimer(action, taskId);
-                else if (task)
-                  onTimer(
-                    action,
-                    taskId,
-                    targetSeconds || undefined,
-                    effectiveArea(task, plan.tasks),
-                  );
-              }}
-              editTask={editTask}
-              complete={complete}
-              index={index}
-              minutes={minutesOf(id)}
-            />
-          ))}
+          {queue.map((id, index) =>
+            block(id, index, isToday ? "today" : "readonly"),
+          )}
         </ol>
       ) : (
         <section className="plus-focus-empty">
           <p>
-            {language === "zh"
-              ? "今天还没有安排步骤。"
-              : "No steps planned for today."}
+            {isToday
+              ? language === "zh"
+                ? "今天还没有安排步骤。"
+                : "No steps planned for today."
+              : text.noStepsDay}
           </p>
           {openPlan}
         </section>
       )}
-      {showCompleted && focus.completedTaskIds.length > 0 && (
+      {showCompleted && day.completedTaskIds.length > 0 && (
         <section className="plus-focus-done" aria-labelledby={doneHeading}>
           <h2 id={doneHeading} className="plus-focus-divider">
             {text.completed}
           </h2>
           {/* Never inside the queue: completed steps are not reordered or started. */}
           <ul className="plus-focus-stack">
-            {focus.completedTaskIds.map((id, index) => (
-              <FocusBlock
-                key={id}
-                mode="done"
-                taskId={id}
-                task={byId.get(id)}
-                plan={plan}
-                focus={focus}
-                date={focus.date}
-                records={focus.entries.filter((entry) => entry.taskId === id)}
-                language={language}
-                busy={busy}
-                pending={pending}
-                actions={actions}
-                writeRecord={writeRecord}
-                onTimer={onTimer}
-                editTask={editTask}
-                complete={complete}
-                onOpenTask={onOpenTask}
-                index={index}
-                minutes={minutesOf(id)}
-              />
-            ))}
+            {day.completedTaskIds.map((id, index) => block(id, index, "done"))}
           </ul>
         </section>
       )}

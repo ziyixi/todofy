@@ -165,3 +165,15 @@ export function addDays(date: string, days: number): string {
   value.setUTCDate(value.getUTCDate() + days);
   return value.toISOString().slice(0, 10);
 }
+
+/** The Monday of a date's week. */
+export function mondayOf(date: string): string {
+  return addDays(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7));
+}
+
+/** The first day of the month `months` after a date's month. */
+export function monthStart(date: string, months = 0): string {
+  const value = new Date(`${date.slice(0, 7)}-01T12:00:00Z`);
+  value.setUTCMonth(value.getUTCMonth() + months);
+  return value.toISOString().slice(0, 10);
+}

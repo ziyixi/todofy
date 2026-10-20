@@ -6,6 +6,7 @@ import type {
   DayPlan,
   FocusEntry,
   FocusState,
+  FocusTaskInfo,
   PlanMetadata,
   PlanState,
   PlanUpdate,
@@ -538,7 +539,32 @@ export function createPrototype(
         }
         range.push(day);
       }
-      return structuredClone({ days: range, tasks: {}, today });
+      // As Tasks reads them: every task the queues and records name, with its parent's title.
+      const named = new Set(
+        range.flatMap((day) => [
+          ...day.taskIds,
+          ...day.completedTaskIds,
+          ...day.entries.map((entry) => entry.taskId),
+        ]),
+      );
+      const tasks: Record<string, FocusTaskInfo> = {};
+      for (const id of named) {
+        const item = plan.tasks.find((task) => task.id === id);
+        const parent = plan.tasks.find((task) => task.id === item?.parentId);
+        const info = item
+          ? {
+              title: item.title,
+              parentId: item.parentId,
+              parentTitle: parent?.title ?? "",
+              ...(item.estimatedMinutes
+                ? { estimatedMinutes: item.estimatedMinutes }
+                : {}),
+              completed: false,
+            }
+          : focus.tasks[id];
+        if (info) tasks[id] = info;
+      }
+      return structuredClone({ days: range, tasks, today });
     },
     async addEntry(entry) {
       const saved: FocusEntry = {

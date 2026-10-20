@@ -11,6 +11,7 @@ import { words } from "./i18n";
 import type {
   FocusEntry,
   FocusState,
+  FocusTaskInfo,
   Language,
   PlanState,
   PlanningTask,
@@ -20,10 +21,15 @@ import { areaColor, outcomeForTask } from "./planning-outcomes";
 import { PendingMark } from "./StatusMarks";
 
 interface Props {
-  /** An open step of the queue, or one completed from it: no timer, its title opens Tasks. */
-  mode?: "open" | "done";
+  /**
+   * Today's open step: complete, Start and the timer. A read-only one, on another day: no
+   * controls. A completed one: no timer, and its title opens Tasks' own dialog.
+   */
+  mode?: "today" | "readonly" | "done";
   taskId: string;
   task?: PlanningTask;
+  /** What Tasks' Focus read says of the task, which Plan may not list. */
+  known?: FocusTaskInfo;
   plan: PlanState;
   focus: FocusState;
   /** The day the card is shown on. */
@@ -50,9 +56,10 @@ interface Props {
 }
 
 export function FocusBlock({
-  mode = "open",
+  mode = "today",
   taskId,
   task,
+  known,
   plan,
   focus,
   date,
@@ -72,17 +79,17 @@ export function FocusBlock({
 }: Props) {
   const text = words(language);
   const done = mode === "done";
+  const running = mode === "today";
   // A task Plan does not list has its title and parent from Tasks' Focus read.
-  const known = focus.tasks[taskId];
   const title = displayedTitle(task?.title ?? known?.title ?? text.missingTask);
   // This card's session, when it counts on the card's day.
   const session =
     focus.timer?.taskId === taskId && focus.timer.day === date
       ? focus
       : undefined;
-  const timer = done ? undefined : session?.timer;
+  const timer = running ? session?.timer : undefined;
   let status = "";
-  if (index === 0 && !done) status = language === "zh" ? "下一步" : "Up next";
+  if (index === 0 && running) status = language === "zh" ? "下一步" : "Up next";
   let timerAction: "start" | "pause" | "resume" = "start";
   if (timer) {
     status = text.paused;
@@ -122,7 +129,7 @@ export function FocusBlock({
           >
             <Check size={13} />
           </span>
-        ) : task ? (
+        ) : task && running ? (
           <button
             className="plus-checkbox"
             // Todoist's priority ring: the API's priority 4 is P1.
@@ -138,7 +145,7 @@ export function FocusBlock({
             )}
           </button>
         ) : (
-          // A task Plan does not list keeps its title in line with the rows above.
+          // A task Plan does not list, or another day's, keeps its title in line.
           <span className="plus-checkbox-slot" aria-hidden="true" />
         )}
         <div className="plus-focus-block-content">
@@ -209,7 +216,7 @@ export function FocusBlock({
             )}
           </div>
         </div>
-        {task && !done && (
+        {task && running && (
           <div className="plus-focus-timer-controls">
             <button
               className="plus-focus-timer-action is-primary"

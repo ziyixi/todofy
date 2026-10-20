@@ -18,7 +18,7 @@ import {
 import { displayedTitle, elapsed, taskIndex } from "./domain";
 import { droppedText, releasedText, unsettled } from "./dependencies";
 import { words } from "./i18n";
-import { readableDate, weekLabel } from "./PlanningCalendar";
+import { weekLabel } from "./PlanningCalendar";
 import {
   applyConfirmed,
   pendingTask,
@@ -28,7 +28,7 @@ import {
 } from "./plan-updates";
 import { Elapsed } from "./StatusMarks";
 import { PlanView } from "./PlanView";
-import { FocusView } from "./FocusView";
+import { FocusView, focusLabel, type FocusTab } from "./FocusView";
 import { StepEditor } from "./StepEditor";
 import { TaskEditor } from "./TaskEditor";
 import { WeeklyGoals } from "./WeeklyGoals";
@@ -134,13 +134,21 @@ export function App({
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
   // Focus's quiet line opens Plan at Start now.
   const [showStart, setShowStart] = useState(false);
-  // Focus's Completed checkbox, like the task list's: off on every visit and never remembered.
+  // Focus opens on today's Day, with completed steps hidden: Focus is for doing, so neither the
+  // view, its date nor the Completed checkbox is remembered. The header reads them.
+  const [focusTab, setFocusTab] = useState<FocusTab>("day");
+  // "" follows Tasks' today, past midnight too.
+  const [focusDate, setFocusDate] = useState("");
   const [showCompleted, setShowCompleted] = useState(false);
   const [visited, setVisited] = useState(view);
   if (visited !== view) {
     setVisited(view);
+    setFocusTab("day");
+    setFocusDate("");
     setShowCompleted(false);
   }
+  // Confirmed writes so far; Focus reads the other days it shows again after each.
+  const [written, setWritten] = useState(0);
   // Each task's completion keeps its first request ID and Focus day until it is confirmed, so a
   // retry, from any view, resends both and a lost answer replays instead of completing again.
   const completionIds = useRef(
@@ -281,6 +289,7 @@ export function App({
           if (epoch !== writes.current.epoch) return false;
           const result = await operation();
           setConfirmed((current) => current && applyConfirmed(current, result));
+          setWritten((count) => count + 1);
           reread = rereadsAfter(result);
           return true;
         } catch (failure) {
@@ -608,13 +617,13 @@ export function App({
             {data
               ? view === "plan"
                 ? weekLabel(data.days[0]?.date ?? data.plan.week, language)
-                : readableDate(data.focus.date, language)
+                : focusLabel(focusTab, focusDate || data.focus.date, language)
               : ""}
             {data && <span> · {data.plan.timezone}</span>}
           </div>
         </div>
         <div className="plus-header-actions">
-          {view === "focus" && (
+          {view === "focus" && focusTab === "day" && (
             <label className="plus-completed-toggle">
               <input
                 type="checkbox"
@@ -698,8 +707,15 @@ export function App({
               busy={busy || !data.plan.configured}
               pending={pendingCards}
               completing={completing}
+              tab={focusTab}
+              date={focusDate || data.focus.date}
+              onNavigate={(tab, date) => {
+                setFocusTab(tab);
+                setFocusDate(date === data.focus.date ? "" : date);
+              }}
               actions={planActions}
               run={run}
+              written={written}
               showCompleted={showCompleted}
               onOpenTask={onOpenTask}
               editTask={openTask}
