@@ -188,8 +188,10 @@ that release `tools/prepare-planning-import.ts` (logic in `tools/planning-import
 - The lane orders are copied while Tasks' board is untouched.
 
 Every statement repeats its guard, so a fact set in Tasks since the release is never overwritten and running the
-import again changes nothing. A state, dependency or lane entry that names a task Tasks does not have live (a deleted
-task, or a Todoist-era identity) is counted as an orphan and left out.
+import again changes nothing. Facts are copied once: the SQL ends by recording when it ran (`plan_board.created_at`,
+0 until then), so a fact the owner clears in Tasks afterwards stays cleared. A state, dependency or lane entry that
+names a task Tasks does not have live (a deleted task, or a Todoist-era identity) is counted as an orphan and left
+out.
 
 The owner runs [Tasks planning import](../../.github/workflows/tasks-planning-import.yml) from GitHub Actions on
 `main`. It runs in the `production` environment with the releases' Cloudflare token and in the Tasks release's

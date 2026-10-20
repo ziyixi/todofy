@@ -8,13 +8,15 @@
  * - each task's planning state onto its row, and only onto a row whose planning columns still hold their defaults, so
  *   a fact set in Tasks since the release is never overwritten. It writes `revision+1` and, as `updated_at`, the later
  *   of the row's and the state's, which is what Todofy's overlay reported. A commitment keeps the week it was recorded
- *   for (plus_weeks), else the week in effect (plus_settings), so it reads as weekly once that week has ended;
+ *   for (plus_weeks), else the week in effect (plus_settings), so it reads as weekly once that week has ended. Facts
+ *   are copied once: the SQL ends by recording when it ran (plan_board.created_at, 0 until then), after which a fact
+ *   the owner cleared in Tasks is never brought back;
  * - each dependency of an open task, with its baseline and creation time, unless Tasks has that pair, even a removed
  *   one. As in Todofy, a completed task waits for nothing;
  * - each week's Bets that Tasks lacks. An empty Bet is a cleared one and stays out;
  * - the Review lanes the owner arranged, while Tasks' board is untouched (revision 1).
- * Every statement repeats its guard, so applying the SQL again changes nothing and the next dry run counts nothing
- * pending.
+ * Every statement repeats its guard, so applying the SQL again changes nothing, even after the owner has cleared facts
+ * in Tasks, and the next dry run counts nothing pending.
  *
  * The inputs are `wrangler d1 execute --json` answers to the read-only EXPORTS. Only checked IDs, days and fixed words
  * are quoted into the SQL; a Bet's text goes in hex-encoded. The counts name no task, title or Bet.
@@ -55,7 +57,7 @@ export const EXPORTS = [
   },
   { app: 'tasks', name: 'tasks.task_dependencies', sql: 'SELECT task_id, prerequisite_id FROM task_dependencies' },
   { app: 'tasks', name: 'tasks.weekly_bets', sql: 'SELECT week_start, area FROM weekly_bets' },
-  { app: 'tasks', name: 'tasks.plan_board', sql: "SELECT revision FROM plan_board WHERE id='board'" },
+  { app: 'tasks', name: 'tasks.plan_board', sql: "SELECT revision, created_at FROM plan_board WHERE id='board'" },
 ] as const;
 
 // The vocabularies of migrations/0006_planning.sql and worker/src/planning.ts.
@@ -104,7 +106,7 @@ export interface PlanningImport {
     states: {
       all: number;
       pending: number;
-      /** The Tasks row already has planning facts: imported before, or set in Tasks since the release. */
+      /** Tasks owns the row's facts: set there since the release, or the import has run. */
       present: number;
       /** Nothing to import: no stage, area, lead days or flag (Todofy's `blocked` alone counts as none). */
       empty: number;
@@ -218,6 +220,8 @@ export function preparePlanningImport(answers: Record<string, unknown>): Plannin
   const boards = rows(answers, 'tasks.plan_board');
   check(boards.length === 1, 'tasks.plan_board');
   const boardRevision = count(boards[0]?.revision, 'tasks.plan_board');
+  // When the import ran, 0 before: from then on Tasks owns every task's facts.
+  const imported = count(boards[0]?.created_at, 'tasks.plan_board') > 0;
 
   const plan: PlanningImport = {
     facts: [],
@@ -256,7 +260,7 @@ export function preparePlanningImport(answers: Record<string, unknown>): Plannin
     const lead = task && !task.hasDeadline ? 0 : leadDays;
     if (stage === 'none' && area === 'unassigned' && lead === 0 && !flags.length) counts.states.empty++;
     else if (id === undefined || !task) counts.states.orphan++;
-    else if (!task.untouched) counts.states.present++;
+    else if (imported || !task.untouched) counts.states.present++;
     else {
       let committedWeek = '';
       if (stage === 'committed') {
@@ -363,7 +367,7 @@ function quotable({ facts, dependencies, bets, board }: PlanningImport): boolean
   );
 }
 
-/** One guarded statement per change, for `wrangler d1 execute --file`. */
+/** One guarded statement per change, for `wrangler d1 execute --file`, then the record that the import ran. */
 export function planningImportSql(plan: PlanningImport): string {
   if (!quotable(plan)) throw new PlanningImportError('PLAN_INVALID');
   const statements = [
@@ -372,7 +376,8 @@ export function planningImportSql(plan: PlanningImport): string {
         `UPDATE tasks SET stage='${row.stage}',committed_week='${row.committedWeek}',area='${row.area}',` +
         `lead_days=${String(row.leadDays)},planning_flags='${JSON.stringify(row.flags)}',revision=revision+1,` +
         `updated_at=MAX(updated_at,${String(row.updatedAt)}) WHERE id='${row.id}' AND deleted_at IS NULL ` +
-        "AND stage='none' AND area='unassigned' AND lead_days=0 AND planning_flags='[]';",
+        "AND stage='none' AND area='unassigned' AND lead_days=0 AND planning_flags='[]' " +
+        "AND (SELECT created_at FROM plan_board WHERE id='board')=0;",
     ),
     ...plan.dependencies.map(
       (row) =>
@@ -394,6 +399,8 @@ export function planningImportSql(plan: PlanningImport): string {
             `updated_at=${String(plan.board.updatedAt)} WHERE id='board' AND revision=1;`,
         ]
       : []),
+    // Last, so the facts above still see 0: a later run copies none.
+    "UPDATE plan_board SET created_at=unixepoch()*1000 WHERE id='board' AND created_at=0;",
   ];
-  return statements.length ? statements.join('\n') + '\n' : 'SELECT 0 AS pending_count;\n';
+  return statements.join('\n') + '\n';
 }

@@ -236,7 +236,11 @@ test('imports facts, open dependencies, Bets and lanes once, and counts nothing 
     assert.deepEqual(everything(tasks), after);
     const again = preparePlanningImport(exported(paths));
     assert.deepEqual(again.counts, IMPORTED_COUNTS);
-    assert.equal(planningImportSql(again), 'SELECT 0 AS pending_count;\n');
+    // Only the record that the import ran, which is there already.
+    assert.equal(
+      planningImportSql(again),
+      "UPDATE plan_board SET created_at=unixepoch()*1000 WHERE id='board' AND created_at=0;\n",
+    );
   } finally {
     tasks.close();
     rmSync(dir, { recursive: true, force: true });
@@ -278,6 +282,33 @@ test('never overwrites what Tasks changed between the export and the import', ()
     assert.equal(again.counts.pending, 0);
     assert.deepEqual(again.counts.states, { all: 10, pending: 0, present: 4, empty: 2, orphan: 4 });
     assert.deepEqual(again.counts.dependencies, { all: 6, pending: 0, present: 2, orphan: 4 });
+  } finally {
+    tasks.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('copies facts once: one the owner clears in Tasks afterwards stays cleared when the import runs again', () => {
+  const { dir, paths, tasks } = databases();
+  try {
+    const sql = planningImportSql(preparePlanningImport(exported(paths)));
+    tasks.exec(sql);
+    const ran = tasks.prepare("SELECT created_at FROM plan_board WHERE id='board'").get().created_at;
+    assert.ok(ran > 0);
+    // The owner unchecks Quick and Standalone and clears the rest: every column holds its default again.
+    tasks.exec(`
+      UPDATE tasks SET stage='none',committed_week='',area='unassigned',lead_days=0,planning_flags='[]',
+        revision=revision+1 WHERE id='due';
+    `);
+    const cleared = everything(tasks);
+    const again = preparePlanningImport(exported(paths));
+    assert.deepEqual(again.counts, IMPORTED_COUNTS);
+    assert.deepEqual(again.facts, []);
+    // Even the first run's SQL, applied again, brings nothing back.
+    tasks.exec(sql);
+    tasks.exec(planningImportSql(again));
+    assert.deepEqual(everything(tasks), cleared);
+    assert.equal(tasks.prepare("SELECT created_at FROM plan_board WHERE id='board'").get().created_at, ran);
   } finally {
     tasks.close();
     rmSync(dir, { recursive: true, force: true });

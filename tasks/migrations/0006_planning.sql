@@ -23,6 +23,7 @@ CREATE TABLE weekly_bets (
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(week_start, area)
 );
 -- The Review lanes the owner arranged: one document, as Todofy's 'board' setting was, because a task is in one lane.
+-- created_at stays 0 until the one-time planning import (tools/planning-import.ts) records when it ran.
 CREATE TABLE plan_board (
   id TEXT PRIMARY KEY CHECK(id='board'), lanes TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(lanes)),
   revision INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
