@@ -127,9 +127,12 @@ export const childCounts = `(SELECT p.title FROM tasks p WHERE p.id=t.parent_id)
   t.completed_base_count+(SELECT count(*) FROM completions h WHERE h.task_id=t.id AND h.imported=0) AS completed_count,
   (SELECT count(*) FROM tasks c WHERE c.parent_id=t.id AND c.deleted_at IS NULL) AS child_count,
   (SELECT count(*) FROM tasks c WHERE c.parent_id=t.id AND c.deleted_at IS NULL AND c.completed=1) AS completed_child_count`;
-/** Whether a prerequisite is done: completed, or recurring and completed again since the dependency was added. */
-export const prerequisiteDone = `(p.completed=1 OR (p.recurrence<>'' AND p.completed_base_count+(SELECT count(*)
-  FROM completions h WHERE h.task_id=p.id AND h.imported=0)>d.baseline_count))`;
+/**
+ * Whether a prerequisite is done: completed, in an archived project (it left the list, as Plan sees it), or recurring
+ * and completed again since the dependency was added. Unarchiving its project makes it hold again.
+ */
+export const prerequisiteDone = `(p.completed=1 OR p.project_archived=1 OR (p.recurrence<>'' AND
+  p.completed_base_count+(SELECT count(*) FROM completions h WHERE h.task_id=p.id AND h.imported=0)>d.baseline_count))`;
 /** A row's dependencies on live tasks, oldest first: one primary-key seek for a task that has none. */
 export const dependencyList = `(SELECT json_group_array(json_object('prerequisite_id',id,'title',title,'done',done))
   FROM (SELECT p.id,p.title,${prerequisiteDone} AS done FROM task_dependencies d JOIN tasks p ON p.id=d.prerequisite_id

@@ -115,8 +115,8 @@ message TaskDependency {
   string prerequisite_id = 1 [(google.api.field_behavior) = REQUIRED];
   // Its current title.
   string title = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // It is completed, or it repeats and was completed again since the dependency was added. A done dependency
-  // holds nothing back.
+  // It is completed, its project is archived, or it repeats and was completed again since the dependency was
+  // added. A done dependency holds nothing back; unarchiving the project makes it hold again.
   bool done = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 

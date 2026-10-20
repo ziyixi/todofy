@@ -146,7 +146,10 @@ export function waitsThrough(holding: readonly Edge[], from: string, to: string)
   return false;
 }
 export interface StoredEdge extends Edge {
-  /** It still holds back its task: the prerequisite is open and, when it repeats, not completed since. */
+  /**
+   * It still holds back its task: the prerequisite is open, in an active project and, when it repeats, not completed
+   * since.
+   */
   holding: boolean;
 }
 /**

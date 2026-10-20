@@ -99,7 +99,10 @@ Dependencies (`task_dependencies`) name prerequisite task IDs and derive Blocked
 there is no independent Blocked checkbox. They are written as the task's whole set with
 `update_mask=dependencies`: at most 5 per task and 300 in the account, no cycle, an open prerequisite, all
 checked inside the write's batch. A removed edge is soft-deleted and revives when added again. Deleting a task
-removes the edges at both ends; completing one removes the edges of what it waited for.
+removes the edges at both ends; completing one removes the edges of what it waited for. A prerequisite is done
+once completed, in an archived project (until the project is back) or, when it repeats, completed again since the
+edge was added. A set that keeps an edge keeps it as it is, done or not, so Plan waits for a recurring
+prerequisite's next completion by removing it and adding it again.
 
 Plan's weekly goals (`weekly_bets`, one line per week and area, this and next week writable) and the owner's
 order of each Review lane (`plan_board`, one document) are read by GetPlan with next week's commitments, in

@@ -394,6 +394,61 @@ test('a recurring prerequisite is done after its next completion, and a reopened
   expect((await read(waiter)).dependencies?.map((value) => value.done ?? false)).toEqual([true, false]);
 });
 
+test('a set that keeps a done dependency keeps it done; removed and added again, it waits again', async () => {
+  const waiter = await make({ title: 'Synthetic after the next report' });
+  const weekly = await make({ title: 'Synthetic recurring report', due_date: '2099-01-05', recurrence: 'every week' });
+  await waitsFor(waiter, weekly.id);
+  const completed = await harness.mutate('POST', `/api/tasks/v1/${weekly.name}:complete`, {
+    etag: weekly.etag,
+    request_id: randomUUID(),
+  });
+  expect(completed.status, await completed.clone().text()).toBe(200);
+  const done = { prerequisite_id: weekly.id, title: 'Synthetic recurring report', done: true };
+  const kept = await waitsFor(await read(waiter), weekly.id);
+  expect(kept.dependencies).toEqual([done]);
+  // Plan's restart: the set without it, then with it, which takes the count now as the new baseline.
+  const restarted = await waitsFor(await waitsFor(kept), weekly.id);
+  expect(restarted.dependencies).toEqual([{ prerequisite_id: weekly.id, title: 'Synthetic recurring report' }]);
+  expect(await edges(waiter.id)).toEqual([{ prerequisite_id: weekly.id, baseline_count: 1, deleted: 0 }]);
+});
+
+test('a prerequisite in an archived project is done and gives way, and holds again once unarchived', async () => {
+  const created = await harness.mutate('POST', `/api/tasks/v1/projects?request_id=${randomUUID()}`, {
+    title: 'Synthetic shelved project',
+  });
+  expect(created.status, await created.clone().text()).toBe(200);
+  const project = await created.json<{ id: string; name: string; etag: string }>();
+  const archive = async (current: { name: string; etag: string }, archived: boolean) => {
+    const response = await harness.mutate(
+      'PATCH',
+      `/api/tasks/v1/${current.name}?request_id=${randomUUID()}&update_mask=archived&etag=${current.etag}`,
+      { archived, etag: current.etag },
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+    return response.json<{ name: string; etag: string }>();
+  };
+  const shelved = await make({ title: 'Synthetic shelved prerequisite', project_id: project.id });
+  const open = await Promise.all(
+    Array.from({ length: 5 }, (_, index) => make({ title: `Synthetic open prerequisite ${String(index)}` })),
+  );
+  const ids = open.map((task) => task.id);
+  const full = await waitsFor(await make({ title: 'Synthetic full waiter' }), shelved.id, ...ids.slice(0, 4));
+  const other = await waitsFor(await make({ title: 'Synthetic other waiter' }), shelved.id);
+  const archived = await archive(project, true);
+  expect((await read(full)).dependencies?.[0]).toEqual({
+    prerequisite_id: shelved.id,
+    title: 'Synthetic shelved prerequisite',
+    done: true,
+  });
+  // As Plan offers it: the shelved one no longer fills the five, so it gives way to a new one.
+  const replaced = await waitsFor(await read(full), shelved.id, ...ids);
+  expect(replaced.dependencies?.map((value) => value.prerequisite_id)).toEqual(ids);
+  await archive(archived, false);
+  expect((await read(other)).dependencies).toEqual([
+    { prerequisite_id: shelved.id, title: 'Synthetic shelved prerequisite' },
+  ]);
+});
+
 test('completing a waiter and deleting a prerequisite take their dependencies away', async () => {
   const parent = await make({ title: 'Synthetic parent waiter' });
   const child = await make({ title: 'Synthetic child waiter', parent_id: parent.id });
