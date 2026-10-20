@@ -87,8 +87,8 @@ The lead's production steps right after the release, in this order:
 
 **In progress, local only.** A branch from `origin/main` `b7b52e75` for the owner's ten Plan and Focus changes of
 2026-10-19, which ship in one release. Slices, in order: A (card layout and area colours), B (the Step panel and
-double-click), C (whole-row drag in Plan) and D1 (Tasks' Focus backend) are done; D2 (planning-ui and the Tasks host
-switch to it) and D3 (Focus reorder, Completed and the Day/Week/Month views) remain. FlowDay keeps running untouched,
+double-click), C (whole-row drag in Plan), D1 (Tasks' Focus backend) and D2 (planning-ui and the Tasks host switch
+to it) are done; D3 (Focus reorder, Completed and the Day/Week/Month views) remains. FlowDay keeps running untouched,
 nothing new uses it, and its queue and time data are not migrated (owner decision).
 
 - **Slice A (2026-10-20 UTC).** Plan and Focus cards are coloured by area (Work slate, Personal ochre, Unassigned
@@ -130,6 +130,13 @@ nothing new uses it, and its queue and time data are not migrated (owner decisio
   (another session holds 4173). Platform's contract step passed; its manifest compiler, AppArmor, image and k3s
   steps need Linux. Changes' test steps and the 453 `.github/scripts` tests passed; its decide step again could not
   run locally.
+  For slice D2 `ci_changes.py` selects every check, because `.github/scripts` changed. D2 touches planning-ui, Tasks
+  and the CI map only, so these ran on macOS and passed: Shared packages (planning-ui's 249 unit tests), Contracts,
+  Tasks (the Worker's runtime suite of 18 files and 80 tests, the CPU and budget tests included; the web's 65 unit
+  tests, build and all 98 Playwright tests against the dev server's Focus) and Changes' test steps (453
+  `.github/scripts` tests); its decide step again could not run locally. The other apps' code is unchanged since
+  the D1 runs above. The Tasks Worker bundle stays 130.5 of 132 KiB. The web's shared `api` chunk (124 kB) folded
+  into its index (590 to 698 kB); the two together went from 714 to 698 kB, 230 to 223 kB gzip.
 - **Slice D1 (2026-10-20 UTC).** Tasks owns Focus; nothing calls it until D2. Migration `0005_focus.sql` adds day
   queues (`day_steps`), time records (`focus_entries`) and the one timer row (`focus_timer`), never hard-deleted.
   `proto/tasks/ui/v1/focus.proto` and seven methods: `ListFocusDays` (1-7 days, their records, every task they name
@@ -141,6 +148,21 @@ nothing new uses it, and its queue and time data are not migrated (owner decisio
   week at 9.7-10.7 reference ms, now 8.5-8.9. The weekly backup exports the three tables; the restore tool also
   restores older backups, with empty Focus tables and an idle timer (`tasks/docs/backup.md`). The Tasks Worker
   bundle grew from 122.0 to 130.5 KiB gzip, of its 132 KiB budget.
+- **Slice D2 (2026-10-20 UTC).** Plan and Focus use Tasks' Focus API: `createPlanningActions({ plus, tasks })`
+  reads a week and Tasks' today with `ListFocusDays`, writes each queue change as one `MoveFocusStep`, runs the
+  timer through `GetFocusTimer`/`CommandFocusTimer`, and has `readFocus` (a month in reads of at most 7 days) and the
+  record writes for D3. `completeTask` is the host's: one Tasks `CompleteTask` with `focus_day` (a calendar card's
+  own day, else Focus's; the task list sends none, meaning Tasks' today) settles the queue and a related timer in
+  the same batch, so the FlowDay settlement and its "Focus could not confirm" warning are gone. A completion keeps
+  its first request ID and day until confirmed. Plan still counts from Todofy's today (`PlanState.today`), Focus
+  from Tasks'. Count-up shows at most 4 hours, as Tasks saves it. The Worker no longer forwards
+  `/api/plus/flowday/*` (404), and `ci_changes.py` no longer lists Tasks as a user of `proto/flowday/ui/`. No code
+  in `tasks/` or `packages/planning-ui/` uses FlowDay; the one-time estimate backfill (`tasks/tools/estimate-backfill.ts`
+  and its `backup.md` section) stays until it has run, and `backup.md`'s FlowDay mirror reset stays while FlowDay
+  runs. Browser journeys keep Focus in the dev server's D1 (`planning-stub.ts` `seedFocus`).
+- **Owner, with this release (D1-D3):** stop any FlowDay timer that is running before it. Afterwards this week's
+  day queues are empty, because nothing is migrated: arrange the week once in Plan › Week. FlowDay's own site keeps
+  working until its decommission; nothing reads it any more.
 - **Known limit.** With all seven Review lanes at a 1440px window (six cards a row, about 155px each) the step counts
   end in an ellipsis; the cards keep their 77px.
 
