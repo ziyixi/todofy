@@ -52,7 +52,7 @@ test("native mail creates no task until requested, replays a lost reply and dele
   let finishRead: (() => void) | undefined;
   page.on("request", (sent) => {
     if (
-      /\/api\/plus\/(?:flowday\/|v1\/(?:plan:read|tasks(?:\?|$)))/.test(
+      /\/api\/(?:plus\/v1\/(?:plan:read|tasks(?:\?|$))|tasks\/v1\/focus)/.test(
         sent.url(),
       )
     )

@@ -1,8 +1,9 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   createTask,
-  flowdayTaskWrites,
+  readFocus,
   stubPlanning,
+  tasksToday,
   type Json,
   type PlanningState,
 } from "./planning-stub";
@@ -154,7 +155,7 @@ test("a dependency is added in the details, and completing its prerequisite in F
   page,
   request,
 }) => {
-  // Focus completes the step in Tasks' own D1 before it settles FlowDay through Todofy.
+  // Focus completes the step in Tasks' own D1, on Tasks' today, and the planning list then leaves it out.
   const { id: venue } = await createTask(request, {
     title: "Synthetic venue booking",
   });
@@ -163,14 +164,18 @@ test("a dependency is added in the details, and completing its prerequisite in F
     kind: "step",
     parent_id: venue,
   });
-  const state = await stubPlanning(page, {
-    tasks: [
-      outcome("launch", "Synthetic launch"),
-      outcome(venue, "Synthetic venue booking"),
-      step(call, "Synthetic venue call", venue),
-    ],
-    days: { "2026-10-13": [call] },
-  });
+  const state = await stubPlanning(
+    page,
+    {
+      tasks: [
+        outcome("launch", "Synthetic launch"),
+        outcome(venue, "Synthetic venue booking"),
+        step(call, "Synthetic venue call", venue),
+      ],
+      queues: { [await tasksToday()]: [call] },
+    },
+    request,
+  );
   await openPlan(page);
   const dialog = await details(page, "Synthetic launch");
   const section = dialog.locator(".plus-dependencies");
@@ -212,7 +217,6 @@ test("a dependency is added in the details, and completing its prerequisite in F
     .poll(() => bodies(state, "/api/plus/v1/tasks:resolveDependencies"))
     .toEqual([{ task_ids: [call], request_id: expect.any(String) }]);
   await expect(waiting).toHaveCount(0);
-  expect(flowdayTaskWrites(state)).toEqual([]);
 });
 
 test("a deadline and its start-ahead days are saved in one SetTaskLead", async ({
@@ -245,13 +249,18 @@ test("a deadline and its start-ahead days are saved in one SetTaskLead", async (
   ).toHaveValue("3");
 });
 
-test("Week schedules a step into a day and moves it to another with FlowDay's queues only", async ({
+test("Week schedules a step into a day and moves it to another, one Tasks MoveFocusStep each", async ({
   page,
+  request,
 }) => {
+  // Tasks' queues hold its own tasks.
+  const { id: intro } = await createTask(request, {
+    title: "Synthetic introduction",
+  });
   const state = await stubPlanning(page, {
     tasks: [
       outcome("website", "Synthetic website refresh"),
-      step("intro", "Synthetic introduction", "website"),
+      step(intro, "Synthetic introduction", "website"),
     ],
   });
   // Wide enough for all seven days side by side.
@@ -270,7 +279,10 @@ test("Week schedules a step into a day and moves it to another with FlowDay's qu
     tray.getByRole("button", { name: "Drag step: Synthetic introduction" }),
     thursday.locator(".planning-day-end"),
   );
-  await expect.poll(() => state.days["2026-10-15"]).toEqual(["intro"]);
+  const queue = async (date: string) =>
+    ((await readFocus(date, date)).days as { task_ids?: string[] }[])[0]
+      ?.task_ids ?? [];
+  await expect.poll(() => queue("2026-10-15")).toEqual([intro]);
   await expect(page.locator(".plus-page-header .plus-spin")).toHaveCount(0);
   await drag(
     page,
@@ -279,14 +291,33 @@ test("Week schedules a step into a day and moves it to another with FlowDay's qu
     }),
     friday.locator(".planning-day-end"),
   );
-  await expect.poll(() => state.days["2026-10-16"]).toEqual(["intro"]);
-  expect(state.days["2026-10-15"]).toEqual([]);
-  const writes = state.requests.filter((request) => request.method !== "GET");
-  expect(writes.map((request) => [request.method, request.path])).toEqual([
-    ["PATCH", "/api/plus/flowday/api/v1/flows/2026-10-15"],
-    ["POST", "/api/plus/flowday/api/v1/flows/2026-10-15:rollover"],
+  await expect.poll(() => queue("2026-10-16")).toEqual([intro]);
+  expect(await queue("2026-10-15")).toEqual([]);
+  // The task's dates and Todofy's plan are untouched.
+  expect(state.requests.filter((request) => request.method !== "GET")).toEqual(
+    [],
+  );
+  expect(
+    state.tasksRequests
+      .filter((request) => request.method !== "GET")
+      .map(({ path, body: { request_id: requestId, ...body } }) => {
+        expect(requestId).toMatch(/^[0-9a-f-]{36}$/u);
+        return [path, body];
+      }),
+  ).toEqual([
+    [
+      "/api/tasks/v1/focusDays:moveStep",
+      { task_id: intro, destination_day: "2026-10-15" },
+    ],
+    [
+      "/api/tasks/v1/focusDays:moveStep",
+      {
+        task_id: intro,
+        source_day: "2026-10-15",
+        destination_day: "2026-10-16",
+      },
+    ],
   ]);
-  expect(flowdayTaskWrites(state)).toEqual([]);
 });
 
 test("the keyboard moves a Committed card along its row, Escape puts it back, and Down from Week commits a candidate", async ({

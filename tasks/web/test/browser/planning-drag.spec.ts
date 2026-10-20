@@ -1,5 +1,11 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { stubPlanning, type Json, type PlanningState } from "./planning-stub";
+import {
+  readFocus,
+  stubPlanning,
+  type Json,
+  type PlanningSeed,
+  type PlanningState,
+} from "./planning-stub";
 
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
 
@@ -39,11 +45,13 @@ const TASKS: Json[] = [
   }),
 ];
 
-async function openPlan(page: Page, seed: Partial<PlanningState> = {}) {
+async function openPlan(page: Page, seed: PlanningSeed = {}) {
   await page.clock.setFixedTime(new Date("2026-10-13T18:00:00Z"));
   const state = await stubPlanning(page, {
     tasks: structuredClone(TASKS),
-    days: { "2026-10-13": ["layout"] },
+    // The introduction is dropped into a day, so it is one of Tasks' tasks too.
+    queues: { "2026-10-13": ["layout"] },
+    inTasks: ["intro"],
     ...seed,
   });
   await page.goto("/#/plan");
@@ -300,7 +308,7 @@ test("small cards' grips show only on hover, and their titles never move", async
 test("on touch a card drags after a 250ms hold, and a quick swipe on it scrolls instead", async ({
   page,
 }) => {
-  const state = await openPlan(page);
+  await openPlan(page);
   await week(page);
   // Playwright has no touch drag: Chromium's own touch input, through the DevTools protocol.
   const cdp = await page.context().newCDPSession(page);
@@ -341,6 +349,12 @@ test("on touch a card drags after a 250ms hold, and a quick swipe on it scrolls 
       from.y + ((to.y - from.y) * index) / 12,
     );
   await touch("touchEnd");
-  await expect.poll(() => state.days["2026-10-14"]).toEqual(["intro"]);
+  await expect
+    .poll(
+      async () =>
+        ((await readFocus("2026-10-14", "2026-10-14")).days as Json[])[0]
+          ?.task_ids,
+    )
+    .toEqual(["intro"]);
   await expect(dragging(page)).toHaveCount(0);
 });

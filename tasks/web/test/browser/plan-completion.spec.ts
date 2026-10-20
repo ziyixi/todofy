@@ -1,11 +1,21 @@
 import { expect, test, type Page } from "@playwright/test";
-import { createTask, stubPlanning, type Json } from "./planning-stub";
+import {
+  createTask,
+  mondayOf,
+  readFocus,
+  readTimer,
+  seedFocus,
+  startTimer,
+  stubPlanning,
+  tasksToday,
+  type Json,
+} from "./planning-stub";
 
 test.afterEach(async ({ page }) => {
   await page.unrouteAll({ behavior: "wait" });
 });
 
-test("Plan completes an outcome in real D1 and settles its running descendant on the original timer date", async ({
+test("Plan completes an outcome in real D1, which stops its descendant's running timer and marks its queued step done", async ({
   page,
   request,
 }) => {
@@ -31,9 +41,12 @@ test("Plan completes an outcome in real D1 and settles its running descendant on
     parent_id: parent.id,
     kind: "step",
   });
-  const today = "2026-10-13",
-    timerDate = "2026-10-12";
-  const genericWrites: { requestId: string; etag: string }[] = [];
+  // The child is queued on Tasks' today and its timer runs there.
+  const today = await tasksToday();
+  await seedFocus({ [today]: [child.id] }, mondayOf(today));
+  await startTimer(child.id);
+  const genericWrites: { requestId: string; etag: string; focusDay: string }[] =
+    [];
   page.on("request", (event) => {
     const url = new URL(event.url());
     if (url.pathname !== `/api/tasks/v1/${parent.name}:complete`) return;
@@ -41,9 +54,9 @@ test("Plan completes an outcome in real D1 and settles its running descendant on
     genericWrites.push({
       requestId: body.request_id || url.searchParams.get("request_id"),
       etag: body.etag,
+      focusDay: body.focus_day,
     });
   });
-  const settlements: Record<string, unknown>[] = [];
   await page.route("**/api/plus/**", async (route) => {
     const url = new URL(route.request().url());
     let response: unknown;
@@ -52,8 +65,8 @@ test("Plan completes an outcome in real D1 and settles its running descendant on
         plan: {
           native_planning: true,
           enabled: true,
-          timezone: "UTC",
-          week_start: timerDate,
+          timezone: "America/Los_Angeles",
+          week_start: mondayOf(today),
           today,
           etag: "synthetic-plan",
           labels: [],
@@ -80,39 +93,7 @@ test("Plan completes an outcome in real D1 and settles its running descendant on
             planning_flags: [],
           })),
       };
-    } else if (url.pathname.endsWith("/tasks:completeTask")) {
-      const body = route.request().postDataJSON();
-      const completed = await (
-        await request.get(`/api/tasks/v1/tasks/${child.id}`)
-      ).json();
-      expect(completed.completed).toBe(true);
-      settlements.push(body);
-      response = { task_id: parent.id };
-    } else if (url.pathname === "/api/plus/flowday/api/v1/timerSession")
-      response = settlements.length
-        ? { name: "timerSession", state: "idle", etag: "settled" }
-        : {
-            name: "timerSession",
-            state: "running",
-            etag: "running-child",
-            task_id: child.id,
-            flow_date: timerDate,
-            segment_start_time: `${timerDate}T23:55:00Z`,
-          };
-    else if (url.pathname.startsWith("/api/plus/flowday/api/v1/flows/"))
-      response = {
-        name: `flows/${url.pathname.split("/").at(-1)}`,
-        task_ids:
-          url.pathname.endsWith(timerDate) && !settlements.length
-            ? [child.id]
-            : [],
-      };
-    else if (url.pathname === "/api/plus/flowday/api/v1/tasks")
-      response = { tasks: [] };
-    else if (url.pathname === "/api/plus/flowday/api/v1/timeEntries")
-      response = { time_entries: [] };
-    else if (url.pathname.endsWith("/tasks:sync")) response = {};
-    else {
+    } else {
       await route.fulfill({
         status: 500,
         json: {
@@ -123,28 +104,35 @@ test("Plan completes an outcome in real D1 and settles its running descendant on
     }
     await route.fulfill({ json: response });
   });
-  await page.clock.setFixedTime(new Date(`${today}T00:05:00Z`));
   await page.goto("/#/plan");
+  // The running session shows in the timer bar.
+  await expect(
+    page.getByRole("complementary", { name: "Focus" }),
+  ).toContainText("Synthetic running descendant");
   await page
     .getByRole("button", {
       name: "Complete task: Synthetic Plan completion outcome",
       exact: true,
     })
     .click();
-  await expect.poll(() => settlements.length).toBe(1);
-  expect(genericWrites).toHaveLength(1);
-  expect(settlements[0]).toMatchObject({
-    task_id: parent.id,
-    flow_task_id: child.id,
-    flow_date: timerDate,
-    task_etag: parent.etag,
-    request_id: genericWrites[0]!.requestId,
+  await expect.poll(() => genericWrites.length).toBe(1);
+  // One Tasks write, on Focus's day; the session settles on its own day in it.
+  expect(genericWrites[0]).toEqual({
+    requestId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    etag: parent.etag,
+    focusDay: today,
   });
   const saved = await (
     await request.get(`/api/tasks/v1/tasks/${parent.id}`)
   ).json();
   expect(saved.completed).toBe(true);
   expect(saved.completed_count).toBe(1);
+  expect((await readTimer()).state).toBe("idle");
+  const [day] = (await readFocus(today, today)).days as {
+    task_ids?: string[];
+    done_task_ids?: string[];
+  }[];
+  expect([day?.task_ids ?? [], day?.done_task_ids]).toEqual([[], [child.id]]);
   await expect(page.locator(`[data-outcome-id="${parent.id}"]`)).toHaveCount(0);
   await expect(
     page.getByRole("status").filter({ hasText: "Task completed" }),
@@ -302,22 +290,17 @@ test.describe("Plan's cards", () => {
       parent_id: parent.id,
       area: "unassigned",
     });
-    const state = await stubPlanning(
+    await stubPlanning(
       page,
       {
         today,
         tasks: [outcome(parent.id, parent.title), step(first), step(second)],
-        flowTasks: [first, second].map((task) => ({
-          name: `tasks/${task.id}`,
-          todoist_id: task.id,
-          title: task.title,
-          estimated_minutes: 30,
-        })),
-        days: { [today]: [first.id] },
+        queues: { [today]: [first.id] },
       },
       request,
     );
-    const completions: { id: string; requestId: string }[] = [];
+    const completions: { id: string; requestId: string; focusDay: string }[] =
+      [];
     page.on("request", (event) => {
       const match = /^\/api\/tasks\/v1\/tasks\/([^/:]+):complete$/u.exec(
         new URL(event.url()).pathname,
@@ -326,6 +309,7 @@ test.describe("Plan's cards", () => {
         completions.push({
           id: match[1]!,
           requestId: event.postDataJSON()?.request_id,
+          focusDay: event.postDataJSON()?.focus_day,
         });
     });
     // Wide enough for all seven days side by side.
@@ -372,19 +356,21 @@ test.describe("Plan's cards", () => {
     expect(new Set(completions.map((write) => write.requestId)).size).toBe(3);
     for (const write of completions)
       expect(write.requestId).toMatch(/^[a-f0-9-]{36}$/u);
-    // Only the Step in its day's queue settles FlowDay: on that day, under its completion's request ID.
-    expect(
-      state.requests
-        .filter((call) => call.path === "/api/plus/v1/tasks:completeTask")
-        .map((call) => call.body),
-    ).toEqual([
-      expect.objectContaining({
-        task_id: first.id,
-        flow_date: today,
-        request_id: completions[1]!.requestId,
-      }),
+    // A scheduled Step completes on its own day; the others on Focus's, Tasks' today.
+    const focusDay = await tasksToday();
+    expect(completions.map((write) => write.focusDay)).toEqual([
+      focusDay,
+      today,
+      focusDay,
     ]);
-    expect(state.days[today]).toEqual([]);
+    const [queue] = (await readFocus(today, today)).days as {
+      task_ids?: string[];
+      done_task_ids?: string[];
+    }[];
+    expect([queue?.task_ids ?? [], queue?.done_task_ids]).toEqual([
+      [],
+      [first.id],
+    ]);
     for (const task of [parent, first, second]) {
       const saved = await request.get(`/api/tasks/v1/tasks/${task.id}`);
       expect((await saved.json()).completed).toBe(true);
@@ -403,9 +389,10 @@ test.describe("Plan's cards", () => {
       { today, tasks: [outcome(task.id, task.title, candidate("quarterly"))] },
       request,
     );
-    const attempts: string[] = [];
+    const attempts: { requestId: string; focusDay: string }[] = [];
     await page.route(`**/api/tasks/v1/tasks/${task.id}:complete`, (route) => {
-      attempts.push(route.request().postDataJSON()?.request_id);
+      const body = route.request().postDataJSON();
+      attempts.push({ requestId: body?.request_id, focusDay: body?.focus_day });
       return attempts.length === 1
         ? route.fulfill({
             status: 503,
@@ -436,8 +423,10 @@ test.describe("Plan's cards", () => {
     await expect(quarter.locator(`[data-outcome-id="${task.id}"]`)).toHaveCount(
       0,
     );
+    // The retry resends the same request: its ID and its Focus day.
     expect(attempts).toHaveLength(2);
-    expect(attempts[1]).toBe(attempts[0]);
+    expect(attempts[1]).toEqual(attempts[0]);
+    expect(attempts[0]!.requestId).toMatch(/^[0-9a-f-]{36}$/u);
     const saved = await request.get(`/api/tasks/v1/tasks/${task.id}`);
     expect((await saved.json()).completed).toBe(true);
   });

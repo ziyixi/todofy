@@ -5,6 +5,7 @@ import {
   type Locator,
   type Page,
 } from "@playwright/test";
+import { seedFocus } from "./planning-stub";
 
 async function width(page: Page) {
   return (await page.locator(".sidebar").boundingBox())!.width;
@@ -143,14 +144,11 @@ test("Plan Review and Week fit the window after navigation resizing", async ({
           },
         ],
       };
-    else if (path === "/api/plus/flowday/api/v1/tasks") data = { tasks: [] };
-    else if (path === "/api/plus/flowday/api/v1/timerSession")
-      data = { name: "timerSession", etag: "0" };
-    else if (path.startsWith("/api/plus/flowday/api/v1/flows/"))
-      data = { name: path.slice("/api/plus/flowday/api/v1/".length) };
     else return route.continue();
     return route.fulfill({ json: data });
   });
+  // Plan's week reads the dev server's Focus queues, which start empty.
+  await seedFocus();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/#/plan");
   await expect(

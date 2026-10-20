@@ -1,5 +1,13 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { createTask, flowdayTaskWrites, stubPlanning } from "./planning-stub";
+import {
+  createTask,
+  mondayOf,
+  readFocus,
+  readTimer,
+  seedFocus,
+  stubPlanning,
+  tasksToday,
+} from "./planning-stub";
 
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
 
@@ -87,22 +95,6 @@ test("a native lane reorder keeps its siblings pending and the next stage drag s
       await route.fulfill({ json: { task } });
       return;
     }
-    if (path === "/api/plus/flowday/api/v1/tasks") {
-      await route.fulfill({ json: { tasks: [] } });
-      return;
-    }
-    if (path.startsWith("/api/plus/flowday/api/v1/flows/")) {
-      await route.fulfill({
-        json: { name: path.slice("/api/plus/flowday/api/v1/".length) },
-      });
-      return;
-    }
-    if (path === "/api/plus/flowday/api/v1/timerSession") {
-      await route.fulfill({
-        json: { name: "timerSession", state: "idle", etag: "0" },
-      });
-      return;
-    }
     throw new Error(`Unexpected synthetic request ${path}`);
   });
   async function drag(source: Locator, target: Locator) {
@@ -125,6 +117,8 @@ test("a native lane reorder keeps its siblings pending and the next stage drag s
     });
     await page.mouse.up();
   }
+  // Focus is the dev server's; its week starts empty.
+  await seedFocus();
   await page.clock.setFixedTime(new Date("2026-10-13T18:00:00Z"));
   await page.goto("/#/plan");
   const week = page.getByRole("region", { name: "Week", exact: true });
@@ -174,8 +168,8 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
   page,
   request,
 }) => {
-  const today = "2026-10-13";
-  // Focus completes the step in Tasks' own D1 before it settles FlowDay through Todofy.
+  // Focus is on Tasks' today, by the dev server's real clock; the plan's week holds it.
+  const today = await tasksToday();
   const { id: outcomeId } = await createTask(request, {
     title: "Synthetic native weekly outcome",
   });
@@ -208,35 +202,31 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
       etag: "1",
     },
   ];
-  const state = await stubPlanning(page, {
-    today,
-    tasks,
-    flowTasks: [
-      {
-        name: `tasks/${stepId}`,
-        todoist_id: stepId,
-        title: tasks[1]!.title,
-        estimated_minutes: 30,
-      },
-    ],
-    days: { [today]: [stepId] },
-    mail: [
-      {
-        id: "native-message",
-        title: "Synthetic native mail",
-        etag: "mail-1",
-        receive_time: "2026-10-13T17:00:00Z",
-        brief: "Synthetic native brief",
-        has_summary: true,
-      },
-    ],
-    summaries: { "native-message": "Synthetic native summary" },
-  });
+  const state = await stubPlanning(
+    page,
+    {
+      today,
+      plan: { week_start: mondayOf(today) },
+      tasks,
+      queues: { [today]: [stepId] },
+      mail: [
+        {
+          id: "native-message",
+          title: "Synthetic native mail",
+          etag: "mail-1",
+          receive_time: "2026-10-13T17:00:00Z",
+          brief: "Synthetic native brief",
+          has_summary: true,
+        },
+      ],
+      summaries: { "native-message": "Synthetic native summary" },
+    },
+    request,
+  );
   const writes = () =>
     state.requests
       .filter((request) => request.path === "/api/plus/v1/tasks:setTaskPlan")
       .map((request) => request.body);
-  await page.clock.setFixedTime(new Date("2026-10-13T18:00:00Z"));
   await page.goto("/#/plan");
   await expect(
     page.getByText("Synthetic native weekly outcome", { exact: true }).first(),
@@ -318,8 +308,8 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
       exact: true,
     }),
   ).toBeVisible();
-  const command = state.requests.find((request) =>
-    request.path.endsWith("/timerSession:command"),
+  const command = state.tasksRequests.find(
+    (request) => request.path === "/api/tasks/v1/focusTimer:command",
   );
   expect(command?.body).toMatchObject({
     action: "start",
@@ -348,13 +338,28 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
     step.getByRole("button", { name: /^Complete task:/u }),
   ).toHaveCount(0);
   await expect(page.locator(".plus-page-header .plus-spin")).toHaveCount(0);
+  // One Tasks write completes the step on Focus's day and settles its paused session.
   expect(
-    state.requests.filter(
-      (request) => request.path === "/api/plus/v1/tasks:completeTask",
-    ),
-  ).toHaveLength(1);
-  // Focus writes the timer and completes through Tasks; FlowDay's own task API stays untouched.
-  expect(flowdayTaskWrites(state)).toEqual([]);
+    state.tasksRequests
+      .filter((request) => request.path.endsWith(":complete"))
+      .map((request) => [request.path, request.body.focus_day]),
+  ).toEqual([[`/api/tasks/v1/tasks/${stepId}:complete`, today]]);
+  const day = (await readFocus(today, today)).days as {
+    task_ids?: string[];
+    done_task_ids?: string[];
+  }[];
+  expect(day[0]?.task_ids ?? []).not.toContain(stepId);
+  expect(day[0]?.done_task_ids).toContain(stepId);
+  expect((await readTimer()).state).toBe("idle");
+  // Focus writes nothing to Todofy: Plan's two task changes are its only writes there.
+  expect(
+    state.requests
+      .filter((request) => request.method !== "GET")
+      .map((request) => request.path),
+  ).toEqual([
+    "/api/plus/v1/tasks:setTaskPlan",
+    "/api/plus/v1/tasks:setTaskPlan",
+  ]);
   const mailStart = state.requests.length;
   await page.getByRole("link", { name: "Mail", exact: true }).click();
   await page.getByText("Synthetic native mail", { exact: true }).click();

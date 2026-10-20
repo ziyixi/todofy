@@ -50,7 +50,7 @@ const URL_STEP = `https://example.test/${"synthetic-path/".repeat(13)}`.slice(
 const LONG_QUICK =
   "Pay the electricity bill before Friday so that autopay does not bounce again";
 const LONG_OUTCOME =
-  "Migrate day queues off FlowDay and into Tasks D1 without losing the week's arrangement";
+  "Migrate day queues off the old planner into Tasks D1 without losing the week's arrangement";
 
 /** Eleven commitments (Work, Personal and one Unassigned), six Review lanes and a long Quick list. */
 const TASKS: Json[] = [
@@ -124,7 +124,7 @@ async function openPlan(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 });
   await stubPlanning(page, {
     tasks: TASKS,
-    days: {
+    queues: {
       "2026-10-12": ["s7"],
       "2026-10-13": ["s1", "s3", "q1"],
       "2026-10-14": ["s5"],

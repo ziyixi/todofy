@@ -1,4 +1,9 @@
-import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  expect,
+  request as apiRequest,
+  type APIRequestContext,
+  type Page,
+} from "@playwright/test";
 
 export type Json = Record<string, unknown>;
 export interface PlanningRequest {
@@ -7,25 +12,33 @@ export interface PlanningRequest {
   body: Json;
   authorization: string | null;
 }
-/** What the synthetic Todofy planning API and FlowDay hold; tests read and change it in place. */
+/** What the synthetic Todofy planning API holds; tests read and change it in place. */
 export interface PlanningState {
   today: string;
   /** Plan fields over the defaults (a native plan for the week of 2026-10-12). */
   plan: Json;
   tasks: Json[];
-  /** FlowDay's task list: mirrored tasks carry `todoist_id`. */
-  flowTasks: Json[];
-  /** FlowDay's day queues by date. */
-  days: Record<string, string[]>;
-  timer: Json;
   bets: Json[];
   dependencies: Json[];
   mail: Json[];
   summaries: Record<string, string>;
   requests: PlanningRequest[];
+  /** The page's requests to the dev server's own Tasks API, which holds Focus. */
+  tasksRequests: PlanningRequest[];
+}
+export interface PlanningSeed extends Partial<
+  Omit<PlanningState, "requests" | "tasksRequests">
+> {
+  /**
+   * Day queues to put in the dev server's D1 through MoveFocusStep, first to last. Each step's
+   * task is made there first when it is missing (seedFocus).
+   */
+  queues?: Record<string, string[]>;
+  /** Tasks a test drops into a day, which Tasks' queues need in its D1 as well. */
+  inTasks?: string[];
 }
 
-const FLOWDAY = "/api/plus/flowday/api/v1/";
+const ORIGIN = "http://127.0.0.1:8798";
 
 function refusal(code: number, status: string, reason: string) {
   return {
@@ -48,33 +61,44 @@ function refusal(code: number, status: string, reason: string) {
 }
 
 /**
- * Answers `/api/plus/**` in the page as Todofy's planning API and FlowDay's focus API do for
- * Tasks, from synthetic data only. Every request is recorded; an unknown one fails with 500.
- * With `tasksIn`, the task list leaves out a task the dev server's D1 holds completed, as
- * Todofy's list of Tasks' open tasks does.
+ * Answers `/api/plus/**` in the page as Todofy's planning API does for Tasks, from synthetic data
+ * only. Every request is recorded; an unknown one fails with 500. Focus is the dev server's own:
+ * its timer is stopped and the queues of the plan's week and of Tasks' today are emptied, then
+ * filled from `queues` (seedFocus). With `tasksIn`, the task list leaves out a task the dev
+ * server's D1 holds completed, as Todofy's list of Tasks' open tasks does.
  */
 export async function stubPlanning(
   page: Page,
-  seed: Partial<Omit<PlanningState, "requests">> = {},
+  { queues = {}, inTasks = [], ...seed }: PlanningSeed = {},
   tasksIn?: APIRequestContext,
 ): Promise<PlanningState> {
   const state: PlanningState = {
     today: "2026-10-13",
     plan: {},
     tasks: [],
-    flowTasks: [],
-    days: {},
-    timer: { name: "timerSession", state: "idle", etag: "0" },
     bets: [],
     dependencies: [],
     mail: [],
     summaries: {},
     requests: [],
+    tasksRequests: [],
     ...seed,
   };
-  const flow = (date: string) => ({
-    name: `flows/${date}`,
-    task_ids: state.days[date] ?? [],
+  await seedFocus(
+    queues,
+    String(state.plan.week_start ?? "2026-10-12"),
+    state.tasks,
+    inTasks,
+  );
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/tasks/v1/")) return;
+    state.tasksRequests.push({
+      path: url.pathname + url.search,
+      method: request.method(),
+      body: (request.method() === "GET" ? {} : request.postDataJSON()) ?? {},
+      authorization: request.headers()["authorization"] ?? null,
+    });
   });
   const task = (id: unknown) => state.tasks.find((item) => item.id === id);
   await page.route("**/api/plus/**", async (route) => {
@@ -241,26 +265,6 @@ export async function stubPlanning(
             dependency.done = true;
         return { json: { dependencies: state.dependencies } };
       }
-      if (path === "/api/plus/v1/tasks:completeTask") {
-        state.tasks = state.tasks.filter((item) => item.id !== body.task_id);
-        // The FlowDay settlement: the day's queue drops the task, and its timer on that day stops.
-        const flowDate = String(body.flow_date ?? "");
-        if (flowDate) {
-          state.days[flowDate] = (state.days[flowDate] ?? []).filter(
-            (id) => id !== body.flow_task_id && id !== body.task_id,
-          );
-          if (
-            [body.flow_task_id, body.task_id].includes(state.timer.task_id) &&
-            state.timer.flow_date === flowDate
-          )
-            state.timer = {
-              name: "timerSession",
-              state: "idle",
-              etag: String(Number(state.timer.etag) + 1),
-            };
-        }
-        return { json: { task_id: body.task_id } };
-      }
       if (path === "/api/plus/v1/mailItems")
         return {
           json: {
@@ -281,51 +285,6 @@ export async function stubPlanning(
         return {
           json: { task: { id: `task-${String(item.id)}`, title: item.title } },
         };
-      }
-      if (path === `${FLOWDAY}tasks`)
-        return { json: { tasks: state.flowTasks } };
-      if (path === `${FLOWDAY}timerSession`) return { json: state.timer };
-      if (path === `${FLOWDAY}timerSession:command`) {
-        const running = body.action === "start" || body.action === "resume";
-        state.timer = running
-          ? {
-              name: "timerSession",
-              task_id: body.task_id,
-              flow_date: body.flow_date,
-              state: "running",
-              segment_start_time: `${state.today}T18:00:00Z`,
-              etag: String(Number(state.timer.etag) + 1),
-            }
-          : {
-              ...state.timer,
-              state: body.action === "pause" ? "paused" : "idle",
-              etag: String(Number(state.timer.etag) + 1),
-            };
-        return { json: state.timer };
-      }
-      const flowMatch =
-        /^\/api\/plus\/flowday\/api\/v1\/flows\/(\d{4}-\d{2}-\d{2})(:rollover)?$/u.exec(
-          path,
-        );
-      if (flowMatch) {
-        const date = flowMatch[1]!;
-        if (flowMatch[2]) {
-          const target = String(body.destination).slice("flows/".length);
-          const moved = (body.task_ids as string[]).filter((id) =>
-            state.days[date]?.includes(id),
-          );
-          state.days[target] = [
-            ...moved.filter((id) => !state.days[target]?.includes(id)),
-            ...(state.days[target] ?? []),
-          ];
-          state.days[date] = (state.days[date] ?? []).filter(
-            (id) => !moved.includes(id),
-          );
-          return { json: { flow: flow(date), destination_flow: flow(target) } };
-        }
-        if (method === "PATCH")
-          state.days[date] = [...(body.task_ids as string[])];
-        return { json: flow(date) };
       }
       return undefined;
     };
@@ -350,18 +309,9 @@ async function stillOpen(request: APIRequestContext, tasks: Json[]) {
   return tasks.filter((_, index) => open[index]);
 }
 
-/** FlowDay calls Tasks must never make: its own task sync and task writes. */
-export function flowdayTaskWrites(state: PlanningState) {
-  return state.requests.filter(
-    (request) =>
-      request.path.startsWith(`${FLOWDAY}tasks`) &&
-      (request.path.endsWith(":sync") || request.method !== "GET"),
-  );
-}
-
 /**
- * Creates a task in the dev server's own D1. Plan and Focus complete a task in Tasks first (GetTask, then
- * CompleteTask) and only then settle FlowDay through Todofy, so a journey that completes one needs it there.
+ * Creates a task in the dev server's own D1. Plan and Focus complete a task in Tasks (GetTask, then
+ * CompleteTask, which settles its Focus day), so a journey that completes one needs it there.
  */
 export async function createTask(
   request: APIRequestContext,
@@ -377,4 +327,148 @@ export async function createTask(
   );
   expect(response.status()).toBe(200);
   return response.json();
+}
+
+/** The dev server's own Tasks API as the owner, in a request context of its own, so the page's CSRF cookie stays. */
+interface TasksApi {
+  read(path: string): Promise<Json | undefined>;
+  write(path: string, data: Json): Promise<Json>;
+}
+async function withTasks<T>(use: (api: TasksApi) => Promise<T>): Promise<T> {
+  const context = await apiRequest.newContext({ baseURL: ORIGIN });
+  try {
+    const { token } = await (await context.get("/api/tasks/csrf")).json();
+    return await use({
+      async read(path) {
+        const response = await context.get(path);
+        if (response.status() === 404) return undefined;
+        expect(response.status(), `GET ${path}`).toBe(200);
+        return response.json();
+      },
+      async write(path, data) {
+        const response = await context.post(path, {
+          headers: { "x-csrf-token": token, origin: ORIGIN },
+          data,
+        });
+        expect(response.status(), `POST ${path}`).toBe(200);
+        return response.json();
+      },
+    });
+  } finally {
+    await context.dispose();
+  }
+}
+const addDays = (day: string, days: number) =>
+  new Date(Date.parse(`${day}T12:00:00Z`) + days * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+/** The Monday of a day's week, which a plan's `week_start` is. */
+export function mondayOf(day: string): string {
+  return addDays(day, -((new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7));
+}
+/** Tasks' today: the day Focus shows, the timer counts on and an empty focus_day settles. */
+export async function tasksToday(): Promise<string> {
+  return String((await readFocus("2026-01-05", "2026-01-05")).today);
+}
+/** ListFocusDays from the dev server, as its wire JSON. */
+export async function readFocus(start: string, end: string): Promise<Json> {
+  return withTasks(
+    async (api) =>
+      (await api.read(
+        `/api/tasks/v1/focusDays?start_day=${start}&end_day=${end}`,
+      ))!,
+  );
+}
+/** The dev server's Focus timer, as its wire JSON. */
+export async function readTimer(): Promise<Json> {
+  return withTasks(
+    async (api) => (await api.read("/api/tasks/v1/focusTimer"))!,
+  );
+}
+/** Starts the dev server's timer on a task, counting up; it counts on Tasks' today. */
+export async function startTimer(taskId: string): Promise<Json> {
+  return withTasks(async (api) => {
+    const timer = (await api.read("/api/tasks/v1/focusTimer"))!;
+    return api.write("/api/tasks/v1/focusTimer:command", {
+      request_id: crypto.randomUUID(),
+      etag: timer.etag,
+      action: "start",
+      task_id: taskId,
+    });
+  });
+}
+/**
+ * Puts the dev server's Focus in a known state, as a planning test begins: the timer stopped, and
+ * every step (open or done) taken off the queues of `week`, of Tasks' today and of each seeded
+ * day. Then each day of `queues` gets its steps, first to last. Each queued task, and each of
+ * `inTasks`, is made in D1 when it is missing, under its own ID, titled as in `tasks`, and inside
+ * one synthetic parent so the Inbox gains one row; a completed one is reopened.
+ */
+export async function seedFocus(
+  queues: Record<string, string[]> = {},
+  week = "2026-10-12",
+  tasks: Json[] = [],
+  inTasks: string[] = [],
+): Promise<void> {
+  await withTasks(async (api) => {
+    const timer = (await api.read("/api/tasks/v1/focusTimer"))!;
+    if (timer.state === "running" || timer.state === "paused")
+      await api.write("/api/tasks/v1/focusTimer:command", {
+        request_id: crypto.randomUUID(),
+        etag: timer.etag,
+        action: "stop",
+      });
+    const today = String(
+      (await api.read(
+        "/api/tasks/v1/focusDays?start_day=2026-01-05&end_day=2026-01-05",
+      ))!.today,
+    );
+    const weeks = new Set(
+      [week, today, ...Object.keys(queues)].map((day) => mondayOf(day)),
+    );
+    for (const monday of weeks) {
+      const read = (await api.read(
+        `/api/tasks/v1/focusDays?start_day=${monday}&end_day=${addDays(monday, 6)}`,
+      ))!;
+      for (const day of read.days as Json[])
+        for (const id of [
+          ...((day.task_ids as string[] | undefined) ?? []),
+          ...((day.done_task_ids as string[] | undefined) ?? []),
+        ])
+          await api.write("/api/tasks/v1/focusDays:moveStep", {
+            request_id: crypto.randomUUID(),
+            task_id: id,
+            source_day: day.day,
+          });
+    }
+    const ids = [...new Set([...Object.values(queues).flat(), ...inTasks])];
+    if (ids.length) await ensureTasks(api, ids, tasks);
+    for (const [day, steps] of Object.entries(queues))
+      for (const id of steps)
+        await api.write("/api/tasks/v1/focusDays:moveStep", {
+          request_id: crypto.randomUUID(),
+          task_id: id,
+          destination_day: day,
+        });
+  });
+}
+const SEEDS = "synthetic-planning-seeds";
+async function ensureTasks(api: TasksApi, ids: string[], tasks: Json[]) {
+  const create = (id: string, data: Json) =>
+    api.write(
+      `/api/tasks/v1/tasks?task_id=${id}&request_id=${crypto.randomUUID()}`,
+      data,
+    );
+  if (!(await api.read(`/api/tasks/v1/tasks/${SEEDS}`)))
+    await create(SEEDS, { title: "Synthetic planning seeds" });
+  for (const id of ids) {
+    const saved = await api.read(`/api/tasks/v1/tasks/${id}`);
+    const title = tasks.find((task) => task.id === id)?.title ?? id;
+    if (!saved) await create(id, { title, parent_id: SEEDS });
+    else if (saved.completed)
+      await api.write(`/api/tasks/v1/tasks/${id}:reopen`, {
+        etag: saved.etag,
+        request_id: crypto.randomUUID(),
+      });
+  }
 }
