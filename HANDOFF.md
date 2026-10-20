@@ -42,11 +42,9 @@ import is verified.
     typecheck, 69 unit tests, build and all 105 Playwright tests (new: `request-counts.spec.ts`, `outdated.spec.ts`),
     and the tools' and deploy tests. Contracts passed, and so did Changes' test steps; its decide step needs
     GitHub's token, so `ci_changes.py` ran directly.
-- **P1 (2026-10-20 UTC), done except the import.** Planning facts, dependencies and Plan live in Tasks.
-  - **Do not release P1 alone.** From its deploy nothing writes Todofy's planning store, and production rows show
-    no planning facts until the one-time import runs. The import slice comes next: the generator
-    (`tasks/tools/planning-import.ts`, `prepare-planning-import.ts`, `planning-import.test.mjs`) and
-    `.github/workflows/tasks-planning-import.yml`, released with P1; then the design's cutover steps 2-5.
+- **P1 (2026-10-20 UTC), done.** Planning facts, dependencies and Plan live in Tasks.
+  - **Do not release P1 without the import.** From its deploy nothing writes Todofy's planning store, and production
+    rows show no planning facts until the one-time import (below) has run.
   - Todofy: `ReadWeeklyReview`, the weekly review's two facts (the newest review task of the week or the week
     before, the pending Mail count) in one D1 batch with no Tasks call; the gateway allows it.
   - Tasks: migration `0006_planning.sql` (planning columns on `tasks` and the partial `tasks_committed` index,
@@ -77,6 +75,38 @@ import is verified.
     Todofy static, Todofy runtime (all 512 tests in one shard, the completeness check included), FlowDay, Mail
     Hero, Home, Links, Watch, Mailsort, Recall, Brief, Fleet, Website and Platform's contract step. CI alone runs
     Platform's manifest compiler, AppArmor, image and k3s steps and Mail Hero's GPG backup test.
+- **Import (2026-10-20 UTC), done.** The one-time copy of Todofy's planning store into Tasks
+  ([runbook](tasks/docs/backup.md#one-time-planning-import)).
+  - `tasks/tools/planning-import.ts` turns read-only exports of Todofy's `plan_tasks`, `plan_task_state`,
+    `plan_edges` (waits_for), `plan_notes` (bets), `plan_settings` (board), `plus_weeks` and `plus_settings`, and of
+    Tasks' planning state, into guarded SQL: facts only onto live rows still at their defaults, dependencies of open
+    tasks on live ones unless Tasks has the pair (even removed), goals Tasks lacks, and the lanes while Tasks' board
+    is at revision 1. Applying it again changes nothing. `prepare-planning-import.ts` lists the exports and prints
+    counts only.
+  - `.github/workflows/tasks-planning-import.yml`: `workflow_dispatch` with one boolean `apply`, main only, the
+    `production` environment, the `tasks-production` lock, `CF_API_TOKEN`. Exports go to a private directory on the
+    runner; with `apply` it prints Tasks' Time Travel bookmark, applies the SQL with `--file` and counts again,
+    failing unless 0 are pending. `test_tasks_planning_import_workflow.py` pins it; `docs/ci-cd.md` lists it.
+  - Deviations from the design: a dependency whose waiting task is completed is not copied (Todofy deletes those
+    edges at the waiter's completion; Tasks soft-deletes them), and the Tasks export carries `completed` for that.
+    The CLI reads a directory of `<name>.json` answers instead of per-table flags.
+  - **After the release, in order** (the lead or the owner; nothing was dispatched from this branch):
+    1. `gh workflow run tasks-planning-import.yml --repo ziyixi/todofy --ref main -f apply=false`, and read the counts
+       in the run's log.
+    2. The same with `-f apply=true`, away from the account's Sunday-to-Monday midnight. The log ends with the counts
+       after the import, `pending` 0; note the printed bookmark.
+    3. In the browser: a row's tags, the dialog, Review, Week and Focus.
+    4. P3, after the owner's OK: drop Todofy's planning tables and delete the workflow, both tools and their tests.
+  - **Checked locally.** `planning-import.test.mjs` (6 tests: both schemas from their migrations, exports on
+    read-only connections, guards against changes made between export and import, malformed exports, the CLI, and
+    the imported rows read back through GetTask and GetPlan on the Tasks Worker's D1); each SQL guard was removed
+    once to confirm a test fails without it. A rehearsal of the workflow's exact step against local D1 (wrangler
+    4.142.0 `--local`, synthetic seeds) printed 9 pending, imported, and printed 0 pending twice; its private
+    directory was gone afterwards. Changes' test steps passed (460 `.github/scripts` tests, 7 new). Tasks passed:
+    the Worker's lint, typecheck, 64 unit tests and 20 runtime files (96 tests), the web's lint, typecheck, 53 unit
+    tests, build and 105 Playwright tests, the tools' 43 tests (6 new) and the deploy tests. `ci_changes.py`
+    selects every check job for this slice (`.github/` changed); the other jobs read nothing it changed and were
+    not run again.
 
 ### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
 
