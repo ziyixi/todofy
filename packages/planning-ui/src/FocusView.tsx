@@ -642,7 +642,7 @@ function FocusDay({
                 : undefined;
               return (
                 <div
-                  className="planning-step-overlay"
+                  className="planning-step-overlay plus-focus-overlay"
                   aria-hidden="true"
                   inert
                   style={

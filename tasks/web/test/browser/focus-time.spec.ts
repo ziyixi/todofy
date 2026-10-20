@@ -150,6 +150,13 @@ test("counting up and completing a step saves its session as one record, which C
   await expect(step.locator("output")).toHaveCount(0);
   const before = await logged.textContent();
   await expect(logged).not.toHaveText(before!);
+  // The running step's grip cannot move it, and stays hidden unless hover shows it.
+  const stepGrip = step.locator(".plus-focus-grip");
+  await expect(stepGrip).toBeDisabled();
+  await page.mouse.move(0, 0);
+  expect(
+    await stepGrip.evaluate((node) => getComputedStyle(node).opacity),
+  ).toBe("0");
   await expect(logged).toHaveText(/^01:0\d logged/u, { timeout: 75_000 });
   // Completing the step ends the session and saves its whole minutes in the same Tasks write.
   await step
@@ -368,6 +375,16 @@ test("Week's totals and bars follow the records, and Month's day opens in Day", 
     "45m",
     "20m",
   ]);
+  // Every group's bar is on one track: the same start and the same length.
+  const tracks = await page
+    .locator(".plus-focus-group-bar")
+    .evaluateAll((bars) =>
+      bars.map((bar) => {
+        const { x, width } = bar.getBoundingClientRect();
+        return [x, width];
+      }),
+    );
+  expect(new Set(tracks.map((track) => track.join())).size).toBe(1);
   await page.screenshot({
     path: testInfo.outputPath("focus-week-1440.png"),
     fullPage: true,
@@ -392,6 +409,13 @@ test("Week's totals and bars follow the records, and Month's day opens in Day", 
   await page.getByRole("tab", { name: "Week" }).click();
   await expect(bars).toHaveCount(7);
   expect(await sideways(page)).toBe(false);
+  // Every day's label is two lines, its weekday over its date, so they share one baseline.
+  const labels = await page
+    .locator(".plus-focus-bar-day")
+    .evaluateAll((days) =>
+      days.map((day) => day.getBoundingClientRect().height),
+    );
+  expect(labels).toEqual(Array(7).fill(32));
   await page.screenshot({
     path: testInfo.outputPath("focus-week-375.png"),
     fullPage: true,

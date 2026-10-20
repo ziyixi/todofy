@@ -413,6 +413,21 @@ test("today's Focus steps drag by their whole row: one MoveFocusStep, kept after
   );
   await page.reload();
   await expect.poll(order).toEqual(["ink", "intro", "layout"]);
+  // Its grip drags it too, and the preview is as wide as its row, under the pointer.
+  const grip = slot("layout").locator(".plus-focus-grip");
+  await slot("layout").hover();
+  await pressAndMove(page, grip.locator("svg"));
+  await expect(slot("layout")).toHaveClass(/is-dragging/u);
+  const row = (await slot("layout").boundingBox())!;
+  const preview = (await page.locator(".plus-focus-overlay").boundingBox())!;
+  expect(Math.abs(preview.width - row.width)).toBeLessThan(2);
+  const pointer = await centre(grip);
+  expect(pointer.x + 8).toBeGreaterThan(preview.x);
+  expect(pointer.x + 8).toBeLessThan(preview.x + preview.width);
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await expect(dragging(page)).toHaveCount(0);
+  await expect.poll(order).toEqual(["ink", "intro", "layout"]);
   // A press inside a card's records that moves never drags the card.
   await slot("layout")
     .getByRole("button", { name: /^Log time/u })

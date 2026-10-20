@@ -199,8 +199,10 @@ export function FocusWeek({
                   )}
                 </span>
               </span>
+              {/* Two lines in every column, so the labels share one baseline. */}
               <span className="plus-focus-bar-day" aria-hidden="true">
-                {shortDay(day.date, language)} {Number(day.date.slice(8))}
+                <span>{shortDay(day.date, language)}</span>
+                <span>{Number(day.date.slice(8))}</span>
               </span>
             </button>
           );

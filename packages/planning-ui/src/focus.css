@@ -105,14 +105,15 @@
 /* Today's steps drag by their whole row, as Plan's cards do (src/row-drag.ts). The grip is an
    overlay in the card's left padding for the keyboard and screen readers: it shows on hover of its
    card or on its own keyboard focus, by opacity alone, so nothing moves; touch screens hold the
-   row for 250ms instead. */
+   row for 250ms instead. Its selectors outrank the shared dimmed `button:disabled`, so a grip that
+   cannot be used now stays hidden until hover shows it. */
 .plus-focus-stack.is-sortable > .plus-focus-slot {
   cursor: grab;
 }
 .plus-focus-stack.is-sortable .plus-focus-title {
   cursor: inherit;
 }
-.plus-root .plus-focus-grip {
+.plus-root .plus-focus-slot .plus-focus-grip {
   position: absolute;
   inset: 0 auto 0 0;
   display: flex;
@@ -130,17 +131,26 @@
     opacity: 1;
   }
 }
-.plus-root .plus-focus-grip:focus-visible {
+.plus-root .plus-focus-slot .plus-focus-grip:focus-visible {
   opacity: 1;
   outline-offset: -2px;
 }
 /* One that cannot be used now shows dimmed when it shows. */
-.plus-root .plus-focus-grip:is(:disabled, [aria-disabled="true"]) {
+.plus-root .plus-focus-slot .plus-focus-grip:is(:disabled, [aria-disabled="true"]) {
   color: color-mix(in srgb, var(--plus-muted) 50%, transparent);
   cursor: default;
 }
 .plus-focus-slot.is-dragging {
   opacity: 0.3;
+}
+/* The dragged step's preview is as wide as its row, so it stays under the pointer as the task
+   list's does. */
+.planning-step-overlay.plus-focus-overlay {
+  width: 100%;
+  max-width: none;
+  min-height: 82px;
+  align-content: center;
+  border-radius: 7px;
 }
 /* The task list's 2px insertion line, centred in the gap. */
 .plus-focus-slot:is(.is-insert-before, .is-insert-after)::before {
@@ -440,12 +450,15 @@
   gap: 4px;
   min-width: 0;
 }
-/* A narrow column puts "3h 20m" and "Mon 12" on two lines each. */
+/* A narrow column puts "3h 20m" on two lines; a day is always two, its weekday over its date. */
 .plus-focus-bar-value,
 .plus-focus-bar-day {
   font-size: 12px;
   line-height: 16px;
   text-align: center;
+}
+.plus-focus-bar-day > span {
+  display: block;
 }
 .plus-focus-bar-value {
   color: var(--plus-text);
@@ -485,7 +498,8 @@
 }
 .plus-focus-group {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) minmax(60px, 28%) auto;
+  /* A fixed time column, which fits "23h 56m", keeps every row's bar on one track. */
+  grid-template-columns: 8px minmax(0, 1fr) minmax(60px, 28%) 56px;
   align-items: center;
   gap: 10px;
   padding: 6px 0;
