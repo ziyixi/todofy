@@ -59,24 +59,6 @@ variable "access_email_idp_name" {
   default = "One-time PIN"
 }
 
-variable "flowday_policy_names" {
-  type    = map(string)
-  default = { flowday = "FlowDay owner", flowday-bypass = "FlowDay PWA files" }
-}
-
-variable "flowday_policy_options" {
-  type = map(object({
-    session_duration = optional(string)
-    connection_rules = optional(object({
-      rdp = optional(object({
-        allowed_clipboard_local_to_remote_formats = optional(list(string))
-        allowed_clipboard_remote_to_local_formats = optional(list(string))
-      }))
-    }))
-  }))
-  default = { flowday = { session_duration = "24h" }, flowday-bypass = {} }
-}
-
 variable "legacy_mail_hero_backup" {
   type    = bool
   default = true

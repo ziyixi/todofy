@@ -86,8 +86,8 @@ REQUIRED_VALUES = (
     "access_allowed_idp_ids",
     "access_github_idp_id",
 )
-OPTIONAL_VALUES = frozenset({"access_github_oauth", "access_email_idp_name", "flowday_policy_names", "flowday_policy_options",
-                             "legacy_mail_hero_backup", "mail_route_ready", "mail_receive_address", "mail_route_name"})
+OPTIONAL_VALUES = frozenset({"access_github_oauth", "access_email_idp_name", "legacy_mail_hero_backup", "mail_route_ready",
+                             "mail_receive_address", "mail_route_name"})
 # Environment that could print values (TF_LOG*), change the configuration behind the committed files
 # (TF_ENCRYPTION could add an unencrypted fallback, TF_CLI_ARGS* any flag, TF_VAR_* any variable), point the
 # backend elsewhere (AWS_*) or pick another workspace. The child environment never inherits them.
@@ -233,29 +233,6 @@ def parse_values(text: str) -> dict[str, Any]:
         if (address.count("@") != 1 or not address.endswith("@inbox." + zone)
                 or not address.split("@", 1)[0] or any(c.isspace() for c in address)):
             raise Refused("mail_receive_address must use the dedicated inbox subdomain")
-    if "flowday_policy_names" in values and (not isinstance(values["flowday_policy_names"], dict)
-            or set(values["flowday_policy_names"]) != {"flowday", "flowday-bypass"}
-            or any(not isinstance(item, str) or not item for item in values["flowday_policy_names"].values())):
-        raise Refused("flowday_policy_names must name both FlowDay policies")
-    options = values.get("flowday_policy_options")
-    if options is not None:
-        if not isinstance(options, dict) or set(options) != {"flowday", "flowday-bypass"}:
-            raise Refused("flowday_policy_options must hold both policies")
-        for item in options.values():
-            if not isinstance(item, dict) or set(item) - {"session_duration", "connection_rules"}:
-                raise Refused("flowday_policy_options has invalid fields")
-            if item.get("session_duration") is not None and not isinstance(item["session_duration"], str):
-                raise Refused("flowday policy duration must be a string")
-            connection = item.get("connection_rules")
-            if connection is not None:
-                if not isinstance(connection, dict) or set(connection) - {"rdp"}:
-                    raise Refused("flowday connection rules must use the supported provider shape")
-                rdp = connection.get("rdp")
-                keys = {"allowed_clipboard_local_to_remote_formats", "allowed_clipboard_remote_to_local_formats"}
-                if rdp is not None and (not isinstance(rdp, dict) or set(rdp) - keys
-                        or any(value is not None and (not isinstance(value, list) or any(not isinstance(v, str) for v in value))
-                               for value in rdp.values())):
-                    raise Refused("flowday clipboard rules must use the supported provider shape")
     return values
 
 
@@ -721,9 +698,8 @@ def check_outputs(plan_json: Any, env: dict[str, str], repo: Path = REPO) -> lis
         if on_actions_runner(env):
             raise Refused("the wrangler.toml check needs Python 3.11+ (tomllib) on the runner")
         print("infra_state: wrangler.toml check skipped: it needs Python 3.11+ (tomllib)", file=sys.stderr)
-        return list(plan_json.get("_flowday_include_errors", []))
-    return [*output_problems(planned_outputs(plan_json), read_wrangler_configs(repo)),
-            *plan_json.get("_flowday_include_errors", [])]
+        return []
+    return output_problems(planned_outputs(plan_json), read_wrangler_configs(repo))
 
 
 def drift_exit(summary: dict) -> int:
@@ -754,7 +730,6 @@ class Session:
         # Before anything can print: every value inside INFRA_TFVARS, then the derived credentials.
         mask(value_scalars(values), env)
         fetch = fetch or (lambda path: cloudflare_get(token, path))
-        self.fetch = fetch
         self.credentials = s3_credentials(env, values["account_id"], fetch)
         mask([self.credentials[0], self.credentials[1]], env)
         self.endpoint = s3_endpoint or endpoint(values["account_id"])
@@ -791,8 +766,6 @@ class Session:
         out = self.work / f"{name}.tfplan"
         code = self.tofu.plan(self.values_file, out)
         plan_json = self.tofu.show_json(out)
-        from flowday_policy_guard import verify
-        plan_json["_flowday_include_errors"] = verify(plan_json, self.values, self.fetch)
         summary, rendered = summarize(plan_json)
         return code, summary, rendered, plan_json
 
@@ -838,7 +811,7 @@ def command_plan(args: argparse.Namespace, env: dict[str, str]) -> int:
         if verdict == EXIT_DESTRUCTIVE:
             print("infra_state: the plan deletes, replaces or forgets a resource", file=sys.stderr)
         elif verdict == EXIT_MISMATCH:
-            print("infra_state: output configuration or actual FlowDay rules differ from the declared values", file=sys.stderr)
+            print("infra_state: output configuration differs from the declared values", file=sys.stderr)
         elif verdict == EXIT_DRIFT:
             print("infra_state: the plan has actions: Cloudflare and infra/ differ (drift)", file=sys.stderr)
         if verdict in (EXIT_DRIFT, EXIT_DESTRUCTIVE):
@@ -1133,9 +1106,6 @@ def command_reconcile(args: argparse.Namespace, env: dict[str, str]) -> int:
         problems = check_outputs(document, env)
         team = load_profile(REPO)["access_issuer"].removeprefix("https://").removesuffix(".cloudflareaccess.com")
         reasons = manual_reasons(document, team)
-        reasons.extend({"address": 'cloudflare_zero_trust_access_policy.flowday["' + item.rsplit(":", 1)[1] + '"]',
-                        "reason": "FLOWDAY_INCLUDE_REQUIRES_OWNER_REPAIR"}
-                       for item in document.get("_flowday_include_errors", []))
         module = load_summary_module()
         keys = module.Keys(module.config_keys(str(INFRA)))
         reasons = [{"address": module.safe_address(item["address"], keys), "reason": item["reason"]}

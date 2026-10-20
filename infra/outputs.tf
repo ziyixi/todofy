@@ -1,13 +1,12 @@
 # Identifiers the apps' wrangler.toml files repeat, read from the managed objects. Not secret: every value is also
 # committed in a wrangler.toml. infra_state.py compares them with those files on every plan (README.md "Outputs"),
 # so an AUD that changed in Cloudflare, or a wrangler.toml that names another database, fails "Infra drift" and
-# "Infra apply". Keys are Worker names (access_aud also has the two applications no Worker checks itself).
+# "Infra apply". Keys are Worker names (access_aud also has the one application no Worker checks itself).
 
 output "access_aud" {
   description = "Access application AUD per app: each Worker's vars.ACCESS_AUDIENCE must equal access_aud[<its name>]."
   value = merge(
     { for key, app in cloudflare_zero_trust_access_application.owner : key => app.aud },
-    { for key, app in cloudflare_zero_trust_access_application.flowday : key => app.aud },
     { for app in cloudflare_zero_trust_access_application.mail_hero_backup : "mail-hero-backup" => app.aud },
   )
 }

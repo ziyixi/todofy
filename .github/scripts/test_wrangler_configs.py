@@ -44,8 +44,8 @@ from catalog import load_catalog  # noqa: E402
 PRODUCTION = load_catalog(REPO).worker_configs()
 # Configs of Workers that CI checks but does not deploy yet (no deploy job, no hostname, placeholder resource ids).
 # They stay out of PRODUCTION, which the dashboard's drift check compares with the live account
-# (drift_desired.py). FlowDay moved to PRODUCTION at F2 (flowday/docs/design.md section 11), the links app at L2
-# (links/docs/design.md section 11) and the watch app at W2 (watch/docs/design.md section 11): empty.
+# (drift_desired.py). The links app moved to PRODUCTION at L2 (links/docs/design.md section 11) and the watch app at W2
+# (watch/docs/design.md section 11): empty.
 UNDEPLOYED: dict[str, str] = {}
 # Runtime-test configs stay next to their tests.
 TEST_CONFIGS = {
@@ -69,7 +69,6 @@ WRAPPERS = {
         ["todofy-core", "todofy"],
     ),
     "dashboard": ("dashboard/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["home"]),
-    "flowday": ("flowday/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["flowday"]),
     "links": ("links/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["links"]),
     "tasks": ("tasks/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["tasks"]),
     "watch": ("watch/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["watch"]),
@@ -102,8 +101,6 @@ PERSONAL_INPUTS = {
     "TODOFY_ACCESS_OWNER_ALIASES",
     "DASHBOARD_ACCESS_OWNER",
     "DASHBOARD_ACCESS_OWNER_ALIASES",
-    "FLOWDAY_ACCESS_OWNER",
-    "FLOWDAY_ACCESS_OWNER_ALIASES",
     "LINKS_ACCESS_OWNER",
     "LINKS_ACCESS_OWNER_ALIASES",
     "WATCH_ACCESS_OWNER",
@@ -119,12 +116,10 @@ PERSONAL_INPUTS = {
     "BRIEF_MAIL_FROM",
     "BRIEF_MAIL_TO",
 }
-# Personal inputs a deploy job reads from another app's secret: the owner of FlowDay, the links app and the watch app is
-# the dashboard's owner (one person, the same Access identities), so their deploys read the dashboard's secrets
-# (flowday/README.md "Deploy", links/README.md "Deploy", watch/README.md "Deploy").
+# Personal inputs a deploy job reads from another app's secret: the owner of the links app, the watch app, mailsort,
+# recall and the brief is the dashboard's owner (one person, the same Access identities), so their deploys read the
+# dashboard's secrets (links/README.md "Deploy", watch/README.md "Deploy").
 SHARED_SECRETS = {
-    "FLOWDAY_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
-    "FLOWDAY_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
     "LINKS_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
     "LINKS_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
     "WATCH_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
@@ -152,7 +147,7 @@ TOGGLES = {
     # the brief's ceiling (off, archive, shadow or live): the emergency switch of brief/docs/design.md section 15.
     "BRIEF_MODE",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "flowday-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy")
+DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy")
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -224,7 +219,7 @@ def tracked_files() -> list[str]:
 
 
 def wrapper_mode(call: str) -> str:
-    """The `deploy-vars-inputs` mode of a wrapper call: "exec" / "secrets" (Mail Hero, dashboard, FlowDay); "core" /
+    """The `deploy-vars-inputs` mode of a wrapper call: "exec" / "secrets" (Mail Hero, dashboard, links, ...); "core" /
     "gateway" for Todofy's `exec core` / `exec gateway`, and "secrets_core" / "secrets_gateway" for its `secrets`."""
     words = call.split()
     return words[-1] if words[0] == "exec" else "_".join(words)
@@ -448,17 +443,13 @@ class Files(unittest.TestCase):
         tasks = load(PRODUCTION["tasks"])
         core = load(PRODUCTION["todofy-core"])
         gateway = load(PRODUCTION["todofy"])
-        flowday = load(PRODUCTION["flowday"])
         self.assertEqual(tasks["services"], [{
             "binding": "PLANNING", "service": "todofy", "entrypoint": "Planning", "props": {"source": "tasks"},
         }])
         self.assertEqual(core["services"], [{
             "binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"access": "read-write"},
         }])
-        self.assertEqual(flowday["services"], [{
-            "binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"access": "read"},
-        }])
-        # Todofy binds no other app: FlowDay's Focus left with the Plan and Focus move into Tasks.
+        # The gateway binds no other app: Focus and planning live in Tasks.
         self.assertNotIn("services", gateway)
         for config in (core, gateway):
             # Tasks is the only task store: no source switch remains.
@@ -469,7 +460,7 @@ class Files(unittest.TestCase):
 class Undeployed(unittest.TestCase):
     """A config CI only checks: on the shared account, closed to the internet (no workers.dev, no preview URL, no
     route), nothing personal committed, no deploy job, and its wrapper's inputs only ever placeholders in ci.yml.
-    A new app starts here, as FlowDay did until F2, the links app until L2 and the watch app until W2."""
+    A new app starts here, as the links app did until L2 and the watch app until W2."""
 
     # Worker name -> its deploy wrapper, for every UNDEPLOYED config (none since W2).
     WRAPPER: dict[str, str] = {}
@@ -545,7 +536,7 @@ class LocalDev(unittest.TestCase):
         return found
 
     def test_the_production_configs_with_routes_are_the_ones_dev_runs(self):
-        for worker in ("mail-hero", "todofy", "home", "flowday", "links", "watch"):
+        for worker in ("mail-hero", "todofy", "home", "links", "watch"):
             with self.subTest(worker=worker):
                 self.assertTrue(load(PRODUCTION[worker]).get("routes"))
 
@@ -557,7 +548,6 @@ class LocalDev(unittest.TestCase):
             {
                 "mail-hero/cloudflare/package.json",
                 "dashboard/worker/package.json",
-                "flowday/worker/package.json",
                 "links/worker/package.json",
                 "watch/worker/package.json",
                 "todofy/docs/dev-notes.md",
@@ -613,17 +603,6 @@ class Hosts(unittest.TestCase):
         self.assertEqual(self.home["routes"], [{"pattern": host, "custom_domain": True}])
         self.assertNotIn(host, {self.mail_hero, self.todofy, *self.hooks})
 
-    def test_flowday_is_on_its_production_host_only(self):
-        """F4: FlowDay's one Custom Domain is its PUBLIC_HOST (the CSRF origin), the production host it took over
-        from the old container. The F3 staging host flowday-next.ziyixi.science is in no config any more."""
-        flowday = load(PRODUCTION["flowday"])
-        host = flowday["vars"]["PUBLIC_HOST"]
-        self.assertEqual(host, "flowday.ziyixi.science")
-        self.assertEqual(flowday["routes"], [{"pattern": host, "custom_domain": True}])
-        hosts = [route["pattern"] for path in PRODUCTION.values() for route in load(path).get("routes", [])]
-        self.assertEqual(hosts.count(host), 1)
-        self.assertNotIn("flowday-next.ziyixi.science", hosts)
-
     def test_links_is_on_its_one_host(self):
         """L2: the links app's one Custom Domain is its PUBLIC_HOST (the CSRF origin), s.ziyixi.science."""
         links = load(PRODUCTION["links"])
@@ -644,21 +623,20 @@ class Hosts(unittest.TestCase):
     def test_the_dashboard_links_to_the_app_hosts(self):
         """Each app tile opens its Worker's PUBLIC_HOST; the links tile opens the launcher /_/ (links/docs/design.md)."""
         registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
-        urls = dict(re.findall(r"id: '(mail-hero|todofy|flowday|links)',[^}]*?url: '([^']+)'", registry, re.S))
-        host = {app: load(PRODUCTION[app])["vars"]["PUBLIC_HOST"] for app in ("flowday", "links")}
+        urls = dict(re.findall(r"id: '(mail-hero|todofy|links)',[^}]*?url: '([^']+)'", registry, re.S))
+        links = load(PRODUCTION["links"])["vars"]["PUBLIC_HOST"]
         self.assertEqual(
             urls,
             {
                 "mail-hero": f"https://{self.mail_hero}/",
                 "todofy": f"https://{self.todofy}/",
-                "flowday": f"https://{host['flowday']}/",
-                "links": f"https://{host['links']}/_/",
+                "links": f"https://{links}/_/",
             },
         )
 
     def test_the_dashboard_registers_every_production_worker_and_d1_database(self):
         """Every deployed Worker has a WORKERS row in dashboard/worker/src/registry.ts and every D1 database a resource
-        whose match is its database_id, so a new app (FlowDay at F4, links at L2, watch at W2) cannot show up on the
+        whose match is its database_id, so a new app (links at L2, watch at W2) cannot show up on the
         dashboard as 未登记. An app moves into PRODUCTION when it deploys, and this then fails until the registry names
         it. That it also has a tile is the next test."""
         registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
@@ -919,50 +897,11 @@ class Workflow(unittest.TestCase):
                         else:
                             self.assertRegex(value, r"^(''|placeholder|[a-z.-]*@([a-z-]+\.)*example\.com)$")
 
-    def test_flowday_deploy_reads_the_dashboard_owner_and_its_own_keys(self):
-        """FlowDay's owner addresses come from the dashboard's secrets (no FLOWDAY_ACCESS_OWNER* secret exists); its
-        CSRF key is its own, never another app's."""
-        self.assertLessEqual(set(SHARED_SECRETS), PERSONAL_INPUTS)
-        self.assertLessEqual(set(SHARED_SECRETS.values()), PERSONAL_INPUTS)
-        read = {}
-        for step in steps(self.jobs["flowday-deploy"]):
-            for name, value in step["env"].items():
-                if match := re.fullmatch(r"\$\{\{ secrets\.([A-Z0-9_]+) \}\}", value):
-                    read.setdefault(name, set()).add(match.group(1))
-        self.assertEqual(read["FLOWDAY_ACCESS_OWNER"], {"DASHBOARD_ACCESS_OWNER"})
-        self.assertEqual(read["FLOWDAY_ACCESS_OWNER_ALIASES"], {"DASHBOARD_ACCESS_OWNER_ALIASES"})
-        self.assertEqual(read["FLOWDAY_CSRF_SIGNING_KEY"], {"FLOWDAY_CSRF_SIGNING_KEY"})
-        self.assertEqual(read["CLOUDFLARE_API_TOKEN"], {"CF_API_TOKEN"})
-        self.assertEqual(set(read), {*markers(WRAPPERS["flowday"][0])["secrets"], "FLOWDAY_WORKER_SECRETS", "CLOUDFLARE_API_TOKEN"})
-        self.assertNotRegex(effective_ci(), r"secrets\.FLOWDAY_ACCESS_OWNER")
-        # The secrets are read only where the secrets file is written (and the token where Cloudflare is called).
-        writers = [step["name"] for step in steps(self.jobs["flowday-deploy"]) if "FLOWDAY_CSRF_SIGNING_KEY" in step["env"]]
-        self.assertEqual(writers, ["Write the Worker secrets file"])
-
-    def test_flowday_deploy_applies_migrations_before_the_worker_and_then_checks_production(self):
-        """F2: `wrangler d1 migrations apply DB --remote`, then the real deploy through the wrapper, in one step after
-        the hostname guard; then a check of the live version and the migrations through the API (the host's /health
-        needs an owner login), before the probes of its host (PUBLIC_HOST, since F3)."""
-        flowday = steps(self.jobs["flowday-deploy"])
-        names = [step["name"] for step in flowday]
-        guard = names.index("Check the hostnames against production")
-        [deploy] = [i for i, s in enumerate(flowday) if "deploy" in wrangler_commands(s["run"]) and "--dry-run" not in s["run"]]
-        self.assertLess(guard, deploy)
-        script = flowday[deploy]["run"]
-        self.assertLess(script.index("wrangler d1 migrations apply DB --remote --config ../wrangler.toml"), script.index("deploy-vars.mjs exec"))
-        check = flowday[deploy + 1]
-        self.assertEqual(check["name"], "Check that production runs this commit")
-        self.assertEqual(check["run"], 'bash "$GITHUB_WORKSPACE/tools/deploy-probes/production.sh" flowday ../wrangler.toml DB')
-        probe = (REPO / "tools/deploy-probes/production.sh").read_text()
-        for command in ("deployments status", "versions view", 'd1 migrations list "$d1" --remote'):
-            self.assertIn(f"wrangler {command}", probe)
-        # Reads only: no deploy, upload, rollback, secret or SQL in the check.
-        self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(probe)))
-        self.assertNotIn("execute", probe)
-
     def test_links_deploy_reads_the_dashboard_owner_and_its_own_csrf_key(self):
         """The links app's owner addresses come from the dashboard's secrets (no LINKS_ACCESS_OWNER* secret exists); its
         CSRF key is its own, never another app's. The secrets are read only where the secrets file is written."""
+        self.assertLessEqual(set(SHARED_SECRETS), PERSONAL_INPUTS)
+        self.assertLessEqual(set(SHARED_SECRETS.values()), PERSONAL_INPUTS)
         read = {}
         for step in steps(self.jobs["links-deploy"]):
             for name, value in step["env"].items():
@@ -979,8 +918,8 @@ class Workflow(unittest.TestCase):
 
     def test_links_deploy_applies_migrations_before_the_worker_and_then_checks_production_and_the_host(self):
         """L2: after the hostname guard, `wrangler d1 migrations apply DB --remote` and then the real deploy through the
-        wrapper in one step; then FlowDay's check of the live version and the migrations (reads only), the Access probe
-        of the owner's half and the probe of the Worker's own anonymous answers."""
+        wrapper in one step; then a check of the live version and the migrations through the API (reads only), the
+        Access probe of the owner's half and the probe of the Worker's own anonymous answers."""
         links = steps(self.jobs["links-deploy"])
         names = [step["name"] for step in links]
         guard = names.index("Check the hostnames against production")
@@ -990,8 +929,13 @@ class Workflow(unittest.TestCase):
         self.assertLess(script.index("wrangler d1 migrations apply DB --remote --config ../wrangler.toml"), script.index("deploy-vars.mjs exec"))
         check = links[deploy + 1]
         self.assertEqual(check["name"], "Check that production runs this commit")
-        [same] = [s for s in steps(self.jobs["flowday-deploy"]) if s["name"] == check["name"]]
-        self.assertEqual(check["run"].replace('production.sh" links', 'production.sh" flowday'), same["run"])
+        self.assertEqual(check["run"], 'bash "$GITHUB_WORKSPACE/tools/deploy-probes/production.sh" links ../wrangler.toml DB')
+        probe = (REPO / "tools/deploy-probes/production.sh").read_text()
+        for command in ("deployments status", "versions view", 'd1 migrations list "$d1" --remote'):
+            self.assertIn(f"wrangler {command}", probe)
+        # Reads only: no deploy, upload, rollback, secret or SQL in the check.
+        self.assertFalse({"deploy", "versions upload", "versions deploy", "rollback", "secret"} & set(wrangler_commands(probe)))
+        self.assertNotIn("execute", probe)
         self.assertEqual(
             names[deploy + 2 :],
             [
@@ -1085,16 +1029,15 @@ class Workflow(unittest.TestCase):
             self.assertIn('node ../deploy/bundle-size.mjs "$RUNNER_TEMP/fleet-bundle"', dry["run"])
         self.assertIn("fleet-deploy", needs(self.jobs["dashboard-deploy"]))
 
-    def test_flowday_links_and_watch_accept_exactly_the_owner_values_the_dashboard_accepts(self):
+    def test_links_and_watch_accept_exactly_the_owner_values_the_dashboard_accepts(self):
         """The same secrets feed these wrappers: their owner and alias rules must be the same lines, or a valid
-        dashboard value could stop FlowDay deploy, Links deploy or Watch deploy, or the reverse. Here, in Changes, a change to any one wrapper runs this comparison, whichever app's checks it runs."""
+        dashboard value could stop Links deploy or Watch deploy, or the reverse. Here, in Changes, a change to any one wrapper runs this comparison, whichever app's checks it runs."""
         rules = r"^(?:const ACCESS_EMAIL|const MAX_ALIASES|const MAX_LIST_CHARS) = .+$"
-        dashboard, flowday, links, watch = (
+        dashboard, links, watch = (
             re.findall(rules, (REPO / app / "deploy" / "deploy-vars.mjs").read_text(), re.M)
-            for app in ("dashboard", "flowday", "links", "watch")
+            for app in ("dashboard", "links", "watch")
         )
         self.assertEqual(len(dashboard), 3)
-        self.assertEqual(flowday, dashboard)
         self.assertEqual(links, dashboard)
         self.assertEqual(watch, dashboard)
 

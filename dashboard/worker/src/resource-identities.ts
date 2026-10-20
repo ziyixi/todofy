@@ -4,7 +4,6 @@ export const OWNER_ZONE = "ziyixi.science";
 export const RESOURCE_IDENTITIES: Readonly<Record<string, string | null>> = {
   "brief-state": "6edfe7c19d6748b186ee38bb48c686be",
   "fleet-state": "a3d3d60939e54b49951af9586232c50e",
-  "flowday-db": "df104e83-7183-47e3-b2f9-638dc7502c13",
   "home-state": "acddddf88d624194a68af430fd1a90ff",
   "links-db": "2f8c5331-06ce-4347-8c0a-90fe51c82260",
   "mail-coordinator": "55c248f9d82c45f3a89d2de1d719d5db",

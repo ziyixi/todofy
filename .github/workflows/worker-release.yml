@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: ${{ inputs.app == 'website-relay' && 10 || 15 }}
     environment:
       name: production
-      url: ${{ steps.todofy.outputs.url || steps.mail_hero.outputs.url || steps.dashboard.outputs.url || steps.flowday.outputs.url || steps.links.outputs.url || steps.watch.outputs.url || steps.mailsort.outputs.url || steps.recall.outputs.url || steps.brief.outputs.url || steps.fleet.outputs.url }}
+      url: ${{ steps.todofy.outputs.url || steps.mail_hero.outputs.url || steps.dashboard.outputs.url || steps.links.outputs.url || steps.watch.outputs.url || steps.mailsort.outputs.url || steps.recall.outputs.url || steps.brief.outputs.url || steps.fleet.outputs.url }}
     concurrency:
       group: ${{ inputs.app }}-production
       cancel-in-progress: false
@@ -127,17 +127,6 @@ jobs:
           dashboard-cf-analytics-token: ${{ secrets.DASHBOARD_CF_ANALYTICS_TOKEN }}
           dashboard-csrf-signing-key: ${{ secrets.DASHBOARD_CSRF_SIGNING_KEY }}
           dashboard-worker-secrets: ${{ secrets.DASHBOARD_WORKER_SECRETS }}
-      - name: Release flowday
-        id: flowday
-        if: inputs.app == 'flowday' && steps.preflight.outputs.required == 'true'
-        uses: ./.github/actions/release-flowday
-        with:
-          required: ${{ steps.preflight.outputs.required }}
-          cf-api-token: ${{ secrets.CF_API_TOKEN }}
-          dashboard-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
-          dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
-          flowday-csrf-signing-key: ${{ secrets.FLOWDAY_CSRF_SIGNING_KEY }}
-          flowday-worker-secrets: ${{ secrets.FLOWDAY_WORKER_SECRETS }}
       - name: Release links
         id: links
         if: inputs.app == 'links' && steps.preflight.outputs.required == 'true'

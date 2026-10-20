@@ -31,7 +31,7 @@ export const DAY = 86_400_000;
 
 /**
  * A synthetic link-only entry (an Access-protected host shown as a link, never probed): the registry
- * has none since the owner removed Flowday from the dashboard (2026-09-30), and the kind stays covered.
+ * has had none since 2026-09-30, and the kind stays covered.
  */
 export const LINK_ONLY_ENTRY: EntryDef = {
   id: 'link-demo',
@@ -112,7 +112,7 @@ export function input(patch: Partial<EvalInput> = {}): EvalInput {
     lastTickAt: NOW,
     analyticsConfigured: true,
     statuses: { 'mail-hero': status('mail-hero'), todofy: status('todofy'), watch: status('watch'), fleet: status('fleet'), newsletter: status('newsletter'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks') },
-    probes: { website: probe(), flowday: probe({ latency_ms: 95 }), links: probe({ latency_ms: 40 }) },
+    probes: { website: probe(), links: probe({ latency_ms: 40 }) },
     scripts: scripts(),
     digest: {
       ...NO_DIGEST,

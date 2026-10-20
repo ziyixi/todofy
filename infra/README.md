@@ -46,7 +46,7 @@ current plan. The P4 dispatch "Infra apply" remains available; the Writes list b
 ### Owner rule (2026-10-01)
 
 Only objects that belong to the monorepo apps go here: mail-hero, todofy and todofy-core, the dashboard
-`home`, `flowday`, `links`, `watch`, the website `ziyixi-website`, the relay `ziyixi-notion-publish`, Fleet and the dedicated VPS platform endpoint.
+`home`, `links`, `watch`, the website `ziyixi-website`, the relay `ziyixi-notion-publish`, Fleet and the dedicated VPS platform endpoint.
 Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`infra_guard.py`](../.github/scripts/infra_guard.py) enforces the boundary on every push (through
 [`test_infra_config.py`](../.github/scripts/test_infra_config.py) in `Changes`, and again in
@@ -72,10 +72,10 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (41 objects)
+### Managed here (36 objects)
 
-This is the maximum declared count. Fresh bootstrap creates 39 objects before the first Worker release,
-then adds its exact mail rule (40). An adopted account retains the frozen legacy backup app (41).
+This is the maximum declared count. Fresh bootstrap creates 34 objects before the first Worker release,
+then adds its exact mail rule (35). An adopted account retains the frozen legacy backup app (36).
 Objects being retired ([Retiring an app](#retiring-an-app)) are not counted: [`retired.tf`](retired.tf) moves them
 out of the managed addresses so that the next apply deletes them.
 Older private inputs can temporarily keep the existing external IdP references; bootstrap captures and
@@ -85,8 +85,6 @@ imports their actual IDs before switching to the managed references.
 | --- | --- | --- |
 | `cloudflare_zero_trust_access_identity_provider.github[0]` | GitHub login | Imported OAuth secrets stay untouched because Cloudflare never returns them; fresh creation uses the private OAuth input |
 | `cloudflare_zero_trust_access_identity_provider.email[0]` | Email PIN login | Only the provider already selected by these owner applications is adopted |
-| `cloudflare_zero_trust_access_policy.flowday["flowday"]` | FlowDay login | Preserves the existing owner email and GitHub login rules |
-| `cloudflare_zero_trust_access_policy.flowday["flowday-bypass"]` | FlowDay PWA files | The existing everyone bypass on the PWA path |
 | `cloudflare_email_routing_rule.mail_hero[0]` | Exact Mail Hero receive address | Enabled after the Worker exists; no catchall or root mailbox DNS |
 | `cloudflare_zero_trust_access_policy.owner` | reusable Access policy "Mail Hero owner" | Allow. Includes the owner's email(s), which come from a sensitive variable. **Shared, see below** |
 | `cloudflare_zero_trust_access_policy.github_owner` | reusable Access policy "Mail Hero GitHub owner" | Allow. Includes the owner's email(s) and requires the GitHub login method. **Shared, see below** |
@@ -112,12 +110,10 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_tunnel_cloudflared_config.platform` | Platform ingress | Loopback daemon HTTP only, then 404; never routes Kubernetes |
 | `cloudflare_dns_record.platform["runtime"]` | Runtime CNAME | Only this exact platform host; existing Worker and mailbox DNS remain with their current owners |
 | `cloudflare_zero_trust_access_application.mail_hero_backup` | Access app "Mail Hero backup API" | `mail-hero.ziyixi.science/api/internal/backup/*`. Used by the backup collector's machine identity (mail-hero/AGENTS.md §7). **Frozen**: an apply refuses any write to it ([Apply](#apply-p4)) |
-| `cloudflare_zero_trust_access_application.flowday["flowday"]` | Access app "flowday" | `flowday.ziyixi.science`, session 168h, FlowDay's own policy by id. See [FlowDay](#flowday) |
-| `cloudflare_zero_trust_access_application.flowday["flowday-bypass"]` | Access app "flowday-bypass" | `flowday.ziyixi.science/pwa/*` (and the staging host's), session 6h, FlowDay's own policy by id. See [FlowDay](#flowday) |
-| `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "flowday" \| "links"]` | D1 databases | Existence only |
+| `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "links" \| "tasks"]` | D1 databases | Existence only |
 | `cloudflare_r2_bucket.app["mail-hero-store" \| "mail-hero-backups" \| "todofy-backups" \| "recall-store"]` | R2 buckets | Existence only. `recall-store` is **created** here before recall's first deploy |
 
-**Never edit these objects in the Cloudflare dashboard** (FlowDay's and the links app's applications included). A
+**Never edit these objects in the Cloudflare dashboard** (the links app's application included). A
 hand edit is drift: the next "Infra apply" reverts it, and before the first apply it would even turn an import into
 `import+update`. Every change is a commit here and a dispatch of "Infra apply" ([Apply](#apply-p4)).
 
@@ -130,8 +126,8 @@ Every object has `prevent_destroy`, for two reasons:
 
 **The two reusable policies are shared.** Each is attached to the six owner-facing monorepo apps
 (Mail Hero, Todofy, Home, links, watch, Fleet), plus applications of self-hosted services outside the monorepo.
-The Mail Hero backup API uses only its own application-scoped policy, and FlowDay's two apps their own
-policies ([FlowDay](#flowday)). Changing a reusable policy here therefore also changes who can reach those
+The Mail Hero backup API uses only its own application-scoped policy. Changing a reusable policy here therefore
+also changes who can reach those
 outside services. This prototype never changes a policy's identity rules,
 because the include/require values are exactly the live values, passed in through variables. Renaming
 them to neutral names (`owner`, `owner-github`) is a P4 decision for the owner, because it affects
@@ -145,7 +141,7 @@ those other apps too.
 | DNS records of the Worker hostnames | wrangler (Custom Domains create read-only AAAA records) | They are read-only and wrangler-owned; the dedicated platform CNAME is managed above |
 | Email Routing: settings, catch-all, and the receive subdomain's MX/DKIM/SPF records | Email Routing (set up once) | The enable/DNS resources would try to write apex MX/SPF records, which would split the owner's mailbox. The exact Mail Hero address rule is managed separately in `mail-routing.tf`; bootstrap verifies its literal match and keeps private plan output off stdout |
 | The service token used by the backup collector, and the rules of the backup app's application-scoped policy | Cloudflare dashboard | A token created or replaced by OpenTofu would put its client secret in state, and replacing it breaks backups without any error. The policy is referenced only by id (see [Import notes](#import-notes)) |
-| Legacy Mail Hero backup policy and service token | Cloudflare dashboard | Kept frozen for existing accounts only; fresh accounts use the Worker-native backup and omit this application. FlowDay policies and selected owner IdPs are managed above |
+| Legacy Mail Hero backup policy and service token | Cloudflare dashboard | Kept frozen for existing accounts only; fresh accounts use the Worker-native backup and omit this application. Selected owner IdPs are managed above |
 | R2 lifecycle rules | none (only Cloudflare's default multipart-abort rule) | See [Storage](#storage) |
 | GitHub secrets and variables, ops switches (`*_PAUSED`, `*_MAINTENANCE_MODE`, …) | GitHub `production` environment | Secret values would end up in state. Switches are flipped at runtime, and IaC would flip them back |
 
@@ -162,51 +158,6 @@ Listed by category only. These are neither declared nor read, and their values a
 - identity providers unrelated to the selected owner login methods;
 - notification and budget alerts;
 - R2 buckets of other projects.
-
-## FlowDay
-
-FlowDay moved into the monorepo (flowday/docs/design.md) with two Access applications created before the
-move: `flowday` (the host) and `flowday-bypass` (its PWA files under `/pwa/*`, which must load without a
-login). Both are adopted unchanged (`cloudflare_zero_trust_access_application.flowday[...]`):
-
-- Each app retains its own reusable policy. Bootstrap imports their exact include/require, session and
-  connection rules into `cloudflare_zero_trust_access_policy.flowday[...]`; it does not move FlowDay
-  onto the shared owner policy or change the bypass. Authentication changes require explicit review.
-
-Cloudflare provider 5.25.0 (and 5.26.0) imports an empty `login_method` selector beside an email rule.
-Only these two policies ignore changes to `include` to avoid a perpetual update. Every plan and apply
-independently reads their actual rules and verifies the exact owner emails, GitHub provider, bypass,
-decision, `require` and `exclude`. A mismatch reports `FLOWDAY_INCLUDE_MISMATCH` and blocks apply.
-For this provider defect, restore the exact declared include rules in the official Access policy UI,
-then rerun the check; an approved saved plan cannot repair this ignored field. Fresh creation still
-uses the HCL include rules. The exception does not cover applications or other policies.
-
-Every change to these two applications goes through this directory, never the dashboard (FlowDay's own runbooks,
-`flowday/README.md` "Rollback and removal" and `flowday/docs/design.md` section 11, point here):
-
-- **The F3 staging host left through OpenTofu (after F4, 2026-10-01).** Both apps listed
-  `flowday-next.ziyixi.science` (and its `/pwa/*`) as a second destination. After the first P4 apply and after the
-  commit that cleared F4's cf-guard allowances, **one commit** dropped `flowday-next.ziyixi.science` from both entries
-  of `local.flowday_apps` and empties `RETIRING_HOSTS` in
-  [`test_infra_config.py`](../.github/scripts/test_infra_config.py) (`test_retiring_hosts_are_exact` fails if only
-  one of the two changes). Its "Infra drift" run must show exactly `update: 2`, the addresses
-  `cloudflare_zero_trust_access_application.flowday["flowday"]` and `["flowday-bypass"]`, and nothing else; then
-  dispatch "Infra apply" with `update=2@<the fingerprint of that run>`. A local plan of exactly that change
-  (2026-10-01, not applied) showed an in-place update of the two apps and no replacement, so their AUDs (and
-  FlowDay's `ACCESS_AUDIENCE`) stay. It needs a token with Access: Apps and Policies Edit
-  ([Replacing the token](#replacing-the-token)).
-- **Adding the staging host back** (the F3 revert, or step 6 of the F4 rollback in `flowday/README.md`): the same
-  way in reverse, one commit that adds it to both entries and to `RETIRING_HOSTS`, `update: 2`, then "Infra apply".
-- **F6 (retiring `flowday-bypass`)** is its own reviewed change to this directory, planned when F6 starts. The
-  application has `prevent_destroy` (on the whole `flowday` resource), and the guard forbids `removed` blocks, so
-  either way needs a narrow, reviewed exception in [`infra_guard.py`](../.github/scripts/infra_guard.py) for exactly
-  that address: OpenTofu deletes the application (a `delete` in the plan), or a `removed` block with
-  `destroy = false` forgets it (`forget`) and it is deleted by hand afterwards. Both are destructive, so the
-  dispatch needs `confirm_destructive` = `delete-replace-forget` and the reviewed counts and fingerprint; the same
-  commit drops its key from `local.flowday_apps` and its id from `ids.tf`. Deleting it in the
-  dashboard first would turn into a `create` in the next plan.
-- **Removing FlowDay altogether** (`flowday/README.md` "Remove FlowDay's Worker") takes its D1 database and both
-  applications out of this directory in a reviewed change of the same kind, never by hand.
 
 ## DNS
 
@@ -251,10 +202,9 @@ All values come from a tfvars file **outside the repository** (locally) or from 
 | `account_id` | no | Kept out of `infra/` all the same. Several `wrangler.toml` files already contain it, but this directory adds no new copy |
 | `access_owner_emails` | **yes** | The live include list of "Mail Hero owner" |
 | `access_github_owner_emails` | **yes** | The live include list of "Mail Hero GitHub owner" |
-| `access_allowed_idp_ids` | no | Identity provider ids allowed on the seven owner-facing apps (links, watch and Fleet have the same list as the others; FlowDay's apps allow every provider, `allowed_idps` unset) |
+| `access_allowed_idp_ids` | no | Identity provider ids allowed on the seven owner-facing apps (links, watch and Fleet have the same list as the others) |
 | `access_github_idp_id` | no | The GitHub identity provider that "Mail Hero GitHub owner" requires |
 | `access_github_oauth` | **yes** | Fresh OAuth client ID/secret; selected existing IdPs are imported with the existing secret preserved |
-| `flowday_policy_names` / `flowday_policy_options` | no | Exact names, session duration and connection rules captured during adoption |
 | `mail_receive_address` / `mail_route_name` | **yes** | Exact dedicated-subdomain rule captured privately; `mail_route_ready` activates it only after the Worker exists |
 | `legacy_mail_hero_backup` | no | Existing-account compatibility only; false for fresh native backups |
 | `state_passphrase` | **yes** | Not a value of the infrastructure: the state and plan encryption passphrase, `INFRA_STATE_PASSPHRASE` ([Remote state](#remote-state)). Never in a values file |
@@ -294,7 +244,7 @@ python3 infra/scripts/infra_state.py values-json --var-file ~/.config/todofy-inf
 
 **Which ids are committed (one rule).** Ids of the objects this directory manages are committed:
 the Access application ids, the two shared reusable policy ids, the backup app's application-scoped policy
-id, FlowDay's two managed reusable policy ids, the selected IdPs, owned network/mail-rule IDs and the D1 ids (in
+id, the selected IdPs, owned network/mail-rule IDs and the D1 ids (in
 [`ids.tf`](ids.tf), [`access.tf`](access.tf), [`scripts/local_tfvars.py`](scripts/local_tfvars.py) and,
 as the backup app's `FROZEN` id, [`scripts/infra_state.py`](scripts/infra_state.py)). They are opaque object handles,
 not credentials: no API call can use them without a token for the account. Import needs them, and a
@@ -445,7 +395,7 @@ GitHub disables scheduled workflows after 60 days without repository activity; a
 
 | Output | Value | Checked against |
 | --- | --- | --- |
-| `access_aud` | AUD per Access application, keyed by Worker name (plus `flowday-bypass` and `mail-hero-backup`, which no Worker checks itself) | every `vars.ACCESS_AUDIENCE` (`access_aud[<the config's name>]`) |
+| `access_aud` | AUD per Access application, keyed by Worker name (plus `mail-hero-backup`, which no Worker checks itself) | every `vars.ACCESS_AUDIENCE` (`access_aud[<the config's name>]`) |
 | `d1_database_ids` | D1 id per database name | every `[[d1_databases]]` `database_id` |
 | `r2_bucket_names` | the bucket names | every `[[r2_buckets]]` `bucket_name` |
 
@@ -944,15 +894,11 @@ the merge:
    with "apply: done" and a verify plan of `no-op: 18`, `output changes: 0`.
 3. Dispatch "Infra drift": green, `no-op: 18`.
 4. The follow-up commit [Removing the import blocks](#removing-the-import-blocks) (done).
-5. FlowDay, in this order: the commit that clears F4's cf-guard allowances (`flowday/docs/design.md` F4), then the
-   staging-host removal through this directory ([FlowDay](#flowday)): its drift run shows `update: 2` (the two
-   FlowDay applications only), dispatch with `update=2@<that run's fingerprint>`.
+5. FlowDay's staging-host removal through this directory, `update: 2` (done). FlowDay itself was retired on
+   2026-10-20 ([Retiring an app](#retiring-an-app)).
 
 Historical follow-ups recorded at that point:
 
-- After F4: remove the staging host from FlowDay's apps through OpenTofu ([FlowDay](#flowday), step 5 above);
-  needs `CF_INFRA_TOKEN` or a deploy token with Access Edit.
-- FlowDay policy ownership is now implemented while retaining the exact existing policies; moving it onto shared policies remains a separate owner decision.
 - The owner decides whether to rename the shared policies (this affects the self-hosted apps) and
   whether the backup app's application-scoped policy becomes reusable (then drop it from `FROZEN`).
 - A `push` trigger for "Infra apply", after several clean manual applies.

@@ -342,7 +342,7 @@ zone_id = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         self.assertIn('platform-runtime.example.test', outputs['infra/platform-identity.tf'])
         self.assertIn('= "new-team"', outputs['infra/platform-identity.tf'])
         self.assertIn('mail-hero.example.test', outputs['infra/access.tf'])
-        self.assertIn('flowday.example.test/pwa/*', outputs['infra/access.tf'])
+        self.assertIn('s.example.test/_/*', outputs['infra/access.tf'])
         self.assertIn('mail_hero_backup_app_id = null', outputs['infra/ids.tf'])
         self.assertNotRegex(outputs['infra/ids.tf'], r'"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"')
         self.assertEqual(before, {path.relative_to(root).as_posix(): path.read_bytes()
@@ -377,7 +377,6 @@ zone_id = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         self.assertEqual([route['pattern'] for route in gateway['routes']],
                          ['todofy.example.test', 'todofy-hooks.example.test', 'daily.example.test'])
         self.assertEqual(gateway['vars']['TODOFY_HOOKS_HOSTS'], 'todofy-hooks.example.test,daily.example.test')
-        self.assertNotIn('FLOWDAY_PUBLIC_URL', gateway['vars'])
         relay = tomllib.loads(outputs['website/relay/wrangler.toml'])
         self.assertEqual(relay['vars']['GITHUB_REPOSITORY'], 'new-owner/new-cloud')
         self.assertEqual(relay['vars']['CANONICAL_HOST'], 'www.example.test')

@@ -40,9 +40,7 @@ def expect(
     website_deploy=False,
     website_relay_deploy=False,
     infra=False,
-    flowday_check=False,
     proto=False,
-    flowday_deploy=False,
     links_check=False,
     links_deploy=False,
     watch_check=False,
@@ -83,7 +81,6 @@ def expect(
         "mail_hero_check": mail_hero_check,
         "dashboard_check": dashboard_check,
         "website_check": website_check,
-        "flowday_check": flowday_check,
         "links_check": links_check,
         "watch_check": watch_check,
         "newsletter_check": newsletter_check,
@@ -101,7 +98,6 @@ def expect(
         "dashboard_deploy": dashboard_deploy,
         "website_deploy": website_deploy,
         "website_relay_deploy": website_relay_deploy,
-        "flowday_deploy": flowday_deploy,
         "links_deploy": links_deploy,
         "watch_deploy": watch_deploy,
         "newsletter_deploy": newsletter_deploy,
@@ -117,12 +113,11 @@ def expect(
     }
 
 
-# Every app checked (a contracts/ or .github/ change, FlowDay, the links app and the watch app included); the dashboard
+# Every app checked (a contracts/ or .github/ change, the links app and the watch app included); the dashboard
 # checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero plus
 # EDGE_AUTH; every app with the website Worker (the relay Worker is added where a test expects it).
-ALL_CHECKED = {"dashboard_check": True, "website_check": True, "flowday_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "brief_check": True, "tasks_check": True}
+ALL_CHECKED = {"dashboard_check": True, "website_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "brief_check": True, "tasks_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
-FLOWDAY = {"flowday_check": True, "flowday_deploy": True}
 LINKS = {"links_check": True, "links_deploy": True}
 WATCH = {"watch_check": True, "watch_deploy": True}
 FLEET = {"fleet_check": True, "fleet_deploy": True}
@@ -132,10 +127,10 @@ BRIEF = {"brief_check": True, "brief_deploy": True}
 PLATFORM = {"platform_check": True, "platform_publish": True, "platform_deploy": True}
 VPS = {**PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 ALL = {**DASH}
-# Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, FlowDay, the links app,
-# the watch app, Fleet, mailsort, recall and the brief, each checked and deployed.
-EDGE_AUTH = {"tasks_check": True, "tasks_deploy": True, **ALL, **FLOWDAY, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF}
-EVERY = {"tasks_check": True, "tasks_deploy": True, **ALL, "website_check": True, "website_deploy": True, **FLOWDAY, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
+# Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, the links app, the watch
+# app, Fleet, mailsort, recall, the brief and Tasks, each checked and deployed.
+EDGE_AUTH = {"tasks_check": True, "tasks_deploy": True, **ALL, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF}
+EVERY = {"tasks_check": True, "tasks_deploy": True, **ALL, "website_check": True, "website_deploy": True, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -274,22 +269,6 @@ class Classify(unittest.TestCase):
     def test_all_three_apps(self):
         paths = ["todofy/README.md", "mail-hero/web/src/app/App.tsx", "dashboard/README.md"]
         self.assertEqual(push(paths), expect(T, T, T, T, T, **DASH))
-
-    def test_flowday_checks_and_deploys_only_itself(self):
-        """FlowDay uses no contract (NO_CONTRACTS): its changes run only its checks and, on main, its deploy (F2)."""
-        for path in (
-            "flowday/worker/src/sync.ts",
-            "flowday/web/lib/client/http.ts",
-            "flowday/migrations/0001_init.sql",
-            "flowday/wrangler.toml",
-            "flowday/deploy/deploy-vars.mjs",
-            "flowday/web/package-lock.json",
-            "flowday/docs/design.md",
-            "flowday/README.md",
-        ):
-            with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(F, F, F, F, F, **FLOWDAY))
-                self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **FLOWDAY))
 
     def test_every_app_has_stable_check_and_deploy_outputs_during_bootstrap(self):
         """All declared apps have resource identities; checks and deploy outputs remain explicit."""
@@ -508,7 +487,7 @@ class Classify(unittest.TestCase):
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""
-        bundled = expect(T, T, T, T, T, **ALL, website_check=T, flowday_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, **MAILSORT, recall_check=T, **BRIEF, proto=T, tasks_check=T)
+        bundled = expect(T, T, T, T, T, **ALL, website_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, **MAILSORT, recall_check=T, **BRIEF, proto=T, tasks_check=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), bundled)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), bundled)
@@ -521,7 +500,6 @@ class Classify(unittest.TestCase):
             "todofy": [REPO / "todofy" / "gateway" / "src", REPO / "todofy" / "web" / "src"],
             "dashboard": [REPO / "dashboard" / "worker" / "src", REPO / "dashboard" / "web" / "src"],
             "website": [REPO / "website" / "src", REPO / "website" / "relay" / "src"],
-            "flowday": [REPO / "flowday" / "worker" / "src", *(REPO / "flowday" / "web" / name for name in ("app", "components", "features", "lib"))],
             "links": [REPO / "links" / "worker" / "src", REPO / "links" / "web" / "src"],
             "watch": [REPO / "watch" / "worker" / "src", REPO / "watch" / "web" / "src"],
             "newsletter": [REPO / "newsletter" / "src"],
@@ -590,7 +568,6 @@ class Classify(unittest.TestCase):
             ci_changes.PROTO_USERS,
             {
                 "todofy": ("python", "ts"),
-                "flowday": ("ts",),
                 "links": ("ts",),
                 "mail-hero": ("ts",),
                 "dashboard": ("ts",),
@@ -606,7 +583,7 @@ class Classify(unittest.TestCase):
         )
         # Todofy is both: todofy-core vendors the Python package, its gateway and UI bundle the TypeScript
         # (todofy.ui.v1).
-        ts, python = {"mail-hero", "dashboard", "flowday", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "tasks"}, {"todofy", "platform"}
+        ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "tasks"}, {"todofy", "platform"}
         every, none = ts | python, set()
         cases = {
             # task-intent-v1, bundled by the watch app's TypeScript and todofy-core's Python.
@@ -632,9 +609,6 @@ class Classify(unittest.TestCase):
             "proto/brief/ui/v1/brief_ui_service.proto": {"brief"},
             # mail.received.v1: Mail Hero builds every event, todofy-core reads every body.
             "proto/mailhero/webhook/v1/mail_received.proto": {"mail-hero", "todofy"},
-            # FlowDay's UI API reaches only FlowDay; Tasks keeps Focus itself.
-            "proto/flowday/ui/v1/flowday_ui_service.proto": {"flowday"},
-            "proto/flowday/ui/v1/task.proto": {"flowday"},
             # The links app's UI API reaches only the links app.
             "proto/links/ui/v1/links_ui_service.proto": {"links"},
             # The watch app's UI API reaches only the watch app.
@@ -704,8 +678,6 @@ class Classify(unittest.TestCase):
                 website_relay_deploy="website" in deployed,
                 dashboard_check=T,
                 dashboard_deploy="dashboard" in deployed,
-                flowday_check=T,
-                flowday_deploy="flowday" in deployed,
                 links_check=T,
                 links_deploy="links" in deployed,
                 watch_check=T,
@@ -737,7 +709,6 @@ class Classify(unittest.TestCase):
             checked_and({"todofy", "links", "platform"}),
         )
         self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), ts)
-        self.assertEqual(ci_changes.proto_deploys("proto/flowday/ui/v1/flow.proto"), {"flowday"})
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
         self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch"})
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/ui/v1/fleet_ui_service.proto"), {"fleet"})
@@ -827,12 +798,12 @@ class Classify(unittest.TestCase):
             ["packages/edge-auth/docs/notes.md"],
         ):
             with self.subTest(paths=paths):
-                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, flowday_check=T, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T))
+                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T))
         # With the package's code, or with one app, the usual rules apply.
         paths = ["packages/edge-auth/SPEC.md", "packages/edge-auth/src/csrf.ts"]
         self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **EDGE_AUTH))
         paths = ["packages/edge-auth/SPEC.md", "dashboard/docs/design.md"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, flowday_check=T, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T))
         # An unregistered package's documents are checked by every app, deployed by none.
         self.assertEqual(push(["packages/new-kit/README.md"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
 
@@ -851,7 +822,7 @@ class Classify(unittest.TestCase):
         ]
         self.assertEqual(
             push(paths),
-            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, flowday_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T),
         )
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
@@ -1024,7 +995,6 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(self.dispatch("todofy"), expect(T, F, T, T, F, packages=T, proto=T))
         self.assertEqual(self.dispatch("mail-hero"), expect(F, T, T, F, T, packages=T, proto=T))
         self.assertEqual(self.dispatch("dashboard"), expect(F, F, T, F, F, packages=T, proto=T, **DASH))
-        self.assertEqual(self.dispatch("flowday"), expect(F, F, T, F, F, packages=T, proto=T, **FLOWDAY))
         self.assertEqual(self.dispatch("links"), expect(F, F, T, F, F, packages=T, proto=T, **LINKS))
         self.assertEqual(self.dispatch("fleet"), expect(F, F, T, F, F, packages=T, proto=T, **FLEET))
         self.assertEqual(self.dispatch("platform"), expect(F, F, T, F, F, packages=T, proto=T, **VPS))
@@ -1152,7 +1122,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false", tasks_check="false", tasks_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false")
-        expected.update(flowday_check="false", flowday_deploy="false", links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false", fleet_check="false", fleet_deploy="false", platform_check="false", platform_publish="false", platform_deploy="false", mailsort_check="false", mailsort_deploy="false", recall_check="false", recall_deploy="false", recall_extension_publish="false", brief_check="false", brief_deploy="false")
+        expected.update(links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false", fleet_check="false", fleet_deploy="false", platform_check="false", platform_publish="false", platform_deploy="false", mailsort_check="false", mailsort_deploy="false", recall_check="false", recall_deploy="false", recall_extension_publish="false", brief_check="false", brief_deploy="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
@@ -1391,7 +1361,6 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "website-relay-deploy"),
         ("watch-deploy", "todofy-deploy"),
         ("todofy-deploy", "tasks-deploy"),
-        ("flowday-deploy", "tasks-deploy"),
     }
 
     # Check jobs a deploy may also find skipped, but only when this push to main reuses a green branch run of
@@ -1404,7 +1373,6 @@ class DeployConditions(unittest.TestCase):
         "mail-hero-checks",
         "dashboard-checks",
         "website-checks",
-        "flowday-checks",
         "links-checks",
         "watch-checks",
         "newsletter-checks",
@@ -1438,7 +1406,6 @@ class DeployConditions(unittest.TestCase):
                 "dashboard-deploy",
                 "website-deploy",
                 "website-relay-deploy",
-                "flowday-deploy",
                 "links-deploy",
                 "tasks-deploy",
                 "watch-deploy",
@@ -1512,9 +1479,7 @@ class DeployConditions(unittest.TestCase):
 
     def test_native_task_release_order_has_no_reverse_planning_dependency(self):
         jobs = self.jobs()
-        self.assertIn("tasks-deploy", self.needs(jobs["flowday-deploy"]))
         self.assertIn("tasks-deploy", self.needs(jobs["todofy-deploy"]))
-        self.assertNotIn("flowday-deploy", self.needs(jobs["todofy-deploy"]))
         self.assertIn("tasks-deploy", self.needs(jobs["dashboard-deploy"]))
         self.assertNotIn("todofy-deploy", self.needs(jobs["tasks-deploy"]))
 
@@ -1533,7 +1498,6 @@ class DeployConditions(unittest.TestCase):
                 "mail-hero-deploy": "mail-hero-production",
                 "dashboard-deploy": "dashboard-production",
                 "website-relay-deploy": "website-relay-production",
-                "flowday-deploy": "flowday-production",
                 "links-deploy": "links-production",
                 "tasks-deploy": "tasks-production",
                 "watch-deploy": "watch-production",
@@ -1555,7 +1519,6 @@ class DeployConditions(unittest.TestCase):
             ("dashboard-deploy", "dashboard-checks", "dashboard_deploy"),
             ("website-deploy", "website-checks", "website_deploy"),
             ("website-relay-deploy", "website-checks", "website_relay_deploy"),
-            ("flowday-deploy", "flowday-checks", "flowday_deploy"),
             ("links-deploy", "links-checks", "links_deploy"),
             ("watch-deploy", "watch-checks", "watch_deploy"),
             ("newsletter-deploy", "newsletter-checks", "newsletter_deploy"),
@@ -2186,7 +2149,7 @@ class AccessProbe(unittest.TestCase):
 
     def test_every_app_probe_runs_from_its_effective_workflow_directory(self):
         login = f"{self.ISSUER}/cdn-cgi/access/login/{self.HOST}"
-        jobs = ("dashboard-deploy", "flowday-deploy", "links-deploy", "watch-deploy")
+        jobs = ("dashboard-deploy", "links-deploy", "watch-deploy")
         for job in jobs:
             with self.subTest(job=job):
                 code, output = self.probe(f"302 {login}", job=job)
@@ -2194,26 +2157,6 @@ class AccessProbe(unittest.TestCase):
                 code, output = self.probe("200 ", job=job)
                 self.assertEqual(code, 1, output)
                 self.assertIn("was answered with", output)
-
-    def test_flowday_deploy_runs_the_same_probe_from_its_own_config(self):
-        """The FlowDay deploy's probe of its host (F3 staging, F4 production) is this very script too, fed from
-        flowday/wrangler.toml."""
-        name = "- name: Check that Access answers unauthenticated requests\n"
-        step = lambda job: workflow_jobs()[job].split(name, 1)[1].split("\n      - ", 1)[0]  # noqa: E731
-
-        def body(job):
-            """The step's `run: |` lines only (the next step's leading comments are not part of it)."""
-            lines = step(job).split("        run: |\n", 1)[1].splitlines()
-            return "\n".join(line for line in lines if not line.strip() or line.startswith("          ")).rstrip()
-
-        self.assertEqual(body("flowday-deploy").replace("/api/v1/tasks", "/api/v1/homeView"), body("dashboard-deploy"))
-        self.assertIn("ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}", step("flowday-deploy"))
-        self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step("flowday-deploy"))
-        block = workflow_jobs()["flowday-deploy"]
-        config = block.split("- name: Read the host and the Access issuer from the committed config\n", 1)[1]
-        self.assertIn('open("wrangler.toml", "rb")', config.split("\n      - ", 1)[0])
-        # After the deploy and the API check: the host serves the version just checked.
-        self.assertLess(block.index("- name: Check that production runs this commit\n"), block.index(name))
 
     def test_links_deploy_runs_the_same_probe_on_the_owners_half(self):
         """The links deploy's probe is this very script too, fed from links/wrangler.toml, on the paths the path-scoped
@@ -2303,122 +2246,6 @@ class AccessProbe(unittest.TestCase):
         self.assertEqual(code, 1, output)
         self.assertIn("/ never reached Access", output)
 
-
-
-class FlowDayPwaBypass(unittest.TestCase):
-    """FlowDay deploy's check of its host's PWA files, run as the workflow runs it against a stubbed curl.
-
-    Only the listed PWA files may answer an anonymous request (through the Access app flowday-bypass), each with its
-    own media type; an unlisted /pwa/ file must get the Worker's 401. A 302 means the bypass is missing."""
-
-    STEP = "- name: Check that only the PWA files bypass Access\n"
-    HOST = "flowday.example.org"
-    GOOD = {
-        "/pwa/manifest.webmanifest": "200 application/manifest+json",
-        "/pwa/icon-192x192.png": "200 image/png",
-        "/pwa/apple-touch-icon.png": "200 image/png",
-        "/pwa/sw": "200 application/javascript; charset=utf-8",
-        "/pwa/sw.js": "401 application/json; charset=utf-8",
-    }
-
-    def script(self):
-        block = workflow_jobs()["flowday-deploy"]
-        body = block.split(self.STEP, 1)[1].split("        run: |\n", 1)[1]
-        lines = []
-        for line in body.splitlines():
-            if line.strip() and not line.startswith("          "):
-                break
-            lines.append(line[10:])
-        return "\n".join(lines) + "\n"
-
-    def check(self, answers, host=HOST):
-        """Runs the step; curl answers each URL with answers[path] ("<code> <media type>"), or, for a list, with the
-        next item of that list (the last one repeating). Returns (exit code, output, the URLs requested)."""
-        with tempfile.TemporaryDirectory() as root:
-            bin_dir = Path(root, "bin")
-            bin_dir.mkdir()
-            table = Path(root, "answers")
-            table.mkdir()
-            for index, (path, answer) in enumerate(answers.items()):
-                queue = answer if isinstance(answer, list) else [answer]
-                Path(table, str(index)).write_text("\n".join(queue) + "\n")
-                Path(table, f"{index}.path").write_text(path)
-            curl = bin_dir / "curl"
-            curl.write_text(
-                "#!/usr/bin/env bash\n"
-                'url="${@: -1}"\n'
-                f'echo "$url" >> "{root}/urls"\n'
-                f'for name in "{table}"/*.path; do\n'
-                '  index=${name%.path}\n'
-                f'  if [ "$url" = "https://{host}$(cat "$name")" ]; then\n'
-                '    line=$(head -n 1 "$index")\n'
-                '    if [ "$(wc -l < "$index")" -gt 1 ]; then tail -n +2 "$index" > "$index.next"; mv "$index.next" "$index"; fi\n'
-                '    printf "%s" "$line"\n'
-                "    exit 0\n"
-                "  fi\n"
-                "done\n"
-                'printf "404 text/plain"\n'
-            )
-            (bin_dir / "sleep").write_text("#!/usr/bin/env bash\nexit 0\n")
-            for tool in (curl, bin_dir / "sleep"):
-                tool.chmod(0o755)
-            env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PUBLIC_HOST": host}
-            result = subprocess.run(
-                ["bash", "-e", "-c", self.script()], cwd=REPO, env=env, capture_output=True, text=True, check=False
-            )
-            urls = Path(root, "urls").read_text().splitlines() if Path(root, "urls").exists() else []
-            return result.returncode, result.stdout + result.stderr, urls
-
-    def test_the_listed_files_pass_and_the_unlisted_one_is_refused_by_the_worker(self):
-        code, output, urls = self.check(self.GOOD)
-        self.assertEqual(code, 0, output)
-        self.assertEqual(urls, [f"https://{self.HOST}{path}" for path in self.GOOD])
-        self.assertIn("/pwa/sw.js: 401 application/json from the Worker", output)
-
-    def test_the_checked_files_are_the_workers_public_pwa_paths(self):
-        """Every checked 200 is on the Worker's list, and the 401 one exists in the export but is not on it."""
-        assets = (REPO / "flowday" / "worker" / "src" / "assets.ts").read_text()
-        listed = set(re.findall(r"'(/pwa/[^']+)'", assets.split("PWA_PUBLIC_PATHS", 1)[1].split("])", 1)[0]))
-        for path, answer in self.GOOD.items():
-            with self.subTest(path=path):
-                self.assertIn(path, self.script())
-                self.assertEqual(path in listed, answer.startswith("200 "))
-        self.assertTrue((REPO / "flowday" / "web" / "public" / "pwa" / "sw.js").is_file())
-
-    def test_a_missing_bypass_fails_with_its_name(self):
-        code, output, urls = self.check({**self.GOOD, "/pwa/manifest.webmanifest": "302 text/html"})
-        self.assertEqual(code, 1, output)
-        self.assertIn("the Access app flowday-bypass does not cover", output)
-        self.assertEqual(len(urls), 1)
-
-    def test_a_public_unlisted_file_or_a_wrong_media_type_fails(self):
-        for path, answer in (
-            ("/pwa/sw.js", "200 application/javascript"),
-            ("/pwa/manifest.webmanifest", "200 text/html; charset=utf-8"),
-            ("/pwa/icon-192x192.png", "401 application/json"),
-            ("/pwa/sw", "200 "),
-        ):
-            with self.subTest(path=path, answer=answer):
-                code, output, _ = self.check({**self.GOOD, path: answer})
-                self.assertEqual(code, 1, output)
-                self.assertIn(f"{path} was answered with", output)
-
-    def test_no_connection_or_5xx_is_retried_then_fails(self):
-        code, output, _ = self.check({**self.GOOD, "/pwa/manifest.webmanifest": ["000 ", "503 text/html", "200 application/manifest+json"]})
-        self.assertEqual(code, 0, output)
-        self.assertIn("(attempt 3)", output)
-        code, output, urls = self.check({**self.GOOD, "/pwa/manifest.webmanifest": "000 "})
-        self.assertEqual(code, 1, output)
-        self.assertIn("/pwa/manifest.webmanifest never reached the Worker", output)
-        self.assertEqual(len(urls), 10)
-
-    def test_the_host_comes_from_the_committed_config(self):
-        block = workflow_jobs()["flowday-deploy"]
-        step = block.split(self.STEP, 1)[1].split("\n      - ", 1)[0]
-        self.assertIn("PUBLIC_HOST: ${{ steps.config.outputs.host }}", step)
-        self.assertLess(block.index("- name: Check that Access answers unauthenticated requests\n"), block.index(self.STEP))
-        code, _, _ = self.check(self.GOOD, host="")
-        self.assertNotEqual(code, 0)
 
 
 class LinksWorkerProbe(unittest.TestCase):
@@ -2581,14 +2408,15 @@ class LinksWorkerProbe(unittest.TestCase):
         self.assertEqual(urls, [])
 
 
-class FlowDayProductionCheck(unittest.TestCase):
-    """FlowDay deploy's hostname-free check, run as the workflow runs it against a stubbed npx (wrangler).
+class LinksProductionCheck(unittest.TestCase):
+    """Links deploy's hostname-free check, run as the workflow runs it against a stubbed npx (wrangler). Nothing
+    anonymous on the host shows the build, so the deployed version's BUILD_SHA tells whether this commit serves.
 
     It passes only when the live deployment serves one version at 100% whose BUILD_SHA is this commit and no D1
     migration is pending, and it never prints wrangler's JSON (it names the token's account email)."""
 
-    JOB = "flowday-deploy"
-    WORKER = "flowday"
+    JOB = "links-deploy"
+    WORKER = "links"
     STEP = "- name: Check that production runs this commit\n"
     VERSION = "0b9c1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3"
     EMAIL = "deployer@example.org"
@@ -2724,15 +2552,7 @@ class FlowDayProductionCheck(unittest.TestCase):
         self.assertEqual(calls, [])
 
 
-class LinksProductionCheck(FlowDayProductionCheck):
-    """Links deploy's check, the same step: nothing anonymous on the host shows the build, so the deployed version's
-    BUILD_SHA tells whether this commit serves."""
-
-    JOB = "links-deploy"
-    WORKER = "links"
-
-
-class WatchProductionCheck(FlowDayProductionCheck):
+class WatchProductionCheck(LinksProductionCheck):
     """Watch deploy's check: the same step without the D1 part (the watch app has no D1). Nothing anonymous on the host
     shows the build (it is all behind Access), so the deployed version's BUILD_SHA tells whether this commit serves."""
 
@@ -2740,7 +2560,7 @@ class WatchProductionCheck(FlowDayProductionCheck):
     WORKER = "watch"
 
     def test_the_same_step_as_the_links_app_without_d1(self):
-        links = FlowDayProductionCheck.script(LinksProductionCheck())
+        links = LinksProductionCheck.script(LinksProductionCheck())
         self.assertEqual(self.script(), links.replace('production.sh" links', 'production.sh" watch').replace("wrangler.toml DB", "wrangler.toml"))
         self.assertNotIn(" DB", self.script())
 
@@ -2974,7 +2794,6 @@ class Reuse(unittest.TestCase):
             "Mail Hero checks",
             "Dashboard checks",
             "Website checks",
-            "FlowDay checks",
             "Links checks",
             "Watch checks",
             "Fleet checks",
@@ -3135,7 +2954,7 @@ class HostnameGuard(unittest.TestCase):
     GUARD = "node tools/cf-guard/cf-guard.mjs"
     STEP = "- name: Check the hostnames against production\n"
     # Intentional hostname changes, (CF_GUARD_ALLOW_REMOVE, CF_GUARD_ALLOW_CONFLICT) per job, set only in the commit
-    # that makes them (FlowDay's F4 cutover set both for "flowday-deploy"; the next commit cleared them). None today.
+    # that makes them (a cutover onto a hostname sets both for its deploy; the next commit clears them). None today.
     # A conflict allowance names its kind: "dns:<host>", "worker:<host>" or "route:<pattern>" (tools/cf-guard).
     ALLOWED: dict[str, tuple[str, str]] = {}
 
@@ -3153,7 +2972,6 @@ class HostnameGuard(unittest.TestCase):
             ("todofy-deploy", ["todofy/wrangler.toml", "todofy/gateway/wrangler.toml"], "CF_API_TOKEN", "wrangler d1 migrations apply"),
             ("mail-hero-deploy", ["mail-hero/wrangler.toml"], "MAIL_HERO_CF_API_TOKEN", "wrangler d1 migrations apply"),
             ("dashboard-deploy", ["dashboard/wrangler.toml"], "CF_API_TOKEN", "deploy-vars.mjs exec -- npx --no-install wrangler deploy --config"),
-            ("flowday-deploy", ["flowday/wrangler.toml"], "CF_API_TOKEN", "wrangler d1 migrations apply"),
             ("links-deploy", ["links/wrangler.toml"], "CF_API_TOKEN", "wrangler d1 migrations apply"),
             ("watch-deploy", ["watch/wrangler.toml"], "CF_API_TOKEN", "deploy-vars.mjs exec -- npx --no-install wrangler deploy --config"),
             ("fleet-deploy", ["fleet/wrangler.toml"], "CF_API_TOKEN", "deploy-vars.mjs exec -- npx --no-install wrangler deploy --config"),

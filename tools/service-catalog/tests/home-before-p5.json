@@ -51,32 +51,6 @@
       "order": 2
     },
     {
-      "id": "flowday",
-      "name": "FlowDay",
-      "description": "Todoist 时间块、计时与回顾",
-      "group": "apps",
-      "icon": "calendar-clock",
-      "accent": "teal",
-      "url": "https://flowday.ziyixi.science/",
-      "access": true,
-      "status": {
-        "type": "public_http",
-        "url": "https://flowday.ziyixi.science/pwa/manifest.webmanifest",
-        "expect": [
-          200
-        ],
-        "content_type": "application/manifest+json",
-        "outside_access": true,
-        "error_rate": true,
-        "enabled": true
-      },
-      "tile_metric": {
-        "kind": "latency"
-      },
-      "app_only_signals": [],
-      "order": 5
-    },
-    {
       "id": "links",
       "name": "短链接",
       "description": "s.ziyixi.science 短链接与启动器",
@@ -236,11 +210,6 @@
       "script": "home",
       "entry": "home",
       "role": "本面板"
-    },
-    {
-      "script": "flowday",
-      "entry": "flowday",
-      "role": "页面、API 与 PWA 文件"
     },
     {
       "script": "links",

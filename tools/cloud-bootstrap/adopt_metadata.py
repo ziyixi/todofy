@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from cloud_api import request
 from private_input import BootstrapError
-from flowday_policy_guard import matches
 
 GITHUB = "cloudflare_zero_trust_access_identity_provider.github[0]"
 EMAIL = "cloudflare_zero_trust_access_identity_provider.email[0]"
@@ -47,19 +46,6 @@ def prepare(private: dict, resources: dict, zone: str, mode: str, fetch=request)
     if len(matches) != 1 or not isinstance(matches[0][1], str):
         raise BootstrapError("ADOPT_EMAIL_IDENTITY_AMBIGUOUS")
     imports[EMAIL], values["access_email_idp_name"] = matches[0]
-    names, options = {}, {}
-    for name in ("flowday", "flowday-bypass"):
-        address = 'cloudflare_zero_trust_access_policy.flowday["' + name + '"]'
-        identifier = imports.get(address, resources.get("referenced_policy_ids", {}).get(name))
-        if not identifier:
-            raise BootstrapError("ADOPT_FLOWDAY_POLICY_ID_REQUIRED")
-        policy = fetch(token, f"/accounts/{account}/access/policies/{identifier}")
-        _flowday_shape(policy, name, values, github_id)
-        names[name] = policy["name"]
-        options[name] = {"session_duration": policy.get("session_duration"), "connection_rules": policy.get("connection_rules")}
-        imports[address] = identifier
-    values["flowday_policy_names"] = names
-    values["flowday_policy_options"] = options
     if MAIL_RULE in imports:
         rule = fetch(token, "/zones/" + resources["zone_id"] + "/email/routing/rules/" + imports[MAIL_RULE])
         if (rule.get("actions") != [{"type": "worker", "value": ["mail-hero"]}]
@@ -79,9 +65,3 @@ def validate_address(address: object, zone: str) -> None:
             or not address.endswith("@inbox." + zone) or not address.split("@", 1)[0]
             or any(c.isspace() for c in address)):
         raise BootstrapError("RECEIVE_ADDRESS_REQUIRES_DEDICATED_SUBDOMAIN")
-
-
-def _flowday_shape(policy: dict, name: str, values: dict, github_id: str) -> None:
-    if (not isinstance(policy, dict) or not isinstance(policy.get("name"), str)
-            or not matches(policy, name, values["access_owner_emails"], github_id)):
-        raise BootstrapError("ADOPT_FLOWDAY_POLICY_MISMATCH")

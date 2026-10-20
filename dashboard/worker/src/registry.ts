@@ -73,28 +73,6 @@ const ENTRIES: readonly EntryDef[] = [
     order: 2,
   },
   {
-    id: 'flowday',
-    name: 'FlowDay',
-    description: 'Tasks 时间块、计时与回顾',
-    group: 'apps',
-    icon: 'calendar-clock',
-    accent: 'teal',
-    url: 'https://flowday.ziyixi.science/',
-    access: true,
-    status: {
-      type: 'public_http',
-      expect: [200],
-      content_type: 'application/manifest+json',
-      outside_access: true,
-      error_rate: true,
-      enabled: true,
-      url: 'https://flowday.ziyixi.science/pwa/manifest.webmanifest',
-    },
-    tile_metric: { kind: 'latency' },
-    app_only_signals: [],
-    order: 5,
-  },
-  {
     id: 'links',
     name: '短链接',
     description: 's.ziyixi.science 短链接与启动器',
@@ -301,7 +279,6 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'todofy', entry: 'todofy', role: '网关与 UI' },
   { script: 'todofy-core', entry: 'todofy', role: '处理核心（TodofyCore）' },
   { script: 'home', entry: 'home', role: '本面板' },
-  { script: 'flowday', entry: 'flowday', role: '页面、API 与 PWA 文件' },
   { script: 'links', entry: 'links', role: '短链接跳转与启动器' },
   { script: 'watch', entry: 'watch', role: '网页监视与 UI' },
   { script: 'ziyixi-notion-publish', entry: 'notion-publish', role: '发布 Worker' },
@@ -328,8 +305,6 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'home-state', kind: 'do', name: 'HomeState', entry: 'home', script: 'home', match: RESOURCE_IDENTITIES['home-state'] ?? null },
   // Created for the links app's first deploy (L2, 2026-10-01).
   { id: 'links-db', kind: 'd1', name: 'links 短链接库', entry: 'links', match: RESOURCE_IDENTITIES['links-db'] ?? null },
-  // FlowDay's database (flowday/wrangler.toml, managed by infra/ since IaC P4).
-  { id: 'flowday-db', kind: 'd1', name: 'flowday 主库', entry: 'flowday', match: RESOURCE_IDENTITIES['flowday-db'] ?? null },
   { id: 'tasks-db', kind: 'd1', name: 'Tasks 任务库', entry: 'tasks', match: RESOURCE_IDENTITIES['tasks-db'] ?? null },
   // Created by the watch app's first deploy (W2, 2026-10-02); id read from the account's Durable Object namespace list.
   { id: 'watch-state', kind: 'do', name: 'WatchState', entry: 'watch', script: 'watch', match: RESOURCE_IDENTITIES['watch-state'] ?? null },

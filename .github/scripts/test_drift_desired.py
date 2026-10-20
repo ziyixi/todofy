@@ -119,35 +119,6 @@ class DesiredState(unittest.TestCase):
                 self.assertEqual(bindings[name], {"name": name, "type": "plain_text", "source": "deploy"})
         self.assertEqual(worker["personal"], [])
 
-    def test_flowday_secrets_all_come_from_its_deploy(self):
-        """FlowDay's wrapper writes the owner addresses and the CSRF key with --secrets-file and adds BUILD_SHA as a
-        var; no secret is set by hand. Its one hostname is the Custom Domain flowday.ziyixi.science (since the F4
-        cutover)."""
-        worker = self.state["workers"]["flowday"]
-        bindings = {b["name"]: b for b in worker["bindings"]}
-        secrets = ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY")
-        for name in secrets:
-            with self.subTest(name=name):
-                self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy"})
-        self.assertEqual(bindings["BUILD_SHA"], {"name": "BUILD_SHA", "type": "plain_text", "source": "deploy"})
-        self.assertEqual({name for name, b in bindings.items() if b["source"] == "deploy"}, {*secrets, "BUILD_SHA"})
-        self.assertEqual({name for name, b in bindings.items() if b["source"] == "manual"}, set())
-        self.assertEqual(
-            {(name, b["type"]) for name, b in bindings.items() if b["source"] == "config"},
-            {
-                ("ACCESS_AUDIENCE", "plain_text"),
-                ("ACCESS_ISSUER", "plain_text"),
-                ("ASSETS", "assets"),
-                ("DB", "d1"),
-                ("PUBLIC_HOST", "plain_text"),
-                ("TASKS", "service"),
-            },
-        )
-        self.assertNotIn("flowday", drift_desired.MANUAL_SECRETS)
-        self.assertEqual((worker["workers_dev"], worker["preview_urls"], worker["crons"]), (False, False, []))
-        self.assertEqual(worker["custom_domains"], ["flowday.ziyixi.science"])
-        self.assertEqual((worker["routes"], worker["personal"]), ([], []))
-
     def test_links_secrets_all_come_from_its_deploy(self):
         """The links app's wrapper writes the owner addresses and the CSRF key with --secrets-file and adds BUILD_SHA as
         a var; no secret is set by hand. Without its WRAPPERS entry these four would be missing from the desired state

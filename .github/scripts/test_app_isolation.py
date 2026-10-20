@@ -302,11 +302,8 @@ class AppIsolation(unittest.TestCase):
             for name, targets in self.script_imports.items()
         }
         for name in (
-            "flowday/worker/test/runtime/cpu.test.ts",
             "mail-hero/cloudflare/test/cpu/native-ops-cpu.test.mjs",
             "dashboard/worker/test/runtime/cpu.test.ts",
-            "flowday/worker/scripts/bundle-size.mjs",
-            "flowday/web/scripts/js-budget.mjs",
             "mail-hero/deploy/bundle-size.mjs",
             "dashboard/deploy/bundle-size.mjs",
             "watch/worker/test/runtime/cpu.test.ts",

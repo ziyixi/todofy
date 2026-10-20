@@ -43,7 +43,6 @@ describe('操作与记录', () => {
     expect(rows.map((row) => within(row).getByRole('rowheader').textContent)).toEqual([
       'Mail Hero',
       'Todofy',
-      'FlowDay',
       '短链接',
       '网页监视',
       '服务器监控',
@@ -59,31 +58,29 @@ describe('操作与记录', () => {
       '平台运行时',
     ])
     expect(rows[1]).toHaveTextContent('ops-v1 状态接口')
-    // FlowDay and the links app: a probe of a path their own Worker answers outside Access.
+    // The links app: a probe of a path its own Worker answers outside Access.
     expect(rows[2]).toHaveTextContent('公开地址探测')
-    expect(within(rows[2] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('flowday')
-    expect(rows[3]).toHaveTextContent('公开地址探测')
-    expect(within(rows[3] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('links')
+    expect(within(rows[2] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('links')
     // The watch app: its Ops entrypoint, as Mail Hero and Todofy.
+    expect(rows[3]).toHaveTextContent('ops-v1 状态接口')
+    expect(within(rows[3] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('watch')
     expect(rows[4]).toHaveTextContent('ops-v1 状态接口')
-    expect(within(rows[4] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('watch')
-    expect(rows[5]).toHaveTextContent('ops-v1 状态接口')
     // mailsort: its Ops entrypoint (counts and codes of the Gmail sorting).
-    expect(rows[6]).toHaveTextContent('ops-v1 状态接口')
-    expect(within(rows[6] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('mailsort')
+    expect(rows[5]).toHaveTextContent('ops-v1 状态接口')
+    expect(within(rows[5] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('mailsort')
     // recall: its Ops entrypoint (counts and codes of the browsing record).
-    expect(rows[7]).toHaveTextContent('ops-v1 状态接口')
-    expect(within(rows[7] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('recall')
+    expect(rows[6]).toHaveTextContent('ops-v1 状态接口')
+    expect(within(rows[6] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('recall')
     // Brief's status and guard are available through its own Ops binding.
+    expect(rows[7]).toHaveTextContent('ops-v1 状态接口')
+    expect(within(rows[7] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('brief')
     expect(rows[8]).toHaveTextContent('ops-v1 状态接口')
-    expect(within(rows[8] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('brief')
-    expect(rows[9]).toHaveTextContent('ops-v1 状态接口')
-    expect(within(rows[9] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('tasks')
-    expect(rows[10]).toHaveTextContent('公开地址探测')
-    expect(rows[12]).toHaveTextContent('ops-v1 状态接口')
+    expect(within(rows[8] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('tasks')
+    expect(rows[9]).toHaveTextContent('公开地址探测')
+    expect(rows[11]).toHaveTextContent('ops-v1 状态接口')
     // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
-    expect(rows[14]).toHaveTextContent('未接入监控')
-    expect(within(rows[14] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
+    expect(rows[13]).toHaveTextContent('未接入监控')
+    expect(within(rows[13] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
   })
 
   it('names a link-only entry of the registry as such', async () => {

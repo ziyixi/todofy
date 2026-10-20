@@ -75,7 +75,7 @@ describe('the registry', () => {
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'flowday', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'brief', 'tasks']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'brief', 'tasks']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
     expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime']);
@@ -83,7 +83,6 @@ describe('the registry', () => {
     expect(status).toEqual({
       'mail-hero': 'ops_v1',
       todofy: 'ops_v1',
-      flowday: 'public_http',
       links: 'public_http',
       watch: 'ops_v1',
       website: 'public_http',
@@ -130,13 +129,10 @@ describe('the registry', () => {
     expect(resourceByMatch('do', '55c248f9d82c45f3a89d2de1d719d5db')?.id).toBe('mail-coordinator');
     expect(resourceByMatch('do', 'a013ef9fa45048d4b4f7bfcc641b57ea')?.id).toBe('todofy-core-do');
     expect(resourceByMatch('do', 'acddddf88d624194a68af430fd1a90ff')?.id).toBe('home-state');
-    // FlowDay and the links app: their Worker and D1 database, under their tiles (no flow takes part).
+    // The links app: its Worker and D1 database, under its tile (no flow takes part).
     expect(resourceByMatch('d1', '2f8c5331-06ce-4347-8c0a-90fe51c82260')).toMatchObject({ id: 'links-db', entry: 'links' });
-    expect(resourceByMatch('d1', 'df104e83-7183-47e3-b2f9-638dc7502c13')).toMatchObject({ id: 'flowday-db', entry: 'flowday' });
     expect(entryOfScript('links')).toBe('links');
-    expect(entryOfScript('flowday')).toBe('flowday');
     expect(flowsOfScript('links')).toEqual([]);
-    expect(flowsOfScript('flowday')).toEqual([]);
     expect(resourceByMatch('r2', 'someone-elses-bucket')).toBeUndefined();
     // Not an app of the monorepo: the self-hosted servers' backups, named under a hidden entry.
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });
@@ -156,10 +152,10 @@ describe('the registry', () => {
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 9 status() + 3 probes (website, FlowDay, links) + 1 GraphQL + 5 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
-    expect(outboundPerTick()).toBe(34);
+    // 10 status() + 2 probes (website, links) + 1 GraphQL + 5 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
+    expect(outboundPerTick()).toBe(33);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
-    expect(outboundPerRefresh()).toBe(13);
+    expect(outboundPerRefresh()).toBe(12);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {
@@ -172,8 +168,9 @@ describe('the registry', () => {
     for (const probe of ['build-info', 'manifest.webmanifest', 'robots.txt', 'content_type', 'outside_access']) expect(body).not.toContain(probe);
     expect(body).not.toContain('GitHub');
     const view = registryView('abc123');
-    expect(view.entries.find((e) => e.id === 'flowday')).toMatchObject({ status_type: 'public_http', host: 'flowday.ziyixi.science', access: true, scripts: ['flowday'] });
-    expect(view.entries.find((e) => e.id === 'links')).toMatchObject({ url: 'https://s.ziyixi.science/_/', host: 's.ziyixi.science', access: true, scripts: ['links'] });
+    expect(view.entries.find((e) => e.id === 'links')).toMatchObject({
+      status_type: 'public_http', url: 'https://s.ziyixi.science/_/', host: 's.ziyixi.science', access: true, scripts: ['links'],
+    });
     const linkOnly = registryView('abc123', withLinkOnly()).entries.find((e) => e.id === LINK_ONLY_ENTRY.id);
     expect(linkOnly).toMatchObject({ status_type: 'link_only', host: 'link-demo.ziyixi.science', scripts: [] });
     expect(linkOnly).not.toHaveProperty('status');
@@ -274,18 +271,18 @@ describe('validateRegistry', () => {
   it('allows a probe of an Access-protected host only where the login redirect can never pass as healthy', () => {
     type Probe = Extract<Mutable<EntryDef>['status'], { type: 'public_http' }>;
     const cases: [(probe: Probe) => void, string][] = [
-      [(p) => delete p.content_type, 'entry flowday: a probe outside Access needs content_type'],
-      [(p) => (p.expect = [200, 302]), 'entry flowday: a probe outside Access expects 2xx only'],
-      [(p) => (p.url = 'https://flowday.ziyixi.science/'), 'entry flowday: a probe outside Access cannot be the Access-protected url'],
-      [(p) => (p.url = 'https://elsewhere.ziyixi.science/pwa/manifest.webmanifest'), "entry flowday: a probe outside Access is on the entry's own host"],
-      [(p) => delete p.outside_access, 'entry flowday: an Access-protected host cannot be probed publicly'],
-      [(p) => (p.content_type = 'Application/JSON; charset=utf-8'), 'entry flowday: content_type is not a lowercase media type'],
+      [(p) => delete p.content_type, 'entry links: a probe outside Access needs content_type'],
+      [(p) => (p.expect = [200, 302]), 'entry links: a probe outside Access expects 2xx only'],
+      [(p) => (p.url = 'https://s.ziyixi.science/_/'), 'entry links: a probe outside Access cannot be the Access-protected url'],
+      [(p) => (p.url = 'https://elsewhere.ziyixi.science/robots.txt'), "entry links: a probe outside Access is on the entry's own host"],
+      [(p) => delete p.outside_access, 'entry links: an Access-protected host cannot be probed publicly'],
+      [(p) => (p.content_type = 'Application/JSON; charset=utf-8'), 'entry links: content_type is not a lowercase media type'],
     ];
     for (const [change, problem] of cases) {
       const r = copy();
-      const probe = { ...(entry(r, 'flowday').status as Probe) };
+      const probe = { ...(entry(r, 'links').status as Probe) };
       change(probe);
-      entry(r, 'flowday').status = probe;
+      entry(r, 'links').status = probe;
       expect(problems(r), problem).toContain(problem);
     }
     // A public host never claims to be outside Access, and error_rate needs Workers to judge.

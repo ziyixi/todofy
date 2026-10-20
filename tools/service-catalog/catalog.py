@@ -274,7 +274,7 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
             rule = dict(rule)
             identifier(rule["key"], f"{app}.access key")
             require(not any(old["key"] == rule["key"] for old in access), f"{app}.access key")
-            require(isinstance(rule["kind"], str) and rule["kind"] in {"owner", "flowday"}, f"{app}.access kind")
+            require(isinstance(rule["kind"], str) and rule["kind"] == "owner", f"{app}.access kind")
             identifier(rule["worker"], f"{app}.access worker")
             require(any(w["script"] == rule["worker"] and w["app"] == app for w in workers), f"{app}.access worker")
             text(rule["name"], f"{app}.access name")
@@ -298,10 +298,7 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
             entry = next(e for e in entries if e["id"] == worker["entry"])
             require(worker["script"] == "home" or (entry["group"] in {"apps", "sites"} and entry["url"] is not None), "visible entry coverage")
     for rule in access:
-        if rule["kind"] == "owner":
-            require(rule["key"] == rule["worker"], "owner Access identity")
-        else:
-            require(rule["worker"] == "flowday" and rule["key"] in {"flowday", "flowday-bypass"} and rule["name"] == rule["key"], "FlowDay Access identity")
+        require(rule["key"] == rule["worker"], "owner Access identity")
     try:
         worker_secret_specs(root)
     except ProfileError as error:
@@ -359,12 +356,7 @@ def replace_region(original: str, name: str, body: str, prefix: str) -> str:
 
 def access_file(catalog: Catalog) -> str:
     """Render the same Access HCL for normal generation and private initial bootstrap."""
-    access = replace_region((catalog.root / "infra/access.tf").read_text(), "owner", owner_region(catalog), "    #")
-    for rule in catalog.access:
-        if rule["kind"] == "flowday":
-            body = f'      destinations = {json.dumps(rule["destinations"])}\n      session      = {json.dumps(rule["session"])}'
-            access = replace_region(access, rule["key"], body, "      #")
-    return access
+    return replace_region((catalog.root / "infra/access.tf").read_text(), "owner", owner_region(catalog), "    #")
 
 
 def generated_files(catalog: Catalog) -> dict[str, str]:

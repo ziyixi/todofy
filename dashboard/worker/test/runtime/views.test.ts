@@ -105,7 +105,7 @@ describe('GetRegistry', () => {
     const first = await h.view<Registry>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(VIEW_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'flowday', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'tasks', 'self-hosted']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'tasks', 'self-hosted']);
     const text = JSON.stringify(first.body);
     for (const url of Object.values(PROBES)) expect(text).not.toContain(new URL(url).pathname);
     expect(text).not.toContain('MAIL_HERO');
@@ -124,7 +124,6 @@ describe('GetHomeView and RefreshHomeView', () => {
     expect(levels).toEqual({
       'mail-hero': ['unknown', 'never_checked'],
       todofy: ['unknown', 'never_checked'],
-      flowday: ['unknown', 'never_checked'],
       links: ['unknown', 'never_checked'],
       watch: ['unknown', 'never_checked'],
       website: ['unknown', 'never_checked'],
@@ -156,8 +155,7 @@ describe('GetHomeView and RefreshHomeView', () => {
     expect(tiles.todofy).toMatchObject({ level: 'ok', metric: { kind: 'counter', name: 'received_24h', value: 63 } });
     expect(tiles.website?.level).toBe('ok');
     expect(tiles.website?.metric?.kind).toBe('latency');
-    // FlowDay's manifest and the links app's robots.txt, each answered by its own Worker.
-    expect(tiles.flowday).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency' } });
+    // The links app's robots.txt, answered by its own Worker.
     expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency' } });
     // Content sync is evaluated from its check evidence, with no activity metric.
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: null });
@@ -188,12 +186,12 @@ describe('GetHomeView and RefreshHomeView', () => {
     expect((await h.called()).sort()).toEqual(['mail-hero.status', 'todofy.status']);
     expect([...h.outboundLog].sort()).toEqual(Object.values(PROBES).sort());
     expect(h.analytics.requests).toEqual([]);
-    for (const id of ['website', 'flowday', 'links']) expect(refreshed.entries.find((e) => e.id === id)?.level).toBe('ok');
+    for (const id of ['website', 'links']) expect(refreshed.entries.find((e) => e.id === id)?.level).toBe('ok');
     // Within the minute: nothing is fetched again.
     const second = await refreshedView<HomeView>(h, 'home');
     expect(second.refresh.refreshed).toBe(false);
     expect(await h.called()).toEqual([]);
-    expect(h.outboundLog).toHaveLength(3);
+    expect(h.outboundLog).toHaveLength(2);
     // The next status poll is 10 minutes after the last one.
     expect(Date.parse(second.refresh.next_refresh_at) - Date.parse(refreshed.refresh.last_refresh_at ?? '')).toBeGreaterThanOrEqual(10 * MIN - MIN);
   });
@@ -219,29 +217,25 @@ describe('GetHomeView and RefreshHomeView', () => {
   });
 });
 
-describe('the FlowDay and links tiles', () => {
+describe('the links tile', () => {
   it('probes exactly the public_http URLs of the registry', () => {
     const urls = REGISTRY.entries.flatMap((e) => (e.status.type === 'public_http' && e.status.enabled ? [[e.id, e.status.url]] : []));
     expect(Object.fromEntries(urls)).toEqual(PROBES);
   });
 
-  it('shows Access answering FlowDay\'s manifest, or a wrong type from links, on the tile and as one observed item each', async () => {
+  it('shows a wrong type from links on the tile and as one observed item', async () => {
     h = await mockupDay();
-    // The bypass is gone: Access redirects the manifest to its login page.
-    h.routes.set(PROBES.flowday, () => new Response(null, { status: 302, headers: { location: 'https://team.example.com/cdn-cgi/access/login' } }));
     // Something other than the links Worker answers 200 with HTML.
     h.routes.set(PROBES.links, () => new Response('<html></html>', { headers: { 'content-type': 'text/html; charset=utf-8' } }));
     await h.tick(NOW - 31 * MIN);
     await h.tick(NOW - MIN);
     const home = await view<HomeView>(h, 'home');
-    expect(home.entries.find((e) => e.id === 'flowday')).toMatchObject({ level: 'critical', reason: 'http_status', consecutive_failures: 2, metric: null });
     expect(home.entries.find((e) => e.id === 'links')).toMatchObject({ level: 'critical', reason: 'content_type', consecutive_failures: 2, metric: null });
     expect(attentionFacts(home.attention.items)).toEqual([
-      { source: 'flowday', code: 'http_status', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'flowday' }, observed: 'critical' },
       { source: 'links', code: 'content_type', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'links' }, observed: 'critical' },
     ]);
-    expect(home.badges).toEqual({ home: 2, flows: 0, cloudflare: 0, ops: 0 });
-    // No flow names either app, and the digest to Todofy keeps v1's item set.
+    expect(home.badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 0 });
+    // No flow names the app, and the digest to Todofy keeps v1's item set.
     expect(home.flows.every((f) => f.level === 'ok')).toBe(true);
     expect((await view<OpsView>(h, 'ops')).digest.items).toEqual([]);
   });

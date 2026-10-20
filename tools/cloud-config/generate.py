@@ -157,12 +157,11 @@ def inventory_map(text: str, field: str, values: dict[str, str]) -> str:
 
 def infrastructure_ids(text: str, resources: dict) -> str:
     """Refresh public inventory locals; optional frozen applications may be absent in a fresh account."""
-    for field in ("access_policy_ids", "access_app_ids", "flowday_app_ids"):
+    for field in ("access_policy_ids", "access_app_ids"):
         require(field in resources, "resource inventory coverage")
     maps = {
         "access_policy_ids": {name.replace("-", "_"): value for name, value in resources["access_policy_ids"].items()},
         "access_app_ids": resources["access_app_ids"],
-        "flowday_app_ids": resources["flowday_app_ids"],
         "d1_database_ids": resources["d1_databases"],
     }
     for field, values in maps.items():
@@ -273,7 +272,7 @@ def bootstrap_infra_files(root: Path) -> dict[str, str]:
 
     profile, resources = load_profile(root), load_resources(root)
     resources = {**resources, **{field: resources.get(field, {}) for field in
-                                ("access_policy_ids", "access_app_ids", "flowday_app_ids")}}
+                                ("access_policy_ids", "access_app_ids")}}
     catalog = load_catalog(root, bootstrap=True)
     return {
         PLATFORM_IDENTITY: platform_identity(profile, resources),

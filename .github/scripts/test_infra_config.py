@@ -14,18 +14,15 @@ What they keep true (infra/README.md):
   no backend without enforced state and plan encryption (test_infra_guard.py tests the guard itself).
 - The state lives in the R2 bucket infra-state through a partial S3 backend (no key, endpoint or credentials
   committed), encrypted with the state_passphrase variable only, no fallback.
-- Every Access application gates a Custom Domain its app's wrangler.toml declares (a retiring host only while
-  RETIRING_HOSTS lists it; an application created ahead of its Worker's first deploy, AHEAD_OF_DEPLOY, the host its
-  undeployed config names), and every Worker with an ACCESS_AUDIENCE has an application whose key is its name, so the
-  access_aud output covers it.
+- Every Access application gates a Custom Domain its app's wrangler.toml declares (an application created ahead of
+  its Worker's first deploy, AHEAD_OF_DEPLOY, the host its undeployed config names), and every Worker with an
+  ACCESS_AUDIENCE has an application whose key is its name, so the access_aud output covers it.
 - The D1 databases and R2 buckets are exactly those the production configs bind, and each D1 import id is
   the database_id committed there (ids.tf). The production configs are test_wrangler_configs.py's, minus the Workers
-  named in NOT_ADOPTED (none since IaC P4 adopted FlowDay and the links app).
+  named in NOT_ADOPTED (none since IaC P4 adopted the links app).
 - infra_state.py's lists agree with the rest: WRANGLER_CONFIGS (the outputs check in "Infra drift"/"Infra apply") is
   test_wrangler_configs.py's PRODUCTION, its ALLOWED_TYPES (the apply's allowlist) and FROZEN are the guard's, each
   FROZEN object's id is the id ids.tf records, and its OUTPUTS are the outputs outputs.tf declares.
-- RETIRING_HOSTS is exact: each retiring host is still a FlowDay destination and no other application uses one, so the
-  commit that drops a host from FlowDay's applications must empty its allowance in the same change.
 - The count of managed objects is one number: README.md "Managed here (N objects)", bootstrap_state.py's
   EXPECTED_OBJECTS (a rebuild by import must cover each) and the resources the configuration declares (each for_each
   map's keys) agree; ids.tf records the id of every application except one still AHEAD_OF_DEPLOY (never the all-zeros
@@ -60,7 +57,7 @@ import bootstrap_state  # noqa: E402
 import infra_state  # noqa: E402
 
 # Production Workers whose D1 database and Access applications are not adopted into infra/ yet. Empty since IaC P4
-# adopted FlowDay and the links app. A new app's Worker goes here until a change writes its import blocks and, in the
+# adopted the links app. A new app's Worker goes here until a change writes its import blocks and, in the
 # same commit, moves it into PRODUCTION below (Coverage checks that the two lists together are test_wrangler_configs.py's).
 NOT_ADOPTED: dict[str, str] = {}
 # Worker name -> production config: the list of test_wrangler_configs.py without NOT_ADOPTED.
@@ -71,7 +68,6 @@ PRODUCTION = {
     "home": "dashboard/wrangler.toml",
     "ziyixi-website": "website/wrangler.toml",
     "ziyixi-notion-publish": "website/relay/wrangler.toml",
-    "flowday": "flowday/wrangler.toml",
     "links": "links/wrangler.toml",
     "watch": "watch/wrangler.toml",
     "fleet": "fleet/wrangler.toml",
@@ -94,10 +90,6 @@ AHEAD_OF_DEPLOY = ({"fleet": load_profile(REPO)["platform_hostname"]}
                   if "fleet" in test_wrangler_configs.ci_changes.CHECK_ONLY else {})
 if "tasks" in test_wrangler_configs.ci_changes.CHECK_ONLY:
     AHEAD_OF_DEPLOY["tasks"] = "tasks." + load_profile(REPO)["zone"]
-# Hosts an Access application may still list although no wrangler.toml declares them. Empty since FlowDay's F3
-# staging host left both FlowDay applications after the F4 cutover (README.md "FlowDay"); a rollback that adds a host
-# back to an application adds it here in the same commit (test_retiring_hosts_are_exact).
-RETIRING_HOSTS: set[str] = set()
 
 
 def uncommented(text: str) -> str:
@@ -240,7 +232,7 @@ class Coverage(unittest.TestCase):
         self.assertEqual(bootstrap_state.EXPECTED_OBJECTS, declared)
 
     def test_ids_record_every_application_but_one_ahead_of_its_deploy(self):
-        """ids.tf names every owner and FlowDay application by its id (a rebuild by import writes its import block
+        """ids.tf names every owner application by its id (a rebuild by import writes its import block
         from it), except an application created ahead of its Worker's first deploy: that deploy's commit records the
         id (README.md "Adding an app" step 5), and the all-zeros placeholder never passes."""
         ids = (INFRA / "ids.tf").read_text()
@@ -248,10 +240,8 @@ class Coverage(unittest.TestCase):
         uuid = re.compile(r'^"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"$')
         placeholder = '"00000000-0000-0000-0000-000000000000"'
         owner_ids = hcl_map(ids, "access_app_ids")
-        flowday_ids = hcl_map(ids, "flowday_app_ids")
         self.assertEqual(set(owner_ids), set(hcl_map(code, "owner_apps")) - set(AHEAD_OF_DEPLOY))
-        self.assertEqual(set(flowday_ids), set(MatchesTheApps.flowday_apps(code)))
-        for key, value in {**owner_ids, **flowday_ids}.items():
+        for key, value in owner_ids.items():
             with self.subTest(app=key):
                 self.assertRegex(value, uuid)
                 self.assertNotEqual(value, placeholder, "fill in the application id read after the apply")
@@ -264,26 +254,9 @@ class Coverage(unittest.TestCase):
 
 
 class MatchesTheApps(unittest.TestCase):
-    def test_flowday_for_each_keys_do_not_require_other_imported_policy_instances(self):
-        # CLI import expands only its selected policy. Resource references inside the application's
-        # for_each local would index an absent sibling before that sibling can be imported.
-        code = (INFRA / "access.tf").read_text()
-        apps = re.search(r"^  flowday_apps = \{\n(.*?)^  \}\n", code, re.MULTILINE | re.DOTALL).group(1)
-        self.assertNotIn("cloudflare_", apps)
-        application = re.search(r'resource "cloudflare_zero_trust_access_application" "flowday" \{(.*?)^\}',
-                                code, re.MULTILINE | re.DOTALL).group(1)
-        self.assertIn("cloudflare_zero_trust_access_policy.flowday[each.key].id", application)
-
-    @staticmethod
-    def flowday_apps(code: str) -> dict[str, list[str]]:
-        block = re.search(r"^  flowday_apps = \{\n(.*?)^  \}\n", code, re.MULTILINE | re.DOTALL).group(1)
-        entries = re.findall(r'^    "([a-z-]+)" = \{\n(.*?)^    \}', block, re.MULTILINE | re.DOTALL)
-        return {key: re.findall(r'"([^"]+)"', re.search(r"destinations = \[(.*?)\]", body).group(1))
-                for key, body in entries}
-
     def test_access_applications_gate_the_apps_custom_domains(self):
         """Each application's key is its Worker's name, and each destination's host is one of that Worker's Custom
-        Domains (or a retiring host)."""
+        Domains."""
         code = (INFRA / "access.tf").read_text()
         owner = hcl_map(code, "owner_apps")
         destinations = {
@@ -291,21 +264,17 @@ class MatchesTheApps(unittest.TestCase):
             + re.findall(r'"([^"]+)"', re.search(r"more\s*=\s*\[(.*?)\]", value).group(1))
             for key, value in owner.items()
         }
-        flowday = self.flowday_apps(code)
-        self.assertEqual(set(flowday), {"flowday", "flowday-bypass"})
-        destinations.update({key: value for key, value in flowday.items()})
         self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks"})
-        for key, uris in destinations.items():
-            worker = "flowday" if key.startswith("flowday") else key
+        for worker, uris in destinations.items():
             if worker in AHEAD_OF_DEPLOY:
                 hosts = {AHEAD_OF_DEPLOY[worker]}  # no Custom Domain before the first deploy
             else:
                 hosts = {route["pattern"] for route in config(worker).get("routes", []) if route.get("custom_domain")}
-            with self.subTest(app=key):
+            with self.subTest(app=worker):
                 self.assertTrue(uris)
                 self.assertIn(uris[0].split("/")[0], hosts, "the first destination is the app's own host")
                 for uri in uris:
-                    self.assertIn(uri.split("/")[0], hosts | RETIRING_HOSTS)
+                    self.assertIn(uri.split("/")[0], hosts)
         backup = re.search(r'resource "cloudflare_zero_trust_access_application" "mail_hero_backup" \{(.*?)^\}', code, re.DOTALL | re.MULTILINE)
         self.assertIn('domain                      = "mail-hero.ziyixi.science/api/internal/backup/*"', backup.group(1))
 
@@ -317,57 +286,38 @@ class MatchesTheApps(unittest.TestCase):
             for key, value in hcl_map(code, "owner_apps").items()
         }
         backup = re.search(r'resource "cloudflare_zero_trust_access_application" "mail_hero_backup" \{.*?^\s*domain\s*=\s*"([^"]+)"', code, re.DOTALL | re.MULTILINE)
-        return {**owner, **self.flowday_apps(code), "mail-hero-backup": [backup.group(1)]}
+        return {**owner, "mail-hero-backup": [backup.group(1)]}
 
     def test_the_dashboard_probes_only_paths_outside_access(self):
         """Each public_http probe of dashboard/worker/src/registry.ts is anonymous, so Access must not govern its path: no
-        destination matches it, or the most specific one is a bypass application (FlowDay's /pwa/* "flowday-bypass").
-        A probe on a host with any Access application declares `outside_access: true`. When F6 removes "flowday-bypass"
-        (flowday/docs/design.md section 11), FlowDay's manifest probe fails here until the registry moves it."""
+        destination matches it (the links app's /robots.txt is outside its application's /_ paths). A probe on a host
+        with any Access application declares `outside_access: true`."""
         code = (INFRA / "access.tf").read_text()
         destinations = self.access_destinations(code)
         registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
         probes = re.findall(r"type: 'public_http',(.*?)\}", registry, re.DOTALL)
-        self.assertGreaterEqual(len(probes), 3)
+        self.assertGreaterEqual(len(probes), 2)
 
-        def governs(destination: str, host: str, path: str) -> int | None:
-            """The length of the destination's path when it covers host+path (longer = more specific), else None."""
+        def governs(destination: str, host: str, path: str) -> bool:
+            """Whether the destination covers host+path."""
             dest_host, _, rest = destination.partition("/")
             if dest_host != host:
-                return None
+                return False
             dest_path = f"/{rest}" if rest else ""
             if dest_path == "":
-                return 0
+                return True
             if dest_path.endswith("/*"):
-                return len(dest_path) if path.startswith(dest_path[:-1]) else None
-            return len(dest_path) if path == dest_path else None
+                return path.startswith(dest_path[:-1])
+            return path == dest_path
 
         for body in probes:
             url = re.search(r"url: '([^']+)'", body).group(1)
             host, path = re.match(r"https://([^/]+)(/.*)", url).groups()
             with self.subTest(probe=url):
-                matches = sorted(
-                    ((length, key) for key, uris in destinations.items() for uri in uris if (length := governs(uri, host, path)) is not None),
-                    reverse=True,
-                )
-                if matches:
-                    self.assertTrue(matches[0][1].endswith("-bypass"), f"Access application {matches[0][1]} governs the probe")
+                matches = sorted(key for key, uris in destinations.items() for uri in uris if governs(uri, host, path))
+                self.assertEqual(matches, [], "an Access application governs the probe")
                 on_access_host = any(uri.split("/")[0] == host for uris in destinations.values() for uri in uris)
                 self.assertEqual("outside_access: true" in body, on_access_host)
-
-    def test_retiring_hosts_are_exact(self):
-        """An allowance in RETIRING_HOSTS exists only while a FlowDay application still lists the host, and no other
-        application may use it: dropping the host from local.flowday_apps without emptying the set fails here."""
-        code = (INFRA / "access.tf").read_text()
-        flowday_hosts = {uri.split("/")[0] for uris in self.flowday_apps(code).values() for uri in uris}
-        other_hosts = {re.search(r'domain\s*=\s*"([^"/]+)', value).group(1) for value in hcl_map(code, "owner_apps").values()}
-        other_hosts |= {uri.split("/")[0] for value in hcl_map(code, "owner_apps").values()
-                        for uri in re.findall(r'"([^"]+)"', re.search(r"more\s*=\s*\[(.*?)\]", value).group(1))}
-        for host in sorted(RETIRING_HOSTS):
-            with self.subTest(host=host):
-                self.assertIn(host, flowday_hosts, "a stale allowance: empty RETIRING_HOSTS in the commit that drops it")
-                self.assertNotIn(host, other_hosts)
-                self.assertNotIn(host, code.split("# --- FlowDay")[0], "only FlowDay's applications may list it")
 
     def test_ahead_of_deploy_is_exact(self):
         """A first-phase app (Fleet, mailsort, recall and the brief before; none now) has no fake AUD and cannot deploy
@@ -456,7 +406,7 @@ class MatchesTheApps(unittest.TestCase):
         """The access_aud output is keyed by Worker name; a Worker whose ACCESS_AUDIENCE no application key matches
         would fail the outputs check in "Infra drift"."""
         code = (INFRA / "access.tf").read_text()
-        keys = set(hcl_map(code, "owner_apps")) | set(self.flowday_apps(code))
+        keys = set(hcl_map(code, "owner_apps"))
         for worker in PRODUCTION:
             if "ACCESS_AUDIENCE" in config(worker).get("vars", {}):
                 with self.subTest(worker=worker):

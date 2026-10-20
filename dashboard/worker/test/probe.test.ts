@@ -5,7 +5,7 @@ import type { FetchLike } from '../src/usage.ts';
 
 const URL_ = 'https://www.example.com/build-info.json';
 const TARGET: ProbeTarget = { url: URL_, expect: [200] };
-/** A probe that also asks for the Worker's own media type (FlowDay's manifest, the links app's robots.txt). */
+/** A probe that also asks for the Worker's own media type (the links app's robots.txt). */
 const TYPED: ProbeTarget = { url: 'https://app.example.com/robots.txt', expect: [200], content_type: 'text/plain' };
 const NOW = Date.parse('2026-09-29T14:30:00Z');
 

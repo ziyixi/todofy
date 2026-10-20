@@ -2,8 +2,8 @@
 """Decide which apps a CI run checks and deploys. Standard library only (the runner's python3).
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
-  todofy_check, mail_hero_check, dashboard_check, website_check, flowday_check, links_check, watch_check,
-  newsletter_check, fleet_check, platform_check, mailsort_check, recall_check, brief_check
+  todofy_check, mail_hero_check, dashboard_check, website_check, links_check, watch_check, newsletter_check,
+  fleet_check, platform_check, mailsort_check, recall_check, brief_check, tasks_check
                     run that app's full checks
   contracts         run the contract tests: both sides of mail.received.v1, ops-v1 and
                     task-intent-v1, and the dashboard's ops-v1 caller tests (also on a proto/ change: the
@@ -17,9 +17,9 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     tools/ changed, or a dispatch.
   base              not a flag: the commit the diff started from (empty when everything runs), which
                     "Proto checks" compares the IDL with.
-  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, flowday_deploy, links_deploy,
-  watch_deploy, newsletter_deploy, fleet_deploy, platform_publish, platform_deploy, mailsort_deploy, recall_deploy,
-  brief_deploy
+  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, links_deploy, watch_deploy,
+  newsletter_deploy, fleet_deploy, platform_publish, platform_deploy, mailsort_deploy, recall_deploy, brief_deploy,
+  tasks_deploy
                     the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
   website_relay_deploy
@@ -32,12 +32,9 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     (main only; a version whose tag exists is skipped). Any file there counts, a README too: an
                     extra release is harmless, a missed one is not. A dispatch for recall (or all) and a run of
                     everything publish too. The extension is never deployed.
-  FlowDay (flowday/) is checked and deployed like the other apps since F2 (flowday/docs/design.md section 11). It uses
-  no contract (NO_CONTRACTS) and compiles in packages/edge-auth and the TypeScript proto runtime with
-  proto/flowday/ui/ (its owner API, flowday.ui.v1), so a change to those checks and deploys it too. The links app
-  (links/, the short links on s.ziyixi.science) is checked and deployed since L2 (links/docs/design.md section 11). It
-  uses no contract and compiles in packages/edge-auth and the TypeScript proto runtime with proto/links/ui/, so a
-  change to those checks and deploys it too. The watch app (watch/, the web watches on watch.ziyixi.science) is
+  The links app (links/, the short links on s.ziyixi.science) is checked and deployed since L2 (links/docs/design.md
+  section 11). It uses no contract (NO_CONTRACTS) and compiles in packages/edge-auth and the TypeScript proto runtime
+  with proto/links/ui/, so a change to those checks and deploys it too. The watch app (watch/, the web watches on watch.ziyixi.science) is
   checked and deployed since W2 (watch/docs/design.md section 11). It proposes task-intent-v1 (its notification sink)
   and answers ops-v1 (its Ops entrypoint; Contracts runs both tests) and compiles in packages/edge-auth and the
   TypeScript proto runtime with proto/watch/ui/, proto/todofy/taskintent/ and proto/ops/, so a change to those checks
@@ -58,12 +55,11 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
 ziyixi-proto) and deploys only the apps whose bundle the changed path reaches (proto_deploys): PROTO_USERS[app] names
-the languages whose generated code and runtime the app's production bundles compile in ("ts": FlowDay's, Mail
-Hero's, the links app's, the watch app's and the dashboard's Workers and UIs, and Todofy's gateway and UI
+the languages whose generated code and runtime the app's production bundles compile in ("ts": Mail Hero's, the
+links app's, the watch app's and the dashboard's Workers and UIs, and Todofy's gateway and UI
 (todofy.ui.v1's transcoder and client); "python": todofy-core, through the wheel pywrangler vendors), PROTO_RUNTIMES
 maps a language's runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to the apps
-that import its generated code (flowday/ui reaches FlowDay only, mailhero/ui Mail Hero only, links/ui
-the links app only, watch/ui the watch app only, dashboard/ui the dashboard only, todofy/ui Todofy only; prototest, the
+that import its generated code (mailhero/ui reaches Mail Hero only, links/ui the links app only, watch/ui the watch app only, dashboard/ui the dashboard only, todofy/ui Todofy only; prototest, the
 runtimes' fixtures, reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and
 Markdown (PROTO_NOT_BUNDLED), and the files of a package proto/retired.json lists (its deletion), deploy nothing; any
 other proto/ path (buf.yaml, buf.lock, the toolchain lockfile,
@@ -144,7 +140,6 @@ KEYS = (
     "mail_hero_check",
     "dashboard_check",
     "website_check",
-    "flowday_check",
     "links_check",
     "watch_check",
     "newsletter_check",
@@ -163,7 +158,6 @@ KEYS = (
     "dashboard_deploy",
     "website_deploy",
     "website_relay_deploy",
-    "flowday_deploy",
     "links_deploy",
     "watch_deploy",
     "newsletter_deploy",
@@ -183,7 +177,6 @@ DISPATCH = {
     "mail-hero": ("mail-hero",),
     "dashboard": ("dashboard",),
     "website": ("website",),
-    "flowday": ("flowday",),
     "links": ("links",),
     "watch": ("watch",),
     "newsletter": ("newsletter",),
@@ -200,7 +193,7 @@ RELAY = "website/relay/"
 # Release (recall_extension_publish).
 EXTENSION = ("recall/extension/", "recall/shared/")
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"flowday", "links", "newsletter"}
+NO_CONTRACTS = {"links", "newsletter"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")
@@ -220,7 +213,6 @@ APP_TEST_DIRECTORIES = (
     "todofy/gateway/test/",
     "mail-hero/cloudflare/test/",
     "dashboard/worker/test/",
-    "flowday/worker/test/",
     "links/worker/test/",
     "watch/worker/test/",
     "fleet/worker/test/",
@@ -232,14 +224,13 @@ APP_TEST_DIRECTORIES = (
     "tasks/tools/test/",
 )
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "flowday", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
 PROTO = "proto/"
 PROTO_USERS: dict[str, tuple[str, ...]] = {
     "todofy": ("python", "ts"),
-    "flowday": ("ts",),
     "links": ("ts",),
     "mail-hero": ("ts",),
     "dashboard": ("ts",),
@@ -274,8 +265,7 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
     # shared transcoder and Todofy's UI calls it through the shared client.
     "proto/todofy/ui/": ("todofy", "tasks"),
-    "proto/flowday/ui/": ("flowday",),
-    "proto/tasks/ui/": ("tasks", "todofy", "flowday"),
+    "proto/tasks/ui/": ("tasks", "todofy"),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
     # mailsort's owner API (mailsort.ui.v2, after v1): its Worker serves it, its UI calls it.
@@ -364,7 +354,6 @@ CHECK_JOBS = {
     "mail_hero_check": ("Mail Hero checks",),
     "dashboard_check": ("Dashboard checks",),
     "website_check": ("Website checks",),
-    "flowday_check": ("FlowDay checks",),
     "links_check": ("Links checks",),
     "watch_check": ("Watch checks",),
     "newsletter_check": ("Newsletter checks", "Newsletter image checks"),

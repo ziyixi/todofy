@@ -116,9 +116,7 @@ python3 tools/cloud-bootstrap/bootstrap.py plan --mode adopt \
   --private-file ~/.config/personal-cloud/adopt.json
 ```
 
-`plan` 只读取明确的 zone、选中 IdP、FlowDay policy、邮件 rule 和 state，运行 Tofu plan。它不创建桶、注册 workers.dev、修改 Cloudflare/state、写私有文件或 GitHub secrets。允许 import/no-op；已有资源任何变更都会拒绝，先解决差异再收编。
-
-FlowDay 的 `include` 有已确认的 provider 导入缺陷，因此由精确的实际 API 规则校验补足；出现 `FLOWDAY_INCLUDE_MISMATCH` 时，在 Access policy 页面恢复声明的规则后重跑 `plan`。这项兼容仅覆盖两个 FlowDay policy，首次创建仍直接使用 HCL。
+`plan` 只读取明确的 zone、选中 IdP、邮件 rule 和 state，运行 Tofu plan。它不创建桶、注册 workers.dev、修改 Cloudflare/state、写私有文件或 GitHub secrets。允许 import/no-op；已有资源任何变更都会拒绝，先解决差异再收编。
 
 实际收编使用同一个输入运行 `cloud --mode adopt`。它先按标准 `tofu import` 收编 state 中缺失的固定地址，已有 state 先备份；这一步只读取 Cloudflare、写加密 state，使 IdP 引用确定下来。随后完整计划必须 no-op，才结束初始化。失败可从同一文件续跑，已导入项跳过。OAuth secret、历史数据库、对象和应用 key 保留。收编并不要求运行 `secrets`；现有 GitHub/Worker secrets 仍有效。需要重新生成 VPS 私有文件时补入已有共享 key，不能替换为新随机 key。
 

@@ -29,7 +29,6 @@ export const NOW = Date.parse('2026-10-01T12:00:00Z');
 /** The registry's public_http probes by entry (the only public GETs the Worker makes; v2.test.ts keeps them in step). */
 export const PROBES = {
   website: 'https://www.ziyixi.science/build-info.json',
-  flowday: 'https://flowday.ziyixi.science/pwa/manifest.webmanifest',
   links: 'https://s.ziyixi.science/robots.txt',
 } as const;
 export const WEBSITE_PROBE = PROBES.website;
@@ -39,8 +38,6 @@ export function healthyProbe(entry: keyof typeof PROBES): Response {
   switch (entry) {
     case 'website':
       return Response.json({ build: 'synthetic' }, { headers: { 'cache-control': 'no-store' } });
-    case 'flowday':
-      return new Response('{"name":"FlowDay"}', { headers: { 'content-type': 'application/manifest+json' } });
     case 'links':
       return new Response('User-agent: *\nDisallow: /\n', { headers: { 'content-type': 'text/plain; charset=utf-8' } });
   }

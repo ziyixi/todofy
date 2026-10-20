@@ -1,5 +1,5 @@
-# One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, FlowDay, the links app, the watch app,
-# Fleet, Newsletter, Platform, mailsort, recall and the brief).
+# One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, the links app, the watch app, Fleet,
+# Newsletter, Platform, mailsort, recall, the brief and Tasks).
 # "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run
 # from its own directory, "Shared packages" checks packages/* (compiled into the apps), "Contracts" runs both
 # sides of mail.received.v1, ops-v1 and task-intent-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
@@ -22,7 +22,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, flowday, links, watch, newsletter, fleet, platform, mailsort, recall, brief, tasks]
+        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, mailsort, recall, brief, tasks]
         default: both
       resume_vps_release:
         description: Explicitly resume a held VPS release after investigating its safe error
@@ -58,7 +58,6 @@ jobs:
       mail_hero_check: ${{ steps.decide.outputs.mail_hero_check }}
       dashboard_check: ${{ steps.decide.outputs.dashboard_check }}
       website_check: ${{ steps.decide.outputs.website_check }}
-      flowday_check: ${{ steps.decide.outputs.flowday_check }}
       links_check: ${{ steps.decide.outputs.links_check }}
       watch_check: ${{ steps.decide.outputs.watch_check }}
       newsletter_check: ${{ steps.decide.outputs.newsletter_check }}
@@ -78,7 +77,6 @@ jobs:
       dashboard_deploy: ${{ steps.decide.outputs.dashboard_deploy }}
       website_deploy: ${{ steps.decide.outputs.website_deploy }}
       website_relay_deploy: ${{ steps.decide.outputs.website_relay_deploy }}
-      flowday_deploy: ${{ steps.decide.outputs.flowday_deploy }}
       links_deploy: ${{ steps.decide.outputs.links_deploy }}
       watch_deploy: ${{ steps.decide.outputs.watch_deploy }}
       newsletter_deploy: ${{ steps.decide.outputs.newsletter_deploy }}
@@ -124,8 +122,8 @@ jobs:
       - name: Test the deploy hostname guard
         run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs
       # The shared test and build tools the apps' checks import by relative path (dependency-free, synthetic data):
-      # the bundle-size budgets and the CPU meter of the workerd CPU tests, whose workerd side runs in the FlowDay,
-      # links, watch, Mail Hero and dashboard suites.
+      # the bundle-size budgets and the CPU meter of the workerd CPU tests, whose workerd side runs in the apps' own
+      # suites (Tasks, Todofy, Mail Hero, Home, links, watch, mailsort, recall and the brief).
       - name: Test the shared bundle-size and CPU test tools
         run: node --test tools/bundle-size/test/*.test.mjs tools/workerd-cpu/test/*.test.mts
       # On a push to main it reads this workflow's runs with the read-only token: the newest first-parent commit
@@ -280,22 +278,6 @@ jobs:
           persist-credentials: false
       - name: Run dashboard-checks steps
         uses: ./.github/actions/check-dashboard
-
-  flowday-checks:
-    name: FlowDay checks
-    needs: changes
-    if: needs.changes.outputs.flowday_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: flowday
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run flowday-checks steps
-        uses: ./.github/actions/check-flowday
 
   tasks-checks:
     name: Tasks checks
@@ -607,7 +589,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, flowday-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -622,7 +604,6 @@ jobs:
           MAIL_HERO: ${{ needs.mail-hero-checks.result }}
           DASHBOARD: ${{ needs.dashboard-checks.result }}
           WEBSITE: ${{ needs.website-checks.result }}
-          FLOWDAY: ${{ needs.flowday-checks.result }}
           TASKS: ${{ needs.tasks-checks.result }}
           LINKS: ${{ needs.links-checks.result }}
           WATCH: ${{ needs.watch-checks.result }}
@@ -650,7 +631,7 @@ jobs:
           failed=0
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
-            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "FlowDay checks=$FLOWDAY" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" "Mailsort checks=$MAILSORT" \
+            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" "Mailsort checks=$MAILSORT" \
             "Tasks checks=$TASKS" "Recall checks=$RECALL" "Brief checks=$BRIEF" \
             "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
@@ -880,28 +861,6 @@ jobs:
     uses: ./.github/workflows/worker-release.yml
     with:
       app: dashboard
-      source_sha: ${{ github.sha }}
-    secrets: inherit
-
-  flowday-deploy:
-    name: FlowDay deploy
-    needs: [changes, flowday-checks, gate, tasks-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
-    if: >-
-      ${{ !cancelled()
-      && needs.changes.result == 'success'
-      && (needs.flowday-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.flowday-checks.result == 'skipped'))
-      && needs.gate.result == 'success'
-      && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
-      && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-      && needs.changes.outputs.flowday_deploy == 'true' }}
-    permissions:
-      contents: read
-      deployments: write
-    uses: ./.github/workflows/worker-release.yml
-    with:
-      app: flowday
       source_sha: ${{ github.sha }}
     secrets: inherit
 

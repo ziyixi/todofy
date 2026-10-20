@@ -12,7 +12,6 @@ UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 TABLES = {
     "access_app_ids": "cloudflare_zero_trust_access_application.owner",
     "access_policy_ids": "cloudflare_zero_trust_access_policy",
-    "flowday_app_ids": "cloudflare_zero_trust_access_application.flowday",
     "d1_databases": "cloudflare_d1_database.app",
 }
 POLICY_KEYS = {
@@ -34,8 +33,6 @@ PLATFORM_ADDRESSES = {
 MANAGED_ADDRESSES = PLATFORM_ADDRESSES | {
     "cloudflare_zero_trust_access_identity_provider.github[0]",
     "cloudflare_zero_trust_access_identity_provider.email[0]",
-    'cloudflare_zero_trust_access_policy.flowday["flowday"]',
-    'cloudflare_zero_trust_access_policy.flowday["flowday-bypass"]',
     "cloudflare_email_routing_rule.mail_hero[0]",
 }
 
@@ -65,9 +62,6 @@ def known_imports(resources: dict, values: dict, extra: dict | None = None) -> d
             imports[address] = account + "/" + resources["standalone_access_app_ids"][name]
     for name in ("mail-hero-store", "mail-hero-backups", "todofy-backups"):
         imports['cloudflare_r2_bucket.app[' + json.dumps(name) + ']'] = account + "/" + name
-    for name in ("flowday", "flowday-bypass"):
-        if name in resources.get("referenced_policy_ids", {}):
-            imports['cloudflare_zero_trust_access_policy.flowday[' + json.dumps(name) + ']'] = account + "/" + resources["referenced_policy_ids"][name]
     for address, identifier in {**resources.get("managed_ids", {}), **(extra or {})}.items():
         if address not in MANAGED_ADDRESSES or not isinstance(identifier, str) or (re.fullmatch(r"[0-9a-f]{32}", identifier) is None and UUID.fullmatch(identifier) is None):
             raise BootstrapError("ADOPT_ID_INVALID")
@@ -93,7 +87,7 @@ def exported_resources(previous: dict, plan: dict, *, fresh: bool) -> dict:
             raise ValueError
         result = {"version": 1, "account_id": previous["account_id"], "zone_id": previous["zone_id"],
                   "access_audiences": {name: audience for name, audience in audiences.items()
-                                       if name not in {"flowday-bypass", "mail-hero-backup"}},
+                                       if name != "mail-hero-backup"},
                   "d1_databases": databases,
                   "durable_objects": ({} if fresh and databases != previous["d1_databases"]
                                       else dict(previous["durable_objects"]))}

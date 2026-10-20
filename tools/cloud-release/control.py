@@ -16,7 +16,6 @@ WORKERS = {
     "todofy": ["todofy/wrangler.toml", "todofy/gateway/wrangler.toml"],
     "mail-hero": ["mail-hero/wrangler.toml"],
     "dashboard": ["dashboard/wrangler.toml"],
-    "flowday": ["flowday/wrangler.toml"],
     "links": ["links/wrangler.toml"],
     "tasks": ["tasks/wrangler.toml"],
     "watch": ["watch/wrangler.toml"],
@@ -49,10 +48,10 @@ RETIRED_WEBSITE_BINDINGS = {
     "IGNORED_EDITOR_IDS",
 }
 # Bindings the owner retired from an app; a normal release of that app removes them, a repair still stops.
-# A binding to a deleted Worker stays until that Worker is gone (see infra/README "Retiring an app"). None now:
-# Todofy's Todoist-era vars and its FlowDay bindings left with the releases before FlowDay's retirement. A secret
-# never goes here: a deploy keeps the secrets it does not name, so a retired secret is deleted before the push or the
-# release's record step fails.
+# A binding to a deleted Worker stays until that Worker is gone (see infra/README "Retiring an app"). None now: the
+# last entries, Todofy's retired vars and service bindings, left the live Workers with its releases of October 2026.
+# A secret never goes here: a deploy keeps the secrets it does not name, so a retired secret is deleted before the push
+# or the release's record step fails.
 RETIRED_SERVICE_BINDINGS: dict[str, set[str]] = {}
 
 

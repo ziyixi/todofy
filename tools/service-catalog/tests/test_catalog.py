@@ -74,8 +74,8 @@ class CatalogTests(unittest.TestCase):
         before = json.loads((Path(__file__).parent / "home-before-p5.json").read_text())
         keys = ("id", "name", "description", "group", "icon", "accent", "url", "access", "status", "tile_metric", "app_only_signals", "order")
         existing = [entry for entry in before["entries"] if entry["id"] not in {"self-hosted", "newsletter", "notion-publish"}]
-        # Tasks replaced Todoist as the task store, which two descriptions named.
-        renamed = {"todofy": "邮件摘要、规划与每日提醒", "flowday": "Tasks 时间块、计时与回顾"}
+        # Tasks replaced Todoist as the task store, which Todofy's description named.
+        renamed = {"todofy": "邮件摘要、规划与每日提醒"}
         existing = [entry | {"description": renamed.get(entry["id"], entry["description"])} for entry in existing]
         existing_ids = {entry["id"] for entry in existing}
         entries = [{key: entry[key] for key in keys} for entry in loaded.entries if entry["id"] in existing_ids]
@@ -96,7 +96,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(set(loaded.worker_configs().values()), catalog.production_configs(catalog.REPO))
         self.assertGreaterEqual(len(loaded.workers), 10)
         self.assertEqual({app for app, data in loaded.apps.items() if data["target"] == "cloudflare"},
-                         {"todofy", "mail-hero", "dashboard", "website", "flowday", "links", "watch", "mailsort", "recall", "brief", "tasks"}
+                         {"todofy", "mail-hero", "dashboard", "website", "links", "watch", "mailsort", "recall", "brief", "tasks"}
                          | ({"fleet"} if "fleet" in loaded.apps else set()))
         self.assertEqual(loaded.apps["newsletter"]["image"], "ghcr.io/ziyixi/todofy-newsletter")
         self.assertEqual(loaded.apps["newsletter"]["target"], "vps")
@@ -105,8 +105,6 @@ class CatalogTests(unittest.TestCase):
     def test_access_values_are_unchanged_and_paths_are_derived(self):
         rules = {r["key"]: r for r in catalog.load_catalog().access}
         self.assertEqual(rules["links"]["destinations"], ["s.ziyixi.science/_/*", "s.ziyixi.science/_"])
-        self.assertEqual(rules["flowday-bypass"]["destinations"], ["flowday.ziyixi.science/pwa/*"])
-        self.assertEqual(rules["flowday"]["session"], "168h")
         self.assertEqual(rules["mail-hero"]["name"], "Mail Hero")
 
     def test_unknown_fields_fail_at_every_level(self):
@@ -302,9 +300,9 @@ guard = false
         for original in ['unmarked', '// BEGIN service-catalog x\nmissing end']:
             with self.assertRaises(catalog.CatalogError):
                 catalog.replace_region(original, 'x', 'safe', '//')
-        original = '# BEGIN service-catalog flowday\na\n# END service-catalog flowday\n# BEGIN service-catalog flowday-bypass\nb\n# END service-catalog flowday-bypass\n'
-        result = catalog.replace_region(original, 'flowday', 'new', '#')
-        self.assertIn('\nb\n# END service-catalog flowday-bypass', result)
+        original = '# BEGIN service-catalog a\na\n# END service-catalog a\n# BEGIN service-catalog a-b\nb\n# END service-catalog a-b\n'
+        result = catalog.replace_region(original, 'a', 'new', '#')
+        self.assertIn('\nb\n# END service-catalog a-b', result)
 
 
 if __name__ == '__main__':

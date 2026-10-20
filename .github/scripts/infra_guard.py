@@ -65,7 +65,13 @@ FROZEN = frozenset({"cloudflare_zero_trust_access_application.mail_hero_backup"}
 # resource block declares, as exact `from` -> `to` addresses. Such a move takes the object out of prevent_destroy's reach,
 # so the next plan deletes it, and "Infra apply" still refuses that unless confirm_destructive is given. Remove a pair
 # with its moved block after the apply that deleted the object.
-RETIRED: dict[str, str] = {}
+RETIRED: dict[str, str] = {
+    'cloudflare_zero_trust_access_application.flowday["flowday"]': "cloudflare_zero_trust_access_application.retired_flowday",
+    'cloudflare_zero_trust_access_application.flowday["flowday-bypass"]': "cloudflare_zero_trust_access_application.retired_flowday_bypass",
+    'cloudflare_zero_trust_access_policy.flowday["flowday"]': "cloudflare_zero_trust_access_policy.retired_flowday",
+    'cloudflare_zero_trust_access_policy.flowday["flowday-bypass"]': "cloudflare_zero_trust_access_policy.retired_flowday_bypass",
+    'cloudflare_d1_database.app["flowday"]': "cloudflare_d1_database.retired_flowday",
+}
 TOP_LEVEL = frozenset({"terraform", "provider", "variable", "locals", "resource", "import", "output", "moved"})
 NEVER_NESTED = frozenset({"provisioner", "connection", "data", "module", "resource"})
 # Committed files under infra/, relative to it. Anything else (a plan named tfplan or plan.out, a .tofu

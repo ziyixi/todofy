@@ -50,7 +50,6 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     expect(tiles.todofy).toMatchObject({ level: 'ok', metric: { kind: 'counter', name: 'received_24h', value: 63 } });
     expect(tiles[LINK_ONLY_ENTRY.id]).toMatchObject({ level: 'link', reason: null, metric: null, checked_at: null });
     expect(tiles.website).toMatchObject({ level: 'ok', metric: { kind: 'latency', ms: 180 } });
-    expect(tiles.flowday).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency', ms: 95 } });
     expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency', ms: 40 } });
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: null });
     expect(tiles.newsletter).toMatchObject({ level: 'ok', reason: null, metric: null });
@@ -113,34 +112,32 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     expect(entryState(entry('website', off), input(), off)).toMatchObject({ level: 'unmonitored', reason: null });
   });
 
-  it('judges FlowDay and the links app by their probe like the website, plus a wrong media type', () => {
+  it('judges the links app by its probe like the website, plus a wrong media type', () => {
     const wrongType = probe({ ok: false, http_status: 200, error: 'content_type', consecutive_failures: 1 });
-    for (const id of ['flowday', 'links'] as const) {
-      expect(state(id, { probes: {} })).toMatchObject({ level: 'unknown', reason: 'never_checked', metric: null });
-      expect(state(id, { probes: { [id]: wrongType } })).toMatchObject({ level: 'warning', reason: 'content_type', consecutive_failures: 1, metric: null });
-      // Access's login redirect on a path that should be public: an http_status failure, critical the second time.
-      const redirected = probe({ ok: false, http_status: 302, error: 'http_status', consecutive_failures: 2 });
-      expect(state(id, { probes: { [id]: redirected } })).toMatchObject({ level: 'critical', reason: 'http_status', metric: null });
-      expect(state(id, { probes: { [id]: probe({ checked_at: NOW - 2 * HOUR }) } })).toMatchObject({ level: 'unknown', reason: 'stale', metric: null });
-    }
+    expect(state('links', { probes: {} })).toMatchObject({ level: 'unknown', reason: 'never_checked', metric: null });
+    expect(state('links', { probes: { links: wrongType } })).toMatchObject({ level: 'warning', reason: 'content_type', consecutive_failures: 1, metric: null });
+    // Access's login redirect on a path that should be public: an http_status failure, critical the second time.
+    const redirected = probe({ ok: false, http_status: 302, error: 'http_status', consecutive_failures: 2 });
+    expect(state('links', { probes: { links: redirected } })).toMatchObject({ level: 'critical', reason: 'http_status', metric: null });
+    expect(state('links', { probes: { links: probe({ checked_at: NOW - 2 * HOUR }) } })).toMatchObject({ level: 'unknown', reason: 'stale', metric: null });
   });
 
   it('adds the Workers\' error rate to a probe that asks for it (fresh data only), and never to the website\'s', () => {
     const errors = (script: string, requests: number, failed: number) =>
       mergeScripts(scripts(), [{ script, requests, errors: failed, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
     // 30 % errors over 100 requests: critical, while the probe itself passed; the latency gives way to the reason.
-    expect(state('flowday', { scripts: errors('flowday', 100, 30) })).toMatchObject({ level: 'critical', reason: 'error_rate', metric: null });
+    expect(state('links', { scripts: errors('links', 100, 30) })).toMatchObject({ level: 'critical', reason: 'error_rate', metric: null });
     expect(state('links', { scripts: errors('links', 100, 6) })).toMatchObject({ level: 'warning', reason: 'error_rate', metric: null });
     // Too few requests to judge, or another Worker's errors: the probe decides.
     expect(state('links', { scripts: errors('links', 10, 9) })).toMatchObject({ level: 'ok', metric: { kind: 'latency', ms: 40 } });
-    expect(state('flowday', { scripts: errors('links', 100, 30) })).toMatchObject({ level: 'ok' });
+    expect(state('links', { scripts: errors('watch', 100, 30) })).toMatchObject({ level: 'ok' });
     // A failing probe stays the reason when it is the worse of the two.
     const down = probe({ ok: false, http_status: 503, error: 'http_status', consecutive_failures: 2 });
-    expect(state('flowday', { probes: { flowday: down }, scripts: errors('flowday', 100, 6) })).toMatchObject({ level: 'critical', reason: 'http_status' });
+    expect(state('links', { probes: { links: down }, scripts: errors('links', 100, 6) })).toMatchObject({ level: 'critical', reason: 'http_status' });
     // Stale analytics never make the tile unknown: the fresh probe still says ok.
     const staleNow = NOW + 2 * HOUR;
-    const fresh = { flowday: probe({ checked_at: staleNow - MIN, latency_ms: 95 }) };
-    expect(state('flowday', { now: staleNow, lastTickAt: staleNow, probes: fresh, scripts: errors('flowday', 100, 30) })).toMatchObject({ level: 'ok' });
+    const fresh = { links: probe({ checked_at: staleNow - MIN, latency_ms: 40 }) };
+    expect(state('links', { now: staleNow, lastTickAt: staleNow, probes: fresh, scripts: errors('links', 100, 30) })).toMatchObject({ level: 'ok' });
     // The website's assets-only Worker is not judged by its error rate.
     expect(state('website', { scripts: errors('ziyixi-website', 100, 30) })).toMatchObject({ level: 'ok' });
   });
@@ -347,29 +344,28 @@ describe('the attention strip', () => {
     expect(attentionView(base({ neverRan: true, evaluation: input({ statuses: {}, probes: {}, scripts: null }) })).attention.items).toEqual([]);
   });
 
-  it('raises a failing FlowDay or links probe as one observed item on its tile, like the website (no flow repeats it)', () => {
+  it('raises a failing links probe as one observed item on its tile, like the website (no flow repeats it)', () => {
     const redirected = probe({ ok: false, http_status: 302, error: 'http_status', consecutive_failures: 2 });
-    const evaluation = input({ probes: { ...input().probes, flowday: redirected, links: probe({ ok: false, http_status: 200, error: 'content_type', consecutive_failures: 1 }) } });
+    const evaluation = input({ probes: { ...input().probes, links: redirected } });
     const { attention, badges } = attentionView(base({ evaluation }));
     expect(attention.level).toBe('critical');
     expect(attention.items).toEqual([
-      { source: 'flowday', code: 'http_status', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'flowday' }, observed: 'critical' },
-      { source: 'links', code: 'content_type', severity: 'warning', since: null, metrics: {}, target: { view: 'home', entry: 'links' }, observed: 'warning' },
+      { source: 'links', code: 'http_status', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'links' }, observed: 'critical' },
     ]);
-    expect(badges).toEqual({ home: 2, flows: 0, cloudflare: 0, ops: 0 });
+    expect(badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 0 });
     // A high error rate shows once, on the tile: the Worker row of the same entry and code is not repeated.
-    const failing = mergeScripts(scripts(), [{ script: 'flowday', requests: 100, errors: 30, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
+    const failing = mergeScripts(scripts(), [{ script: 'links', requests: 100, errors: 30, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
     const errors = attentionView(base({ evaluation: input({ scripts: failing }) })).attention;
-    expect(errors.items.map((i) => [i.source, i.code, i.observed, i.target])).toEqual([['flowday', 'error_rate', 'critical', { view: 'home', entry: 'flowday' }]]);
+    expect(errors.items.map((i) => [i.source, i.code, i.observed, i.target])).toEqual([['links', 'error_rate', 'critical', { view: 'home', entry: 'links' }]]);
     // Two causes, two items: when the probe failure is at least as severe it keeps the tile (a tie keeps the probe's
     // reason), and the Worker row on the Cloudflare view lists the error rate, as it does for any other entry.
     for (const errorCount of [30, 6]) {
-      const both = mergeScripts(scripts(), [{ script: 'flowday', requests: 100, errors: errorCount, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
+      const both = mergeScripts(scripts(), [{ script: 'links', requests: 100, errors: errorCount, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
       const down = probe({ ok: false, http_status: 503, error: 'http_status', consecutive_failures: 2 });
-      const tie = attentionView(base({ evaluation: input({ probes: { ...input().probes, flowday: down }, scripts: both }) }));
+      const tie = attentionView(base({ evaluation: input({ probes: { ...input().probes, links: down }, scripts: both }) }));
       expect(tie.attention.items.map((i) => [i.source, i.code, i.observed, i.target])).toEqual([
-        ['flowday', 'http_status', 'critical', { view: 'home', entry: 'flowday' }],
-        ['flowday', 'error_rate', errorCount === 30 ? 'critical' : 'warning', { view: 'cloudflare', script: 'flowday' }],
+        ['links', 'http_status', 'critical', { view: 'home', entry: 'links' }],
+        ['links', 'error_rate', errorCount === 30 ? 'critical' : 'warning', { view: 'cloudflare', script: 'links' }],
       ]);
       expect(tie.badges).toEqual({ home: 1, flows: 0, cloudflare: 1, ops: 0 });
     }

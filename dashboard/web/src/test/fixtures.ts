@@ -278,7 +278,6 @@ function entries(patch: Record<string, Partial<EntryState>> = {}): EntryState[] 
   return [
     entry('mail-hero', { metric: { kind: 'counter', name: 'ingest_today_messages', value: 37 }, ...patch['mail-hero'] }),
     entry('todofy', { metric: { kind: 'counter', name: 'received_24h', value: 41 }, ...patch.todofy }),
-    entry('flowday', { metric: { kind: 'latency', ms: 95 }, ...patch.flowday }),
     entry('links', { metric: { kind: 'latency', ms: 40 }, ...patch.links }),
     entry('website', { metric: { kind: 'latency', ms: 180 }, ...patch.website }),
     entry('notion-publish', { ...patch['notion-publish'] }),
@@ -854,8 +853,8 @@ export function canaryFailed(): Scenario {
 }
 
 /**
- * Healthy, plus a synthetic link-only app tile (the registry has none since Flowday was removed from
- * the dashboard on 2026-09-30): an Access-protected host shown as a link, never probed.
+ * Healthy, plus a synthetic link-only app tile (the registry has had none since 2026-09-30): an
+ * Access-protected host shown as a link, never probed.
  */
 export function withLinkOnly(): Scenario {
   const base = healthy()

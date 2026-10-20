@@ -22,8 +22,6 @@ MANAGED_ADDRESSES = frozenset({
     'cloudflare_dns_record.platform["runtime"]',
     "cloudflare_zero_trust_access_identity_provider.github[0]",
     "cloudflare_zero_trust_access_identity_provider.email[0]",
-    'cloudflare_zero_trust_access_policy.flowday["flowday"]',
-    'cloudflare_zero_trust_access_policy.flowday["flowday-bypass"]',
     "cloudflare_email_routing_rule.mail_hero[0]",
 })
 
@@ -173,7 +171,7 @@ def _worker_secret_declarations(root: Path) -> dict[str, dict]:
 def load_resources(root: Path) -> dict:
     value = fields(read_public(root / "config/resources.toml"),
                    {"version", "account_id", "zone_id", "access_audiences", "d1_databases", "durable_objects"}, "resources",
-                   {"access_app_ids", "access_policy_ids", "standalone_access_app_ids", "flowday_app_ids", "referenced_policy_ids", "managed_ids"})
+                   {"access_app_ids", "access_policy_ids", "standalone_access_app_ids", "referenced_policy_ids", "managed_ids"})
     require(type(value["version"]) is int and value["version"] == 1, "resources.version")
     for key in ("account_id", "zone_id"):
         require(isinstance(value[key], str) and re.fullmatch(r"[0-9a-f]{32}", value[key]) is not None,
@@ -182,7 +180,7 @@ def load_resources(root: Path) -> dict:
     identifiers(value["access_audiences"], "resources.access_audiences", r"[0-9a-f]{64}")
     identifiers(value["d1_databases"], "resources.d1_databases", r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
     identifiers(value["durable_objects"], "resources.durable_objects", r"[0-9a-f]{32}")
-    for key in ("access_app_ids", "access_policy_ids", "standalone_access_app_ids", "flowday_app_ids", "referenced_policy_ids"):
+    for key in ("access_app_ids", "access_policy_ids", "standalone_access_app_ids", "referenced_policy_ids"):
         if key in value:
             identifiers(value[key], "resources." + key, r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
     managed = value.get("managed_ids", {})

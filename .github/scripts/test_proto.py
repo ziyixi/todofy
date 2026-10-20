@@ -163,15 +163,11 @@ def ts_proto_imports(text: str) -> list[tuple[str, bool]]:
     return found
 
 
-# A Next.js app (FlowDay's UI) keeps the code it ships in these top-level directories instead of src/.
-NEXT_SOURCE_DIRS = ("app", "components", "features", "lib")
-
-
 def production_sources(manifest: Path) -> list[Path]:
-    """The TypeScript a package ships: src/** (or Next.js sources) and its relay/src/** when the same manifest
-    builds both Workers, without tests (*.test.*) or helpers (test/ and __tests__/)."""
+    """The TypeScript a package ships: src/** and its relay/src/** when the same manifest builds both Workers, without
+    tests (*.test.*) or helpers (test/ and __tests__/)."""
     base = manifest.parent
-    roots = [base / "src"] if (base / "src").is_dir() else [base / name for name in NEXT_SOURCE_DIRS if (base / name).is_dir()]
+    roots = [base / "src"]
     if (base / "relay" / "src").is_dir():
         roots.append(base / "relay" / "src")
     return [
@@ -524,16 +520,6 @@ class Users(unittest.TestCase):
         self.assertEqual(data["project"]["scripts"]["personal-cloud"], "personal_cloud.__main__:main")
         self.assertFalse((platform.parent / "wrangler.toml").exists())
         self.assertTrue(all(source.is_relative_to(platform.parent / "src") for source in py_production_sources(platform)))
-
-    def test_a_next_js_ui_is_read_from_its_source_directories(self):
-        """FlowDay's UI (Next.js, no src/) imports flowday.ui.v1 from lib/: its production sources are found."""
-        manifest = REPO / "flowday" / "web" / "package.json"
-        self.assertIn(manifest, ts_users())
-        sources = production_sources(manifest)
-        self.assertIn(REPO / "flowday" / "web" / "lib" / "client" / "flowday-api.ts", sources)
-        self.assertFalse([path for path in sources if "__tests__" in path.parts])
-        values = {name for path in sources for name, type_only in ts_proto_imports(path.read_text()) if not type_only}
-        self.assertIn("@ziyixi/proto/flowday/ui/v1/flowday_ui_service_pb", values)
 
     def test_the_website_manifest_covers_its_separate_relay_bundle(self):
         manifest = REPO / "website" / "package.json"

@@ -11,7 +11,6 @@ locals {
   d1_databases = {
     "mail-hero" = "mail-hero"
     "todofy"    = "todofy (todofy-core)"
-    "flowday"   = "flowday"
     "links"     = "links"
     "tasks"     = "tasks"
   }

@@ -291,53 +291,18 @@ class Cloud(unittest.TestCase):
         previous = {"account_id": ACCOUNT, "zone_id": ZONE, "d1_databases": {}, "durable_objects": {}}
         self.assertNotIn("synthetic-hidden", json.dumps(inventory.exported_resources(previous, plan, fresh=True)))
 
-    def test_verify_refuses_live_flowday_drift_hidden_by_the_provider(self):
-        plan = {"resource_changes": [{"mode": "managed", "type": "cloudflare_zero_trust_access_policy",
-                "address": "cloudflare_zero_trust_access_policy.owner", "change": {"actions": ["no-op"]}}]}
-
-        class Session:
-            def __init__(self, **kwargs):
-                self.work = kwargs["work"]
-                self.tofu = SimpleNamespace(init=lambda environment: None)
-
-            def s3(self, method, key):
-                return 200, b""
-
-            def plan_full(self, name):
-                observed = dict(plan)
-                if name == "verify":
-                    observed["_flowday_include_errors"] = ["FLOWDAY_INCLUDE_MISMATCH:flowday"]
-                return 0, {"rows": [("no-op", "owner")], "outputs": []}, "", observed
-
-            def cleanup(self):
-                pass
-
-        values = {"account_id": ACCOUNT, "access_owner_emails": ["owner"], "access_github_owner_emails": ["owner"],
-                  "access_allowed_idp_ids": ["idp"], "access_github_idp_id": "idp"}
-        private = {"infra_values": values, "cloudflare_api_token": "synthetic", "infra_state_passphrase": "synthetic-passphrase"}
-        resources = {"account_id": ACCOUNT, "zone_id": ZONE, "managed_ids": {}, "standalone_access_app_ids": {}}
-        with tempfile.TemporaryDirectory() as directory, mock.patch.object(tofu_bootstrap, "verify_target"), \
-                mock.patch.object(tofu_bootstrap, "prepare"), mock.patch.object(tofu_bootstrap, "ensure_workers_subdomain"), \
-                mock.patch.object(tofu_bootstrap, "ensure_bucket"), mock.patch.object(tofu_bootstrap, "import_state"), \
-                mock.patch.object(tofu_bootstrap, "output") as credentials:
-            with self.assertRaisesRegex(BootstrapError, "BOOTSTRAP_FLOWDAY_INCLUDE_MISMATCH"):
-                tofu_bootstrap.run(private, {"zone": "example.invalid", "workers_dev_subdomain": "desired"},
-                                   resources, "adopt", Path(directory), session_factory=Session)
-            credentials.assert_not_called()
-
     def test_fresh_and_adopt_inventory_exclude_only_non_worker_audiences(self):
-        audiences = {"flowday": "worker-audience", "mail-hero": "mail-audience",
-                     "flowday-bypass": "pwa-audience", "mail-hero-backup": "legacy-audience",
-                     "unexpected": "unexpected-audience"}
+        audiences = {"links": "worker-audience", "mail-hero": "mail-audience",
+                     "mail-hero-backup": "legacy-audience", "unexpected": "unexpected-audience"}
         plan = {"planned_values": {"outputs": {"access_aud": {"value": audiences},
                 "d1_database_ids": {"value": {}}}, "root_module": {"resources": []}}}
         previous = {"account_id": ACCOUNT, "zone_id": ZONE, "d1_databases": {}, "durable_objects": {}}
         for fresh in (True, False):
             with self.subTest(fresh=fresh):
                 exported = inventory.exported_resources(previous, plan, fresh=fresh)
-                self.assertEqual(exported["access_audiences"], {"flowday": "worker-audience",
+                self.assertEqual(exported["access_audiences"], {"links": "worker-audience",
                                  "mail-hero": "mail-audience", "unexpected": "unexpected-audience"})
-        self.assertEqual(len(audiences), 5, "the full Terraform output remains available for drift checks")
+        self.assertEqual(len(audiences), 4, "the full Terraform output remains available for drift checks")
 
     def test_only_missing_state_addresses_import_and_resume(self):
         calls = []
@@ -359,7 +324,7 @@ class Cloud(unittest.TestCase):
             backup.assert_not_called()
 
     def test_failed_import_keeps_only_sanitized_headlines_and_stops(self):
-        address = 'cloudflare_zero_trust_access_policy.flowday["flowday"]'
+        address = 'cloudflare_d1_database.app["links"]'
         calls = []
         private_value = "sensitive-credential-" + "x" * 40
         with tempfile.TemporaryDirectory() as directory:

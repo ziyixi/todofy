@@ -21,7 +21,6 @@ describe('首页', () => {
     expect(links.map((link) => link.getAttribute('aria-label'))).toEqual([
       '打开 Mail Hero（新标签页），mail-hero.ziyixi.science',
       '打开 Todofy（新标签页），todofy.ziyixi.science',
-      '打开 FlowDay（新标签页），flowday.ziyixi.science',
       '打开 短链接（新标签页），s.ziyixi.science',
       '打开 网页监视（新标签页），watch.ziyixi.science',
       '打开 服务器监控（新标签页），fleet.ziyixi.science',
@@ -38,7 +37,7 @@ describe('首页', () => {
     // The links tile opens its launcher, the Access-protected /_/ of the short-link host.
     expect(within(apps).getByRole('link', { name: /打开 短链接/ })).toHaveAttribute('href', 'https://s.ziyixi.science/_/')
     // Access-protected entries carry the lock with its own name; never an emoji.
-    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(10)
+    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(9)
 
     // Status lines are separate buttons (never inside the link).
     const mail = within(apps).getByRole('button', { name: 'Mail Hero 状态：正常，查看详情' })
@@ -48,12 +47,11 @@ describe('首页', () => {
     // fixtures: 未知).
     // mailsort's tile has its own status button too, and so have recall's and the brief's (not in these fixtures
     // either: 未知).
-    expect(within(apps).getAllByRole('button')).toHaveLength(10)
+    expect(within(apps).getAllByRole('button')).toHaveLength(9)
     expect(within(apps).getByRole('button', { name: '浏览记录 状态：未知，查看详情' })).toBeInTheDocument()
     expect(within(apps).getByRole('button', { name: '简报 状态：未知，查看详情' })).toBeInTheDocument()
     expect(within(apps).getByRole('button', { name: 'Tasks 状态：未知，查看详情' })).toBeInTheDocument()
-    // FlowDay and the links app: their probe's latency, like the website.
-    expect(within(apps).getByRole('button', { name: 'FlowDay 状态：正常，查看详情' })).toHaveTextContent('正常· 响应 95 ms')
+    // The links app: its probe's latency, like the website.
     expect(within(apps).getByRole('button', { name: '短链接 状态：正常，查看详情' })).toHaveTextContent('正常· 响应 40 ms')
 
     const sites = within(launcher()).getByRole('region', { name: '站点' })
@@ -79,7 +77,7 @@ describe('首页', () => {
     const link = within(apps).getByRole('link', { name: '打开 Link Demo（新标签页），link-demo.ziyixi.science，未接入监控（仅链接）' })
     expect(link).toHaveAttribute('href', 'https://link-demo.ziyixi.science/')
     expect(link).toHaveAttribute('target', '_blank')
-    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(11)
+    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(10)
     expect(within(apps).queryByRole('button', { name: /Link Demo/ })).toBeNull()
   })
 
@@ -192,29 +190,29 @@ describe('首页', () => {
     expect(button).toHaveFocus()
   })
 
-  it('shows a failing FlowDay probe on its tile and in its sheet, with its Worker and no flow', async () => {
+  it('shows a failing links probe on its tile and in its sheet, with its Worker and no flow', async () => {
     const base = healthy()
-    const flowday = { level: 'critical' as const, reason: 'content_type', consecutive_failures: 2, metric: null }
-    const item = { source: 'flowday', code: 'content_type', severity: 'critical' as const, since: null, metrics: {}, target: { view: 'home' as const, entry: 'flowday' }, observed: 'critical' as const }
+    const links = { level: 'critical' as const, reason: 'content_type', consecutive_failures: 2, metric: null }
+    const item = { source: 'links', code: 'content_type', severity: 'critical' as const, since: null, metrics: {}, target: { view: 'home' as const, entry: 'links' }, observed: 'critical' as const }
     const home = {
       ...base.home,
-      entries: base.home.entries.map((e) => (e.id === 'flowday' ? { ...e, ...flowday } : e)),
+      entries: base.home.entries.map((e) => (e.id === 'links' ? { ...e, ...links } : e)),
       attention: { level: 'critical' as const, items: [item], info: [], held: [] },
       badges: { ...base.home.badges, home: 1 },
     }
     await showHome({ ...base, home })
     const user = userEvent.setup()
     const strip = screen.getByRole('region', { name: '1 项故障' })
-    expect(within(strip).getByRole('listitem')).toHaveTextContent('FlowDay：响应类型不符')
-    const button = within(launcher()).getByRole('button', { name: 'FlowDay 状态：故障，查看详情' })
+    expect(within(strip).getByRole('listitem')).toHaveTextContent('短链接：响应类型不符')
+    const button = within(launcher()).getByRole('button', { name: '短链接 状态：故障，查看详情' })
     expect(button).toHaveTextContent('故障· 响应类型不符')
     await user.click(button)
-    const sheet = screen.getByRole('dialog', { name: 'FlowDay 状态' })
+    const sheet = screen.getByRole('dialog', { name: '短链接 状态' })
     expect(within(sheet).getByText('连续失败').nextElementSibling).toHaveTextContent('2 次')
-    const links = within(within(sheet).getByRole('list', { name: '相关位置' })).getAllByRole('link')
-    expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
-      ['查看 Worker：flowday →', '#/cloudflare/worker/flowday'],
-      ['打开 FlowDay（新标签页）', 'https://flowday.ziyixi.science/'],
+    const related = within(within(sheet).getByRole('list', { name: '相关位置' })).getAllByRole('link')
+    expect(related.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['查看 Worker：links →', '#/cloudflare/worker/links'],
+      ['打开 短链接（新标签页）', 'https://s.ziyixi.science/_/'],
     ])
   })
 

@@ -27,8 +27,6 @@ from state_imports import adopt as import_state
 
 def bootstrap_gate(plan: dict, mode: str, create_addresses: tuple[str, ...] = ()) -> None:
     """Bootstrap may read imports or create missing objects; it never edits an existing object."""
-    if plan.get("_flowday_include_errors"):
-        raise BootstrapError("BOOTSTRAP_FLOWDAY_INCLUDE_MISMATCH")
     if infra_state.type_violations(plan):
         raise BootstrapError("BOOTSTRAP_RESOURCE_OUTSIDE_SCOPE")
     for item in plan.get("resource_changes", []):

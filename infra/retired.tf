@@ -6,4 +6,31 @@
 # pairs it lists in RETIRED. Remove a block, and its RETIRED pair, after the apply that deleted the object: once the
 # state no longer holds the old address, the block does nothing.
 #
-# No app is being retired now: Lab's Access application and D1 database were deleted by the apply of 2026-10-07.
+# FlowDay (retired 2026-10-20; README.md "Retiring an app"): its two Access applications, the two reusable policies only
+# they used, and its D1 database. The resource blocks are gone; these moves give each object an address without an
+# instance key, so the redacted drift summary names every deletion exactly. Remove them, with their RETIRED pairs in
+# .github/scripts/infra_guard.py, in the commit after the apply that deleted the objects.
+moved {
+  from = cloudflare_zero_trust_access_application.flowday["flowday"]
+  to   = cloudflare_zero_trust_access_application.retired_flowday
+}
+
+moved {
+  from = cloudflare_zero_trust_access_application.flowday["flowday-bypass"]
+  to   = cloudflare_zero_trust_access_application.retired_flowday_bypass
+}
+
+moved {
+  from = cloudflare_zero_trust_access_policy.flowday["flowday"]
+  to   = cloudflare_zero_trust_access_policy.retired_flowday
+}
+
+moved {
+  from = cloudflare_zero_trust_access_policy.flowday["flowday-bypass"]
+  to   = cloudflare_zero_trust_access_policy.retired_flowday_bypass
+}
+
+moved {
+  from = cloudflare_d1_database.app["flowday"]
+  to   = cloudflare_d1_database.retired_flowday
+}

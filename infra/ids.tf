@@ -31,14 +31,9 @@ locals {
     "brief"    = "6005b0c0-ddc3-4812-8b28-322f3601a95a"
     "tasks"    = "1cf91393-a308-4b4a-bcb0-962bc2840ea3"
   }
-  flowday_app_ids = {
-    "flowday"        = "3d956afb-07ea-4b5e-802e-27fd29ca4587"
-    "flowday-bypass" = "d63df372-28d1-4a88-a7b4-b31449d1592b"
-  }
   d1_database_ids = {
     "mail-hero" = "6c13e4c3-e239-42fb-a7a4-96810fa8d7dc"
     "todofy"    = "151c1306-3885-4679-9592-08887b30ae68"
-    "flowday"   = "df104e83-7183-47e3-b2f9-638dc7502c13"
     "links"     = "2f8c5331-06ce-4347-8c0a-90fe51c82260"
     "tasks"     = "79a1f345-1183-46c3-bc6a-651be106f90c"
   }
