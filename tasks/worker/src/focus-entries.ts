@@ -114,7 +114,7 @@ export async function updateFocusEntry(db: D1Database, input: UpdateFocusEntryRe
   if (!paths.length || paths.includes('*')) invalid('An explicit update_mask is required');
   for (const path of paths) {
     if (path === 'seconds') continue;
-    if (!(path in IMMUTABLE)) invalid('Unsupported update field');
+    if (!Object.hasOwn(IMMUTABLE, path)) invalid('Unsupported update field');
     const field = IMMUTABLE[path as keyof typeof IMMUTABLE];
     if (entry[field] !== old[path as keyof typeof IMMUTABLE]) invalid('Only seconds can change');
   }
