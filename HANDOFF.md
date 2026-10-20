@@ -14,21 +14,22 @@ refinement and cutover, VPS recovery, Recall, Mailsort) in
 
 ### Tasks performance: planning in Tasks (`claude/tasks-planning`)
 
-**Ready to release; local only, not pushed.** A branch from `origin/main` `abd0da1a`, which holds the Plan and
-Focus release. It implements the performance design in one release, by the owner's choice without flags, staged
-rollout or a shadow phase: P0 front end, P1 planning facts in Tasks, the one-time import workflow and P2 Todofy
+**Ready to release.** Pushed through `57bd6b99`, whose CI run 39459937383 failed only Tasks' `cpu.test.ts`; the
+first-request CPU fix after it (below) is local, not pushed. A branch from `origin/main` `abd0da1a`, which holds the
+Plan and Focus release. It implements the performance design in one release, by the owner's choice without flags,
+staged rollout or a shadow phase: P0 front end, P1 planning facts in Tasks, the one-time import workflow and P2 Todofy
 cleanup (Todofy stops serving planning and drops its FlowDay proxy), with the review's fixes. P3, dropping Todofy's
 planning tables, follows once the import is verified.
 
-Final local check on 2026-10-20 UTC at `8f2259c4`, with `abd0da1a` still the tip of `origin/main`:
+Final local check on 2026-10-20 UTC at `d1d20199` (the CPU fix), with `abd0da1a` still the tip of `origin/main`:
 `ci_changes.py` selects every check job, and each passed on macOS: Changes' tests, Shared packages, Proto,
 Contracts, Todofy static and runtime (all 498 runtime tests in one shard, the completeness check included), Tasks
-(the Worker's 64 unit tests and 20 runtime files with 98 tests; the web's 55 unit tests, build and 107 Playwright
+(the Worker's 65 unit tests and 20 runtime files with 98 tests; the web's 55 unit tests, build and 107 Playwright
 tests; the tools' 44 tests), FlowDay, Mail Hero, Home, Links, Watch, Mailsort, Recall, Brief, Fleet, Website,
 Newsletter (its engine steps with an empty `HOME`, as on a runner), Infra and Platform's contract steps. CI alone runs
 what macOS cannot: the Newsletter image (a linux/amd64 Docker build) and CJK font install, Platform's manifest
 compiler, AppArmor, runtime image and k3s steps, Mail Hero's GPG backup test and Changes' decide step (it needs
-GitHub's token; `ci_changes.py` ran directly). The web's main chunk is 884.3 kB (283.0 kB gzip), the gateway 74.2
+GitHub's token; `ci_changes.py` ran directly). The web's main chunk is 884.8 kB (283.2 kB gzip), the gateway 74.6
 KiB gzip (budget 87), todofy-core's upload 198.5 KiB gzip.
 
 Measured in the synthetic preview (the Tasks dev server's D1 in Chromium, 3 runs each, with no added latency and
@@ -181,6 +182,9 @@ is one request; completing a card is one CompleteTask, then one reload wave.
     inbox page 6.69 → 4.87, the plan 4.07 → 3.37, one task 3.97 → 3.37. A 169 ms loop added to the warm-up's async
     step left the first request unchanged: it runs during startup. Auth (`auth.ts`, `edge-auth`) is unchanged.
     `test/startup.test.ts` now fails when the warm-up's stub D1 no longer answers `listTasks`, which it only logs.
+  - Final check at `d1d20199`: two more interleaved runs against 57bd6b99 read 7.09-7.20 → 4.80-5.18, 7.38-7.72 →
+    5.51-5.56 and 8.76-8.78 → 5.83-6.15; three runs at the fix read 4.99-5.19, 5.34-5.50 and 5.76-5.91. Scaled by
+    CI's ratio to local before the fix (1.12-1.25), CI should read about 6-7.5 against the bound of 10.
 
 ### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
 
