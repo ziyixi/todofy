@@ -173,6 +173,12 @@ API responses, HTML, manifest and service worker use private no-store headers. H
 browser's private immutable cache. The service worker only supplies a clear offline page; it does not cache
 private tasks, credentials or writes. The installed PWA needs a connection to use task data.
 
+A tab opened before a release keeps its old bundle. Every authenticated answer names the Worker's build
+(`BUILD_SHA`) in `x-tasks-build`, and the release builds the web from the same commit. When an answer comes from
+another build, the tab shows "Tasks was updated." with Reload in place of the page and its errors. Where either
+build is unnamed (development, a manual build), an unknown route (404 "Unknown API route", or 405) does the same
+(`web/src/outdated.ts`, `shared/build.ts`).
+
 ## Synthetic interface references
 
 These images contain only local synthetic data. The shared planning interface is documented in

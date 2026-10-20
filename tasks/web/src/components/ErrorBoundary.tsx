@@ -4,6 +4,20 @@ import { Component, type ReactNode } from "react";
 const MISSING_CHUNK =
   /dynamically imported module|Importing a module script failed/i;
 
+/** Asks for a reload, which loads the current build. */
+export function ReloadPrompt({ updated }: { updated: boolean }) {
+  return (
+    <p className="loading-state" role="alert">
+      {updated
+        ? "Tasks was updated."
+        : "This part of Tasks could not be shown."}
+      <button className="text-button" onClick={() => window.location.reload()}>
+        Reload
+      </button>
+    </p>
+  );
+}
+
 /**
  * Lazily loaded parts fail to load once a newer deploy has replaced their chunk. Instead of blanking the
  * whole app, this one place asks for a reload, which fetches the current build. A changed `resetKey`, such
@@ -33,18 +47,6 @@ export class ErrorBoundary extends Component<
   }
   override render() {
     if (!this.state.failed) return this.props.children;
-    return (
-      <p className="loading-state" role="alert">
-        {this.state.updated
-          ? "Tasks was updated."
-          : "This part of Tasks could not be shown."}
-        <button
-          className="text-button"
-          onClick={() => window.location.reload()}
-        >
-          Reload
-        </button>
-      </p>
-    );
+    return <ReloadPrompt updated={this.state.updated} />;
   }
 }

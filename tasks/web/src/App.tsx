@@ -35,9 +35,10 @@ import { Sidebar } from "./components/Sidebar";
 import { SidebarResize } from "./components/SidebarResize";
 import { TaskWorkspace } from "./components/TaskWorkspace";
 import { CatalogView } from "./components/CatalogView";
-import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ErrorBoundary, ReloadPrompt } from "./components/ErrorBoundary";
 import { TaskDragProvider } from "./components/TaskDrag";
 import { useReturnRefresh } from "./useReturnRefresh";
+import { useOutdated } from "./outdated";
 // The app's own styles come before the task dialog's and Plan's, as when those two loaded on demand.
 import "./styles.css";
 // The dialog and Plan load with the app: a part loaded on demand shows only after React's 300ms Suspense
@@ -71,6 +72,9 @@ export function App() {
     item?: CatalogItem;
   }>();
   const [showSidebar, setShowSidebar] = useState(false);
+  // A newer build serves Tasks, so this tab's bundle may call routes it no longer has: the page and its
+  // errors give way to the reload prompt.
+  const outdated = useOutdated();
   const taskOpenSequence = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const currentRoute = useRef(route);
@@ -270,7 +274,7 @@ export function App() {
             </button>
             <span>{title}</span>
           </div>
-          {catalogError && (
+          {catalogError && !outdated && (
             <div className="error-message" role="alert">
               {catalogError}
               <button
@@ -281,7 +285,7 @@ export function App() {
               </button>
             </div>
           )}
-          {notice && (
+          {notice && !outdated && (
             <div className="notice" role="status">
               {notice}
               <button className="text-button" onClick={() => setNotice("")}>
@@ -289,7 +293,9 @@ export function App() {
               </button>
             </div>
           )}
-          {route.page === "mail" ? (
+          {outdated ? (
+            <ReloadPrompt updated />
+          ) : route.page === "mail" ? (
             <ErrorBoundary key="mail">
               <Suspense
                 fallback={

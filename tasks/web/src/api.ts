@@ -16,6 +16,7 @@ import type {
   SavedFilter,
 } from "@ziyixi/proto/tasks/ui/v1/task_pb";
 import { clearDetailReadCache } from "./detail-read-cache";
+import { checkBuild, isOutdated } from "./outdated";
 
 export type Task = ApiTask;
 export type Catalog = Pick<
@@ -100,10 +101,12 @@ export async function send(call: HttpCall): Promise<Response> {
   if (mutation || [401, 403, 409].includes(response.status))
     clearDetailReadCache();
   if (response.status === 401 || response.status === 403) csrf = undefined;
+  await checkBuild(response);
   return response;
 }
 export const api = createHttpClient(TasksUiService, send);
 export function describeError(reason: unknown): string {
+  if (isOutdated()) return "Tasks was updated. Reload to continue.";
   if (reason instanceof RpcStatusError)
     return reason.status.localizedMessage?.message || reason.status.message;
   if (

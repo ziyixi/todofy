@@ -58,7 +58,16 @@ async function asset(request: Request): Promise<Response> {
   }
 }
 export async function startHarness(
-  options: { port?: number; bypass?: boolean; inspectorPort?: number; jwks?: unknown; ownerToken?: string; planning?: (request: Request) => Promise<Response> } = {},
+  options: {
+    port?: number;
+    bypass?: boolean;
+    inspectorPort?: number;
+    jwks?: unknown;
+    ownerToken?: string;
+    planning?: (request: Request) => Promise<Response>;
+    /** BUILD_SHA, which a release sets; unset, as in development, by default. */
+    build?: string;
+  } = {},
 ) {
   const temp = await mkdtemp(join(tmpdir(), 'tasks-d1-'));
   const mf = new Miniflare(
@@ -83,6 +92,7 @@ export async function startHarness(
             ACCESS_AUDIENCE: 'b'.repeat(64),
             CSRF_SIGNING_KEY: 'cd'.repeat(32),
             DEV_AUTH_BYPASS: options.bypass === false ? 'false' : 'true',
+            ...(options.build ? { BUILD_SHA: options.build } : {}),
           },
           outboundService: (request: Request) =>
             options.jwks && request.url === 'https://synthetic.cloudflareaccess.com/cdn-cgi/access/certs'
