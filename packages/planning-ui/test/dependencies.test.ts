@@ -5,10 +5,7 @@ import {
   candidates,
   dependencyIndex,
   doneText,
-  droppedText,
   holds,
-  releasedText,
-  unsettled,
   waitersText,
   waitingForStatus,
   waitingTasks,
@@ -33,20 +30,11 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
 });
-const managedLabels = [
-  "office",
-  "home",
-  "quarter",
-  "candiate",
-  "focus",
-  "committed",
-].map((role) => ({ role, id: role, label: role }));
 const task = (id: string, value: Partial<PlanningTask> = {}): PlanningTask => ({
   id,
   title: `Synthetic ${id}`,
   parentId: "",
   projectId: "synthetic",
-  labels: [],
   area: "work",
   stage: "none",
   priority: 1,
@@ -65,27 +53,19 @@ const waitsFor = (
 ): TaskDependency => ({
   taskId,
   prerequisiteId,
-  baselineCount: 0,
   done: false,
   ...value,
 });
 
-it("holds while the prerequisite is listed, and a recurring one until its next completion", () => {
-  const edge = waitsFor("a", "b", { baselineCount: 3 });
+it("holds while the prerequisite is listed and Tasks does not say it is done", () => {
+  const edge = waitsFor("a", "b");
   expect(holds(edge, task("b"))).toBe(true);
   // Missing from a complete read: done, completed or deleted alike.
   expect(holds(edge, undefined)).toBe(false);
-  expect(holds({ ...edge, done: true }, undefined)).toBe(false);
-  const recurring = (completedCount?: number) =>
-    task("b", { recurring: true, completedCount });
-  expect(holds(edge, recurring(3))).toBe(true);
-  expect(holds(edge, recurring(4))).toBe(false);
-  // An undone completion lowers the counter: the task waits again.
-  expect(holds(edge, recurring(3))).toBe(true);
-  // Without Todoist's counter there is no telling: it keeps waiting.
-  expect(holds(edge, recurring(undefined))).toBe(true);
-  // A reopened one-off task waits again, whatever Todofy recorded before.
-  expect(holds({ ...edge, done: true }, task("b"))).toBe(true);
+  // A recurring prerequisite stays listed; Tasks says when it was completed again.
+  const recurring = task("b", { recurring: true, completedCount: 4 });
+  expect(holds(edge, recurring)).toBe(true);
+  expect(holds({ ...edge, done: true }, recurring)).toBe(false);
 });
 
 it("indexes what each active task waits for, what is done and who waits", () => {
@@ -98,7 +78,7 @@ it("indexes what each active task waits for, what is done and who waits", () => 
   const dependencies = [
     waitsFor("invite", "venue"),
     waitsFor("invite", "gone", { done: true }),
-    waitsFor("invite", "weekly", { baselineCount: 1 }),
+    waitsFor("invite", "weekly", { done: true }),
     waitsFor("budget", "venue"),
     // A waiter that is gone itself waits for nothing.
     waitsFor("closed", "venue"),
@@ -132,10 +112,13 @@ it("indexes what each active task waits for, what is done and who waits", () => 
 
 it("lists label and dependency waits together, the longest untouched first", () => {
   const tasks = [
-    task("label", { labels: ["waiting"], updatedAt: "2026-10-10T00:00:00Z" }),
+    task("label", {
+      planningFlags: ["waiting"],
+      updatedAt: "2026-10-10T00:00:00Z",
+    }),
     task("dependent", { updatedAt: "2026-10-01T00:00:00Z" }),
     task("venue", { updatedAt: "2026-09-01T00:00:00Z" }),
-    task("unknown", { labels: ["blocked"] }),
+    task("unknown", { planningFlags: ["blocked"] }),
   ];
   expect(
     waitingTasks({ tasks, dependencies: [waitsFor("dependent", "venue")] }).map(
@@ -144,7 +127,7 @@ it("lists label and dependency waits together, the longest untouched first", () 
   ).toEqual(["dependent", "label", "unknown"]);
 });
 
-it("detects a cycle through other tasks as Todofy does", () => {
+it("detects a cycle through other tasks as Tasks does", () => {
   const dependencies = [
     waitsFor("a", "b"),
     waitsFor("b", "c"),
@@ -165,7 +148,11 @@ it("offers matching tasks by title or parent, never the task's own family or a l
     task("venue", { title: "Book the venue" }),
     task("menu", { title: "Choose the menu", parentId: "venue" }),
     task("deck", { title: "Launch deck" }),
-    task("review", { title: "Weekly launch review", recurring: true }),
+    task("review", {
+      title: "Weekly launch review",
+      recurring: true,
+      completedCount: 0,
+    }),
     task("sync", { title: "Launch sync", recurring: true, completedCount: 5 }),
     task("blocked", { title: "Launch blog post" }),
   ];
@@ -183,7 +170,7 @@ it("offers matching tasks by title or parent, never the task's own family or a l
   // Its parent and its steps are its family; the deck is already linked.
   expect(shown("launch")).toEqual([
     ["rehearsal", "Product launch"],
-    ["review", "repeats"],
+    ["review", ""],
     ["sync", ""],
     ["blocked", "cycle"],
   ]);
@@ -208,49 +195,20 @@ it("offers a recurring prerequisite again once completed, and greys a cycle only
       item.task.id,
       item.refusal ?? "",
     ]);
-  // The sync's count passed the baseline: done, so it can be chosen to wait for its next completion.
-  expect(shown([waitsFor("report", "sync", { baselineCount: 4 })])).toEqual([
+  // The sync was completed again since: done, so it can be chosen to wait for its next completion.
+  expect(shown([waitsFor("report", "sync", { done: true })])).toEqual([
     ["sync", ""],
     ["draft", ""],
   ]);
-  expect(shown([waitsFor("report", "sync", { baselineCount: 5 })])).toEqual([
-    ["draft", ""],
-  ]);
+  expect(shown([waitsFor("report", "sync")])).toEqual([["draft", ""]]);
   // The draft once waited for the report through the sync, which is done: no cycle any more.
   const through = [
-    waitsFor("draft", "sync", { baselineCount: 4 }),
+    waitsFor("draft", "sync", { done: true }),
     waitsFor("sync", "report"),
   ];
   expect(shown(through, report, "dra")).toEqual([["draft", ""]]);
   expect(shown([waitsFor("draft", "report")], report, "dra")).toEqual([
     ["draft", "cycle"],
-  ]);
-});
-
-it("names the tasks a complete read misses for Todofy to settle, gone waiters first, at most twenty", () => {
-  const tasks = [task("invite"), task("venue"), task("reopened")];
-  expect(
-    unsettled({
-      tasks,
-      dependencies: [
-        waitsFor("invite", "venue"),
-        waitsFor("invite", "completed", { done: true }),
-        waitsFor("invite", "deleted"),
-        waitsFor("finished", "venue"),
-        // Recorded completed, yet listed again: reopened, so that a later deletion is settled too.
-        waitsFor("invite", "reopened", { done: true }),
-      ],
-    }),
-  ).toEqual(["finished", "deleted", "reopened"]);
-  const many = Array.from({ length: 25 }, (_, n) => waitsFor(`w${n}`, "venue"));
-  expect(unsettled({ tasks, dependencies: many })).toHaveLength(20);
-  // Review finding: the ones asked already in this visit leave room for the rest, so none starves.
-  const stuck = Array.from({ length: 21 }, (_, n) =>
-    waitsFor("invite", `gone-${n}`),
-  );
-  const first = unsettled({ tasks, dependencies: stuck });
-  expect(unsettled({ tasks, dependencies: stuck }, new Set(first))).toEqual([
-    "gone-20",
   ]);
 });
 
@@ -277,18 +235,6 @@ it("writes the quiet texts in both languages", () => {
   expect(waitersText([invite, venue], "en")).toBe(
     "“Send invitations” and 1 more are waiting for this",
   );
-  expect(droppedText(invite, "zh")).toBe(
-    "「Send invitations」等的任务已被删除，不再等待。",
-  );
-  expect(droppedText(invite, "en")).toBe(
-    "“Send invitations” no longer waits — the task it waited for was deleted.",
-  );
-  expect(releasedText(invite, "zh")).toBe(
-    "「Send invitations」等的任务已不在待办中，不再等待。",
-  );
-  expect(releasedText(invite, "en")).toBe(
-    "“Send invitations” no longer waits — the task it waited for is no longer active.",
-  );
 });
 
 it("puts a task that waits only for another task in Waiting, and one with a stage label in its lane with that status", () => {
@@ -304,7 +250,6 @@ it("puts a task that waits only for another task in Waiting, and one with a stag
   });
   const plan = (dependencies: TaskDependency[], tasks = [venue, invite]) => ({
     tasks,
-    managedLabels,
     dependencies,
     laneOrders: {},
   });
@@ -328,11 +273,11 @@ it("puts a task that waits only for another task in Waiting, and one with a stag
       statusLine([part]),
     ),
   ).toEqual(["等「Book the venue」", "10月20日截止"]);
-  // An explicit stage label keeps its lane, saying what it waits for.
+  // An explicit stage keeps its lane, saying what it waits for.
   const committed = {
     ...invite,
     stage: "committed" as const,
-    labels: ["committed"],
+    explicitStage: "committed" as const,
   };
   const lanes = boardLanes(
     plan([waitsFor("invite", "venue")], [venue, committed]),
@@ -358,21 +303,20 @@ it("puts a task that waits only for another task in Waiting, and one with a stag
   expect(due([])).toEqual({ past: 0, window: 1 });
 });
 
-it("merges a dependency write's answer without reading again", async () => {
+it("merges a dependency write's answer, and the waiting task's new etag, without reading again", async () => {
   const data = await createPrototype().load();
-  data.plan.dependencies = [waitsFor("a", "b"), waitsFor("c", "d")];
-  const one = { forTask: "a", dependencies: [waitsFor("a", "e")] };
+  data.plan.dependencies = [waitsFor("release", "b"), waitsFor("c", "d")];
+  const one = { forTask: "release", dependencies: [waitsFor("release", "e")] };
   expect(applyConfirmed(data, one).plan.dependencies).toEqual([
     waitsFor("c", "d"),
-    waitsFor("a", "e"),
+    waitsFor("release", "e"),
   ]);
-  const every = {
-    dependencies: [waitsFor("c", "d", { done: true })],
-    dropped: ["a"],
-  };
-  expect(applyConfirmed(data, every).plan.dependencies).toEqual(
-    every.dependencies,
-  );
   expect(applyConfirmed(data, one).plan.tasks).toBe(data.plan.tasks);
-  expect(rereadsAfter(one) || rereadsAfter(every)).toBe(false);
+  const release = data.plan.tasks.find((item) => item.id === "release")!;
+  const saved = { ...one, task: { ...release, etag: "release-2" } };
+  expect(
+    applyConfirmed(data, saved).plan.tasks.find((item) => item.id === "release")
+      ?.etag,
+  ).toBe("release-2");
+  expect(rereadsAfter(one)).toBe(false);
 });

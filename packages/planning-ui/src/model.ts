@@ -12,14 +12,15 @@ export interface PlanningTask {
   title: string;
   parentId: string;
   projectId: string;
-  labels: string[];
   /** The task's content type in Tasks. */
   kind?: "task" | "step";
   effort?: "" | "deep" | "shallow";
   /** The saved stage, before date-based candidates. */
   explicitStage?: Stage;
-  /** Native planning state, separate from ordinary tags. */
+  /** Planning state, separate from ordinary tags. */
   planningFlags?: string[];
+  /** Tasks' section, which with the project and parent makes a task's siblings. */
+  sectionId?: string;
   area: Area;
   stage: Stage;
   priority: number;
@@ -46,48 +47,33 @@ export interface PlanningTask {
   /** Tasks' numeric sibling position; fractional positions are preserved. */
   sortOrder?: number;
 }
-/** One task waits for another; kept only in Todofy's planning store (dependencies.ts). */
+/** One task waits for another, as a task in Tasks lists it (dependencies.ts). */
 export interface TaskDependency {
   /** The task that waits. */
   taskId: string;
   /** The task it waits for. */
   prerequisiteId: string;
-  /** The prerequisite's completedCount when added: a recurring one is done once it is higher. */
-  baselineCount: number;
-  /** Todofy confirmed the prerequisite completed, not deleted; the active list comes first. */
+  /** Tasks says it is completed, or repeats and was completed again since the dependency was added. */
   done: boolean;
 }
 export interface PlanState {
   tasks: PlanningTask[];
   week: string;
   timezone: string;
-  configured: boolean;
   /**
-   * Todofy's today, which Plan's week, lanes and statuses count from. Focus counts on Tasks' today
-   * (FocusState.date); both Workers keep the account's time zone, so the two are the same date.
+   * Tasks' today, which Plan's week, lanes and statuses count from, as Focus does (FocusState.date).
    */
   today: string;
-  /** Pending Mail entries, supplied by a complete planning read. */
-  mailboxPendingCount?: number;
-  managedLabels: { role: string; id: string; label: string }[];
-  /** Newest weekly review task Todofy created; the active task list says whether it is open. */
-  reviewTaskId: string;
-  /** Commitments chosen on this week's Sunday, which Monday's reset keeps. */
+  /** Commitments chosen on this week's Sunday, which Monday's rollover keeps. */
   nextWeekTaskIds: string[];
-  /** Every dependency, IDs only. */
+  /** Every dependency of the listed tasks, IDs only. */
   dependencies: TaskDependency[];
   /** The Bets saved for last, this and next week; a week and area with none is absent. */
   weeklyBets: WeeklyBet[];
-  /**
-   * The Review lanes the owner arranged, each first to last by task ID, kept in Todofy's
-   * planning store; a lane never arranged is absent.
-   */
+  /** The Review lanes the owner arranged, each first to last by task ID; a lane never arranged is absent. */
   laneOrders: Partial<Record<LaneId, string[]>>;
 }
-/**
- * One week's Work or Personal Bet: the owner's own line of text, kept in Todofy's planning store
- * and tied to no task.
- */
+/** One week's Work or Personal Bet: the owner's own line of text, tied to no task. */
 export interface WeeklyBet {
   /** The account-local Monday of its week. */
   weekStart: string;
@@ -97,8 +83,15 @@ export interface WeeklyBet {
   /** Sent back to save over it; empty while the week and area have none. */
   etag: string;
 }
-/** Account planning settings without the task list. */
-export type PlanMetadata = Omit<PlanState, "tasks">;
+/** The plan without the task list and its dependencies. */
+export type PlanMetadata = Omit<PlanState, "tasks" | "dependencies">;
+/** The weekly review's two facts Todofy keeps, read when the review opens. */
+export interface WeeklyReviewFacts {
+  /** Newest weekly review task Todofy created; the open task list says whether it is open. */
+  reviewTaskId: string;
+  /** Mail entries still awaiting a decision. */
+  mailboxPendingCount: number;
+}
 /** Time spent on a task, counted on one day: a timer session or time added by hand. */
 export interface FocusEntry {
   id: string;
@@ -153,15 +146,12 @@ export interface SavedEntry {
 export interface DeletedEntry {
   deletedEntry: { id: string; date: string };
 }
-/** A dependency write's confirmed result. */
+/** A dependency write's confirmed result: the task that waits, saved, and its dependencies now. */
 export interface DependencyResult {
-  /** The task whose dependencies these are; absent when they are every dependency. */
-  forTask?: string;
+  forTask: string;
   dependencies: TaskDependency[];
-  /** Tasks that stopped waiting because what they waited for was deleted. */
-  dropped?: string[];
-  /** Tasks that stopped waiting because what they waited for left the list, Tasks not saying how. */
-  released?: string[];
+  /** The task as Tasks saved it: a dependency write changes its etag. */
+  task?: PlanningTask;
 }
 /** A reorder's confirmed result. */
 export interface ReorderResult {
@@ -274,11 +264,13 @@ export interface PlanUpdate {
 export interface PlusActions {
   load(weekStart?: string): Promise<PlusData>;
   readPlan(): Promise<PlanMetadata>;
+  /** The weekly review's Todofy facts for the week starting `week`. */
+  readWeeklyReview?(week: string): Promise<WeeklyReviewFacts>;
   loadDays(weekStart: string): Promise<DayPlan[]>;
-  /** Saves the task's planning state in Todofy. */
+  /** Saves the task's planning state in Tasks. */
   updateTask(task: PlanningTask, update: PlanUpdate): Promise<PlanningTask>;
   /**
-   * Saves a Bet's text over the one with `bet.etag`. Rejects with BetNotSaved when Todofy says it
+   * Saves a Bet's text over the one with `bet.etag`. Rejects with BetNotSaved when Tasks says it
    * changed elsewhere or its week has ended.
    */
   setWeeklyBet(bet: WeeklyBet): Promise<WeeklyBet>;
@@ -302,14 +294,12 @@ export interface PlusActions {
     requestId: string,
     focusDay: string,
   ): Promise<void>;
-  /** Adds (`waits`) or removes that `taskId` waits for `prerequisiteId`; the tasks are not written. */
+  /** Adds (`waits`) or removes that `taskId` waits for `prerequisiteId`, a write of the waiting task. */
   setDependency(
     taskId: string,
     prerequisiteId: string,
     waits: boolean,
   ): Promise<DependencyResult>;
-  /** Settles tasks that dependencies name and a complete read no longer lists (at most 20). */
-  resolveDependencies(taskIds: string[]): Promise<DependencyResult>;
   /**
    * Adds, removes or moves one step in Tasks' day queues, each one MoveFocusStep against the
    * queues Tasks holds, not the copy on screen.
@@ -345,9 +335,9 @@ export interface PlusActions {
   updateEntry(entry: FocusEntry, seconds: number): Promise<SavedEntry>;
   deleteEntry(entry: FocusEntry): Promise<DeletedEntry>;
   /**
-   * Puts these tasks in this order, at most 100: `lane`'s order in Todofy's planning store, or
-   * none for "". In Tasks, the siblings of `movedId` among them (same project, section and parent)
-   * swap their positions into this order; Waiting and Parked never change the tasks.
+   * Puts these tasks in this order, at most 100: `lane`'s order, or none for "". The siblings of
+   * `movedId` among them (same project, section and parent) swap their positions into this order;
+   * Waiting and Parked never change the tasks.
    */
   reorderTasks(
     taskIds: string[],

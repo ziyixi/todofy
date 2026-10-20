@@ -190,9 +190,7 @@ export function PlanningWeek(props: Props) {
   );
   // A step set aside is in Review's Parked lane, not among the next steps.
   const steps = selected
-    ? outcomeSteps(selected, plan.tasks, plan.managedLabels).filter(
-        (task) => !isParked(task),
-      )
+    ? outcomeSteps(selected, plan.tasks).filter((task) => !isParked(task))
     : [];
   const scheduledIds = new Set(
     days.flatMap((day) =>
@@ -219,8 +217,8 @@ export function PlanningWeek(props: Props) {
       );
   }
   /**
-   * Moves a step from `from` to `to` among its siblings, in Todoist's order: one ReorderTasks
-   * with the parent's children, which Todofy writes as their positions.
+   * Moves a step from `from` to `to` among its siblings, in Tasks' order: one ReorderTasks with
+   * the parent's children, which take their positions in the new order.
    */
   function reorderStep(id: string, from: number, to: number) {
     const task = taskIndex(plan.tasks).get(id);
@@ -547,7 +545,6 @@ export function PlanningWeek(props: Props) {
                 <OutcomeCard
                   task={commitment}
                   tasks={plan.tasks}
-                  managedLabels={plan.managedLabels}
                   scheduledIds={scheduledIds}
                   language={language}
                   selected={selected?.id === commitment.id}
@@ -557,9 +554,7 @@ export function PlanningWeek(props: Props) {
             );
           const id = String(source.data?.taskId ?? "");
           const task = taskIndex(plan.tasks).get(id);
-          const outcome = task
-            ? outcomeForTask(task, plan.tasks, plan.managedLabels)
-            : undefined;
+          const outcome = task ? outcomeForTask(task, plan.tasks) : undefined;
           return (
             <div
               className="planning-step-overlay"
@@ -674,7 +669,6 @@ function Commitment({
       <OutcomeCard
         task={task}
         tasks={plan.tasks}
-        managedLabels={plan.managedLabels}
         scheduledIds={scheduledIds}
         language={language}
         selected={selected}

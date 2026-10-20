@@ -55,7 +55,6 @@ it("counts steps in natural English and Chinese", async () => {
     id: "outcome",
     parentId: "",
     stage: "committed",
-    labels: [],
   };
   const step = (id: string): PlanningTask => ({
     ...parent,
@@ -68,7 +67,6 @@ it("counts steps in natural English and Chinese", async () => {
       <OutcomeCard
         task={parent}
         tasks={[parent, ...tasks]}
-        managedLabels={plan.managedLabels}
         scheduledIds={new Set(["one"])}
         today="2026-10-13"
         language={language}
@@ -106,7 +104,6 @@ it("keeps an outcome card to a title and one left-aligned line, the deadline fir
       <OutcomeCard
         task={venue}
         tasks={[...plan.tasks, blocker]}
-        managedLabels={plan.managedLabels}
         scheduledIds={new Set()}
         today="2026-10-13"
         language={language}

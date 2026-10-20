@@ -6,8 +6,8 @@ import type { LaneId, PlanningTask, PlusActions, RunOperation } from "./model";
 /**
  * A lane reorder, as Review's lanes and Week's Committed row write it. `reorderLane` moves `task`
  * from `from` to `to`, both positions in the whole lane (`laneTasks`, which an area filter never
- * shortens): one ReorderTasks with the lane's new order, at most Todofy's 100. The card shows in
- * its new place at once and waits there until Todofy confirms. It returns true when it queued a
+ * shortens): one ReorderTasks with the lane's new order, at most 100. The card shows in its new
+ * place at once and waits there until Tasks confirms. It returns true when it queued a
  * write; the caller then puts focus back on the moved card's grip.
  */
 export function useLaneReorder(actions: PlusActions, run: RunOperation) {
@@ -27,8 +27,8 @@ export function useLaneReorder(actions: PlusActions, run: RunOperation) {
       if (next.indexOf(task.id) >= MAX_LANE_TASKS) return false;
       next = next.slice(0, MAX_LANE_TASKS);
     }
-    // Todoist's current positions are part of the key: once they changed elsewhere, so that
-    // Todofy refuses the old request, the read that follows makes the next drop a new one.
+    // The tasks' current positions are part of the key: once they changed elsewhere, so that
+    // Tasks refuses the old request, the read that follows makes the next drop a new one.
     const key = [
       lane,
       task.id,

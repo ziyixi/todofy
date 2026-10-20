@@ -63,7 +63,7 @@ export function oldestUntouched(
   );
 }
 
-/** Tasks with a deadline but no start-ahead choice (Todofy's missing_lead), earliest deadline first. */
+/** Tasks with a deadline but no start-ahead choice (Task.missing_lead), earliest deadline first. */
 export function withoutLead(tasks: readonly PlanningTask[]): PlanningTask[] {
   return tasks
     .filter((task) => task.missingLead)
@@ -83,9 +83,7 @@ export function unscheduledCommitments(
   return committedOutcomes(plan).filter(
     (task) =>
       !scheduled.has(task.id) &&
-      !outcomeSteps(task, plan.tasks, plan.managedLabels).some((step) =>
-        scheduled.has(step.id),
-      ),
+      !outcomeSteps(task, plan.tasks).some((step) => scheduled.has(step.id)),
   );
 }
 

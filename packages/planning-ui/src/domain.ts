@@ -1,9 +1,9 @@
 import type { Area, FocusState, PlanningTask } from "./model";
 
-/** Native planning flags never derive from ordinary tags. Legacy hosts still use their labels. */
+/** Planning flags never derive from ordinary tags. */
 export function hasPlanningFlag(task: PlanningTask, flag: string): boolean {
   if (flag === "blocked" && task.kind) return false;
-  const flags = task.planningFlags ?? task.labels;
+  const flags = task.planningFlags ?? [];
   return flags.includes(flag) || (flag === "task" && flags.includes("quick"));
 }
 

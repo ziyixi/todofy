@@ -53,19 +53,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const labels = [
-  "office",
-  "home",
-  "quarter",
-  "candiate",
-  "focus",
-  "committed",
-].map((role) => ({ role, id: role, label: role }));
 /** Synthetic outcomes with steps, plus unplanned tasks; some areas are only inherited. */
 function dataset(total: number): PlanningTask[] {
   const base = {
     projectId: "synthetic",
-    labels: [],
     priority: 1,
     deadline: "",
     due: "",
@@ -144,36 +135,23 @@ const laneOrders = Object.fromEntries(
  * review's lines; and Focus's quiet deadline line. The Bets are text and read no task.
  */
 function planRender(tasks: PlanningTask[]) {
-  const outcomes = planningOutcomes(tasks, labels);
-  boardLanes(
-    {
-      tasks,
-      managedLabels: labels,
-      dependencies: [],
-      laneOrders,
-    },
-    "2026-10-13",
-  );
+  const outcomes = planningOutcomes(tasks);
+  boardLanes({ tasks, dependencies: [], laneOrders }, "2026-10-13");
   unplannedDue(tasks, [], "2026-10-13");
   tasks.some((task) => effectiveArea(task, tasks) === "unassigned");
   for (const outcome of outcomes) {
-    outcomeSteps(outcome, tasks, labels);
+    outcomeSteps(outcome, tasks);
     outcomeArea(outcome, tasks, "en");
   }
   for (const outcome of outcomes.filter((task) => task.stage === "committed"))
-    for (const step of outcomeSteps(outcome, tasks, labels))
-      outcomeForTask(step, tasks, labels);
+    for (const step of outcomeSteps(outcome, tasks))
+      outcomeForTask(step, tasks);
   tasks.filter(
     (task) =>
       effectiveArea(task, tasks) === "work" &&
       taskAncestors(task, tasks).length >= 0,
   );
-  const plan = {
-    tasks,
-    managedLabels: labels,
-    laneOrders,
-    reviewTaskId: "",
-  } as unknown as PlanState;
+  const plan = { tasks, laneOrders } as unknown as PlanState;
   oldestUntouched(tasks, WAITING_LABELS);
   oldestUntouched(tasks, SOMEDAY_LABELS);
   withoutLead(tasks);

@@ -41,13 +41,6 @@ export interface PlanViewProps {
   onWeekChange: (weekStart: string) => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
   completeTask: CompletePlanningTask;
-  /** One line per task that no longer waits because what it waited for was deleted or left the list. */
-  dependencyNotices?: readonly string[];
-  /**
-   * Called while the Review board is shown, which is where Todofy's settling is told: the only view
-   * that asks Todofy to settle dependencies.
-   */
-  onReviewShown?: (plan: PlanState) => void;
   /** The weekly review's mail line opens the host's Mail page. */
   onOpenMail?: () => void;
   /** Opened from the review task's link: start with the weekly review. */
@@ -141,10 +134,7 @@ export function PlanView(props: PlanViewProps) {
     setAddingStep(id);
     setJump("addStep");
   }
-  const { showStart, onStartShown, onReviewShown } = props;
-  useEffect(() => {
-    if (mode === "review") onReviewShown?.(plan);
-  }, [mode, plan, onReviewShown]);
+  const { showStart, onStartShown } = props;
   useEffect(() => {
     if (!showStart) return;
     showLane("start");

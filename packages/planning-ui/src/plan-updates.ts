@@ -84,19 +84,16 @@ function withTasks(data: PlusData, tasks: PlanningTask[]): PlusData {
   };
 }
 
-/** One task's dependencies replace its old ones; an answer without a task replaces them all. */
+/** One task's dependencies replace its old ones, and the task its saved self (its etag changed). */
 function withDependencies(data: PlusData, result: DependencyResult): PlusData {
-  const { forTask } = result;
-  const dependencies =
-    forTask === undefined
-      ? result.dependencies
-      : [
-          ...data.plan.dependencies.filter(
-            (dependency) => dependency.taskId !== forTask,
-          ),
-          ...result.dependencies,
-        ];
-  return { ...data, plan: { ...data.plan, dependencies } };
+  const dependencies = [
+    ...data.plan.dependencies.filter(
+      (dependency) => dependency.taskId !== result.forTask,
+    ),
+    ...result.dependencies,
+  ];
+  const saved = { ...data, plan: { ...data.plan, dependencies } };
+  return result.task ? withTasks(saved, [result.task]) : saved;
 }
 
 function withWeeklyBets(data: PlusData, bets: WeeklyBet[]): PlusData {
@@ -108,7 +105,7 @@ function withWeeklyBets(data: PlusData, bets: WeeklyBet[]): PlusData {
 }
 
 /**
- * A lane's new order as Todofy saves it: its tasks leave every other lane's order, and a lane left
+ * A lane's new order as Tasks saves it: its tasks leave every other lane's order, and a lane left
  * with none is removed.
  */
 export function withLaneOrder(
@@ -228,9 +225,9 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
 }
 
 /**
- * Mirrors how Todofy records a confirmed SetTaskPlan on the week's last day (core/plus.py
- * membership_week, REMEMBER_WEEK, FORGET_TASK), until the next read lists next week's choices: a
- * commitment chosen then is kept for next week, and a task no longer committed is not.
+ * Mirrors how Tasks records a commitment confirmed on the week's last day (its committed week),
+ * until the next read lists next week's choices: a commitment chosen then is kept for next week, and
+ * a task no longer committed is not.
  */
 export function withNextWeek(
   data: PlusData,
@@ -324,9 +321,9 @@ export function predictLaneOrder(lane: LaneId, ids: readonly string[]) {
 }
 
 /**
- * Shows a reorder of Next steps at once, as Todofy writes it: the siblings' own positions,
- * smallest first, in the new order, and their order keys likewise when every one has one.
- * Undefined when a position is missing or repeated, where Todofy writes nothing either.
+ * Shows a reorder of Next steps at once, as it is written: the siblings' own positions, smallest
+ * first, in the new order, and their order keys likewise when every one has one. Undefined when a
+ * position is missing or repeated, where the write changes nothing either.
  */
 export function predictChildOrder(
   tasks: readonly PlanningTask[],

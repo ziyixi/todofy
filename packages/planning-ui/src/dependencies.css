@@ -130,10 +130,3 @@ button.plus-dependency-title:focus-visible {
   color: var(--plus-muted);
   font-size: 12px;
 }
-/* Under the board's lanes, so that the board does not move when a notice comes. */
-.review-board-notices > p {
-  margin: 10px 0 0;
-  color: var(--plus-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}

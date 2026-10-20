@@ -31,7 +31,7 @@ const refusal = (code: Code, reason: string) =>
     code === Code.ABORTED ? 409 : 400,
   );
 
-it("keeps a Bet to one trimmed line, as Todofy stores it", () => {
+it("keeps a Bet to one trimmed line, as Tasks stores it", () => {
   expect(betText("  Ship\n the\t\tdraft \u0000")).toBe("Ship the draft");
   expect(betText("周末　去徒步")).toBe("周末 去徒步");
   expect(betText(" \n ")).toBe("");
@@ -92,38 +92,34 @@ it("saves in the write queue and says why a refused Bet was not saved", async ()
   );
 });
 
-it("sends SetWeeklyBet with no request ID and maps Todofy's refusals", async () => {
+it("sends UpdateWeeklyBet with no request ID and maps Tasks' refusals", async () => {
   const bodies: unknown[] = [];
   const answers = [
     json({
-      weekly_bet: {
-        week_start: "2026-10-12",
-        area: "work",
-        text: "Ship the draft",
-        etag: "1",
-        update_time: "2026-10-14T16:00:00Z",
-      },
+      name: "weeklyBets/2026-10-12-work",
+      week_start: "2026-10-12",
+      area: "work",
+      text: "Ship the draft",
+      etag: "1",
+      update_time: "2026-10-14T16:00:00Z",
     }),
     refusal(Code.ABORTED, "ETAG_MISMATCH"),
-    refusal(Code.FAILED_PRECONDITION, "ACTION_NOT_ALLOWED"),
+    refusal(Code.FAILED_PRECONDITION, "PRECONDITION_FAILED"),
     refusal(Code.INVALID_ARGUMENT, "BAD_REQUEST"),
   ];
   const api = fakeActions(
     vi.fn<typeof fetch>(async (input, init) => {
-      expect(new URL(String(input)).pathname).toBe(
-        "/api/plus/v1/weeklyBets:setWeeklyBet",
+      const url = new URL(String(input));
+      expect(url.pathname + url.search).toBe(
+        "/api/tasks/v1/weeklyBets/2026-10-12-work?update_mask=text",
       );
+      expect(init?.method).toBe("PATCH");
       bodies.push(JSON.parse(String(init?.body)));
       return answers.shift()!;
     }),
   );
   expect(await api.setWeeklyBet(WORK)).toEqual(WORK);
-  expect(bodies[0]).toEqual({
-    week_start: "2026-10-12",
-    area: "work",
-    text: "Ship the draft",
-    etag: "1",
-  });
+  expect(bodies[0]).toEqual({ text: "Ship the draft" });
   await expect(api.setWeeklyBet(WORK)).rejects.toEqual(
     new BetNotSaved("changed"),
   );
@@ -138,21 +134,19 @@ it("reads the plan's Bets and leaves out an area this build does not know", asyn
   const api = fakeActions(
     vi.fn<typeof fetch>(async () =>
       json({
-        plan: {
-          timezone: "UTC",
-          week_start: "2026-10-12",
-          enabled: true,
-          weekly_bets: [
-            {
-              week_start: "2026-10-05",
-              area: "personal",
-              text: "Rest",
-              etag: "2",
-            },
-            { week_start: "2026-10-12", area: "work", etag: "3" },
-            { week_start: "2026-10-12", area: "family", text: "x", etag: "1" },
-          ],
-        },
+        name: "plan",
+        time_zone: "UTC",
+        week_start: "2026-10-12",
+        weekly_bets: [
+          {
+            week_start: "2026-10-05",
+            area: "personal",
+            text: "Rest",
+            etag: "2",
+          },
+          { week_start: "2026-10-12", area: "work", etag: "3" },
+          { week_start: "2026-10-12", area: "family", text: "x", etag: "1" },
+        ],
       }),
     ),
   );

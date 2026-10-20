@@ -15,8 +15,7 @@ import {
   RefreshCw,
   Square,
 } from "lucide-react";
-import { displayedTitle, elapsed, taskIndex } from "./domain";
-import { droppedText, releasedText, unsettled } from "./dependencies";
+import { displayedTitle, elapsed } from "./domain";
 import { words } from "./i18n";
 import { weekLabel } from "./PlanningCalendar";
 import {
@@ -176,52 +175,6 @@ export function App({
       },
     }),
     [actions],
-  );
-  // Once per complete read that the Review board shows, Todofy settles the tasks dependencies name that
-  // the read did not list (dependencies.ts unsettled), each once in this visit; a failed check is asked
-  // again by the next read. Only the board asks, so a task that no longer waits because what it
-  // waited for was deleted or left the list is told there, once: under its lanes, for this visit.
-  const settleAsked = useRef(new Set<string>());
-  const [told, setTold] = useState<
-    readonly { taskId: string; deleted: boolean }[]
-  >([]);
-  const settle = useCallback(
-    async (plan: PlanState) => {
-      const ids = unsettled(plan, settleAsked.current);
-      if (!plan.configured || !ids.length) return;
-      for (const id of ids) settleAsked.current.add(id);
-      const settled = writes.current.settled;
-      try {
-        const result = await actions.resolveDependencies(ids);
-        const notices = [
-          ...(result.dropped ?? []).map((taskId) => ({
-            taskId,
-            deleted: true,
-          })),
-          ...(result.released ?? []).map((taskId) => ({
-            taskId,
-            deleted: false,
-          })),
-        ];
-        if (notices.length) setTold((current) => [...current, ...notices]);
-        // A write confirmed meanwhile may be missing from the answer; the next read shows both.
-        if (settled === writes.current.settled)
-          setConfirmed((current) => current && applyConfirmed(current, result));
-      } catch {
-        for (const id of ids) settleAsked.current.delete(id);
-      }
-    },
-    [actions],
-  );
-  // The complete read the board last asked about: not a remembered board, nor again for a write.
-  const settledRead = useRef(0);
-  const onReviewShown = useCallback(
-    (plan: PlanState) => {
-      if (stale || settledRead.current === reads.current.shown) return;
-      settledRead.current = reads.current.shown;
-      void settle(plan);
-    },
-    [stale, settle],
   );
   const load = useCallback(async (): Promise<boolean> => {
     const request = ++weekRequest.current;
@@ -511,18 +464,6 @@ export function App({
     });
   }
   const selected = data?.plan.tasks.find((task) => task.id === selectedId);
-  // One line per task and reason, even when two checks drop two of its dependencies.
-  const dependencyNotices = data
-    ? [
-        ...new Set(
-          told.flatMap(({ taskId, deleted }) => {
-            const task = taskIndex(data.plan.tasks).get(taskId);
-            if (!task) return [];
-            return [(deleted ? droppedText : releasedText)(task, language)];
-          }),
-        ),
-      ]
-    : [];
   // A task whose stage drag waits still carries its old etag, so its editor waits too.
   const selectedPending = Boolean(
     selected && pendingCards.has(pendingTask(selected.id)),
@@ -535,23 +476,13 @@ export function App({
     setError("");
     void revalidate();
   }
-  // Above every page's content: what failed, and what setup still needs.
-  const notices = (
-    <>
-      {error && (
-        <div className="plus-error" role="alert">
-          <span>{error}</span>
-          <button onClick={refresh}>{text.refresh}</button>
-          <button onClick={onSettings}>{text.manage}</button>
-        </div>
-      )}
-      {data && !data.plan.configured && (
-        <p className="plus-error">
-          {text.setup}
-          <button onClick={onSettings}>{text.manage}</button>
-        </p>
-      )}
-    </>
+  // Above every page's content: what failed.
+  const notices = error && (
+    <div className="plus-error" role="alert">
+      <span>{error}</span>
+      <button onClick={refresh}>{text.refresh}</button>
+      <button onClick={onSettings}>{text.manage}</button>
+    </div>
   );
   const timerBar = data?.focus.timer && (
     <aside className="plus-timer-bar" aria-label={text.focus}>
@@ -653,16 +584,13 @@ export function App({
         </p>
       )}
       {data && (
-        <fieldset
-          className="plus-content-fieldset"
-          disabled={!data.plan.configured}
-        >
+        <fieldset className="plus-content-fieldset">
           {view === "plan" ? (
             <>
               <WeeklyGoals
                 plan={data.plan}
                 language={language}
-                busy={busy || !data.plan.configured}
+                busy={busy}
                 run={run}
                 actions={planActions}
               />
@@ -674,15 +602,13 @@ export function App({
                 currentDate={data.plan.today}
                 onWeekChange={changeWeek}
                 language={language}
-                busy={busy || weekLoading || !data.plan.configured}
+                busy={busy || weekLoading}
                 pending={pendingCards}
                 run={run}
                 actions={planActions}
                 editTask={openTask}
                 completeReview={(task) => complete(task, "")}
                 completeTask={(task, day) => void complete(task, day)}
-                dependencyNotices={dependencyNotices}
-                onReviewShown={onReviewShown}
                 onOpenMail={onOpenMail}
                 reviewing={review}
                 planView={planView}
@@ -704,7 +630,7 @@ export function App({
                 onViewChange?.("plan");
               }}
               language={language}
-              busy={busy || !data.plan.configured}
+              busy={busy}
               pending={pendingCards}
               completing={completing}
               tab={focusTab}

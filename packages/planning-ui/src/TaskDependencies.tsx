@@ -40,7 +40,7 @@ interface Props {
  * Task details' "依赖 / Depends on" section, after the deadline, in Plan's editor and the native
  * Steps & timing: what the task still waits for, one line for what is done (its remove action takes
  * the done ones away), who waits for it, and an inline picker that searches the loaded tasks as you
- * type. Each change is confirm-first SetTaskDependency; Todoist is never written. Only what still
+ * type. Each change is one confirm-first write of the task's dependencies in Tasks. Only what still
  * holds fills the 5: a done dependency gives way to a new one.
  */
 export function TaskDependencies({
@@ -67,7 +67,7 @@ export function TaskDependencies({
   const [query, setQuery] = useState("");
   // The highlighted option, by task ID; a greyed one is never highlighted.
   const [activeId, setActiveId] = useState("");
-  // The chosen task, shown pending until Todofy confirms it.
+  // The chosen task, shown pending until Tasks confirms it.
   const [adding, setAdding] = useState<PlanningTask>();
   // After a change, focus returns to "Add a dependency" once write controls are enabled again.
   const [returnFocus, setReturnFocus] = useState(false);
@@ -266,11 +266,7 @@ export function TaskDependencies({
                     {displayedTitle(match.task.title)}
                   </span>
                   <span className="plus-dependency-option-note">
-                    {match.refusal === "cycle"
-                      ? text.wouldCycle
-                      : match.refusal === "repeats"
-                        ? text.repeatsForever
-                        : match.path}
+                    {match.refusal === "cycle" ? text.wouldCycle : match.path}
                   </span>
                 </li>
               ))}

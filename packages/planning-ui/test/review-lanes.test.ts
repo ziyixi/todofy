@@ -20,21 +20,11 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
 });
-const managedLabels = [
-  "office",
-  "home",
-  "bets",
-  "quarter",
-  "candiate",
-  "focus",
-  "committed",
-].map((role) => ({ role, id: role, label: role }));
 const task = (id: string, value: Partial<PlanningTask> = {}): PlanningTask => ({
   id,
   title: `Synthetic ${id}`,
   parentId: "",
   projectId: "synthetic",
-  labels: [],
   area: "work",
   stage: "none",
   priority: 1,
@@ -51,10 +41,7 @@ function laneIds(
   tasks: PlanningTask[],
   laneOrders: PlanState["laneOrders"] = {},
 ) {
-  const lanes = boardLanes(
-    { tasks, managedLabels, dependencies: [], laneOrders },
-    TODAY,
-  );
+  const lanes = boardLanes({ tasks, dependencies: [], laneOrders }, TODAY);
   return Object.fromEntries(
     Object.entries(lanes).map(([lane, cards]) => [
       lane,
@@ -67,28 +54,32 @@ it("gives every task at most one lane: its own stage, then Waiting, then Start n
   const tasks = [
     task("staged-start", {
       stage: "committed",
-      labels: ["committed", "lead_1w"],
+      planningFlags: [],
       deadline: on(5),
       leadDays: 7,
       mustStart: true,
     }),
-    task("staged-wait", { stage: "monthly", labels: ["candiate", "waiting"] }),
+    task("staged-wait", { stage: "monthly", planningFlags: ["waiting"] }),
     // Only the 7-day date rule made these Week candidates: they have no Week label.
     task("dated-start", {
       stage: "weekly",
-      labels: ["lead_3d"],
+      planningFlags: [],
       deadline: on(2),
       leadDays: 3,
       mustStart: true,
     }),
-    task("dated-wait", { stage: "weekly", labels: ["waiting"], due: on(2) }),
+    task("dated-wait", {
+      stage: "weekly",
+      planningFlags: ["waiting"],
+      due: on(2),
+    }),
     task("dated", { stage: "weekly", due: on(2) }),
-    task("week", { stage: "weekly", labels: ["focus"], due: on(2) }),
-    task("blocked", { labels: ["blocked"] }),
+    task("week", { stage: "weekly", explicitStage: "weekly", due: on(2) }),
+    task("blocked", { planningFlags: ["blocked"] }),
     task("past", { deadline: on(-1), mustStart: true }),
     // Todofy lists a waiting task past its deadline as must start too; it waits.
     task("past-wait", {
-      labels: ["waiting"],
+      planningFlags: ["waiting"],
       deadline: on(-2),
       mustStart: true,
     }),
@@ -103,10 +94,10 @@ it("gives every task at most one lane: its own stage, then Waiting, then Start n
     task("step-wait", {
       parentId: "staged-start",
       stage: "committed",
-      labels: ["committed", "waiting"],
+      planningFlags: ["waiting"],
     }),
     // In progress, not yet in the window, or without a lead: on no lane.
-    task("active", { labels: ["active"], deadline: on(3), leadDays: 7 }),
+    task("active", { planningFlags: ["active"], deadline: on(3), leadDays: 7 }),
     task("later", { deadline: on(30), leadDays: 7 }),
     task("no-lead", { deadline: on(40), missingLead: true }),
   ];
@@ -146,13 +137,13 @@ it("orders Start now by deadline, then priority, and Waiting by the longest unto
     task("claim", { deadline: on(1), mustStart: true }),
     task("claim-p1", { deadline: on(1), mustStart: true, priority: 4 }),
     task("report", { deadline: on(-2), mustStart: true }),
-    task("unknown", { labels: ["waiting"] }),
+    task("unknown", { planningFlags: ["waiting"] }),
     task("quote", {
-      labels: ["waiting"],
+      planningFlags: ["waiting"],
       updatedAt: "2026-10-10T09:00:00Z",
     }),
     task("contract", {
-      labels: ["blocked"],
+      planningFlags: ["blocked"],
       updatedAt: "2026-10-01T09:00:00Z",
     }),
   ]);
@@ -164,24 +155,31 @@ it("orders Start now by deadline, then priority, and Waiting by the longest unto
 
 it("puts a parked task in Parked before every other rule, only while the account has the label", () => {
   const tasks = [
-    task("plain", { labels: ["parked"], updatedAt: "2026-10-10T09:00:00Z" }),
+    task("plain", {
+      planningFlags: ["parked"],
+      updatedAt: "2026-10-10T09:00:00Z",
+    }),
     task("staged", {
       stage: "committed",
-      labels: ["committed", "parked"],
+      planningFlags: ["parked"],
       updatedAt: "2026-09-01T09:00:00Z",
     }),
     task("waits", {
-      labels: ["waiting", "parked"],
+      planningFlags: ["waiting", "parked"],
       updatedAt: "2026-10-01T09:00:00Z",
     }),
     // A step of the committed outcome, set aside on its own.
     task("step", {
       parentId: "outcome",
-      labels: ["parked"],
+      planningFlags: ["parked"],
       deadline: on(-1),
     }),
-    task("outcome", { stage: "committed", labels: ["committed"] }),
-    task("quick", { labels: ["quick", "focus"], stage: "weekly" }),
+    task("outcome", { stage: "committed", planningFlags: [] }),
+    task("quick", {
+      explicitStage: "weekly",
+      planningFlags: ["quick"],
+      stage: "weekly",
+    }),
   ];
   // Longest untouched first, unknown ages last; in no other lane.
   expect(laneIds(tasks)).toEqual({
@@ -197,19 +195,15 @@ it("puts a parked task in Parked before every other rule, only while the account
 
 it("lists the commitments Review's Committed lane shows, none of them parked", () => {
   const tasks = [
-    task("kept", { stage: "committed", labels: ["committed"] }),
-    task("set-aside", { stage: "committed", labels: ["committed", "parked"] }),
-    task("waits", { stage: "committed", labels: ["committed", "waiting"] }),
-    task("week", { stage: "weekly", labels: ["focus"] }),
+    task("kept", { stage: "committed", planningFlags: [] }),
+    task("set-aside", { stage: "committed", planningFlags: ["parked"] }),
+    task("waits", { stage: "committed", planningFlags: ["waiting"] }),
+    task("week", { stage: "weekly", explicitStage: "weekly" }),
   ];
-  const plan = { tasks, managedLabels, dependencies: [], laneOrders: {} };
+  const plan = { tasks, dependencies: [], laneOrders: {} };
   expect(committedOutcomes(plan)).toEqual(boardLanes(plan, TODAY).committed);
   expect(
-    committedOutcomes({
-      tasks,
-      managedLabels,
-      laneOrders: {},
-    }).map((item) => item.id),
+    committedOutcomes({ tasks, laneOrders: {} }).map((item) => item.id),
   ).toEqual(["kept", "waits"]);
 });
 
@@ -218,15 +212,24 @@ it("lists each lane in the owner's stored order first, the rest after it in the 
     task("claim", { deadline: on(1), mustStart: true }),
     task("report", { deadline: on(-2), mustStart: true }),
     task("visa", { deadline: on(5), mustStart: true }),
-    task("quote", { labels: ["waiting"], updatedAt: "2026-10-10T09:00:00Z" }),
+    task("quote", {
+      planningFlags: ["waiting"],
+      updatedAt: "2026-10-10T09:00:00Z",
+    }),
     task("contract", {
-      labels: ["waiting"],
+      planningFlags: ["waiting"],
       updatedAt: "2026-10-01T09:00:00Z",
     }),
-    task("idea", { labels: ["parked"], updatedAt: "2026-10-12T09:00:00Z" }),
-    task("plan", { labels: ["parked"], updatedAt: "2026-09-12T09:00:00Z" }),
+    task("idea", {
+      planningFlags: ["parked"],
+      updatedAt: "2026-10-12T09:00:00Z",
+    }),
+    task("plan", {
+      planningFlags: ["parked"],
+      updatedAt: "2026-09-12T09:00:00Z",
+    }),
     ...["one", "two", "three"].map((id) =>
-      task(id, { stage: "committed", labels: ["committed"] }),
+      task(id, { stage: "committed", planningFlags: [] }),
     ),
   ];
   expect(
@@ -252,16 +255,16 @@ it("says each card's one status: how long is left, or how long untouched with th
   const claim = task("claim", { deadline: on(1), mustStart: true });
   const late = task("late", { deadline: on(-2), mustStart: true });
   const contract = task("contract", {
-    labels: ["waiting"],
+    planningFlags: ["waiting"],
     deadline: on(7),
     updatedAt: "2026-10-03T09:00:00Z",
   });
   const quote = task("quote", {
-    labels: ["blocked"],
+    planningFlags: ["blocked"],
     updatedAt: "2026-10-03T09:00:00Z",
   });
   const overdue = task("overdue", {
-    labels: ["waiting"],
+    planningFlags: ["waiting"],
     deadline: on(-2),
     mustStart: true,
     updatedAt: "2026-10-15T09:00:00Z",
@@ -294,7 +297,9 @@ it("says each card's one status: how long is left, or how long untouched with th
     "Changed within a day · 2 days late",
   );
   // A wait of unknown age without a deadline says nothing.
-  expect(status(task("plain", { labels: ["waiting"] }), "en")).toEqual([]);
+  expect(status(task("plain", { planningFlags: ["waiting"] }), "en")).toEqual(
+    [],
+  );
 });
 
 /**
@@ -309,15 +314,15 @@ it("says each card's one status: how long is left, or how long untouched with th
 it("shows every task the API marks for a replaced deadline, waiting or parked filter on the board", () => {
   const marks = ["waiting", "blocked", "active", "parked"];
   const stages = [
-    { stage: "none" as const, labels: [] },
-    { stage: "committed" as const, labels: ["committed"] },
-    { stage: "monthly" as const, labels: ["candiate"] },
+    { stage: "none" as const },
+    { stage: "committed" as const, explicitStage: "committed" as const },
+    { stage: "monthly" as const, explicitStage: "monthly" as const },
     // The date rule's Week candidate.
-    { stage: "weekly" as const, labels: [], due: on(2) },
+    { stage: "weekly" as const, due: on(2) },
   ];
   const outcome = task("outcome", {
     stage: "committed",
-    labels: ["committed"],
+    explicitStage: "committed",
   });
   for (let combination = 0; combination < 1 << marks.length; combination++)
     for (const deadline of ["", on(-3), TODAY, on(5), on(40)])
@@ -338,18 +343,13 @@ it("shows every task the API marks for a replaced deadline, waiting or parked fi
               const item = task("grid", {
                 ...plan,
                 parentId,
-                labels: [...plan.labels, ...labels],
+                planningFlags: labels,
                 deadline,
                 mustStart,
                 missingLead,
               });
               const lanes = boardLanes(
-                {
-                  tasks: [outcome, item],
-                  managedLabels,
-                  dependencies: [],
-                  laneOrders: {},
-                },
+                { tasks: [outcome, item], dependencies: [], laneOrders: {} },
                 TODAY,
               );
               const shown = Object.values(lanes).filter((cards) =>
@@ -397,7 +397,7 @@ it("lists as Quick tasks exactly what Todofy's gate reads the hidden Quick / Ops
       for (const deadline of ["", TODAY]) {
         const labels = marks.filter((_, bit) => (combination >> bit) & 1);
         const id = `grid-${tasks.length}`;
-        tasks.push(task(id, { labels, due, deadline }));
+        tasks.push(task(id, { planningFlags: labels, due, deadline }));
         if (
           labels.includes("quick") &&
           (!due || day <= on(2) || (Boolean(deadline) && deadline <= on(2)))

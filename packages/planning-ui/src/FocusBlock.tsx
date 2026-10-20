@@ -117,9 +117,7 @@ export function FocusBlock({
       status = language === "zh" ? "正在做" : "Now";
     timerAction = timer.status === "running" ? "pause" : "resume";
   }
-  const outcome = task
-    ? outcomeForTask(task, plan.tasks, plan.managedLabels)
-    : undefined;
+  const outcome = task ? outcomeForTask(task, plan.tasks) : undefined;
   // A task Plan does not list takes its parent's colour when Plan lists the parent, else none.
   const parent = known?.parentId
     ? taskIndex(plan.tasks).get(known.parentId)

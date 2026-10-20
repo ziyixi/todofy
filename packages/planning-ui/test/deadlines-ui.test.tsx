@@ -44,7 +44,6 @@ function deadlineTasks(template: PlanningTask): PlanningTask[] {
     title,
     parentId: "",
     stage: "none" as const,
-    labels: [],
     planningFlags: [],
     mustStart: false,
     missingLead: false,
@@ -183,9 +182,6 @@ it("puts Start now and then Waiting left of the four stage lanes, with nothing s
     "review-board",
     "planning-reset-note",
   ]);
-  expect(
-    document.querySelector(".review-board-notices")!.children,
-  ).toHaveLength(0);
   fireEvent.click(screen.getByRole("tab", { name: "Week" }));
   expect(sections()).toEqual([
     "planning-toolbar",

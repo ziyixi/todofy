@@ -22,10 +22,12 @@ const actions = {
 </div>
 ```
 
-Transports receive the root proto `HttpCall` and return a `Response`. Tasks sends `PlusService` calls to its
-same-origin `/api/plus/v1/*` with CSRF, which Todofy's private Planning channel forwards (only the methods
-Tasks uses), and its own `TasksUiService` Focus methods to `/api/tasks/v1/*`. Host callbacks open the full task editor and
-Tasks' Mail page. `snapshot`/`onSnapshot` keep confirmed content in page memory; `planView`/`onPlanView`
+Transports receive the root proto `HttpCall` and return a `Response`. Plan, the tasks' planning facts and
+dependencies, and Focus are Tasks' own `TasksUiService`, sent to its same-origin `/api/tasks/v1/*`: a load is one wave
+of GetPlan, ListTasks pages, ListFocusDays and GetFocusTimer, and every planning write is one UpdateTask, ReorderTasks
+or UpdateWeeklyBet. Only the weekly review's two Todofy facts (ReadWeeklyReview, read when the review opens) and the
+Mail categories go to `/api/plus/v1/*` with CSRF, which Todofy's private Planning channel forwards. Host callbacks
+open the full task editor and Tasks' Mail page. `snapshot`/`onSnapshot` keep confirmed content in page memory; `planView`/`onPlanView`
 optionally remember IDs and view choices, never task text.
 
 The package keeps the write ordering, confirmed timer state and pending-card rendering. It does not
@@ -54,8 +56,7 @@ change is one `MoveFocusStep`, and every write keeps its request ID until confir
 card's one time number is its logged time, which opens the day's records (`FocusEntries`); Week and Month
 show logged time by area, steps done and where the time went (`focus-stats.ts`). Only today's steps run,
 complete and reorder by their whole row; other days are read-only. A header checkbox shows the day's
-completed steps. Plan counts from Todofy's today (`PlanState.today`), Focus from
-Tasks' today (`FocusState.date`); in one time zone they are the same date. A task's estimate is its Tasks
+completed steps. Plan and Focus both count from Tasks' today (`PlanState.today`, `FocusState.date`). A task's estimate is its Tasks
 duration: the host supplies `updateEstimate`, which writes Tasks and answers the saved duration
 (`{ estimate }`). A Step opens a panel that sets only its time (`StepEditor`); tasks open the full planning
 panel.

@@ -638,7 +638,7 @@ function FocusDay({
               const id = String(source.data?.taskId ?? "");
               const task = byId.get(id);
               const outcome = task
-                ? outcomeForTask(task, plan.tasks, plan.managedLabels)
+                ? outcomeForTask(task, plan.tasks)
                 : undefined;
               return (
                 <div

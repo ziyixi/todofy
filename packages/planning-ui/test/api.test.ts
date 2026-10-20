@@ -5,12 +5,12 @@ const json = (body: unknown) =>
   new Response(JSON.stringify(body), {
     headers: { "Content-Type": "application/json" },
   });
-/** Every day from `start` to `end`, as ListFocusDays lists them. */
+/** Every day from `start` to `end`, as ListFocusDays lists them; no range is Tasks' today's week. */
 function focusDays(url: URL, queues: Record<string, string[]> = {}) {
   const days = [];
-  const end = url.searchParams.get("end_day")!;
+  const end = url.searchParams.get("end_day") || "2026-10-18";
   for (
-    let day = url.searchParams.get("start_day")!;
+    let day = url.searchParams.get("start_day") || "2026-10-12";
     day <= end;
     day = new Date(Date.parse(`${day}T12:00:00Z`) + 86_400_000)
       .toISOString()
@@ -37,35 +37,37 @@ it("loads complete pages and the week with Tasks' Focus, and uses the authoritat
       ? (JSON.parse(String(init.body)) as Record<string, unknown>)
       : {};
     calls.push({ path: url.pathname + url.search, body });
-    if (url.pathname === "/api/plus/v1/plan:read")
+    if (url.pathname === "/api/tasks/v1/plan")
       return json({
-        plan: {
-          timezone: "UTC",
-          week_start: "2026-10-12",
-          today: "2026-10-13",
-          enabled: true,
-        },
+        name: "plan",
+        time_zone: "UTC",
+        week_start: "2026-10-12",
+        today: "2026-10-13",
       });
-    if (url.pathname === "/api/plus/v1/tasks")
+    if (url.pathname === "/api/tasks/v1/tasks")
       return url.searchParams.get("page_token")
         ? json({
-            planning_tasks: [
+            tasks: [
               {
                 id: "child",
+                name: "tasks/child",
                 title: "A small step",
                 parent_id: "parent",
                 stage: "none",
+                board_stage: "none",
                 area: "work",
-                estimated_minutes: 45,
+                duration_minutes: 45,
               },
             ],
           })
         : json({
-            planning_tasks: [
+            tasks: [
               {
                 id: "parent",
+                name: "tasks/parent",
                 title: "A project",
                 stage: "committed",
+                board_stage: "committed",
                 area: "work",
               },
             ],
@@ -127,6 +129,15 @@ it("loads complete pages and the week with Tasks' Focus, and uses the authoritat
     "2026-10-18",
   ]);
   expect(plan.tasks.map((task) => task.id)).toEqual(["parent", "child"]);
+  // Every open task, steps included, in pages of 100.
+  expect(
+    calls
+      .filter((call) => call.path.startsWith("/api/tasks/v1/tasks?"))
+      .map((call) => call.path),
+  ).toEqual([
+    "/api/tasks/v1/tasks?view=all&page_size=100",
+    "/api/tasks/v1/tasks?view=all&page_size=100&page_token=second",
+  ]);
   expect(plan.today).toBe("2026-10-13");
   expect(focus.date).toBe("2026-10-13");
   expect(focus.taskIds).toEqual(["child"]);
@@ -151,12 +162,12 @@ it("loads complete pages and the week with Tasks' Focus, and uses the authoritat
   });
   expect(focus.estimates.child).toBe(45);
   expect(focus.timerEtag).toBe("42");
-  // One read of the week, which holds today.
+  // One read of Tasks' today's week, which needs no other answer first.
   expect(
     calls.filter((call) => call.path.startsWith("/api/tasks/v1/focusDays")),
   ).toEqual([
     {
-      path: "/api/tasks/v1/focusDays?start_day=2026-10-12&end_day=2026-10-18",
+      path: "/api/tasks/v1/focusDays?start_day=&end_day=",
       body: {},
     },
   ]);
@@ -347,11 +358,14 @@ it("returns a stopped timer and the record it saved without reloading the task l
 });
 it("does not present partial task pages as a complete plan", async () => {
   const api = fakeActions(
-    vi.fn<typeof fetch>(async (input) =>
-      String(input).includes("/plan:read")
-        ? json({ plan: { today: "2026-10-13" } })
-        : json({ next_page_token: "more" }),
-    ),
+    vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/tasks/v1/tasks")
+        return json({ next_page_token: "more" });
+      if (url.pathname === "/api/tasks/v1/focusDays")
+        return json({ days: focusDays(url), today: "2026-10-13" });
+      return json({ name: "plan", today: "2026-10-13" });
+    }),
   );
   await expect(api.load()).rejects.toThrow("incomplete");
 });
@@ -382,19 +396,22 @@ it("takes the estimate from the task list and keeps a paused timer on its own da
     vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(String(input));
       const path = url.pathname;
-      if (path.endsWith("/plan:read"))
+      if (path === "/api/tasks/v1/plan")
         return json({
-          plan: {
-            timezone: "UTC",
-            week_start: "2026-10-12",
-            today: "2026-10-13",
-            enabled: true,
-          },
+          name: "plan",
+          time_zone: "UTC",
+          week_start: "2026-10-12",
+          today: "2026-10-13",
         });
-      if (path === "/api/plus/v1/tasks")
+      if (path === "/api/tasks/v1/tasks")
         return json({
-          planning_tasks: [
-            { id: "child", title: "Synthetic step", estimated_minutes: 60 },
+          tasks: [
+            {
+              id: "child",
+              name: "tasks/child",
+              title: "Synthetic step",
+              duration_minutes: 60,
+            },
           ],
         });
       if (path === "/api/tasks/v1/focusDays")
@@ -511,25 +528,30 @@ it("adds, changes and deletes a record, replaying an uncertain write with its re
   );
 });
 
-it("returns the confirmed lead task instead of requiring a full reload", async () => {
-  const paths: string[] = [];
+it("saves a deadline and its lead days in one UpdateTask and returns the confirmed task", async () => {
+  const calls: { path: string; body: unknown }[] = [];
   const api = fakeActions(
-    vi.fn<typeof fetch>(async (input) => {
-      const path = new URL(String(input)).pathname;
-      paths.push(path);
-      if (path.endsWith("/tasks:setTaskLead"))
+    vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input));
+      calls.push({
+        path:
+          url.pathname +
+          url.search.replace(/request_id=[^&]+/u, "request_id=…"),
+        body: JSON.parse(String(init?.body)),
+      });
+      if (url.pathname === "/api/tasks/v1/tasks/child")
         return json({
-          task: {
-            id: "child",
-            title: "Synthetic step",
-            stage: "weekly",
-            deadline: "2026-10-30",
-            lead_days: 7,
-            etag: "child-2",
-            estimated_minutes: 480,
-          },
+          id: "child",
+          name: "tasks/child",
+          title: "Synthetic step",
+          stage: "weekly",
+          board_stage: "weekly",
+          deadline: "2026-10-30",
+          lead_days: 7,
+          etag: "child-2",
+          duration_minutes: 480,
         });
-      throw new Error("Unexpected request " + path);
+      throw new Error("Unexpected request " + url.pathname);
     }),
   );
   const lead = await api.updateLead(
@@ -538,7 +560,6 @@ it("returns the confirmed lead task instead of requiring a full reload", async (
       title: "Synthetic step",
       parentId: "",
       projectId: "",
-      labels: [],
       area: "work",
       stage: "weekly",
       priority: 1,
@@ -561,5 +582,10 @@ it("returns the confirmed lead task instead of requiring a full reload", async (
     // The shown estimate stays until the next complete read.
     estimatedMinutes: 30,
   });
-  expect(paths).toEqual(["/api/plus/v1/tasks:setTaskLead"]);
+  expect(calls).toEqual([
+    {
+      path: "/api/tasks/v1/tasks/child?update_mask=deadline%2Clead_days&request_id=…&etag=child-1",
+      body: { deadline: "2026-10-30", lead_days: 7 },
+    },
+  ]);
 });

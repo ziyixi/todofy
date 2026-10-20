@@ -22,7 +22,7 @@ const task = (id: string, value: Partial<PlanningTask> = {}): PlanningTask => ({
   title: `Synthetic ${id}`,
   parentId: "",
   projectId: "synthetic",
-  labels: ["quick"],
+  planningFlags: ["quick"],
   area: "work",
   stage: "none",
   priority: 1,
@@ -50,7 +50,7 @@ it("shows what the native Quick / Ops filter shows: no date, or due or a deadlin
       // Half an hour before local midnight after the last day: in, though its UTC day is not.
       task("fixed-in", { due: `${on(3)}T06:30:00Z` }),
       task("fixed-out", { due: `${on(3)}T07:30:00Z` }),
-      task("other-label", { labels: ["quickly"] }),
+      task("other-label", { planningFlags: ["quickly"] }),
     ]),
   ).toEqual([
     "overdue",
@@ -86,7 +86,7 @@ it("leaves out of Week's line what is in a shown day, a next step above it, or s
     task("queued"),
     task("done-there"),
     task("step"),
-    task("parked", { labels: ["quick", "parked"] }),
+    task("parked", { planningFlags: ["quick", "parked"] }),
     task("free"),
   ];
   const days = [

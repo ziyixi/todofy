@@ -3,14 +3,7 @@ import {
   type HttpSend,
   RpcStatusError,
 } from "@ziyixi/proto/http-client";
-import {
-  PlusService,
-  type LaneOrder as ApiLaneOrder,
-  type Plan as ApiPlan,
-  type PlanningTask as ApiPlanningTask,
-  type TaskDependency as ApiTaskDependency,
-  type WeeklyBet as ApiWeeklyBet,
-} from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
+import { PlusService } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 import {
   FocusEntry_Source,
   FocusTimer_State,
@@ -18,6 +11,13 @@ import {
   type FocusEntry as ApiFocusEntry,
   type FocusTimer as ApiFocusTimer,
 } from "@ziyixi/proto/tasks/ui/v1/focus_pb";
+import type {
+  LaneOrder as ApiLaneOrder,
+  Plan as ApiPlan,
+  WeeklyBet as ApiWeeklyBet,
+} from "@ziyixi/proto/tasks/ui/v1/plan_pb";
+import type { MessageInitShape } from "@ziyixi/proto/protobuf";
+import type { Task, TaskSchema } from "@ziyixi/proto/tasks/ui/v1/task_pb";
 import {
   CommandFocusTimerRequest_Action,
   TasksUiService,
@@ -35,6 +35,7 @@ import type {
   LaneId,
   PlanMetadata,
   PlanningTask,
+  PlanUpdate,
   PlusActions,
   ReorderResult,
   TaskDependency,
@@ -42,68 +43,84 @@ import type {
   WeeklyBet,
 } from "./model";
 
-/** Todofy did not add a dependency; the message says why. */
+/** Tasks did not add a dependency; the message says why. */
 class DependencyNotAddedError extends Error {}
 
-export function planningTask(task: ApiPlanningTask): PlanningTask {
+/** The planning flags PlanUpdate's switches set, as Task.planning_flags names them. */
+const FLAGS: Partial<Record<keyof PlanUpdate, string>> = {
+  active: "active",
+  parked: "parked",
+  quick: "quick",
+  waiting: "waiting",
+  routine: "routine",
+  onHold: "onhold",
+  blocked: "blocked",
+  singleAction: "task",
+};
+/** Review lanes whose order changes no task: they sort by update time. */
+const UNTOUCHED_LANES: readonly string[] = ["waiting", "parked"];
+/** Plan reads at most this many pages of 100 open tasks. */
+const MAX_PAGES = 20;
+
+/** A Task as Plan shows it: its saved stage is explicitStage, and its Review lane's is stage. */
+export function planningTask(task: Task): PlanningTask {
+  const position = task.sortOrder ?? 0;
   return {
     id: task.id,
     title: task.title,
     parentId: task.parentId,
     projectId: task.projectId,
-    labels: task.labels,
-    ...(task.kind
-      ? {
-          kind: task.kind as PlanningTask["kind"],
-          effort: task.effort as PlanningTask["effort"],
-        }
-      : {}),
-    ...(task.explicitStage !== undefined
-      ? {
-          explicitStage: task.explicitStage as PlanningTask["stage"],
-          planningFlags: task.planningFlags,
-        }
-      : {}),
-    area: ["work", "personal"].includes(task.area)
-      ? (task.area as PlanningTask["area"])
-      : "unassigned",
-    stage: ["quarterly", "monthly", "weekly", "committed"].includes(task.stage)
-      ? (task.stage as PlanningTask["stage"])
-      : "none",
-    priority: task.priority || 1,
+    sectionId: task.sectionId,
+    kind: task.kind === "step" ? "step" : "task",
+    effort: task.effort as PlanningTask["effort"],
+    explicitStage: stage(task.stage),
+    planningFlags: task.planningFlags,
+    area:
+      task.area === "work" || task.area === "personal"
+        ? task.area
+        : "unassigned",
+    stage: stage(task.boardStage),
+    // Plan's order is the API's, 4 for P1; Tasks' is the domain's, 1 for P1.
+    priority: 5 - (task.priority || 4),
     deadline: task.deadline,
-    due: task.due,
+    due: task.dueDate,
     leadDays: task.leadDays,
-    estimatedMinutes: task.estimatedMinutes,
+    estimatedMinutes: task.durationMinutes || undefined,
     etag: task.etag,
     mustStart: task.mustStart,
     missingLead: task.missingLead,
-    updatedAt:
-      task.updateTime &&
-      new Date(Number(task.updateTime.seconds) * 1000).toISOString(),
-    recurring: task.recurring,
+    updatedAt: isoTime(task.updateTime),
+    recurring: Boolean(task.recurrence),
     completedCount: task.completedCount,
-    childOrder: task.childOrder,
-    orderKey: task.orderKey,
-    sortOrder: task.sortOrder,
+    childOrder:
+      Number.isInteger(position) && Math.abs(position) < 2 ** 31
+        ? position
+        : undefined,
+    sortOrder: position,
   };
 }
-function taskDependency(dependency: ApiTaskDependency): TaskDependency {
-  return {
-    taskId: dependency.taskId,
+function stage(value: string): PlanningTask["stage"] {
+  return value === "quarterly" ||
+    value === "monthly" ||
+    value === "weekly" ||
+    value === "committed"
+    ? value
+    : "none";
+}
+function taskDependencies(task: Task): TaskDependency[] {
+  return task.dependencies.map((dependency) => ({
+    taskId: task.id,
     prerequisiteId: dependency.prerequisiteId,
-    baselineCount: dependency.baselineCompletedCount,
     done: dependency.done,
-  };
+  }));
 }
 /**
- * Todofy refuses a dependency the page had allowed when another tab changed them meanwhile (a cycle
- * or the limit), and for reasons the same refusal also carries (planning or task writes paused): the
- * message names none of them. A task that is no longer active is said so.
+ * Tasks refuses a dependency the page had allowed when another tab changed them meanwhile (a cycle
+ * or the limit), or when one of the tasks is no longer open: the message names none of them.
  */
 function dependencyError(error: unknown): unknown {
   if (!(error instanceof RpcStatusError)) return error;
-  if (error.status.reason === "ACTION_NOT_ALLOWED")
+  if (error.status.reason === "PRECONDITION_FAILED")
     return new DependencyNotAddedError(
       "Not added: this dependency cannot be added now. Refresh and try again.",
     );
@@ -122,7 +139,7 @@ function weeklyBet(bet: ApiWeeklyBet): WeeklyBet | undefined {
     etag: bet.etag,
   };
 }
-/** The lanes Todofy keeps an order for (core/plan.py LANES). */
+/** The lanes Tasks keeps an order for, in board order. */
 const LANES: readonly string[] = [
   "start",
   "waiting",
@@ -142,19 +159,8 @@ function planMetadata(plan: ApiPlan): PlanMetadata {
   return {
     week: plan.weekStart,
     today: plan.today,
-    timezone: plan.timezone,
-    configured: plan.enabled,
-    ...(plan.mailboxPendingCount !== undefined
-      ? { mailboxPendingCount: plan.mailboxPendingCount }
-      : {}),
-    managedLabels: plan.labels.map((label) => ({
-      role: label.role,
-      id: label.id,
-      label: label.label,
-    })),
-    reviewTaskId: plan.reviewTaskId,
+    timezone: plan.timeZone,
     nextWeekTaskIds: plan.nextWeekTaskIds,
-    dependencies: plan.dependencies.map(taskDependency),
     weeklyBets: plan.weeklyBets.flatMap((bet) => weeklyBet(bet) ?? []),
     laneOrders: Object.fromEntries(
       plan.laneOrders.flatMap((order) => {
@@ -235,16 +241,39 @@ function timerSnapshot(
   };
 }
 /**
- * Adapts Todofy's planning API and Tasks' Focus API. The host supplies authentication and URL
- * routing, `updateEstimate` (an estimate is the task's duration in Tasks) and `completeTask`, which
- * completes in Tasks and settles Focus in the same write.
+ * The moved task's siblings among `tasks` (same project, section and parent) take their existing
+ * positions in the given order; only those whose position changes are written.
+ */
+export function siblingPositions(tasks: readonly Task[], movedId: string) {
+  const moved = tasks.find((task) => task.id === movedId);
+  if (!moved) return [];
+  const siblings = tasks.filter(
+    (task) =>
+      task.projectId === moved.projectId &&
+      task.sectionId === moved.sectionId &&
+      task.parentId === moved.parentId,
+  );
+  const positions = siblings
+    .map((task) => task.sortOrder ?? 0)
+    .sort((left, right) => left - right);
+  return siblings.flatMap((task, index) => {
+    const sortOrder = positions[index] ?? 0;
+    return sortOrder === (task.sortOrder ?? 0)
+      ? []
+      : [{ name: task.name, etag: task.etag, sortOrder }];
+  });
+}
+/**
+ * Adapts Tasks' planning and Focus API, and the weekly review's two facts Todofy keeps. The host
+ * supplies authentication and URL routing, `updateEstimate` (an estimate is the task's duration in
+ * Tasks) and `completeTask`, which completes in Tasks and settles Focus in the same write.
  */
 export function createPlanningActions(transports: {
   plus: HttpSend;
   tasks: HttpSend;
 }): Omit<PlusActions, "updateEstimate" | "completeTask"> {
   const plus = createHttpClient(PlusService, transports.plus);
-  const focus = createHttpClient(TasksUiService, transports.tasks);
+  const tasks = createHttpClient(TasksUiService, transports.tasks);
   // One request ID per identical write until it is confirmed, so a retry after a lost answer
   // replays it instead of writing again.
   const requests = new Map<string, string>();
@@ -258,20 +287,35 @@ export function createPlanningActions(transports: {
     requests.delete(key);
     return result;
   }
-  async function loadPlanningTasks(): Promise<PlanningTask[]> {
-    const tasks: PlanningTask[] = [];
+  // A write a caller retries under its own request ID is resent as it was first built, so Tasks
+  // replays it even when the tasks it was built from have changed since.
+  const built = new Map<string, unknown>();
+  function sameAs<T>(requestId: string, build: () => Promise<T>): Promise<T> {
+    const known = built.get(requestId) as Promise<T> | undefined;
+    if (known) return known;
+    const request = build();
+    built.set(requestId, request);
+    request.catch(() => built.delete(requestId));
+    return request;
+  }
+  async function loadTasks(): Promise<Task[]> {
+    const listed: Task[] = [];
     let pageToken = "";
-    for (let page = 0; page < 10; page++) {
-      const result = await plus.listPlanningTasks({ pageSize: 200, pageToken });
-      tasks.push(...result.planningTasks.map(planningTask));
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const result = await tasks.listTasks({
+        view: "all",
+        pageSize: 100,
+        pageToken,
+      });
+      listed.push(...result.tasks);
       pageToken = result.nextPageToken;
-      if (!pageToken) return tasks;
+      if (!pageToken) return listed;
     }
     throw new Error("Task list is incomplete. Counts have not been shown.");
   }
-  /** At most 7 days, which one ListFocusDays reads. */
-  async function readDays(start: string, end: string): Promise<FocusRange> {
-    const result = await focus.listFocusDays({ startDay: start, endDay: end });
+  /** At most 7 days, which one ListFocusDays reads; no range reads Tasks' today's week. */
+  async function readDays(start = "", end = ""): Promise<FocusRange> {
+    const result = await tasks.listFocusDays({ startDay: start, endDay: end });
     const days = result.days.map((day): DayPlan => ({
       ...dayQueue(day),
       entries: [],
@@ -280,9 +324,9 @@ export function createPlanningActions(transports: {
       days
         .find((day) => day.date === entry.day)
         ?.entries.push(focusEntry(entry));
-    const tasks: FocusRange["tasks"] = {};
+    const named: FocusRange["tasks"] = {};
     for (const task of result.tasks)
-      tasks[task.taskId] = {
+      named[task.taskId] = {
         title: task.title,
         parentId: task.parentId,
         parentTitle: task.parentTitle,
@@ -291,7 +335,7 @@ export function createPlanningActions(transports: {
           : {}),
         completed: task.completed,
       };
-    return { days, tasks, today: result.today };
+    return { days, tasks: named, today: result.today };
   }
   async function moveStep(
     taskId: string,
@@ -302,7 +346,7 @@ export function createPlanningActions(transports: {
     const result = await once(
       `move:${taskId}:${sourceDay}:${destinationDay}:${beforeTaskId}`,
       (requestId) =>
-        focus.moveFocusStep({
+        tasks.moveFocusStep({
           requestId,
           taskId,
           sourceDay,
@@ -315,122 +359,167 @@ export function createPlanningActions(transports: {
   async function loadDays(weekStart: string): Promise<DayPlan[]> {
     return (await readDays(weekStart, addDays(weekStart, 6))).days;
   }
+  /** One UpdateTask of planning paths; the answer keeps the estimate Plan shows. */
+  async function save(
+    task: PlanningTask,
+    paths: string[],
+    values: Pick<
+      MessageInitShape<typeof TaskSchema>,
+      "stage" | "area" | "planningFlags" | "deadline" | "leadDays"
+    >,
+  ): Promise<PlanningTask> {
+    const saved = await tasks.updateTask({
+      requestId: crypto.randomUUID(),
+      etag: task.etag,
+      task: { name: `tasks/${task.id}`, ...values },
+      updateMask: { paths },
+    });
+    return { ...planningTask(saved), estimatedMinutes: task.estimatedMinutes };
+  }
   return {
     loadDays,
     async load(weekStart) {
-      const [metadata, tasks, timer, shown] = await Promise.all([
-        plus.readPlan({}),
-        loadPlanningTasks(),
-        focus.getFocusTimer({ name: "focusTimer" }),
-        weekStart ? readDays(weekStart, addDays(weekStart, 6)) : undefined,
+      const [plan, listed, timer, shown] = await Promise.all([
+        tasks.getPlan({ name: "plan" }),
+        loadTasks(),
+        tasks.getFocusTimer({ name: "focusTimer" }),
+        weekStart ? readDays(weekStart, addDays(weekStart, 6)) : readDays(),
       ]);
-      if (!metadata.plan) throw new Error("Planning metadata is missing.");
-      const plan = metadata.plan;
-      const week =
-        shown ?? (await readDays(plan.weekStart, addDays(plan.weekStart, 6)));
       // Focus is on Tasks' today, which the displayed week may not include.
-      const current = week.days.some((day) => day.date === week.today)
-        ? week
-        : await readDays(week.today, week.today);
-      const today = current.days.find((day) => day.date === week.today);
+      const current = shown.days.some((day) => day.date === shown.today)
+        ? shown
+        : await readDays(shown.today, shown.today);
+      const today = current.days.find((day) => day.date === shown.today);
       if (!today) throw new Error("Today's planning day is missing.");
+      const planned = listed.map(planningTask);
       // A task's duration in Tasks is its only estimate.
       const estimates: Record<string, number> = {};
-      for (const task of tasks) estimates[task.id] = task.estimatedMinutes ?? 0;
+      for (const task of planned)
+        estimates[task.id] = task.estimatedMinutes ?? 0;
       const focusState: FocusState = {
         ...today,
         ...timerSnapshot(timer),
         estimates,
-        tasks: { ...week.tasks, ...current.tasks },
+        tasks: { ...shown.tasks, ...current.tasks },
       };
       return {
-        plan: { ...planMetadata(plan), tasks },
+        plan: {
+          ...planMetadata(plan),
+          tasks: planned,
+          dependencies: listed.flatMap(taskDependencies),
+        },
         focus: focusState,
-        days: week.days,
+        days: shown.days,
       };
     },
     async readPlan() {
-      const result = await plus.readPlan({});
-      if (!result.plan) throw new Error("Planning metadata is missing.");
-      return planMetadata(result.plan);
+      return planMetadata(await tasks.getPlan({ name: "plan" }));
+    },
+    async readWeeklyReview(week) {
+      const result = await plus.readWeeklyReview({ weekStart: week });
+      return {
+        reviewTaskId: result.reviewTaskId,
+        mailboxPendingCount: result.mailboxPendingCount,
+      };
     },
     async updateTask(task, update) {
-      const result = await plus.setTaskPlan({
-        taskId: task.id,
-        etag: task.etag,
-        requestId: crypto.randomUUID(),
-        ...update,
+      const flags = new Set(task.planningFlags ?? []);
+      for (const [field, flag] of Object.entries(FLAGS)) {
+        const value = update[field as keyof PlanUpdate];
+        if (value === true) flags.add(flag);
+        if (value === false) flags.delete(flag);
+      }
+      const paths: string[] = [];
+      if (update.stage !== undefined) paths.push("stage");
+      if (update.area !== undefined) paths.push("area");
+      if (Object.keys(FLAGS).some((field) => field in update))
+        paths.push("planning_flags");
+      return save(task, paths, {
+        stage: update.stage ?? "",
+        area: update.area ?? "",
+        planningFlags: [...flags],
       });
-      if (!result.task) throw new Error("The saved task could not be read.");
-      return {
-        ...planningTask(result.task),
-        estimatedMinutes: task.estimatedMinutes,
-      };
     },
     async setWeeklyBet(bet) {
       let result;
       try {
-        result = await plus.setWeeklyBet(bet);
+        result = await tasks.updateWeeklyBet({
+          weeklyBet: {
+            name: `weeklyBets/${bet.weekStart}-${bet.area}`,
+            text: bet.text,
+            etag: bet.etag,
+          },
+          updateMask: { paths: ["text"] },
+        });
       } catch (error) {
         const reason =
           error instanceof RpcStatusError ? error.status.reason : undefined;
         if (reason === "ETAG_MISMATCH") throw new BetNotSaved("changed");
-        // The only write Todofy refuses for a configured plan: a week that has ended.
-        if (reason === "ACTION_NOT_ALLOWED") throw new BetNotSaved("ended");
+        // The only other refusal of a well-formed Bet: its week has ended.
+        if (reason === "PRECONDITION_FAILED") throw new BetNotSaved("ended");
         throw error;
       }
-      const saved = result.weeklyBet && weeklyBet(result.weeklyBet);
+      const saved = weeklyBet(result);
       if (!saved) throw new Error("The saved goal could not be read.");
       return saved;
     },
     async createSteps(task, steps, requestId) {
-      const result = await plus.appendTaskSteps({
-        parentId: task.id,
-        steps,
-        requestId,
-      });
-      return result.taskIds;
+      // Each step's task and request IDs are fixed once per add, so a retry creates none twice.
+      const ids = await sameAs(requestId, () =>
+        Promise.resolve(
+          steps.map(() => ({
+            taskId: crypto.randomUUID(),
+            requestId: crypto.randomUUID(),
+          })),
+        ),
+      );
+      const created: string[] = [];
+      for (const [index, step] of steps.entries()) {
+        const id = ids[index];
+        if (!id) throw new Error("A step has no identity.");
+        const saved = await tasks.createTask({
+          ...id,
+          task: {
+            title: step.title,
+            parentId: task.id,
+            kind: "step",
+            durationMinutes: step.estimatedMinutes ?? 0,
+          },
+        });
+        created.push(saved.id);
+      }
+      built.delete(requestId);
+      return created;
     },
     async updateLead(task, deadline, leadDays) {
-      const result = await plus.setTaskLead({
-        taskId: task.id,
-        etag: task.etag,
-        requestId: crypto.randomUUID(),
-        deadline,
-        leadDays,
-      });
-      if (!result.task) throw new Error("The saved task could not be read.");
-      return {
-        ...planningTask(result.task),
-        estimatedMinutes: task.estimatedMinutes,
-      };
+      return save(task, ["deadline", "lead_days"], { deadline, leadDays });
     },
     async setDependency(taskId, prerequisiteId, waits) {
       try {
-        const result = await plus.setTaskDependency({
-          taskId,
-          prerequisiteId,
-          waits,
+        const current = await tasks.getTask({ name: `tasks/${taskId}` });
+        const prerequisites = current.dependencies
+          .map((dependency) => dependency.prerequisiteId)
+          .filter((id) => id !== prerequisiteId);
+        const saved = await tasks.updateTask({
           requestId: crypto.randomUUID(),
+          etag: current.etag,
+          task: {
+            name: current.name,
+            dependencies: [
+              ...prerequisites,
+              ...(waits ? [prerequisiteId] : []),
+            ].map((id) => ({ prerequisiteId: id })),
+          },
+          updateMask: { paths: ["dependencies"] },
         });
         return {
           forTask: taskId,
-          dependencies: result.dependencies.map(taskDependency),
+          dependencies: taskDependencies(saved),
+          task: planningTask(saved),
         };
       } catch (error) {
         throw waits ? dependencyError(error) : error;
       }
-    },
-    async resolveDependencies(taskIds) {
-      const result = await plus.resolveDependencies({
-        taskIds,
-        requestId: crypto.randomUUID(),
-      });
-      return {
-        dependencies: result.dependencies.map(taskDependency),
-        dropped: result.droppedTaskIds,
-        released: result.releasedTaskIds,
-      };
     },
     async addToDay(taskId, date) {
       return moveStep(taskId, "", date);
@@ -443,7 +532,7 @@ export function createPlanningActions(transports: {
       return moveStep(taskId, source?.date ?? "", target.date, beforeId);
     },
     async readTimer() {
-      return timerSnapshot(await focus.getFocusTimer({ name: "focusTimer" }));
+      return timerSnapshot(await tasks.getFocusTimer({ name: "focusTimer" }));
     },
     async timer(action, taskId, state, targetSeconds, taskArea) {
       const actions = {
@@ -457,7 +546,7 @@ export function createPlanningActions(transports: {
       const confirmed = await once(
         `timer:${action}:${taskId}:${state.timerEtag}:${start ? `${targetSeconds ?? 0}:${wireArea(taskArea)}` : ""}`,
         (requestId) =>
-          focus.commandFocusTimer({
+          tasks.commandFocusTimer({
             name: "focusTimer",
             requestId,
             etag: state.timerEtag,
@@ -494,7 +583,7 @@ export function createPlanningActions(transports: {
       const saved = await once(
         `add:${entry.taskId}:${entry.date}:${entry.seconds}:${entry.area}`,
         (requestId) =>
-          focus.createFocusEntry({
+          tasks.createFocusEntry({
             requestId,
             focusEntry: {
               taskId: entry.taskId,
@@ -510,7 +599,7 @@ export function createPlanningActions(transports: {
       const saved = await once(
         `update:${entry.id}:${entry.etag}:${seconds}`,
         (requestId) =>
-          focus.updateFocusEntry({
+          tasks.updateFocusEntry({
             requestId,
             etag: entry.etag,
             focusEntry: { name: `focusEntries/${entry.id}`, seconds },
@@ -521,7 +610,7 @@ export function createPlanningActions(transports: {
     },
     async deleteEntry(entry) {
       await once(`delete:${entry.id}:${entry.etag}`, (requestId) =>
-        focus.deleteFocusEntry({
+        tasks.deleteFocusEntry({
           name: `focusEntries/${entry.id}`,
           etag: entry.etag,
           requestId,
@@ -530,15 +619,35 @@ export function createPlanningActions(transports: {
       return { deletedEntry: { id: entry.id, date: entry.date } };
     },
     async reorderTasks(taskIds, movedId, lane, requestId) {
-      const result = await plus.reorderTasks({
-        requestId,
-        taskIds,
-        taskId: movedId,
-        lane,
+      // Built once per request ID from the tasks as Tasks lists them, then resent as built.
+      const request = await sameAs(requestId, async () => {
+        const listed = UNTOUCHED_LANES.includes(lane)
+          ? []
+          : (await tasks.listTasks({ view: "all", taskIds, pageSize: 100 }))
+              .tasks;
+        const byId = new Map(listed.map((task) => [task.id, task]));
+        return {
+          requestId,
+          positions: siblingPositions(
+            taskIds.flatMap((id) => byId.get(id) ?? []),
+            movedId,
+          ),
+          ...(lane ? { laneOrder: { lane, taskIds } } : {}),
+        };
       });
+      let result;
+      try {
+        if (request.positions.length || request.laneOrder)
+          result = await tasks.reorderTasks(request);
+      } catch (error) {
+        // Tasks refused it and wrote nothing: the next try is built from the tasks as they are then.
+        if (error instanceof RpcStatusError) built.delete(requestId);
+        throw error;
+      }
+      built.delete(requestId);
       return {
-        reordered: result.tasks.map(planningTask),
-        lane: result.laneOrder && laneOrder(result.laneOrder),
+        reordered: (result?.tasks ?? []).map(planningTask),
+        lane: result?.laneOrder && laneOrder(result.laneOrder),
       };
     },
   };

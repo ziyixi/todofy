@@ -14,7 +14,6 @@ const task = (
   title: id,
   parentId: "",
   projectId: "",
-  labels: [],
   area: "work",
   stage: "none",
   priority: 1,
@@ -37,7 +36,7 @@ describe("planning choices", () => {
         area: "unassigned",
       }),
       task("candidate", { stage: "weekly" }),
-      task("quick", { labels: ["quick"] }),
+      task("quick", { planningFlags: ["quick"] }),
     ];
     expect(topLevelChoices(tasks, "work").map((item) => item.id)).toEqual([
       "parent",

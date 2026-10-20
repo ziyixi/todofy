@@ -28,7 +28,7 @@ export type CardState = "waiting" | "start";
 /**
  * Waiting wins, as in the board's lanes: a @waiting task past its deadline waits, and so does one
  * whose dependency holds (`waitsFor`, its prerequisites that still hold it back). A task should
- * start once Todofy's start window opens or its deadline passes, until it is in progress.
+ * start once its start window opens or its deadline passes, until it is in progress.
  */
 export function cardState(
   task: PlanningTask,
@@ -52,10 +52,7 @@ export function cardState(
  * deadline first, then the higher priority; Waiting and Parked the longest untouched first.
  */
 export function boardLanes(
-  plan: Pick<
-    PlanState,
-    "tasks" | "managedLabels" | "dependencies" | "laneOrders"
-  >,
+  plan: Pick<PlanState, "tasks" | "dependencies" | "laneOrders">,
   today: string,
 ): BoardLanes {
   const lanes: BoardLanes = {
@@ -69,13 +66,9 @@ export function boardLanes(
   };
   const parked = (task: PlanningTask) => isParked(task);
   lanes.parked = byUntouched(plan.tasks.filter(parked));
-  const outcomes = planningOutcomes(plan.tasks, plan.managedLabels).filter(
-    (task) => !parked(task),
-  );
+  const outcomes = planningOutcomes(plan.tasks).filter((task) => !parked(task));
   const staged = new Set(
-    outcomes
-      .filter((task) => !isDateCandidate(task, plan.managedLabels))
-      .map((task) => task.id),
+    outcomes.filter((task) => !isDateCandidate(task)).map((task) => task.id),
   );
   const { waitingFor } = dependencyIndex(plan);
   const state = (task: PlanningTask) =>

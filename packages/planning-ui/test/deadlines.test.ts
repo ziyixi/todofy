@@ -18,7 +18,6 @@ const task = (id: string, value: Partial<PlanningTask> = {}): PlanningTask => ({
   title: `Synthetic ${id}`,
   parentId: "",
   projectId: "synthetic",
-  labels: [],
   area: "work",
   stage: "none",
   priority: 1,
@@ -35,12 +34,12 @@ const on = (days: number) => addDays(TODAY, days);
 it("gives each task with a deadline the first matching state, from Todofy's flags", () => {
   const states = [
     task("none", { mustStart: true }),
-    task("parked", { deadline: on(-2), labels: ["parked"], mustStart: true }),
-    task("active", { deadline: on(12), labels: ["active"] }),
+    task("parked", { deadline: on(-2), planningFlags: ["parked"], mustStart: true }),
+    task("active", { deadline: on(12), planningFlags: ["active"] }),
     // @active with @blocked is not in progress: Todofy's in-progress deadline query excludes it.
     task("blockedActive", {
       deadline: on(3),
-      labels: ["active", "blocked"],
+      planningFlags: ["active", "blocked"],
       missingLead: true,
     }),
     task("past", { deadline: on(-2), mustStart: true }),
@@ -103,7 +102,7 @@ it("says in task details where the deadline stands, from the fields as shown", (
   expect(status(on(-2), 7)).toEqual({ text: "", danger: "已过截止 2 天" });
   // Without a start-ahead choice the select already says "Not set".
   expect(status(on(40), 0)).toBeUndefined();
-  const active = task("active", { labels: ["active"] });
+  const active = task("active", { planningFlags: ["active"] });
   expect(status(on(12), 7, active)).toEqual({ text: "进行中 · 还剩 12 天" });
   expect(detailStatus(plain, on(5), 7, TODAY, "en")).toEqual({
     text: "Start window open · 5 days left",
@@ -139,9 +138,9 @@ it("counts tasks that should start once, unless the task or an open step is plan
     task("done-step-parent", { deadline: on(4), leadDays: 7, mustStart: true }),
     task("done-step", { parentId: "done-step-parent" }),
     task("noLead", { deadline: on(2), missingLead: true }),
-    task("active", { deadline: on(2), labels: ["active"] }),
+    task("active", { deadline: on(2), planningFlags: ["active"] }),
     // Todofy marks a waiting task past its deadline must start, but the board shows it in Waiting.
-    task("waiting", { deadline: on(-2), labels: ["waiting"], mustStart: true }),
+    task("waiting", { deadline: on(-2), planningFlags: ["waiting"], mustStart: true }),
   ];
   const days = [
     {

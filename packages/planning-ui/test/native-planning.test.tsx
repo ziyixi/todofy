@@ -3,11 +3,12 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { create } from "@ziyixi/proto/protobuf";
-import { PlanningTaskSchema } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
+import { TaskSchema } from "@ziyixi/proto/tasks/ui/v1/task_pb";
 import { createPlanningActions, planningTask } from "../src/api";
 import { hasPlanningFlag, isSchedulable } from "../src/domain";
 import { deadlineState } from "../src/deadlines";
@@ -30,7 +31,6 @@ const task: PlanningTask = {
   title: "Synthetic native action",
   parentId: "",
   projectId: "inbox",
-  labels: ["quick", "active"],
   planningFlags: [],
   explicitStage: "none",
   area: "unassigned",
@@ -48,29 +48,20 @@ const plan: PlanState = {
   week: "2026-10-12",
   today: "2026-10-13",
   timezone: "UTC",
-  configured: true,
-  managedLabels: [],
-  reviewTaskId: "",
   nextWeekTaskIds: [],
   dependencies: [],
   weeklyBets: [],
   laneOrders: {},
 };
 
-it("keeps ordinary tags separate from native planning flags, including an empty flag list", () => {
+it("keeps ordinary tags separate from planning flags, including an empty flag list", () => {
   const native = planningTask(
-    create(PlanningTaskSchema, {
-      id: task.id,
-      labels: ["quick", "active"],
-      explicitStage: "none",
-    }),
+    create(TaskSchema, { id: task.id, labelIds: ["quick", "active"] }),
   );
   expect(native.planningFlags).toEqual([]);
+  expect(native.explicitStage).toBe("none");
   expect(hasPlanningFlag(native, "active")).toBe(false);
   expect(quickTasks({ ...plan, tasks: [native] }, "2026-10-17")).toEqual([]);
-  expect(hasPlanningFlag({ ...task, planningFlags: undefined }, "active")).toBe(
-    true,
-  );
   expect(deadlineState(task, "2026-10-17")?.kind).toBe("window");
 });
 
@@ -101,7 +92,6 @@ it("puts native states in the existing lanes and keeps tags unchanged on a stage
     stage: "committed",
     explicitStage: "committed",
     planningFlags: ["active"],
-    labels: task.labels,
   });
   const setAside = withStage(
     { ...plan, tasks: [moved] },
@@ -113,16 +103,17 @@ it("puts native states in the existing lanes and keeps tags unchanged on a stage
   expect(setAside).toMatchObject({
     explicitStage: "none",
     planningFlags: ["parked"],
-    labels: task.labels,
   });
+  expect(isDateCandidate({ ...task, stage: "weekly", due: "2026-10-18" })).toBe(
+    true,
+  );
   expect(
-    isDateCandidate({ ...task, stage: "weekly", due: "2026-10-18" }, []),
-  ).toBe(true);
-  expect(
-    isDateCandidate(
-      { ...task, stage: "weekly", explicitStage: "weekly", due: "2026-10-18" },
-      [],
-    ),
+    isDateCandidate({
+      ...task,
+      stage: "weekly",
+      explicitStage: "weekly",
+      due: "2026-10-18",
+    }),
   ).toBe(false);
 });
 
@@ -164,40 +155,45 @@ it("edits native flags directly and shows saved stage rather than a date-derived
   );
 });
 
-it("sends native flag writes in the existing update contract", async () => {
+it("sends flag writes as the task's planning flags in one UpdateTask", async () => {
   const calls: import("@ziyixi/proto/http-client").HttpCall[] = [];
   const send: import("@ziyixi/proto/http-client").HttpSend = async (call) => {
     calls.push(call);
     return Response.json({
-      task: {
-        id: task.id,
-        explicit_stage: "none",
-        planning_flags: ["quick", "onhold"],
-      },
+      id: task.id,
+      name: `tasks/${task.id}`,
+      stage: "none",
+      planning_flags: ["quick", "onhold", "task"],
     });
   };
   const actions = createPlanningActions({ plus: send, tasks: send });
   const updated = await actions.updateTask(task, { quick: true, onHold: true });
-  expect(JSON.parse(calls[0]!.body!)).toMatchObject({
-    quick: true,
-    on_hold: true,
+  expect(JSON.parse(calls[0]!.body!)).toEqual({
+    planning_flags: ["quick", "onhold"],
   });
-  expect(updated.planningFlags).toEqual(["quick", "onhold"]);
-  expect(updated.labels).toEqual([]);
+  expect(updated.planningFlags).toEqual(["quick", "onhold", "task"]);
 });
 
-it("shows uncreated native Mail in weekly review and opens Mail without a task identity", () => {
+it("shows uncreated native Mail in weekly review and opens Mail without a task identity", async () => {
   const openMail = vi.fn();
   const updateTask = vi.fn();
   render(
     <WeeklyReview
-      plan={{ ...plan, tasks: [], mailboxPendingCount: 3 }}
+      plan={{ ...plan, tasks: [] }}
       days={[]}
       today="2026-10-17"
       language="en"
       busy={false}
       run={vi.fn()}
-      actions={{ updateTask } as unknown as PlusActions}
+      actions={
+        {
+          updateTask,
+          readWeeklyReview: async () => ({
+            reviewTaskId: "",
+            mailboxPendingCount: 3,
+          }),
+        } as unknown as PlusActions
+      }
       editTask={vi.fn()}
       progress={{ lines: [], kept: [] }}
       onProgress={vi.fn()}
@@ -209,7 +205,10 @@ it("shows uncreated native Mail in weekly review and opens Mail without a task i
     />,
   );
   const line = screen.getByText("Mail to clarify").closest("li")!;
-  expect(line.querySelector(".weekly-review-count")?.textContent).toBe("3");
+  // Todofy's count arrives after the review opens; until then it shows "—".
+  await waitFor(() =>
+    expect(line.querySelector(".weekly-review-count")?.textContent).toBe("3"),
+  );
   fireEvent.click(within(line).getByRole("button", { name: "Open" }));
   expect(openMail).toHaveBeenCalledTimes(1);
   expect(updateTask).not.toHaveBeenCalled();

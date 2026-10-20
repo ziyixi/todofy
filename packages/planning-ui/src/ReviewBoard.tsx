@@ -64,7 +64,6 @@ import type {
 export interface OutcomeCardProps {
   task: PlanningTask;
   tasks: PlanningTask[];
-  managedLabels: PlanState["managedLabels"];
   scheduledIds: Set<string>;
   /**
    * The account's today, on the Review board: there a card says that it waits or should start.
@@ -93,7 +92,6 @@ export interface OutcomeCardProps {
 export function OutcomeCard({
   task,
   tasks,
-  managedLabels,
   scheduledIds,
   today,
   language,
@@ -104,7 +102,7 @@ export function OutcomeCard({
   onClick,
   onOpen,
 }: OutcomeCardProps) {
-  const steps = outcomeSteps(task, tasks, managedLabels);
+  const steps = outcomeSteps(task, tasks);
   const planned = steps.filter((step) => scheduledIds.has(step.id)).length;
   const priority =
     task.priority > 1
@@ -220,11 +218,6 @@ interface Props {
   run: RunOperation;
   editTask: (task: PlanningTask) => void;
   completeTask: CompletePlanningTask;
-  /**
-   * One quiet line each, under the lanes so that nothing above them moves: a task that no longer waits
-   * because what it waited for was deleted or left the list, told once.
-   */
-  dependencyNotices?: readonly string[];
 }
 /**
  * As many cards as Parked shows before "more", the most untouched: few, so that where the side
@@ -238,7 +231,7 @@ const PARKED_SHOWN = 3;
  * a stage lane takes that stage and is marked in progress in one write; one from Waiting takes only
  * the stage. Parked always shows and takes any card: it sets the card aside, and a card dragged out
  * of it into a stage lane takes that stage and is no longer set aside. Inside every lane a card
- * dropped on another card takes its place: the lane keeps that order in Todofy, and Tasks' order of
+ * dropped on another card takes its place: Tasks keeps the lane's order, and the order of
  * the moved card's siblings follows (not for Waiting and Parked).
  */
 export function ReviewBoard({
@@ -254,7 +247,6 @@ export function ReviewBoard({
   run,
   editTask,
   completeTask,
-  dependencyNotices = [],
 }: Props) {
   const text = words(language);
   const board = useRef<HTMLDivElement>(null);
@@ -311,8 +303,6 @@ export function ReviewBoard({
       id: lane.stage,
       title: lane.title,
       stage: lane.stage,
-      label: plan.managedLabels.find((label) => label.role === lane.role)
-        ?.label,
     })),
   ].filter(
     (column) =>
@@ -451,11 +441,6 @@ export function ReviewBoard({
         <p className="plus-sr-only" role="status">
           {announcement}
         </p>
-        <div className="review-board-notices" role="status">
-          {dependencyNotices.map((notice) => (
-            <p key={notice}>{notice}</p>
-          ))}
-        </div>
       </div>
       {/* Finish preview cleanup immediately, retaining dnd-kit's keyboard focus restoration. */}
       <DragOverlay
@@ -473,7 +458,6 @@ export function ReviewBoard({
               <OutcomeCard
                 task={task}
                 tasks={plan.tasks}
-                managedLabels={plan.managedLabels}
                 scheduledIds={scheduledIds}
                 today={currentDate}
                 language={language}
@@ -702,7 +686,6 @@ function DraggableOutcome({
       <OutcomeCard
         task={task}
         tasks={plan.tasks}
-        managedLabels={plan.managedLabels}
         scheduledIds={scheduledIds}
         today={today}
         language={language}

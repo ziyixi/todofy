@@ -306,9 +306,7 @@ function CalendarStep({
   onRemove: (id: string) => void;
 }) {
   const task = taskIndex(plan.tasks).get(id);
-  const outcome = task
-    ? outcomeForTask(task, plan.tasks, plan.managedLabels)
-    : undefined;
+  const outcome = task ? outcomeForTask(task, plan.tasks) : undefined;
   const timing = timer?.taskId === id && timer.day === day.date;
   const title = taskTitle(task?.title ?? focusTask?.title, language);
   const { ref, handleRef, isDragSource } = useDraggable({

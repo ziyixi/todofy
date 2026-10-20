@@ -3,15 +3,23 @@ import { createPlanningActions } from "../src/api";
 import type { HttpCall, HttpSend } from "@ziyixi/proto/http-client";
 import type { FocusState } from "../src/model";
 
-it("reads the native pending Mail count even when no mail task exists", async () => {
-  const send: HttpSend = async () =>
-    Response.json({
-      plan: { enabled: true, native_planning: true, mailbox_pending_count: 0 },
-    });
-  const actions = createPlanningActions({ plus: send, tasks: send });
-  expect(await actions.readPlan()).toMatchObject({
+it("reads the weekly review's two Todofy facts for the plan's week, a zero count included", async () => {
+  const calls: HttpCall[] = [];
+  const plus: HttpSend = async (call) => {
+    calls.push(call);
+    return Response.json({ review_task_id: "synthetic-review" });
+  };
+  const tasks: HttpSend = async () => {
+    throw new Error("The weekly review reads Todofy only");
+  };
+  const actions = createPlanningActions({ plus, tasks });
+  expect(await actions.readWeeklyReview!("2026-10-12")).toEqual({
+    reviewTaskId: "synthetic-review",
     mailboxPendingCount: 0,
   });
+  expect(calls.map((call) => call.url)).toEqual([
+    "/api/plus/v1/weeklyReview:read?week_start=2026-10-12",
+  ]);
 });
 
 it("starts a pomodoro in Tasks and uses its authoritative session across reload and finish", async () => {
@@ -152,21 +160,23 @@ it("counts up when Start has no target, and an unassigned task starts with no ar
 it("takes every estimate from the task list; Tasks' Focus read only names tasks the list leaves out", async () => {
   const send: HttpSend = async ({ url }) => {
     const path = url.split("?")[0]!;
-    if (path === "/api/plus/v1/plan:read")
+    if (path === "/api/tasks/v1/plan")
       return Response.json({
-        plan: {
-          enabled: true,
-          native_planning: true,
-          timezone: "UTC",
-          today: "2026-10-17",
-          week_start: "2026-10-12",
-        },
+        name: "plan",
+        time_zone: "UTC",
+        today: "2026-10-17",
+        week_start: "2026-10-12",
       });
-    if (path === "/api/plus/v1/tasks")
+    if (path === "/api/tasks/v1/tasks")
       return Response.json({
-        planning_tasks: [
-          { id: "step", kind: "step", estimated_minutes: 90 },
-          { id: "cleared", kind: "step" },
+        tasks: [
+          {
+            id: "step",
+            name: "tasks/step",
+            kind: "step",
+            duration_minutes: 90,
+          },
+          { id: "cleared", name: "tasks/cleared", kind: "step" },
         ],
       });
     if (path === "/api/tasks/v1/focusDays")

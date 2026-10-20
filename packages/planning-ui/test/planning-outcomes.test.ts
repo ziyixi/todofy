@@ -14,7 +14,6 @@ function task(id: string, changes: Partial<PlanningTask> = {}): PlanningTask {
     title: id,
     parentId: "",
     projectId: "",
-    labels: [],
     area: "work",
     stage: "none",
     priority: 1,
@@ -74,31 +73,36 @@ it("uses the immediate parent when no task in the ancestry has a planning stage"
 });
 
 it("keeps a dated child with its commitment while an explicitly weekly child stays independent", () => {
-  const labels = [{ role: "focus", id: "weekly-id", label: "weekly-choice" }];
   const commitment = task("commitment", {
     stage: "committed",
-    labels: ["committed"],
+    explicitStage: "committed",
   });
+  // Weekly only by its date, which its commitment's own stage outranks.
   const datedStep = task("dated-step", {
     parentId: commitment.id,
     stage: "weekly",
+    explicitStage: "none",
     due: "2026-10-15",
   });
   const independent = task("independent", {
     parentId: commitment.id,
     stage: "weekly",
+    explicitStage: "weekly",
     due: "2026-10-15",
-    labels: ["weekly-choice"],
   });
-  const datedRoot = task("dated-root", { stage: "weekly", due: "2026-10-15" });
+  const datedRoot = task("dated-root", {
+    stage: "weekly",
+    explicitStage: "none",
+    due: "2026-10-15",
+  });
   const tasks = [commitment, datedStep, independent, datedRoot];
 
-  expect(
-    outcomeSteps(commitment, tasks, labels).map((item) => item.id),
-  ).toEqual([datedStep.id]);
-  expect(outcomeForTask(datedStep, tasks, labels).id).toBe(commitment.id);
-  expect(outcomeForTask(independent, tasks, labels).id).toBe(independent.id);
-  expect(planningOutcomes(tasks, labels).map((item) => item.id)).toEqual([
+  expect(outcomeSteps(commitment, tasks).map((item) => item.id)).toEqual([
+    datedStep.id,
+  ]);
+  expect(outcomeForTask(datedStep, tasks).id).toBe(commitment.id);
+  expect(outcomeForTask(independent, tasks).id).toBe(independent.id);
+  expect(planningOutcomes(tasks).map((item) => item.id)).toEqual([
     commitment.id,
     independent.id,
     datedRoot.id,

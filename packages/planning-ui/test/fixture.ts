@@ -13,7 +13,7 @@ import type {
   PlanningTask,
   PlusActions,
 } from "../src/model";
-/** A task as Todofy lists it from Tasks: its saved stage and planning flags, no planning labels. */
+/** A task as Tasks lists it: its saved stage and planning flags. */
 const task = (
   id: string,
   title: string,
@@ -23,7 +23,6 @@ const task = (
   title,
   parentId: "",
   projectId: "synthetic",
-  labels: [],
   planningFlags: [],
   area: "work",
   stage: "none",
@@ -54,10 +53,6 @@ export function createPrototype(
     week: "2026-10-12",
     today,
     timezone: "America/Los_Angeles",
-    configured: true,
-    managedLabels: [],
-    mailboxPendingCount: 2,
-    reviewTaskId: "weekly-review",
     nextWeekTaskIds: [],
     dependencies: [],
     laneOrders: {},
@@ -291,10 +286,15 @@ export function createPrototype(
     async readPlan() {
       const metadata: Partial<PlanState> = structuredClone(plan);
       delete metadata.tasks;
+      delete metadata.dependencies;
       return metadata as PlanMetadata;
     },
+    // Todofy's weekly review facts: two pending mails and this week's review task.
+    async readWeeklyReview() {
+      return { reviewTaskId: "weekly-review", mailboxPendingCount: 2 };
+    },
     async updateTask(item, { stage, area, active, parked, ...switches }) {
-      // As Todofy saves native planning state: the stage is the saved stage, and each switch sets
+      // As Tasks saves planning state: the stage is the saved stage, and each switch sets
       // or clears its flag. In progress clears must start and missing lead; setting aside comes
       // last, with no stage and not in progress.
       const saved = (task: PlanningTask): PlanningTask => {
@@ -412,7 +412,7 @@ export function createPrototype(
           : day,
       );
     },
-    // As Todofy keeps them: by ID only, adding one that holds changing nothing and one that is done
+    // As Tasks keeps them: by ID, adding one that holds changing nothing and one that is done
     // starting it over (the limits are left out).
     async setDependency(taskId, prerequisiteId, waits) {
       const others = plan.dependencies.filter(
@@ -433,12 +433,7 @@ export function createPrototype(
               ...others,
               existing && holds(existing, prerequisite)
                 ? existing
-                : {
-                    taskId,
-                    prerequisiteId,
-                    baselineCount: prerequisite?.completedCount ?? 0,
-                    done: false,
-                  },
+                : { taskId, prerequisiteId, done: false },
             ]
           : others,
       };
@@ -448,9 +443,6 @@ export function createPrototype(
           (item) => item.taskId === taskId,
         ),
       });
-    },
-    async resolveDependencies() {
-      return structuredClone({ dependencies: plan.dependencies });
     },
     async addToDay(id, date) {
       days = days.map((day) =>

@@ -58,7 +58,7 @@ export function isParked(task: PlanningTask): boolean {
   return hasPlanningFlag(task, PARKED_LABEL);
 }
 
-/** Todofy keeps at most this many tasks of one lane's order (core/plan.py MAX_LANE_TASKS). */
+/** Tasks keeps at most this many tasks of one lane's order (planning.ts MAX_LANE_TASKS). */
 export const MAX_LANE_TASKS = 100;
 
 /**
@@ -79,45 +79,29 @@ export function inLaneOrder(
   return lane === "start" ? [...rest, ...arranged] : [...arranged, ...rest];
 }
 
-/** A Week candidate only by Todofy's 7-day date rule (Candidate If): it has no Week label of its own. */
-export function isDateCandidate(
-  task: PlanningTask,
-  labels: PlanState["managedLabels"],
-): boolean {
-  if (task.explicitStage !== undefined)
-    return (
-      task.stage === "weekly" &&
-      task.explicitStage === "none" &&
-      Boolean(task.due || task.deadline)
-    );
-  const weeklyLabel = labels.find((label) => label.role === "focus")?.label;
+/** A Week candidate only by the 7-day date rule (Candidate If): it has no stage of its own. */
+export function isDateCandidate(task: PlanningTask): boolean {
   return (
     task.stage === "weekly" &&
-    Boolean(task.due || task.deadline) &&
-    !task.labels.some((label) => label === weeklyLabel)
+    (task.explicitStage ?? "none") === "none" &&
+    Boolean(task.due || task.deadline)
   );
 }
 
-function outcomeCandidates(
-  chain: PlanningTask[],
-  labels: PlanState["managedLabels"],
-): PlanningTask[] {
+function outcomeCandidates(chain: PlanningTask[]): PlanningTask[] {
   return chain.filter(
     (task, index) =>
       task.stage !== "none" &&
-      (!isDateCandidate(task, labels) ||
+      (!isDateCandidate(task) ||
         !chain.slice(index + 1).some((ancestor) => ancestor.stage !== "none")),
   );
 }
 
-export function planningOutcomes(
-  tasks: PlanningTask[],
-  labels: PlanState["managedLabels"] = [],
-): PlanningTask[] {
+export function planningOutcomes(tasks: PlanningTask[]): PlanningTask[] {
   const outcomes = tasks.filter((task) => {
     if (task.stage === "none") return false;
     const chain = [task, ...taskAncestors(task, tasks).reverse()];
-    const candidates = outcomeCandidates(chain, labels);
+    const candidates = outcomeCandidates(chain);
     return (
       candidates[0]?.id === task.id &&
       !candidates.slice(1).some((ancestor) => ancestor.stage === task.stage)
@@ -133,11 +117,11 @@ export function planningOutcomes(
  * Week's overview, the toolbar's counts and the weekly review all use this one list.
  */
 export function committedOutcomes(
-  plan: Pick<PlanState, "tasks" | "managedLabels" | "laneOrders">,
+  plan: Pick<PlanState, "tasks" | "laneOrders">,
 ): PlanningTask[] {
   return inLaneOrder(
     "committed",
-    planningOutcomes(plan.tasks, plan.managedLabels).filter(
+    planningOutcomes(plan.tasks).filter(
       (task) => task.stage === "committed" && !isParked(task),
     ),
     plan.laneOrders.committed,
@@ -147,7 +131,6 @@ export function committedOutcomes(
 export function outcomeSteps(
   outcome: PlanningTask,
   tasks: PlanningTask[],
-  labels: PlanState["managedLabels"] = [],
 ): PlanningTask[] {
   const children = childIndex(tasks);
   const leaves: PlanningTask[] = [];
@@ -159,7 +142,7 @@ export function outcomeSteps(
       task.id !== outcome.id &&
       task.stage !== "none" &&
       task.stage !== outcome.stage &&
-      !isDateCandidate(task, labels)
+      !isDateCandidate(task)
     )
       return;
     const next = children.get(task.id) ?? [];
@@ -173,10 +156,9 @@ export function outcomeSteps(
 export function outcomeForTask(
   task: PlanningTask,
   tasks: PlanningTask[],
-  labels: PlanState["managedLabels"] = [],
 ): PlanningTask {
   const parents = taskAncestors(task, tasks).reverse();
-  const candidates = outcomeCandidates([task, ...parents], labels);
+  const candidates = outcomeCandidates([task, ...parents]);
   return (
     candidates.find(
       (item, index) =>
@@ -199,38 +181,14 @@ export function areaColor(task: PlanningTask, tasks: PlanningTask[]): string {
   return `var(--plus-area-${area === "unassigned" ? "none" : area})`;
 }
 
-/** The label role of each planning stage, as Todofy maps them (core/plus.py STAGES). */
-export const STAGE_ROLES = {
-  quarterly: "quarter",
-  monthly: "candiate",
-  weekly: "focus",
-  committed: "committed",
-} as const;
-
 export function reviewLanes(
   language: Language,
-): { stage: Exclude<Stage, "none">; title: string; role: string }[] {
+): { stage: Exclude<Stage, "none">; title: string }[] {
   return [
-    {
-      stage: "quarterly",
-      title: language === "zh" ? "本季度" : "Quarter",
-      role: STAGE_ROLES.quarterly,
-    },
-    {
-      stage: "monthly",
-      title: language === "zh" ? "本月" : "Month",
-      role: STAGE_ROLES.monthly,
-    },
-    {
-      stage: "weekly",
-      title: language === "zh" ? "本周" : "Week",
-      role: STAGE_ROLES.weekly,
-    },
-    {
-      stage: "committed",
-      title: language === "zh" ? "本周承诺" : "Committed",
-      role: STAGE_ROLES.committed,
-    },
+    { stage: "quarterly", title: language === "zh" ? "本季度" : "Quarter" },
+    { stage: "monthly", title: language === "zh" ? "本月" : "Month" },
+    { stage: "weekly", title: language === "zh" ? "本周" : "Week" },
+    { stage: "committed", title: language === "zh" ? "本周承诺" : "Committed" },
   ];
 }
 

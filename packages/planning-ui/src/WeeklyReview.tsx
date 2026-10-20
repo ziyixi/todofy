@@ -29,6 +29,7 @@ import type {
   PlanningTask,
   PlusActions,
   RunOperation,
+  WeeklyReviewFacts,
 } from "./model";
 
 /** Someday items shown at once; keeping or moving one brings the next. */
@@ -109,8 +110,22 @@ export function WeeklyReview({
   const chosen = new Set(plan.nextWeekTaskIds);
   const commitments = sunday ? weekChoices(plan) : [];
   const toKeep = commitments.filter((task) => !chosen.has(task.id));
-  const reviewTask = plan.reviewTaskId
-    ? taskIndex(plan.tasks).get(plan.reviewTaskId)
+  // Todofy's two facts: the review task it created and the mail still pending, read when it opens.
+  const [facts, setFacts] = useState<WeeklyReviewFacts>();
+  useEffect(() => {
+    let current = true;
+    actions.readWeeklyReview?.(plan.week).then(
+      (read) => {
+        if (current) setFacts(read);
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [actions, plan.week]);
+  const reviewTask = facts?.reviewTaskId
+    ? taskIndex(plan.tasks).get(facts.reviewTaskId)
     : undefined;
 
   useEffect(() => {
@@ -219,7 +234,7 @@ export function WeeklyReview({
           zh ? "邮件待理清" : "Mail to clarify",
           <>
             <span className="weekly-review-count">
-              {plan.mailboxPendingCount ?? "—"}
+              {facts?.mailboxPendingCount ?? "—"}
             </span>
             <button className="weekly-review-jump" onClick={onOpenMail}>
               {zh ? "打开" : "Open"}
@@ -412,8 +427,7 @@ export function WeeklyReview({
                             aria-label={`${keep}: ${title}`}
                             onClick={async () => {
                               const index = toKeep.indexOf(task);
-                              // Sends the commitment again; for a stage the task already shows,
-                              // Todofy changes no label.
+                              // Sends the commitment again, which on Sunday keeps it for next week.
                               if (
                                 await run(() =>
                                   actions.updateTask(task, {
@@ -488,7 +502,7 @@ export function WeeklyReview({
           </button>
         ) : (
           <span className="weekly-review-note">
-            {plan.reviewTaskId
+            {facts?.reviewTaskId
               ? zh
                 ? "回顾任务已完成"
                 : "Review task completed"

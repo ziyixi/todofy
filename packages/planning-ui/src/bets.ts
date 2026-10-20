@@ -2,12 +2,12 @@ import type { BetArea, PlusActions, RunOperation, WeeklyBet } from "./model";
 
 /** The Bets' areas, in the order they are shown. */
 export const BET_AREAS: readonly BetArea[] = ["work", "personal"];
-/** In UTF-16 code units, as the input's maxlength counts them and Todofy checks. */
+/** In UTF-16 code units, as the input's maxlength counts them and Tasks checks. */
 export const BET_MAX_LENGTH = 160;
 /** The character count is shown once this many or fewer remain. */
 export const BET_COUNT_FROM = 20;
 
-/** Why Todofy did not save a Bet: it changed elsewhere since it was shown, or its week has ended. */
+/** Why Tasks did not save a Bet: it changed elsewhere since it was shown, or its week has ended. */
 export class BetNotSaved extends Error {
   constructor(readonly reason: "changed" | "ended") {
     super(
@@ -21,7 +21,7 @@ export class BetNotSaved extends Error {
 export type BetOutcome = "saved" | BetNotSaved["reason"] | "failed";
 
 /**
- * The text as Todofy stores it (core/plan.py bet_text): one line, each run of whitespace or
+ * The text as Tasks stores it (planning.ts betText): one line, each run of whitespace or
  * control characters one space, trimmed. Empty means no Bet.
  */
 export function betText(value: string): string {

@@ -167,7 +167,9 @@ it("keeps unclarified mail as the first line only, never as cards on the board",
       screen.queryByRole("button", { name: new RegExp(`^${title}`, "u") }),
     ).toBeNull();
   const review = openReview();
-  expect(line(review, "Mail to clarify").textContent).toContain("2");
+  await waitFor(() =>
+    expect(line(review, "Mail to clarify").textContent).toContain("2"),
+  );
 });
 
 it("lists deadlines without a start-ahead choice in one line, with the editor's lead control", async () => {
@@ -289,7 +291,9 @@ it("counts the five review lines and keeps ticks through Plan's view, for this a
     />,
   );
   let review = openReview();
-  expect(line(review, "Mail to clarify").textContent).toContain("2");
+  await waitFor(() =>
+    expect(line(review, "Mail to clarify").textContent).toContain("2"),
+  );
   // Open shows the host's Mail page, which lists this line's mail.
   fireEvent.click(
     within(line(review, "Mail to clarify")).getByRole("button", {
@@ -661,7 +665,7 @@ it("completes the review task only when Finish review is clicked, outside Focus"
     await screen.findByRole("region", { name: "Weekly review" }),
   );
   expect(complete).not.toHaveBeenCalled();
-  fireEvent.click(review.getByRole("button", { name: "Finish review" }));
+  fireEvent.click(await review.findByRole("button", { name: "Finish review" }));
   await waitFor(() => expect(complete).toHaveBeenCalledOnce());
   // No day: Tasks marks it done in its own today's queue, if it is queued there.
   const [task, requestId, focusDay] = complete.mock.calls[0]!;
@@ -682,29 +686,27 @@ it("completes the review task only when Finish review is clicked, outside Focus"
   );
 });
 
-it("maps a task's last change and the review IDs from the API", async () => {
+it("maps a task's last change and next week's choices from Tasks", async () => {
   const api = fakeActions(async (input) => {
     const path = new URL(String(input)).pathname;
-    if (path === "/api/plus/v1/plan:read")
+    if (path === "/api/tasks/v1/plan")
       return Response.json({
-        plan: {
-          week_start: "2026-10-12",
-          today: "2026-10-13",
-          timezone: "UTC",
-          enabled: true,
-          review_task_id: "review",
-          next_week_task_ids: ["kept"],
-        },
+        name: "plan",
+        week_start: "2026-10-12",
+        today: "2026-10-13",
+        time_zone: "UTC",
+        next_week_task_ids: ["kept"],
       });
-    if (path === "/api/plus/v1/tasks")
+    if (path === "/api/tasks/v1/tasks")
       return Response.json({
-        planning_tasks: [
+        tasks: [
           {
             id: "a",
+            name: "tasks/a",
             title: "Synthetic a",
             update_time: "2026-10-01T16:00:00Z",
           },
-          { id: "b", title: "Synthetic b" },
+          { id: "b", name: "tasks/b", title: "Synthetic b" },
         ],
       });
     if (path === "/api/tasks/v1/focusTimer")
@@ -717,10 +719,7 @@ it("maps a task's last change and the review IDs from the API", async () => {
     });
   });
   const { plan } = await api.load();
-  expect([plan.reviewTaskId, plan.nextWeekTaskIds]).toEqual([
-    "review",
-    ["kept"],
-  ]);
+  expect(plan.nextWeekTaskIds).toEqual(["kept"]);
   expect(plan.tasks.map((task: PlanningTask) => task.updatedAt)).toEqual([
     "2026-10-01T16:00:00.000Z",
     undefined,

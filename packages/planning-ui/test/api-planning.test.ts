@@ -167,137 +167,280 @@ it("retries a move whose answer was lost with the same request ID", async () => 
   expect(ids[2]).not.toBe(ids[0]);
 });
 
-it("answers the new steps' IDs, which Tasks can queue at once", async () => {
+it("creates each new step in Tasks, in order, under IDs fixed for its add, and answers their IDs", async () => {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
+  let lose = true;
   const api = fakeActions(async (input, init) => {
-    const path = new URL(String(input)).pathname;
+    const url = new URL(String(input));
     const body = init?.body
       ? (JSON.parse(String(init.body)) as Record<string, unknown>)
       : {};
-    requests.push({ path, body });
-    if (path === "/api/plus/v1/tasks:appendTaskSteps")
-      return Response.json({ task_ids: ["step-1"] });
-    if (path === "/api/tasks/v1/focusDays:moveStep")
+    requests.push({ path: url.pathname + url.search, body });
+    if (url.pathname === "/api/tasks/v1/tasks") {
+      // The second step's answer is lost once.
+      if (body.title === "Synthetic step 2" && lose) {
+        lose = false;
+        throw new TypeError("Synthetic response loss");
+      }
+      return Response.json({ id: url.searchParams.get("task_id"), name: "x" });
+    }
+    if (url.pathname === "/api/tasks/v1/focusDays:moveStep")
       return Response.json({
         days: [{ day: body.destination_day, task_ids: [body.task_id] }],
       });
-    throw new Error(`Unexpected request: ${path}`);
+    throw new Error(`Unexpected request: ${url.pathname}`);
   });
   const outcome = { id: "outcome" } as Parameters<typeof api.createSteps>[0];
-  expect(
-    await api.createSteps(
-      outcome,
-      [{ title: "Synthetic step 1", estimatedMinutes: 30 }],
-      "11111111-1111-4111-8111-111111111111",
-    ),
-  ).toEqual(["step-1"]);
-  expect(requests.at(-1)).toEqual({
-    path: "/api/plus/v1/tasks:appendTaskSteps",
-    body: {
+  const steps = [
+    { title: "Synthetic step 1", estimatedMinutes: 30 },
+    { title: "Synthetic step 2" },
+  ];
+  const add = "11111111-1111-4111-8111-111111111111";
+  await expect(api.createSteps(outcome, steps, add)).rejects.toThrow();
+  const ids = await api.createSteps(outcome, steps, add);
+  expect(requests.map((request) => request.body)).toEqual([
+    {
+      title: "Synthetic step 1",
       parent_id: "outcome",
-      request_id: "11111111-1111-4111-8111-111111111111",
-      steps: [{ title: "Synthetic step 1", estimated_minutes: 30 }],
+      duration_minutes: 30,
+      kind: "step",
     },
-  });
-  expect(await api.addToDay("step-1", "2026-10-13")).toEqual([
-    { date: "2026-10-13", taskIds: ["step-1"], completedTaskIds: [] },
+    { title: "Synthetic step 2", parent_id: "outcome", kind: "step" },
+    {
+      title: "Synthetic step 1",
+      parent_id: "outcome",
+      duration_minutes: 30,
+      kind: "step",
+    },
+    { title: "Synthetic step 2", parent_id: "outcome", kind: "step" },
   ]);
-  expect(requests.map((request) => request.path)).toEqual([
-    "/api/plus/v1/tasks:appendTaskSteps",
-    "/api/tasks/v1/focusDays:moveStep",
+  // The retry resends the same task and request IDs, so Tasks replays what it already made.
+  const query = (index: number) =>
+    new URLSearchParams(requests[index]!.path.split("?")[1]);
+  for (const index of [0, 1])
+    for (const key of ["task_id", "request_id"])
+      expect(query(index + 2).get(key)).toBe(query(index).get(key));
+  expect(ids).toEqual([query(0).get("task_id"), query(1).get("task_id")]);
+  expect(await api.addToDay(ids[0]!, "2026-10-13")).toEqual([
+    { date: "2026-10-13", taskIds: [ids[0]], completedTaskIds: [] },
   ]);
+  // Another add is new steps.
+  requests.length = 0;
+  await api.createSteps(
+    outcome,
+    steps.slice(0, 1),
+    "33333333-3333-4333-8333-333333333333",
+  );
+  expect(query(0).get("task_id")).not.toBe(ids[0]);
 });
 
-it("maps Todoist's sibling order and the saved lane orders, and sends a reorder with the moved task", async () => {
+it("maps Tasks' sibling order and the saved lane orders, and sends one reorder of the moved task's siblings", async () => {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
+  const listed = [
+    // b is moved before a among the siblings of one parent; c, under another parent, keeps its place.
+    {
+      id: "a",
+      name: "tasks/a",
+      title: "Synthetic a",
+      parent_id: "p",
+      sort_order: 1,
+      etag: "1",
+    },
+    {
+      id: "b",
+      name: "tasks/b",
+      title: "Synthetic b",
+      parent_id: "p",
+      sort_order: 2.5,
+      etag: "1",
+    },
+    {
+      id: "c",
+      name: "tasks/c",
+      title: "Synthetic c",
+      parent_id: "q",
+      sort_order: 0,
+      etag: "1",
+    },
+  ];
   const api = fakeActions(async (input, init) => {
-    const path = new URL(String(input)).pathname;
+    const url = new URL(String(input));
     const body = init?.body
       ? (JSON.parse(String(init.body)) as Record<string, unknown>)
       : {};
-    requests.push({ path, body });
-    if (path === "/api/plus/v1/plan:read")
+    requests.push({ path: url.pathname + url.search, body });
+    if (url.pathname === "/api/tasks/v1/plan")
       return Response.json({
-        plan: {
-          week_start: "2026-10-12",
-          today: "2026-10-13",
-          timezone: "UTC",
-          enabled: true,
-          // A lane a later Todofy might add is not this build's.
-          lane_orders: [
-            { lane: "committed", task_ids: ["b", "a"] },
-            { lane: "someday", task_ids: ["c"] },
-          ],
-        },
+        name: "plan",
+        week_start: "2026-10-12",
+        today: "2026-10-13",
+        time_zone: "UTC",
+        // A lane a later Tasks might add is not this build's.
+        lane_orders: [
+          { lane: "committed", task_ids: ["b", "a"] },
+          { lane: "someday", task_ids: ["c"] },
+        ],
       });
-    if (path === "/api/plus/v1/tasks:reorder")
+    if (url.pathname === "/api/tasks/v1/tasks")
+      return Response.json({ tasks: listed });
+    if (url.pathname === "/api/tasks/v1/tasks:reorder")
       return Response.json({
         tasks: [
           {
-            id: "b",
-            title: "Synthetic b",
-            child_order: -3,
-            order_key: "a0",
+            ...listed[1],
+            sort_order: 1,
+            etag: "2",
             update_time: "2026-10-13T08:00:00Z",
           },
-          { id: "a", title: "Synthetic a", child_order: 4 },
+          { ...listed[0], sort_order: 2.5, etag: "2" },
         ],
-        lane_order: { lane: "committed", task_ids: ["b", "a"] },
+        lane_order: { lane: "committed", task_ids: ["b", "a", "c"] },
       });
-    throw new Error(`Unexpected request: ${path}`);
+    throw new Error(`Unexpected request: ${url.pathname}`);
   });
   expect((await api.readPlan()).laneOrders).toEqual({ committed: ["b", "a"] });
   const result = await api.reorderTasks(
-    ["b", "a"],
+    ["b", "a", "c"],
     "b",
     "committed",
     "22222222-2222-4222-8222-222222222222",
   );
-  expect(requests.at(-1)).toEqual({
-    path: "/api/plus/v1/tasks:reorder",
-    body: {
-      request_id: "22222222-2222-4222-8222-222222222222",
-      task_ids: ["b", "a"],
-      task_id: "b",
-      lane: "committed",
-    },
+  expect(requests.slice(1).map((request) => request.path)).toEqual([
+    "/api/tasks/v1/tasks?view=all&page_size=100&task_ids=b&task_ids=a&task_ids=c",
+    "/api/tasks/v1/tasks:reorder",
+  ]);
+  expect(requests.at(-1)?.body).toEqual({
+    positions: [
+      { name: "tasks/b", etag: "1", sort_order: 1 },
+      { name: "tasks/a", etag: "1", sort_order: 2.5 },
+    ],
+    request_id: "22222222-2222-4222-8222-222222222222",
+    lane_order: { lane: "committed", task_ids: ["b", "a", "c"] },
   });
   expect(
-    result.reordered.map(({ id, childOrder, orderKey, updatedAt }) => ({
+    result.reordered.map(({ id, sortOrder, childOrder, etag, updatedAt }) => ({
       id,
+      sortOrder,
       childOrder,
-      orderKey,
+      etag,
       updatedAt,
     })),
   ).toEqual([
     {
       id: "b",
-      childOrder: -3,
-      orderKey: "a0",
+      sortOrder: 1,
+      childOrder: 1,
+      etag: "2",
       updatedAt: "2026-10-13T08:00:00.000Z",
     },
-    { id: "a", childOrder: 4, orderKey: undefined, updatedAt: undefined },
+    {
+      id: "a",
+      sortOrder: 2.5,
+      childOrder: undefined,
+      etag: "2",
+      updatedAt: undefined,
+    },
   ]);
-  expect(result.lane).toEqual({ lane: "committed", taskIds: ["b", "a"] });
+  expect(result.lane).toEqual({ lane: "committed", taskIds: ["b", "a", "c"] });
+  // Waiting and Parked change no task: their order alone, with no read.
+  requests.length = 0;
+  await api.reorderTasks(
+    ["a", "b"],
+    "a",
+    "waiting",
+    "44444444-4444-4444-8444-444444444444",
+  );
+  expect(requests.map((request) => [request.path, request.body])).toEqual([
+    [
+      "/api/tasks/v1/tasks:reorder",
+      {
+        positions: [],
+        request_id: "44444444-4444-4444-8444-444444444444",
+        lane_order: { lane: "waiting", task_ids: ["a", "b"] },
+      },
+    ],
+  ]);
 });
 
-it("sends a parked change as SetTaskPlan's parked field", async () => {
-  const bodies: Record<string, unknown>[] = [];
-  const api = fakeActions(async (_input, init) => {
-    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-    return Response.json({ task: { id: "a", title: "Synthetic a" } });
+it("resends a reorder whose answer was lost as first built, and builds a refused one again", async () => {
+  const bodies: unknown[] = [];
+  let answer: () => Response | never = () => {
+    throw new TypeError("Synthetic response loss");
+  };
+  let etag = "1";
+  const api = fakeActions(async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/api/tasks/v1/tasks")
+      return Response.json({
+        tasks: ["a", "b"].map((id, index) => ({
+          id,
+          name: `tasks/${id}`,
+          sort_order: index,
+          etag,
+        })),
+      });
+    bodies.push(JSON.parse(String(init?.body)));
+    return answer();
   });
-  const task = { id: "a", etag: "a-1" } as Parameters<typeof api.updateTask>[0];
+  const request = "55555555-5555-4555-8555-555555555555";
+  await expect(
+    api.reorderTasks(["b", "a"], "b", "", request),
+  ).rejects.toThrow();
+  etag = "2";
+  answer = () =>
+    Response.json(
+      {
+        error: {
+          code: 409,
+          status: "ABORTED",
+          message: "changed",
+          details: [],
+        },
+      },
+      { status: 409 },
+    );
+  await expect(
+    api.reorderTasks(["b", "a"], "b", "", request),
+  ).rejects.toThrow();
+  answer = () => Response.json({});
+  await api.reorderTasks(["b", "a"], "b", "", request);
+  const etags = bodies.map(
+    (body) => (body as { positions: { etag: string }[] }).positions[0]?.etag,
+  );
+  // The lost answer's retry is the same request; once Tasks refused it, the next is built anew.
+  expect(etags).toEqual(["1", "1", "2"]);
+});
+
+it("sends planning switches as Task.planning_flags over the task's own, and only the masked fields", async () => {
+  const requests: { path: string; body: Record<string, unknown> }[] = [];
+  const api = fakeActions(async (input, init) => {
+    const url = new URL(String(input));
+    requests.push({
+      path: url.searchParams.get("update_mask") ?? "",
+      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+    });
+    return Response.json({ id: "a", name: "tasks/a", title: "Synthetic a" });
+  });
+  const task = {
+    id: "a",
+    etag: "a-1",
+    planningFlags: ["active", "waiting"],
+  } as Parameters<typeof api.updateTask>[0];
   await api.updateTask(task, { parked: true });
   await api.updateTask(task, { stage: "monthly", parked: false });
-  expect(bodies).toEqual([
-    { task_id: "a", etag: "a-1", request_id: expect.any(String), parked: true },
+  await api.updateTask(task, { area: "personal" });
+  expect(requests).toEqual([
     {
-      task_id: "a",
-      etag: "a-1",
-      request_id: expect.any(String),
-      stage: "monthly",
-      parked: false,
+      path: "planning_flags",
+      body: { planning_flags: ["active", "waiting", "parked"] },
+    },
+    {
+      path: "stage,planning_flags",
+      body: { stage: "monthly", planning_flags: ["active", "waiting"] },
+    },
+    {
+      path: "area",
+      body: { area: "personal" },
     },
   ]);
 });
