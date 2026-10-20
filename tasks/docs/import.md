@@ -178,25 +178,12 @@ The synthetic D1 roundtrip checks preserved IDs, Unicode and quoting, archived v
 
 ## Keep planning identities during cutover
 
-Todofy's dependencies and weekly marks refer to `plan_tasks.id`. Matching external task IDs alone is insufficient: the existing row must change provider in place so its internal ID stays the same.
-
-Prepare a private metadata JSON file with three arrays:
-
-- `plan_tasks`: `id`, `provider`, `external_id`, `created_at`, `closed_at`, `closed_as`.
-- `plan_edges`: `task_id`, `prerequisite_id`, `kind`, `baseline_count`, `created_at`.
-- `plan_marks`: `task_id`, `kind`, `period`, `created_at`.
-
-These are the exact selected columns from the existing Todofy database. They contain identifiers and timestamps, with no task body, Bets or notes. The tool does not read production itself.
-
-```sh
-node tasks/tools/prepare-planning-cutover.ts \
-  --snapshot "$PRIVATE_DIR/todoist-snapshot.json" \
-  --metadata "$PRIVATE_DIR/planning-identities.json"
-```
-
-After import coverage and the identity check pass, add `--output "$PRIVATE_DIR/planning-cutover.sql"` to prepare one atomic SQL statement. It updates only `provider` from `todoist` to `tasks` on the matched existing rows. Internal IDs, dependency edges, baseline counts, marks, creation times and closed states stay unchanged. Unreferenced closed identities absent from the imported history remain under their original provider.
-
-Duplicate Todoist/native identities, missing open or referenced tasks, changed metadata or changed edges stop the operation. The SQL checks the captured state again when it runs. Repeating the same accepted statement preserves the same identities. The operator must compare returned IDs/counts with the dry-run result before switching consumers. Frozen mail events, summary ledgers and FlowDay history are not rewritten by this tool.
+This check was part of step 4 of the production cutover above: `tools/prepare-planning-cutover.ts` matched
+Todofy's planning identities (`plan_tasks`) with the imported tasks and, for any that matched, prepared one
+statement that changed their provider from `todoist` to `tasks` in place, so dependencies and marks kept their IDs.
+Planning moved into Tasks on 2026-10-20 and Todofy's store was copied there once
+([backup.md](backup.md#one-time-planning-import)), so the tool has nothing left to rewrite. It was deleted and is at
+`777d5f01` (`git show 777d5f01:tasks/tools/planning-cutover.ts`).
 
 ## Convert the old planning labels once
 

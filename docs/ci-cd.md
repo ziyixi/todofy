@@ -281,12 +281,6 @@ Worker upload proves a VPS update, a complete backup or live business success. R
 [production.sh](../tools/deploy-probes/production.sh) and [access.sh](../tools/deploy-probes/access.sh), with each
 application retaining its own config, credentials, wrapper and expected paths.
 
-[Tasks planning import](../.github/workflows/tasks-planning-import.yml) is a one-time manual dispatch on main in the
-`production` environment, under the Tasks release's `tasks-production` lock, with the releases' `CF_API_TOKEN`. It
-copies Todofy's planning store into Tasks' D1 after the release that moved planning into Tasks: read-only exports,
-counts only in the log, and one write, the generated SQL, only when its `apply` input is set
-([runbook](../tasks/docs/backup.md#one-time-planning-import)). It is deleted with Todofy's planning tables.
-
 The old generated-config rollback procedure is retained in [history](history.md#committed-config-rollback).
 Follow the current application runbook and HANDOFF before attempting a rollback.
 
