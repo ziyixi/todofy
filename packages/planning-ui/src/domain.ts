@@ -104,6 +104,18 @@ export function taskAncestors(
   return result;
 }
 
+/**
+ * A step's time choices, in minutes: the Step panel's presets, Add steps' select and the task
+ * panel's "Steps & timing". Any other whole number of minutes, 1 to 1440, is typed in.
+ */
+export const STEP_MINUTES = [15, 30, 60, 90] as const;
+/** The time a new step takes unless another is chosen. */
+export const DEFAULT_STEP_MINUTES = 30;
+/** Whether a typed estimate can be saved: whole minutes, at least one, at most a day. */
+export function validMinutes(minutes: number): boolean {
+  return Number.isInteger(minutes) && minutes >= 1 && minutes <= 1440;
+}
+
 export function formattedMinutes(minutes: number): string {
   return minutes >= 60
     ? `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`

@@ -118,6 +118,8 @@ export interface TaskEditorProps {
   /** Opens a task the "Depends on" section names; its Todoist page (onOpenTask) when absent. */
   onOpenDependency?: (id: string) => void;
   onClose?: () => void;
+  /** The heading's ID, which names the dialog. */
+  titleId?: string;
 }
 
 export function TaskEditor({
@@ -135,6 +137,7 @@ export function TaskEditor({
   onOpenTask,
   onOpenDependency,
   onClose,
+  titleId,
 }: TaskEditorProps) {
   const text = words(language);
   const [lines, setLines] = useState("");
@@ -308,7 +311,7 @@ export function TaskEditor({
   return (
     <section className="plus-task-editor" aria-label={text.details}>
       <header className="plus-editor-header">
-        <h2>
+        <h2 id={titleId}>
           {displayedTitle(task.title)}
           {pending && <PendingMark language={language} />}
         </h2>

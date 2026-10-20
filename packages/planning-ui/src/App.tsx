@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   CalendarDays,
   Check,
@@ -21,6 +28,7 @@ import {
 import { Elapsed } from "./StatusMarks";
 import { PlanView } from "./PlanView";
 import { FocusView } from "./FocusView";
+import { StepEditor } from "./StepEditor";
 import { TaskEditor } from "./TaskEditor";
 import { WeeklyGoals } from "./WeeklyGoals";
 import { localDate } from "./mail";
@@ -128,6 +136,8 @@ export function App({
   // Confirmed completions stay visible but disabled until a re-read shows the result.
   const [completing, setCompleting] = useState<ReadonlySet<string>>(new Set());
   const dialog = useRef<HTMLDialogElement>(null);
+  // The open panel's heading, which names the dialog.
+  const dialogTitle = useId();
   const text = words(language);
   // A confirmed planning write on Sunday also changes next week's choices, which only ReadPlan lists.
   const planActions = useMemo<PlusActions>(
@@ -654,6 +664,7 @@ export function App({
       <dialog
         className="plus-dialog"
         ref={dialog}
+        aria-labelledby={selected && data ? dialogTitle : undefined}
         onClose={() => setSelectedId("")}
         onCancel={() => setSelectedId("")}
         onClick={(event) => {
@@ -663,10 +674,30 @@ export function App({
           }
         }}
       >
-        {selected && data && (
+        {selected && data && selected.kind === "step" && (
+          <StepEditor
+            // Not keyed by its pending estimate: a save keeps the panel and its focus.
+            key={selected.id}
+            task={selected}
+            tasks={data.plan.tasks}
+            language={language}
+            busy={busy || selectedPending}
+            pending={selectedPending}
+            run={run}
+            actions={planActions}
+            onOpenTask={onOpenTask}
+            titleId={dialogTitle}
+            onClose={() => {
+              dialog.current?.close();
+              setSelectedId("");
+            }}
+          />
+        )}
+        {selected && data && selected.kind !== "step" && (
           <TaskEditor
             // Once the drag settles, the fields show what the server kept.
             key={`${selected.id}:${selectedPending}`}
+            titleId={dialogTitle}
             task={selected}
             tasks={data.plan.tasks}
             dependencies={data.plan.dependencies}

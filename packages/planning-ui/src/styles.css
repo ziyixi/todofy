@@ -410,6 +410,20 @@
   padding: 3px 5px !important;
   font-size: 12px !important;
 }
+.plus-custom-minutes[aria-invalid="true"] {
+  border-color: var(--plus-danger);
+}
+/* A Step's panel (StepEditor): the note line, its parents, then the one row of time choices. While
+   a choice saves, the presets only stop answering; the pressed one already shows it. */
+.plus-step-editor .plus-native-note {
+  margin-bottom: 10px;
+}
+.plus-step-editor .plus-task-breadcrumb {
+  margin-bottom: 14px;
+}
+.plus-estimate-presets button[aria-disabled="true"] {
+  cursor: default;
+}
 .plus-editor-actions {
   display: flex;
   justify-content: flex-end;
