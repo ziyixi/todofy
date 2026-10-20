@@ -148,17 +148,11 @@ test("reopening a cached task keeps the dependency heading and empty section sti
     release = resolve;
   });
   let childReads = 0;
-  let releaseChildren!: () => void;
-  const childrenPending = new Promise<void>((resolve) => {
-    releaseChildren = resolve;
-  });
   await page.route("**/api/tasks/v1/tasks?**", async (route) => {
     if (
-      new URL(route.request().url()).searchParams.get("parent_id") ===
-        parent.id &&
-      ++childReads === 2
+      new URL(route.request().url()).searchParams.get("parent_id") === parent.id
     )
-      await childrenPending;
+      childReads++;
     await route.continue();
   });
   await page.route("**/api/plus/v1/plan:read", async (route) => {
@@ -194,14 +188,9 @@ test("reopening a cached task keeps the dependency heading and empty section sti
     .click();
   await open();
   await expect(dependencies.getByRole("status")).toBeVisible();
-  await expect(children.getByRole("status")).toHaveCount(1);
-  const before = {
-    heading: await dependencies.locator("h3").boundingBox(),
-    section: await dependencies.boundingBox(),
-  };
-  releaseChildren();
+  // A task without children reads none, so only the dependency check is pending.
   await expect(children.getByRole("status")).toHaveCount(0);
-  const afterChildren = {
+  const before = {
     heading: await dependencies.locator("h3").boundingBox(),
     section: await dependencies.boundingBox(),
   };
@@ -215,14 +204,12 @@ test("reopening a cached task keeps the dependency heading and empty section sti
     JSON.stringify({
       event: "warm_dependency_geometry",
       before,
-      afterChildren,
       after,
       reads,
       childReads,
     }),
   );
-  expect(reads).toBe(2);
-  expect(afterChildren.heading?.y).toBe(before.heading?.y);
+  expect([reads, childReads]).toEqual([2, 0]);
   expect(after.heading?.y).toBe(before.heading?.y);
   expect(after.section?.height).toBe(before.section?.height);
 });

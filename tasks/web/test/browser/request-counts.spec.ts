@@ -73,3 +73,60 @@ test("completing a card in Plan reads Plan once, and moving between Plan and Foc
   // Plan reads its own write back; the host's refresh after a write is only for the writes made elsewhere.
   expect(planReads(state)).toBe(2);
 });
+
+test("opening a task reads it once, and its children only when it has some", async ({
+  page,
+  request,
+}) => {
+  const suffix = crypto.randomUUID();
+  const single = await createTask(request, {
+    title: `Synthetic childless ${suffix}`,
+  });
+  const parent = await createTask(request, {
+    title: `Synthetic parent ${suffix}`,
+  });
+  await createTask(request, {
+    title: `Synthetic child ${suffix}`,
+    parent_id: parent.id,
+  });
+  await stubPlanning(page, {
+    tasks: [single, parent].map((task) => ({
+      ...outcome(task.id, task.title),
+      ...{ stage: "none", explicit_stage: "none" },
+    })),
+  });
+  const reads: string[] = [];
+  page.on("request", (event) => {
+    const url = new URL(event.url());
+    const parentId = url.searchParams.get("parent_id");
+    if (event.method() !== "GET") return;
+    if (url.pathname.startsWith("/api/tasks/v1/tasks/"))
+      reads.push(`get ${url.pathname.slice("/api/tasks/v1/tasks/".length)}`);
+    else if (url.pathname === "/api/tasks/v1/tasks" && parentId)
+      reads.push(`children ${parentId}`);
+  });
+  await page.goto("/#/inbox");
+  const dialog = page.getByRole("dialog", {
+    name: "Task details",
+    exact: true,
+  });
+  await page.getByText(single.title, { exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await settled(page);
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
+  await page.getByText(parent.title, { exact: true }).click();
+  await expect(
+    dialog.getByRole("button", {
+      name: `Synthetic child ${suffix}`,
+      exact: true,
+    }),
+  ).toBeVisible();
+  await settled(page);
+  expect(reads).toEqual([
+    `get ${single.id}`,
+    `get ${parent.id}`,
+    `children ${parent.id}`,
+  ]);
+});

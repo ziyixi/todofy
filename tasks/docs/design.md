@@ -27,6 +27,7 @@ Task and Subtask share `kind=task`; their hierarchy describes outcomes. An execu
 resource with `kind=step` and a Task/Subtask parent. A Step cannot contain children. Only Steps and Tasks
 explicitly marked Standalone action enter the day calendar. Adding an ordinary Subtask does not make it a Step.
 The editor separates Subtasks and Steps, with completion, reopening, deletion and Step estimates in each list.
+It reads a task's children only when its GetTask reply counts some (`child_count`).
 Quick implies Standalone: new writes enforce it, and existing Quick state is projected as standalone without
 a database backfill. Clearing Quick retains Standalone until it is explicitly cleared.
 

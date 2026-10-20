@@ -30,14 +30,17 @@ export function TaskChildren({
 }) {
   const today = todayDate(new Date(), timeZone || undefined);
   const [children, setChildren] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
+  // GetTask counts the children, so a task without any reads nothing here.
+  const [loading, setLoading] = useState(task.childCount > 0);
   const [page, setPage] = useState("");
   const [adding, setAdding] = useState<"task" | "step">("task");
   const [title, setTitle] = useState("");
   const [minutes, setMinutes] = useState(30);
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [deleting, setDeleting] = useState("");
+  // Once per task: a child added here joins the list, and a later count (after a save) reads nothing more.
   useEffect(() => {
+    if (!task.childCount) return;
     let active = true;
     setLoading(true);
     void api
