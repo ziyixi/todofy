@@ -58,13 +58,29 @@ export interface PlanningView {
   /** A deadline without lead days, on a task that is neither active nor parked. */
   missingLead: boolean;
 }
+/** A day's Monday and the day seven days on, which every row's planning fields on that day count from. */
+interface PlanningDay {
+  today: string;
+  week: string;
+  horizon: string;
+}
+let lastDay: PlanningDay | undefined;
+/**
+ * The planning day of `today`. An answer maps up to hundreds of rows on one day, and deriving these dates parses and
+ * validates them, so the last day's are kept (they depend on `today` only).
+ */
+function planningDay(today: string): PlanningDay {
+  if (lastDay?.today !== today) lastDay = { today, week: mondayOf(today), horizon: addDays(today, 7) };
+  return lastDay;
+}
 export function planningView(row: PlanningRow, today: string): PlanningView {
+  const { week, horizon } = planningDay(today);
   const flags = flagsOf(row);
   const has = (flag: string) => flags.includes(flag);
-  let stage = rolledStage(row, mondayOf(today));
+  let stage = rolledStage(row, week);
   if ((stage === 'weekly' || stage === 'monthly') && has('quick')) stage = 'none';
   const date = row.due_date || row.deadline;
-  const dated = Boolean(date) && !['task', 'quick', 'onhold', 'routine'].some(has) && date < addDays(today, 7);
+  const dated = Boolean(date) && !['task', 'quick', 'onhold', 'routine'].some(has) && date < horizon;
   const resting = has('active') || has('parked');
   const days = row.deadline ? daysBetween(today, row.deadline) : 0;
   return {
