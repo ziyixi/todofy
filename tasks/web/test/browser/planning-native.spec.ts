@@ -149,10 +149,10 @@ test("a native lane reorder keeps its siblings pending and the next stage drag s
   await expect(secondHandle).toHaveAttribute("aria-disabled", "true");
   releaseReorder!();
   await expect(week.locator(".review-draggable.is-pending")).toHaveCount(0);
-  await expect(week.locator(".planning-outcome-title")).toHaveText([
-    "Synthetic second outcome",
-    "Synthetic first outcome",
-  ]);
+  // The card's title text, not the full-title bubble that repeats it for sight.
+  await expect(
+    week.locator(".planning-outcome-title .planning-full-title-text"),
+  ).toHaveText(["Synthetic second outcome", "Synthetic first outcome"]);
   expect(taskReads).toBe(1);
   await drag(firstHandle, month);
   await expect(month.locator('[data-outcome-id="native-first"]')).toBeVisible();
@@ -273,9 +273,10 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
     { steps: 18 },
   );
   await page.mouse.up();
-  await expect(
-    month.getByText("Synthetic native weekly outcome", { exact: true }),
-  ).toBeVisible();
+  const moved = month.getByRole("button", {
+    name: /^Synthetic native weekly outcome,/u,
+  });
+  await expect(moved).toBeVisible();
   // Dragging updates the card before the queued mutation reaches the transport.
   await expect
     .poll(() => writes()[0])
@@ -284,9 +285,7 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
       stage: "monthly",
     });
   expect(tasks[0]!.labels).toEqual(["ordinary"]);
-  await month
-    .getByText("Synthetic native weekly outcome", { exact: true })
-    .click();
+  await moved.click();
   const details = page.getByRole("dialog");
   await details.getByText("Task options", { exact: true }).click();
   await details

@@ -154,7 +154,7 @@ test("Plan Review and Week fit the window after navigation resizing", async ({
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/#/plan");
   await expect(
-    page.getByText("Synthetic committed outcome", { exact: true }),
+    page.getByText("Synthetic committed outcome", { exact: true }).first(),
   ).toBeVisible();
   await drag(page, 90);
   for (const size of [360, 768, 1024, 1440]) {
