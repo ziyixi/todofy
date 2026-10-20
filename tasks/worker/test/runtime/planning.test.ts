@@ -292,6 +292,16 @@ test('dependencies are added and removed as a set, with titles and done, and tou
   // Added again, the removed one comes back as the newest.
   const again = await waitsFor(one, budget.id, venue.id);
   expect(again.dependencies?.map((value) => value.prerequisite_id)).toEqual([budget.id, venue.id]);
+  // The generated client leaves an empty set out of the body; the mask still names it.
+  const none = await harness.mutate(
+    'PATCH',
+    `/api/tasks/v1/${again.name}?etag=${again.etag}&request_id=${randomUUID()}&update_mask=dependencies`,
+    {},
+  );
+  expect(none.status, await none.clone().text()).toBe(200);
+  expect((await none.json<Task>()).dependencies ?? []).toEqual([]);
+  const restored = await waitsFor(await read(waiter), budget.id, venue.id);
+  expect(restored.dependencies).toHaveLength(2);
   // A task cannot wait for itself, for a task that waits for it, or for one that is not open.
   expect(await reason(await patch(venue, { dependencies: [{ prerequisite_id: venue.id }] }))).toBe(
     'PRECONDITION_FAILED',
@@ -299,7 +309,7 @@ test('dependencies are added and removed as a set, with titles and done, and tou
   expect(await reason(await patch(venue, { dependencies: [{ prerequisite_id: waiter.id }] }))).toBe(
     'PRECONDITION_FAILED',
   );
-  expect(await reason(await patch(again, { dependencies: [{ prerequisite_id: 'synthetic-missing' }] }))).toBe(
+  expect(await reason(await patch(restored, { dependencies: [{ prerequisite_id: 'synthetic-missing' }] }))).toBe(
     'PRECONDITION_FAILED',
   );
   expect((await read(venue)).etag).toBe('1');
