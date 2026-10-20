@@ -237,7 +237,7 @@ it("ticks a running session's logged time on its Focus card without re-rendering
     fireEvent.click(start);
   });
   const logged = screen.getByRole("button", {
-    name: "00:00 logged: Write the introduction",
+    name: "00:00 logged (Write the introduction)",
   });
   const before = focusBlockRenders.count;
   // The cards are counted: Start re-rendered them once.

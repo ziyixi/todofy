@@ -118,6 +118,8 @@ export function FocusLogged(props: Props) {
   const text = words(language);
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
+  const timeId = useId();
+  const titleId = useId();
   const saved = records.reduce((sum, entry) => sum + entry.seconds, 0);
   function close(refocus: boolean) {
     setOpen(false);
@@ -131,25 +133,28 @@ export function FocusLogged(props: Props) {
         className="plus-focus-logged"
         aria-haspopup="dialog"
         aria-expanded={open}
+        // Its name is the time, then whose it is: "35m logged (Draft API)".
+        aria-labelledby={`${timeId} ${titleId}`}
         // A press while the records are open keeps focus in them, so the click closes them.
         onMouseDown={(event) => {
           if (open) event.preventDefault();
         }}
         onClick={() => (open ? close(true) : setOpen(true))}
       >
-        {saved || session ? (
-          <LoggedTime
-            seconds={saved}
-            session={session}
-            clock={Boolean(session)}
-            label={text.logged}
-          />
-        ) : (
-          text.logTime
-        )}
-        <span className="plus-sr-only">
-          {language === "zh" ? "：" : ": "}
-          {title}
+        <span id={timeId}>
+          {saved || session ? (
+            <LoggedTime
+              seconds={saved}
+              session={session}
+              clock={Boolean(session)}
+              label={text.logged}
+            />
+          ) : (
+            text.logTime
+          )}
+        </span>
+        <span id={titleId} hidden>
+          {language === "zh" ? `（${title}）` : `(${title})`}
         </span>
       </button>
       {open && <Records {...props} trigger={button} onClose={close} />}

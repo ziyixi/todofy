@@ -87,7 +87,7 @@ function open(name: string) {
 
 it("changes, deletes and adds a step's records through the write queue, each row waiting on its own key", async () => {
   const { focus, entries, changes, writes } = await setup();
-  const records = open("40m logged: Write the introduction");
+  const records = open("40m logged (Write the introduction)");
   expect(records.getAttribute("aria-labelledby")).toBeTruthy();
   expect(within(records).getByRole("heading").textContent).toBe(
     "Time records · Write the introduction",
@@ -151,9 +151,9 @@ it("changes, deletes and adds a step's records through the write queue, each row
 it("refuses zero minutes; Escape puts the saved value back, a second Escape closes, and so does Tab out", async () => {
   const { writes } = await setup();
   const trigger = screen.getByRole("button", {
-    name: "40m logged: Write the introduction",
+    name: "40m logged (Write the introduction)",
   });
-  let records = open("40m logged: Write the introduction");
+  let records = open("40m logged (Write the introduction)");
   const session = within(records).getByRole("spinbutton", {
     name: "Minutes, 16:40",
   }) as HTMLInputElement;
@@ -168,7 +168,7 @@ it("refuses zero minutes; Escape puts the saved value back, a second Escape clos
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(document.activeElement).toBe(trigger);
   // Focus moving within it keeps it open.
-  records = open("40m logged: Write the introduction");
+  records = open("40m logged (Write the introduction)");
   const added = within(records).getByRole("spinbutton", {
     name: "Minutes, added",
   });
@@ -188,7 +188,7 @@ it("adds time to a step Plan does not list in its parent's area", async () => {
     parentTitle: "Make the home desk comfortable",
     completed: false,
   });
-  const records = open("Log time: Synthetic unlisted step");
+  const records = open("Log time (Synthetic unlisted step)");
   expect(within(records).getByText("No time recorded.")).toBeTruthy();
   fireEvent.click(within(records).getByRole("button", { name: "Add time" }));
   await act(async () => {

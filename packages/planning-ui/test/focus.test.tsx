@@ -203,7 +203,7 @@ it("shows one logged time per card, ticking while its session runs, and distinct
   // A card with nothing logged offers to log time.
   expect(
     screen.getByRole("button", {
-      name: "Log time: Outline three questions for the check-in",
+      name: "Log time (Outline three questions for the check-in)",
     }),
   ).toBeTruthy();
 });
@@ -382,7 +382,7 @@ it("shows another day read-only, where a past day's records still change and a f
   expect(screen.getByRole("button", { name: "Adjust plan" })).toBeTruthy();
   expect(
     screen.getByRole("button", {
-      name: "20m logged: Check the layout on a phone",
+      name: "20m logged (Check the layout on a phone)",
     }),
   ).toBeTruthy();
   rerender(<FocusView {...props} date="2026-10-14" />);
