@@ -63,8 +63,11 @@ Steps (`step`), which require a Task/Subtask parent and cannot contain children.
 or `shallow`. Both fields use the existing task CRUD, update masks, change feed and duplication contract.
 Recurrence remains the existing date-rule text on the wire; structured controls produce that value and the
 Tasks Worker advances it. Catalog counts describe the default task views. Todofy's `PlanningTask` projects
-kind and effort for Plan/Focus; planning state and dependency edges remain in Todofy's API, while FlowDay
-continues to own queues, timers and time records.
+kind and effort for Plan/Focus; planning state and dependency edges remain in Todofy's API. `focus.proto`
+(2026-10-19) is Focus, which Tasks owns: each day's queue of steps (`ListFocusDays` reads 1 to 7 days in one bounded
+answer, `MoveFocusStep` adds, removes, reorders or moves one step), the one timer (`GetFocusTimer`,
+`CommandFocusTimer`) and its time records (`CreateFocusEntry`, `UpdateFocusEntry`, `DeleteFocusEntry`). FlowDay's
+own queues and timer keep running until its decommission; nothing is migrated from them.
 
 `ops/v1/ops.proto` is the IDL of `contracts/ops-v1` (2026-10-01) and its single source of validation: the
 value rules are options in the IDL ([Value rules](#value-rules)), the contract's JSON Schema is generated from

@@ -14,8 +14,8 @@ import {
 } from '@ziyixi/proto/tasks/ui/v1/task_pb';
 import { invalid } from './errors.ts';
 
-export type Table = 'tasks' | 'projects' | 'sections' | 'labels' | 'filters';
-export type CatalogTable = Exclude<Table, 'tasks'>;
+export type Table = 'tasks' | 'projects' | 'sections' | 'labels' | 'filters' | 'focus_entries' | 'focus_timer';
+export type CatalogTable = 'projects' | 'sections' | 'labels' | 'filters';
 export interface BaseRow {
   id: string;
   title: string;

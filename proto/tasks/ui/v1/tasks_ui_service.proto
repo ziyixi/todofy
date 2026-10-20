@@ -3,9 +3,10 @@
 // (-- api-linter: core::0155::request-id-format=disabled
 //     aip.dev/not-precedent: existing planning commands use UUIDv5; runtime accepts UUIDv4 and UUIDv5,
 //     preserving frozen retry identities instead of replacing them with random IDs. --)
-// Native Tasks owner API. Access is verified before reading a body; mutations also require same-origin
+// Native Tasks owner API. Tasks owns task content and Focus: each day's queue of steps, the one timer and the time
+// records (focus.proto). Access is verified before reading a body; mutations also require same-origin
 // Origin and the signed tasks_csrf token. The TasksApi service binding uses the same protobuf messages
-// without exposing a machine-auth route: a `read` binding (FlowDay) may only read, and a `read-write`
+// without exposing a machine-auth route: a `read` binding may only read, and a `read-write`
 // binding (Todofy) may also write and call the machine-only exportBackup method that Todofy's weekly backup
 // pages every table through. Bodies are bounded to 64 KiB.
 // Every mutation requires a UUIDv4 or UUIDv5 request_id. Exact replays return the original response; reusing it for
@@ -21,6 +22,7 @@ import "google/api/resource.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
+import "tasks/ui/v1/focus.proto";
 import "tasks/ui/v1/task.proto";
 
 option java_multiple_files = true;
@@ -237,6 +239,63 @@ service TasksUiService {
       post: "/api/tasks/v1/dates:previewDate"
       body: "*"
     };
+  }
+  // Every day of a range of 1 to 7 days, even an empty one, with the records counted on them, every task either
+  // names and Tasks' today. A day holds at most 30 queued steps and 40 records, so the answer is bounded.
+  rpc ListFocusDays(ListFocusDaysRequest) returns (ListFocusDaysResponse) {
+    option (google.api.http) = {get: "/api/tasks/v1/focusDays"};
+  }
+  // Adds a step to a day's queue, removes it, reorders it within the day or moves it to another day, in one write.
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: the verb acts on one step of the focusDays collection, so `focusDays:moveStep`
+  //     names both without repeating the collection. --)
+  rpc MoveFocusStep(MoveFocusStepRequest) returns (MoveFocusStepResponse) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/focusDays:moveStep"
+      body: "*"
+    };
+  }
+  // The one Focus timer.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetFocusTimer(GetFocusTimerRequest) returns (FocusTimer) {
+    option (google.api.http) = {get: "/api/tasks/v1/{name=focusTimer}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Starts, pauses, resumes, stops or finishes the timer's session. Stop and Finish save a session of at least a
+  // minute as one record, in whole minutes.
+  rpc CommandFocusTimer(CommandFocusTimerRequest) returns (CommandFocusTimerResponse) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/{name=focusTimer}:command"
+      body: "*"
+    };
+  }
+  // Adds time by hand.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateFocusEntry(CreateFocusEntryRequest) returns (FocusEntry) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/focusEntries"
+      body: "focus_entry"
+    };
+    option (google.api.method_signature) = "focus_entry";
+  }
+  // Changes a record's minutes.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateFocusEntry(UpdateFocusEntryRequest) returns (FocusEntry) {
+    option (google.api.http) = {
+      patch: "/api/tasks/v1/{focus_entry.name=focusEntries/*}"
+      body: "focus_entry"
+    };
+    option (google.api.method_signature) = "focus_entry,update_mask";
+  }
+  // Deletes a record.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteFocusEntry(DeleteFocusEntryRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/tasks/v1/{name=focusEntries/*}"};
+    option (google.api.method_signature) = "name";
   }
 }
 
@@ -675,4 +734,145 @@ message PreviewDateResponse {
   string due_timezone = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Recurrence text, empty for one-time input.
   string recurrence = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// The Focus days to read: one bounded range, not pages.
+// (-- api-linter: core::0132::request-parent-required=disabled
+//     aip.dev/not-precedent: Focus days are the owner's top-level calendar, with no parent resource. --)
+// (-- api-linter: core::0158::request-page-size-field=disabled
+//     aip.dev/not-precedent: at most 7 days of at most 30 steps and 40 records each fit one answer. --)
+// (-- api-linter: core::0158::request-page-token-field=disabled
+//     aip.dev/not-precedent: at most 7 days of at most 30 steps and 40 records each fit one answer. --)
+// (-- api-linter: core::0132::request-unknown-fields=disabled
+//     aip.dev/not-precedent: the range of days is the read; a day has no page order to resume. --)
+message ListFocusDaysRequest {
+  // The first day, YYYY-MM-DD.
+  // (-- api-linter: core::0132::request-required-fields=disabled
+  //     aip.dev/not-precedent: the range of days is the read; without it there is nothing to list. --)
+  string start_day = 1 [(google.api.field_behavior) = REQUIRED];
+  // The last day, YYYY-MM-DD: start_day or up to 6 days after it.
+  // (-- api-linter: core::0132::request-required-fields=disabled
+  //     aip.dev/not-precedent: the range of days is the read; without it there is nothing to list. --)
+  string end_day = 2 [(google.api.field_behavior) = REQUIRED];
+}
+// Every day of the range, the records counted on them and the tasks either names.
+// (-- api-linter: core::0158::response-next-page-token-field=disabled
+//     aip.dev/not-precedent: one bounded range is one answer (see ListFocusDaysRequest). --)
+// (-- api-linter: core::0132::response-unknown-fields=disabled
+//     aip.dev/not-precedent: Focus shows a day's queue with its records, task titles and today, read together. --)
+message ListFocusDaysResponse {
+  // Each day of the range, first to last, including empty ones. Steps of deleted tasks are left out.
+  repeated FocusDay days = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The records counted on those days, by day and start; records of deleted tasks stay.
+  repeated FocusEntry entries = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every task the days or records name, including completed ones.
+  repeated FocusTask tasks = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Tasks' today, YYYY-MM-DD in the account's time zone.
+  string today = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// Where a step goes. No source adds it; no destination removes it; the same day reorders; two days move it.
+message MoveFocusStepRequest {
+  // UUIDv4 or UUIDv5 reused for an exact retry.
+  string request_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // The step's task.
+  string task_id = 2 [(google.api.field_behavior) = REQUIRED];
+  // The day it leaves; empty adds it.
+  string source_day = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The day it joins, which needs an open task; empty removes it. A day holds at most 30 steps.
+  string destination_day = 4 [(google.api.field_behavior) = OPTIONAL];
+  // The step it goes before on the destination day; empty puts it last.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: the queue position is named by the step it precedes, as the owner drops it. --)
+  string before_task_id = 5 [(google.api.field_behavior) = OPTIONAL];
+}
+// The days the move changed, as it left them.
+message MoveFocusStepResponse {
+  // The source and the destination day, once each.
+  repeated FocusDay days = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// Read the timer.
+message GetFocusTimerRequest {
+  // Always focusTimer.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/FocusTimer"
+  ];
+}
+// One timer command, against the timer's current etag.
+message CommandFocusTimerRequest {
+  // What to do.
+  enum Action {
+    // Not used.
+    ACTION_UNSPECIFIED = 0;
+    // Start a session on task_id, counted on Tasks' today: idle to running.
+    ACTION_START = 1;
+    // Running to paused.
+    ACTION_PAUSE = 2;
+    // Paused to running.
+    ACTION_RESUME = 3;
+    // End the session and save its time.
+    ACTION_STOP = 4;
+    // End a pomodoro that reached its target and save its time, at most the target.
+    ACTION_FINISH = 5;
+  }
+  // Always focusTimer.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/FocusTimer"
+  ];
+  // UUIDv4 or UUIDv5 reused for an exact retry.
+  string request_id = 2 [(google.api.field_behavior) = REQUIRED];
+  // The timer's current etag.
+  string etag = 3 [(google.api.field_behavior) = REQUIRED];
+  // What to do.
+  Action action = 4 [(google.api.field_behavior) = REQUIRED];
+  // START: the open task to time. Other actions: when set, it must be the session's task.
+  string task_id = 5 [(google.api.field_behavior) = OPTIONAL];
+  // START only: a pomodoro's length, 60..14400 seconds; unset counts up, at most 4 hours.
+  optional int32 target_seconds = 6 [(google.api.field_behavior) = OPTIONAL];
+  // START only: "", "work" or "personal", kept on the session's record.
+  string area = 7 [(google.api.field_behavior) = OPTIONAL];
+}
+// The timer after a command, and the record it saved.
+message CommandFocusTimerResponse {
+  // The timer now.
+  FocusTimer timer = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The saved record, when the command ended a session of at least a minute.
+  FocusEntry entry = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// Input to CreateFocusEntry: time added by hand.
+// (-- api-linter: core::0133::request-id-field=disabled
+//     aip.dev/not-precedent: Tasks names each record; request_id makes a retry exact, so a client-chosen ID would
+//     have no caller. --)
+message CreateFocusEntryRequest {
+  // The task, a day no later than Tasks' today, the whole minutes in seconds and the area.
+  FocusEntry focus_entry = 1 [(google.api.field_behavior) = REQUIRED];
+  // One UUIDv4 or UUIDv5 for this user action; required.
+  string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+// Input to UpdateFocusEntry. Only seconds changes; the other fields may be named only with their stored values.
+message UpdateFocusEntryRequest {
+  // The record's name and new values.
+  FocusEntry focus_entry = 1 [(google.api.field_behavior) = REQUIRED];
+  // The fields to change, required and explicit (`seconds`): a record has nothing else to change.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action; required.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Current record etag, separate from the fields being updated; required.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this concurrency token stays outside the masked resource body. --)
+  // (-- api-linter: core::0154::no-duplicate-etag=disabled
+  //     aip.dev/not-precedent: the shared HTTP client masks resource bodies; this token must survive an update_mask. --)
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+// Input to DeleteFocusEntry. The record is kept as deleted, so it can no longer be read or changed.
+message DeleteFocusEntryRequest {
+  // focusEntries/{id}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/FocusEntry"
+  ];
+  // Current etag; required.
+  string etag = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this user action; required.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
 }

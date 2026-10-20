@@ -1,0 +1,125 @@
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: days are account-local calendar date text, YYYY-MM-DD, like Task.due_date. --)
+// Focus, which Tasks owns: each day's queue of steps, the one timer and the time records it and the owner write.
+// A day is YYYY-MM-DD in the account's time zone; Tasks' today is the day the timer counts on.
+syntax = "proto3";
+
+package tasks.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "FocusProto";
+option java_package = "science.ziyixi.tasks.ui.v1";
+
+// One account-local day's Focus queue. Tasks completed on another day are on neither list.
+message FocusDay {
+  // The day, YYYY-MM-DD in the account's time zone.
+  string day = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Open steps queued for the day, first to last. (FlowDay's queue also listed completed steps; this one does not.)
+  repeated string task_ids = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Steps completed from this day's queue, first to last.
+  repeated string done_task_ids = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Time spent on a task, counted on one day.
+message FocusEntry {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/FocusEntry"
+    pattern: "focusEntries/{focus_entry}"
+    singular: "focusEntry"
+    plural: "focusEntries"
+  };
+
+  // Where the time came from.
+  enum Source {
+    // Not used.
+    SOURCE_UNSPECIFIED = 0;
+    // A timer session.
+    SOURCE_TIMER = 1;
+    // Time added by hand.
+    SOURCE_MANUAL = 2;
+  }
+
+  // focusEntries/{id}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The task the time was spent on.
+  string task_id = 2 [(google.api.field_behavior) = IMMUTABLE];
+  // The day it counts on; never after today.
+  string day = 3 [(google.api.field_behavior) = IMMUTABLE];
+  // Whole minutes, as seconds: 60..86400.
+  int32 seconds = 4 [(google.api.field_behavior) = REQUIRED];
+  // When the timer session started; unset for added time.
+  google.protobuf.Timestamp start_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Timer or manual.
+  Source source = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // "", "work" or "personal", as it was when the time was logged.
+  string area = 7 [(google.api.field_behavior) = IMMUTABLE];
+  // Current etag.
+  string etag = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// What Focus shows for a task a queue or record names, including ones Plan does not list.
+message FocusTask {
+  // The task's ID.
+  string task_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its title.
+  string title = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its immediate parent's ID, or empty.
+  string parent_id = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its immediate parent's title, or empty.
+  string parent_title = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its estimate in minutes, or 0.
+  int32 duration_minutes = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether the task itself is completed.
+  bool completed = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The one Focus timer.
+message FocusTimer {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/FocusTimer"
+    pattern: "focusTimer"
+    singular: "focusTimer"
+    plural: "focusTimers"
+  };
+
+  // The timer's state.
+  enum State {
+    // Not used.
+    STATE_UNSPECIFIED = 0;
+    // No session.
+    STATE_IDLE = 1;
+    // A session is counting.
+    STATE_RUNNING = 2;
+    // A session is paused.
+    STATE_PAUSED = 3;
+  }
+
+  // Always focusTimer.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Idle, running or paused.
+  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The session's task.
+  string task_id = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The day the session counts on: Tasks' today when it started.
+  string day = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The area sent with Start.
+  string area = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A pomodoro's length; unset counts up (at most 4 hours).
+  optional int32 target_seconds = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Closed time of this session.
+  int32 saved_seconds = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the current running segment began.
+  google.protobuf.Timestamp segment_start_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the session first started.
+  google.protobuf.Timestamp start_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The task of the last pomodoro that reached its target.
+  string finished_task_id = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // That pomodoro's length.
+  int32 finished_seconds = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current etag.
+  string etag = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

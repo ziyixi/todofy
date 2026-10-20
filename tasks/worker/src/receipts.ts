@@ -2,7 +2,7 @@ import type { Message } from '@ziyixi/proto/protobuf';
 import { RpcError, Code } from '@ziyixi/proto/rpc-status';
 import { TasksUiService } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { toWire } from '@ziyixi/proto/wire-json';
-import { conflict, invalid, storage } from './errors.ts';
+import { conflict, invalid, missing, storage } from './errors.ts';
 import type { Table } from './model.ts';
 
 interface Receipt {
@@ -56,7 +56,10 @@ export async function replay(db: D1Database, id: string, hash: RequestHash): Pro
   return receipt.response;
 }
 
-/** D1 batches are transactional. The CHECK guard aborts the entire batch on a stale revision. */
+/**
+ * D1 batches are transactional. The CHECK guard aborts the entire batch on a stale revision. `revision` is the
+ * resource's current one, null for a new resource, or 'live' when the write only needs the resource to exist.
+ */
 export async function commit(
   db: D1Database,
   input: {
@@ -64,7 +67,7 @@ export async function commit(
     hash: RequestHash;
     table: Table;
     id: string;
-    revision: number | null;
+    revision: number | null | 'live';
     response: string;
     now: number;
   },
@@ -73,7 +76,9 @@ export async function commit(
   const condition =
     input.revision === null
       ? `NOT EXISTS(SELECT 1 FROM ${input.table} WHERE id=?)`
-      : `EXISTS(SELECT 1 FROM ${input.table} WHERE id=? AND revision=? AND deleted_at IS NULL)`;
+      : input.revision === 'live'
+        ? `EXISTS(SELECT 1 FROM ${input.table} WHERE id=? AND deleted_at IS NULL)`
+        : `EXISTS(SELECT 1 FROM ${input.table} WHERE id=? AND revision=? AND deleted_at IS NULL)`;
   const guard = db
     .prepare(
       `INSERT INTO requests(id,fingerprint,response,created_at,revision_guard) VALUES(?,?,?,?,CASE WHEN ${condition} THEN 1 ELSE 0 END)`,
@@ -84,7 +89,7 @@ export async function commit(
       input.response,
       input.now,
       input.id,
-      ...(input.revision === null ? [] : [input.revision]),
+      ...(typeof input.revision === 'number' ? [input.revision] : []),
     );
   try {
     await db.batch([guard, ...writes]);
@@ -94,11 +99,15 @@ export async function commit(
     const previous = await replay(db, input.requestId, input.hash);
     if (previous !== null) return previous;
     const current = await storage(() =>
-      db.prepare(`SELECT revision FROM ${input.table} WHERE id=?`).bind(input.id).first<{ revision: number }>(),
+      db
+        .prepare(`SELECT revision,deleted_at FROM ${input.table} WHERE id=?`)
+        .bind(input.id)
+        .first<{ revision: number; deleted_at: number | null }>(),
     );
     if (input.revision === null && current)
       throw new RpcError(Code.ALREADY_EXISTS, 'ALREADY_EXISTS', 'Resource ID already exists');
-    if (input.revision !== null && current?.revision !== input.revision) conflict();
+    if (input.revision === 'live' && (!current || current.deleted_at !== null)) missing();
+    if (typeof input.revision === 'number' && current?.revision !== input.revision) conflict();
     if (
       String(error).includes('task_reference_invalid') ||
       String(error).includes('resource_in_use') ||

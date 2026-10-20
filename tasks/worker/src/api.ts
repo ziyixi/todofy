@@ -12,6 +12,9 @@ import { getTask, listTasks } from './task-read.ts';
 import { createTask, updateTask, deleteTask, completeTask, reopenTask } from './task-write.ts';
 import { duplicateTask } from './task-copy.ts';
 import { reorderTasks } from './task-order.ts';
+import { listFocusDays, moveFocusStep } from './focus.ts';
+import { commandFocusTimer, getFocusTimer } from './focus-timer.ts';
+import { createFocusEntry, deleteFocusEntry, updateFocusEntry } from './focus-entries.ts';
 
 export interface ApiContext {
   env: Env;
@@ -31,6 +34,13 @@ export const handlers: ServiceHandlers<ShapeOf<typeof TasksUiService>, ApiContex
   reopenTask: (input, { env, now }) => reopenTask(env.DB, input, now),
   duplicateTask: (input, { env, now }) => duplicateTask(env.DB, input, now),
   reorderTasks: (input, { env, now }) => reorderTasks(env.DB, input, now),
+  listFocusDays: (input, { env, now }) => listFocusDays(env.DB, input, accountZone(env), now),
+  moveFocusStep: (input, { env, now }) => moveFocusStep(env.DB, input, now),
+  getFocusTimer: (input, { env }) => getFocusTimer(env.DB, input),
+  commandFocusTimer: (input, { env, now }) => commandFocusTimer(env.DB, input, now, accountZone(env)),
+  createFocusEntry: (input, { env, now }) => createFocusEntry(env.DB, input, now, accountZone(env)),
+  updateFocusEntry: (input, { env, now }) => updateFocusEntry(env.DB, input, now),
+  deleteFocusEntry: (input, { env, now }) => deleteFocusEntry(env.DB, input, now),
   listChanges: (input, { env }) => listChanges(env.DB, input),
   listCompletions: (input, { env }) => listCompletions(env.DB, input),
   previewDate(input, { env, now }) {
