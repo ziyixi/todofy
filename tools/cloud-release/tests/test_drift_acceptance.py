@@ -452,8 +452,9 @@ class DriftAcceptance(unittest.TestCase):
                 )
                 self.assert_readonly(fixture)
 
-    def todofy_with_todoist_era_bindings(self):
-        """The live core and gateway as the last release before native-only Tasks left them."""
+    def todofy_with_retired_bindings(self):
+        """The live core and gateway as the release before native-only Tasks left them, with the gateway's FlowDay
+        proxy, which the release that moves planning into Tasks retires."""
         fixture = self.fixture("todofy")
         fixture.bindings("todofy-core").extend(
             [
@@ -468,12 +469,16 @@ class DriftAcceptance(unittest.TestCase):
                 {"name": "TASK_SOURCE", "type": "plain_text", "text": "tasks"},
                 {"name": "FLOWDAY_FOCUS", "type": "service", "service": "flowday",
                  "entrypoint": "FocusEntrypoint", "environment": "production"},
+                {"name": "FLOWDAY_NATIVE_FOCUS", "type": "service", "service": "flowday",
+                 "entrypoint": "NativeFocusEntrypoint", "environment": "production"},
+                {"name": "FLOWDAY_PUBLIC_URL", "type": "plain_text",
+                 "text": "https://flowday.example.invalid"},
             ]
         )
         return fixture
 
-    def test_normal_todofy_release_retires_the_todoist_era_bindings(self):
-        fixture = self.todofy_with_todoist_era_bindings()
+    def test_normal_todofy_release_retires_the_todoist_era_and_flowday_bindings(self):
+        fixture = self.todofy_with_retired_bindings()
         output = io.StringIO()
         with redirect_stdout(output):
             required = preflight(
@@ -486,6 +491,8 @@ class DriftAcceptance(unittest.TestCase):
             sorted((item["script"], item["field"], item["reason"]) for item in result["changes"]),
             [
                 ("todofy", "FLOWDAY_FOCUS", "RETIRED_SERVICE_BINDING"),
+                ("todofy", "FLOWDAY_NATIVE_FOCUS", "RETIRED_SERVICE_BINDING"),
+                ("todofy", "FLOWDAY_PUBLIC_URL", "RETIRED_SERVICE_BINDING"),
                 ("todofy", "TASK_SOURCE", "RETIRED_SERVICE_BINDING"),
                 ("todofy-core", "PLUS_METADATA", "RETIRED_SERVICE_BINDING"),
                 ("todofy-core", "TASK_SOURCE", "RETIRED_SERVICE_BINDING"),

@@ -632,9 +632,9 @@ class Classify(unittest.TestCase):
             "proto/brief/ui/v1/brief_ui_service.proto": {"brief"},
             # mail.received.v1: Mail Hero builds every event, todofy-core reads every body.
             "proto/mailhero/webhook/v1/mail_received.proto": {"mail-hero", "todofy"},
-            # FlowDay's UI API reaches FlowDay and Todofy's gateway; Tasks keeps Focus itself.
-            "proto/flowday/ui/v1/flowday_ui_service.proto": {"flowday", "todofy"},
-            "proto/flowday/ui/v1/task.proto": {"flowday", "todofy"},
+            # FlowDay's UI API reaches only FlowDay; Tasks keeps Focus itself.
+            "proto/flowday/ui/v1/flowday_ui_service.proto": {"flowday"},
+            "proto/flowday/ui/v1/task.proto": {"flowday"},
             # The links app's UI API reaches only the links app.
             "proto/links/ui/v1/links_ui_service.proto": {"links"},
             # The watch app's UI API reaches only the watch app.
@@ -737,7 +737,7 @@ class Classify(unittest.TestCase):
             checked_and({"todofy", "links", "platform"}),
         )
         self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), ts)
-        self.assertEqual(ci_changes.proto_deploys("proto/flowday/ui/v1/flow.proto"), {"flowday", "todofy"})
+        self.assertEqual(ci_changes.proto_deploys("proto/flowday/ui/v1/flow.proto"), {"flowday"})
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
         self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch"})
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/ui/v1/fleet_ui_service.proto"), {"fleet"})
@@ -1390,7 +1390,7 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "tasks-deploy"),
         ("dashboard-deploy", "website-relay-deploy"),
         ("watch-deploy", "todofy-deploy"),
-        ("todofy-deploy", "flowday-deploy"),
+        ("todofy-deploy", "tasks-deploy"),
         ("flowday-deploy", "tasks-deploy"),
     }
 
@@ -1513,7 +1513,8 @@ class DeployConditions(unittest.TestCase):
     def test_native_task_release_order_has_no_reverse_planning_dependency(self):
         jobs = self.jobs()
         self.assertIn("tasks-deploy", self.needs(jobs["flowday-deploy"]))
-        self.assertIn("flowday-deploy", self.needs(jobs["todofy-deploy"]))
+        self.assertIn("tasks-deploy", self.needs(jobs["todofy-deploy"]))
+        self.assertNotIn("flowday-deploy", self.needs(jobs["todofy-deploy"]))
         self.assertIn("tasks-deploy", self.needs(jobs["dashboard-deploy"]))
         self.assertNotIn("todofy-deploy", self.needs(jobs["tasks-deploy"]))
 

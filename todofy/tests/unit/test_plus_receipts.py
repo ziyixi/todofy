@@ -1,6 +1,6 @@
 """Plus replay receipts in the object's SQLite (runtime/plus_receipts.py) on host CPython with a controlled clock:
-the started/done lifecycle around the Tasks write, IDs-only results, a planning write's plan check on resend, the
-FlowDay settlement's compare-and-set and the 30-day lookup window (nothing deletes a receipt).
+the started/done lifecycle around the Tasks write, IDs-only results, a planning write's plan check on resend and the
+30-day lookup window (nothing deletes a receipt).
 
 D1 and the object's SQLite are host SQLite, and Tasks the fake of plus_support.py, which runs each request ID once
 and journals its calls next to storage.sync(). The workerd path is tests/runtime/test_clients_native_tasks.py.
@@ -61,9 +61,6 @@ class Stack:
 
     def sent(self, method: str) -> list[dict[str, Any]]:
         return [body for name, body in self.tasks.calls if name == method]
-
-    def settle(self, request_id: str, value: str | None, replace_etag: str | None = None) -> str | None:
-        return asyncio.run(self.runtime.plus_receipts.settle(self.core, request_id, value, replace_etag))
 
 
 @pytest.fixture
@@ -187,40 +184,6 @@ def test_a_lost_receipt_turns_a_replay_into_a_rerun_the_operation_journal_answer
     stack.sql.db.execute("DELETE FROM plus_receipts")  # the receipt is gone, its finished operation is not
     assert stack.call("CompleteTask", **request) == first
     assert len(stack.sent("CompleteTask")) == 1 and stack.tasks.tasks["other"]["completed"]
-
-
-# ---- the FlowDay settlement -----------------------------------------------------------------------------
-
-
-def frozen(etag: str) -> str:
-    return json.dumps({"name": "timerSession", "request_id": str(uuid.uuid4()), "etag": etag, "action": "settle"})
-
-
-def test_the_first_settlement_frozen_wins_and_only_a_refused_etag_is_replaced(stack):
-    request_id = str(uuid.uuid4())
-    assert stack.settle(request_id, frozen("e1")) is None  # no completion yet: nothing to freeze
-    stack.call("CompleteTask", task_id="other", request_id=request_id, flow_date="2026-10-14")
-    assert stack.settle(request_id, None) is None
-    first = frozen("e1")
-    stack.journal.clear()
-    assert stack.settle(request_id, first) == first
-    assert stack.journal == ["storage.sync"]  # held before the gateway sends it
-    assert json.loads(stack.settle(request_id, frozen("e2"))) == json.loads(first)  # a second freeze loses
-    assert json.loads(stack.settle(request_id, frozen("e3"), "other-etag")) == json.loads(first)
-    replacement = frozen("e4")
-    assert stack.settle(request_id, replacement, "e1") == replacement  # FlowDay refused e1 (409)
-    assert json.loads(stack.settle(request_id, None)) == json.loads(replacement)
-    # The replay of the completion answers its IDs, never the frozen settlement.
-    assert stack.call("CompleteTask", task_id="other", request_id=request_id, flow_date="2026-10-14") == {
-        "task_id": "other"
-    }
-
-
-def test_only_a_completion_can_hold_a_settlement(stack):
-    request_id = str(uuid.uuid4())
-    stack.call("SetTaskPlan", task_id="parent", etag=stack.etag("parent"), stage="weekly", request_id=request_id)
-    assert stack.settle(request_id, frozen("e1")) is None
-    assert "focus" not in stack.receipts()[request_id]["result"]
 
 
 # ---- the 30-day window ----------------------------------------------------------------------------------

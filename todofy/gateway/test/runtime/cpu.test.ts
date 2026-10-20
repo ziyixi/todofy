@@ -45,19 +45,13 @@ const API_INIT = "GET /api/v1/serviceStatus as the isolate's first API request";
 const LEGACY = 'GET /api/v1/legacyTexts/{id} (1.9 MB of ASCII with escapes)';
 const REPORTS = 'GET /api/v1/latestReports (every report at its limits)';
 const PLUS = "GET /api/plus/v1/tasks (200 tasks, Tasks' Planning channel)";
-// A FULL Plan, which the gateway reads and writes again to add flowday_url: 500 labels, 300 dependencies, six Bets and
-// every Review lane's order (7 lanes of 100), the most TodofyCore answers.
+// A FULL Plan: 500 labels, 300 dependencies, six Bets and every Review lane's order (7 lanes of 100), the most
+// TodofyCore answers.
 const PLAN = 'GET /api/plus/v1/plan:read (500 labels, 300 dependencies, six Bets, 700 lane order IDs)';
 // Mail's two largest answers, passed through unread like the legacy text and the reports: a decode of either again
 // would show here.
 const MAIL_ITEMS = 'GET /api/plus/v1/mailItems (a full page of 50 items)';
 const MAIL_SUMMARY = 'GET /api/plus/v1/mailItems:readMailSummary (64 KiB summary)';
-const FOCUS = 'GET /api/plus/flowday/api/v1/tasks (100 tasks, the proxy\'s largest page)';
-// The generated FlowDay client decodes and the proxy re-encodes a full page. A 200-task page with 2,000-char titles
-// and descriptions reached 10.2 ms cold in CI, so the proxy caps a page at 100 tasks (plus.ts FOCUS_PAGE_MAX).
-// Keep this path's growth decision separate from the existing API ratchets and the Free 10 ms limit.
-const FOCUS_COLD_BOUND_MS = 0.8 * FREE_CPU_MS;
-const FOCUS_BOUND_MS = 0.6 * FREE_CPU_MS;
 const PASSED_THROUGH = new Set([LEGACY, REPORTS, MAIL_ITEMS, MAIL_SUMMARY]);
 
 const ANSWERS = {
@@ -114,13 +108,6 @@ interface GatewayIsolate extends Isolate {
 async function startIsolate(): Promise<GatewayIsolate> {
   const h = await startHarness({
     answers: ANSWERS,
-    focusTasks: { tasks: Array.from({ length: 100 }, (_, n) => ({
-      name: `tasks/task-${String(n)}`, todoist_id: `task-${String(n)}`,
-      title: 'Synthetic Focus task '.repeat(100).slice(0, 2000), description: 'Synthetic description. '.repeat(100).slice(0, 2000),
-      project_display_name: 'Synthetic project', project_color: '#00ff00', priority: 4,
-      labels: ['office', 'deep', 'committed', 'lead_2w'], estimated_minutes: 45, due_date: '2026-10-13',
-      deadline_date: '2026-10-27', parent_id: 'parent-task', create_time: '2026-10-01T10:00:00Z',
-    })) },
     inspectorPort: 0,
     routes: new Map([[`${ISSUER}/cdn-cgi/access/certs`, () => Response.json(issuerJwks)]]),
   });
@@ -183,7 +170,6 @@ async function session({ h, meter }: GatewayIsolate): Promise<Measurement[]> {
   const planning: [string, string][] = [
     [PLUS, '/api/plus/v1/tasks?page_size=200'],
     [PLAN, '/api/plus/v1/plan:read'],
-    [FOCUS, '/api/plus/flowday/api/v1/tasks?page_size=100'],
     [MAIL_ITEMS, '/api/plus/v1/mailItems?page_size=50'],
     [MAIL_SUMMARY, `/api/plus/v1/mailItems:readMailSummary?id=${fixtures.UUID(0)}`],
   ];
@@ -209,14 +195,11 @@ describe('CPU per owner API request (Workers Free: 10 ms)', () => {
       else if (PASSED_THROUGH.has(label)) {
         expect(first, `${label}: first run`).toBeLessThan(PASSED_THROUGH_BOUND_MS);
         expect(median, `${label}: warm median`).toBeLessThan(PASSED_THROUGH_BOUND_MS);
-      } else if (label === FOCUS) {
-        expect(first, `${label}: first run`).toBeLessThan(FOCUS_COLD_BOUND_MS);
-        expect(median, `${label}: warm median`).toBeLessThan(FOCUS_BOUND_MS);
       } else {
         expect(first, `${label}: first run`).toBeLessThan(API_COLD_BOUND_MS);
         expect(median, `${label}: warm median`).toBeLessThan(API_BOUND_MS);
       }
     }
-    expect(reference.size).toBe(16);
+    expect(reference.size).toBe(15);
   });
 });

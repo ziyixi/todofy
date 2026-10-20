@@ -865,16 +865,6 @@
           "source": "manual"
         },
         {
-          "name": "FLOWDAY_NATIVE_FOCUS",
-          "type": "service",
-          "source": "config"
-        },
-        {
-          "name": "FLOWDAY_PUBLIC_URL",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
           "name": "MAIL_WEBHOOK_TOKEN_SHA256",
           "type": "secret_text",
           "source": "manual"

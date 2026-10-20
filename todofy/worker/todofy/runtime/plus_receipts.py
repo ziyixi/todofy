@@ -4,12 +4,11 @@
 SetTaskPlan, SetTaskLead, CompleteTask, AppendTaskSteps, ReorderTasks, ConvertMailItem and each planning update of
 the Monday reset record a receipt ``started`` with their frozen Tasks operations, wait until the object's storage
 holds it, and only then send them. ``done`` drops the operations and keeps the answer's IDs, never a title;
-CompleteTask's also keeps the FlowDay settlement it froze, at ``$.focus``, and ReorderTasks' keeps nothing
-(runtime/plus_order.py). A replay of a done request answers from those IDs, a started one resends the same
-operations, whose request IDs (uuid5 of the request ID) Tasks runs at most once (runtime/native_plus.py). So a lost
-receipt only turns a replay into a re-run that Tasks deduplicates: receipts may live in the object's SQLite, which no
-backup holds. A planning write's started receipt also keeps the plan etag it was chosen under: once that has
-changed, its retry answers ETAG_MISMATCH.
+ReorderTasks' keeps nothing (runtime/plus_order.py). A replay of a done request answers from those IDs, a started
+one resends the same operations, whose request IDs (uuid5 of the request ID) Tasks runs at most once
+(runtime/native_plus.py). So a lost receipt only turns a replay into a re-run that Tasks deduplicates: receipts may
+live in the object's SQLite, which no backup holds. A planning write's started receipt also keeps the plan etag it
+was chosen under: once that has changed, its retry answers ETAG_MISMATCH.
 
 A lookup reads only the receipts of the last MAX_AGE, and an older request ID starts over. Nothing deletes a
 receipt (the owner's rule: no automatic time-based deletion), so one that never finished keeps its operations,
@@ -50,17 +49,6 @@ START = (
 FINISH = (
     "UPDATE plus_receipts SET state = 'done', commands = NULL, result = ?, finished_at = ?"
     " WHERE request_id = ? AND state = 'started'"
-)
-FOCUS = (
-    "SELECT result ->> '$.focus' AS focus FROM plus_receipts"
-    " WHERE request_id = ? AND method = 'CompleteTask' AND state = 'done' AND created_at >= ?"
-)
-# Compare-and-set: the first settlement frozen wins, and only the one whose timer etag FlowDay refused (409)
-# is replaced (gateway/src/plus.ts settleCompleted).
-SETTLE = (
-    "UPDATE plus_receipts SET result = json_set(result, '$.focus', json(?))"
-    " WHERE request_id = ? AND method = 'CompleteTask' AND state = 'done'"
-    " AND ((? IS NULL AND result ->> '$.focus' IS NULL) OR result ->> '$.focus.etag' = ?)"
 )
 
 
@@ -106,22 +94,3 @@ async def start(
 def finish(store: Any, request_id: str, result: dict[str, Any]) -> None:
     """Done: the commands go, ``result`` (IDs only) stays."""
     store.exec(FINISH, _json(result), now_s(), request_id)
-
-
-async def settle(core: Any, request_id: str, value: str | None, replace_etag: str | None) -> str | None:
-    """The FlowDay settlement CompleteTask ``request_id`` freezes, or None when it has no done receipt.
-
-    ``value`` freezes a settlement when none is frozen, or replaces the frozen one whose etag is
-    ``replace_etag``; otherwise the frozen one is answered unchanged.
-    """
-    rows = core.sql.exec(FOCUS, request_id, now_s() - MAX_AGE).toArray()
-    if not rows:
-        return None
-    frozen = rows[0].focus
-    if value is None:
-        return frozen
-    if core.sql.exec(SETTLE, value, request_id, replace_etag, replace_etag).rowsWritten == 0:
-        return frozen
-    # The gateway sends what this answers to FlowDay.
-    await core.ctx.storage.sync()
-    return value

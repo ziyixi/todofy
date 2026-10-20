@@ -801,8 +801,9 @@ jobs:
 
   todofy-deploy:
     name: Todofy deploy
-    # Every Todofy job, named here even though "Todofy checks" already requires the other two.
-    needs: [changes, todofy-static, todofy-runtime, todofy-checks, gate, flowday-deploy]
+    # Every Todofy job, named here even though "Todofy checks" already requires the other two. After Tasks: Tasks
+    # stops calling Todofy's retired planning methods before Todofy stops serving them.
+    needs: [changes, todofy-static, todofy-runtime, todofy-checks, gate, tasks-deploy]
     # Keep the status function and the results explicit. "gate" needs Mail Hero checks (and Dashboard checks),
     # which are skipped when only Todofy changed; a bare condition gets an implicit success() that looks at the whole needs
     # chain, sees that skipped job and skips this deploy too (actions/runner#491, #2205).
@@ -815,7 +816,7 @@ jobs:
       && (needs.todofy-runtime.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-runtime.result == 'skipped'))
       && (needs.todofy-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-checks.result == 'skipped'))
       && needs.gate.result == 'success'
-      && (needs.flowday-deploy.result == 'success' || needs.flowday-deploy.result == 'skipped')
+      && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.todofy_deploy == 'true' }}

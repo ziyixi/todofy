@@ -50,11 +50,19 @@ RETIRED_WEBSITE_BINDINGS = {
 }
 # Bindings the owner retired from an app; a normal release of that app removes them, a repair still stops.
 # A binding to a deleted Worker stays until that Worker is gone (see infra/README "Retiring an app"). Todofy's
-# Todoist-era vars and its FlowDay Focus binding leave with the release that makes Tasks its only task source;
-# empty that entry in the commit after that release is verified. A secret never goes here: a deploy keeps the
-# secrets it does not name, so a retired secret is deleted before the push or the release's record step fails.
+# Todoist-era vars and its FlowDay Focus binding leave with the release that makes Tasks its only task source, and
+# the gateway's FlowDay proxy (FLOWDAY_NATIVE_FOCUS, FLOWDAY_PUBLIC_URL) with the release that moves planning into
+# Tasks; empty that entry in the commit after those releases are verified. A secret never goes here: a deploy keeps
+# the secrets it does not name, so a retired secret is deleted before the push or the release's record step fails.
 RETIRED_SERVICE_BINDINGS: dict[str, set[str]] = {
-    "todofy": {"FLOWDAY_FOCUS", "TASK_SOURCE", "TODOIST_API_BASE", "PLUS_METADATA"},
+    "todofy": {
+        "FLOWDAY_FOCUS",
+        "TASK_SOURCE",
+        "TODOIST_API_BASE",
+        "PLUS_METADATA",
+        "FLOWDAY_NATIVE_FOCUS",
+        "FLOWDAY_PUBLIC_URL",
+    },
 }
 
 

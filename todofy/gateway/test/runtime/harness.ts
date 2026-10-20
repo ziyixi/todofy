@@ -94,7 +94,6 @@ export interface Harness {
 }
 
 export interface HarnessOptions {
-  readonly focusTasks?: unknown;
   readonly answers: CoreAnswers;
   readonly bindings?: Record<string, string>;
   /** Outbound routes (the Access certs endpoint), by URL. */
@@ -124,7 +123,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
           script: await gatewayBundle(),
           compatibilityDate: '2026-09-08',
           durableObjects: { COORDINATOR: { className: 'TodofyCore', scriptName: 'todofy-core' } },
-          serviceBindings: { ASSETS: () => assets(), FLOWDAY_NATIVE_FOCUS: () => Response.json(options.focusTasks ?? {}) },
+          serviceBindings: { ASSETS: () => assets() },
           bindings: { ...SYNTHETIC_BINDINGS, ...options.bindings },
           outboundService: (request: Request) => outbound(request),
         },

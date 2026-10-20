@@ -377,7 +377,7 @@ zone_id = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         self.assertEqual([route['pattern'] for route in gateway['routes']],
                          ['todofy.example.test', 'todofy-hooks.example.test', 'daily.example.test'])
         self.assertEqual(gateway['vars']['TODOFY_HOOKS_HOSTS'], 'todofy-hooks.example.test,daily.example.test')
-        self.assertEqual(gateway['vars']['FLOWDAY_PUBLIC_URL'], 'https://flowday.example.test')
+        self.assertNotIn('FLOWDAY_PUBLIC_URL', gateway['vars'])
         relay = tomllib.loads(outputs['website/relay/wrangler.toml'])
         self.assertEqual(relay['vars']['GITHUB_REPOSITORY'], 'new-owner/new-cloud')
         self.assertEqual(relay['vars']['CANONICAL_HOST'], 'www.example.test')

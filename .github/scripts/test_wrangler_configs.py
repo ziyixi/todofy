@@ -458,9 +458,8 @@ class Files(unittest.TestCase):
         self.assertEqual(flowday["services"], [{
             "binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"access": "read"},
         }])
-        self.assertEqual(gateway["services"], [{
-            "binding": "FLOWDAY_NATIVE_FOCUS", "service": "flowday", "entrypoint": "NativeFocusEntrypoint",
-        }])
+        # Todofy binds no other app: FlowDay's Focus left with the Plan and Focus move into Tasks.
+        self.assertNotIn("services", gateway)
         for config in (core, gateway):
             # Tasks is the only task store: no source switch remains.
             self.assertNotIn("TASK_SOURCE", config["vars"])

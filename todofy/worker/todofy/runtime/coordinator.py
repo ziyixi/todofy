@@ -208,13 +208,6 @@ class TodofyCore(DurableObject):
             return {"error": "UNAVAILABLE"}
         return await plus_api.handle(self, method, request)
 
-    async def plus_focus_claim(self, action_id: str, value: str | None, replace_etag: str | None) -> str | None:
-        """Freeze one FlowDay settlement request in its Tasks completion's receipt (plus_receipts.settle)."""
-        async with self.plus_lock:
-            if flag(self.env, "MAINTENANCE_MODE") or backup.holds_ledger(self.env, self.sql, now_s()):
-                raise RuntimeError("Plus state is temporarily held")
-            return await plus_receipts.settle(self, action_id, value, replace_etag)
-
     async def ingest(self, idempotency_key: str | None, body: Any) -> dict[str, Any]:
         """POST /hooks/mail after the gateway's checks: the Idempotency-Key header and the unread body stream."""
         # The gateway refuses writes in maintenance first; this keeps the single writer consistent on its own.

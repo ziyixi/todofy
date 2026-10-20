@@ -290,4 +290,4 @@ counts only in the log, and one write, the generated SQL, only when its `apply` 
 The old generated-config rollback procedure is retained in [history](history.md#committed-config-rollback).
 Follow the current application runbook and HANDOFF before attempting a rollback.
 
-Todofy's gateway deploy waits for FlowDay's compatible `NativeFocusEntrypoint` when both changed.
+Todofy's deploy waits for Tasks' when both changed: Tasks stops calling a Todofy method before Todofy stops serving it.
