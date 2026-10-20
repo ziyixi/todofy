@@ -17,8 +17,8 @@ refinement and cutover, VPS recovery, Recall, Mailsort) in
 **In progress, local only; not pushed.** A branch from `origin/main` `abd0da1a`, which holds the Plan and Focus
 release. It implements the performance design in one release, by the owner's choice without flags, staged rollout
 or a shadow phase: P0 front end, P1 planning facts in Tasks, the one-time import workflow, P2 Todofy cleanup
-(Todofy stops serving planning and drops its FlowDay proxy). P3, dropping Todofy's planning tables, follows once the
-import is verified.
+(Todofy stops serving planning and drops its FlowDay proxy), all four done. P3, dropping Todofy's planning tables,
+follows once the import is verified.
 
 - **P0 (2026-10-20 UTC), done.** Front end only, plus one Worker header.
   - The task dialog and Plan/Focus load with the app instead of on demand, which waited for their chunk and React's
@@ -107,6 +107,44 @@ import is verified.
     tests, build and 105 Playwright tests, the tools' 43 tests (6 new) and the deploy tests. `ci_changes.py`
     selects every check job for this slice (`.github/` changed); the other jobs read nothing it changed and were
     not run again.
+- **P2 (2026-10-20 UTC), done.** Todofy stops serving planning and drops its FlowDay proxy (the Plan and Focus
+  release's queued Todofy cleanup, below).
+  - Gateway: the Planning channel allows only the Mail methods and `ReadWeeklyReview`. The `/api/plus/flowday`
+    proxy, `FOCUS_METHODS`, `settleCompleted`, the `flowday_url` injection, the `FLOWDAY_NATIVE_FOCUS` binding and
+    the `FLOWDAY_PUBLIC_URL` var are gone, also from the cloud-config generator and Home's `drift-desired.json`.
+    `tools/cloud-release/control.py` lets the next Todofy release remove both from the live Worker; empty those two
+    `RETIRED_SERVICE_BINDINGS` entries once it is verified.
+  - todofy-core: the planning modules, the overlay in `native_tasks.py`, the frozen focus claim, the alarm's weekly
+    tick (a Tasks page scan every 10 minutes) and the finished `tools/prepare_native_plan.py` are deleted with their
+    tests. Mail keeps its receipts; a resent conversion reuses its derived Tasks request ID, which Tasks answers from
+    its own receipt, instead of the planning operation journal. A conversion answers the task's ID, title and
+    project. The weekly review task always links Plan's checklist.
+  - Proto: `ReadPlan`, `ListPlanningTasks`, `SetTaskPlan`, `AppendTaskSteps`, `SetTaskLead`, `SetTaskDependency`,
+    `ResolveDependencies`, `VerifyPlanStore`, `SetWeeklyBet`, `ReorderTasks` and `CompleteTask` are retired in
+    `proto/retired.json` with their messages, `Plan` (and its `flowday_url`) and the planning-only messages.
+  - CI: Todofy's deploy waits for Tasks' instead of FlowDay's, so Tasks stops calling a method before Todofy stops
+    serving it.
+  - Deviations from the design: `PlanningTask` is not retired, since `ConvertMailItemResponse` still answers it;
+    `PlanView` stays unused (no retirement kind for a top-level enum). `core/plan.py` went entirely: its one Mail
+    constant moved into `core/sql/plan.py`. The request helpers Mail needs moved unchanged from `core/plus.py` into
+    `core/mailbox.py` (`command_id` is pinned by a test). The restore runbook no longer opens `VerifyPlanStore`;
+    `backup_restore.py verify` already compares every table's rows with the manifest.
+  - **Left for P3**, with the owner's OK after the import is verified: Todofy's planning tables (`plan_tasks`,
+    `plan_task_state`, `plan_edges`, `plan_marks`, `plan_notes`, every `plan_settings` row except
+    `todoist.mail`, `plus_settings`, `plus_weeks`) and their backup entries; in TodofyCore's SQLite, the planning
+    writes' receipts and `native_task_requests`, which nothing reads; the import workflow and its tools.
+  - **Release.** Tasks deploys first, then Todofy. Between the two deploys Plan's weekly review shows "—" for its
+    two Todofy numbers. Tabs opened before P0 call the retired paths until reloaded.
+  - Measured locally: the gateway bundle is 298.5 KiB raw, 74.2 KiB gzip (was 338.5 and 85.4; budget 87), and
+    todofy-core's upload 825.7 KiB, 200.9 KiB gzip (was 906.3 and 224.5).
+  - **Checked locally on macOS.** `ci_changes.py` selects every check job (`.github/` changed). Passed: Changes'
+    test steps (460 `.github/scripts` tests; its decide step needs GitHub's token), Proto (buf, api-linter, and
+    breaking plus wire profile against `abd0da1a` with the retirements), Contracts, Shared packages, Todofy static
+    (1900 host tests, was 2053; the gateway's lint, typecheck, 125 unit tests and its workerd CPU suite; the
+    production dry-runs), Todofy runtime (all 498 tests, was 512, in one shard, the completeness check included),
+    Tasks (the Worker's 64 unit tests and 20 runtime files with 96 tests, the web's 53 unit tests, build and 105
+    Playwright tests, the tools' and deploy tests), Home (with the regenerated `drift-desired.json`), Infra and
+    FlowDay. The other app jobs read nothing this slice changed and were not run again.
 
 ### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
 
@@ -309,13 +347,7 @@ macOS cannot: the Newsletter image build (its source audit passed), Platform's k
   by default: Start, work, then ✓ saves the time; each step's logged time opens its records. Focus cards drag by
   their whole row. FlowDay's own site keeps working until its decommission; nothing reads it any more.
 - **Next, after this release.** Two follow-ups, in order; neither moves any data.
-  1. **Todofy cleanup release**, right after: nothing calls these any more, so retire them. In
-     `todofy/gateway/src/plus.ts`, CompleteTask in `NATIVE_METHODS`, the `/api/plus/flowday` proxy with
-     `FOCUS_METHODS`, `settleCompleted` and the `flowday_url` injection; the `FLOWDAY_NATIVE_FOCUS` binding and
-     `FLOWDAY_PUBLIC_URL` var (`gateway/src/env.ts`, `wrangler.toml`); the frozen focus claim in
-     `worker/todofy/runtime/plus_receipts.py` and `coordinator.py`; Todofy's CompleteTask handler and RPC, reserved
-     with its messages through `proto/retired.json`, and `Plan.flowday_url` reserved the same way; their tests and
-     `todofy/docs` (`planning-api.md` already says these have no caller).
+  1. **Todofy cleanup release**: done in P2 of `claude/tasks-planning` (above), with the planning retirement.
   2. **FlowDay decommission**, an owner action after the performance pass. Its checklist is this command, run again
      then: `git grep -l -i flowday -- . ':!flowday' ':!proto/flowday' ':!docs/history'` (FlowDay's app and proto,
      its CI jobs and `ci_changes.py` entries, infrastructure, tools, Home's registry and drift files, other apps'
@@ -338,9 +370,9 @@ Answered in chat; do not re-ask.
   Clarify queue was not chosen, so the checklist only counts the mail project's unplanned tasks and links it.
 - Native weekly rollover remains enabled. Limited October 19 metadata confirms the current week and zero
   expired memberships. Its five-item legacy batching defect is fixed and released; the 32-member
-  first-request behavior is proved by real local Core/Tasks/D1 tests, not by production content writes.
-  [Evidence](docs/tasks-plan-reliability-verification.md) and
-  [controls](todofy/docs/planning-api.md#weekly-rollover-and-controls).
+  first-request behavior is proved by real local Core/Tasks/D1 tests, not by production content writes
+  ([evidence](docs/tasks-plan-reliability-verification.md)). With `claude/tasks-planning` it becomes Tasks' read
+  rule (a commitment for an ended week reads as weekly, [Tasks design](tasks/docs/design.md)) and Todofy's job goes.
 
 ### Waiting for the owner
 
