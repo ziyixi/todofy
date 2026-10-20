@@ -93,6 +93,47 @@ it("shows a step's own start window in Start now while its parent occupies the c
   );
   expect(screen.getByText(/3\/5 work/)).toBeTruthy();
 });
+// A guard against a future cap: Week's Committed has none, and wraps every commitment into rows.
+it("shows every commitment in Week, eleven of them included, each with its complete button", async () => {
+  const actions = createPrototype();
+  const { plan, focus, days } = await actions.load();
+  const template = plan.tasks.find((task) => task.id === "notes")!;
+  const committed = plan.tasks.filter(
+    (task) => task.stage === "committed",
+  ).length;
+  for (let index = committed + 1; index <= 11; index++)
+    plan.tasks.push({
+      ...template,
+      id: `commitment-${index}`,
+      title: `Synthetic commitment ${index}`,
+      area: index % 2 ? "work" : "personal",
+    });
+  render(
+    <PlanView
+      plan={plan}
+      days={days}
+      currentDate={focus.date}
+      flowTasks={focus.flowTasks}
+      onWeekChange={vi.fn()}
+      language="en"
+      busy={false}
+      actions={actions}
+      run={vi.fn()}
+      editTask={vi.fn()}
+      completeTask={vi.fn()}
+      completeReview={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  const grid = document.querySelector(".planning-commitment-grid")!;
+  expect(grid.querySelectorAll(".planning-commitment")).toHaveLength(11);
+  expect(
+    within(grid as HTMLElement).getAllByRole("button", {
+      name: /^Complete task: /u,
+    }),
+  ).toHaveLength(11);
+  expect(screen.getByText("11 outcomes")).toBeTruthy();
+});
 it("stopping a session preserves the task and queue; checkbox completes it", async () => {
   const actions = createPrototype();
   const load = vi.spyOn(actions, "load");
