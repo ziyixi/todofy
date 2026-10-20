@@ -64,11 +64,27 @@ APP = Path(__file__).resolve().parents[1]
 PRODUCTION_CONFIG = APP / "wrangler.toml"
 MIGRATIONS_DIR = APP / "migrations"
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-# The tables the planning store (migration 0007) replaces, and the idle Plus tables 0012 drops. A backup made
-# while one exists holds it, so once a migration of this checkout drops one, restore leaves it out instead of
-# failing on a table the schema no longer has. Until that migration exists, they restore like every other table.
-RETIRED_TABLES = ("plus_settings", "plus_weeks", "plus_connections", "plus_actions")
-DROP_TABLE = re.compile(r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)", re.IGNORECASE)
+# The idle Plus tables 0012 drops, and the planning store Tasks copied, which 0013 drops (only the Mail categories
+# stay: plan_categories and plan_settings 'todoist.mail'). A backup made while one exists holds it, so once a
+# migration of this checkout drops one, restore leaves it out instead of failing on a table the schema no longer
+# has. Until that migration exists, they restore like every other table. An older backup's other plan_settings
+# rows ('week', 'board', ...) still restore: nothing reads them, and leaving them out would break verify's row count.
+RETIRED_TABLES = (
+    "plus_connections",
+    "plus_actions",
+    "plus_settings",
+    "plus_weeks",
+    "plan_task_state",
+    "plan_tasks",
+    "plan_edges",
+    "plan_marks",
+    "plan_notes",
+)
+# The statements that create, rename into or drop a table. A table's last one, in migration order, says whether this
+# checkout's schema has it: 0011 drops plan_task_state and renames its rebuilt copy back.
+TABLE_DDL = re.compile(
+    r"\b(CREATE\s+TABLE|RENAME\s+TO|DROP\s+TABLE)\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?(\w+)", re.IGNORECASE
+)
 
 
 class RestoreError(Exception):
@@ -226,10 +242,10 @@ def check_table(root: Path, table: dict[str, Any]) -> None:
 
 
 def retired_tables() -> frozenset[str]:
-    """The RETIRED_TABLES that a migration of this checkout drops."""
+    """The RETIRED_TABLES that a migration of this checkout drops and none creates again."""
     code = "\n".join(re.sub(r"--[^\n]*", "", path.read_text()) for path in sorted(MIGRATIONS_DIR.glob("*.sql")))
-    dropped = {name.lower() for name in DROP_TABLE.findall(code)}
-    return frozenset(name for name in RETIRED_TABLES if name in dropped)
+    last = {name.lower(): statement.split()[0].upper() for statement, name in TABLE_DDL.findall(code)}
+    return frozenset(name for name in RETIRED_TABLES if last.get(name) == "DROP")
 
 
 def _tables(manifest: dict[str, Any], *, legacy_text: bool) -> list[dict[str, Any]]:

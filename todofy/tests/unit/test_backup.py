@@ -49,27 +49,6 @@ def test_every_table_is_backed_up_with_all_its_columns_and_its_primary_key(db):
         assert table.key == tuple(row[1] for row in sorted(info, key=lambda row: row[5]) if row[5]), table.name
 
 
-def test_plan_tasks_is_last_but_only_the_lease_keeps_a_backups_task_ids_complete(db):
-    """plan_tasks comes after the tables that hold its IDs. The order alone would not keep their IDs in the same
-    backup: a mark added during a job reuses a deleted mark's rowid inside the snapshot, while its task is
-    outside plan_tasks'. The backup's lease keeps Plus writes out of a running job (core/sql/backup.py)."""
-    names = list(sql.TABLES)
-    assert names[-1] == "plan_tasks"
-    assert {"plan_marks", "plan_edges"} <= set(names[:-1])
-    db.execute("INSERT INTO plan_tasks (provider, external_id, created_at) VALUES ('todoist', 't1', 1)")
-    db.execute("INSERT INTO plan_marks VALUES (1, 'committed', '2026-10-19', 1)")
-    snapshot = {
-        name: db.execute(sql.max_rowid(sql.TABLES[name])).fetchone()[0] for name in ("plan_tasks", "plan_marks")
-    }
-    # A write the lease holds back: the reset consumes the mark, then a new task is marked.
-    db.execute("DELETE FROM plan_marks WHERE task_id = 1")
-    db.execute("INSERT INTO plan_tasks (provider, external_id, created_at) VALUES ('todoist', 't2', 2)")
-    db.execute("INSERT INTO plan_marks VALUES (2, 'committed', '2026-10-26', 2)")
-    marks = db.execute("SELECT task_id FROM plan_marks WHERE rowid <= ?", (snapshot["plan_marks"],)).fetchall()
-    tasks = db.execute("SELECT id FROM plan_tasks WHERE rowid <= ?", (snapshot["plan_tasks"],)).fetchall()
-    assert marks == [(2,)] and tasks == [(1,)]
-
-
 @pytest.mark.parametrize("table", sql.TABLES.values(), ids=lambda table: table.name)
 def test_pages_are_rowid_range_searches(db, table):
     assert plan(db, sql.page(table)) == [f"SEARCH {table.name} USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)"]

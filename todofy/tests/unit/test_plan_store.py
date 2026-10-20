@@ -1,5 +1,5 @@
-"""The planning store (migrations/0007_plan_store.sql) on host SQLite, synthetic rows only: its CHECKs and the
-partial Mailbox index. Mail's categories are the store's rows that still change; Tasks owns planning."""
+"""What is left of the planning store (migrations/0007_plan_store.sql) on host SQLite, synthetic rows only: the Mail
+categories' CHECKs, the partial Mailbox index, and 0013, which dropped the rest once Tasks owned planning."""
 
 import re
 import sqlite3
@@ -10,7 +10,7 @@ import pytest
 
 MIGRATIONS = sorted((Path(__file__).parents[2] / "migrations").glob("*.sql"))
 PLAN_MIGRATION = Path(__file__).parents[2] / "migrations" / "0007_plan_store.sql"
-NOW = 1_760_000_000
+DROP_MIGRATION = Path(__file__).parents[2] / "migrations" / "0013_drop_plan_store.sql"
 
 
 @pytest.fixture
@@ -20,13 +20,6 @@ def db() -> Iterator[sqlite3.Connection]:
         connection.executescript(migration.read_text())
     yield connection
     connection.close()
-
-
-def add_task(db: sqlite3.Connection, external_id: str, provider: str = "todoist") -> int:
-    cursor = db.execute(
-        "INSERT INTO plan_tasks (provider, external_id, created_at) VALUES (?, ?, ?)", (provider, external_id, NOW)
-    )
-    return int(cursor.lastrowid)
 
 
 def rejected(db: sqlite3.Connection, statement: str, args: tuple = ()) -> bool:
@@ -45,23 +38,8 @@ def test_glob_patterns_stay_under_d1s_50_byte_limit():
 @pytest.mark.parametrize(
     "statement",
     [
-        pytest.param("INSERT INTO plan_marks VALUES (1, 'kept', '2026-W42', 0)", id="iso_week_is_not_a_period"),
-        pytest.param("INSERT INTO plan_marks VALUES (1, 'Bet', '2026-10-19', 0)", id="kind_is_lower_case"),
-        pytest.param(
-            "INSERT INTO plan_tasks (provider, external_id, created_at) VALUES ('todoist', 'a b', 0)",
-            id="external_id_charset",
-        ),
-        pytest.param(
-            "INSERT INTO plan_tasks (provider, external_id, created_at, closed_at) VALUES ('todoist', 'a', 0, 1)",
-            id="closed_at_without_closed_as",
-        ),
-        pytest.param(
-            "INSERT INTO plan_notes (period, area, kind, body, updated_at) VALUES ('2026-10-12', '', 'review', 'x', 0)",
-            id="review_progress_is_json",
-        ),
-        pytest.param("INSERT INTO plan_edges (task_id, prerequisite_id, created_at) VALUES (1, 1, 0)", id="self_edge"),
-        pytest.param("INSERT INTO plan_settings VALUES ('Week', '{}', 0)", id="setting_key_shape"),
-        pytest.param("INSERT INTO plan_settings VALUES ('week', 'not json', 0)", id="setting_is_json"),
+        pytest.param("INSERT INTO plan_settings VALUES ('Todoist.mail', '{}', 0)", id="setting_key_shape"),
+        pytest.param("INSERT INTO plan_settings VALUES ('todoist.mail', 'not json', 0)", id="setting_is_json"),
         pytest.param(
             "INSERT INTO plan_categories (name, priority, created_at, updated_at) VALUES ('Reply', 5, 0, 0)",
             id="priority_range",
@@ -81,10 +59,19 @@ def test_an_active_category_name_is_unique_and_an_archived_one_may_return(db):
     assert db.execute("SELECT count(*) FROM plan_categories").fetchone() == (2,)
 
 
-def test_task_ids_are_never_reused(db):
-    first = add_task(db, "A")
-    db.execute("DELETE FROM plan_tasks WHERE id = ?", (first,))
-    assert add_task(db, "B") > first
+def test_the_drop_keeps_only_the_mail_categories():
+    """0013 drops the planning store Tasks copied; Mail's categories and their 'todoist.mail' binding stay."""
+    db = sqlite3.connect(":memory:")
+    for migration in MIGRATIONS[: MIGRATIONS.index(DROP_MIGRATION)]:
+        db.executescript(migration.read_text())
+    db.executemany("INSERT INTO plan_settings VALUES (?, '{}', 0)", [("week",), ("board",), ("todoist.mail",)])
+    db.execute("INSERT INTO plan_categories (name, priority, created_at, updated_at) VALUES ('Reply', 2, 0, 0)")
+    db.execute("INSERT INTO plan_tasks (provider, external_id, created_at) VALUES ('todoist', 'A', 0)")
+    db.executescript(DROP_MIGRATION.read_text())
+    assert db.execute("SELECT key FROM plan_settings").fetchall() == [("todoist.mail",)]
+    assert db.execute("SELECT name, priority FROM plan_categories").fetchall() == [("Reply", 2)]
+    assert db.execute("SELECT count(*) FROM sqlite_master WHERE name = 'plan_tasks'").fetchone() == (0,)
+    db.close()
 
 
 def test_triage_columns_are_additive(db):

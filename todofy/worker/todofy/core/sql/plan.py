@@ -1,8 +1,8 @@
 """D1 statements of the Mail categories in the planning store (runtime/plan_store.py, migrations/0007_plan_store.sql).
 
 The Mail categories are plan_categories rows of scheme 'mail' (their Tasks label IDs are in plan_settings
-'todoist.mail', a frozen key name), replaced as one set in one batch. Planning itself is Tasks'; the store's other
-tables and settings are only read once more, by Tasks' one-time import, and nothing here touches them.
+'todoist.mail', a frozen key name), replaced as one set in one batch. Planning itself is Tasks'; migration 0013
+dropped the store's other tables and settings.
 """
 
 from . import Query

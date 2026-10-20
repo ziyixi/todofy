@@ -233,53 +233,13 @@ TASK_INTENT_TASKS = Table(
     500,
 )
 
-PLUS_SETTINGS = Table("plus_settings", ("id", "mapping", "timezone", "week_start", "enabled"), ("id",), 50)
-PLUS_WEEKS = Table("plus_weeks", ("task_id", "week_start", "committed", "bet"), ("task_id",), 500)
-# The planning store (migration 0007): owner facts and task identities, never task content. Planning is Tasks' now,
-# so only the Mail categories (plan_categories, plan_settings 'todoist.mail') still change; the other tables keep
-# what Tasks' one-time import reads until they are dropped. plan_tasks is the last table, after those that hold its
-# IDs.
+# The Mail categories: what is left of the planning store (migration 0007; 0013 dropped the rest).
 PLAN_SETTINGS = Table("plan_settings", ("key", "value", "updated_at"), ("key",), 50)
-PLAN_MARKS = Table("plan_marks", ("task_id", "kind", "period", "created_at"), ("task_id", "kind", "period"), 500)
-PLAN_EDGES = Table(
-    "plan_edges",
-    ("task_id", "prerequisite_id", "kind", "baseline_count", "created_at"),
-    ("task_id", "prerequisite_id", "kind"),
-    500,
-)
-PLAN_NOTES = Table(
-    "plan_notes", ("period", "area", "kind", "body", "rev", "updated_at"), ("period", "area", "kind"), 200
-)
 PLAN_CATEGORIES = Table(
     "plan_categories",
     ("id", "scheme", "name", "priority", "sort_order", "archived_at", "created_at", "updated_at"),
     ("id",),
     100,
-)
-PLAN_TASKS = Table(
-    "plan_tasks", ("id", "provider", "external_id", "created_at", "closed_at", "closed_as"), ("id",), 500
-)
-PLAN_TASK_STATE = Table(
-    "plan_task_state",
-    (
-        "task_id",
-        "stage",
-        "area",
-        "lead_days",
-        "quick",
-        "waiting",
-        "blocked",
-        "parked",
-        "active",
-        "onhold",
-        "routine",
-        "task",
-        "rev",
-        "request_id",
-        "updated_at",
-    ),
-    ("task_id",),
-    500,
 )
 
 TABLES = {
@@ -300,15 +260,8 @@ TABLES = {
         GTD_REVIEWS,
         TASK_INTENTS,
         TASK_INTENT_TASKS,
-        PLUS_SETTINGS,
-        PLUS_WEEKS,
         PLAN_SETTINGS,
-        PLAN_MARKS,
-        PLAN_EDGES,
-        PLAN_NOTES,
         PLAN_CATEGORIES,
-        PLAN_TASK_STATE,
-        PLAN_TASKS,
     )
 }
 

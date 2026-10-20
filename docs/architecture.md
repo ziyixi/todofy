@@ -121,10 +121,10 @@ timers and work records; Plan and Focus no longer use it.
 
 Tasks reads the weekly rollover as a rule rather than a job: a commitment is for its week, and once that week ends
 it reads as a weekly candidate with no write. Counts stay soft limits. Todofy retains mail receipts and the weekly
-review task, and serves no planning; its old planning tables wait only for Tasks' one-time import to be verified,
-then a Todofy migration drops them. Mail filing uses
-the native Inbox, with an optional category's label and priority. The task UI replaces technical planning labels
-and favorites with those controls while retaining their underlying identities.
+review task, and serves no planning; migration `0013_drop_plan_store.sql` dropped its old planning tables, and it
+keeps only the Mail categories. Mail filing uses the native Inbox, with an optional category's label and priority.
+The task UI replaces technical planning labels and favorites with those controls while retaining their underlying
+identities.
 
 Imported task IDs preserve mail and FlowDay references; planning identities change provider in place.
 Tasks is the only task store: no code reads or writes Todoist, and the original account remains intact as the

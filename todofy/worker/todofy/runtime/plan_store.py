@@ -1,6 +1,6 @@
 """The Mail categories in the planning store's D1 tables (migrations/0007_plan_store.sql): plan_categories of scheme
 'mail', with their Tasks label IDs in plan_settings 'todoist.mail' (a frozen key name). Planning itself is Tasks';
-the store's other tables wait to be dropped once Tasks' one-time import of them is verified (docs/planning-api.md).
+the store's other tables were dropped by migration 0013 (docs/planning-api.md).
 """
 
 import json

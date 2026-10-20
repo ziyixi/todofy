@@ -76,7 +76,9 @@ afterwards.
    says so in a `NOTE` line, they restore empty with the idle timer, and `verify` expects 0, 0 and 1 rows in them. A
    backup made before `0006_planning.sql` has no planning: its tasks take the columns' defaults (no stage,
    unassigned, no flags), and the three planning tables restore as migrated (0, 0 and 1 rows), named in a `NOTE`
-   line. Planning facts that still lived in Todofy then are restored from Todofy's backup, not this one.
+   line. The planning facts of that time were in Todofy's planning store, which Todofy's migration
+   `0013_drop_plan_store.sql` dropped; Todofy's backups made before it still hold them as files, and its restore
+   tool leaves those tables out.
    `verify` ends with `verify PASS`.
 5. Switch the Tasks Worker to the new database. This step is not rehearsed, and a push alone does not do it:
    the release's preflight finds the live `DB` binding on the old id and stops (`STATEFUL_BINDING_CHANGED`
@@ -176,4 +178,5 @@ Then check it:
 Until the release that added `0006_planning.sql`, Todofy kept each task's planning facts, the dependencies, the
 weekly goals and Plan's lane orders. Right after that release, on 2026-10-20, the owner ran the one-time Tasks
 planning import, which copied them into Tasks; its last dry run counted 0 pending. Its workflow, generator and tests
-were then deleted; they are at `777d5f01` (`git show 777d5f01:tasks/tools/planning-import.ts`).
+were then deleted; they are at `777d5f01` (`git show 777d5f01:tasks/tools/planning-import.ts`). Todofy's migration
+`0013_drop_plan_store.sql` dropped the store it read.

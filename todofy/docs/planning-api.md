@@ -6,7 +6,7 @@ Bets and the Review lanes' order; Focus's day queues, timer and time records are
 (`proto/tasks/ui/v1/focus.proto`). Todofy keeps the mail summaries and the Mail categories. The service keeps the name
 of the retired Todoist Plus extension ([history](../../docs/history/todoist-plus.md)), because renaming a published
 service is a breaking change; its paths stay `/api/plus/v1/*`. Its planning methods and `CompleteTask` were retired
-on 2026-10-20 (`proto/retired.json`), with the gateway's FlowDay proxy.
+on 2026-10-20 (`proto/retired.json`).
 
 ## Channel and allowlist
 
@@ -44,11 +44,12 @@ owner deletes a summary; no retention does. Receipts and logs carry IDs, counts 
 or summary.
 
 The categories are `plan_categories` rows of scheme `mail`, with their Tasks label IDs in the `plan_settings`
-document `todoist.mail` (a frozen key name; `runtime/plan_store.py`). These are the only rows of the planning store
-(migration `0007`) that still change. Its other tables (`plan_tasks`, `plan_task_state`, `plan_edges`, `plan_notes`,
-`plan_marks`, the other `plan_settings` documents, `plus_settings`, `plus_weeks`) hold what Tasks' one-time import
-reads ([tasks/docs/backup.md](../../tasks/docs/backup.md#one-time-planning-import)); nothing writes them, the weekly
-backup still carries them, and a later Todofy migration drops them once the import is verified.
+document `todoist.mail` (a frozen key name; `runtime/plan_store.py`). They are all that is left of the planning
+store (migration `0007`): Tasks' one-time import copied the rest on 2026-10-20
+([tasks/docs/backup.md](../../tasks/docs/backup.md#one-time-planning-import)), and migration
+`0013_drop_plan_store.sql` dropped its other tables (`plan_tasks`, `plan_task_state`, `plan_edges`, `plan_notes`,
+`plan_marks`, `plus_settings`, `plus_weeks`) and the other `plan_settings` documents. `tools/backup_restore.py`
+leaves those tables out of an older backup.
 
 ## Receipts
 

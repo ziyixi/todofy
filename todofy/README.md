@@ -127,8 +127,8 @@ Mail lists the summarised mail still awaiting a decision, each with its one-sent
 an Inbox task in Tasks, with its category's tag and priority when one is chosen; deleting one deletes its summary
 and keeps the ledger row. Nothing else deletes a summary.
 
-The [planning API](docs/planning-api.md) covers the channel, receipts, pause controls and retry behavior, and the
-old planning tables that wait for Tasks' import to be verified; the retired Todoist Plus extension is in
+The [planning API](docs/planning-api.md) covers the channel, receipts, pause controls and retry behavior, and what
+is left of the old planning tables (the Mail categories); the retired Todoist Plus extension is in
 [its history](../docs/history/todoist-plus.md).
 
 ## Backups
