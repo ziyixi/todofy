@@ -333,6 +333,7 @@ export async function createTask(
 interface TasksApi {
   read(path: string): Promise<Json | undefined>;
   write(path: string, data: Json): Promise<Json>;
+  remove(path: string): Promise<void>;
 }
 async function withTasks<T>(use: (api: TasksApi) => Promise<T>): Promise<T> {
   const context = await apiRequest.newContext({ baseURL: ORIGIN });
@@ -352,6 +353,12 @@ async function withTasks<T>(use: (api: TasksApi) => Promise<T>): Promise<T> {
         });
         expect(response.status(), `POST ${path}`).toBe(200);
         return response.json();
+      },
+      async remove(path) {
+        const response = await context.delete(path, {
+          headers: { "x-csrf-token": token, origin: ORIGIN },
+        });
+        expect(response.status(), `DELETE ${path}`).toBe(200);
       },
     });
   } finally {
@@ -397,10 +404,27 @@ export async function startTimer(taskId: string): Promise<Json> {
     });
   });
 }
+/** Adds time to a task on a day in the dev server's D1, as Focus's records do. */
+export async function addRecord(
+  taskId: string,
+  day: string,
+  minutes: number,
+  area: "" | "work" | "personal" = "",
+): Promise<Json> {
+  return withTasks((api) =>
+    api.write(`/api/tasks/v1/focusEntries?request_id=${crypto.randomUUID()}`, {
+      task_id: taskId,
+      day,
+      seconds: minutes * 60,
+      area,
+    }),
+  );
+}
 /**
  * Puts the dev server's Focus in a known state, as a planning test begins: the timer stopped, and
  * every step (open or done) taken off the queues of `week`, of Tasks' today and of each seeded
- * day. Then each day of `queues` gets its steps, first to last. Each queued task, and each of
+ * day, with those weeks' time records deleted. Then each day of `queues` gets its steps, first to
+ * last. Each queued task, and each of
  * `inTasks`, is made in D1 when it is missing, under its own ID, titled as in `tasks`, and inside
  * one synthetic parent so the Inbox gains one row; a completed one is reopened.
  */
@@ -440,6 +464,10 @@ export async function seedFocus(
             task_id: id,
             source_day: day.day,
           });
+      for (const entry of (read.entries as Json[] | undefined) ?? [])
+        await api.remove(
+          `/api/tasks/v1/${String(entry.name)}?etag=${String(entry.etag)}&request_id=${crypto.randomUUID()}`,
+        );
     }
     const ids = [...new Set([...Object.values(queues).flat(), ...inTasks])];
     if (ids.length) await ensureTasks(api, ids, tasks);

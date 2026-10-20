@@ -1,7 +1,9 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
+  mondayOf,
   readFocus,
   stubPlanning,
+  tasksToday,
   type Json,
   type PlanningSeed,
   type PlanningState,
@@ -357,4 +359,74 @@ test("on touch a card drags after a 250ms hold, and a quick swipe on it scrolls 
     )
     .toEqual(["intro"]);
   await expect(dragging(page)).toHaveCount(0);
+});
+
+test("today's Focus steps drag by their whole row: one MoveFocusStep, kept after a reload, never from the records", async ({
+  page,
+}) => {
+  // Focus is on Tasks' own today in the dev server's D1, so this page keeps the real clock.
+  const today = await tasksToday();
+  const state = await stubPlanning(page, {
+    today,
+    plan: { week_start: mondayOf(today) },
+    tasks: structuredClone(TASKS),
+    queues: { [today]: ["intro", "layout", "ink"] },
+  });
+  await page.goto("/#/focus");
+  const order = () =>
+    page
+      .locator('[aria-label="Today\'s steps"] > .plus-focus-slot')
+      .evaluateAll((slots) =>
+        slots.map((slot) => slot.getAttribute("data-task-id")),
+      );
+  await expect.poll(order).toEqual(["intro", "layout", "ink"]);
+  const slot = (id: string) =>
+    page.locator(`.plus-focus-slot[data-task-id="${id}"]`);
+  // Pressed on its title and moved, the ink takes the introduction's place.
+  await pressAndMove(page, slot("ink").locator(".plus-focus-title"));
+  await expect(slot("ink")).toHaveClass(/is-dragging/u);
+  const intro = await centre(slot("intro"));
+  await page.mouse.move(intro.x, intro.y, { steps: 12 });
+  await expect(slot("intro")).toHaveClass(/is-insert-before/u);
+  await page.mouse.up();
+  await expect.poll(order).toEqual(["ink", "intro", "layout"]);
+  await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+  const moves = state.tasksRequests.filter(
+    (request) => request.path === "/api/tasks/v1/focusDays:moveStep",
+  );
+  expect(
+    moves.map(({ body: { request_id: requestId, ...body } }) => {
+      expect(requestId).toMatch(/^[0-9a-f-]{36}$/u);
+      return body;
+    }),
+  ).toEqual([
+    {
+      task_id: "ink",
+      source_day: today,
+      destination_day: today,
+      before_task_id: "intro",
+    },
+  ]);
+  expect(writes(state)).toEqual([]);
+  expect(((await readFocus(today, today)).days as Json[])[0]?.task_ids).toEqual(
+    ["ink", "intro", "layout"],
+  );
+  await page.reload();
+  await expect.poll(order).toEqual(["ink", "intro", "layout"]);
+  // A press inside a card's records that moves never drags the card.
+  await slot("layout")
+    .getByRole("button", { name: /^Log time/u })
+    .click();
+  const records = page.getByRole("dialog");
+  await pressAndMove(page, records.getByRole("heading"), 12);
+  await page.waitForTimeout(100);
+  await expect(dragging(page)).toHaveCount(0);
+  await expect(slot("layout")).not.toHaveClass(/is-dragging/u);
+  await page.mouse.up();
+  await expect(records).toBeVisible();
+  expect(
+    state.tasksRequests.filter(
+      (request) => request.path === "/api/tasks/v1/focusDays:moveStep",
+    ),
+  ).toHaveLength(1);
 });
