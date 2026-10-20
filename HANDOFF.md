@@ -14,11 +14,46 @@ refinement and cutover, VPS recovery, Recall, Mailsort) in
 
 ### Tasks performance: planning in Tasks (`claude/tasks-planning`)
 
-**In progress, local only; not pushed.** A branch from `origin/main` `abd0da1a`, which holds the Plan and Focus
-release. It implements the performance design in one release, by the owner's choice without flags, staged rollout
-or a shadow phase: P0 front end, P1 planning facts in Tasks, the one-time import workflow, P2 Todofy cleanup
-(Todofy stops serving planning and drops its FlowDay proxy), all four done. P3, dropping Todofy's planning tables,
-follows once the import is verified.
+**Ready to release; local only, not pushed.** A branch from `origin/main` `abd0da1a`, which holds the Plan and
+Focus release. It implements the performance design in one release, by the owner's choice without flags, staged
+rollout or a shadow phase: P0 front end, P1 planning facts in Tasks, the one-time import workflow and P2 Todofy
+cleanup (Todofy stops serving planning and drops its FlowDay proxy), with the review's fixes. P3, dropping Todofy's
+planning tables, follows once the import is verified.
+
+Final local check on 2026-10-20 UTC at `8f2259c4`, with `abd0da1a` still the tip of `origin/main`:
+`ci_changes.py` selects every check job, and each passed on macOS: Changes' tests, Shared packages, Proto,
+Contracts, Todofy static and runtime (all 498 runtime tests in one shard, the completeness check included), Tasks
+(the Worker's 64 unit tests and 20 runtime files with 98 tests; the web's 55 unit tests, build and 107 Playwright
+tests; the tools' 44 tests), FlowDay, Mail Hero, Home, Links, Watch, Mailsort, Recall, Brief, Fleet, Website,
+Newsletter (its engine steps with an empty `HOME`, as on a runner), Infra and Platform's contract steps. CI alone runs
+what macOS cannot: the Newsletter image (a linux/amd64 Docker build) and CJK font install, Platform's manifest
+compiler, AppArmor, runtime image and k3s steps, Mail Hero's GPG backup test and Changes' decide step (it needs
+GitHub's token; `ci_changes.py` ran directly). The web's main chunk is 884.3 kB (283.0 kB gzip), the gateway 74.2
+KiB gzip (budget 87), todofy-core's upload 198.5 KiB gzip.
+
+Measured in the synthetic preview (the Tasks dev server's D1 in Chromium, 3 runs each, with no added latency and
+with 45 ms added to every request): the first task open 59-69 and 79-83 ms (one GetTask); Plan from the list 45-47
+and 92-99 ms to its cards (GetPlan, ListTasks and Focus's timer and days in one wave); Focus from the list 14-16 ms
+to its page; Plan to Focus and back 12-35 ms with no request. A Plan stage change, lane reorder or dependency change
+is one request; completing a card is one CompleteTask, then one reload wave.
+
+- **Release.** Push, wait for the complete gate, then fast-forward `main` to the same green SHA. CI deploys Tasks
+  (migration `0006`) first, then Todofy and FlowDay (unchanged in what it does; it uses the changed proto), then
+  Home. Between Tasks' and Todofy's deploys Plan's weekly review shows "—" for its two Todofy numbers. From Tasks'
+  deploy until the import, production rows show no planning facts, so the import follows at once. Tabs opened
+  before this release call the retired paths until reloaded once; after it, an outdated tab asks for the reload.
+- **The lead, right after the release, in order** (nothing was dispatched from this branch;
+  [runbook](tasks/docs/backup.md#one-time-planning-import)):
+  1. `gh workflow run tasks-planning-import.yml --repo ziyixi/todofy --ref main -f apply=false`. The log prints counts
+     only: `states`, `dependencies`, `bets` and `board`, each `pending` (what the apply copies), `present` and
+     `orphan` (names no live Tasks task; left out).
+  2. The same with `-f apply=true`, away from the account's Sunday-to-Monday midnight. Note the printed Time Travel
+     bookmark; the run counts again and fails unless `pending` is 0.
+  3. Once more with `-f apply=false`: `pending` 0. Then, in the browser, a row's tags, the dialog, Review, Week and
+     Focus.
+  4. P3 later, with the owner's OK once the import is verified: drop Todofy's planning tables (listed under P2) and
+     their backup entries, delete the workflow, both import tools and their tests, and empty the two
+     `RETIRED_SERVICE_BINDINGS` entries once Todofy's release is verified.
 
 - **P0 (2026-10-20 UTC), done.** Front end only, plus one Worker header.
   - The task dialog and Plan/Focus load with the app instead of on demand, which waited for their chunk and React's
@@ -37,14 +72,7 @@ follows once the import is verified.
     unknown-route answer) shows "Tasks was updated." with Reload in place of the page and its errors. Tabs opened
     before this release do not have it yet; they need one manual reload after it. The Tasks Worker bundle was 130.8
     of its own 132 KiB gzip budget (the platform allows 3 MiB); P1 raised the budget.
-  - **Checked locally on macOS.** `ci_changes.py` selects Changes, Tasks and Contracts. Tasks passed: the Worker's
-    lint, typecheck, unit tests and 19 runtime files (82 tests, the new `build.test.ts` included), the web's lint,
-    typecheck, 69 unit tests, build and all 105 Playwright tests (new: `request-counts.spec.ts`, `outdated.spec.ts`),
-    and the tools' and deploy tests. Contracts passed, and so did Changes' test steps; its decide step needs
-    GitHub's token, so `ci_changes.py` ran directly.
 - **P1 (2026-10-20 UTC), done.** Planning facts, dependencies and Plan live in Tasks.
-  - **Do not release P1 without the import.** From its deploy nothing writes Todofy's planning store, and production
-    rows show no planning facts until the one-time import (below) has run.
   - Todofy: `ReadWeeklyReview`, the weekly review's two facts (the newest review task of the week or the week
     before, the pending Mail count) in one D1 batch with no Tasks call; the gateway allows it.
   - Tasks: migration `0006_planning.sql` (planning columns on `tasks` and the partial `tasks_committed` index,
@@ -68,13 +96,6 @@ follows once the import is verified.
     stay under the file's bounds. `read-budget.test.ts`: a task with 5 dependencies reads 16 rows (2 without),
     GetPlan 3 statements and 9 rows, its next-week read through `tasks_committed`.
   - Todofy's weekly backup carries the new columns and tables; its runtime round trip seeds and compares them.
-  - **Checked locally on macOS.** `ci_changes.py` selects every check job (the proto changed). Each passed:
-    Changes' test steps (its decide step needs GitHub's token, so `ci_changes.py` ran directly), Proto, Shared
-    packages, Contracts, Tasks (the Worker's lint, typecheck, 64 unit tests and 20 runtime files with 96 tests; the
-    web's lint, typecheck, 53 unit tests, build and all 105 Playwright tests; the tools' 37 and deploy tests),
-    Todofy static, Todofy runtime (all 512 tests in one shard, the completeness check included), FlowDay, Mail
-    Hero, Home, Links, Watch, Mailsort, Recall, Brief, Fleet, Website and Platform's contract step. CI alone runs
-    Platform's manifest compiler, AppArmor, image and k3s steps and Mail Hero's GPG backup test.
 - **Import (2026-10-20 UTC), done.** The one-time copy of Todofy's planning store into Tasks
   ([runbook](tasks/docs/backup.md#one-time-planning-import)).
   - `tasks/tools/planning-import.ts` turns read-only exports of Todofy's `plan_tasks`, `plan_task_state`,
@@ -90,23 +111,12 @@ follows once the import is verified.
   - Deviations from the design: a dependency whose waiting task is completed is not copied (Todofy deletes those
     edges at the waiter's completion; Tasks soft-deletes them), and the Tasks export carries `completed` for that.
     The CLI reads a directory of `<name>.json` answers instead of per-table flags.
-  - **After the release, in order** (the lead or the owner; nothing was dispatched from this branch):
-    1. `gh workflow run tasks-planning-import.yml --repo ziyixi/todofy --ref main -f apply=false`, and read the counts
-       in the run's log.
-    2. The same with `-f apply=true`, away from the account's Sunday-to-Monday midnight. The log ends with the counts
-       after the import, `pending` 0; note the printed bookmark.
-    3. In the browser: a row's tags, the dialog, Review, Week and Focus.
-    4. P3, after the owner's OK: drop Todofy's planning tables and delete the workflow, both tools and their tests.
-  - **Checked locally.** `planning-import.test.mjs` (6 tests: both schemas from their migrations, exports on
-    read-only connections, guards against changes made between export and import, malformed exports, the CLI, and
-    the imported rows read back through GetTask and GetPlan on the Tasks Worker's D1); each SQL guard was removed
-    once to confirm a test fails without it. A rehearsal of the workflow's exact step against local D1 (wrangler
-    4.142.0 `--local`, synthetic seeds) printed 9 pending, imported, and printed 0 pending twice; its private
-    directory was gone afterwards. Changes' test steps passed (460 `.github/scripts` tests, 7 new). Tasks passed:
-    the Worker's lint, typecheck, 64 unit tests and 20 runtime files (96 tests), the web's lint, typecheck, 53 unit
-    tests, build and 105 Playwright tests, the tools' 43 tests (6 new) and the deploy tests. `ci_changes.py`
-    selects every check job for this slice (`.github/` changed); the other jobs read nothing it changed and were
-    not run again.
+  - Tested by `planning-import.test.mjs` (both schemas from their migrations, exports on read-only connections,
+    guards against changes made between export and import, malformed exports, the CLI, and the imported rows read
+    back through GetTask and GetPlan on the Tasks Worker's D1); each SQL guard was removed once to confirm a test
+    fails without it. A rehearsal of the workflow's exact step against local D1 (wrangler 4.142.0 `--local`,
+    synthetic seeds) printed 9 pending, imported, and printed 0 pending twice; its private directory was gone
+    afterwards.
 - **P2 (2026-10-20 UTC), done.** Todofy stops serving planning and drops its FlowDay proxy (the Plan and Focus
   release's queued Todofy cleanup, below).
   - Gateway: the Planning channel allows only the Mail methods and `ReadWeeklyReview`. The `/api/plus/flowday`
@@ -133,18 +143,8 @@ follows once the import is verified.
     `plan_task_state`, `plan_edges`, `plan_marks`, `plan_notes`, every `plan_settings` row except
     `todoist.mail`, `plus_settings`, `plus_weeks`) and their backup entries; in TodofyCore's SQLite, the planning
     writes' receipts and `native_task_requests`, which nothing reads; the import workflow and its tools.
-  - **Release.** Tasks deploys first, then Todofy. Between the two deploys Plan's weekly review shows "—" for its
-    two Todofy numbers. Tabs opened before P0 call the retired paths until reloaded.
   - Measured locally: the gateway bundle is 298.5 KiB raw, 74.2 KiB gzip (was 338.5 and 85.4; budget 87), and
     todofy-core's upload 825.7 KiB, 200.9 KiB gzip (was 906.3 and 224.5).
-  - **Checked locally on macOS.** `ci_changes.py` selects every check job (`.github/` changed). Passed: Changes'
-    test steps (460 `.github/scripts` tests; its decide step needs GitHub's token), Proto (buf, api-linter, and
-    breaking plus wire profile against `abd0da1a` with the retirements), Contracts, Shared packages, Todofy static
-    (1900 host tests, was 2053; the gateway's lint, typecheck, 125 unit tests and its workerd CPU suite; the
-    production dry-runs), Todofy runtime (all 498 tests, was 512, in one shard, the completeness check included),
-    Tasks (the Worker's 64 unit tests and 20 runtime files with 96 tests, the web's 53 unit tests, build and 105
-    Playwright tests, the tools' and deploy tests), Home (with the regenerated `drift-desired.json`), Infra and
-    FlowDay. The other app jobs read nothing this slice changed and were not run again.
 - **Review fixes (2026-10-20 UTC), done.** Nine confirmed review findings, each fixed with a test.
   - Dependencies: a prerequisite in an archived project is done in Tasks too (`prerequisiteDone`), as Plan shows
     it, so the dialog, the five-limit and the cycle guard agree with Plan's picker; unarchiving makes it hold
@@ -158,13 +158,7 @@ follows once the import is verified.
     token is read at startup, so the first write does not wait for it.
   - The import copies facts once: its SQL ends by recording when it ran in `plan_board.created_at` (0 until then),
     so a second apply never brings back a fact the owner cleared in Tasks.
-  - **Checked locally on macOS.** `ci_changes.py` selects every check job, since a proto comment changed; the app
-    jobs that read nothing this round changed were not run again. Passed: Tasks (the Worker's lint, typecheck, 64
-    unit tests and 20 runtime files with 98 tests; the web's lint, typecheck, 55 unit tests, build and all 107
-    Playwright tests; the tools' 44 tests and the deploy tests), Shared packages (planning-ui's 267 tests),
-    Contracts, Proto (passed on the third run: twice one of `ensure.test.ts`' lock tests hit its 60 s generation
-    timeout while the machine was loaded; the file passes alone in 15 s) and the import workflow's pin test.
-    Without the archived-project rule, the estimate's etag or the import's run record, the matching new test fails.
+  - Without the archived-project rule, the estimate's etag or the import's run record, the matching new test fails.
 
 ### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
 
