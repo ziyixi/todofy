@@ -86,8 +86,8 @@ The lead's production steps right after the release, in this order:
 ### Plan and Focus owner changes (`claude/plan-focus-ui`)
 
 **In progress, local only.** A branch from `origin/main` `b7b52e75` for the owner's ten Plan and Focus changes of
-2026-10-19, which ship in one release. Slices, in order: A (card layout and area colours) and B (the Step panel and
-double-click) are done; C (whole-row drag in Plan) and D1-D3 (Tasks owns Focus day queues, the timer and time
+2026-10-19, which ship in one release. Slices, in order: A (card layout and area colours), B (the Step panel and
+double-click) and C (whole-row drag in Plan) are done; D1-D3 (Tasks owns Focus day queues, the timer and time
 records; Focus reorder, Completed and the Day/Week/Month views) remain. FlowDay keeps running untouched, nothing new uses it,
 and its queue and time data are not migrated (owner decision).
 
@@ -102,6 +102,12 @@ and its queue and time data are not migrated (owner decision).
   the task panel's "Steps & timing" uses the same times without "Not estimated". A click on a Week commitment
   selects it and a double-click opens it; elsewhere the dialog swallows a double-click's second press and click for
   600ms after it opens, and focus returns to the opener when it closes.
+- **Slice C (2026-10-20 UTC).** Plan's cards drag by their whole row like the task list: 6px with a mouse, a 250ms
+  hold on touch, never from complete, Start or remove (`packages/planning-ui/src/row-drag.ts`, in Review's and
+  Week's providers). Next steps, Quick and calendar grips are 14px overlays shown on hover or keyboard focus, so
+  titles never move; outcome grips stay shown. Week's commitments reorder as Review's Committed lane through the
+  shared `useLaneReorder` (ReorderTasks, lane `committed`), with Review's grip, a 2px line and "Committed,
+  position N". Insertion lines are 2px and a dragged card fades to 0.3. D3's Focus provider reuses the sensors.
 - **Checked locally on macOS** for slice A: `ci_changes.py` selects Changes, Shared packages, Contracts and Tasks.
   Shared packages, Contracts and Tasks passed (Tasks' worker lint, typecheck, unit and runtime suites; its web lint,
   typecheck, unit tests, build and all 89 Playwright tests, with the new `plan-layout.spec.ts` at 1440, 1024, 800 and
@@ -110,6 +116,11 @@ and its queue and time data are not migrated (owner decision).
   Contracts, and Tasks with all 92 Playwright tests, including the new Step panel, timed Add steps and
   double-click journeys in `planning-journeys.spec.ts`; Changes' test steps passed and its decide step again could
   not run locally.
+  For slice C the same four jobs passed again on macOS: Shared packages (planning-ui's 245 unit tests), Contracts,
+  and Tasks with all 98 Playwright tests, including the six new `planning-drag.spec.ts` journeys (each card type
+  drags by its body, one commitment selects, opens and moves, its keyboard reorder keeps focus on the grip, small
+  grips show only on hover or focus, and Chromium touch input through CDP drags only after a 250ms hold while a
+  quick swipe scrolls); Changes' test steps passed and its decide step again could not run locally.
 - **Known limit.** With all seven Review lanes at a 1440px window (six cards a row, about 155px each) the step counts
   end in an ellipsis; the cards keep their 77px.
 
