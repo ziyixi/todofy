@@ -296,6 +296,10 @@ it("keeps timed steps readable while preventing their move, and marks rather tha
 
 it("folds Committed to its heading line and keeps the runway line and Next steps", async () => {
   const data = await props();
+  // No personal commitment, so the Personal filter leaves none selected.
+  data.plan.tasks = data.plan.tasks.map((task) =>
+    task.id === "desk" ? { ...task, area: "work" } : task,
+  );
   render(<PlanView {...data} />);
   openWeek();
   const toggle = screen.getByRole("button", { name: "Committed" });
@@ -339,10 +343,14 @@ it("folds Committed to its heading line and keeps the runway line and Next steps
   expect(toggle.closest("div")!.textContent).toBe(
     "Committed4 outcomes2 commitments have nothing planned in these 7 days",
   );
+  // Clicking the selected commitment keeps it selected.
+  const selected = document.querySelector<HTMLElement>(
+    ".planning-outcome-card.is-selected",
+  )!;
+  fireEvent.click(selected);
+  expect(selected.classList.contains("is-selected")).toBe(true);
   // With nothing selected, folded Week says where to choose one.
-  fireEvent.click(
-    document.querySelector<HTMLElement>(".planning-outcome-card.is-selected")!,
-  );
+  fireEvent.click(within(filter).getByRole("tab", { name: "Personal" }));
   expect(
     screen.getByText("Choose an outcome above to arrange its next steps."),
   ).toBeTruthy();

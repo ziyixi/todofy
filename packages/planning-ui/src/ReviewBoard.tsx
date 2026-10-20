@@ -85,6 +85,8 @@ export interface OutcomeCardProps {
   /** In Parked: how long Todoist has not changed it, in place of the step counts. */
   untouched?: boolean;
   onClick: () => void;
+  /** A double-click: Week's commitments select on a click and open their panel here. */
+  onOpen?: () => void;
 }
 /**
  * A fixed-height card: a title of at most two lines, then one left-aligned line pinned to the
@@ -105,6 +107,7 @@ export function OutcomeCard({
   waitsFor,
   untouched = false,
   onClick,
+  onOpen,
 }: OutcomeCardProps) {
   const steps = outcomeSteps(task, tasks, managedLabels);
   const planned = steps.filter((step) => scheduledIds.has(step.id)).length;
@@ -142,6 +145,7 @@ export function OutcomeCard({
       style={{ "--area-color": areaColor(task, tasks) } as CSSProperties}
       data-outcome-id={task.id}
       onClick={onClick}
+      onDoubleClick={onOpen}
       onPointerEnter={markCut}
       onFocus={markCut}
       // The name replaces the content, so it carries the area, status and pending state too.

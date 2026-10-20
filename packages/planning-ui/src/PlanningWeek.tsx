@@ -344,9 +344,9 @@ export function PlanningWeek(props: Props) {
                 scheduledIds={scheduledIds}
                 language={language}
                 selected={selected?.id === task.id}
-                onClick={() =>
-                  onSelect(selected?.id === task.id ? "" : task.id)
-                }
+                // A click (or Enter) selects, and keeps it selected; a double-click opens it.
+                onClick={() => onSelect(task.id)}
+                onOpen={() => editTask(task)}
               />
               <CompleteTaskButton
                 task={task}
@@ -372,7 +372,10 @@ export function PlanningWeek(props: Props) {
                 <span>{words(language).steps}</span>
                 <strong>{displayedTitle(selected.title)}</strong>
               </div>
-              <button onClick={() => editTask(selected)}>
+              <button
+                aria-label={`${words(language).details}${language === "zh" ? "：" : ": "}${displayedTitle(selected.title)}`}
+                onClick={() => editTask(selected)}
+              >
                 {words(language).details}
               </button>
             </header>

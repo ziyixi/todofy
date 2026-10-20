@@ -255,13 +255,20 @@ it("leaves the drop zone under a planned day blank and dates the weekly review",
 });
 
 it("folds Committed with a chevron button named in words, in both languages", async () => {
-  const { rerender } = render(<PlanView {...await planProps("zh")} />);
+  const props = await planProps("zh");
+  // No personal commitment, so the Personal filter leaves none selected.
+  props.plan.tasks = props.plan.tasks.map((task) =>
+    task.id === "desk" ? { ...task, area: "work" } : task,
+  );
+  const { rerender } = render(<PlanView {...props} />);
   fireEvent.click(screen.getByRole("tab", { name: "一周安排" }));
   const toggle = screen.getByRole("button", { name: "本周承诺" });
   expect(toggle.closest("h2")).toBeTruthy();
   expect(toggle.querySelector("svg.lucide-chevron-down")).toBeTruthy();
   fireEvent.click(
-    document.querySelector<HTMLElement>(".planning-outcome-card.is-selected")!,
+    within(screen.getByRole("tablist", { name: "承诺范围" })).getByRole("tab", {
+      name: "生活",
+    }),
   );
   fireEvent.click(toggle);
   expect(toggle.querySelector("svg.lucide-chevron-right")).toBeTruthy();

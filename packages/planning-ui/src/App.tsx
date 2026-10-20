@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent,
 } from "react";
 import {
   CalendarDays,
@@ -138,6 +139,9 @@ export function App({
   const dialog = useRef<HTMLDialogElement>(null);
   // The open panel's heading, which names the dialog.
   const dialogTitle = useId();
+  // When the dialog opened, and what had focus then, which gets it back when it closes.
+  const openedAt = useRef(0);
+  const opener = useRef<HTMLElement | null>(null);
   const text = words(language);
   // A confirmed planning write on Sunday also changes next week's choices, which only ReadPlan lists.
   const planActions = useMemo<PlusActions>(
@@ -405,9 +409,27 @@ export function App({
     if (externalTaskId) setSelectedId(externalTaskId);
   }, [externalTaskId]);
   useEffect(() => {
-    if (selectedId && dialog.current && !dialog.current.open)
+    if (selectedId && dialog.current && !dialog.current.open) {
+      const focused = document.activeElement;
+      opener.current =
+        focused instanceof HTMLElement && focused !== document.body
+          ? focused
+          : null;
       dialog.current.showModal();
+      openedAt.current = performance.now();
+    }
   }, [selectedId]);
+  /**
+   * A double-click's second press and click, when its first click opened the dialog: they land on
+   * the backdrop, which would close it, or on a control in the panel, which would write. A double
+   * click that opens the dialog itself (Week's commitments) has no presses after it.
+   */
+  function swallowSecondClick(event: MouseEvent) {
+    if (event.detail > 1 && performance.now() - openedAt.current < 600) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
   function openTask(task: PlanningTask) {
     setSelectedId(task.id);
   }
@@ -665,8 +687,14 @@ export function App({
         className="plus-dialog"
         ref={dialog}
         aria-labelledby={selected && data ? dialogTitle : undefined}
-        onClose={() => setSelectedId("")}
+        onClose={() => {
+          setSelectedId("");
+          if (opener.current?.isConnected) opener.current.focus();
+          opener.current = null;
+        }}
         onCancel={() => setSelectedId("")}
+        onClickCapture={swallowSecondClick}
+        onMouseDownCapture={swallowSecondClick}
         onClick={(event) => {
           if (event.target === event.currentTarget) {
             dialog.current?.close();

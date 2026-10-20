@@ -352,3 +352,90 @@ it("persists and clears an existing step's estimate through the task editor", as
       ?.estimatedMinutes,
   ).toBeUndefined();
 });
+it("selects a Week commitment on a click, keeps it selected, and opens its panel on a double-click", async () => {
+  const actions = createPrototype();
+  const { plan, focus, days } = await actions.load();
+  const editTask = vi.fn();
+  render(
+    <PlanView
+      plan={plan}
+      days={days}
+      currentDate={focus.date}
+      flowTasks={focus.flowTasks}
+      onWeekChange={vi.fn()}
+      language="en"
+      busy={false}
+      actions={actions}
+      run={vi.fn()}
+      editTask={editTask}
+      completeTask={vi.fn()}
+      completeReview={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("tab", { name: /^Week$/u }));
+  const card = within(
+    document.querySelector<HTMLElement>(".planning-commitment-grid")!,
+  ).getByRole("button", { name: /^Prepare the next research check-in,/u });
+  const tray = () =>
+    screen.getByRole("region", {
+      name: "Next steps: Prepare the next research check-in",
+    });
+  // Two single clicks select it; the second does not take the selection away.
+  fireEvent.click(card);
+  fireEvent.click(card);
+  expect(card.classList.contains("is-selected")).toBe(true);
+  expect(tray()).toBeTruthy();
+  expect(editTask).not.toHaveBeenCalled();
+  fireEvent.doubleClick(card);
+  expect(editTask).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ id: "research" }),
+  );
+  expect(card.classList.contains("is-selected")).toBe(true);
+  // The tray's button opens the selected commitment, and its name says which.
+  fireEvent.click(
+    within(tray()).getByRole("button", {
+      name: "Steps & timing: Prepare the next research check-in",
+    }),
+  );
+  expect(editTask).toHaveBeenCalledTimes(2);
+});
+
+it("keeps the panel open, and its controls still, through the rest of the double-click that opened it", async () => {
+  const actions = createPrototype();
+  const write = vi.spyOn(actions, "updateTask");
+  render(
+    <App
+      actions={actions}
+      view="plan"
+      language="en"
+      onOpenTask={() => {}}
+      onSettings={() => {}}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: /^Week$/u }));
+  const title = within(
+    screen.getByRole("region", {
+      name: "Next steps: Ship the small website refresh",
+    }),
+  ).getByRole("button", { name: /^Write the introduction/u });
+  // The first click opens the panel, which the second press and click then land on.
+  fireEvent.click(title, { detail: 1 });
+  const dialog = screen.getByRole("dialog", {
+    name: "Write the introduction",
+  });
+  const planning = within(dialog).getByRole("combobox", { name: "Planning" });
+  expect(fireEvent.mouseDown(planning, { detail: 2 })).toBe(false);
+  expect(fireEvent.mouseDown(dialog, { detail: 2 })).toBe(false);
+  fireEvent.click(dialog, { detail: 2 });
+  const waiting = within(dialog).getByRole<HTMLInputElement>("checkbox", {
+    name: "Waiting",
+  });
+  fireEvent.click(waiting, { detail: 2 });
+  expect(dialog.hasAttribute("open")).toBe(true);
+  expect(waiting.checked).toBe(false);
+  expect(write).not.toHaveBeenCalled();
+  // A single press is left alone, and a click on the backdrop still closes it.
+  expect(fireEvent.mouseDown(planning, { detail: 1 })).toBe(true);
+  fireEvent.click(dialog, { detail: 1 });
+  expect(dialog.hasAttribute("open")).toBe(false);
+});
