@@ -25,20 +25,14 @@ import {
   spokenDrags,
 } from "./drag-announcements";
 import {
-  MAX_LANE_TASKS,
   areaColor,
   outcomeArea,
   outcomeSteps,
   PARKED_LABEL,
   reviewLanes,
 } from "./planning-outcomes";
-import {
-  moved,
-  pendingTask,
-  predictLaneOrder,
-  predictStage,
-  withStage,
-} from "./plan-updates";
+import { pendingTask, predictStage, withStage } from "./plan-updates";
+import { useLaneReorder } from "./lane-reorder";
 import {
   boardLanes,
   cardState,
@@ -268,8 +262,7 @@ export function ReviewBoard({
   const [focusAfter, setFocusAfter] = useState<{ id: string; next: string }>();
   // A card reordered in its lane keeps keyboard focus on its handle, though React moves its node.
   const [focusMoved, setFocusMoved] = useState<string>();
-  // A reorder's request ID, reused when the same reorder is tried again.
-  const reorderRequests = useRef(new Map<string, string>());
+  const reorderLane = useLaneReorder(actions, run);
   // The drag instructions every handle names, in the board's own shadow root.
   const hintId = useId();
   // A drag speaks of card titles, lane names and positions.
@@ -357,49 +350,6 @@ export function ReviewBoard({
       ?.focus();
   }, [focusMoved]);
 
-  /**
-   * Moves a card from `from` to `to` in its lane, both positions in the whole lane: one
-   * ReorderTasks with the lane's new order, at most Todofy's 100.
-   */
-  function reorder(task: PlanningTask, lane: LaneId, from: number, to: number) {
-    const ids = lanes[lane].map((item) => item.id);
-    let next = moved(ids, from, to);
-    if (next.every((id, index) => id === ids[index])) return;
-    if (next.length > MAX_LANE_TASKS) {
-      if (next.indexOf(task.id) >= MAX_LANE_TASKS) return;
-      next = next.slice(0, MAX_LANE_TASKS);
-    }
-    // Todoist's current positions are part of the key: once they changed elsewhere, so that
-    // Todofy refuses the old request, the read that follows makes the next drop a new one.
-    const key = [
-      lane,
-      task.id,
-      next.join(","),
-      lanes[lane].map((item) => item.childOrder).join(","),
-    ].join("|");
-    const requestId = reorderRequests.current.get(key) ?? crypto.randomUUID();
-    reorderRequests.current.set(key, requestId);
-    setFocusMoved(task.id);
-    // The card shows in its new place at once and waits there until Todofy confirms.
-    void run(
-      async () => {
-        const result = await actions.reorderTasks(
-          next,
-          task.id,
-          lane,
-          requestId,
-        );
-        reorderRequests.current.delete(key);
-        return result;
-      },
-      {
-        // A reorder changes the siblings' revisions too; their next writes need the returned etags.
-        pending: next.map(pendingTask),
-        predict: predictLaneOrder(lane, next),
-      },
-    );
-  }
-
   async function start(task: PlanningTask) {
     // The next card that can start, in the board's order now.
     const ids = [
@@ -426,8 +376,12 @@ export function ReviewBoard({
         if (from === to) {
           const start = operation.source?.data?.position as number | undefined;
           const end = operation.target?.data?.position as number | undefined;
-          if (start !== undefined && end !== undefined)
-            reorder(task, from, start, end);
+          if (
+            start !== undefined &&
+            end !== undefined &&
+            reorderLane(task, from, lanes[from], start, end)
+          )
+            setFocusMoved(task.id);
           return;
         }
         const column = columns.find((item) => item.id === to);
