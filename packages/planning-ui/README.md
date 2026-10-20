@@ -44,13 +44,17 @@ blocked status; Waiting remains available for something outside the task graph. 
 accepts 0–365 calendar days and Start now opens exactly that many days before the deadline.
 
 Focus keeps its day queues, the one timer and time records in Tasks (`proto/tasks/ui/v1/focus.proto`). The
-timer counts up or runs a 25/50-minute pomodoro; Start counts on Tasks' today, reloads hydrate the same
-session, and pause/resume keeps its day. Visible pages read only the timer once per minute and refresh the
+timer counts up by default or runs a 25/50-minute pomodoro; Start counts on Tasks' today and keeps the step's
+area on its record, reloads hydrate the same session, and pause/resume keeps its day. Visible pages read only the timer once per minute and refresh the
 task view at account midnight. Stop and a pomodoro's Finish save the session as one record of whole minutes;
 Finish caps it at the target and count-up stops at four hours, even if the browser was closed. Each queue
 change is one `MoveFocusStep`, and every write keeps its request ID until confirmed, so a lost answer replays.
 `readFocus` reads any range in reads of at most seven days, and records are added, changed and deleted with
-`addEntry`, `updateEntry` and `deleteEntry`. Plan counts from Todofy's today (`PlanState.today`), Focus from
+`addEntry`, `updateEntry` and `deleteEntry`. Focus has Day, Week and Month views with day navigation: each
+card's one time number is its logged time, which opens the day's records (`FocusEntries`); Week and Month
+show logged time by area, steps done and where the time went (`focus-stats.ts`). Only today's steps run,
+complete and reorder by their whole row; other days are read-only. A header checkbox shows the day's
+completed steps. Plan counts from Todofy's today (`PlanState.today`), Focus from
 Tasks' today (`FocusState.date`); in one time zone they are the same date. A task's estimate is its Tasks
 duration: the host supplies `updateEstimate`, which writes Tasks and answers the saved duration
 (`{ estimate }`). A Step opens a panel that sets only its time (`StepEditor`); tasks open the full planning

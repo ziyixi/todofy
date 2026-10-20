@@ -108,11 +108,14 @@ Focus day; a finish operation cannot become a Reopen after a fresh read.
 
 Focus keeps one timer in Tasks (`focusTimer`): Start counts on Tasks' today, Pause and Resume keep the
 session, and Stop or a pomodoro's Finish saves it as one record of whole minutes when it reached a minute.
-Count-up stops at four hours. Completing a task, from any list, Plan or Focus, is one Tasks `CompleteTask`
-batch: the occurrence, the task and its Steps marked done in `focus_day`'s queue (empty: Tasks' today), and a
-related running or paused session on the task or a descendant saved as a record and stopped, its Steps marked
-on the session's own day. An unrelated timer is left alone, and completing an unplanned task adds it to no
-queue. Reopening opens the queue rows that completion marked. There is no separate settlement step to fail.
+Count-up, Focus's default, stops at four hours. Completing a task, from any list, Plan or Focus, is one Tasks
+`CompleteTask` batch: the occurrence, the task and its Steps marked done in `focus_day`'s queue (empty: Tasks'
+today), and a related running or paused session on the task or a descendant saved as a record and stopped, its
+Steps marked on the session's own day. An unrelated timer is left alone, and completing an unplanned task adds
+it to no queue. Reopening opens the queue rows that completion marked. There is no separate settlement step to
+fail. Records are edited, added and deleted one at a time with their etags; Focus's Week and Month read their
+days with `ListFocusDays` (at most seven days a call) and total them in the browser, so the Worker does no
+aggregation.
 
 ## Native Mail and planning calls
 
