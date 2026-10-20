@@ -1,4 +1,11 @@
-import { useId, useMemo, useRef, type CSSProperties } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   DragDropProvider,
   DragOverlay,
@@ -19,6 +26,7 @@ import {
   dragHandle,
   dragInstructions,
   spokenDrags,
+  type SpokenName,
 } from "./drag-announcements";
 import {
   CompleteTaskButton,
@@ -46,6 +54,7 @@ import { PendingMark } from "./StatusMarks";
 import { FullTitle, markCut } from "./FullTitle";
 import { QuickTasks } from "./QuickTasks";
 import { planningSensors } from "./row-drag";
+import { useLaneReorder } from "./lane-reorder";
 import { quickTray, unscheduledCommitments } from "./weekly-review";
 import { words } from "./i18n";
 import type {
@@ -89,6 +98,26 @@ interface Props {
   addingStep?: string;
   onAddingStep: (id: string | undefined) => void;
 }
+/**
+ * What a Week drag says: the dragged step's or commitment's title; over a day its short name, over
+ * a commitment its place in Committed, over a sibling step its place among the steps.
+ */
+export function weekDragName(language: Language): SpokenName {
+  return (data, as) => {
+    if (as === "target" && typeof data?.date === "string")
+      return shortDay(data.date, language);
+    if (as === "target" && typeof data?.position === "number")
+      return data.lane === "committed"
+        ? language === "zh"
+          ? `${words(language).committed}第 ${data.position + 1} 项`
+          : `${words(language).committed}, position ${data.position + 1}`
+        : language === "zh"
+          ? `第 ${data.position + 1} 步`
+          : `step ${data.position + 1}`;
+    return typeof data?.title === "string" ? data.title : undefined;
+  };
+}
+
 export function PlanningWeek(props: Props) {
   const {
     plan,
@@ -116,23 +145,38 @@ export function PlanningWeek(props: Props) {
   const gridId = useId();
   // The drag instructions every handle names, in Week's own shadow root.
   const hintId = useId();
+  const week = useRef<HTMLElement>(null);
   // A reorder's request ID, reused when the same reorder is tried again.
   const reorderRequests = useRef(new Map<string, string>());
-  // A drag speaks of step titles, their places and days.
+  // Committed is Review's Committed lane: the same order, written the same way.
+  const reorderLane = useLaneReorder(actions, run);
+  // A commitment reordered keeps keyboard focus on its grip, though React moves its node.
+  const [focusMoved, setFocusMoved] = useState<string>();
+  // A drag speaks of titles, places and days.
   const plugins = useMemo(
-    () =>
-      spokenDrags(language, (data, as) => {
-        if (as === "target" && typeof data?.date === "string")
-          return shortDay(data.date, language);
-        if (as === "target" && typeof data?.position === "number")
-          return language === "zh"
-            ? `第 ${data.position + 1} 步`
-            : `step ${data.position + 1}`;
-        return typeof data?.title === "string" ? data.title : undefined;
-      }),
+    () => spokenDrags(language, weekDragName(language)),
     [language],
   );
+  useEffect(() => {
+    if (!focusMoved || !week.current) return;
+    setFocusMoved(undefined);
+    // Only where focus was lost or is still in Week; never pulled back from elsewhere.
+    const active = (week.current.getRootNode() as Document | ShadowRoot)
+      .activeElement;
+    if (active && active !== document.body && !week.current.contains(active))
+      return;
+    [
+      ...week.current.querySelectorAll<HTMLElement>(
+        ".planning-commitment > .planning-outcome-card",
+      ),
+    ]
+      .find((card) => card.dataset.outcomeId === focusMoved)
+      ?.parentElement?.querySelector<HTMLElement>(".review-drag-handle")
+      ?.focus();
+  }, [focusMoved]);
   const committed = committedOutcomes(plan);
+  // Each commitment's place in the whole lane, which a reorder writes; a filter shows fewer.
+  const positions = new Map(committed.map((task, index) => [task.id, index]));
   // One quiet line, not a mark per card: commitments with nothing in these seven days.
   const unplanned = unscheduledCommitments(plan, days);
   // A remembered commitment that is no longer committed falls back to the first one.
@@ -212,6 +256,28 @@ export function PlanningWeek(props: Props) {
       sensors={planningSensors}
       onDragEnd={({ canceled, operation }) => {
         if (canceled) return;
+        // A commitment dropped on another takes its place in Committed; nothing else takes one.
+        const moving = operation.source?.data as
+          { task?: PlanningTask; lane?: string; position?: number } | undefined;
+        if (moving?.lane === "committed") {
+          const over = operation.target?.data as
+            { lane?: string; position?: number } | undefined;
+          if (
+            moving.task &&
+            moving.position !== undefined &&
+            over?.lane === "committed" &&
+            over.position !== undefined &&
+            reorderLane(
+              moving.task,
+              "committed",
+              committed,
+              moving.position,
+              over.position,
+            )
+          )
+            setFocusMoved(moving.task.id);
+          return;
+        }
         const source = operation.source?.data as
           | {
               taskId?: string;
@@ -254,6 +320,7 @@ export function PlanningWeek(props: Props) {
       }}
     >
       <section
+        ref={week}
         className="planning-week"
         aria-label={language === "zh" ? "一周安排" : "Weekly planning"}
       >
@@ -337,29 +404,27 @@ export function PlanningWeek(props: Props) {
           </div>
         </header>
         <div id={gridId} className="planning-commitment-grid" hidden={folded}>
-          {shown.map((task) => (
-            <div className="planning-commitment" key={task.id}>
-              <OutcomeCard
-                task={task}
-                tasks={plan.tasks}
-                managedLabels={plan.managedLabels}
-                scheduledIds={scheduledIds}
-                language={language}
-                selected={selected?.id === task.id}
-                // A click (or Enter) selects, and on the selected card changes nothing, its open
-                // Add steps input included; a double-click opens it.
-                onClick={() => {
-                  if (selected?.id !== task.id) onSelect(task.id);
-                }}
-                onOpen={() => editTask(task)}
-              />
-              <CompleteTaskButton
-                task={task}
-                language={language}
-                disabled={busy}
-                onComplete={() => completeTask(task)}
-              />
-            </div>
+          {shown.map((task, index) => (
+            <Commitment
+              key={task.id}
+              task={task}
+              index={index}
+              position={positions.get(task.id)!}
+              plan={plan}
+              scheduledIds={scheduledIds}
+              language={language}
+              busy={busy}
+              pending={pending?.has(pendingTask(task.id)) ?? false}
+              selected={selected?.id === task.id}
+              dragHint={hintId}
+              // A click (or Enter) selects, and on the selected card changes nothing, its open
+              // Add steps input included; a double-click opens it.
+              onSelect={() => {
+                if (selected?.id !== task.id) onSelect(task.id);
+              }}
+              editTask={editTask}
+              completeTask={completeTask}
+            />
           ))}
         </div>
         {selected ? (
@@ -470,6 +535,25 @@ export function PlanningWeek(props: Props) {
         dropAnimation={() => undefined}
       >
         {(source) => {
+          const commitment = source.data?.task as PlanningTask | undefined;
+          if (source.data?.lane === "committed" && commitment)
+            // The commitment as it is in the grid, with its grip: dnd-kit sizes the overlay to it.
+            return (
+              <div className="review-drag-preview" aria-hidden="true" inert>
+                <span className="review-drag-handle">
+                  <GripVertical size={14} />
+                </span>
+                <OutcomeCard
+                  task={commitment}
+                  tasks={plan.tasks}
+                  managedLabels={plan.managedLabels}
+                  scheduledIds={scheduledIds}
+                  language={language}
+                  selected={selected?.id === commitment.id}
+                  onClick={() => {}}
+                />
+              </div>
+            );
           const id = String(source.data?.taskId ?? "");
           const task = taskIndex(plan.tasks).get(id);
           const outcome = task
@@ -500,6 +584,110 @@ export function PlanningWeek(props: Props) {
         }}
       </DragOverlay>
     </DragDropProvider>
+  );
+}
+
+/**
+ * One commitment, which drags by its whole row to another commitment's place in Committed, or by
+ * its grip with the keyboard: Review's Committed lane, the same order and the same write.
+ */
+function Commitment({
+  task,
+  index,
+  position,
+  plan,
+  scheduledIds,
+  language,
+  busy,
+  pending,
+  selected,
+  dragHint,
+  onSelect,
+  editTask,
+  completeTask,
+}: {
+  task: PlanningTask;
+  /** Its place among the commitments shown. */
+  index: number;
+  /** Its place in the whole lane. */
+  position: number;
+  plan: PlanState;
+  scheduledIds: Set<string>;
+  language: Language;
+  busy: boolean;
+  /** Its reorder is shown but not yet confirmed. */
+  pending: boolean;
+  selected: boolean;
+  /** The ID of the drag instructions, which every handle names. */
+  dragHint: string;
+  onSelect: () => void;
+  editTask: Props["editTask"];
+  completeTask: CompletePlanningTask;
+}) {
+  const title = displayedTitle(task.title);
+  const { ref, handleRef, isDragSource } = useSortable({
+    id: `week-outcome:${task.id}`,
+    index,
+    group: "committed",
+    type: "week-outcome",
+    // Only another commitment: a dragged step never lands here.
+    accept: "week-outcome",
+    // As in Review: the arrows step between cards, and nothing moves the DOM while dragging.
+    plugins: [SortableKeyboardPlugin],
+    collisionDetector: pointerIntersection,
+    collisionPriority: 2,
+    disabled: busy || pending,
+    data: { task, title, lane: "committed", position },
+  });
+  // A commitment dragged over this one draws the line where it will land: before it moving
+  // earlier, after it moving later.
+  const { source, target } = useDragOperation();
+  const from = source?.data?.position as number | undefined;
+  const insert =
+    target?.id === `week-outcome:${task.id}` &&
+    source?.id !== target.id &&
+    source?.data?.lane === "committed" &&
+    from !== undefined
+      ? position < from
+        ? "before"
+        : "after"
+      : undefined;
+  return (
+    <div
+      ref={ref}
+      className={`planning-commitment ${isDragSource ? "is-dragging" : ""} ${pending ? "is-pending" : ""} ${insert ? `is-insert-${insert}` : ""}`}
+      aria-busy={pending || undefined}
+    >
+      <button
+        ref={handleRef}
+        type="button"
+        className="review-drag-handle"
+        {...dragHandle(language, dragHint)}
+        // A waiting handle stays focusable, so a keyboard drop keeps focus on the moved card.
+        disabled={busy}
+        aria-disabled={pending || undefined}
+        aria-label={`${language === "zh" ? "移动承诺：" : "Move commitment: "}${title}${pending ? `, ${words(language).updating}` : ""}`}
+      >
+        <GripVertical size={14} />
+      </button>
+      <OutcomeCard
+        task={task}
+        tasks={plan.tasks}
+        managedLabels={plan.managedLabels}
+        scheduledIds={scheduledIds}
+        language={language}
+        selected={selected}
+        pending={pending}
+        onClick={onSelect}
+        onOpen={() => editTask(task)}
+      />
+      <CompleteTaskButton
+        task={task}
+        language={language}
+        disabled={busy || pending}
+        onComplete={() => completeTask(task)}
+      />
+    </div>
   );
 }
 

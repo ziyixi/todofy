@@ -105,7 +105,8 @@
 }
 /* A card stays lit while the pointer is on its handle or its Start. */
 .planning-outcome-card:hover,
-.review-draggable:hover > .planning-outcome-card {
+.review-draggable:hover > .planning-outcome-card,
+.planning-commitment:hover > .planning-outcome-card {
   background:
     linear-gradient(var(--plus-hover), var(--plus-hover)), var(--plus-bg) !important;
 }
@@ -219,20 +220,23 @@
   width: 1em;
   text-align: center;
 }
-/* A card drags by its whole row, like the task list's rows (src/row-drag.ts); its grip stays
-   for the keyboard and screen readers. */
-.review-draggable {
+/* A card, in Review or in Week's Committed, drags by its whole row like the task list's rows
+   (src/row-drag.ts); its grip stays, always shown, for the keyboard and screen readers. */
+.review-draggable,
+.planning-commitment {
   position: relative;
+  min-width: 0;
   cursor: grab;
 }
-.review-draggable > .planning-outcome-card {
+:is(.review-draggable, .planning-commitment) > .planning-outcome-card {
   cursor: inherit;
 }
 .review-draggable > .planning-outcome-card,
+.planning-commitment > .planning-outcome-card,
 .review-drag-preview > .planning-outcome-card {
   padding-left: 25px;
 }
-.review-draggable.is-dragging {
+:is(.review-draggable, .planning-commitment).is-dragging {
   opacity: 0.3;
 }
 /* Where a card moved inside its lane will land: the task list's 2px line, in the 7px gap. */
@@ -265,6 +269,22 @@
   left: auto;
   right: -5px;
 }
+/* Week's Committed grid: the same vertical line, in the middle of its 10px gap. */
+.planning-commitment:is(.is-insert-before, .is-insert-after)::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--plus-accent);
+}
+.planning-commitment.is-insert-before::before {
+  left: -6px;
+}
+.planning-commitment.is-insert-after::before {
+  right: -6px;
+}
 .review-drag-handle {
   position: absolute;
   inset: 0 auto 0 4px;
@@ -277,6 +297,13 @@
   color: var(--plus-muted) !important;
   cursor: grab;
   touch-action: none;
+}
+/* In Week, over its buttons' pointer cursor. */
+.planning-week .review-drag-handle {
+  cursor: grab;
+}
+.planning-week .review-drag-handle:focus-visible {
+  outline-offset: 2px;
 }
 .review-drag-handle:active {
   cursor: grabbing;
@@ -381,8 +408,4 @@
 }
 .plus-root .review-card-action {
   right: 35px;
-}
-.planning-commitment {
-  position: relative;
-  min-width: 0;
 }
