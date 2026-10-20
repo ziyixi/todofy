@@ -147,23 +147,29 @@ it("re-reads only after void results", async () => {
   expect(rereadsAfter([tasks[0]!])).toBe(false);
   expect(rereadsAfter([data.days[0]!])).toBe(false);
   expect(rereadsAfter({ timerEtag: "1" })).toBe(false);
-  expect(rereadsAfter({ estimate: { taskId: "copy", minutes: 60 } })).toBe(
-    false,
-  );
+  expect(
+    rereadsAfter({ estimate: { taskId: "copy", minutes: 60 }, etag: "2" }),
+  ).toBe(false);
 });
 
-it("shows a saved estimate as its prediction did, and 0 as none", async () => {
+it("shows a saved estimate as its prediction did, with the etag the next write needs, and 0 as none", async () => {
   const data = await createPrototype().load();
+  const copy = (shown: typeof data) =>
+    shown.plan.tasks.find((task) => task.id === "copy")!;
   const minutes = (shown: typeof data) => [
-    shown.plan.tasks.find((task) => task.id === "copy")?.estimatedMinutes,
+    copy(shown).estimatedMinutes,
     shown.focus.estimates.copy,
   ];
   const predicted = predictEstimate("copy", 60)(data);
   const saved = applyConfirmed(data, {
     estimate: { taskId: "copy", minutes: 60 },
+    etag: "saved-etag",
   });
   expect(minutes(predicted)).toEqual([60, 60]);
-  expect(saved).toEqual(predicted);
+  // As predicted, and with the etag the write gave the task, which the prediction cannot know.
+  expect(copy(predicted).etag).toBe(copy(data).etag);
+  expect(copy(saved)).toEqual({ ...copy(predicted), etag: "saved-etag" });
+  expect(saved.focus).toEqual(predicted.focus);
   // Every other task, the queues and the plan's settings stay as they were.
   expect(saved.plan.tasks.filter((task) => task.id !== "copy")).toEqual(
     data.plan.tasks.filter((task) => task.id !== "copy"),
@@ -171,7 +177,10 @@ it("shows a saved estimate as its prediction did, and 0 as none", async () => {
   expect(saved.days).toBe(data.days);
   expect(
     minutes(
-      applyConfirmed(saved, { estimate: { taskId: "copy", minutes: 0 } }),
+      applyConfirmed(saved, {
+        estimate: { taskId: "copy", minutes: 0 },
+        etag: "cleared-etag",
+      }),
     ),
   ).toEqual([undefined, 0]);
 });

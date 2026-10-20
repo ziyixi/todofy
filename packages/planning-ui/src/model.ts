@@ -160,9 +160,10 @@ export interface ReorderResult {
   /** The lane's saved order; absent when only the tasks' order changed. */
   lane?: { lane: LaneId; taskIds: string[] };
 }
-/** A saved estimate: the task's duration in the host's task store, 0 for none. */
+/** A saved estimate: the task's duration in the host's task store, 0 for none, and the etag the write gave it. */
 export interface EstimateResult {
   estimate: { taskId: string; minutes: number };
+  etag: string;
 }
 /** A write's server-confirmed result; void means only a re-read can show it. */
 export type Confirmed =
@@ -286,19 +287,24 @@ export interface PlusActions {
     leadDays: number,
   ): Promise<PlanningTask>;
   /**
-   * Completes the task in the host's task store. In the same write Tasks marks it done in
-   * `focusDay`'s queue (empty: Tasks' today) and settles a related timer session on its own day.
+   * Completes the task in the host's task store, under its etag. In the same write Tasks marks it
+   * done in `focusDay`'s queue (empty: Tasks' today) and settles a related timer session on its own
+   * day.
    */
   completeTask(
     task: PlanningTask,
     requestId: string,
     focusDay: string,
   ): Promise<void>;
-  /** Adds (`waits`) or removes that `taskId` waits for `prerequisiteId`, a write of the waiting task. */
-  setDependency(
-    taskId: string,
-    prerequisiteId: string,
-    waits: boolean,
+  /**
+   * Saves the tasks `task` waits for, one write of the waiting task under its etag. `added` names the one this write
+   * adds, which Tasks may refuse. Tasks keeps a dependency it already has as it is, so a done one (`restart`) is
+   * removed and added again, a second write: a recurring task is then waited for until its next completion.
+   */
+  setDependencies(
+    task: PlanningTask,
+    prerequisiteIds: readonly string[],
+    added?: { id: string; restart: boolean },
   ): Promise<DependencyResult>;
   /**
    * Adds, removes or moves one step in Tasks' day queues, each one MoveFocusStep against the
@@ -313,10 +319,10 @@ export interface PlusActions {
     beforeId?: string,
   ): Promise<DayQueue[]>;
   /**
-   * Sets the task's duration in the host's task store, 0 to clear it. Answers the duration the
-   * store saved.
+   * Sets the task's duration in the host's task store under its etag, 0 to clear it. Answers the
+   * duration the store saved.
    */
-  updateEstimate(taskId: string, minutes: number): Promise<EstimateResult>;
+  updateEstimate(task: PlanningTask, minutes: number): Promise<EstimateResult>;
   /** Tasks' timer, without rereading task lists. */
   readTimer?(): Promise<TimerSnapshot>;
   /** One timer command; Start counts on Tasks' today, and `area` stays on the session's record. */
@@ -336,11 +342,11 @@ export interface PlusActions {
   deleteEntry(entry: FocusEntry): Promise<DeletedEntry>;
   /**
    * Puts these tasks in this order, at most 100: `lane`'s order, or none for "". The siblings of
-   * `movedId` among them (same project, section and parent) swap their positions into this order;
-   * Waiting and Parked never change the tasks.
+   * `movedId` among them (same project, section and parent) swap their positions into this order,
+   * each under the etag Plan holds; Waiting and Parked never change the tasks.
    */
   reorderTasks(
-    taskIds: string[],
+    tasks: readonly PlanningTask[],
     movedId: string,
     lane: LaneId | "",
     requestId: string,

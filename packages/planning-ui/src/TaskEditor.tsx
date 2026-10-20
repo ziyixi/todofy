@@ -381,7 +381,7 @@ export function TaskEditor({
               onChange={(event) => {
                 // Read now: a queued write runs after the select shows its saved value again.
                 const minutes = Number(event.target.value);
-                void run(() => actions.updateEstimate(task.id, minutes));
+                void run(() => actions.updateEstimate(task, minutes));
               }}
             >
               <option value={0}>{text.unknown}</option>

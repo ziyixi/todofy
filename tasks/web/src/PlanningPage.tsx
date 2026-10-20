@@ -6,7 +6,8 @@ import {
   type PlusSnapshot,
 } from "@ziyixi/planning-ui";
 import "@ziyixi/planning-ui/styles.css";
-import { api, send, type Task } from "./api";
+import { api, send } from "./api";
+import type { CompletedTask } from "./useTaskActions";
 import { removeQueryParameter } from "./routes";
 import { usePlanView } from "./usePlanView";
 
@@ -24,31 +25,38 @@ export default function PlanningPage({
   onSettings: () => void;
   /** Completes in Tasks, which settles `focusDay`'s Focus queue in the same write. */
   onCompleteTask: (
-    task: Task,
+    task: CompletedTask,
     requestId: string,
     focusDay?: string,
   ) => Promise<string | undefined>;
 }) {
   const actions = useMemo<PlusActions>(() => {
     // Tasks' own planning and Focus API, and Todofy's weekly review facts, both on this origin.
+    // Both writes go under the etag Plan holds, with no read first.
     const actions = createPlanningActions({ plus: send, tasks: send });
     return {
       ...actions,
       async completeTask(task, requestId, focusDay) {
-        const current = await api.getTask({ name: `tasks/${task.id}` });
-        const error = await onCompleteTask(current, requestId, focusDay);
+        const error = await onCompleteTask(
+          { id: task.id, name: `tasks/${task.id}`, etag: task.etag },
+          requestId,
+          focusDay,
+        );
         if (error) throw new Error(error);
       },
-      // Answers the duration Tasks saved, which Plan and Focus show without reading again.
-      async updateEstimate(id, minutes) {
-        const task = await api.getTask({ name: `tasks/${id}` });
+      // Answers the duration Tasks saved and the task's new etag, which Plan and Focus merge without
+      // reading again.
+      async updateEstimate(task, minutes) {
         const saved = await api.updateTask({
           requestId: crypto.randomUUID(),
           etag: task.etag,
-          task: { name: task.name, durationMinutes: minutes },
+          task: { name: `tasks/${task.id}`, durationMinutes: minutes },
           updateMask: { paths: ["duration_minutes"] },
         });
-        return { estimate: { taskId: id, minutes: saved.durationMinutes } };
+        return {
+          estimate: { taskId: task.id, minutes: saved.durationMinutes },
+          etag: saved.etag,
+        };
       },
     };
   }, [onCompleteTask]);

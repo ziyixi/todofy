@@ -322,8 +322,9 @@ it("keeps the latest week after navigating away and back while an older full ref
   actions.load = originalLoad;
 });
 
-it("persists and clears an existing step's estimate through the task editor", async () => {
+it("persists and clears an existing step's estimate through the task editor, each write under the etag the last one gave", async () => {
   const actions = createPrototype();
+  const update = vi.spyOn(actions, "updateEstimate");
   render(
     <App
       actions={actions}
@@ -353,6 +354,9 @@ it("persists and clears an existing step's estimate through the task editor", as
     (await actions.load()).plan.tasks.find((task) => task.id === "copy")
       ?.estimatedMinutes,
   ).toBeUndefined();
+  // An estimate is a write of the task, which answers its new etag: the next write goes under it.
+  const first = await update.mock.results[0]!.value;
+  expect(update.mock.calls[1]![0].etag).toBe(first.etag);
 });
 it("selects a Week commitment on a click, keeps it selected, and opens its panel on a double-click", async () => {
   const actions = createPrototype();

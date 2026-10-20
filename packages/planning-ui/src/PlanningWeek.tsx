@@ -224,9 +224,9 @@ export function PlanningWeek(props: Props) {
     const task = taskIndex(plan.tasks).get(id);
     if (!task) return;
     const siblings = stepSiblings(task, plan.tasks);
-    const ids = siblings.map((item) => item.id);
-    const next = moved(ids, from, to);
-    if (next.every((item, index) => item === ids[index])) return;
+    const ordered = moved(siblings, from, to);
+    if (ordered.every((item, index) => item === siblings[index])) return;
+    const next = ordered.map((item) => item.id);
     // Without every position, or with more children than one request takes, Todoist keeps its
     // order, so nothing is written.
     const predict = predictChildOrder(plan.tasks, next);
@@ -234,13 +234,13 @@ export function PlanningWeek(props: Props) {
     const key = [
       id,
       next.join(","),
-      siblings.map((item) => item.childOrder).join(","),
+      siblings.map((item) => item.etag).join(","),
     ].join("|");
     const requestId = reorderRequests.current.get(key) ?? crypto.randomUUID();
     reorderRequests.current.set(key, requestId);
     void run(
       async () => {
-        const result = await actions.reorderTasks(next, id, "", requestId);
+        const result = await actions.reorderTasks(ordered, id, "", requestId);
         reorderRequests.current.delete(key);
         return result;
       },

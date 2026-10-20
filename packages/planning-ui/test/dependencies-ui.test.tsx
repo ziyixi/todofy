@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { createPrototype } from "./fixture";
-import type { PlusActions, TaskDependency } from "../src/model";
+import type { PlusActions } from "../src/model";
 
 // The fixture's tasks are synthetic; today is Tuesday 2026-10-13.
 beforeAll(() => {
@@ -39,6 +39,23 @@ async function details(actions: PlusActions, taskId: string) {
   const editor = await screen.findByRole("region", { name: "Steps & timing" });
   return within(editor);
 }
+/** Makes `taskId` wait for `prerequisiteId` too, as the picker adds one. */
+async function addDependency(
+  actions: PlusActions,
+  taskId: string,
+  prerequisiteId: string,
+) {
+  const { plan } = await actions.load();
+  const own = plan.dependencies
+    .filter((dependency) => dependency.taskId === taskId)
+    .map((dependency) => dependency.prerequisiteId);
+  await actions.setDependencies(
+    plan.tasks.find((task) => task.id === taskId)!,
+    [...own, prerequisiteId],
+    { id: prerequisiteId, restart: false },
+  );
+}
+const release = expect.objectContaining({ id: "release" });
 const section = (editor: ReturnType<typeof within>) =>
   editor
     .getByRole("heading", { name: "Depends on" })
@@ -47,8 +64,8 @@ const section = (editor: ReturnType<typeof within>) =>
 it("adds a dependency from the search field with the keyboard, greys a cycle and keeps Escape to itself", async () => {
   const actions = createPrototype();
   // The notes already wait for the release, so the release cannot wait for them.
-  await actions.setDependency("notes", "release", true);
-  const set = vi.spyOn(actions, "setDependency");
+  await addDependency(actions, "notes", "release");
+  const set = vi.spyOn(actions, "setDependencies");
   const editor = await details(actions, "release");
   const own = within(section(editor));
   expect(
@@ -107,7 +124,10 @@ it("adds a dependency from the search field with the keyboard, greys a cycle and
   fireEvent.keyDown(again, { key: "ArrowUp" });
   fireEvent.keyDown(again, { key: "Enter" });
   await waitFor(() =>
-    expect(set).toHaveBeenCalledWith("release", "research", true),
+    expect(set).toHaveBeenCalledWith(release, ["research"], {
+      id: "research",
+      restart: false,
+    }),
   );
   await within(section(editor)).findByRole("button", {
     name: "Prepare the next research check-in",
@@ -126,14 +146,14 @@ it("adds a dependency from the search field with the keyboard, greys a cycle and
       "Removed dependency: Prepare the next research check-in",
     ),
   );
-  expect(set).toHaveBeenLastCalledWith("release", "research", false);
+  expect(set).toHaveBeenLastCalledWith(release, []);
   expect(within(section(editor)).queryByRole("listitem")).toBeNull();
 });
 
 it("says when what it waits for is done, and stops at five", async () => {
   const actions = createPrototype();
-  await actions.setDependency("release", "tools", true);
-  await actions.setDependency("release", "cleanup", true);
+  await addDependency(actions, "release", "tools");
+  await addDependency(actions, "release", "cleanup");
   await actions.completeTask(
     (await actions.load()).plan.tasks.find((task) => task.id === "tools")!,
     "r1",
@@ -157,7 +177,7 @@ it("says when what it waits for is done, and stops at five", async () => {
   ).toBeTruthy();
   cleanup();
   for (const id of ["copy", "layout", "notes", "reading", "walk"])
-    await actions.setDependency("release", id, true);
+    await addDependency(actions, "release", id);
   const full = within(section(await details(actions, "release")));
   const add = full.getByRole("button", {
     name: "Add a dependency",
@@ -169,14 +189,14 @@ it("says when what it waits for is done, and stops at five", async () => {
 it("leaves room for a new dependency once five are done, and removes the done ones on request", async () => {
   const actions = createPrototype();
   const ids = ["copy", "layout", "notes", "reading", "walk"];
-  for (const id of ids) await actions.setDependency("release", id, true);
+  for (const id of ids) await addDependency(actions, "release", id);
   for (const id of ids)
     await actions.completeTask(
       (await actions.load()).plan.tasks.find((task) => task.id === id)!,
       `r-${id}`,
       "",
     );
-  const set = vi.spyOn(actions, "setDependency");
+  const set = vi.spyOn(actions, "setDependencies");
   const editor = await details(actions, "release");
   const own = within(section(editor));
   expect(
@@ -196,7 +216,7 @@ it("leaves room for a new dependency once five are done, and removes the done on
       "Removed the done dependencies",
     ),
   );
-  expect(set.mock.calls).toEqual(ids.map((id) => ["release", id, false]));
+  expect(set).toHaveBeenCalledExactlyOnceWith(release, []);
   expect(
     within(section(editor)).queryByText(
       "Everything it waits for is done — ready to start",
@@ -204,9 +224,57 @@ it("leaves room for a new dependency once five are done, and removes the done on
   ).toBeNull();
 });
 
+it("chooses a done recurring prerequisite again, which restarts it to wait for the next completion", async () => {
+  const actions = createPrototype();
+  await addDependency(actions, "release", "walk");
+  // The walk repeats and was completed again since: Tasks answers its dependency as done.
+  const load = actions.load.bind(actions);
+  vi.spyOn(actions, "load").mockImplementation(async (week) => {
+    const data = await load(week);
+    return {
+      ...data,
+      plan: {
+        ...data.plan,
+        tasks: data.plan.tasks.map((task) =>
+          task.id === "walk" ? { ...task, recurring: true } : task,
+        ),
+        dependencies: data.plan.dependencies.map((dependency) =>
+          dependency.prerequisiteId === "walk"
+            ? { ...dependency, done: true }
+            : dependency,
+        ),
+      },
+    };
+  });
+  const set = vi.spyOn(actions, "setDependencies");
+  const editor = await details(actions, "release");
+  const own = within(section(editor));
+  expect(
+    own.getByText("Everything it waits for is done — ready to start"),
+  ).toBeTruthy();
+  fireEvent.click(own.getByRole("button", { name: "Add a dependency" }));
+  fireEvent.change(own.getByRole("combobox"), { target: { value: "trail" } });
+  fireEvent.click(
+    own.getByRole("option", { name: /Choose a trail for the weekend/u }),
+  );
+  await waitFor(() =>
+    expect(set).toHaveBeenCalledExactlyOnceWith(release, ["walk"], {
+      id: "walk",
+      restart: true,
+    }),
+  );
+  // It holds again, until the walk's next completion.
+  const now = within(section(editor));
+  await now.findByRole("button", { name: "Choose a trail for the weekend" });
+  expect(now.getByText("After its next completion")).toBeTruthy();
+  expect(
+    now.queryByText("Everything it waits for is done — ready to start"),
+  ).toBeNull();
+});
+
 it("leaves composing Enter and arrow keys to the input method before selecting a dependency", async () => {
   const actions = createPrototype();
-  const set = vi.spyOn(actions, "setDependency");
+  const set = vi.spyOn(actions, "setDependencies");
   const editor = await details(actions, "release");
   const own = within(section(editor));
   fireEvent.click(own.getByRole("button", { name: "Add a dependency" }));
@@ -225,6 +293,9 @@ it("leaves composing Enter and arrow keys to the input method before selecting a
   fireEvent.compositionEnd(search);
   fireEvent.keyDown(search, { key: "Enter" });
   await waitFor(() =>
-    expect(set).toHaveBeenCalledExactlyOnceWith("release", "research", true),
+    expect(set).toHaveBeenCalledExactlyOnceWith(release, ["research"], {
+      id: "research",
+      restart: false,
+    }),
   );
 });

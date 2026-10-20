@@ -6,7 +6,8 @@ import type { LaneId, PlanningTask, PlusActions, RunOperation } from "./model";
 /**
  * A lane reorder, as Review's lanes and Week's Committed row write it. `reorderLane` moves `task`
  * from `from` to `to`, both positions in the whole lane (`laneTasks`, which an area filter never
- * shortens): one ReorderTasks with the lane's new order, at most 100. The card shows in its new
+ * shortens): one ReorderTasks with the lane's new order, at most 100, under the etags Plan holds for
+ * the cards. The card shows in its new
  * place at once and waits there until Tasks confirms. It returns true when it queued a
  * write; the caller then puts focus back on the moved card's grip.
  */
@@ -20,27 +21,28 @@ export function useLaneReorder(actions: PlusActions, run: RunOperation) {
     from: number,
     to: number,
   ): boolean {
-    const ids = laneTasks.map((item) => item.id);
-    let next = moved(ids, from, to);
-    if (next.every((id, index) => id === ids[index])) return false;
-    if (next.length > MAX_LANE_TASKS) {
-      if (next.indexOf(task.id) >= MAX_LANE_TASKS) return false;
-      next = next.slice(0, MAX_LANE_TASKS);
+    let ordered = moved(laneTasks, from, to);
+    if (ordered.every((item, index) => item === laneTasks[index])) return false;
+    if (ordered.length > MAX_LANE_TASKS) {
+      if (ordered.findIndex((item) => item.id === task.id) >= MAX_LANE_TASKS)
+        return false;
+      ordered = ordered.slice(0, MAX_LANE_TASKS);
     }
-    // The tasks' current positions are part of the key: once they changed elsewhere, so that
-    // Tasks refuses the old request, the read that follows makes the next drop a new one.
+    const next = ordered.map((item) => item.id);
+    // The etags the request is built with are part of the key: once a task changed elsewhere, so
+    // that Tasks refuses the old request, the read that follows makes the next drop a new one.
     const key = [
       lane,
       task.id,
       next.join(","),
-      laneTasks.map((item) => item.childOrder).join(","),
+      laneTasks.map((item) => item.etag).join(","),
     ].join("|");
     const requestId = requests.current.get(key) ?? crypto.randomUUID();
     requests.current.set(key, requestId);
     void run(
       async () => {
         const result = await actions.reorderTasks(
-          next,
+          ordered,
           task.id,
           lane,
           requestId,

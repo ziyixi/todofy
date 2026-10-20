@@ -242,9 +242,13 @@ function timerSnapshot(
 }
 /**
  * The moved task's siblings among `tasks` (same project, section and parent) take their existing
- * positions in the given order; only those whose position changes are written.
+ * positions in the given order; only those whose position changes are written, under the etag Plan
+ * holds.
  */
-export function siblingPositions(tasks: readonly Task[], movedId: string) {
+export function siblingPositions(
+  tasks: readonly PlanningTask[],
+  movedId: string,
+) {
   const moved = tasks.find((task) => task.id === movedId);
   if (!moved) return [];
   const siblings = tasks.filter(
@@ -260,13 +264,15 @@ export function siblingPositions(tasks: readonly Task[], movedId: string) {
     const sortOrder = positions[index] ?? 0;
     return sortOrder === (task.sortOrder ?? 0)
       ? []
-      : [{ name: task.name, etag: task.etag, sortOrder }];
+      : [{ name: `tasks/${task.id}`, etag: task.etag, sortOrder }];
   });
 }
 /**
  * Adapts Tasks' planning and Focus API, and the weekly review's two facts Todofy keeps. The host
  * supplies authentication and URL routing, `updateEstimate` (an estimate is the task's duration in
- * Tasks) and `completeTask`, which completes in Tasks and settles Focus in the same write.
+ * Tasks) and `completeTask`, which completes in Tasks and settles Focus in the same write. A task
+ * write reads nothing first: it goes under the etag Plan holds, which every confirmed task write
+ * answers anew, and a stale one is refused, after which Plan reads again.
  */
 export function createPlanningActions(transports: {
   plus: HttpSend;
@@ -290,13 +296,9 @@ export function createPlanningActions(transports: {
   // A write a caller retries under its own request ID is resent as it was first built, so Tasks
   // replays it even when the tasks it was built from have changed since.
   const built = new Map<string, unknown>();
-  function sameAs<T>(requestId: string, build: () => Promise<T>): Promise<T> {
-    const known = built.get(requestId) as Promise<T> | undefined;
-    if (known) return known;
-    const request = build();
-    built.set(requestId, request);
-    request.catch(() => built.delete(requestId));
-    return request;
+  function sameAs<T>(requestId: string, build: () => T): T {
+    if (!built.has(requestId)) built.set(requestId, build());
+    return built.get(requestId) as T;
   }
   async function loadTasks(): Promise<Task[]> {
     const listed: Task[] = [];
@@ -465,13 +467,11 @@ export function createPlanningActions(transports: {
     },
     async createSteps(task, steps, requestId) {
       // Each step's task and request IDs are fixed once per add, so a retry creates none twice.
-      const ids = await sameAs(requestId, () =>
-        Promise.resolve(
-          steps.map(() => ({
-            taskId: crypto.randomUUID(),
-            requestId: crypto.randomUUID(),
-          })),
-        ),
+      const ids = sameAs(requestId, () =>
+        steps.map(() => ({
+          taskId: crypto.randomUUID(),
+          requestId: crypto.randomUUID(),
+        })),
       );
       const created: string[] = [];
       for (const [index, step] of steps.entries()) {
@@ -494,31 +494,36 @@ export function createPlanningActions(transports: {
     async updateLead(task, deadline, leadDays) {
       return save(task, ["deadline", "lead_days"], { deadline, leadDays });
     },
-    async setDependency(taskId, prerequisiteId, waits) {
-      try {
-        const current = await tasks.getTask({ name: `tasks/${taskId}` });
-        const prerequisites = current.dependencies
-          .map((dependency) => dependency.prerequisiteId)
-          .filter((id) => id !== prerequisiteId);
-        const saved = await tasks.updateTask({
+    async setDependencies(task, prerequisiteIds, added) {
+      const write = (etag: string, ids: readonly string[]) =>
+        tasks.updateTask({
           requestId: crypto.randomUUID(),
-          etag: current.etag,
+          etag,
           task: {
-            name: current.name,
-            dependencies: [
-              ...prerequisites,
-              ...(waits ? [prerequisiteId] : []),
-            ].map((id) => ({ prerequisiteId: id })),
+            name: `tasks/${task.id}`,
+            dependencies: ids.map((id) => ({ prerequisiteId: id })),
           },
           updateMask: { paths: ["dependencies"] },
         });
+      try {
+        let etag = task.etag;
+        // Tasks keeps a dependency the set already has, done or not: a done one starts over once
+        // removed and added again, with the prerequisite's count then as its new baseline.
+        if (added?.restart)
+          etag = (
+            await write(
+              etag,
+              prerequisiteIds.filter((id) => id !== added.id),
+            )
+          ).etag;
+        const saved = await write(etag, prerequisiteIds);
         return {
-          forTask: taskId,
+          forTask: task.id,
           dependencies: taskDependencies(saved),
           task: planningTask(saved),
         };
       } catch (error) {
-        throw waits ? dependencyError(error) : error;
+        throw added ? dependencyError(error) : error;
       }
     },
     async addToDay(taskId, date) {
@@ -618,23 +623,17 @@ export function createPlanningActions(transports: {
       );
       return { deletedEntry: { id: entry.id, date: entry.date } };
     },
-    async reorderTasks(taskIds, movedId, lane, requestId) {
-      // Built once per request ID from the tasks as Tasks lists them, then resent as built.
-      const request = await sameAs(requestId, async () => {
-        const listed = UNTOUCHED_LANES.includes(lane)
+    async reorderTasks(ordered, movedId, lane, requestId) {
+      // Built once per request ID from the tasks as Plan holds them, then resent as built.
+      const request = sameAs(requestId, () => ({
+        requestId,
+        positions: UNTOUCHED_LANES.includes(lane)
           ? []
-          : (await tasks.listTasks({ view: "all", taskIds, pageSize: 100 }))
-              .tasks;
-        const byId = new Map(listed.map((task) => [task.id, task]));
-        return {
-          requestId,
-          positions: siblingPositions(
-            taskIds.flatMap((id) => byId.get(id) ?? []),
-            movedId,
-          ),
-          ...(lane ? { laneOrder: { lane, taskIds } } : {}),
-        };
-      });
+          : siblingPositions(ordered, movedId),
+        ...(lane
+          ? { laneOrder: { lane, taskIds: ordered.map((task) => task.id) } }
+          : {}),
+      }));
       let result;
       try {
         if (request.positions.length || request.laneOrder)

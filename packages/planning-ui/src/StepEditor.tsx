@@ -60,7 +60,7 @@ export function StepEditor({
 
   async function save(minutes: number) {
     if (busy || minutes === saved) return;
-    const done = await run(() => actions.updateEstimate(task.id, minutes), {
+    const done = await run(() => actions.updateEstimate(task, minutes), {
       pending: [pendingTask(task.id)],
       predict: predictEstimate(task.id, minutes),
     });

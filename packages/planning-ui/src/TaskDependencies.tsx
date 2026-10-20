@@ -13,7 +13,6 @@ import {
 import { words } from "./i18n";
 import { PendingMark } from "./StatusMarks";
 import type {
-  DependencyResult,
   Language,
   PlanningTask,
   PlusActions,
@@ -40,8 +39,9 @@ interface Props {
  * Task details' "依赖 / Depends on" section, after the deadline, in Plan's editor and the native
  * Steps & timing: what the task still waits for, one line for what is done (its remove action takes
  * the done ones away), who waits for it, and an inline picker that searches the loaded tasks as you
- * type. Each change is one confirm-first write of the task's dependencies in Tasks. Only what still
- * holds fills the 5: a done dependency gives way to a new one.
+ * type. Each change is one confirm-first write of the task's whole set of dependencies in Tasks;
+ * choosing a done one again restarts it, to wait for a recurring task's next completion. Only what
+ * still holds fills the 5: a done dependency gives way to a new one.
  */
 export function TaskDependencies({
   task,
@@ -60,6 +60,10 @@ export function TaskDependencies({
   const open = index.waitingFor.get(task.id) ?? [];
   const done = index.done.get(task.id) ?? [];
   const waiters = index.waiters.get(task.id) ?? [];
+  // Every prerequisite the task has, done or not: a write sends the whole set.
+  const own = dependencies
+    .filter((dependency) => dependency.taskId === task.id)
+    .map((dependency) => dependency.prerequisiteId);
   const full =
     open.length >= MAX_DEPENDENCIES ||
     (dependencies.length >= MAX_ALL_DEPENDENCIES && !done.length);
@@ -99,8 +103,14 @@ export function TaskDependencies({
     setPicking(false);
     setQuery("");
     setAdding(match.task);
+    const id = match.task.id;
+    const restart = done.some((dependency) => dependency.prerequisiteId === id);
     const saved = await run(() =>
-      actions.setDependency(task.id, match.task.id, true),
+      actions.setDependencies(
+        task,
+        [...own.filter((other) => other !== id), id],
+        { id, restart },
+      ),
     );
     setAdding(undefined);
     if (saved) announce(`${text.addedDependency}: ${title}`);
@@ -108,22 +118,18 @@ export function TaskDependencies({
   }
   async function remove(prerequisite: PlanningTask) {
     const title = displayedTitle(prerequisite.title);
-    if (await run(() => actions.setDependency(task.id, prerequisite.id, false)))
+    const kept = own.filter((id) => id !== prerequisite.id);
+    if (await run(() => actions.setDependencies(task, kept)))
       announce(`${text.removedDependency}: ${title}`);
     setReturnFocus(true);
   }
-  /** Removes every done dependency in one queued write; the last answer lists what is left. */
+  /** Removes every done dependency in one write. */
   async function removeDone() {
-    const removed = await run(async () => {
-      let result: DependencyResult | undefined;
-      for (const dependency of done)
-        result = await actions.setDependency(
-          task.id,
-          dependency.prerequisiteId,
-          false,
-        );
-      return result;
-    });
+    const finished = new Set(
+      done.map((dependency) => dependency.prerequisiteId),
+    );
+    const kept = own.filter((id) => !finished.has(id));
+    const removed = await run(() => actions.setDependencies(task, kept));
     if (removed) announce(text.removedDoneDependencies);
     setReturnFocus(true);
   }

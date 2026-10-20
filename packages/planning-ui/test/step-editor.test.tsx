@@ -94,15 +94,18 @@ it("shows a step only its heading, the note line, its parents and the time choic
   expect(panel.queryByText("Over 2 hours", { exact: false })).toBeNull();
 });
 
+/** The step as Plan holds it, whose etag the estimate write goes under. */
+const copy = expect.objectContaining({ id: "copy", etag: expect.any(String) });
+
 it("shows a chosen preset at once and keeps it, and focus, when Tasks saves it", async () => {
   const actions = native();
   const load = vi.spyOn(actions, "load");
   const saveEstimate = actions.updateEstimate.bind(actions);
   let finish!: () => void;
   const update = vi.spyOn(actions, "updateEstimate").mockImplementation(
-    (taskId, minutes) =>
+    (task, minutes) =>
       new Promise<EstimateResult>((resolve) => {
-        finish = () => resolve(saveEstimate(taskId, minutes));
+        finish = () => resolve(saveEstimate(task, minutes));
       }),
   );
   const dialog = await open(actions);
@@ -121,7 +124,7 @@ it("shows a chosen preset at once and keeps it, and focus, when Tasks saves it",
   expect(sixty.disabled).toBe(false);
   fireEvent.click(preset(dialog, 90));
   await waitFor(() => expect(update).toHaveBeenCalledOnce());
-  expect(update).toHaveBeenCalledWith("copy", 60);
+  expect(update).toHaveBeenCalledWith(copy, 60);
   expect(document.activeElement).toBe(sixty);
 
   await act(async () => finish());
@@ -179,7 +182,7 @@ it("saves typed whole minutes from 1 to 1440 and refuses 0 and 1441", async () =
 
   fireEvent.change(field, { target: { value: "1440" } });
   fireEvent.keyDown(field, { key: "Enter" });
-  await waitFor(() => expect(update).toHaveBeenLastCalledWith("copy", 1440));
+  await waitFor(() => expect(update).toHaveBeenLastCalledWith(copy, 1440));
   // A value no preset has stays in the field, and no preset is pressed.
   await waitFor(() => expect(field.hasAttribute("aria-disabled")).toBe(false));
   expect(field.value).toBe("1440");
@@ -187,7 +190,7 @@ it("saves typed whole minutes from 1 to 1440 and refuses 0 and 1441", async () =
 
   fireEvent.change(field, { target: { value: "1" } });
   fireEvent.blur(field);
-  await waitFor(() => expect(update).toHaveBeenLastCalledWith("copy", 1));
+  await waitFor(() => expect(update).toHaveBeenLastCalledWith(copy, 1));
   await waitFor(() => expect(field.value).toBe("1"));
   // Escape gives back the saved value; nothing is written.
   fireEvent.change(field, { target: { value: "45" } });

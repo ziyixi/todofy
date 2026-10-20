@@ -206,6 +206,63 @@ test("a dependency is added in the details, and completing its prerequisite in F
   expect(state.requests).toEqual([]);
 });
 
+test("Plan's task writes read nothing first: an estimate, the planning save after it and a dependency each go under the etag the last one gave", async ({
+  page,
+}) => {
+  const state = await stubPlanning(page, {
+    tasks: [
+      outcome("estimated", "Synthetic estimated action", {
+        planning_flags: ["task"],
+      }),
+      outcome("awaited", "Synthetic awaited outcome"),
+    ],
+  });
+  const answers: number[] = [];
+  page.on("response", (response) => {
+    const url = new URL(response.url());
+    if (url.pathname === "/api/tasks/v1/tasks/estimated")
+      answers.push(response.status());
+  });
+  await openPlan(page, state);
+  const dialog = await details(page, "Synthetic estimated action");
+  const before = state.tasksRequests.length;
+  const estimate = dialog.getByLabel("Estimate: Synthetic estimated action");
+  await estimate.selectOption("60");
+  await expect.poll(() => answers).toEqual([200]);
+  const area = dialog.getByLabel("Work / Personal");
+  await expect(area).toBeEnabled();
+  await area.selectOption("personal");
+  await dialog
+    .locator(".plus-editor-planning")
+    .getByRole("button", { name: "Save", exact: true })
+    .click();
+  await expect.poll(() => answers).toEqual([200, 200]);
+  const section = dialog.locator(".plus-dependencies");
+  await section.getByRole("button", { name: "Add a dependency" }).click();
+  await section
+    .getByRole("combobox", { name: "Search tasks or parents" })
+    .fill("awaited");
+  await section
+    .getByRole("combobox", { name: "Search tasks or parents" })
+    .press("Enter");
+  await expect.poll(() => answers).toEqual([200, 200, 200]);
+  // One UpdateTask each, and no read of the task: every answer carries the etag the next one needs.
+  expect(
+    state.tasksRequests
+      .slice(before)
+      .map((request) => [
+        request.method,
+        request.path.split("?")[0],
+        query(request, "update_mask"),
+      ]),
+  ).toEqual([
+    ["PATCH", "/api/tasks/v1/tasks/estimated", "duration_minutes"],
+    ["PATCH", "/api/tasks/v1/tasks/estimated", "area"],
+    ["PATCH", "/api/tasks/v1/tasks/estimated", "dependencies"],
+  ]);
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+});
+
 test("a deadline and its start-ahead days are saved in one UpdateTask", async ({
   page,
   request,

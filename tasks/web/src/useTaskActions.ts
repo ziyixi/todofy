@@ -16,6 +16,9 @@ import { taskDropOrder } from "./task-order";
 import type { useTaskView } from "./useTaskView";
 import type { TaskDropTarget, TaskRowDrop } from "./task-drag";
 
+/** What a completion writes: the task, by name, under its etag. */
+export type CompletedTask = Pick<Task, "id" | "name" | "etag">;
+
 export function useTaskActions(
   route: Route,
   orderBy: string,
@@ -111,7 +114,7 @@ export function useTaskActions(
    */
   const writeCompletion = useCallback(
     async (
-      task: Task,
+      task: CompletedTask,
       reopen = false,
       requestId?: string,
       focusDay?: string,
@@ -152,7 +155,7 @@ export function useTaskActions(
   /** `planned` is a completion from Plan or Focus, with its request ID and Focus day. */
   const applyCompletion = useCallback(
     async (
-      task: Task,
+      task: CompletedTask,
       reopen: boolean,
       planned?: { requestId: string; focusDay?: string },
     ): Promise<string | undefined> => {
@@ -200,7 +203,7 @@ export function useTaskActions(
     return applyCompletion(task, task.completed);
   }
   const finishTask = useCallback(
-    (task: Task, requestId: string, focusDay?: string) =>
+    (task: CompletedTask, requestId: string, focusDay?: string) =>
       applyCompletion(task, false, { requestId, focusDay }),
     [applyCompletion],
   );

@@ -25,7 +25,7 @@ const actions = {
 Transports receive the root proto `HttpCall` and return a `Response`. Plan, the tasks' planning facts and
 dependencies, and Focus are Tasks' own `TasksUiService`, sent to its same-origin `/api/tasks/v1/*`: a load is one wave
 of GetPlan, ListTasks pages, ListFocusDays and GetFocusTimer, and every planning write is one UpdateTask, ReorderTasks
-or UpdateWeeklyBet. Only the weekly review's two Todofy facts (ReadWeeklyReview, read when the review opens) and the
+or UpdateWeeklyBet, sent under the etag Plan holds with no read first. Only the weekly review's two Todofy facts (ReadWeeklyReview, read when the review opens) and the
 Mail categories go to `/api/plus/v1/*` with CSRF, which Todofy's private Planning channel forwards. Host callbacks
 open the full task editor and Tasks' Mail page. `snapshot`/`onSnapshot` keep confirmed content in page memory; `planView`/`onPlanView`
 optionally remember IDs and view choices, never task text.
@@ -58,7 +58,7 @@ show logged time by area, steps done and where the time went (`focus-stats.ts`).
 complete and reorder by their whole row; other days are read-only. A header checkbox shows the day's
 completed steps. Plan and Focus both count from Tasks' today (`PlanState.today`, `FocusState.date`). A task's estimate is its Tasks
 duration: the host supplies `updateEstimate`, which writes Tasks and answers the saved duration
-(`{ estimate }`). A Step opens a panel that sets only its time (`StepEditor`); tasks open the full planning
+and the task's new etag (`{ estimate, etag }`). A Step opens a panel that sets only its time (`StepEditor`); tasks open the full planning
 panel.
 
 Review keeps candidate columns together and gives Committed a separate full-width row of horizontal cards.

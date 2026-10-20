@@ -46,8 +46,10 @@ test("Plan completes an outcome in real D1, which stops its descendant's running
   ).json();
   const genericWrites: { requestId: string; etag: string; focusDay: string }[] =
     [];
+  let reads = 0;
   page.on("request", (event) => {
     const url = new URL(event.url());
+    if (url.pathname === `/api/tasks/v1/${parent.name}`) reads++;
     if (url.pathname !== `/api/tasks/v1/${parent.name}:complete`) return;
     const body = event.postDataJSON() || {};
     genericWrites.push({
@@ -68,12 +70,14 @@ test("Plan completes an outcome in real D1, which stops its descendant's running
     })
     .click();
   await expect.poll(() => genericWrites.length).toBe(1);
-  // One Tasks write, on Focus's day; the session settles on its own day in it.
+  // One Tasks write, on Focus's day; the session settles on its own day in it. It goes under the
+  // etag Plan holds, with no read of the task first.
   expect(genericWrites[0]).toEqual({
     requestId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
     etag,
     focusDay: today,
   });
+  expect(reads).toBe(0);
   const saved = await (
     await request.get(`/api/tasks/v1/tasks/${parent.id}`)
   ).json();

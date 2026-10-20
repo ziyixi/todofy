@@ -104,6 +104,11 @@ function hold<
   ) as PlusActions[Name];
   return calls;
 }
+/** A held reorder's arguments, its tasks by ID. */
+function reorderArgs({ args }: { args: unknown[] }) {
+  const [tasks, ...rest] = args;
+  return [(tasks as PlanningTask[]).map((task) => task.id), ...rest];
+}
 async function mountPlan(actions: PlusActions) {
   render(
     <App
@@ -737,7 +742,7 @@ it("reorders a card inside its lane at once, with one ReorderTasks of the whole 
   );
   // Dropped on the desk's card, the research card takes its place.
   await drop(cardData("research"), cardData("desk"));
-  expect(reorders.map((call) => call.args)).toEqual([
+  expect(reorders.map(reorderArgs)).toEqual([
     [
       ["release", "notes", "desk", "research"],
       "research",
@@ -802,7 +807,7 @@ it("sends the whole lane's order when an area filter hides some of its cards", a
   fireEvent.click(screen.getByRole("tab", { name: "Work" }));
   expect(laneTitles("Committed")).toHaveLength(3);
   await drop(cardData("notes"), cardData("release"));
-  expect(reorders[0]!.args.slice(0, 3)).toEqual([
+  expect(reorderArgs(reorders[0]!).slice(0, 3)).toEqual([
     ["notes", "release", "research", "desk"],
     "notes",
     "committed",
@@ -854,7 +859,7 @@ it("reorders Week's commitments at once, with one ReorderTasks of the Committed 
   expect(commitment("research").plugins).toHaveLength(1);
   // Dropped on the desk's card, the research card takes its place.
   await drop(commitment("research").data!, commitment("desk").data!);
-  expect(reorders.map((call) => call.args)).toEqual([
+  expect(reorders.map(reorderArgs)).toEqual([
     [
       ["release", "notes", "desk", "research"],
       "research",
@@ -908,7 +913,7 @@ it("moves a filtered commitment within the whole lane, and nothing for a drop of
   );
   expect(commitments()).toEqual(["release", "research", "notes"]);
   await drop(commitment("notes").data!, commitment("release").data!);
-  expect(reorders.map((call) => call.args.slice(0, 3))).toEqual([
+  expect(reorders.map((call) => reorderArgs(call).slice(0, 3))).toEqual([
     [["notes", "release", "research", "desk"], "notes", "committed"],
   ]);
 });
@@ -959,7 +964,7 @@ it("reorders a next step among its siblings at once, with one ReorderTasks of th
   expect(reorders).toHaveLength(0);
   // Onto its sibling's place: the parent's three children, the one with its own step too.
   await drop(step("copy"), step("layout"));
-  expect(reorders.map((call) => call.args)).toEqual([
+  expect(reorders.map(reorderArgs)).toEqual([
     [
       ["layout", "copy", "assets"],
       "copy",
@@ -1024,7 +1029,7 @@ it("keeps at most Todofy's 100 IDs of a lane's order, and writes nothing for a d
   expect(ids).toHaveLength(101);
   // Within the first 100: the first 100 of the new order.
   await drop(lane[0]!, lane[1]!);
-  expect(reorders.map((call) => call.args.slice(0, 3))).toEqual([
+  expect(reorders.map((call) => reorderArgs(call).slice(0, 3))).toEqual([
     [[ids[1], ids[0], ...ids.slice(2, 100)], ids[0], "committed"],
   ]);
   await act(() => reorders[0]!.confirm());

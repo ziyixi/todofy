@@ -1,4 +1,3 @@
-import { holds } from "../src/dependencies";
 import { BetNotSaved, betText, weeklyBet, withBets } from "../src/bets";
 import { addDays } from "../src/domain";
 import { withLaneOrder } from "../src/plan-updates";
@@ -412,37 +411,27 @@ export function createPrototype(
           : day,
       );
     },
-    // As Tasks keeps them: by ID, adding one that holds changing nothing and one that is done
-    // starting it over (the limits are left out).
-    async setDependency(taskId, prerequisiteId, waits) {
-      const others = plan.dependencies.filter(
-        (item) =>
-          item.taskId !== taskId || item.prerequisiteId !== prerequisiteId,
-      );
-      const prerequisite = plan.tasks.find(
-        (task) => task.id === prerequisiteId,
-      );
-      const existing = plan.dependencies.find(
-        (item) =>
-          item.taskId === taskId && item.prerequisiteId === prerequisiteId,
+    // As Tasks keeps the set, by ID: one it has stays as it is, done or not, unless `added`
+    // restarts it, and a new one holds (the limits are left out).
+    async setDependencies(item, prerequisiteIds, added) {
+      const own = plan.dependencies.filter((other) => other.taskId === item.id);
+      const saved = prerequisiteIds.map(
+        (id) =>
+          (!(added?.restart && added.id === id) &&
+            own.find((other) => other.prerequisiteId === id)) || {
+            taskId: item.id,
+            prerequisiteId: id,
+            done: false,
+          },
       );
       plan = {
         ...plan,
-        dependencies: waits
-          ? [
-              ...others,
-              existing && holds(existing, prerequisite)
-                ? existing
-                : { taskId, prerequisiteId, done: false },
-            ]
-          : others,
+        dependencies: [
+          ...plan.dependencies.filter((other) => other.taskId !== item.id),
+          ...saved,
+        ],
       };
-      return structuredClone({
-        forTask: taskId,
-        dependencies: plan.dependencies.filter(
-          (item) => item.taskId === taskId,
-        ),
-      });
+      return structuredClone({ forTask: item.id, dependencies: saved });
     },
     async addToDay(id, date) {
       days = days.map((day) =>
@@ -478,20 +467,26 @@ export function createPrototype(
         ),
       );
     },
-    async updateEstimate(taskId, minutes) {
+    async updateEstimate(item, minutes) {
+      // A write of the task: its etag changes.
+      const etag = crypto.randomUUID();
       plan = {
         ...plan,
         tasks: plan.tasks.map((task) =>
-          task.id === taskId
-            ? { ...task, estimatedMinutes: minutes > 0 ? minutes : undefined }
+          task.id === item.id
+            ? {
+                ...task,
+                estimatedMinutes: minutes > 0 ? minutes : undefined,
+                etag,
+              }
             : task,
         ),
       };
       focus = {
         ...focus,
-        estimates: { ...focus.estimates, [taskId]: minutes },
+        estimates: { ...focus.estimates, [item.id]: minutes },
       };
-      return { estimate: { taskId, minutes } };
+      return { estimate: { taskId: item.id, minutes }, etag };
     },
     async timer(action, taskId, _focus, _targetSeconds, area = "unassigned") {
       const seconds = focus.timer
@@ -593,11 +588,11 @@ export function createPrototype(
       }));
       return { deletedEntry: { id: entry.id, date: entry.date } };
     },
-    async reorderTasks(taskIds, movedId, lane) {
-      // As Todofy reorders: the moved task's siblings among these take their existing positions in
+    async reorderTasks(ordered, movedId, lane) {
+      // As Tasks reorders: the moved task's siblings among these take their existing positions in
       // this order (never in Waiting or Parked), and the lane keeps the order of those still active.
-      const listed = taskIds.flatMap(
-        (id) => plan.tasks.find((task) => task.id === id) ?? [],
+      const listed = ordered.flatMap(
+        (item) => plan.tasks.find((task) => task.id === item.id) ?? [],
       );
       const moved = listed.find((task) => task.id === movedId);
       const group = listed.filter(

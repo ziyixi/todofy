@@ -155,13 +155,15 @@ function withReorder(data: PlusData, result: ReorderResult): PlusData {
 }
 
 /**
- * A task's estimate as the host saves it: its duration, none for 0. Focus reads its own copy of
- * the estimates first, so that copy changes too.
+ * A task's estimate as the host saves it: its duration, none for 0, with the etag the write gave
+ * it, which the task's next write needs. Focus reads its own copy of the estimates first, so that
+ * copy changes too.
  */
 export function withEstimate(
   data: PlusData,
   taskId: string,
   minutes: number,
+  etag?: string,
 ): PlusData {
   return {
     ...data,
@@ -169,7 +171,11 @@ export function withEstimate(
       ...data.plan,
       tasks: data.plan.tasks.map((task) =>
         task.id === taskId
-          ? { ...task, estimatedMinutes: minutes > 0 ? minutes : undefined }
+          ? {
+              ...task,
+              estimatedMinutes: minutes > 0 ? minutes : undefined,
+              ...(etag ? { etag } : {}),
+            }
           : task,
       ),
     },
@@ -219,6 +225,7 @@ export function applyConfirmed(data: PlusData, confirmed: Confirmed): PlusData {
       data,
       confirmed.estimate.taskId,
       confirmed.estimate.minutes,
+      confirmed.etag,
     );
   if ("id" in confirmed) return withTasks(data, [confirmed]);
   return withDependencies(data, confirmed);
@@ -301,13 +308,9 @@ export function withStage(
   };
 }
 
-/** `ids` with the one at `from` moved to `to`, as a sortable list moves it. */
-export function moved(
-  ids: readonly string[],
-  from: number,
-  to: number,
-): string[] {
-  const next = [...ids];
+/** `items` with the one at `from` moved to `to`, as a sortable list moves it. */
+export function moved<T>(items: readonly T[], from: number, to: number): T[] {
+  const next = [...items];
   next.splice(to, 0, ...next.splice(from, 1));
   return next;
 }

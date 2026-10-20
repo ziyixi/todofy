@@ -94,7 +94,7 @@ Review／Week、Review 的领域过滤、本周周回顾是否展开及勾选、
 
 - 预设是 `aria-pressed` 按钮，等于已存用时的那个按下，都在 `role=group`、名称“预计用时：{标题}”里。自定义框接受 1–1440 的整数分钟，回车或离开时保存；不合法的值不保存，标成 `aria-invalid`，离开时恢复。Esc 先恢复已存的值，再按一次关闭面板。已存值不是预设时显示在框里，没有估时的步骤没有按下的预设。没有“未估时”选项，也没有“超过 2 小时”那句（卡片上的警示色就够了）。
 - 规划范围、领域、任务选项、子任务、添加步骤、截止日期、标为进行中和依赖都不在这里，“打开任务”打开 Tasks 的完整任务详情。
-- 选择立即显示为按下，这一步的卡片变暗等待，标题旁出现等待标记；宿主写 Tasks 的 `duration_minutes` 并返回保存的时长（`{ estimate }`），确认后直接合并，不整表读取，按下的预设不会闪回旧值。等待期间预设只是 `aria-disabled`，不响应点击，焦点留在按下的按钮上；面板只按任务 ID 挂载，保存不会重新挂载它。保存后读屏读出“已保存预计用时：60 分钟”。失败时现有横幅说明“更改未保存，已恢复”，按下的预设回到已存的值。
+- 选择立即显示为按下，这一步的卡片变暗等待，标题旁出现等待标记；宿主写 Tasks 的 `duration_minutes` 并返回保存的时长和任务新的 etag（`{ estimate, etag }`），确认后直接合并，不整表读取，按下的预设不会闪回旧值。等待期间预设只是 `aria-disabled`，不响应点击，焦点留在按下的按钮上；面板只按任务 ID 挂载，保存不会重新挂载它。保存后读屏读出“已保存预计用时：60 分钟”。失败时现有横幅说明“更改未保存，已恢复”，按下的预设回到已存的值。
 - 任务（`kind=task`，含快速事项）仍打开完整的任务详情；其中“步骤与时间”添加小步骤的用时同样是 15／30／60／90 分钟，默认 30，没有“未估时”。
 
 ### 单击与双击
@@ -139,8 +139,8 @@ Review／Week、Review 的领域过滤、本周周回顾是否展开及勾选、
 
 规则（`src/dependencies.ts`，完整读取之后）：
 
-- 所等的任务 B 在活动列表里、Tasks 也没说它已完成就在等；B 不在活动列表里就算满足（“消失即满足”）。B 被删除时，Tasks 删掉等它的依赖；A 完成时，删掉 A 的依赖。被重新打开的 B 又出现在列表里时重新算在等。
-- 循环任务完成时只推进日期、ID 不变：任务的 `completed_count` 在每次完成时加一、撤销时减一。建立依赖时 Tasks 记下 B 当时的计数，B 在那之后的下一次完成（计数大于记下的值）就算满足，Tasks 在每个依赖上答 `done`，以后的循环不再挡住 A；要等 B 的再下一次，就移除它再选一次 B，从当时的计数重新记起。
+- 所等的任务 B 在活动列表里、Tasks 也没说它已完成就在等；B 不在活动列表里就算满足（“消失即满足”）。B 被删除时，Tasks 删掉等它的依赖；A 完成时，删掉 A 的依赖。B 所在的项目归档时，Tasks 也答 `done`，与 Plan 一致。被重新打开的 B、项目恢复后的 B 又出现在列表里时重新算在等。
+- 循环任务完成时只推进日期、ID 不变：任务的 `completed_count` 在每次完成时加一、撤销时减一。建立依赖时 Tasks 记下 B 当时的计数，B 在那之后的下一次完成（计数大于记下的值）就算满足，Tasks 在每个依赖上答 `done`，以后的循环不再挡住 A；要等 B 的再下一次，就在选择框里再选一次 B，从当时的计数重新记起。Tasks 对集合里已有的依赖保持原样，已满足的也不重新开始，所以 Plan 先发不含 B 的集合，再发含 B 的集合（两次 UpdateTask）。
 - 只有仍在等的依赖算数：每个任务最多等 5 项，全部最多 300 条；不能等自己，也不能互相等待（含经过其他任务的环）。已满足的依赖不构成环，也不占 5 项：任务已有 5 条（或全部已有 300 条）时，它最早一条已满足的依赖给新的让位。选择时就不让选；Tasks 写入时用一次读取再查一次，并在同一个批次里再核对环和 300 条，两个标签页同时写也不会成环。
 
 **任务详情的“依赖 / Depends on”段**：在 Plan 的任务详情里，位于“截止日期”段之后，标题样式与“下一步”“截止日期”相同。
@@ -153,7 +153,7 @@ Review／Week、Review 的领域过滤、本周周回顾是否展开及勾选、
 
 输入法组字期间，Enter、方向键和 Escape 交由输入法处理，不移动选项或添加依赖。选择框是内联的，不在 Plan 的对话框里再套一层：32px 输入框自动获得焦点，占位文字 `搜索任务或父任务 / Search tasks or parents`；输入后在已完整读取的活动任务中按标题或父任务即时搜索，规则与原“更换目标”相同，没有语法；没有输入时不列出任何任务。结果最多 6 行，每行至少 28px：标题 13px，右侧是父任务路径（12px muted）。不列出任务自己、它的父任务和它的步骤，以及它仍在等的任务；已满足的循环任务会再列出，选它就等它的下一次完成。会形成循环的任务（按仍在等的依赖）仍列出但为灰色，右侧写 `会互相等待 / Would wait on each other`；灰色的行不能选择，也从不高亮：高亮从第一个能选的行开始，↑↓ 只在能选的行之间移动，鼠标移到灰色行上不改变高亮，Enter 添加高亮的那一行；Escape 或 `取消 / Cancel` 收起选择框，Escape 不再传给外面的对话框，焦点回到“添加依赖”。
 
-选中即写入，是先确认的一次 UpdateTask（mask `dependencies`，发送这个任务的新的依赖集合）：新行先带现有的等待标记（PendingMark）显示，写入期间停用写入控件，确认后合并返回的这个任务（新的 etag）和它的依赖，不再整表读取；编辑器的 `role="status"` 读出 `已添加依赖：订场地`。点 × 同样是一次写入，读出 `已移除依赖：订场地`。失败时用原有错误区域：Tasks 拒绝时写 `Not added: this dependency cannot be added now. Refresh and try again.`（别的标签页刚改过依赖成环、到了上限或所等的任务已不在待办中都是同一个拒绝，所以不猜原因；和其他 API 错误一样只有英文），任务已不存在时写 `Not added: one of these tasks is no longer active. Refresh and try again.`。
+选中即写入，是先确认的一次 UpdateTask（mask `dependencies`，带 Plan 持有的 etag 发送这个任务的新的依赖集合；再选已满足的循环任务时是先移除再加入的两次）：新行先带现有的等待标记（PendingMark）显示，写入期间停用写入控件，确认后合并返回的这个任务（新的 etag）和它的依赖，不再整表读取；编辑器的 `role="status"` 读出 `已添加依赖：订场地`。点 × 同样是一次写入，读出 `已移除依赖：订场地`。失败时用原有错误区域：Tasks 拒绝时写 `Not added: this dependency cannot be added now. Refresh and try again.`（别的标签页刚改过依赖成环、到了上限或所等的任务已不在待办中都是同一个拒绝，所以不猜原因；和其他 API 错误一样只有英文），任务已不存在时写 `Not added: one of these tasks is no longer active. Refresh and try again.`。
 
 **看板与其他位置**：只因依赖而在等、又没有自己规划范围的任务在“等待中”，排序规则不变（最久未变动的在前）；有自己规划范围的留在原列。卡片计数那一段换成一句安静的状态 `等「订场地」`／`等 2 项`，有截止日期时截止日期那一段在它前面（`已过 2 天 · 等「订场地」`），可访问名称带同一句和完整标题；在等的卡片没有“开始”。所等任务的标题最宽 7em（中文约 7 个字），太长时在引号里以省略号结尾，引号保留，悬停提示完整标题；整句只占一行，卡片窄时以省略号结尾，不会溢出卡片。Focus 的那一行和周回顾的“等待中”计数都包含这类任务；Week 的承诺总览照旧只显示步骤和排程数。
 
@@ -228,7 +228,7 @@ Focus 显示 Tasks 的今天（`ListFocusDaysResponse.today`，即账户时区�
 - 等待确认的卡片在可访问名称中带“正在更新…”；抓手用 `aria-disabled` 停用但保持可聚焦，键盘落下后焦点留在移动的卡片上。减少动态效果时小转圈停止，只保留变暗。
 - 等待确认的 Review 卡仍带拖动前的 etag：它的详情在确认或撤回前只读，详情标题显示同一等待标记；结束后显示服务端保留的规划范围。本周目标与任务无关，拖动期间照常可编辑。
 - “移出日期”不提前删除：卡片原位等待，Tasks 确认后才消失。
-- 所有写入进入同一个先进先出队列，按操作顺序执行。每次加入、移出、同日排序或跨日移动是一次 MoveFocusStep，只改这一个步骤，不写回屏幕上可能过时的整条队列；其他标签页刚加入的步骤和排在前面的移出都会保留。插到某步骤之前而它已不在那天时，Tasks 拒绝（“This step has moved. Refresh and try again.”）。每天最多 20 个步骤。任务写入仍检查 etag。确认后换成服务端返回的任务或队列（队列替换，那天的用时记录保留）。
+- 所有写入进入同一个先进先出队列，按操作顺序执行。每次加入、移出、同日排序或跨日移动是一次 MoveFocusStep，只改这一个步骤，不写回屏幕上可能过时的整条队列；其他标签页刚加入的步骤和排在前面的移出都会保留。插到某步骤之前而它已不在那天时，Tasks 拒绝（“This step has moved. Refresh and try again.”）。每天最多 20 个步骤。任务写入带 Plan 持有的 etag，不先读取：每次确认的任务写入（规划、依赖、排序、估时）都返回新的 etag；过时时 Tasks 拒绝，撤回后重新读取。确认后换成服务端返回的任务或队列（队列替换，那天的用时记录保留）。
 - 队列、计时和用时记录的写入各保留一个请求 ID，直到确认；回答丢失后的同样重试按原请求重放，不会写两次。
 - 任一写入失败时，排在其后的写入不再发送，所有等待确认的预期变化撤回；原有错误区域说明“更改未保存，已恢复”、实际失败和其后未发送的更改数，队列空闲后重新读取。等待确认的卡片不显示为已保存。
 - 邮件归类的保存只写 Todofy，在对话框里等待和报错。
@@ -262,7 +262,7 @@ Plan、规划事实、依赖、Focus 的队列、计时和用时记录都是 Tas
 | 改规划范围／领域     | UpdateTask，mask `stage`／`area`                                                                 | 保存的任务，合并单任务                                |
 | 标为／取消进行中     | UpdateTask，mask `planning_flags`：只增删 `active`                                               | 保存的任务，合并单任务                                |
 | 搁置／移出搁置       | UpdateTask，mask `planning_flags`：新加 `parked` 时 Tasks 去掉规划范围和 `active`                | 保存的任务，合并单任务                                |
-| 调整列内顺序         | ReorderTasks：`lane_order` 是这一列的新顺序（Week 的承诺排序就是本周承诺一列）；`positions` 是移动卡片的兄弟任务交换后的位置，等待中、搁置时为空 | 保存的列顺序和这些任务新的位置与 etag，直接合并 |
+| 调整列内顺序         | ReorderTasks：`lane_order` 是这一列的新顺序（Week 的承诺排序就是本周承诺一列）；`positions` 是移动卡片的兄弟任务交换后的位置，带 Plan 持有的 etag，不先读取，等待中、搁置时为空 | 保存的列顺序和这些任务新的位置与 etag，直接合并 |
 | 保存、清空、沿用目标 | UpdateWeeklyBet：`weeklyBets/{周一}-{work\|personal}` 的 `text` 和 etag，只写 D1，不写任务       | 返回的 WeeklyBet 直接合并；冲突时重读一次 GetPlan     |
 | 创建小步骤           | 每个步骤一次 CreateTask（`kind=step`、`duration_minutes`）                                       | 新步骤的 ID（按输入顺序），后台再读取                 |
 | 切周                 | ListFocusDays（七天，一次）                                                                      | 那周的队列与记录                                      |
@@ -270,13 +270,13 @@ Plan、规划事实、依赖、Focus 的队列、计时和用时记录都是 Tas
 | 移出日期／加入今天   | MoveFocusStep：只有源日，或只有目标日                                                            | 该日的队列，直接合并                                  |
 | Focus 的其他日期、周和月 | `readFocus`：ListFocusDays，每次最多七天，同时发出（一个月最多 6 次）；写入确认后重读显示的范围 | 每天的队列与记录、它们提到的任务、Tasks 的今天        |
 | 用时记录             | CreateFocusEntry、UpdateFocusEntry（只改 `seconds`，带 etag）、DeleteFocusEntry                  | 保存或删除的记录，直接合并                            |
-| 估时                 | 宿主的 `updateEstimate`：Tasks UpdateTask 的 `duration_minutes`                                  | 保存的时长（`{ estimate }`），直接合并；零表示清空    |
+| 估时                 | 宿主的 `updateEstimate`：Tasks UpdateTask 的 `duration_minutes`，带 Plan 持有的 etag             | 保存的时长和新的 etag（`{ estimate, etag }`），直接合并；零表示清空 |
 | 计时                 | CommandFocusTimer，etag 与稳定 request ID；Start 带番茄钟时长和领域                              | FocusTimer 映射为 TimerSnapshot，保存的记录一并合并；idle 清除显示状态 |
-| 真正完成（Focus 与 Plan 的勾选框） | 宿主的 `completeTask`：Tasks CompleteTask 带 `focus_day`，日历卡片带所在日期，其余带 Focus 的日期 | Tasks 确认后后台重新读取，不靠本地删除                |
+| 真正完成（Focus 与 Plan 的勾选框） | 宿主的 `completeTask`：Tasks CompleteTask（Plan 持有的 etag）带 `focus_day`，日历卡片带所在日期，其余带 Focus 的日期 | Tasks 确认后后台重新读取，不靠本地删除                |
 | 提前开始             | UpdateTask，mask `deadline,lead_days`；没有截止日期时 Tasks 存 0                                 | 保存的任务（Deadline、leadDays），Due 保留            |
 | 周回顾数据           | 加载的任务、队列和 GetPlan（下周选择 ID、上周至下周的目标）；清单打开时 Todofy 的 ReadWeeklyReview（待理清的邮件数、回顾任务） | 回顾的两项到达前显示“—” |
 | 依赖                 | 每个任务的 `dependencies`（所等任务的 ID、标题和 `done`），与加载一同读取                         | 由任务得出的全部依赖                                  |
-| 添加／移除依赖       | GetTask 取当前的依赖和 etag，再 UpdateTask（mask `dependencies`，新的集合）                      | 保存的任务和它的依赖，直接合并                        |
+| 添加／移除依赖       | UpdateTask（mask `dependencies`，这个任务新的整组依赖，Plan 持有的 etag）；再选已满足的循环任务时先移除再加入，两次 | 保存的任务和它的依赖，直接合并                        |
 | 移到本月／留到下周   | UpdateTask，mask `stage`（monthly／committed）                                                   | 保存的任务，合并单任务                                |
 | 完成回顾             | CompleteTask，不带 `focus_day`（Tasks 的今天）                                                   | Tasks 确认后后台重新读取                              |
 | 邮件归类             | ReadMailSettings、UpdateMailCategories（整组替换，只写 D1，可为空）                              | 保存后的归类和 etag                                   |

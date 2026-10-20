@@ -1,5 +1,25 @@
 import { expect, it } from "vitest";
+import { create } from "@ziyixi/proto/protobuf";
+import { TaskSchema } from "@ziyixi/proto/tasks/ui/v1/task_pb";
+import { planningTask } from "../src/api";
 import { fakeActions } from "./transport";
+
+/** A task as Plan holds it, with Tasks' order and etag. */
+const held = (task: {
+  id: string;
+  parent_id?: string;
+  sort_order: number;
+  etag: string;
+}) =>
+  planningTask(
+    create(TaskSchema, {
+      id: task.id,
+      name: `tasks/${task.id}`,
+      parentId: task.parent_id ?? "",
+      sortOrder: task.sort_order,
+      etag: task.etag,
+    }),
+  );
 
 /**
  * Tasks' MoveFocusStep over synthetic queues: no source adds, no destination removes, the same day
@@ -234,7 +254,7 @@ it("creates each new step in Tasks, in order, under IDs fixed for its add, and a
   expect(query(0).get("task_id")).not.toBe(ids[0]);
 });
 
-it("maps Tasks' sibling order and the saved lane orders, and sends one reorder of the moved task's siblings", async () => {
+it("maps Tasks' sibling order and the saved lane orders, and sends one reorder of the moved task's siblings under the etags Plan holds", async () => {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
   const listed = [
     // b is moved before a among the siblings of one parent; c, under another parent, keeps its place.
@@ -281,8 +301,6 @@ it("maps Tasks' sibling order and the saved lane orders, and sends one reorder o
           { lane: "someday", task_ids: ["c"] },
         ],
       });
-    if (url.pathname === "/api/tasks/v1/tasks")
-      return Response.json({ tasks: listed });
     if (url.pathname === "/api/tasks/v1/tasks:reorder")
       return Response.json({
         tasks: [
@@ -299,14 +317,15 @@ it("maps Tasks' sibling order and the saved lane orders, and sends one reorder o
     throw new Error(`Unexpected request: ${url.pathname}`);
   });
   expect((await api.readPlan()).laneOrders).toEqual({ committed: ["b", "a"] });
+  const [a, b, c] = listed.map(held);
   const result = await api.reorderTasks(
-    ["b", "a", "c"],
+    [b!, a!, c!],
     "b",
     "committed",
     "22222222-2222-4222-8222-222222222222",
   );
+  // No read first: Plan already holds every task's order and etag.
   expect(requests.slice(1).map((request) => request.path)).toEqual([
-    "/api/tasks/v1/tasks?view=all&page_size=100&task_ids=b&task_ids=a&task_ids=c",
     "/api/tasks/v1/tasks:reorder",
   ]);
   expect(requests.at(-1)?.body).toEqual({
@@ -342,10 +361,10 @@ it("maps Tasks' sibling order and the saved lane orders, and sends one reorder o
     },
   ]);
   expect(result.lane).toEqual({ lane: "committed", taskIds: ["b", "a", "c"] });
-  // Waiting and Parked change no task: their order alone, with no read.
+  // Waiting and Parked change no task: their order alone.
   requests.length = 0;
   await api.reorderTasks(
-    ["a", "b"],
+    [a!, b!],
     "a",
     "waiting",
     "44444444-4444-4444-8444-444444444444",
@@ -367,26 +386,17 @@ it("resends a reorder whose answer was lost as first built, and builds a refused
   let answer: () => Response | never = () => {
     throw new TypeError("Synthetic response loss");
   };
-  let etag = "1";
-  const api = fakeActions(async (input, init) => {
-    const url = new URL(String(input));
-    if (url.pathname === "/api/tasks/v1/tasks")
-      return Response.json({
-        tasks: ["a", "b"].map((id, index) => ({
-          id,
-          name: `tasks/${id}`,
-          sort_order: index,
-          etag,
-        })),
-      });
+  const api = fakeActions(async (_input, init) => {
     bodies.push(JSON.parse(String(init?.body)));
     return answer();
   });
+  // b moves before a; Plan reads both again (etag 2) after the lost answer.
+  const order = (etag: string) =>
+    ["b", "a"].map((id) => held({ id, sort_order: id === "a" ? 0 : 1, etag }));
   const request = "55555555-5555-4555-8555-555555555555";
   await expect(
-    api.reorderTasks(["b", "a"], "b", "", request),
+    api.reorderTasks(order("1"), "b", "", request),
   ).rejects.toThrow();
-  etag = "2";
   answer = () =>
     Response.json(
       {
@@ -400,10 +410,10 @@ it("resends a reorder whose answer was lost as first built, and builds a refused
       { status: 409 },
     );
   await expect(
-    api.reorderTasks(["b", "a"], "b", "", request),
+    api.reorderTasks(order("2"), "b", "", request),
   ).rejects.toThrow();
   answer = () => Response.json({});
-  await api.reorderTasks(["b", "a"], "b", "", request);
+  await api.reorderTasks(order("2"), "b", "", request);
   const etags = bodies.map(
     (body) => (body as { positions: { etag: string }[] }).positions[0]?.etag,
   );

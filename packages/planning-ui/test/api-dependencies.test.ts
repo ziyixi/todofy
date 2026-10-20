@@ -6,13 +6,21 @@ import { fakeActions } from "./transport";
 
 /** A Tasks stub: the synthetic answers by method and path, with every request it received. */
 function tasks(answers: Record<string, () => Response>) {
-  const requests: { method: string; path: string; body: unknown }[] = [];
+  const requests: {
+    method: string;
+    path: string;
+    etag?: string;
+    body: unknown;
+  }[] = [];
   const api = fakeActions(async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
     requests.push({
       method,
       path: url.pathname,
+      ...(url.searchParams.has("etag")
+        ? { etag: url.searchParams.get("etag")! }
+        : {}),
       body: init?.body ? (JSON.parse(String(init.body)) as unknown) : undefined,
     });
     const answer = answers[`${method} ${url.pathname}`];
@@ -60,7 +68,12 @@ it("maps the recurring flag and Tasks' counter", () => {
   expect(planningTask(create(TaskSchema, { id: "b" })).recurring).toBe(false);
 });
 
-it("writes a dependency as the waiting task's new set, over its current etag, and answers the saved task", async () => {
+/** The waiting task as Plan holds it: Tasks' etag, which every write goes under. */
+const held = planningTask(
+  create(TaskSchema, { id: "a", name: "tasks/a", etag: "3" }),
+);
+
+it("writes a dependency as the waiting task's new set in one write under the etag Plan holds, and answers the saved task", async () => {
   const saved = {
     ...waiter,
     etag: "4",
@@ -70,10 +83,12 @@ it("writes a dependency as the waiting task's new set, over its current etag, an
     ],
   };
   const { api, requests } = tasks({
-    "GET /api/tasks/v1/tasks/a": () => Response.json(waiter),
     "PATCH /api/tasks/v1/tasks/a": () => Response.json(saved),
   });
-  const result = await api.setDependency("a", "b", true);
+  const result = await api.setDependencies(held, ["c", "b"], {
+    id: "b",
+    restart: false,
+  });
   expect(result).toMatchObject({
     forTask: "a",
     dependencies: [
@@ -83,10 +98,10 @@ it("writes a dependency as the waiting task's new set, over its current etag, an
     task: { id: "a", etag: "4" },
   });
   expect(requests).toEqual([
-    { method: "GET", path: "/api/tasks/v1/tasks/a", body: undefined },
     {
       method: "PATCH",
       path: "/api/tasks/v1/tasks/a",
+      etag: "3",
       body: {
         dependencies: [{ prerequisite_id: "c" }, { prerequisite_id: "b" }],
       },
@@ -94,8 +109,39 @@ it("writes a dependency as the waiting task's new set, over its current etag, an
   ]);
   // Removing sends the set without it; the wire leaves an empty set out, and the mask still names it.
   requests.length = 0;
-  await api.setDependency("a", "c", false);
-  expect(requests[1]?.body).toEqual({});
+  await api.setDependencies(held, []);
+  expect(requests.map((request) => request.path)).toEqual([
+    "/api/tasks/v1/tasks/a",
+  ]);
+  expect(requests[0]?.body).toEqual({});
+});
+
+it("restarts a done dependency by removing it and adding it again, the second write under the first one's etag", async () => {
+  let answer = 0;
+  const { api, requests } = tasks({
+    "PATCH /api/tasks/v1/tasks/a": () =>
+      Response.json(
+        ++answer === 1
+          ? { ...waiter, etag: "4", dependencies: [] }
+          : {
+              ...waiter,
+              etag: "5",
+              dependencies: [{ prerequisite_id: "c", title: "Synthetic done" }],
+            },
+      ),
+  });
+  const result = await api.setDependencies(held, ["c"], {
+    id: "c",
+    restart: true,
+  });
+  expect(requests.map(({ etag, body }) => ({ etag, body }))).toEqual([
+    { etag: "3", body: {} },
+    { etag: "4", body: { dependencies: [{ prerequisite_id: "c" }] } },
+  ]);
+  expect(result).toMatchObject({
+    dependencies: [{ taskId: "a", prerequisiteId: "c", done: false }],
+    task: { etag: "5" },
+  });
 });
 
 it("says why Tasks did not add a dependency, claiming no cause the refusal does not carry", async () => {
@@ -113,11 +159,10 @@ it("says why Tasks did not add a dependency, claiming no cause the refusal does 
     ],
   ] as const) {
     const { api } = tasks({
-      "GET /api/tasks/v1/tasks/a": () => Response.json(waiter),
       "PATCH /api/tasks/v1/tasks/a": () => refused(reason, status),
     });
     const error = await api
-      .setDependency("a", "b", true)
+      .setDependencies(held, ["c", "b"], { id: "b", restart: false })
       .catch((failure: unknown) => failure);
     // Plan shows a failed write's own message.
     expect((error as Error).message).toBe(message);

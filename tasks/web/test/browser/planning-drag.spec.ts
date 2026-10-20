@@ -165,6 +165,7 @@ test("one Week commitment selects on a click, opens on a double-click and moves 
   await expect(audit).toHaveClass(/is-selected/u);
   expect(writes(state)).toEqual([]);
   // Dragged by its title onto the desk's card, it takes the desk's place.
+  const before = state.tasksRequests.length;
   await pressAndMove(page, audit);
   await expect(grid.locator(".planning-commitment.is-dragging")).toHaveCount(1);
   const desk = await centre(card("Synthetic desk"));
@@ -183,6 +184,12 @@ test("one Week commitment selects on a click, opens on a double-click and moves 
       { lane: "committed", task_ids: ["launch", "desk", "audit"] },
     ],
   ]);
+  // Nothing is read first: the positions go under the etags Plan holds.
+  expect(
+    state.tasksRequests
+      .slice(before)
+      .map((request) => `${request.method} ${request.path}`),
+  ).toEqual(["POST /api/tasks/v1/tasks:reorder"]);
   // The drop was no click: the selection and the dialog are as they were.
   await expect(audit).toHaveClass(/is-selected/u);
   await expect(page.locator("dialog.plus-dialog[open]")).toHaveCount(0);

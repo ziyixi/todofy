@@ -343,8 +343,8 @@ async function upsert(api: TasksApi, task: SeedTask) {
 }
 
 /**
- * Creates a task in the dev server's own D1. Plan and Focus complete a task in Tasks (GetTask, then
- * CompleteTask, which settles its Focus day), so a journey that completes one needs it there.
+ * Creates a task in the dev server's own D1. Plan and Focus complete a task in Tasks (CompleteTask,
+ * which settles its Focus day), so a journey that completes one needs it there.
  */
 export async function createTask(
   request: APIRequestContext,
