@@ -87,9 +87,9 @@ The lead's production steps right after the release, in this order:
 
 **In progress, local only.** A branch from `origin/main` `b7b52e75` for the owner's ten Plan and Focus changes of
 2026-10-19, which ship in one release. Slices, in order: A (card layout and area colours), B (the Step panel and
-double-click) and C (whole-row drag in Plan) are done; D1-D3 (Tasks owns Focus day queues, the timer and time
-records; Focus reorder, Completed and the Day/Week/Month views) remain. FlowDay keeps running untouched, nothing new uses it,
-and its queue and time data are not migrated (owner decision).
+double-click), C (whole-row drag in Plan) and D1 (Tasks' Focus backend) are done; D2 (planning-ui and the Tasks host
+switch to it) and D3 (Focus reorder, Completed and the Day/Week/Month views) remain. FlowDay keeps running untouched,
+nothing new uses it, and its queue and time data are not migrated (owner decision).
 
 - **Slice A (2026-10-20 UTC).** Plan and Focus cards are coloured by area (Work slate, Personal ochre, Unassigned
   none) with legend dots; outcome cards are 77px with one left-aligned meta line, the deadline first in a two-part
@@ -121,6 +121,26 @@ and its queue and time data are not migrated (owner decision).
   drags by its body, one commitment selects, opens and moves, its keyboard reorder keeps focus on the grip, small
   grips show only on hover or focus, and Chromium touch input through CDP drags only after a 250ms hold while a
   quick swipe scrolls); Changes' test steps passed and its decide step again could not run locally.
+  For slice D1 `ci_changes.py` selects every proto user's checks, because the Tasks API changed. On macOS these
+  passed: Proto checks (buf lint, api-linter, breaking against `b7b52e75`, generation and both codecs), Shared
+  packages, Contracts, Tasks (18 worker runtime files with the new Focus, write-budget, read-budget and CPU tests;
+  the web's unit tests and all 98 Playwright tests), FlowDay (its Worker bundle 125.7 of 140 KiB), Todofy static
+  and all 512 Todofy runtime tests (the weekly backup's round trip now carries Focus rows), Mail Hero, Home, links,
+  watch, mailsort, recall, brief and fleet. The website's export and Worker dry runs passed on a free port
+  (another session holds 4173). Platform's contract step passed; its manifest compiler, AppArmor, image and k3s
+  steps need Linux. Changes' test steps and the 453 `.github/scripts` tests passed; its decide step again could not
+  run locally.
+- **Slice D1 (2026-10-20 UTC).** Tasks owns Focus; nothing calls it until D2. Migration `0005_focus.sql` adds day
+  queues (`day_steps`), time records (`focus_entries`) and the one timer row (`focus_timer`), never hard-deleted.
+  `proto/tasks/ui/v1/focus.proto` and seven methods: `ListFocusDays` (1-7 days, their records, every task they name
+  and Tasks' today), `MoveFocusStep` (`focusDays:moveStep`: add, remove, reorder or move one step), `GetFocusTimer`,
+  `CommandFocusTimer` (start, pause, resume, stop, finish; a session of a minute or more becomes one record) and
+  Create/Update/Delete `FocusEntry`. `CompleteTask.focus_day` (empty: Tasks' today) settles the queue and a related
+  session in the completion's own batch, and `ReopenTask` opens those rows again. A day holds 20 steps and 30
+  records, an active session holding one place: the spec's 30 and 40 put an isolate's first read of the fullest
+  week at 9.7-10.7 reference ms, now 8.5-8.9. The weekly backup exports the three tables; the restore tool also
+  restores older backups, with empty Focus tables and an idle timer (`tasks/docs/backup.md`). The Tasks Worker
+  bundle grew from 122.0 to 130.5 KiB gzip, of its 132 KiB budget.
 - **Known limit.** With all seven Review lanes at a 1440px window (six cards a row, about 155px each) the step counts
   end in an ellipsis; the cards keep their 77px.
 
