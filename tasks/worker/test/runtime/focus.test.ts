@@ -161,7 +161,7 @@ test('a step goes before another by the midpoint, and a gap too small to halve r
 
 test('a missing before step, a full day and a completed step are refused without writing', async () => {
   const day = '2030-12-01';
-  const steps = await Promise.all(Array.from({ length: 30 }, (_, index) => task(`Synthetic full ${String(index)}`)));
+  const steps = await Promise.all(Array.from({ length: 20 }, (_, index) => task(`Synthetic full ${String(index)}`)));
   await harness.db.batch(
     steps.map((step, index) =>
       harness.db
@@ -169,7 +169,7 @@ test('a missing before step, a full day and a completed step are refused without
         .bind(day, step.id, index + 1),
     ),
   );
-  const extra = await task('Synthetic 31st step');
+  const extra = await task('Synthetic 21st step');
   const done = await task('Synthetic completed step');
   await ok(
     await harness.mutate('POST', `/api/tasks/v1/${done.name}:complete`, { etag: done.etag, request_id: randomUUID() }),
@@ -188,8 +188,8 @@ test('a missing before step, a full day and a completed step are refused without
   expect(await stepRows('2030-12-03')).toEqual([]);
   expect(await receipts()).toEqual(before.receipts);
   // A step already on the full day may still move within it.
-  await ok(await move({ task_id: steps[29]?.id, source_day: day, destination_day: day, before_task_id: steps[0]?.id }));
-  expect((await queue(day)).open[0]).toBe(steps[29]?.id);
+  await ok(await move({ task_id: steps[19]?.id, source_day: day, destination_day: day, before_task_id: steps[0]?.id }));
+  expect((await queue(day)).open[0]).toBe(steps[19]?.id);
 });
 
 test('malformed days and empty moves are invalid', async () => {
@@ -360,7 +360,7 @@ test('records are created, changed and deleted with etags, within their bounds',
   expect(await refusal(await addEntry({ task_id: 'missing-task', day: '2026-10-02', seconds: 600 }))).toBe('NOT_FOUND');
 });
 
-test('a day holds 40 records, an active session holding one place', async () => {
+test('a day holds 30 records, an active session holding one place', async () => {
   const step = await task('Synthetic busy day');
   const fill = (day: string, count: number) =>
     harness.db
@@ -370,7 +370,7 @@ test('a day holds 40 records, an active session holding one place', async () => 
       )
       .bind(day, step.id, JSON.stringify(Array.from({ length: count }, (_, index) => index)))
       .run();
-  await fill('2026-10-05', 40);
+  await fill('2026-10-05', 30);
   expect(await refusal(await addEntry({ task_id: step.id, day: '2026-10-05', seconds: 600 }))).toBe(
     'FAILED_PRECONDITION',
   );
@@ -378,7 +378,7 @@ test('a day holds 40 records, an active session holding one place', async () => 
     .prepare('SELECT count(*) AS n FROM focus_entries WHERE day=? AND deleted_at IS NULL')
     .bind(today())
     .first<{ n: number }>();
-  await fill(today(), 39 - (live?.n ?? 0));
+  await fill(today(), 29 - (live?.n ?? 0));
   await ok(await command('start', { task_id: step.id }));
   expect(await refusal(await addEntry({ task_id: step.id, day: today(), seconds: 600 }))).toBe('FAILED_PRECONDITION');
   await elapse(120);

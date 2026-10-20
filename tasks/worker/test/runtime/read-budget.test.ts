@@ -4,12 +4,17 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
 import { ProjectSchema, SectionSchema } from '@ziyixi/proto/tasks/ui/v1/task_pb';
 import {
+  GetFocusTimerRequestSchema,
+  ListFocusDaysRequestSchema,
   ListTasksRequestSchema,
   UpdateProjectRequestSchema,
   UpdateSectionRequestSchema,
 } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { saveCatalog } from '../../src/catalog.ts';
+import { listFocusDays } from '../../src/focus.ts';
+import { getFocusTimer } from '../../src/focus-timer.ts';
 import { getTask, listTasks } from '../../src/task-read.ts';
+import { seedWorstWeek, WEEK_ENTRIES, WEEK_STEPS } from './focus-week.ts';
 import { measuredReads, startHarness, type Harness } from './harness.ts';
 
 const ZONE = 'America/Los_Angeles';
@@ -203,4 +208,33 @@ test('a label rename announces the label before its tasks', async () => {
     .all<{ resource: string }>();
   expect(changes.results[0]?.resource).toBe('labels');
   expect(changes.results.filter((change) => change.resource === 'tasks').length).toBeGreaterThan(100);
+});
+
+test('the fullest Focus week reads a bounded number of rows, and the timer poll one', async () => {
+  await seedWorstWeek(harness.db, '2030-04-15');
+  const readWeek = () =>
+    measure(async (db) => {
+      const answer = await listFocusDays(
+        db,
+        create(ListFocusDaysRequestSchema, { startDay: '2030-04-15', endDay: '2030-04-21' }),
+        ZONE,
+        NOW,
+      );
+      expect(answer.days.flatMap((day) => day.taskIds)).toHaveLength(WEEK_STEPS);
+      expect(answer.entries).toHaveLength(WEEK_ENTRIES);
+      expect(answer.tasks).toHaveLength(WEEK_STEPS + WEEK_ENTRIES);
+    });
+  const week = await readWeek();
+  // Another full week elsewhere costs this read nothing: every statement seeks its days.
+  await seedWorstWeek(harness.db, '2030-05-06', 'other');
+  const again = await readWeek();
+  const poll = await measure((db) => getFocusTimer(db, create(GetFocusTimerRequestSchema, { name: 'focusTimer' })));
+  stdout.write(JSON.stringify({ event: 'tasks_focus_week_read', week, again, poll }) + '\n');
+  expect(week.statements).toBe(3);
+  expect(week.rowsWritten).toBe(0);
+  // Measured 2,380 rows (2026-10-19): 140 queue rows, 210 records and 350 tasks, each read through an index.
+  expect(week.rowsRead).toBeLessThan(3000);
+  // A few index steps more, not the other week's 1,000 rows.
+  expect(Math.abs(again.rowsRead - week.rowsRead)).toBeLessThanOrEqual(10);
+  expect(poll.rowsRead).toBe(1);
 });

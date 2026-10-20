@@ -5,6 +5,7 @@ import {
   CPU_TEST_TIMEOUT_MS,
   measureInIsolates,
 } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
+import { seedWorstWeek, WEEK_ENTRIES, WEEK_STEPS } from './focus-week.ts';
 import { startHarness } from './harness.ts';
 
 async function syntheticOwner() {
@@ -221,6 +222,54 @@ test(
       expect(measurement.first, measurement.label).toBeLessThan(10);
       if (measurement.label !== 'first authenticated task page')
         expect(measurement.median, measurement.label).toBeLessThan(8);
+    }
+  },
+  CPU_TEST_TIMEOUT_MS,
+);
+
+const FIRST_WEEK_READ = 'first authenticated read of the fullest Focus week';
+test(
+  'a cold isolate reads the fullest Focus week within the first-request bound',
+  async () => {
+    const owner = await syntheticOwner();
+    const result = await measureInIsolates(
+      COLD_ISOLATES,
+      async () => {
+        const harness = await startHarness({
+          inspectorPort: 0,
+          bypass: false,
+          jwks: owner.jwks,
+          ownerToken: owner.token,
+        });
+        await seedWorstWeek(harness.db, '2030-04-15');
+        const meter = await connectCpuMeter(harness.mf, 'tasks');
+        return {
+          harness,
+          meter,
+          async dispose() {
+            meter.close();
+            await harness.dispose();
+          },
+        };
+      },
+      async ({ harness, meter }) => {
+        const read = async () => {
+          const response = await harness.fetch('/api/tasks/v1/focusDays?start_day=2030-04-15&end_day=2030-04-21');
+          const body = await response.text();
+          expect(response.status, body.slice(0, 200)).toBe(200);
+          expect((JSON.parse(body) as { tasks: unknown[] }).tasks).toHaveLength(WEEK_STEPS + WEEK_ENTRIES);
+        };
+        return [
+          await meter.measure(FIRST_WEEK_READ, read, 1),
+          await meter.measure('the fullest Focus week: 140 steps, 210 records, 350 tasks', read, 7),
+        ];
+      },
+    );
+    for (const measurement of result.reference.values())
+      console.log(JSON.stringify({ event: 'tasks_cpu', ...measurement }));
+    for (const measurement of result.reference.values()) {
+      expect(measurement.first, measurement.label).toBeLessThan(10);
+      if (measurement.label !== FIRST_WEEK_READ) expect(measurement.median, measurement.label).toBeLessThan(8);
     }
   },
   CPU_TEST_TIMEOUT_MS,

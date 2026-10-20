@@ -244,7 +244,7 @@ service TasksUiService {
     };
   }
   // Every day of a range of 1 to 7 days, even an empty one, with the records counted on them, every task either
-  // names and Tasks' today. A day holds at most 30 queued steps and 40 records, so the answer is bounded.
+  // names and Tasks' today. A day holds at most 20 queued steps and 30 records, so the answer is bounded.
   rpc ListFocusDays(ListFocusDaysRequest) returns (ListFocusDaysResponse) {
     option (google.api.http) = {get: "/api/tasks/v1/focusDays"};
   }
@@ -745,9 +745,9 @@ message PreviewDateResponse {
 // (-- api-linter: core::0132::request-parent-required=disabled
 //     aip.dev/not-precedent: Focus days are the owner's top-level calendar, with no parent resource. --)
 // (-- api-linter: core::0158::request-page-size-field=disabled
-//     aip.dev/not-precedent: at most 7 days of at most 30 steps and 40 records each fit one answer. --)
+//     aip.dev/not-precedent: at most 7 days of at most 20 steps and 30 records each fit one answer. --)
 // (-- api-linter: core::0158::request-page-token-field=disabled
-//     aip.dev/not-precedent: at most 7 days of at most 30 steps and 40 records each fit one answer. --)
+//     aip.dev/not-precedent: at most 7 days of at most 20 steps and 30 records each fit one answer. --)
 // (-- api-linter: core::0132::request-unknown-fields=disabled
 //     aip.dev/not-precedent: the range of days is the read; a day has no page order to resume. --)
 message ListFocusDaysRequest {
@@ -783,7 +783,7 @@ message MoveFocusStepRequest {
   string task_id = 2 [(google.api.field_behavior) = REQUIRED];
   // The day it leaves; empty adds it.
   string source_day = 3 [(google.api.field_behavior) = OPTIONAL];
-  // The day it joins, which needs an open task; empty removes it. A day holds at most 30 steps.
+  // The day it joins, which needs an open task; empty removes it. A day holds at most 20 steps.
   string destination_day = 4 [(google.api.field_behavior) = OPTIONAL];
   // The step it goes before on the destination day; empty puts it last.
   // (-- api-linter: core::0140::prepositions=disabled

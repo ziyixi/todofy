@@ -25,9 +25,14 @@ import { invalid, missing, precondition, storage } from './errors.ts';
 import { checkedId } from './model.ts';
 import { commit, fingerprint, replay } from './receipts.ts';
 
-export const DAY_STEPS = 30;
-export const DAY_ENTRIES = 40;
-/** Rows a read statement may return; the caps keep a week at 210 queue rows, 280 records and 490 tasks. */
+/**
+ * A day's caps. An isolate's first read of a full week of them, with 500-character titles under 500-character parent
+ * titles, took 8.5-8.9 reference ms of Free's 10 (test/runtime/cpu.test.ts, 2026-10-19); 30 steps and 40 records
+ * took 9.7-10.7.
+ */
+export const DAY_STEPS = 20;
+export const DAY_ENTRIES = 30;
+/** Rows a read statement may return; the caps keep a week at 140 queue rows, 210 records and 350 tasks. */
 const MAX_ROWS = 500;
 const MOVED = 'This step has moved. Refresh and try again.';
 const FULL = `This day already has ${String(DAY_STEPS)} steps.`;
@@ -43,7 +48,7 @@ export interface EntryRow {
   area: string;
   revision: number;
 }
-interface QueueRow {
+export interface QueueRow {
   day: string;
   task_id: string;
   position: number;
@@ -51,7 +56,7 @@ interface QueueRow {
   /** The task's own state; null when the task is deleted (it then leaves every queue). */
   completed: number | null;
 }
-interface FocusTaskRow {
+export interface FocusTaskRow {
   id: string;
   title: string;
   parent_id: string;
@@ -134,11 +139,12 @@ export async function listFocusDays(db: D1Database, input: ListFocusDaysRequest,
   const span = daysBetween(start, end);
   if (span < 0 || span > 6) invalid('Read 1 to 7 days');
   const range = [start, end];
+  // CROSS JOIN keeps day_steps outer, so a read seeks its days instead of every live task.
   const [queue, entries, tasks] = await storage(() =>
     db.batch<Record<string, unknown>>([
       db
         .prepare(
-          `SELECT s.day,s.task_id,s.position,s.done_at,t.completed FROM day_steps s JOIN tasks t ON t.id=s.task_id
+          `SELECT s.day,s.task_id,s.position,s.done_at,t.completed FROM day_steps s CROSS JOIN tasks t ON t.id=s.task_id
           WHERE s.day>=? AND s.day<=? AND s.deleted_at IS NULL AND t.deleted_at IS NULL
           ORDER BY s.day,s.position LIMIT ${String(MAX_ROWS + 1)}`,
         )
@@ -154,7 +160,7 @@ export async function listFocusDays(db: D1Database, input: ListFocusDaysRequest,
       db
         .prepare(
           `WITH named(id) AS (
-            SELECT s.task_id FROM day_steps s JOIN tasks q ON q.id=s.task_id AND q.deleted_at IS NULL
+            SELECT s.task_id FROM day_steps s CROSS JOIN tasks q ON q.id=s.task_id AND q.deleted_at IS NULL
               WHERE s.day>=? AND s.day<=? AND s.deleted_at IS NULL
             UNION SELECT task_id FROM focus_entries WHERE day>=? AND day<=? AND deleted_at IS NULL)
           SELECT t.id,t.title,t.parent_id,COALESCE(p.title,'') AS parent_title,t.duration_minutes,t.completed
@@ -166,16 +172,27 @@ export async function listFocusDays(db: D1Database, input: ListFocusDaysRequest,
   const results = [queue, entries, tasks].map((result) => result?.results ?? []);
   if (results.some((rows) => rows.length > MAX_ROWS)) precondition('Too many Focus rows in this range');
   const [queueRows, entryRows, taskRows] = results as unknown as [QueueRow[], EntryRow[], FocusTaskRow[]];
-  const days = Array.from({ length: span + 1 }, (_, index) => addDays(start, index));
+  return focusDaysAnswer(
+    Array.from({ length: span + 1 }, (_, index) => addDays(start, index)),
+    { queue: queueRows, entries: entryRows, tasks: taskRows },
+    localDate(now, zone),
+  );
+}
+/** The read's answer from its rows; startup.ts also runs it once on synthetic rows. */
+export function focusDaysAnswer(
+  days: readonly string[],
+  rows: { queue: readonly QueueRow[]; entries: readonly EntryRow[]; tasks: readonly FocusTaskRow[] },
+  today: string,
+) {
   return create(ListFocusDaysResponseSchema, {
     days: days.map((day) =>
       dayMessage(
         day,
-        queueRows.filter((row) => row.day === day),
+        rows.queue.filter((row) => row.day === day),
       ),
     ),
-    entries: entryRows.map(entryMessage),
-    tasks: taskRows.map((row) =>
+    entries: rows.entries.map(entryMessage),
+    tasks: rows.tasks.map((row) =>
       create(FocusTaskSchema, {
         taskId: row.id,
         title: row.title,
@@ -185,7 +202,7 @@ export async function listFocusDays(db: D1Database, input: ListFocusDaysRequest,
         completed: row.completed === 1,
       }),
     ),
-    today: localDate(now, zone),
+    today,
   });
 }
 
