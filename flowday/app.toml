@@ -5,9 +5,10 @@ target = "cloudflare"
 
 [[workers]]
 config = "flowday/wrangler.toml"
-personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"]
+# CREDENTIAL_KEY is retired (nothing reads it) and stays optional only until the live secret is deleted.
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY", "CREDENTIAL_KEY"]
 manual_secrets = []
-optional_secrets = ["ACCESS_OWNER_ALIASES"]
+optional_secrets = ["ACCESS_OWNER_ALIASES", "CREDENTIAL_KEY"]
 hosts = ["flowday"]
 entry = "flowday"
 role = "页面、API 与 PWA 文件"

@@ -497,7 +497,8 @@ class DriftAcceptance(unittest.TestCase):
     def test_todofy_retirement_stops_for_a_repair_or_a_secret_the_deploy_would_keep(self):
         for repair, name, kind in (
             (True, "TASK_SOURCE", "plain_text"),
-            (False, "TODOIST_API_KEY", "secret_text"),
+            # A live secret nothing declares (TODOIST_API_KEY stays declared until it is deleted).
+            (False, "RETIRED_API_KEY", "secret_text"),
         ):
             with self.subTest(repair=repair, name=name):
                 fixture = self.fixture("todofy")

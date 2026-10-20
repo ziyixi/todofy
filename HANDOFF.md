@@ -34,15 +34,10 @@ runner. If `origin/main` moves before the push, merge it again and rerun the job
   1. This read-only check must print nothing. If a map is listed, set it again without `TODOIST_API_KEY` and
      `CREDENTIAL_KEY` (`tools/cloud-bootstrap/bootstrap.py secrets`); the deploy wrappers now refuse those names.
      `gh secret list --env production --repo ziyixi/todofy | grep -E '^(TODOFY_CORE_WORKER_SECRETS|FLOWDAY_WORKER_SECRETS)\s'`
-  2. Save FlowDay's estimates with the first command of [the backfill](tasks/docs/backup.md#one-time-flowday-estimate-backfill).
-     The new FlowDay replaces one as soon as its task changes in Tasks.
-  3. Delete the two retired Worker secrets; a deploy keeps every secret it does not name, so the release's record
-     step would fail. The running builds never read them (FlowDay syncs natively while Tasks is bound; the core's
-     native paths do not call Todoist).
-     ```sh
-     (cd todofy/gateway && npx wrangler secret delete TODOIST_API_KEY --name todofy-core)
-     (cd flowday/worker && npx wrangler secret delete CREDENTIAL_KEY --name flowday)
-     ```
+  2. `TODOIST_API_KEY` (todofy-core) and `CREDENTIAL_KEY` (flowday) stay declared as optional secrets in their
+     `app.toml` until the live secrets are deleted, so the release does not depend on deleting them first. Nothing
+     reads either. Delete them with `wrangler secret delete` (and the GitHub secret `FLOWDAY_CREDENTIAL_KEY`), then
+     remove the two declarations and regenerate (`tools/cloud-config/generate.py`, `.github/scripts/drift_desired.py`).
 - **Release.** Push, wait for the complete gate, then fast-forward `main` to the same green SHA. CI releases Tasks →
   FlowDay → Todofy → Home, and each works while the later apps still run the previous release. Migrations: Tasks
   `0004`, FlowDay `0005` (deletes the Todoist settings rows), Todofy `0012` (drops `plus_connections`, `plus_actions`).
@@ -57,8 +52,10 @@ runner. If `origin/main` moves before the push, merge it again and rerun the job
 
 The lead's production steps right after the release, in this order:
 
-1. The rest of the one-time FlowDay estimate backfill: [commands and checks](tasks/docs/backup.md#one-time-flowday-estimate-backfill).
-   Do not wait: it replaces a duration changed in Tasks since the push with the saved FlowDay value.
+1. The one-time FlowDay estimate backfill, all of it, as soon as the release is live:
+   [commands and checks](tasks/docs/backup.md#one-time-flowday-estimate-backfill). FlowDay's saved estimates were not
+   exported before the push (the session could not read production D1); the new FlowDay replaces one only when its
+   task changes in Tasks, so export FlowDay first and the tasks changed meanwhile are the only loss.
 2. Delete what nothing reads any more, then refresh Home's drift check and expect no differences. The owner may also
    revoke the Todoist API token; nothing uses it.
    ```sh
