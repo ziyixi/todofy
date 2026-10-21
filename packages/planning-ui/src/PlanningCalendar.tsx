@@ -1,6 +1,12 @@
 import { useState, type CSSProperties } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/react";
-import { ChevronLeft, ChevronRight, GripVertical, X } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  GripVertical,
+  X,
+} from "lucide-react";
 import { displayedTitle, formattedMinutes, taskIndex } from "./domain";
 import { dragHandle } from "./drag-announcements";
 import { areaColor, outcomeArea, outcomeForTask } from "./planning-outcomes";
@@ -33,6 +39,8 @@ interface Props {
   dragHint: string;
   editTask: (task: PlanningTask) => void;
   completeTask: CompletePlanningTask;
+  /** Opens Tasks' own task dialog, where a done step can be reopened. */
+  onOpenTask?: (id: string) => void;
   onWeekChange: (week: string) => void;
   onRemove: (day: DayPlan, id: string) => void;
 }
@@ -48,6 +56,7 @@ export function PlanningCalendar({
   dragHint,
   editTask,
   completeTask,
+  onOpenTask,
   onWeekChange,
   onRemove,
 }: Props) {
@@ -141,6 +150,7 @@ export function PlanningCalendar({
             dragHint={dragHint}
             editTask={editTask}
             completeTask={completeTask}
+            onOpenTask={onOpenTask}
             onSelect={() => setSelectedDate(day.date)}
             onRemove={(id) => onRemove(day, id)}
           />
@@ -199,6 +209,7 @@ function CalendarDay({
   dragHint,
   editTask,
   completeTask,
+  onOpenTask,
   onSelect,
   onRemove,
 }: {
@@ -215,6 +226,7 @@ function CalendarDay({
   dragHint: string;
   editTask: Props["editTask"];
   completeTask: CompletePlanningTask;
+  onOpenTask: Props["onOpenTask"];
   onSelect: () => void;
   onRemove: (id: string) => void;
 }) {
@@ -225,6 +237,7 @@ function CalendarDay({
     collisionPriority: 1,
     data: { date: day.date },
   });
+  // The open steps, which the heading's total counts; the steps done from this day stay after them.
   const ids = day.taskIds.filter((id) => !day.completedTaskIds.includes(id));
   const estimate = (id: string) =>
     taskIndex(plan.tasks).get(id)?.estimatedMinutes ??
@@ -269,9 +282,20 @@ function CalendarDay({
         <EndDrop
           date={day.date}
           empty={!ids.length}
+          beforeDone={day.completedTaskIds.length > 0}
           language={language}
           busy={busy}
         />
+        {day.completedTaskIds.map((id) => (
+          <DoneStep
+            key={id}
+            id={id}
+            plan={plan}
+            focusTask={focusTasks[id]}
+            language={language}
+            onOpenTask={onOpenTask}
+          />
+        ))}
       </div>
     </section>
   );
@@ -402,14 +426,97 @@ function CalendarStep({
     </article>
   );
 }
+/**
+ * A step done from this day's queue. It stays in its day, after the open steps and in their queue
+ * order, in Focus's done style: the filled check, the title muted and struck through. It is not
+ * dragged, removed or counted in the day's total. The planning panel needs an open task, so its
+ * title opens Tasks' own dialog, where it can be reopened. Its title comes from Plan, else from
+ * the Focus read that named it, else it is unavailable.
+ */
+function DoneStep({
+  id,
+  plan,
+  focusTask,
+  language,
+  onOpenTask,
+}: {
+  id: string;
+  plan: PlanState;
+  focusTask?: FocusState["tasks"][string];
+  language: Language;
+  onOpenTask: Props["onOpenTask"];
+}) {
+  const tasks = taskIndex(plan.tasks);
+  // A repeating step stays open in Plan after a completion; any other done step is not listed.
+  const task = tasks.get(id);
+  const outcome = task ? outcomeForTask(task, plan.tasks) : undefined;
+  // One Plan does not list takes its parent's colour when Plan lists the parent, as in Focus.
+  const listedParent = focusTask?.parentId
+    ? tasks.get(focusTask.parentId)
+    : undefined;
+  const title = taskTitle(task?.title ?? focusTask?.title, language);
+  const parent = outcome
+    ? outcome.id === id
+      ? outcomeArea(outcome, plan.tasks, language)
+      : displayedTitle(outcome.title)
+    : displayedTitle(focusTask?.parentTitle ?? "");
+  const minutes = task?.estimatedMinutes ?? focusTask?.estimatedMinutes;
+  const color = task
+    ? areaColor(task, plan.tasks)
+    : listedParent
+      ? areaColor(listedParent, plan.tasks)
+      : "var(--plus-area-none)";
+  // Read before the title, so its name says it is done; the space is outside the hidden text.
+  const name = (
+    <>
+      <span className="plus-sr-only">{`${words(language).completed}:`}</span>{" "}
+      {title}
+    </>
+  );
+  return (
+    <article
+      className="planning-calendar-step is-done"
+      data-task-id={id}
+      style={{ "--area-color": color } as CSSProperties}
+    >
+      <div className="planning-calendar-step-top">
+        {onOpenTask ? (
+          <button
+            className="planning-step-title"
+            title={title}
+            onClick={() => onOpenTask(id)}
+          >
+            {name}
+          </button>
+        ) : (
+          <span className="planning-step-title" title={title}>
+            {name}
+          </span>
+        )}
+        <span className="plus-checkbox is-done" aria-hidden="true">
+          <Check size={12} />
+        </span>
+      </div>
+      <div className="planning-calendar-step-meta">
+        <span title={parent}>{parent}</span>
+        <strong>
+          {minutes === undefined ? "?" : formattedMinutes(minutes)}
+        </strong>
+      </div>
+    </article>
+  );
+}
 function EndDrop({
   date,
   empty,
+  beforeDone,
   language,
   busy,
 }: {
   date: string;
   empty: boolean;
+  /** Done steps follow it: after open steps it is a thin band, where a dropped step lands. */
+  beforeDone: boolean;
   language: Language;
   busy: boolean;
 }) {
@@ -423,7 +530,7 @@ function EndDrop({
   return (
     <div
       ref={ref}
-      className={`planning-day-end ${isDropTarget ? "is-over" : ""}`}
+      className={`planning-day-end ${isDropTarget ? "is-over" : ""} ${beforeDone && !empty ? "is-before-done" : ""}`}
     >
       {/* A day with steps shows its drop zone only while a step is dragged over it. */}
       {empty && (language === "zh" ? "拖入步骤" : "Drop a step")}

@@ -11,7 +11,7 @@ import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { PlanView } from "../src/PlanView";
 import { createPrototype } from "./fixture";
-import type { DayPlan, PlusData } from "../src/model";
+import type { FocusRange, PlusData } from "../src/model";
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () {
     this.setAttribute("open", "");
@@ -235,9 +235,9 @@ it("completes on Focus's day and leaves a timer's own day to Tasks after midnigh
 it("keeps a confirmed refresh when older duplicate week reads finish late", async () => {
   const actions = createPrototype();
   const staleFuture = await actions.loadDays("2026-10-19");
-  const requests: ((days: DayPlan[]) => void)[] = [];
+  const requests: ((range: FocusRange) => void)[] = [];
   actions.loadDays = vi.fn(
-    () => new Promise<DayPlan[]>((resolve) => requests.push(resolve)),
+    () => new Promise<FocusRange>((resolve) => requests.push(resolve)),
   );
   render(
     <App
@@ -253,7 +253,7 @@ it("keeps a confirmed refresh when older duplicate week reads finish late", asyn
   fireEvent.click(screen.getByRole("button", { name: "Next week" }));
   fireEvent.click(screen.getByRole("button", { name: "Next week" }));
   expect(requests).toHaveLength(2);
-  await actions.moveTaskToDay("copy", undefined, staleFuture[1]!);
+  await actions.moveTaskToDay("copy", undefined, staleFuture.days[1]!);
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   const scheduled =
     '.planning-calendar-day[data-date="2026-10-20"] .planning-calendar-step[data-task-id="copy"]';
@@ -274,9 +274,21 @@ it("keeps the latest week after navigating away and back while an older full ref
   const stale = await actions.load();
   const latest = structuredClone(stale.days);
   latest[2]!.taskIds.push("copy");
+  // A step done that day, which only the week's own read names.
+  latest[2]!.completedTaskIds.push("past-step");
+  const named = {
+    "past-step": {
+      title: "Synthetic step done this week",
+      parentId: "",
+      parentTitle: "",
+      completed: true,
+    },
+  };
   const originalDays = actions.loadDays;
   actions.loadDays = vi.fn(async (week) =>
-    week === "2026-10-12" ? structuredClone(latest) : originalDays(week),
+    week === "2026-10-12"
+      ? { days: structuredClone(latest), tasks: named, today: "2026-10-13" }
+      : originalDays(week),
   );
   const originalLoad = actions.load;
   let finishRefresh!: (value: PlusData) => void;
@@ -319,7 +331,105 @@ it("keeps the latest week after navigating away and back while an older full ref
   await waitFor(() => expect(document.querySelector(scheduled)).toBeTruthy());
   await act(async () => finishRefresh(structuredClone(stale)));
   expect(document.querySelector(scheduled)).toBeTruthy();
+  // The older read named another week's tasks; the week shown keeps the names its read gave.
+  expect(
+    screen.getByRole("button", {
+      name: "Completed: Synthetic step done this week",
+    }),
+  ).toBeTruthy();
   actions.load = originalLoad;
+});
+
+it("keeps a ticked calendar step in its day, done and out of the total, and leaves Focus as it was", async () => {
+  const actions = createPrototype();
+  const props = {
+    actions,
+    language: "en" as const,
+    onOpenTask: () => {},
+    onSettings: () => {},
+  };
+  const { rerender } = render(<App {...props} view="plan" />);
+  await screen.findByRole("region", { name: "Committed" });
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  const column = () =>
+    document.querySelector<HTMLElement>(
+      '.planning-calendar-day[data-date="2026-10-13"]',
+    )!;
+  const total = () =>
+    column().querySelector(".planning-day-heading small")?.textContent;
+  // Write the introduction 30m, Outline three questions 1h, Download the receipt 15m.
+  expect(total()).toBe("1h 45m");
+  fireEvent.click(
+    within(column()).getByRole("button", {
+      name: "Complete task: Write the introduction",
+    }),
+  );
+  // After the re-read it stays, done, after the open steps.
+  await waitFor(() =>
+    expect(
+      within(column()).getByRole("button", {
+        name: "Completed: Write the introduction",
+      }),
+    ).toBeTruthy(),
+  );
+  expect(
+    [...column().querySelectorAll<HTMLElement>(".planning-calendar-step")].map(
+      (card) => [card.dataset.taskId, card.classList.contains("is-done")],
+    ),
+  ).toEqual([
+    ["outline", false],
+    ["receipt", false],
+    ["copy", true],
+  ]);
+  expect(total()).toBe("1h 15m");
+  // Focus is as it was: the queue has the open steps; the done one shows only under Completed.
+  rerender(<App {...props} view="focus" />);
+  await screen.findByRole("button", {
+    name: "Complete task: Outline three questions for the check-in",
+  });
+  expect(screen.queryByText("Write the introduction")).toBeNull();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Completed" }));
+  expect(
+    within(document.querySelector<HTMLElement>(".plus-focus-done")!).getByText(
+      "Write the introduction",
+    ),
+  ).toBeTruthy();
+});
+
+it("names another week's done steps from that week's read", async () => {
+  const actions = createPrototype();
+  const originalDays = actions.loadDays;
+  actions.loadDays = vi.fn(async (week) => {
+    const range = await originalDays(week);
+    if (week !== "2026-10-19") return range;
+    range.days[0]!.completedTaskIds = ["done-next-week"];
+    range.tasks["done-next-week"] = {
+      title: "Synthetic step done next Monday",
+      parentId: "release",
+      parentTitle: "Ship the small website refresh",
+      estimatedMinutes: 20,
+      completed: true,
+    };
+    return range;
+  });
+  render(
+    <App
+      actions={actions}
+      view="plan"
+      language="en"
+      onOpenTask={() => {}}
+      onSettings={() => {}}
+    />,
+  );
+  await screen.findByRole("region", { name: "Committed" });
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  fireEvent.click(screen.getByRole("button", { name: "Next week" }));
+  const done = await screen.findByRole("button", {
+    name: "Completed: Synthetic step done next Monday",
+  });
+  expect(
+    done.closest('[data-task-id="done-next-week"]')?.textContent,
+  ).toContain("Ship the small website refresh");
 });
 
 it("persists and clears an existing step's estimate through the task editor, each write under the etag the last one gave", async () => {

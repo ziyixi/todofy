@@ -27,7 +27,7 @@ import type {
 export interface PlanViewProps {
   plan: PlanState;
   days: DayPlan[];
-  /** Titles of queued tasks Plan's list leaves out. */
+  /** Titles of queued tasks Plan's list leaves out, done steps among them. */
   focusTasks: FocusState["tasks"];
   timer?: FocusState["timer"];
   currentDate: string;
@@ -41,6 +41,8 @@ export interface PlanViewProps {
   onWeekChange: (weekStart: string) => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
   completeTask: CompletePlanningTask;
+  /** Opens Tasks' own task dialog, where Week's done steps can be reopened. */
+  onOpenTask?: (id: string) => void;
   /** The weekly review's mail line opens the host's Mail page. */
   onOpenMail?: () => void;
   /** Opened from the review task's link: start with the weekly review. */

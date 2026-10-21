@@ -283,7 +283,13 @@ test.describe("Plan's cards", () => {
         exact: true,
       })
       .click();
-    await expect(day.locator(`[data-task-id="${first.id}"]`)).toHaveCount(0);
+    // The scheduled Step stays in its day, done.
+    await expect(
+      day.getByRole("button", {
+        name: "Completed: Synthetic first step",
+        exact: true,
+      }),
+    ).toBeVisible();
     await page.getByRole("tab", { name: "Review", exact: true }).click();
     const committed = page.getByRole("region", {
       name: "Committed",
@@ -324,6 +330,93 @@ test.describe("Plan's cards", () => {
       const saved = await request.get(`/api/tasks/v1/tasks/${task.id}`);
       expect((await saved.json()).completed).toBe(true);
     }
+  });
+
+  test("a ticked calendar Step stays in its day, done and out of the day's total, and Focus is unchanged", async ({
+    page,
+  }) => {
+    const parent = {
+      id: crypto.randomUUID(),
+      title: "Synthetic done-step outcome",
+    };
+    const ticked = { id: crypto.randomUUID(), title: "Synthetic ticked step" };
+    const open = { id: crypto.randomUUID(), title: "Synthetic open step" };
+    const step = (
+      task: { id: string; title: string },
+      minutes: number,
+    ): SeedTask => ({
+      ...task,
+      kind: "step",
+      parent_id: parent.id,
+      duration_minutes: minutes,
+    });
+    await stubPlanning(page, {
+      tasks: [
+        outcome(parent.id, parent.title),
+        step(ticked, 30),
+        step(open, 45),
+      ],
+      queues: { [today]: [ticked.id, open.id] },
+    });
+    // Wide enough for all seven days side by side.
+    await page.setViewportSize({ width: 1800, height: 1000 });
+    await openPlan(page);
+    await page.getByRole("tab", { name: "Week", exact: true }).click();
+    const day = page.locator(`.planning-calendar-day[data-date="${today}"]`);
+    const total = day.locator(".planning-day-heading small");
+    const card = (id: string) =>
+      day.locator(`.planning-calendar-step[data-task-id="${id}"]`);
+    await expect(total).toHaveText("1h 15m");
+    await day
+      .getByRole("button", {
+        name: `Complete task: ${ticked.title}`,
+        exact: true,
+      })
+      .click();
+    // After Tasks' re-read it stays in the day, after the open step, in the done style.
+    const done = day.getByRole("button", {
+      name: `Completed: ${ticked.title}`,
+      exact: true,
+    });
+    await expect(done).toBeVisible();
+    await expect(card(ticked.id)).toHaveClass(/\bis-done\b/u);
+    await expect(done).toHaveCSS("text-decoration-line", "line-through");
+    await expect(
+      card(ticked.id).locator(".plus-checkbox.is-done"),
+    ).toBeVisible();
+    expect(
+      await day
+        .locator(".planning-calendar-step")
+        .evaluateAll((cards) =>
+          cards.map((item) => (item as HTMLElement).dataset.taskId),
+        ),
+    ).toEqual([open.id, ticked.id]);
+    // The total covers the open steps; the done one cannot be dragged, removed or ticked again.
+    await expect(total).toHaveText("45m");
+    await expect(card(ticked.id).getByRole("button")).toHaveCount(1);
+    await expect(
+      day.getByRole("button", { name: `Drag scheduled step: ${open.title}` }),
+    ).toHaveCount(1);
+    const [queue] = (await readFocus(today, today)).days as {
+      task_ids?: string[];
+      done_task_ids?: string[];
+    }[];
+    expect([queue?.task_ids, queue?.done_task_ids]).toEqual([
+      [open.id],
+      [ticked.id],
+    ]);
+    // Focus is as it was: the open step in the queue, the done one only under Completed.
+    await page.goto("/#/focus");
+    const focusCard = (id: string) =>
+      page.locator(`.plus-focus-slot[data-task-id="${id}"]`);
+    await expect(focusCard(open.id)).toBeVisible();
+    await expect(focusCard(ticked.id)).toHaveCount(0);
+    const completed = page.getByRole("checkbox", { name: "Completed" });
+    await expect(completed).not.toBeChecked();
+    await completed.check();
+    await expect(
+      page.locator(`.plus-focus-done [data-task-id="${ticked.id}"]`),
+    ).toBeVisible();
   });
 
   test("a failed Plan completion keeps the card and retries with the same request ID", async ({

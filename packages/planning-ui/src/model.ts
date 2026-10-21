@@ -203,7 +203,7 @@ export interface FocusState extends DayPlan {
   finishedPomodoro?: { taskId: string; targetSeconds: number };
   timerEtag: string;
   estimates: Record<string, number>;
-  /** Every task the read queues and records name. */
+  /** Every task the read queues and records name, the shown week's included. */
   tasks: Record<string, FocusTaskInfo>;
   timer?: {
     taskId: string;
@@ -270,7 +270,11 @@ export interface PlusActions {
   readPlan(): Promise<PlanMetadata>;
   /** The weekly review's Todofy facts for the week starting `week`. */
   readWeeklyReview?(week: string): Promise<WeeklyReviewFacts>;
-  loadDays(weekStart: string): Promise<DayPlan[]>;
+  /**
+   * The week from `weekStart`, Monday to Sunday: its days, with every task they name (done steps,
+   * which Plan's list leaves out, among them).
+   */
+  loadDays(weekStart: string): Promise<FocusRange>;
   /** Saves the task's planning state in Tasks. */
   updateTask(task: PlanningTask, update: PlanUpdate): Promise<PlanningTask>;
   /**

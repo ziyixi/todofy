@@ -71,7 +71,7 @@ import type {
 interface Props {
   plan: PlanState;
   days: DayPlan[];
-  /** Titles of queued tasks Plan's list leaves out. */
+  /** Titles of queued tasks Plan's list leaves out, done steps among them. */
   focusTasks: FocusState["tasks"];
   timer?: FocusState["timer"];
   currentDate: string;
@@ -82,6 +82,8 @@ interface Props {
   run: RunOperation;
   editTask: (task: PlanningTask) => void;
   completeTask: CompletePlanningTask;
+  /** Opens Tasks' own task dialog, where a done step can be reopened. */
+  onOpenTask?: (id: string) => void;
   onWeekChange: (week: string) => void;
   /** The selected commitment: absent for the first one, "" for none. PlanView keeps it. */
   selectedId?: string;
@@ -133,6 +135,7 @@ export function PlanningWeek(props: Props) {
     run,
     editTask,
     completeTask,
+    onOpenTask,
     onWeekChange,
     selectedId,
     onSelect,
@@ -519,6 +522,7 @@ export function PlanningWeek(props: Props) {
           dragHint={hintId}
           editTask={editTask}
           completeTask={completeTask}
+          onOpenTask={onOpenTask}
           onWeekChange={onWeekChange}
           onRemove={(day, id) =>
             // The card stays, marked pending, until Tasks confirms the removal.

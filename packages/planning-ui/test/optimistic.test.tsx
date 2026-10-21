@@ -325,8 +325,9 @@ function removeFrom(date: string, title: string) {
   }) as HTMLButtonElement;
 }
 async function serverDay(actions: PlusActions, date: string) {
-  return (await actions.loadDays("2026-10-12")).find((day) => day.date === date)
-    ?.taskIds;
+  return (await actions.loadDays("2026-10-12")).days.find(
+    (day) => day.date === date,
+  )?.taskIds;
 }
 
 it("removes two steps from one day in quick succession without restoring the first", async () => {

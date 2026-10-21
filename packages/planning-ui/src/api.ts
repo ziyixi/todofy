@@ -358,8 +358,8 @@ export function createPlanningActions(transports: {
     );
     return result.days.map(dayQueue);
   }
-  async function loadDays(weekStart: string): Promise<DayPlan[]> {
-    return (await readDays(weekStart, addDays(weekStart, 6))).days;
+  async function loadDays(weekStart: string): Promise<FocusRange> {
+    return readDays(weekStart, addDays(weekStart, 6));
   }
   /** One UpdateTask of planning paths; the answer keeps the estimate Plan shows. */
   async function save(

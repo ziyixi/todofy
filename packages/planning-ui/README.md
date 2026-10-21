@@ -65,5 +65,7 @@ Review keeps candidate columns together and gives Committed a separate full-widt
 Every Plan and Focus card's left edge is its area's colour (Work slate, Personal ochre, Unassigned none), and
 the area filters' Work and Personal dots are the legend.
 Plan's outcome, Step, Quick and calendar checkboxes complete like Focus, in one Tasks write with a Focus
-day: calendar cards pass their own day, the rest Focus's. A retry resends the first request ID and day. Quick actions always qualify as standalone, even when an older
+day: calendar cards pass their own day, the rest Focus's. A retry resends the first request ID and day. A completed calendar
+Step stays in its day after the open ones, in Focus's done style, outside the day's total; its title opens Tasks' own
+dialog, where it can be reopened. Quick actions always qualify as standalone, even when an older
 response contains only the Quick flag. Ordinary labels do not imply planning properties.

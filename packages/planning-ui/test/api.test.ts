@@ -219,7 +219,7 @@ it("loads complete pages and the week with Tasks' Focus, and uses the authoritat
     "start_day=2026-10-13&end_day=2026-10-13",
   ]);
 });
-it("reads only the selected week's seven queues, in one call, when changing weeks", async () => {
+it("reads only the selected week's seven queues, in one call, with the tasks they name, when changing weeks", async () => {
   const paths: string[] = [];
   const api = fakeActions(
     vi.fn<typeof fetch>(async (input) => {
@@ -235,11 +235,22 @@ it("reads only the selected week's seven queues, in one call, when changing week
           task_ids: ["synthetic-step"],
           done_task_ids: ["synthetic-completed"],
         })),
+        // A done step is not in Plan's list: the week's read names it.
+        tasks: [
+          {
+            task_id: "synthetic-completed",
+            title: "Synthetic done step",
+            parent_id: "synthetic-outcome",
+            parent_title: "Synthetic outcome",
+            duration_minutes: 30,
+            completed: true,
+          },
+        ],
         today: "2026-10-13",
       });
     }),
   );
-  const days = await api.loadDays("2026-10-19");
+  const { days, tasks } = await api.loadDays("2026-10-19");
   expect(paths).toHaveLength(1);
   expect(days.map((day) => day.date)).toEqual([
     "2026-10-19",
@@ -254,6 +265,15 @@ it("reads only the selected week's seven queues, in one call, when changing week
   expect(
     days.every((day) => day.completedTaskIds[0] === "synthetic-completed"),
   ).toBe(true);
+  expect(tasks).toEqual({
+    "synthetic-completed": {
+      title: "Synthetic done step",
+      parentId: "synthetic-outcome",
+      parentTitle: "Synthetic outcome",
+      estimatedMinutes: 30,
+      completed: true,
+    },
+  });
 });
 it("reads a month as ListFocusDays calls of at most seven days, together", async () => {
   const ranges: string[] = [];

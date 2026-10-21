@@ -196,6 +196,94 @@ it("distinguishes two planning outcomes under the same project and keeps queued 
   expect(card("missing").textContent).toContain("Task unavailable");
 });
 
+it("keeps the steps done from a day after its open ones: done, fixed and outside the day's total", async () => {
+  const data = await props();
+  const onOpenTask = vi.fn();
+  const today = data.days[1]!;
+  today.taskIds = ["copy", "outline"];
+  // Plan's list leaves out a done step: its title is from Tasks' Focus read, else unavailable.
+  today.completedTaskIds = ["finished", "gone"];
+  data.focusTasks["finished"] = {
+    title: "Synthetic finished step",
+    parentId: "release",
+    parentTitle: "Ship the small website refresh",
+    estimatedMinutes: 45,
+    completed: true,
+  };
+  render(<PlanView {...data} onOpenTask={onOpenTask} />);
+  openWeek();
+  const column = document.querySelector<HTMLElement>(
+    `.planning-calendar-day[data-date="${today.date}"]`,
+  )!;
+  expect(
+    [...column.querySelectorAll<HTMLElement>(".planning-calendar-step")].map(
+      (card) => [card.dataset.taskId, card.classList.contains("is-done")],
+    ),
+  ).toEqual([
+    ["copy", false],
+    ["outline", false],
+    ["finished", true],
+    ["gone", true],
+  ]);
+  // The total is the open steps' 30m and 1h; the done step's 45m is not in it.
+  expect(column.querySelector(".planning-day-heading small")?.textContent).toBe(
+    "1h 30m",
+  );
+  const finished = column.querySelector<HTMLElement>(
+    '[data-task-id="finished"]',
+  )!;
+  // One control: its title, named done. No grip, completion or removal.
+  expect(
+    within(finished)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["Completed: Synthetic finished step"]);
+  expect(finished.textContent).toContain("Ship the small website refresh");
+  expect(finished.textContent).toContain("45m");
+  // Its parent's area colour, as in Focus.
+  expect(finished.style.getPropertyValue("--area-color")).toBe(
+    "var(--plus-area-work)",
+  );
+  expect(finished.querySelector(".plus-checkbox.is-done")).toBeTruthy();
+  // The planning panel needs an open task: Tasks' own dialog opens, where it can be reopened.
+  fireEvent.click(
+    within(finished).getByRole("button", {
+      name: "Completed: Synthetic finished step",
+    }),
+  );
+  expect(onOpenTask).toHaveBeenCalledWith("finished");
+  expect(data.editTask).not.toHaveBeenCalled();
+  const gone = column.querySelector<HTMLElement>('[data-task-id="gone"]')!;
+  expect(
+    within(gone).getByRole("button", { name: "Completed: Task unavailable" }),
+  ).toBeTruthy();
+  expect(gone.style.getPropertyValue("--area-color")).toBe(
+    "var(--plus-area-none)",
+  );
+  expect(gone.textContent).toContain("?");
+});
+
+it("names a done calendar step done in Chinese, and leaves its title still without a host dialog", async () => {
+  const data = await props();
+  data.days[1]!.completedTaskIds = ["copy"];
+  data.days[1]!.taskIds = ["outline"];
+  render(<PlanView {...data} language="zh" />);
+  fireEvent.click(screen.getByRole("tab", { name: "一周安排" }));
+  const done = document.querySelector<HTMLElement>(
+    '.planning-calendar-step.is-done[data-task-id="copy"]',
+  )!;
+  // A repeating step stays in Plan's list after a completion: its title and area are Plan's.
+  expect(
+    within(done).getByText("Write the introduction", { exact: false })
+      .textContent,
+  ).toBe("已完成: Write the introduction");
+  expect(done.textContent).toContain("Ship the small website refresh");
+  expect(done.querySelector("button")).toBeNull();
+  expect(done.style.getPropertyValue("--area-color")).toBe(
+    "var(--plus-area-work)",
+  );
+});
+
 it("draws each card's edge in its area's colour, with Work and Personal dots as the legend", async () => {
   const data = await props();
   render(<PlanView {...data} />);

@@ -4,6 +4,7 @@ import { withLaneOrder } from "../src/plan-updates";
 import type {
   DayPlan,
   FocusEntry,
+  FocusRange,
   FocusState,
   FocusTaskInfo,
   PlanMetadata,
@@ -274,13 +275,41 @@ export function createPrototype(
       return day;
     });
   }
+  /** Days as Tasks reads them: with every task their queues and records name, and its parent's title. */
+  function named(range: DayPlan[]): FocusRange {
+    const ids = new Set(
+      range.flatMap((day) => [
+        ...day.taskIds,
+        ...day.completedTaskIds,
+        ...day.entries.map((entry) => entry.taskId),
+      ]),
+    );
+    const tasks: Record<string, FocusTaskInfo> = {};
+    for (const id of ids) {
+      const item = plan.tasks.find((task) => task.id === id);
+      const parent = plan.tasks.find((task) => task.id === item?.parentId);
+      const info = item
+        ? {
+            title: item.title,
+            parentId: item.parentId,
+            parentTitle: parent?.title ?? "",
+            ...(item.estimatedMinutes
+              ? { estimatedMinutes: item.estimatedMinutes }
+              : {}),
+            completed: false,
+          }
+        : focus.tasks[id];
+      if (info) tasks[id] = info;
+    }
+    return structuredClone({ days: range, tasks, today });
+  }
   return {
     async load(week = plan.week) {
       focus = { ...focus, ...days.find((day) => day.date === focus.date)! };
       return structuredClone({ plan, focus, days: weekDays(week) });
     },
     async loadDays(week) {
-      return structuredClone(weekDays(week));
+      return named(weekDays(week));
     },
     async readPlan() {
       const metadata: Partial<PlanState> = structuredClone(plan);
@@ -523,32 +552,7 @@ export function createPrototype(
         }
         range.push(day);
       }
-      // As Tasks reads them: every task the queues and records name, with its parent's title.
-      const named = new Set(
-        range.flatMap((day) => [
-          ...day.taskIds,
-          ...day.completedTaskIds,
-          ...day.entries.map((entry) => entry.taskId),
-        ]),
-      );
-      const tasks: Record<string, FocusTaskInfo> = {};
-      for (const id of named) {
-        const item = plan.tasks.find((task) => task.id === id);
-        const parent = plan.tasks.find((task) => task.id === item?.parentId);
-        const info = item
-          ? {
-              title: item.title,
-              parentId: item.parentId,
-              parentTitle: parent?.title ?? "",
-              ...(item.estimatedMinutes
-                ? { estimatedMinutes: item.estimatedMinutes }
-                : {}),
-              completed: false,
-            }
-          : focus.tasks[id];
-        if (info) tasks[id] = info;
-      }
-      return structuredClone({ days: range, tasks, today });
+      return named(range);
     },
     async addEntry(entry) {
       const saved: FocusEntry = {

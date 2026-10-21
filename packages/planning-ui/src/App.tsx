@@ -24,6 +24,7 @@ import {
   REREAD_AFTER_MS,
   rereadsAfter,
   withNextWeek,
+  withWeek,
 } from "./plan-updates";
 import { Elapsed } from "./StatusMarks";
 import { PlanView } from "./PlanView";
@@ -190,9 +191,13 @@ export function App({
       if (!displayedWeek.current) displayedWeek.current = next.plan.week;
       loadedAt.current = Date.now();
       remembered.current = false;
+      // A week shown since this read started stays, with the tasks its read named.
       setConfirmed((current) =>
         current && request !== weekRequest.current
-          ? { ...next, days: current.days }
+          ? withWeek(next, {
+              days: current.days,
+              tasks: { ...current.focus.tasks, ...next.focus.tasks },
+            })
           : next,
       );
       setStale(false);
@@ -418,11 +423,11 @@ export function App({
     displayedWeek.current = week;
     setWeekLoading(true);
     return actions.loadDays(week).then(
-      (days) => {
+      (range) => {
         if (weekRequest.current !== request) return;
         // A write confirmed during the read may be missing from these queues.
         if (settled !== writes.current.settled) return changeWeek(week);
-        setConfirmed((current) => current && { ...current, days });
+        setConfirmed((current) => current && withWeek(current, range));
         setWeekLoading(false);
       },
       (failure) => {
@@ -609,6 +614,7 @@ export function App({
                 editTask={openTask}
                 completeReview={(task) => complete(task, "")}
                 completeTask={(task, day) => void complete(task, day)}
+                onOpenTask={onOpenTask}
                 onOpenMail={onOpenMail}
                 reviewing={review}
                 planView={planView}

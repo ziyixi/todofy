@@ -9,6 +9,7 @@ import type {
   DayQueue,
   DependencyResult,
   FocusEntry,
+  FocusRange,
   LaneId,
   PlanState,
   PlanningTask,
@@ -20,6 +21,21 @@ import type {
 
 /** Data at least this old is read again when the view comes back. */
 export const REREAD_AFTER_MS = 60_000;
+
+/**
+ * Another week's days, read on their own. The tasks they name join the ones named before, as a
+ * complete read names the shown week's: Plan's list leaves out the steps done from their days.
+ */
+export function withWeek(
+  data: PlusData,
+  week: Pick<FocusRange, "days" | "tasks">,
+): PlusData {
+  return {
+    ...data,
+    days: week.days,
+    focus: { ...data.focus, tasks: { ...data.focus.tasks, ...week.tasks } },
+  };
+}
 
 /** Confirmed queues replace the days' queues; their records stay. */
 function withDays(data: PlusData, queues: DayQueue[]): PlusData {
