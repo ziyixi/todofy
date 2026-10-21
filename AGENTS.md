@@ -66,7 +66,7 @@
 - 本地只用本地绑定与各应用 `.dev.vars`；D1 命令显式 `--local`，开发不得使用 `--remote`。
 - 分支完整通过 `CI gate` 后合并同一 green SHA。Rebase 或追加提交后重跑受影响检查；pending、cancelled 不是 green。
   正式发布只走授权的 `main` Actions；PR 不接触生产凭据，各应用保留独立 concurrency group。
-- 发布只影响该应用及共享代码实际使用者；更新 reachability 时同步守卫。Watch 等待 Todofy；Home 等待其绑定的 Ops 服务。
+- 发布只影响该应用及共享代码实际使用者；更新 reachability 时同步守卫。Tasks 与 Watch 等待 Todofy；Home 等待其绑定的 Ops 服务。
   Worker 配置变更前运行 hostname guard；显式、精确审核主机移除/接管，不覆盖其他 Worker 或 DNS。
 - `infra/` 管理其声明范围内的 Access 与 D1/R2 存在性，变更走 gated Infra apply，不手改 dashboard。
   完整配置、CI 门禁和回退见 [CI/CD](docs/ci-cd.md)、[infra README](infra/README.md)。

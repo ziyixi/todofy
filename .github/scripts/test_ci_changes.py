@@ -1362,8 +1362,9 @@ class DeployConditions(unittest.TestCase):
     """
 
     # (job, need) pairs where "skipped" is as good as "success": the dashboard deploys after the app
-    # deploys (its service bindings need their Ops entrypoints), and the watch app after Todofy's (its TODOFY
-    # binding names Todofy's Intents), which do not run when nothing of that app changed.
+    # deploys (its service bindings need their Ops entrypoints), the watch app after Todofy's (its TODOFY
+    # binding names Todofy's Intents) and Tasks after Todofy's (its MAIL binding names Todofy's Mail entry),
+    # which do not run when nothing of that app changed.
     SKIPPED_OK = {
         ("vps-deploy", "fleet-deploy"),
         ("dashboard-deploy", "todofy-deploy"),
@@ -1377,7 +1378,7 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "personal-mcp-deploy"),
         ("dashboard-deploy", "website-relay-deploy"),
         ("watch-deploy", "todofy-deploy"),
-        ("todofy-deploy", "tasks-deploy"),
+        ("tasks-deploy", "todofy-deploy"),
         ("personal-mcp-deploy", "tasks-deploy"),
         ("personal-mcp-deploy", "todofy-deploy"),
         ("personal-mcp-deploy", "recall-deploy"),
@@ -1499,11 +1500,11 @@ class DeployConditions(unittest.TestCase):
         secrets = block.split("- name: Write the Worker secrets file\n", 1)[1].split("\n      - ", 1)[0]
         self.assertIn("CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}", secrets)
 
-    def test_native_task_release_order_has_no_reverse_planning_dependency(self):
+    def test_tasks_deploys_after_todofy_whose_mail_entry_it_binds(self):
         jobs = self.jobs()
-        self.assertIn("tasks-deploy", self.needs(jobs["todofy-deploy"]))
+        self.assertIn("todofy-deploy", self.needs(jobs["tasks-deploy"]))
         self.assertIn("tasks-deploy", self.needs(jobs["dashboard-deploy"]))
-        self.assertNotIn("todofy-deploy", self.needs(jobs["tasks-deploy"]))
+        self.assertNotIn("tasks-deploy", self.needs(jobs["todofy-deploy"]))
 
     def test_every_production_job_has_its_own_concurrency_group(self):
         blocks = self.jobs()

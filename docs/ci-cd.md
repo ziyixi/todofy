@@ -290,4 +290,5 @@ input is set ([runbook](../tasks/docs/backup.md#one-time-todofy-import)). It is 
 The old generated-config rollback procedure is retained in [history](history.md#committed-config-rollback).
 Follow the current application runbook and HANDOFF before attempting a rollback.
 
-Todofy's deploy waits for Tasks' when both changed: Tasks stops calling a Todofy method before Todofy stops serving it.
+Tasks' deploy waits for Todofy's when both changed: Todofy serves the Mail entry Tasks binds, and stops calling Tasks
+before Tasks stops serving the call.
