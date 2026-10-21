@@ -66,7 +66,14 @@ async function harness(extra = {}) {
           };
           return typeof target[name]==='function'?(...args)=>{metrics.r2_calls++;return target[name](...args)}:target[name];
         }});
-        const mainBucket=new Proxy(env.MAIL_STORE,{get(target,name){return typeof target[name]==='function'?(...args)=>{metrics.r2_calls++;return target[name](...args)}:target[name];}});
+        const mainBucket=new Proxy(env.MAIL_STORE,{get(target,name){
+          if(name==='get')return async(key,...args)=>{
+            metrics.r2_calls++;
+            if(faults.value==='source:'+key) {faults.value=null;throw new Error('synthetic_source_unavailable')}
+            return target.get(key,...args);
+          };
+          return typeof target[name]==='function'?(...args)=>{metrics.r2_calls++;return target[name](...args)}:target[name];
+        }});
         const statementProxy=(statement,sql)=>new Proxy(statement,{get(query,method) {
           if(method==='bind')return(...args)=>statementProxy(query.bind(...args),sql);
           if(['all','run','first'].includes(method))return async(...args)=>{
@@ -268,7 +275,9 @@ test('quota audit: bounded SQLite rows and per-Alarm calls for ordinary snapshot
       const {queries,...totals}=metrics;
       assert.ok(metrics.rows_read < (count === 100 ? 8000 : 50000));
       assert.ok(metrics.rows_written + metrics.alarm_writes < (count === 100 ? 1500 : 9000));
-      assert.ok(metrics.max_alarm_d1_calls <= 50); assert.ok(metrics.max_alarm_r2_calls <= 50);
+      // Workers Free: an invocation may make 1,000 subrequests to Cloudflare services (R2 calls and D1 queries), at most
+      // 50 of them D1 queries. A backup tick spends at most 400 of them, and the Alarm a few of its own.
+      assert.ok(metrics.max_alarm_d1_calls <= 50); assert.ok(metrics.max_alarm_r2_calls + metrics.max_alarm_d1_calls <= 450);
       t.diagnostic(JSON.stringify({objects:count,elapsed_ms:Date.now()-started,phase:state.native.phase,...totals,top,top_writes}));
       await h.call('/backup/native/run', { version: 2, request_id: crypto.randomUUID() });
       await advance(h, value => value.native.phase === 'complete', count * 2);
@@ -279,6 +288,89 @@ test('quota audit: bounded SQLite rows and per-Alarm calls for ordinary snapshot
       t.diagnostic(JSON.stringify({objects:count,run:2,...delta,max_alarm_d1_calls:repeated.max_alarm_d1_calls,max_alarm_r2_calls:repeated.max_alarm_r2_calls}));
     } finally { await h.close(); }
   }
+});
+
+// Synthetic messages of four objects each (raw, parsed JSON, one stored attachment, frozen payload) with their D1 rows.
+async function seedMany(h, messages) {
+  const bucket = await h.bucket('MAIL_STORE'), now = new Date().toISOString(), endpoint = crypto.randomUUID(), revision = crypto.randomUUID();
+  await h.db.prepare('INSERT INTO webhook_endpoints(id,label,created_at,updated_at) VALUES(?,?,?,?)').bind(endpoint, 'Synthetic', now, now).run();
+  await h.db.prepare(`INSERT INTO endpoint_revisions(id,endpoint_id,revision,url,auth_type,credential_ciphertext,created_at)
+    VALUES(?,?,1,'https://consumer.example.invalid','bearer','synthetic-never-used',?)`).bind(revision, endpoint, now).run();
+  const keys = [];
+  for (let first = 0; first < messages; first += 50) {
+    const statements = [];
+    await Promise.all(Array.from({ length: Math.min(50, messages - first) }, async () => {
+      const id = crypto.randomUUID(), eventID = crypto.randomUUID(), rawKey = `raw/${id}.eml`, parsedKey = `parsed/${id}/fixture/message.json`;
+      const attachmentKey = `parsed/${id}/fixture/attachment-1`, payloadKey = `payload/${eventID}.json`;
+      const raw = Buffer.alloc(20_000, 0x61), attachment = Buffer.alloc(2_000, 0x62);
+      const parsed = Buffer.from(JSON.stringify({ subject: 'synthetic fixture', text: 'never production mail', html: '', headers: [],
+        attachments: [{ part_id: '1', filename: 'fixture.txt', size: attachment.length, r2_key: attachmentKey, storage_status: 'stored' }] }));
+      const payload = Buffer.from(canonicalJSON({ type: 'mail.received.v1', event_id: eventID, received_at: now,
+        message: { id, subject: 'synthetic fixture', text: 'synthetic frozen payload', from: [], to: [], attachments: [], sent_at: null, rfc_message_id: null } }));
+      await Promise.all([bucket.put(rawKey, raw, { customMetadata: { raw_size: String(raw.length), mode: 'archive' } }),
+        bucket.put(parsedKey, parsed), bucket.put(attachmentKey, attachment), bucket.put(payloadKey, payload)]);
+      keys.push(rawKey, parsedKey, attachmentKey, payloadKey);
+      statements.push(h.db.prepare(`INSERT INTO messages(id,received_at,last_received_at,envelope_from,envelope_recipient,raw_key,raw_sha256,size_bytes,receive_mode,
+        parse_state,parsed_key,parsed_size_bytes,content_bytes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, now, now, 'synthetic@example.invalid',
+          'inbox@example.invalid', rawKey, hash(raw), raw.length, 'archive', 'ready', parsedKey, parsed.length, raw.length + parsed.length + attachment.length),
+        h.db.prepare(`INSERT INTO deliveries(event_id,message_id,endpoint_revision_id,generation,payload_key,payload_sha256,payload_size_bytes,state,next_attempt_at,created_at)
+          VALUES(?,?,?,1,?,?,?,'pending',?,?)`).bind(eventID, id, revision, payloadKey, hash(payload), payload.length, now, now));
+    }));
+    // Each message row before its delivery row: the delivery references it.
+    await h.db.batch(statements.filter((_, index) => index % 2 === 0));
+    await h.db.batch(statements.filter((_, index) => index % 2 === 1));
+  }
+  return keys;
+}
+
+test('a transient failure inside a copy group resumes the same snapshot without skipping an object', { timeout: 90000 }, async () => {
+  const h = await harness();
+  try {
+    const bucket = await h.bucket('MAIL_STORE'), keys = Array.from({ length: 12 }, (_, index) => `group/${String(index).padStart(2, '0')}`);
+    for (const key of keys) await bucket.put(key, `synthetic-${key}`);
+    // The first group is group/00 to group/05; group/03's source read fails once, its neighbours copy.
+    await h.call('/test/fault', 'source:group/03');
+    const failed = await advance(h, value => value.native.error === 'native_backup_stage_retry');
+    assert.equal(failed.native.phase, 'copy');
+    const backup = await h.bucket('BACKUP_STORE'), copied = async key =>
+      (await backup.list({ prefix: `snapshots-v2/` })).objects.some(object => object.key.endsWith(`/objects/${hash(Buffer.from(key))}.bin`));
+    assert.equal(await copied('group/05'), true); assert.equal(await copied('group/03'), false);
+    const complete = await advance(h, value => value.native.phase === 'complete');
+    assert.equal(complete.backup_id, failed.backup_id);
+    const marker = await (await backup.get(`verified-v2/${complete.backup_id}.json`)).json(), manifest = await (await backup.get(marker.key)).json();
+    assert.deepEqual(manifest.files.filter(file => file.kind === 'object').map(file => file.object_key).sort(), keys);
+  } finally { await h.close(); }
+});
+
+test('a 2,500-object snapshot takes few Alarm ticks, well inside its 30-minute lease', { timeout: 300000 }, async t => {
+  const h = await harness();
+  try {
+    const keys = await seedMany(h, 625);
+    // A new DO first counts the existing objects, a page an Alarm; production's did so long ago.
+    for (let page = 0; page < 100 && !(await h.raw('/capacity/status')).ok; page++);
+    // Ticks counted by the phase each started in.
+    const ticks = {}; let phase = 'begin', state, total = 0;
+    for (; total < 2000 && phase !== 'complete'; total++) {
+      state = await h.call('/test/tick');
+      ticks[phase] = (ticks[phase] ?? 0) + 1; phase = state.native.phase;
+      assert.ok(!['cleanup', 'failed'].includes(phase), JSON.stringify(state));
+    }
+    const metrics = await h.call('/test/metrics');
+    t.diagnostic(JSON.stringify({ objects: keys.length, ticks: total, by_phase: ticks,
+      max_alarm_r2_calls: metrics.max_alarm_r2_calls, max_alarm_d1_calls: metrics.max_alarm_d1_calls }));
+    assert.equal(phase, 'complete');
+    const bucket = await h.bucket('BACKUP_STORE'), marker = await (await bucket.get(`verified-v2/${state.backup_id}.json`)).json();
+    const manifest = await (await bucket.get(marker.key)).json();
+    assert.deepEqual(manifest.files.filter(file => file.kind === 'object').map(file => file.object_key).sort(), keys.sort());
+    // Was 415 ticks (313 copying) with eight steps a tick, and a page a tick for the object list and the checks.
+    assert.ok(total <= 60, `${total} ticks`);
+    assert.ok(ticks.copy <= 30, `${ticks.copy} copy ticks`);
+    // A tick works at most 10 s, and the next Alarm follows about a second later: even at that pace the snapshot
+    // ends within half of its 30-minute lease.
+    assert.ok(total * 12_000 <= 15 * 60_000);
+    assert.ok(metrics.max_alarm_d1_calls <= 50);
+    assert.ok(metrics.max_alarm_r2_calls + metrics.max_alarm_d1_calls <= 450);
+  } finally { await h.close(); }
 });
 
 test('deploy wrapper flags drive the actual DO and manual native requests remain idempotent after completion', { timeout: 90000 }, async () => {

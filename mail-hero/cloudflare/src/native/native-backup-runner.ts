@@ -13,6 +13,19 @@ const MANIFEST_LIMIT = 4 * MIB;
 const MAX_FILES = 10_000;
 const MAX_JOURNAL_ENTRIES = 20_000;
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * MIB;
+// One Alarm tick's work. Workers Free gives a Durable Object invocation 30 s of CPU, 15 minutes of wall time and
+// 1,000 subrequests to Cloudflare services (each R2 call or D1 query), at most 50 of them D1 queries. A tick stops
+// far inside each, so the coordinator's own calls in the same Alarm still fit.
+const TICK_MS = 10_000;
+const TICK_BYTES = 8 * MIB;
+const TICK_SUBREQUESTS = 400;
+const TICK_QUERIES = 20;
+// Objects copied at once. Each copy makes four R2 calls (two source reads, the write and its readback) and has at
+// most one waiting for response headers; an invocation may have six waiting, and more would only queue.
+const COPY_GROUP = 6;
+// The most one step spends: a copy group, or a deletion-journal page (a list and 20 reads). A step starts only
+// with this much left, and each spends at most one D1 query.
+const STEP_SUBREQUESTS = COPY_GROUP * 4;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 type Row = Record<string, any>;
 type Phase = 'idle' | 'begin' | 'waiting' | 'export' | 'inventory' | 'copy' | 'journal' | 'validate' |
@@ -45,6 +58,8 @@ export class NativeBackupRunner {
   private readonly storage: DurableObjectStorage;
   private readonly env: Env;
   private readonly backup: BackupState;
+  /** What the current tick has spent; steps that can repeat within a tick count their R2 calls and D1 queries. */
+  private spent = { bytes: 0, subrequests: 0, queries: 0 };
   constructor(storage: DurableObjectStorage, env: Env, backup: BackupState) {
     this.storage = storage; this.env = env; this.backup = backup;
     storage.sql.exec('CREATE TABLE IF NOT EXISTS native_backup_control(id INTEGER PRIMARY KEY,value TEXT NOT NULL)');
@@ -111,21 +126,23 @@ export class NativeBackupRunner {
   private async exported(run: Run, path: string): Promise<{ bytes: Uint8Array; value: Row }> {
     this.ready(run);
     const response = await this.backup.fetch(new Request(`https://coordinator/backup/${path}${path.includes('?') ? '&' : '?'}backup_id=${run.id}`));
+    // An export makes at most one call: a D1 query for the database, an R2 list for the objects.
+    this.spent.subrequests++; if (path.startsWith('database')) this.spent.queries++;
     if (!response?.ok) fail('native_backup_export_failed');
     const bytes = await boundedBytes(response!.body, SOURCE_LIMIT); this.ready(run);
     try { return { bytes, value: JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) }; }
     catch { return fail('native_backup_export_invalid'); }
   }
-  private checkNewFile(run: Run, bytes: number): void {
-    if ((run.files ?? 0) + 1 >= MAX_FILES) fail('native_backup_file_limit'); // Reserve the final manifest.
-    if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > SOURCE_LIMIT || (run.bytes ?? 0) + bytes > this.limit(run)) fail('native_backup_snapshot_limit');
+  /** `queued` are new files of the same copy group, not yet recorded. */
+  private checkNewFile(run: Run, bytes: number, queued = { files: 0, bytes: 0 }): void {
+    if ((run.files ?? 0) + queued.files + 1 >= MAX_FILES) fail('native_backup_file_limit'); // Reserve the final manifest.
+    if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > SOURCE_LIMIT || (run.bytes ?? 0) + queued.bytes + bytes > this.limit(run)) fail('native_backup_snapshot_limit');
   }
   private register(run: Run, file: NativeBackupFile): void {
     this.ready(run);
     this.storage.transactionSync(() => {
       this.storage.sql.exec('INSERT INTO native_backup_copies VALUES(?,?,?,?,?)', file.path, file.kind, file.bytes, file.sha256, file.object_key ?? null);
       run.files = (run.files ?? 0) + 1; run.bytes = (run.bytes ?? 0) + file.bytes;
-      if (file.object_key) run.object_cursor = file.object_key;
       this.save(run);
     });
   }
@@ -144,19 +161,38 @@ export class NativeBackupRunner {
     }
     this.checkNewFile(run, bytes.byteLength);
     const key = `${run.prefix}/${path}`;
+    this.spent.subrequests += 2;
     await this.env.BACKUP_STORE!.put(key, bytes, { httpMetadata: { contentType: 'application/json' }, customMetadata: { backup_id: run.id!, sha256: checksum } });
     await this.readback(key, bytes.byteLength, checksum);
     this.register(run, { path, kind, bytes: bytes.byteLength, sha256: checksum });
     return bytes.byteLength;
   }
-  private async copyObject(run: Run, source: NativeBackupObject): Promise<number> {
+  /** Copies the next objects at once, as many as the tick's byte budget lets start. The cursor passes the group
+   * only after every copy in it is recorded, so a failure or a restart cannot leave an object behind it uncopied. */
+  private async copyGroup(run: Run, sources: NativeBackupObject[]): Promise<number> {
     this.ready(run);
-    const path = `objects/${await sha256Bytes(new TextEncoder().encode(source.key))}.bin`, existing = this.file(path);
-    if (existing) {
-      if (existing.bytes !== source.size || existing.object_key !== source.key) fail('native_backup_source_changed');
-      run.object_cursor = source.key; return 0;
+    const copies: { source: NativeBackupObject; path: string }[] = [], queued = { files: 0, bytes: 0 };
+    let cursor = run.object_cursor;
+    for (const source of sources) {
+      // As when copying one by one: another copy starts only while the tick is below its bytes.
+      if (copies.length && this.spent.bytes + queued.bytes >= TICK_BYTES) break;
+      const path = `objects/${await sha256Bytes(new TextEncoder().encode(source.key))}.bin`, existing = this.file(path);
+      if (existing) {
+        if (existing.bytes !== source.size || existing.object_key !== source.key) fail('native_backup_source_changed');
+      } else {
+        this.checkNewFile(run, source.size, queued);
+        copies.push({ source, path }); queued.files++; queued.bytes += source.size;
+      }
+      cursor = source.key;
     }
-    this.checkNewFile(run, source.size);
+    // Every copy settles before the group's outcome, so none runs on after a failure has ended the tick.
+    const results = await Promise.allSettled(copies.map(copy => this.copyObject(run, copy.source, copy.path)));
+    for (const result of results) if (result.status === 'rejected') throw result.reason;
+    run.object_cursor = cursor;
+    return queued.bytes;
+  }
+  private async copyObject(run: Run, source: NativeBackupObject, path: string): Promise<void> {
+    this.ready(run); this.spent.subrequests += 4;
     // The first streaming read obtains a full SHA for metadata. The second uses
     // the same frozen ETag and an exact-length stream. Neither buffers the mail.
     const first = await this.env.MAIL_STORE.get(source.key, { onlyIf: { etagMatches: source.etag } });
@@ -174,7 +210,6 @@ export class NativeBackupRunner {
     } catch (error) { await fixed.readable.cancel().catch(() => {}); throw error; }
     await this.readback(key, source.size, checksum.sha256);
     this.register(run, { path, kind: 'object', bytes: source.size, sha256: checksum.sha256, object_key: source.key });
-    return source.size;
   }
   private async reference(key: unknown, kind: string): Promise<FileRow> {
     if (typeof key !== 'string' || !key) return fail(`native_backup_${kind}_reference_missing`);
@@ -183,6 +218,7 @@ export class NativeBackupRunner {
     return file;
   }
   private async validate(run: Run): Promise<boolean> {
+    this.spent.subrequests++; this.spent.queries++;
     if (run.validation_table === 'messages') {
       const rows = (await this.env.DB.prepare(`SELECT rowid AS cursor,id,content_deleted_at,raw_expired_at,origin,raw_key,parsed_key,parse_state
         FROM messages WHERE rowid>? ORDER BY rowid LIMIT 10`).bind(run.validation_cursor ?? 0).all<Row>()).results;
@@ -190,7 +226,10 @@ export class NativeBackupRunner {
         if (!message.content_deleted_at) {
           if (!message.raw_expired_at && (message.origin !== 'synthetic_test' || message.raw_key)) await this.reference(message.raw_key, 'raw');
           if (message.parsed_key || message.parse_state === 'ready') {
-            const file = await this.reference(message.parsed_key, 'parsed'), saved = await this.env.BACKUP_STORE!.get(`${run.prefix}/${file.path}`);
+            const file = await this.reference(message.parsed_key, 'parsed');
+            // Read back like a copy: one R2 call, and its bytes count toward the tick's.
+            this.spent.subrequests++; this.spent.bytes += file.bytes;
+            const saved = await this.env.BACKUP_STORE!.get(`${run.prefix}/${file.path}`);
             if (!saved || saved.size !== file.bytes) fail('native_backup_parsed_reference_invalid');
             const bytes = await boundedBytes(saved!.body, SOURCE_LIMIT);
             if (await sha256Bytes(bytes) !== file.sha256) fail('native_backup_parsed_reference_invalid');
@@ -282,10 +321,11 @@ export class NativeBackupRunner {
       run.inventory_count = (run.inventory_count ?? 0) + data.value.objects.length;
       run.inventory_bytes = (run.inventory_bytes ?? 0) + data.value.objects.reduce((sum: number, object: NativeBackupObject) => sum + object.size, 0);
       if (run.inventory_count! + (run.files ?? 0) + 3 > MAX_FILES || run.inventory_bytes! + (run.bytes ?? 0) + 2 * MANIFEST_LIMIT > this.limit(run)) fail('native_backup_snapshot_limit');
-      if (data.value.complete) run.phase = 'copy'; this.save(run); return { bytes, stop: true };
+      if (data.value.complete) run.phase = 'copy';
     } else if (run.phase === 'copy') {
-      const row = this.storage.sql.exec<{ metadata: string }>('SELECT metadata FROM backup_objects WHERE backup_id=? AND key>? ORDER BY key LIMIT 1', run.id!, run.object_cursor ?? '').toArray()[0];
-      if (row) bytes = await this.copyObject(run, JSON.parse(row.metadata));
+      const rows = this.storage.sql.exec<{ metadata: string }>('SELECT metadata FROM backup_objects WHERE backup_id=? AND key>? ORDER BY key LIMIT ?',
+        run.id!, run.object_cursor ?? '', COPY_GROUP).toArray();
+      if (rows.length) bytes = await this.copyGroup(run, rows.map(row => JSON.parse(row.metadata)));
       else {
         const source = await this.exported(run, 'manifest'), body = encode(source.value.manifest);
         if (await sha256Bytes(body) !== source.value.manifest_sha256) fail('native_backup_manifest_changed');
@@ -295,6 +335,7 @@ export class NativeBackupRunner {
       this.ready(run);
       if (!run.journal_done) {
         const page = await this.env.BACKUP_STORE!.list({ prefix: 'deletion-journal/', limit: 20, cursor: run.journal_cursor ?? undefined });
+        this.spent.subrequests += 1 + page.objects.length;
         for (const object of page.objects) {
           const value = await this.env.BACKUP_STORE!.get(object.key); if (!value || value.size > 4096) fail('native_backup_deletion_journal_invalid');
           const item = await value!.json<Row>();
@@ -311,9 +352,8 @@ export class NativeBackupRunner {
         if (body.byteLength > MANIFEST_LIMIT) fail('native_backup_deletion_journal_limit');
         bytes = await this.copyBytes(run, 'snapshot-deletions.json', 'deletions', body); run.phase = 'validate'; run.validation_table = 'messages'; run.validation_cursor = 0;
       }
-      this.save(run); return { bytes, stop: true };
     } else if (run.phase === 'validate') {
-      this.ready(run); if (await this.validate(run)) run.phase = 'manifest'; this.ready(run); this.save(run); return { bytes, stop: true };
+      this.ready(run); if (await this.validate(run)) run.phase = 'manifest'; this.ready(run);
     } else if (run.phase === 'manifest') { await this.writeManifest(run); return { bytes, stop: true };
     } else if (run.phase === 'commit') { await this.backup.commitNativeVerified(run.marker!, run.source_hash!); run.phase = 'marker';
     } else if (run.phase === 'marker') { await writeNativeVerifiedMarker(this.env, run.marker!); await this.backup.finalizeNativeMarker(run.id!); run.phase = 'prune';
@@ -334,9 +374,10 @@ export class NativeBackupRunner {
     try {
       if (!this.active(run)) { this.clearCopies(); run = { phase: 'begin', next_at: now, error: null, files: 0, bytes: 0 }; this.save(run); }
       await this.storage.setAlarm(Date.now() + 60_000);
-      let bytes = 0; const started = Date.now();
-      for (let actions = 0; actions < 8 && bytes < 8 * MIB && Date.now() - started < 10_000; actions++) {
-        run.next_at = Date.now() + 1000; const result = await this.step(run); bytes += result.bytes;
+      this.spent = { bytes: 0, subrequests: 0, queries: 0 }; const started = Date.now();
+      while (this.spent.bytes < TICK_BYTES && this.spent.subrequests + STEP_SUBREQUESTS <= TICK_SUBREQUESTS &&
+        this.spent.queries < TICK_QUERIES && Date.now() - started < TICK_MS) {
+        run.next_at = Date.now() + 1000; const result = await this.step(run); this.spent.bytes += result.bytes;
         if (result.stop || !this.active(run) || run.next_at > Date.now() + 1000) break;
       }
       this.save(run);
