@@ -62,6 +62,9 @@ The helper does not restore data or recreate persistent resources.
 
 Missing required secrets, undeclared bindings, changed binding types, changed operational switches,
 stateful binding changes, route removal, and hostname ownership conflicts require manual recovery.
+A binding the live version does not have yet is `BINDING_MISSING`, which the release adds; only a live
+binding that points at another D1 database, R2 bucket or Durable Object namespace is a stateful
+binding change. A new bucket must still exist before the release that binds it.
 Cloudflare returns secret names without their values; these checks cannot recover or verify a secret's
 contents. Bootstrap validates complete secret maps separately. Existing releases can retain unreadable
 manual secrets when no replacement map is supplied.

@@ -125,6 +125,10 @@ def binding_differences(config, desired, resources, bindings, sha):
     if "BUILD_SHA" in expected and live.get("BUILD_SHA", {}).get("text") != sha:
         changes.append({"field": "BUILD_SHA", "reason": "BUILD_IDENTITY_CHANGED"})
     for name, (kind, wanted) in expected_targets(config, resources).items():
+        if name in expected and name not in live:
+            # A new binding: BINDING_MISSING above reports it, and the release adds
+            # it. Only a live binding can point at another target.
+            continue
         actual = live.get(name, {})
         actual_target = target(actual)
         if kind == "service" and "props" not in actual:

@@ -168,6 +168,37 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn("changed.example.com", json.dumps(changes))
         self.assertNotIn("unknown", json.dumps(changes))
 
+    def test_a_new_binding_is_only_missing_and_a_changed_target_is_stateful(self):
+        config = {
+            "d1_databases": [{"binding": "DB", "database_id": UUID}],
+            "r2_buckets": [{"binding": "BACKUPS", "bucket_name": "synthetic-backups"}],
+            "services": [{"binding": "INBOX", "service": "tasks", "entrypoint": "TaskInbox"}],
+        }
+        desired = {
+            "bindings": [
+                {"name": "DB", "type": "d1"},
+                {"name": "BACKUPS", "type": "r2_bucket"},
+                {"name": "INBOX", "type": "service"},
+            ]
+        }
+        live = [{"name": "DB", "type": "d1", "id": UUID}]
+        self.assertEqual(
+            binding_differences(config, desired, {}, live, SHA),
+            [
+                {"field": "BACKUPS", "reason": "BINDING_MISSING"},
+                {"field": "INBOX", "reason": "BINDING_MISSING"},
+            ],
+        )
+        moved = [
+            *live,
+            {"name": "BACKUPS", "type": "r2_bucket", "bucket_name": "another-bucket"},
+            {"name": "INBOX", "type": "service", "service": "tasks", "entrypoint": "TaskInbox"},
+        ]
+        self.assertEqual(
+            binding_differences(config, desired, {}, moved, SHA),
+            [{"field": "BACKUPS", "reason": "STATEFUL_BINDING_CHANGED"}],
+        )
+
     def test_absent_database_or_bucket_stops_before_any_write(self):
         api = FakeApi([ReleaseError("PROVIDER_HTTP_404")])
         with self.assertRaisesRegex(ReleaseError, "PROVIDER_HTTP_404"):
