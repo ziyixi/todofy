@@ -61,7 +61,7 @@ These steps establish infrastructure readiness, not real Dots receipt.
 ## Business release
 
 The connection gate above passed before business sources were connected. The current source catalog is listed in
-[README](../README.md). Private `TasksApi`, `MailApi`, `RecallApi` and `HomeApi` entrypoints must be deployed before
+[README](../README.md). Private `TasksApi`, `Mail` (Todofy's, read-only; `MailApi` until 2026-10-21), `RecallApi` and `HomeApi` entrypoints must be deployed before
 the MCP binds them. The staged bridge does this through the normal source-app Actions releases; it also adds MCP's
 private Ops entrypoint before Home begins monitoring it.
 

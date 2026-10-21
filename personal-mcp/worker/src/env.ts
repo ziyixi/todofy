@@ -3,7 +3,6 @@ import type { ContentToolEnv } from './content.ts';
 
 export interface Env extends ContentToolEnv {
   SUBSCRIPTIONS: DurableObjectNamespace<SubscriptionStore>;
-  TASKS: Fetcher;
   PUBLIC_HOST: string;
   ACCESS_ISSUER: string;
   ACCESS_AUDIENCE?: string;

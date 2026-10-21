@@ -1,6 +1,6 @@
-import { MailReadyItemSchema } from '@ziyixi/proto/todofy/ui/v1/mail_ready_pb';
+import { MailReadyItemSchema } from '@ziyixi/proto/todofy/mail/v1/mail_service_pb';
 import { toWire } from '@ziyixi/proto/wire-json';
-import { createReadinessClient, readHomeSnapshot, type ContentToolEnv } from './content.ts';
+import { createMailClient, readHomeSnapshot, type ContentToolEnv } from './content.ts';
 import { createTasksClient, type TaskToolEnv } from './tasks.ts';
 
 export const SOURCE_NAMES = ['task.changed', 'task.must_start', 'mail.ready', 'service.attention'] as const;
@@ -39,7 +39,7 @@ export async function baselineSource(name: SourceName, env: SourceEnv, previous?
     case 'task.must_start':
       return { name, ids: await mustStartIds(env), revision: previous?.name === name ? previous.revision : 0 };
     case 'mail.ready': {
-      const result = await createReadinessClient(env).pollMailReady({ baseline: true });
+      const result = await createMailClient(env).pollMailReady({ baseline: true });
       if (!result.cursor) throw new Error('MAIL_READY_CURSOR_MISSING');
       return { name, cursor: result.cursor };
     }
@@ -82,7 +82,7 @@ export async function pollSource(
         ? [{ id: `must_start_${String(revision)}`, name, data: { task_ids: added } }] : [] };
     }
     case 'mail.ready': {
-      const result = await createReadinessClient(env).pollMailReady({ cursor: state.cursor });
+      const result = await createMailClient(env).pollMailReady({ cursor: state.cursor });
       if (!result.cursor) throw new Error('MAIL_READY_CURSOR_MISSING');
       const events = new Map<string, SourceEvent>();
       for (const item of result.mailItems) {

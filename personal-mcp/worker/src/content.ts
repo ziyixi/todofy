@@ -1,4 +1,7 @@
-/** Explicit Mail, Recall and cached Home tools. Scheduling and subscription cursors belong to the MCP store. */
+/**
+ * Explicit Mail, Recall and cached Home tools. Scheduling and subscription cursors belong to the MCP store. Mail is read
+ * on Todofy's Mail entry (todofy.mail.v1, a read-only binding); Tasks converts it and keeps its category shortcuts.
+ */
 import { ProtocolError, type CallToolResult, type McpServer } from '@modelcontextprotocol/server';
 import { ReadHomeRequestSchema, ReadHomeResponseSchema } from '@ziyixi/proto/dashboard/mcp/v1/home_service_pb';
 import type { HomeService, ReadHomeResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
@@ -10,18 +13,18 @@ import {
   SearchPagesRequestSchema,
   SearchPagesResponseSchema,
 } from '@ziyixi/proto/recall/ui/v1/recall_ui_service_pb';
-import { MailReadinessService } from '@ziyixi/proto/todofy/ui/v1/mail_ready_pb';
-import {
-  ConvertMailItemResponseSchema,
-  ListMailItemsResponseSchema,
-  MailItemSchema,
-  PlusService,
-} from '@ziyixi/proto/todofy/ui/v1/plus_service_pb';
+import { MailCategoriesSchema } from '@ziyixi/proto/tasks/ui/v1/mail_pb';
+import { TaskSchema } from '@ziyixi/proto/tasks/ui/v1/task_pb';
+import { ListMailItemsResponseSchema, MailItemSchema, MailService } from '@ziyixi/proto/todofy/mail/v1/mail_service_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import { z } from 'zod';
+import { createTasksClient } from './tasks.ts';
 
 export interface ContentToolEnv {
+  /** Todofy's Mail entry, `props.access = "read"`. */
   TODOFY_MAIL: Fetcher;
+  /** Tasks' generic API: Mail conversion and the category shortcuts. */
+  TASKS: Fetcher;
   RECALL: Fetcher;
   HOME: HomeService;
 }
@@ -39,12 +42,9 @@ function bindingTransport(binding: Fetcher, origin: string): HttpSend {
   }));
 }
 
+/** Todofy's Mail entry: the list, one mail with its summary, and the readiness feed. */
 export function createMailClient(env: Pick<ContentToolEnv, 'TODOFY_MAIL'>) {
-  return createHttpClient(PlusService, bindingTransport(env.TODOFY_MAIL, 'https://mail.internal'));
-}
-
-export function createReadinessClient(env: Pick<ContentToolEnv, 'TODOFY_MAIL'>) {
-  return createHttpClient(MailReadinessService, bindingTransport(env.TODOFY_MAIL, 'https://mail.internal'));
+  return createHttpClient(MailService, bindingTransport(env.TODOFY_MAIL, 'https://mail.internal'));
 }
 
 export function createRecallClient(env: Pick<ContentToolEnv, 'RECALL'>) {
@@ -93,6 +93,7 @@ function textDocument(document: Document) {
 
 export function registerContentTools(server: McpServer, env: ContentToolEnv): void {
   const mail = createMailClient(env);
+  const tasks = createTasksClient(env);
   const recall = createRecallClient(env);
 
   server.registerTool('mail_list', {
@@ -102,8 +103,13 @@ export function registerContentTools(server: McpServer, env: ContentToolEnv): vo
       page_token: z.string().max(256).default('') }),
     annotations: readOnly,
   }, input => answer('MAIL', async () => {
-    const page = await mail.listMailItems({ pageSize: input.page_size, pageToken: input.page_token });
-    return { ...toWire(ListMailItemsResponseSchema, page), mail_items: page.mailItems.map(item => toWire(MailItemSchema, item)) };
+    const [page, categories] = await Promise.all([
+      mail.listMailItems({ pageSize: input.page_size, pageToken: input.page_token }),
+      tasks.getMailCategories({ name: 'mailCategories' }),
+    ]);
+    const shortcuts = toWire(MailCategoriesSchema, categories);
+    return { ...toWire(ListMailItemsResponseSchema, page), mail_items: page.mailItems.map(item => toWire(MailItemSchema, item)),
+      categories: shortcuts['categories'] ?? [], categories_etag: categories.etag };
   }));
 
   server.registerTool('mail_read', {
@@ -112,8 +118,14 @@ export function registerContentTools(server: McpServer, env: ContentToolEnv): vo
     inputSchema: z.strictObject({ event_id: mailId }),
     annotations: readOnly,
   }, input => answer('MAIL', async () => {
-    const result = await mail.readMailSummary({ id: input.event_id });
-    return { event_id: input.event_id, summary: result.summary, available: result.summary.length > 0 };
+    try {
+      const item = await mail.getMailItem({ name: `mailItems/${input.event_id}` });
+      return { event_id: input.event_id, summary: item.summary, available: item.summary.length > 0 };
+    } catch (error) {
+      // Its summary was deleted, or it never was: absent, as before.
+      if (error instanceof RpcStatusError && error.status.reason === 'NOT_FOUND') return { event_id: input.event_id, summary: '', available: false };
+      throw error;
+    }
   }));
 
   server.registerTool('mail_collect', {
@@ -124,9 +136,9 @@ export function registerContentTools(server: McpServer, env: ContentToolEnv): vo
     }).refine(input => Boolean(input.category_id) === Boolean(input.categories_etag), 'Supply category_id and categories_etag together.'),
     annotations: { ...readOnly, readOnlyHint: false },
   }, input => answer('MAIL', async () => {
-    const result = await mail.convertMailItem({ eventId: input.event_id, etag: input.etag, requestId: input.request_id,
+    const task = await tasks.convertMailItem({ eventId: input.event_id, etag: input.etag, requestId: input.request_id,
       categoryId: input.category_id ?? '', categoriesEtag: input.categories_etag ?? '' });
-    return { event_id: input.event_id, ...toWire(ConvertMailItemResponseSchema, result) };
+    return { event_id: input.event_id, task: toWire(TaskSchema, task) };
   }, true));
 
   server.registerTool('recall_search', {

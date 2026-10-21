@@ -602,13 +602,13 @@ class Classify(unittest.TestCase):
             # todofy.ui.v1's answers.
             "proto/todofy/report/v1/report.proto": {"todofy"},
             # Todofy's owner API: its core answers it, its gateway serves it and its UI calls it.
-            "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy", "personal-mcp"},
-            "proto/todofy/ui/v1/mail_event.proto": {"todofy", "personal-mcp"},
+            "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy"},
+            "proto/todofy/ui/v1/mail_event.proto": {"todofy"},
             # Tasks' owner API: its Worker serves it, its UI and the Personal MCP call it.
             "proto/tasks/ui/v1/gtd.proto": {"tasks", "personal-mcp"},
-            # Todofy's private Mail entry: its core answers it, its gateway serves it, Tasks calls it. Tasks'
-            # create-only TaskInbox: Tasks serves it, Home calls it.
-            "proto/todofy/mail/v1/mail_service.proto": {"todofy", "tasks"},
+            # Todofy's private Mail entry: its core answers it, its gateway serves it, Tasks and the Personal MCP call
+            # it. Tasks' create-only TaskInbox: Tasks serves it, Home and the watch app call it.
+            "proto/todofy/mail/v1/mail_service.proto": {"todofy", "tasks", "personal-mcp"},
             "proto/tasks/inbox/v1/task_inbox.proto": {"tasks", "dashboard", "watch"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes its types only, its
             # core reads ops.v1 in Python).

@@ -271,10 +271,10 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
     # shared transcoder and Todofy's UI calls it through the shared client.
-    "proto/todofy/ui/": ("todofy", "personal-mcp"),
-    # Todofy's private Mail entry (todofy.mail.v1): todofy-core answers it, the gateway serves it and Tasks calls it;
-    # the other apps that call it join as each imports it.
-    "proto/todofy/mail/": ("todofy", "tasks"),
+    "proto/todofy/ui/": ("todofy",),
+    # Todofy's private Mail entry (todofy.mail.v1): todofy-core answers it, the gateway serves it, and Tasks and the
+    # Personal MCP call it.
+    "proto/todofy/mail/": ("todofy", "tasks", "personal-mcp"),
     "proto/tasks/ui/": ("tasks", "personal-mcp"),
     # Tasks' create-only TaskInbox (tasks.inbox.v1): Tasks serves it, Home creates the digest's daily task and the watch
     # app its notifications with it.

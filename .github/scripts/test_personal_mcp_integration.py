@@ -32,7 +32,8 @@ class PersonalMcpIntegration(unittest.TestCase):
         ])
         self.assertEqual(config["services"], [
             {"binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"access": "read-write"}},
-            {"binding": "TODOFY_MAIL", "service": "todofy", "entrypoint": "MailApi"},
+            # Todofy's Mail entry, read only: Tasks converts the mail (through TASKS).
+            {"binding": "TODOFY_MAIL", "service": "todofy", "entrypoint": "Mail", "props": {"access": "read"}},
             {"binding": "RECALL", "service": "recall", "entrypoint": "RecallApi"},
             {"binding": "HOME", "service": "home", "entrypoint": "HomeApi"},
         ])

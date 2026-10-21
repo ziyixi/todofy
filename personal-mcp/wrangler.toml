@@ -38,7 +38,8 @@ props = { access = "read-write" }
 [[services]]
 binding = "TODOFY_MAIL"
 service = "todofy"
-entrypoint = "MailApi"
+entrypoint = "Mail"
+props = { access = "read" }
 
 [[services]]
 binding = "RECALL"

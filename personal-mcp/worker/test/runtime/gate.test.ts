@@ -10,7 +10,7 @@ import { toWire, fromWire } from '@ziyixi/proto/wire-json';
 import type { HomeService, ReadHomeRequest, ReadHomeResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
 import { TaskSchema, type Task } from '@ziyixi/proto/tasks/ui/v1/task_pb';
 import { ListChangesResponseSchema, ListTasksResponseSchema, TaskChangeSchema, type TaskChange } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
-import { PollMailReadyResponseSchema } from '@ziyixi/proto/todofy/ui/v1/mail_ready_pb';
+import { PollMailReadyResponseSchema } from '@ziyixi/proto/todofy/mail/v1/mail_service_pb';
 
 const secret = `whsec_${btoa('s'.repeat(32))}`;
 const callback = { mode: 'webhook', url: 'https://receiver.example.org/callback', secret };
@@ -168,7 +168,7 @@ function businessSources() {
     mail(request) {
       expect(request.method).toBe('GET');
       const url = new URL(request.url);
-      expect(url.pathname).toBe('/api/plus/v1/mailItems:pollReady');
+      expect(url.pathname).toBe('/api/mail/v1/mailItems:pollReady');
       const baseline = url.searchParams.get('baseline') === 'true';
       if (baseline) reads.mailBaselines++;
       else reads.mailCursors.push(url.searchParams.get('cursor') ?? '');

@@ -37,7 +37,8 @@ it does not mean a Dot finished its work. The assistant reads current facts thro
 
 ## Runtime and source boundaries
 
-Private generated service bindings connect `TasksApi`, `MailApi`, `RecallApi` and `HomeApi`. The DO retains
+Private generated service bindings connect `TasksApi`, Todofy's read-only `Mail` entry, `RecallApi` and `HomeApi`.
+`mail_collect` and the category shortcuts are Tasks' (`ConvertMailItem`, `GetMailCategories`); Todofy keeps the mail. The DO retains
 subscriptions, cursor/state, delivery metadata, Step request identities and confirmed task revisions. It does
 not copy task bodies, mail or browsing documents into its database. Callback paths and signing secrets never
 appear in status or logs. Home reads this Worker's standard private Ops binding.
