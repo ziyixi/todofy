@@ -72,7 +72,7 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (36 objects)
+### Managed here (37 objects)
 
 This is the maximum declared count. Fresh bootstrap creates 34 objects before the first Worker release,
 then adds its exact mail rule (35). An adopted account retains the frozen legacy backup app (36).
@@ -97,6 +97,7 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_application.owner["fleet"]` | Access app "Fleet" | Whole Fleet owner host; created before the Worker so its real AUD can be recorded |
 | `cloudflare_zero_trust_access_application.owner["mailsort"]` | Access app "mailsort" | `sort.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before mailsort's first deploy, not imported; its AUD and id are then committed ([Adding an app](#adding-an-app)) |
 | `cloudflare_zero_trust_access_application.owner["recall"]` | Access app "recall" | `recall.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before recall's first deploy, not imported; its AUD and id are then committed ([Adding an app](#adding-an-app)) |
+| `cloudflare_zero_trust_access_application.owner["personal-mcp"]` | Personal MCP | Whole `mcp.ziyixi.science` host, shared owner policies and Managed OAuth; created before the first Worker release |
 | `cloudflare_zero_trust_access_application.recall_machine` | recall machine routes | Only the exact `/api/machine/v1/batches` and `/api/machine/v1/changes` and the blobs under `/api/machine/v1/blobs/*`; the Worker checks each route's own bearer token (recall/docs/design.md §2.1) |
 | `cloudflare_zero_trust_access_policy.recall_machine` | recall machine routes only | Bypass policy attached only to the machine-routes application; no owner API bypass |
 | `cloudflare_zero_trust_access_application.owner["brief"]` | Access app "brief" | `brief.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before the brief's first deploy, not imported; its AUD and id are then committed ([Adding an app](#adding-an-app)) |
@@ -543,6 +544,16 @@ AUD exists only once the application does, and the Worker must be deployed with 
    the Worker runs, so a wrong AUD only shows as a 403 for the owner). It must be green: `no-op: 19`,
    `output changes: 0`, and no outputs problem. Red with `vars.ACCESS_AUDIENCE differs from access_aud` means the
    committed AUD is wrong: read it again (step 4), fix it and push; the app's deploy job then ships the fix.
+
+Personal MCP follows this sequence with `CHECK_ONLY` still enabled and no `ACCESS_AUDIENCE` until the apply returns its
+real identity. Provider 5.25.0 supports `oauth_configuration`; only this application enables it. Its redirect allowlist
+contains the exact documented stable ChatGPT callback. Before the first login, verify the authorization server's
+RFC 9207 issuer support and the exact redirect shown on the MCP management page. If ChatGPT shows a callback-ID-specific
+redirect, replace the allowlist with that exact URL before testing. Do not use a wildcard or infer a callback ID.
+See [OpenAI authentication](https://developers.openai.com/plugins/build/auth) and
+[Cloudflare Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
+The release probe checks the anonymous `401` OAuth challenge; an authenticated tool call and synthetic event remain
+separate acceptance checks.
 
 Between steps 3 and 5 the application gates a host that no Worker serves yet, which is harmless. Until the app's
 first deploy its Worker is also in `FIRST_DEPLOY_PENDING`

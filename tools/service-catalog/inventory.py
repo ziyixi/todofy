@@ -13,6 +13,7 @@ DO_KEYS = {
     "FleetState": "fleet-state", "HomeState": "home-state",
     "MailCoordinator": "mail-coordinator", "TodofyCore": "todofy-core-do", "WatchState": "watch-state",
     "MailsortState": "mailsort-state", "RecallState": "recall-state", "BriefState": "brief-state",
+    "SubscriptionStore": "personal-mcp-subscriptions",
 }
 # Workers (script names) before their first deploy, one entry per app. Such a Worker and the buckets it binds stay
 # registered (Home's registry names them) but may be absent: "Infra apply" creates the bucket, the first deploy the Worker. Its Durable Object
@@ -21,7 +22,7 @@ DO_KEYS = {
 # (expected() refuses a recorded id while the entry remains). The entry also keeps the
 # app out of "Personal cloud reconcile"'s Worker comparison, which needs a verified deployment (the matrix's exclude,
 # held equal by .github/scripts/test_reconcile_workflow.py).
-FIRST_DEPLOY_PENDING: set[str] = set()
+FIRST_DEPLOY_PENDING: set[str] = {"personal-mcp"}
 OUTPUT = "dashboard/worker/src/account-inventory.json"
 BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
 PAGE_LIMIT = 100

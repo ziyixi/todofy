@@ -67,6 +67,7 @@ WRAPPERS = {
     "mailsort": {"language": "js", "file": "mailsort/deploy/deploy-vars.mjs", "vars": "mailsort", "secrets": "mailsort"},
     "recall": {"language": "js", "file": "recall/deploy/deploy-vars.mjs", "vars": "recall", "secrets": "recall"},
     "brief": {"language": "js", "file": "brief/deploy/deploy-vars.mjs", "vars": "brief", "secrets": "brief"},
+    "personal-mcp": {"language": "js", "file": "personal-mcp/deploy/deploy-vars.mjs", "vars": "personal-mcp", "secrets": "personal-mcp"},
     "website-relay": {"language": "js", "file": "website/relay/deploy/deploy-vars.mjs", "vars": "ziyixi-notion-publish", "secrets": "ziyixi-notion-publish"},
     "todofy": {
         "language": "py",

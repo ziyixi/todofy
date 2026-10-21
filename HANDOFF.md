@@ -14,6 +14,21 @@ instructions.
 
 ## Current work
 
+### Private MCP connection gate (`codex/personal-mcp`)
+
+Owner authorized implementation starting with real Dots OAuth and one synthetic event. Work is isolated in
+`/private/tmp/todofy-personal-mcp`, based on `origin/main` `3a9277c3`; the shared checkout and Claude's work are
+untouched. New `personal-mcp/` has only connection status, a test-event tool and persistent event subscriptions.
+No business-service bindings or data access yet. The catalog, first-deploy inventory, fixed provider's Managed OAuth,
+and normal CI/release integration are prepared. The new app stays CHECK_ONLY until Infra apply creates its Access
+identity and the real AUD is recorded. Existing Access apps do not enable OAuth as part of this change.
+
+Local workerd proves discovery, restart persistence, signed delivery, duplicate request handling and unsubscribe.
+Real Dots login, event subscription and receipt remain pending; follow [the gate](personal-mcp/docs/connection.md).
+Only after it passes, add the agreed business tools and events. Keep this personal integration small; no generic
+event bus, replay platform or extra model calls. Do not treat local verification as real-client acceptance.
+
+
 ### Home's alerts of 2026-10-20 (`claude/home-alerts`)
 
 **Local only, not pushed**, rebased on `origin/main` `bf41ce60`. Deploys Mail Hero, Brief, Home and Tasks (Tasks

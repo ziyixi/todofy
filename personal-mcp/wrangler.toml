@@ -1,0 +1,30 @@
+# Production config. The first gate has no business-service bindings.
+name = "personal-mcp"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-08"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "mcp.ziyixi.science", custom_domain = true }]
+
+[observability]
+enabled = true
+[observability.logs]
+enabled = true
+invocation_logs = false
+[observability.traces]
+enabled = false
+
+[[durable_objects.bindings]]
+name = "SUBSCRIPTIONS"
+class_name = "SubscriptionStore"
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SubscriptionStore"]
+
+[vars]
+PUBLIC_HOST = "mcp.ziyixi.science"
+ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+# Added from Infra apply before enabling release; dry-run checks need no AUD.
+CALLBACK_HOSTS = ""

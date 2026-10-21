@@ -1,0 +1,37 @@
+version = 1
+id = "personal-mcp"
+target = "cloudflare"
+
+[[workers]]
+config = "personal-mcp/wrangler.toml"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES"]
+manual_secrets = []
+optional_secrets = ["ACCESS_OWNER_ALIASES"]
+hosts = ["mcp"]
+entry = "personal-mcp"
+role = "Private MCP tools and event subscriptions"
+position = 31
+
+[[entries]]
+id = "personal-mcp"
+name = "Personal MCP"
+description = "Private tools and event subscriptions for ChatGPT"
+group = "hidden"
+icon = "plug"
+accent = "slate"
+access = true
+app_only_signals = []
+order = 1
+worker = "personal-mcp"
+url_path = "/mcp"
+position = 31
+[entries.status]
+type = "none"
+
+[[access]]
+key = "personal-mcp"
+kind = "owner"
+worker = "personal-mcp"
+name = "Personal MCP"
+paths = [""]
+session = "24h"

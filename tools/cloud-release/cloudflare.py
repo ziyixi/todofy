@@ -15,6 +15,7 @@ DO_KEYS = {
     "MailsortState": "mailsort-state",
     "RecallState": "recall-state",
     "BriefState": "brief-state",
+    "SubscriptionStore": "personal-mcp-subscriptions",
 }
 
 

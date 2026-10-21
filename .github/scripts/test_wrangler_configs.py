@@ -76,6 +76,7 @@ WRAPPERS = {
     "mailsort": ("mailsort/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["mailsort"]),
     "recall": ("recall/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["recall"]),
     "brief": ("brief/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["brief"]),
+    "personal-mcp": ("personal-mcp/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["personal-mcp"]),
 }
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
 PERSONAL_VARS = {
@@ -115,6 +116,8 @@ PERSONAL_INPUTS = {
     "BRIEF_ACCESS_OWNER_ALIASES",
     "BRIEF_MAIL_FROM",
     "BRIEF_MAIL_TO",
+    "PERSONAL_MCP_ACCESS_OWNER",
+    "PERSONAL_MCP_ACCESS_OWNER_ALIASES",
 }
 # Personal inputs a deploy job reads from another app's secret: the owner of the links app, the watch app, mailsort,
 # recall and the brief is the dashboard's owner (one person, the same Access identities), so their deploys read the
@@ -130,6 +133,8 @@ SHARED_SECRETS = {
     "RECALL_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
     "BRIEF_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
     "BRIEF_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
+    "PERSONAL_MCP_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
+    "PERSONAL_MCP_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
 }
 # The only GitHub variables CI reads: the operational switches, stated at every deploy (mail-hero AGENTS.md §8).
 TOGGLES = {
@@ -147,7 +152,7 @@ TOGGLES = {
     # the brief's ceiling (off, archive, shadow or live): the emergency switch of brief/docs/design.md section 15.
     "BRIEF_MODE",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy")
+DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy", "personal-mcp-deploy")
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -178,7 +183,10 @@ def load(path: str) -> dict:
 
 
 # Production Workers with a Custom Domain but no tile on 首页, and why.
-NO_TILE = {"home": "the dashboard itself (dashboard/docs/design-v2.md Q11)"}
+NO_TILE = {
+    "home": "the dashboard itself (dashboard/docs/design-v2.md Q11)",
+    "personal-mcp": "private MCP endpoint, no owner UI in the first gate",
+}
 
 
 def registry_workers(registry: str) -> dict[str, str]:

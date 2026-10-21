@@ -22,7 +22,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, mailsort, recall, brief, tasks]
+        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, mailsort, recall, brief, tasks, personal-mcp]
         default: both
       resume_vps_release:
         description: Explicitly resume a held VPS release after investigating its safe error
@@ -67,6 +67,8 @@ jobs:
       recall_check: ${{ steps.decide.outputs.recall_check }}
       brief_check: ${{ steps.decide.outputs.brief_check }}
       tasks_check: ${{ steps.decide.outputs.tasks_check }}
+      personal_mcp_check: ${{ steps.decide.outputs.personal_mcp_check }}
+      personal_mcp_deploy: ${{ steps.decide.outputs.personal_mcp_deploy }}
       tasks_deploy: ${{ steps.decide.outputs.tasks_deploy }}
       contracts: ${{ steps.decide.outputs.contracts }}
       packages: ${{ steps.decide.outputs.packages }}
@@ -475,6 +477,19 @@ jobs:
       - name: Run fleet-checks steps
         uses: ./.github/actions/check-fleet
 
+  personal-mcp-checks:
+    name: Personal MCP checks
+    needs: changes
+    if: needs.changes.outputs.personal_mcp_check == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run personal-mcp checks
+        uses: ./.github/actions/check-personal-mcp
+
   contracts:
     name: Contracts
     needs: changes
@@ -589,7 +604,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, personal-mcp-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -608,6 +623,7 @@ jobs:
           LINKS: ${{ needs.links-checks.result }}
           WATCH: ${{ needs.watch-checks.result }}
           FLEET: ${{ needs.fleet-checks.result }}
+          PERSONAL_MCP: ${{ needs.personal-mcp-checks.result }}
           MAILSORT: ${{ needs.mailsort-checks.result }}
           RECALL: ${{ needs.recall-checks.result }}
           BRIEF: ${{ needs.brief-checks.result }}
@@ -632,7 +648,7 @@ jobs:
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
             "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" "Mailsort checks=$MAILSORT" \
-            "Tasks checks=$TASKS" "Recall checks=$RECALL" "Brief checks=$BRIEF" \
+            "Tasks checks=$TASKS" "Recall checks=$RECALL" "Brief checks=$BRIEF" "Personal MCP checks=$PERSONAL_MCP" \
             "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
@@ -1100,6 +1116,27 @@ jobs:
     uses: ./.github/workflows/worker-release.yml
     with:
       app: fleet
+      source_sha: ${{ github.sha }}
+    secrets: inherit
+
+  personal-mcp-deploy:
+    name: Personal MCP deploy
+    needs: [changes, personal-mcp-checks, gate]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.personal-mcp-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.personal-mcp-checks.result == 'skipped'))
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.personal_mcp_deploy == 'true' }}
+    permissions:
+      contents: read
+      deployments: write
+    uses: ./.github/workflows/worker-release.yml
+    with:
+      app: personal-mcp
       source_sha: ${{ github.sha }}
     secrets: inherit
 

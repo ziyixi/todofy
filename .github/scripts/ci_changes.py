@@ -131,7 +131,7 @@ APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
-CHECK_ONLY: set[str] = set()
+CHECK_ONLY: set[str] = {"personal-mcp"}
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
 HOME_BOUND = {"fleet", "mailsort", "recall", "brief", "tasks"}
@@ -149,6 +149,7 @@ KEYS = (
     "recall_check",
     "brief_check",
     "tasks_check",
+    "personal_mcp_check",
     "contracts",
     "packages",
     "infra",
@@ -169,6 +170,7 @@ KEYS = (
     "recall_extension_publish",
     "brief_deploy",
     "tasks_deploy",
+    "personal_mcp_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),
@@ -186,6 +188,7 @@ DISPATCH = {
     "recall": ("recall",),
     "brief": ("brief",),
     "tasks": ("tasks",),
+    "personal-mcp": ("personal-mcp",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
@@ -193,7 +196,7 @@ RELAY = "website/relay/"
 # Release (recall_extension_publish).
 EXTENSION = ("recall/extension/", "recall/shared/")
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"links", "newsletter"}
+NO_CONTRACTS = {"links", "newsletter", "personal-mcp"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")
@@ -222,9 +225,11 @@ APP_TEST_DIRECTORIES = (
     "tasks/worker/test/",
     "tasks/web/test/",
     "tasks/tools/test/",
+    "personal-mcp/worker/test/",
+    "personal-mcp/deploy/test/",
 )
 # packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
+PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
@@ -363,6 +368,7 @@ CHECK_JOBS = {
     "recall_check": ("Recall checks",),
     "brief_check": ("Brief checks",),
     "tasks_check": ("Tasks checks",),
+    "personal_mcp_check": ("Personal MCP checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),

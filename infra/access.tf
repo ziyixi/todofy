@@ -55,16 +55,17 @@ resource "cloudflare_zero_trust_access_policy" "github_owner" {
 locals {
   owner_apps = {
     # BEGIN service-catalog owner
-    "brief"     = { name = "brief", domain = "brief.ziyixi.science", more = [], session = "24h" }
-    "home"      = { name = "Home", domain = "home.ziyixi.science", more = [], session = "24h" }
-    "fleet"     = { name = "Fleet", domain = "fleet.ziyixi.science", more = [], session = "24h" }
-    "links"     = { name = "links", domain = "s.ziyixi.science/_/*", more = ["s.ziyixi.science/_"], session = "168h" }
-    "mail-hero" = { name = "Mail Hero", domain = "mail-hero.ziyixi.science", more = [], session = "24h" }
-    "mailsort"  = { name = "mailsort", domain = "sort.ziyixi.science", more = [], session = "24h" }
-    "recall"    = { name = "recall", domain = "recall.ziyixi.science", more = [], session = "24h" }
-    "tasks"     = { name = "tasks", domain = "tasks.ziyixi.science", more = [], session = "168h" }
-    "todofy"    = { name = "Todofy", domain = "todofy.ziyixi.science", more = [], session = "24h" }
-    "watch"     = { name = "watch", domain = "watch.ziyixi.science", more = [], session = "24h" }
+    "brief"        = { name = "brief", domain = "brief.ziyixi.science", more = [], session = "24h" }
+    "home"         = { name = "Home", domain = "home.ziyixi.science", more = [], session = "24h" }
+    "fleet"        = { name = "Fleet", domain = "fleet.ziyixi.science", more = [], session = "24h" }
+    "links"        = { name = "links", domain = "s.ziyixi.science/_/*", more = ["s.ziyixi.science/_"], session = "168h" }
+    "mail-hero"    = { name = "Mail Hero", domain = "mail-hero.ziyixi.science", more = [], session = "24h" }
+    "mailsort"     = { name = "mailsort", domain = "sort.ziyixi.science", more = [], session = "24h" }
+    "personal-mcp" = { name = "Personal MCP", domain = "mcp.ziyixi.science", more = [], session = "24h" }
+    "recall"       = { name = "recall", domain = "recall.ziyixi.science", more = [], session = "24h" }
+    "tasks"        = { name = "tasks", domain = "tasks.ziyixi.science", more = [], session = "168h" }
+    "todofy"       = { name = "Todofy", domain = "todofy.ziyixi.science", more = [], session = "24h" }
+    "watch"        = { name = "watch", domain = "watch.ziyixi.science", more = [], session = "24h" }
     # END service-catalog owner
   }
 }
@@ -84,6 +85,23 @@ resource "cloudflare_zero_trust_access_application" "owner" {
   http_only_cookie_attribute = true
   options_preflight_bypass   = false
   session_duration           = each.value.session
+
+  # Private MCP only. These fields stay null for existing owner applications. The stable ChatGPT
+  # callback requires RFC 9207 issuer identification; verify the connection page before its first login
+  # and replace this exact URI if ChatGPT shows a callback-ID-specific URI. No redirect wildcard.
+  oauth_configuration = each.key == "personal-mcp" ? {
+    enabled = true
+    dynamic_client_registration = {
+      enabled                = true
+      allow_any_on_localhost = false
+      allow_any_on_loopback  = false
+      allowed_uris           = ["https://chatgpt.com/connector_platform_oauth_redirect"]
+    }
+    grant = {
+      access_token_lifetime = "15m"
+      session_duration      = "336h"
+    }
+  } : null
 
   policies = [
     { id = cloudflare_zero_trust_access_policy.owner.id, precedence = 1 },

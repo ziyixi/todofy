@@ -71,6 +71,7 @@ PRODUCTION = {
     "links": "links/wrangler.toml",
     "watch": "watch/wrangler.toml",
     "fleet": "fleet/wrangler.toml",
+    "personal-mcp": "personal-mcp/wrangler.toml",
     "mailsort": "mailsort/wrangler.toml",
     "recall": "recall/wrangler.toml",
     "brief": "brief/wrangler.toml",
@@ -90,6 +91,8 @@ AHEAD_OF_DEPLOY = ({"fleet": load_profile(REPO)["platform_hostname"]}
                   if "fleet" in test_wrangler_configs.ci_changes.CHECK_ONLY else {})
 if "tasks" in test_wrangler_configs.ci_changes.CHECK_ONLY:
     AHEAD_OF_DEPLOY["tasks"] = "tasks." + load_profile(REPO)["zone"]
+if "personal-mcp" in test_wrangler_configs.ci_changes.CHECK_ONLY:
+    AHEAD_OF_DEPLOY["personal-mcp"] = "mcp." + load_profile(REPO)["zone"]
 
 
 def uncommented(text: str) -> str:
@@ -264,7 +267,7 @@ class MatchesTheApps(unittest.TestCase):
             + re.findall(r'"([^"]+)"', re.search(r"more\s*=\s*\[(.*?)\]", value).group(1))
             for key, value in owner.items()
         }
-        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks"})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp"})
         for worker, uris in destinations.items():
             if worker in AHEAD_OF_DEPLOY:
                 hosts = {AHEAD_OF_DEPLOY[worker]}  # no Custom Domain before the first deploy

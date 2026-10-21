@@ -1,0 +1,13 @@
+import type { SubscriptionStore } from './store.ts';
+
+export interface Env {
+  SUBSCRIPTIONS: DurableObjectNamespace<SubscriptionStore>;
+  PUBLIC_HOST: string;
+  ACCESS_ISSUER: string;
+  ACCESS_AUDIENCE?: string;
+  ACCESS_OWNER?: string;
+  ACCESS_OWNER_ALIASES?: string;
+  BUILD_SHA?: string;
+  CALLBACK_HOSTS: string;
+  DEV_AUTH_BYPASS?: string;
+}

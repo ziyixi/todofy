@@ -253,6 +253,20 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: [],
     order: 30,
   },
+  {
+    id: 'personal-mcp',
+    name: 'Personal MCP',
+    description: 'Private tools and event subscriptions for ChatGPT',
+    group: 'hidden',
+    icon: 'plug',
+    accent: 'slate',
+    url: 'https://mcp.ziyixi.science/mcp',
+    access: true,
+    status: { type: 'none' },
+    tile_metric: null,
+    app_only_signals: [],
+    order: 1,
+  },
   // END service-catalog entries
   {
     // Not a monorepo app: the self-hosted VPS and home server keep their backups in the account's R2
@@ -288,6 +302,7 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'recall', entry: 'recall', role: '浏览记录、搜索与归档' },
   { script: 'brief', entry: 'brief', role: '每日简报、深读与归档' },
   { script: 'tasks', entry: 'tasks', role: '任务存储与桌面规划' },
+  { script: 'personal-mcp', entry: 'personal-mcp', role: 'Private MCP tools and event subscriptions' },
   // END service-catalog workers
 ];
 

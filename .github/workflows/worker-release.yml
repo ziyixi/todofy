@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: ${{ inputs.app == 'website-relay' && 10 || 15 }}
     environment:
       name: production
-      url: ${{ steps.todofy.outputs.url || steps.mail_hero.outputs.url || steps.dashboard.outputs.url || steps.links.outputs.url || steps.watch.outputs.url || steps.mailsort.outputs.url || steps.recall.outputs.url || steps.brief.outputs.url || steps.fleet.outputs.url }}
+      url: ${{ steps.todofy.outputs.url || steps.mail_hero.outputs.url || steps.dashboard.outputs.url || steps.links.outputs.url || steps.watch.outputs.url || steps.mailsort.outputs.url || steps.recall.outputs.url || steps.brief.outputs.url || steps.fleet.outputs.url || steps.personal_mcp.outputs.url }}
     concurrency:
       group: ${{ inputs.app }}-production
       cancel-in-progress: false
@@ -204,6 +204,16 @@ jobs:
           fleet-access-owner-aliases: ${{ secrets.FLEET_ACCESS_OWNER_ALIASES }}
           fleet-report-hmac-key: ${{ secrets.FLEET_REPORT_HMAC_KEY }}
           fleet-worker-secrets: ${{ secrets.FLEET_WORKER_SECRETS }}
+      - name: Release personal-mcp
+        id: personal_mcp
+        if: inputs.app == 'personal-mcp' && steps.preflight.outputs.required == 'true'
+        uses: ./.github/actions/release-personal-mcp
+        with:
+          required: ${{ steps.preflight.outputs.required }}
+          cf-api-token: ${{ secrets.CF_API_TOKEN }}
+          personal-mcp-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
+          personal-mcp-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
+          personal-mcp-worker-secrets: ${{ secrets.PERSONAL_MCP_WORKER_SECRETS }}
       - name: Release website-relay
         id: website_relay
         if: inputs.app == 'website-relay' && steps.preflight.outputs.required == 'true'

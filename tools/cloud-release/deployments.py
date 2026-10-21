@@ -16,6 +16,7 @@ APPS = {
     "mailsort",
     "recall",
     "brief",
+    "personal-mcp",
     "website-relay",
     "platform",
     "website",

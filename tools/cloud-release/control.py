@@ -23,6 +23,7 @@ WORKERS = {
     "mailsort": ["mailsort/wrangler.toml"],
     "recall": ["recall/wrangler.toml"],
     "brief": ["brief/wrangler.toml"],
+    "personal-mcp": ["personal-mcp/wrangler.toml"],
     "website-relay": ["website/relay/wrangler.toml"],
 }
 MANUAL = {

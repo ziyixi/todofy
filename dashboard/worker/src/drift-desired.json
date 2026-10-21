@@ -592,6 +592,54 @@
       ],
       "personal": []
     },
+    "personal-mcp": {
+      "config": "personal-mcp/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "mcp.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [],
+      "bindings": [
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "CALLBACK_HOSTS",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "SUBSCRIPTIONS",
+          "type": "durable_object_namespace",
+          "source": "config"
+        }
+      ],
+      "personal": []
+    },
     "recall": {
       "config": "recall/wrangler.toml",
       "workers_dev": false,
