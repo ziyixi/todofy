@@ -2,8 +2,10 @@ import type { TaskJobs } from './jobs.ts';
 
 export interface Env {
   DB: D1Database;
-  /** The scheduled jobs' object (jobs.ts): the GTD day and the weekly review. */
+  /** The scheduled jobs' object (jobs.ts): the GTD day, the weekly review and the weekly backup. */
   JOBS: DurableObjectNamespace<TaskJobs>;
+  /** The weekly backup's private bucket (backup-runner.ts); without it there is no backup. */
+  BACKUPS?: R2Bucket;
   ASSETS: Fetcher;
   /** Todofy's Mail entry (todofy.mail.v1), read-write. */
   MAIL?: Fetcher;

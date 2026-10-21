@@ -37,6 +37,7 @@
     "mail-hero-backups",
     "mail-hero-store",
     "recall-store",
+    "tasks-backups",
     "todofy-backups",
     "vultr-backup"
   ]

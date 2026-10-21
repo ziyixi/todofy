@@ -66,6 +66,8 @@ export async function startHarness(
     ownerToken?: string;
     /** Todofy's Mail entry (fake-mail.ts); unbound when absent. */
     mail?: (request: Request) => Promise<Response>;
+    /** Binds the weekly backup's bucket (BACKUPS); unbound, so no backup runs, by default. */
+    backups?: boolean;
     /** BUILD_SHA, which a release sets; unset, as in development, by default. */
     build?: string;
   } = {},
@@ -85,6 +87,7 @@ export async function startHarness(
           compatibilityDate: '2026-09-08',
           d1Databases: { DB: 'tasks-test' },
           durableObjects: { JOBS: { className: 'TaskJobs', useSQLite: true } },
+          ...(options.backups ? { r2Buckets: { BACKUPS: 'tasks-backups' } } : {}),
           serviceBindings: { ASSETS: asset, ...(options.mail ? { MAIL: options.mail } : {}) },
           bindings: {
             PUBLIC_HOST: 'tasks.example.test',
@@ -112,7 +115,7 @@ export async function startHarness(
           name: `tasks-${access}`,
           modules: true,
           compatibilityDate: '2026-09-08',
-          script: `export default {async fetch(request,env){const path=new URL(request.url).pathname;if(path==='/backup')return Response.json(await env.TASKS.exportBackup(await request.text()));return env.TASKS.fetch(request);}}`,
+          script: `export default {fetch(request,env){return env.TASKS.fetch(request);}}`,
           serviceBindings: { TASKS: { name: 'tasks', entrypoint: 'TasksApi', props: { access } } },
         })),
         // The jobs object's status(), as Home's tick reaches it through Ops.

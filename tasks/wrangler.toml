@@ -34,6 +34,10 @@ class_name = "TaskJobs"
 tag = "v1"
 new_sqlite_classes = ["TaskJobs"]
 
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "tasks-backups"
+
 [[services]]
 binding = "MAIL"
 service = "todofy"

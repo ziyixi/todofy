@@ -14,9 +14,9 @@ Read the root rules, [README](README.md), [design](docs/design.md) and [verifica
 - Todoist is not a task source; no code reads or writes it.
 - Preserve imported IDs, archived state, history and source completion counts. API access and a green build
   do not prove complete migration. Keep private snapshots outside the public repository.
-- Todofy's weekly backup copies every table through `TasksApi.exportBackup`; a migration that adds a table or
-  column updates `worker/src/backup.ts` (its runtime test compares the schema) and `tools/backup-restore.ts`.
-  Restore only as [docs/backup.md](docs/backup.md) describes.
+- Tasks backs itself up weekly into its own bucket `tasks-backups` (`worker/src/backup-runner.ts`); a migration that
+  adds a table or column updates `worker/src/backup.ts` (its runtime test compares the schema) and
+  `tools/backup-restore.ts`. Restore only as [docs/backup.md](docs/backup.md) describes.
 - Production data changes go only through the Tasks API (etag and request_id) or a committed, tested generator
   with a dry run (as the one-time planning and Todofy imports are; see [docs/backup.md](docs/backup.md#one-time-todofy-import)),
   whose SQL is applied with `wrangler d1 execute --remote --file`.

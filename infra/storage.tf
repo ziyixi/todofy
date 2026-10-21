@@ -19,8 +19,7 @@ locals {
     "mail-hero-backups" = "mail-hero (BACKUP_STORE)"
     "todofy-backups"    = "todofy-core (BACKUPS)"
     "recall-store"      = "recall (STORE)"
-    # Created here before Tasks binds it: Tasks' own weekly backup, from the release after it exists.
-    "tasks-backups" = "tasks (BACKUPS)"
+    "tasks-backups"     = "tasks (BACKUPS)"
   }
 }
 

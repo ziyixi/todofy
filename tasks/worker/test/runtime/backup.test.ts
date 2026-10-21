@@ -1,10 +1,10 @@
-/** The weekly backup's export (src/backup.ts) over the real TasksApi binding and D1. Synthetic rows only. */
+/** What the weekly backup reads (src/backup.ts): its plan and pages on real D1. Synthetic rows only. */
 import { randomUUID } from 'node:crypto';
 import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { BACKUP_TABLES, MAX_PAGE_BYTES, PAGE_ROWS, exportBackup as exportDirect } from '../../src/backup.ts';
+import { BACKUP_TABLES, MAX_PAGE_BYTES, PAGE_ROWS, backupPage, planBackup } from '../../src/backup.ts';
 import { measuredReads, startHarness, type Harness } from './harness.ts';
 
 let harness: Harness;
@@ -15,38 +15,14 @@ afterAll(async () => {
   await harness.dispose();
 });
 
-interface Answer {
-  status: number;
-  body: string;
-}
-interface Plan {
-  schema_version: string;
-  change_sequence: number;
-  tables: { name: string; columns: string[]; key: string[]; max_rowid: number }[];
-}
-interface Page {
-  rows: unknown[][];
-  last: number;
-  done: boolean;
-  change_sequence: number;
-}
-async function exportBackup(request: unknown, access = 'read-write'): Promise<Answer> {
-  const binding = await harness.mf.getWorker(`tasks-${access}`);
-  const response = await binding.fetch('https://tasks.internal/backup', {
-    method: 'POST',
-    body: typeof request === 'string' ? request : JSON.stringify(request),
-  });
-  return (await response.json()) as Answer;
-}
-async function plan(): Promise<Plan> {
-  const answer = await exportBackup({ table: '' });
-  expect(answer.status, answer.body).toBe(200);
-  return JSON.parse(answer.body) as Plan;
-}
-async function page(table: string, after: number, through: number): Promise<{ page: Page; bytes: number }> {
-  const answer = await exportBackup({ table, after, through });
-  expect(answer.status, answer.body).toBe(200);
-  return { page: JSON.parse(answer.body) as Page, bytes: new TextEncoder().encode(answer.body).byteLength };
+const plan = () => planBackup(harness.db);
+/** A page of a table in all its columns, its rows parsed, and the bytes of its row JSON. */
+async function page(name: string, after: number, through: number) {
+  const table = BACKUP_TABLES.find((candidate) => candidate.name === name);
+  if (!table) throw new Error(`Unknown table ${name}`);
+  const read = await backupPage(harness.db, table, after, through);
+  const bytes = read.rows.reduce((sum, row) => sum + new TextEncoder().encode(row).byteLength + 1, 0);
+  return { page: { ...read, rows: read.rows.map((row) => JSON.parse(row) as unknown[]) }, bytes };
 }
 async function make(kind: string, body: Record<string, unknown>): Promise<{ id: string; name: string; etag: string }> {
   const response = await harness.mutate('POST', `/api/tasks/v1/${kind}?request_id=${randomUUID()}`, body);
@@ -186,7 +162,9 @@ test('a page stops before its byte cap and always holds at least one row', async
     .bind(JSON.stringify(Array.from({ length: 1000 }, (_, index) => index)))
     .run();
   const measured = measuredReads(harness.db);
-  await exportDirect(measured.db, { table: 'tasks', after: 0, through: through + 1000 });
+  const tasks = BACKUP_TABLES.find((table) => table.name === 'tasks');
+  if (!tasks) throw new Error('Missing tasks table');
+  await backupPage(measured.db, tasks, 0, through + 1000);
   expect(measured.metrics.rowsRead).toBeLessThanOrEqual(3 * (PAGE_ROWS + 1));
   await harness.db.prepare("DELETE FROM tasks WHERE id LIKE 'small-%'").run();
 
@@ -200,16 +178,17 @@ test('a page stops before its byte cap and always holds at least one row', async
   expect(huge.done).toBe(true);
 });
 
-test('only a read-write binding may export, and only known tables', async () => {
-  for (const access of ['read', 'unknown']) {
-    const refused = await exportBackup({ table: '' }, access);
-    expect(refused.status).toBe(403);
-    expect(refused.body).not.toContain('projects');
-  }
-  expect((await exportBackup({ table: 'changes', after: 0, through: 10 })).status).toBe(400);
-  expect((await exportBackup({ table: 'tasks', after: -1, through: 10 })).status).toBe(400);
-  expect((await exportBackup({ table: 'tasks', after: 0 })).status).toBe(400);
-  expect((await exportBackup('not json')).status).toBe(400);
-  // The export is a binding method only: the owner API has no such route.
+test('a page reads only the tables and columns a plan names, and no binding or route exports', async () => {
+  await expect(backupPage(harness.db, { name: 'changes', columns: ['sequence'] }, 0, 10)).rejects.toThrow(/Unknown/);
+  await expect(backupPage(harness.db, { name: 'tasks', columns: ['id', 'secret'] }, 0, 10)).rejects.toThrow(/Unknown/);
+  await expect(backupPage(harness.db, { name: 'tasks', columns: [] }, 0, 10)).rejects.toThrow(/Unknown/);
+  // A job keeps the columns of the release that planned it: a subset reads that subset.
+  const { rows } = await backupPage(harness.db, { name: 'labels', columns: ['id'] }, 0, 1_000_000);
+  expect(rows.every((row) => (JSON.parse(row) as unknown[]).length === 1)).toBe(true);
+  // The backup runs in the jobs object (backup-runner.ts): the owner API has no route and TasksApi no method for it.
   expect((await harness.fetch('/api/tasks/v1/backup')).status).toBe(404);
+  const binding = await harness.mf.getWorker('tasks-read-write');
+  expect((await binding.fetch('https://tasks.internal/backup', { method: 'POST', body: '{"table":""}' })).status).toBe(
+    404,
+  );
 });

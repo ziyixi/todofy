@@ -21,9 +21,10 @@
     "inbox_oldest_days": 41,
     "overdue": 3,
     "completed_7d": 42,
-    "review_age_days": 2
+    "review_age_days": 2,
+    "backup_age_seconds": 359940
   },
-  "last_backup_at": null,
+  "last_backup_at": "2026-10-06T10:01:00Z",
   "ui_url": "https://tasks.example.org/",
   "capabilities": []
 }

@@ -635,15 +635,19 @@ cutoff with an owner-set $80 budget) and `OpsStatus/brief-degraded.json` are fix
 - Guard: a shed defers `embedding` (items deduplicate by key only), `learning` (the Sunday weights) and
   `source_probe` (the daily retry of paused sources). An issue is never deferred.
 
-## 3g. Tasks (GTD counters added 2026-10-21, additive)
+## 3g. Tasks (GTD counters added 2026-10-21, its own backup in the release after; additive)
 
 `tasks/worker/src/ops.ts`. `status()` is one D1 batch of three reads (the newest change, the newest GTD day's rows
 and the reviews' first creation and last completion) beside the TaskJobs object's `status()`, which arms its Alarm
-when none is set (the one write ops-v1 allows). Counters: `database_ready`, `change_sequence`, and from the newest
-GTD day `inbox_open`, `inbox_oldest_days`, `overdue` and `completed_7d`, and `review_age_days` (since the last
-completed weekly review, else the first one). Signals: `gtd_stale` (warning, `age_hours`) and `review_overdue`
-(info, `days`). No capability, guard or mode besides `maintenance` (always false). Tests:
-`tasks/worker/test/runtime/ops.test.ts` and `jobs.test.ts`.
+when none is set or brings it forward to a backup due sooner (the one write ops-v1 allows) and answers the weekly
+backup's facts from the object's storage. Counters: `database_ready`, `change_sequence`, and from the newest
+GTD day `inbox_open`, `inbox_oldest_days`, `overdue` and `completed_7d`, `review_age_days` (since the last
+completed weekly review, else the first one), and `backup_age_seconds` once a backup is complete. Signals:
+`backup_stale` (critical, `age_seconds` and `has_backup`: 8 days, counted from the first backup step while there is
+no complete one), `gtd_stale` (warning, `age_hours`), `backup_failed` (warning: the last job failed) and
+`review_overdue` (info, `days`); `last_backup_at` is the newest complete backup. Both backup signals are app-only
+(`tasks/app.toml`). No capability, guard or mode besides `maintenance` (always false). Tests:
+`tasks/worker/test/runtime/ops.test.ts`, `jobs.test.ts` and `backup-runner.test.ts`.
 
 ## 3b. The move onto proto/ (2026-10-01, no wire change)
 

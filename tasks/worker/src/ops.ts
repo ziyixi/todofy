@@ -3,6 +3,7 @@ import { create } from '@ziyixi/proto/protobuf';
 import { GuardLevel, Health, OpsStatusSchema, Severity } from '@ziyixi/proto/ops/v1/ops_pb';
 import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
 import { toWire } from '@ziyixi/proto/wire-json';
+import { backupOps } from './backup-runner.ts';
 import type { Env } from './env.ts';
 import type { DayRow } from './gtd.ts';
 import { JOBS_OBJECT, type JobsStatus } from './jobs.ts';
@@ -12,11 +13,13 @@ const HOUR_MS = 3_600_000;
 export const GTD_STALE_MS = 48 * HOUR_MS;
 /** review_overdue: no review completed for more than this many days. */
 export const REVIEW_OVERDUE_DAYS = 10;
+/** Signals come critical first, then by code (ops-v1). */
+const rank = (severity: Severity) => (severity === Severity.CRITICAL ? 0 : severity === Severity.WARNING ? 1 : 2);
 
 /**
- * Read-only Home status: the change feed, the newest GTD day's counts and the review's age, from one D1 batch. A quiet
- * task list is healthy. Reading it also arms the jobs object's Alarm when none is set (jobs.ts), the one write ops-v1
- * allows.
+ * Read-only Home status: the change feed, the newest GTD day's counts and the review's age, from one D1 batch, and the
+ * weekly backup's facts from the jobs object. A quiet task list is healthy. Reading it also arms the jobs object's
+ * Alarm when none is set (jobs.ts), the one write ops-v1 allows.
  */
 export class Ops extends WorkerEntrypoint<Env> implements wire.OpsService {
   async status(): Promise<wire.OpsStatus> {
@@ -70,6 +73,10 @@ export class Ops extends WorkerEntrypoint<Env> implements wire.OpsService {
         if (age > REVIEW_OVERDUE_DAYS)
           signals.push({ code: 'review_overdue', severity: Severity.INFO, metrics: { days: age } });
       }
+      const backup = backupOps(jobs?.backup ?? null, now);
+      Object.assign(counters, backup.counters);
+      signals.push(...backup.signals);
+      signals.sort((a, b) => rank(a.severity) - rank(b.severity) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
       return toWire(
         OpsStatusSchema,
         create(OpsStatusSchema, {
@@ -77,6 +84,7 @@ export class Ops extends WorkerEntrypoint<Env> implements wire.OpsService {
           health: signals.some((signal) => signal.severity !== Severity.INFO) ? Health.DEGRADED : Health.OK,
           signals,
           counters,
+          ...(backup.lastBackupAt ? { lastBackupAt: backup.lastBackupAt } : {}),
         }),
       );
     } catch {

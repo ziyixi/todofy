@@ -250,7 +250,7 @@ const ENTRIES: readonly EntryDef[] = [
     access: true,
     status: { type: 'ops_v1', binding: 'TASKS', guard: false },
     tile_metric: null,
-    app_only_signals: [],
+    app_only_signals: ['backup_stale', 'backup_failed'],
     order: 30,
   },
   {
@@ -332,6 +332,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'todofy-backups', kind: 'r2', name: 'todofy 备份', entry: 'todofy', match: 'todofy-backups' },
   // recall's captured texts (recall/wrangler.toml STORE), created by "Infra apply" before recall's first deploy.
   { id: 'recall-store', kind: 'r2', name: 'recall 正文存储', entry: 'recall', match: 'recall-store' },
+  // Tasks' own weekly backups (tasks/wrangler.toml BACKUPS), created by "Infra apply" before Tasks bound it.
+  { id: 'tasks-backups', kind: 'r2', name: 'Tasks 备份', entry: 'tasks', match: 'tasks-backups' },
   // The self-hosted servers' backups (~790 MB on 2026-09-30), outside this repository.
   { id: 'vps-backup', kind: 'r2', name: 'VPS 备份', entry: 'self-hosted', match: 'vultr-backup' },
 ];

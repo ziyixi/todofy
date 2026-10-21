@@ -8,8 +8,7 @@
 // the owner's mail categories (mail.proto), and the GTD statistics and weekly reviews (gtd.proto). Access is verified
 // before reading a body; mutations also require same-origin Origin and the signed tasks_csrf token. The TasksApi
 // service binding gives generic access with the same protobuf messages, without exposing a machine-auth route: a
-// `read` binding may only read, and a `read-write` binding may also write and call the machine-only exportBackup
-// method that Todofy's weekly backup pages every table through. A caller that only creates tasks binds the
+// `read` binding may only read, and a `read-write` binding may also write. A caller that only creates tasks binds the
 // create-only TaskInbox instead (tasks.inbox.v1). Bodies are bounded to 64 KiB.
 // Every mutation but UpdateWeeklyBet and UpdateMailCategories requires a UUIDv4 or UUIDv5 request_id. Exact replays
 // return the original response; reusing it for different input is rejected. Updates require the current etag and an

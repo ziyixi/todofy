@@ -10,14 +10,14 @@ outside the approved scope.
 | Component | Owns | Interface |
 | --- | --- | --- |
 | Tasks web | Navigation, draft forms, selection and rendered views | Generated `TasksUiService` client, same-origin owner requests |
-| Tasks Worker and D1 | Task/Subtask and Step content, effort, catalog, dates, completion history, planning facts, dependencies, Plan's weekly goals and lane orders, Focus's day queues, timer and time records, the Mail categories, the GTD days and the weekly reviews | Root `proto/tasks/ui/v1`, named `TasksApi`, create-only `TaskInbox` (`tasks.inbox.v1`), read-only `Ops`; the `TaskJobs` Durable Object for its scheduled jobs |
+| Tasks Worker and D1 | Task/Subtask and Step content, effort, catalog, dates, completion history, planning facts, dependencies, Plan's weekly goals and lane orders, Focus's day queues, timer and time records, the Mail categories, the GTD days and the weekly reviews | Root `proto/tasks/ui/v1`, named `TasksApi`, create-only `TaskInbox` (`tasks.inbox.v1`), read-only `Ops`; the `TaskJobs` Durable Object for its scheduled jobs and its weekly backup into the private R2 bucket `tasks-backups` |
 | Todofy | Mail: the ledger, the summaries and the mail awaiting a decision | Its private Mail entry (`todofy.mail.v1`), which Tasks binds as `MAIL` (read-write) |
 | Shared planning UI | Plan, Focus and the optional Mail shortcut editor | Caller-supplied typed transport and navigation callbacks |
 
 Applications do not import each other's source or databases. `packages/planning-ui` compiles into
 Tasks; `packages/task-dates` supplies the date parser used by the Tasks Worker and import tools. A `read`
 binding may only read Tasks; a `read-write` one may also write; other bindings are rejected. Home and Watch create
-their tasks through `TaskInbox`, whose binding names the source. Todofy binds Tasks only for its weekly backup.
+their tasks through `TaskInbox`, whose binding names the source. Todofy does not bind Tasks.
 
 Tasks is the only task source; no consumer reads or writes Todoist. Existing task IDs and planning internal
 IDs survived the cutover.
@@ -168,6 +168,9 @@ from 10:00 it creates the weekly review task with its `weekly_reviews` row in on
 trends against a week before, what stands out, the mail awaiting a decision and links, never a task title. GTD
 (`#/gtd`) shows the counts as trends; Plan's weekly review reads GetWeeklyReview (the review task and the mail
 count) and links to it. Days and reviews copied from Todofy keep their values ([backup](backup.md#one-time-todofy-import)).
+Every Sunday at 10:00 UTC, and at once when the object has no backup state yet, it copies every table into the bucket
+`tasks-backups` (`backup-runner.ts`), one bounded step a second: the plan, then pages of each table into gzip parts,
+then the manifest and `latest.json`; it keeps the newest six ([backup](backup.md)).
 
 `TaskInbox` (`inbox.ts`) creates one task with up to 30 subtasks per call in one D1 batch with its receipt, at most 20
 a day per source, in the project `task_inbox_routes` names for the source while it is live, else the Inbox. It has
@@ -293,7 +296,7 @@ the rows GetPlan and a task's dependencies read.
 An isolate's start costs more than any request. The global scope's warm-up (`src/startup.ts`) measured 19.4-20.8
 reference ms on its first run (three runs, 2026-10-20): about 11 for the first Intl initialization and 9 for
 warming the task page's and the Focus week's code. Every request `cpu.test.ts` measures stays below 10 even as an
-isolate's first request and below 8 warm: owner pages, GetPlan, reorders, duplicates, the backup's pages and plan,
+isolate's first request and below 8 warm: owner pages, GetPlan, reorders, duplicates,
 Home's `Ops.status()` and Todofy's service calls (a footer search of 20 full descriptions, a page of 100); 5.8 was
 the highest first run and 4.2 the highest warm median. Completing a family is a fixed number of D1 statements, its
 subtree walked in D1, not in the Worker. So the only measured work near the CPU p99 Home's Cloudflare view showed on
@@ -310,9 +313,9 @@ rename or recolour touches no task and leaves list etags valid. A label rename w
 before its task changes, so a paged change reader refreshes the catalog first. `read-budget.test.ts` holds
 these row counts.
 
-Todofy's weekly backup reads every table through the machine-only `TasksApi.exportBackup` (read-write
-bindings only, no HTTP route): rowid pages below each table's max rowid at plan time, bounded to half a MiB of
-row JSON so a page stays within Workers Free's CPU. [backup.md](backup.md) has the restore.
+The weekly backup (`backup-runner.ts`) runs in the `TaskJobs` object, whose Alarm invocations get 30 s of CPU: rowid
+pages below each table's max rowid at plan time, each bounded to half a MiB of row JSON, at most 30 D1 statements a
+step. It has no HTTP route or binding method. [backup.md](backup.md) has the restore.
 
 D1 batches atomically store each write with its request receipt; updates carry masks and current etags.
 Resource references are checked again by database triggers. A task family is limited to 32 hierarchy levels;

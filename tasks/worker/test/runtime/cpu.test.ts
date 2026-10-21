@@ -86,29 +86,6 @@ test(
           )
           .bind('Synthetic long description. '.repeat(550), Date.now(), Date.now(), JSON.stringify(children))
           .run();
-        // The backup export's worst pages: 100 tasks of 48 KB (CJK) descriptions, and 100 receipts of a full task each.
-        const wide = Array.from({ length: 100 }, (_, index) => ({ id: `backup-cpu-${String(index)}` }));
-        await harness.db
-          .prepare(
-            `INSERT INTO tasks(id,title,description,sort_order,created_at,updated_at) SELECT value->>'id','Synthetic backup task',?,20000,?,? FROM json_each(?)`,
-          )
-          .bind('汉字'.repeat(8000), Date.now(), Date.now(), JSON.stringify(wide))
-          .run();
-        await harness.db
-          .prepare(
-            `INSERT INTO requests(id,fingerprint,response,created_at,revision_guard) SELECT printf('00000000-0000-4000-8000-%012d',value),?,?,?,1 FROM json_each(?)`,
-          )
-          .bind(
-            'f'.repeat(64),
-            JSON.stringify({
-              id: 'synthetic',
-              title: 'Synthetic receipt',
-              description: 'Receipt "text".\n'.repeat(1000),
-            }),
-            Date.now(),
-            JSON.stringify(Array.from({ length: 100 }, (_, index) => index)),
-          )
-          .run();
         const meter = await connectCpuMeter(harness.mf, 'tasks');
         return {
           harness,
@@ -139,38 +116,6 @@ test(
           ),
           await meter.measure('100 current change records', () => read('/api/tasks/v1/changes?page_size=100'), 7),
         ];
-        const writer = await harness.mf.getWorker('tasks-read-write');
-        const backupPage = async (table: string, range: { after: number; through: number } | null) => {
-          if (!range) throw new Error('Missing backup range');
-          const response = await writer.fetch('https://tasks.internal/backup', {
-            method: 'POST',
-            body: JSON.stringify({ table, ...range }),
-          });
-          const answer = (await response.json()) as { status: number; body: string };
-          expect(answer.status, answer.body.slice(0, 200)).toBe(200);
-          expect((JSON.parse(answer.body) as { rows: unknown[] }).rows.length).toBeGreaterThan(0);
-        };
-        const range = (sql: string) => harness.db.prepare(sql).first<{ after: number; through: number }>();
-        const longTasks = await range(
-          "SELECT min(rowid)-1 AS after, max(rowid) AS through FROM tasks WHERE id LIKE 'synthetic-%'",
-        );
-        const wideTasks = await range(
-          "SELECT min(rowid)-1 AS after, max(rowid) AS through FROM tasks WHERE id LIKE 'backup-cpu-%'",
-        );
-        const receipts = await range('SELECT 0 AS after, max(rowid) AS through FROM requests');
-        measurements.push(
-          await meter.measure(
-            'backup page of 100 tasks with 15 KB descriptions',
-            () => backupPage('tasks', longTasks),
-            7,
-          ),
-          await meter.measure(
-            'backup page of 100 tasks with 48 KB descriptions',
-            () => backupPage('tasks', wideTasks),
-            7,
-          ),
-          await meter.measure('backup page of 100 receipts of 16 KB', () => backupPage('requests', receipts), 7),
-        );
         const csrf = await harness.fetch('/api/tasks/csrf');
         const { token } = await csrf.json<{ token: string }>();
         let reorderBatch = 0;
@@ -510,8 +455,8 @@ test(
 
 /**
  * What other Workers call: Home's Ops.status() as an isolate's very first request, and reads through a TasksApi
- * binding: a search of 20 tasks with full 16,000-character descriptions (the Personal MCP's), a page of 100 and the
- * backup's plan. And a mail conversion, which reads a 64 KiB summary from Todofy's Mail entry, cuts it to 16,000 UTF-16
+ * binding: a search of 20 tasks with full 16,000-character descriptions (the Personal MCP's) and a page of 100. And a
+ * mail conversion, which reads a 64 KiB summary from Todofy's Mail entry, cuts it to 16,000 UTF-16
  * units, creates the task and marks the mail; and TaskInbox's largest create, a task of 16,000 units with 30 subtasks
  * of as many.
  */
@@ -581,17 +526,6 @@ test(
           await meter.measure(
             'a service page of 100 tasks',
             () => list('view=all&page_size=100', 100),
-            7,
-          ),
-          await meter.measure(
-            "the backup's plan",
-            async () => {
-              const response = await binding.fetch('https://tasks.internal/backup', {
-                method: 'POST',
-                body: JSON.stringify({ table: '' }),
-              });
-              expect(((await response.json()) as { status: number }).status).toBe(200);
-            },
             7,
           ),
           await meter.measure(
