@@ -439,8 +439,8 @@ test(
  * The isolate's one-time start (src/startup.ts): the global scope's warm-up, run here in a request so the meter sees
  * it, in an isolate whose first request did nothing else. Its first run is what a fresh isolate's start costs: about
  * 11 reference ms of first Intl initialization and 9 of warming the task page's and the Focus week's code and codec
- * (2026-10-20). No request path of Tasks reaches 10 reference ms even as an isolate's first request (the tests above
- * and below), so a CPU p99 near 20 ms in production matches isolates' starts, not a heavy request. Startup has its own
+ * (2026-10-20). No request these tests measure reaches 10 reference ms even as an isolate's first request (above and
+ * below), so a CPU p99 near 20 ms in production matches isolates' starts, not a heavy request. Startup has its own
  * limit (1 s), not Free's 10 ms; the bound keeps the warm-up from growing unnoticed.
  */
 const FIRST_WARM_UP = 'the startup warm-up, on its first run in an isolate';
