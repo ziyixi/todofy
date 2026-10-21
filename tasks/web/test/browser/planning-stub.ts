@@ -39,13 +39,23 @@ export interface PlanningState {
   /** Tasks' today and its week's Monday, by the dev server's clock. */
   today: string;
   week: string;
-  /** Synthetic Mail that Todofy keeps; tests change it in place. */
-  mail: Json[];
-  summaries: Record<string, string>;
-  /** The page's requests to Todofy's `/api/plus/**`, which this module answers. */
+  /** The page's requests that reach Todofy (reachesTodofy). */
   requests: PlanningRequest[];
   /** The page's requests to the dev server's own Tasks API. */
   tasksRequests: PlanningRequest[];
+}
+/** A mail of the dev server's synthetic Todofy (worker/test/runtime/fake-mail.ts). */
+export interface SyntheticMail {
+  id: string;
+  title: string;
+  summary?: string;
+  /** Milliseconds. */
+  receivedAt?: number;
+  /** A task an older Todofy linked, or the converted one. */
+  taskId?: string;
+  pending?: boolean;
+  /** Changes the etag, as an edit of the mail would. */
+  version?: number;
 }
 export interface PlanningSeed {
   tasks?: SeedTask[];
@@ -53,15 +63,45 @@ export interface PlanningSeed {
   bets?: { week_start: string; area: string; text: string }[];
   /** Review lanes' orders; every arranged lane is cleared first. */
   laneOrders?: { lane: string; task_ids: string[] }[];
-  mail?: Json[];
-  summaries?: Record<string, string>;
-  /** The weekly review's two Todofy facts. */
-  review?: { review_task_id?: string; mailbox_pending_count?: number };
+  /** The synthetic Todofy's mail; none when absent. */
+  mail?: SyntheticMail[];
   /** Day queues of seeded tasks, put in the dev server's D1 through MoveFocusStep, first to last. */
   queues?: Record<string, string[]>;
 }
 
 const ORIGIN = "http://127.0.0.1:8798";
+/** The dev server's synthetic Todofy, on its own port (worker/test/runtime/dev-server.ts). */
+const TODOFY = "http://127.0.0.1:8789";
+
+/** Replaces the synthetic Todofy's mail and forgets the rpcs it was called with. */
+export async function seedMail(mail: SyntheticMail[]): Promise<void> {
+  const response = await fetch(`${TODOFY}/mail`, {
+    method: "PUT",
+    body: JSON.stringify(mail),
+  });
+  expect(response.ok).toBe(true);
+}
+/** The synthetic Todofy's mail and the rpcs called since it was seeded. */
+export async function readTodofy(): Promise<{
+  mail: SyntheticMail[];
+  calls: string[];
+}> {
+  return (await fetch(`${TODOFY}/mail`)).json() as Promise<{
+    mail: SyntheticMail[];
+    calls: string[];
+  }>;
+}
+/**
+ * Whether a page request reaches Todofy: the Mail page's own (`/api/mail/**`), and Tasks' conversion and weekly
+ * review, which read Todofy's Mail entry.
+ */
+export function reachesTodofy(path: string): boolean {
+  return (
+    path.startsWith("/api/mail/") ||
+    path === "/api/tasks/v1/mailItems:convert" ||
+    path.startsWith("/api/tasks/v1/weeklyReviews")
+  );
+}
 /** The synthetic project seeded tasks live in, so the Inbox stays as other specs left it. */
 const PROJECT = "synthetic-planning";
 const LANES = [
@@ -94,9 +134,9 @@ const SEEDED: readonly (keyof SeedTask)[] = [
  * tasks there with their planning facts, dependencies, Bets, lane orders and Focus queues, all
  * through the API. Each seeded task keeps its ID across tests: one that exists already is reopened
  * and written again. The dev server's D1 is shared by every spec, so Plan's list of open tasks is
- * narrowed to the seeded ones, as a fresh database would hold them. Only Todofy's half is
- * synthetic: the weekly review's two facts and Mail (`/api/plus/**`); an unknown request fails with
- * 500. Every request is recorded.
+ * narrowed to the seeded ones, as a fresh database would hold them. Only Todofy is synthetic: the
+ * dev server's synthetic Mail entry, which this seeds with the test's mail (none by default). Every
+ * request is recorded.
  */
 export async function stubPlanning(
   page: Page,
@@ -105,19 +145,17 @@ export async function stubPlanning(
     bets = [],
     laneOrders = [],
     queues = {},
-    review = {},
-    ...seed
+    mail = [],
   }: PlanningSeed = {},
 ): Promise<PlanningState> {
   const today = await tasksToday();
   const state: PlanningState = {
     today,
     week: mondayOf(today),
-    mail: seed.mail ?? [],
-    summaries: seed.summaries ?? {},
     requests: [],
     tasksRequests: [],
   };
+  await seedMail(mail);
   await withTasks(async (api) => {
     const plan = (await api.read("/api/tasks/v1/plan"))!;
     for (const order of (plan.lane_orders as Json[] | undefined) ?? [])
@@ -172,13 +210,15 @@ export async function stubPlanning(
   );
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (!url.pathname.startsWith("/api/tasks/v1/")) return;
-    state.tasksRequests.push({
+    const recorded = {
       path: url.pathname + url.search,
       method: request.method(),
       body: (request.method() === "GET" ? {} : request.postDataJSON()) ?? {},
       authorization: request.headers()["authorization"] ?? null,
-    });
+    };
+    if (reachesTodofy(url.pathname)) state.requests.push(recorded);
+    if (url.pathname.startsWith("/api/tasks/v1/"))
+      state.tasksRequests.push(recorded);
   });
   // Plan's ListTasks pages (view=all, no IDs and no search) list only this test's tasks and the
   // ones the page adds under them, with the seeded ages.
@@ -214,55 +254,6 @@ export async function stubPlanning(
           })),
       },
     });
-  });
-  await page.route("**/api/plus/**", async (route) => {
-    const request = route.request();
-    const url = new URL(request.url());
-    const path = url.pathname;
-    const method = request.method();
-    const body = (
-      method === "GET" ? {} : (request.postDataJSON() ?? {})
-    ) as Json;
-    state.requests.push({
-      path,
-      method,
-      body,
-      authorization: request.headers()["authorization"] ?? null,
-    });
-    const answer = (): { status?: number; json: unknown } | undefined => {
-      if (path === "/api/plus/v1/weeklyReview:read")
-        return {
-          json: { mailbox_pending_count: state.mail.length, ...review },
-        };
-      if (path === "/api/plus/v1/mailItems")
-        return {
-          json: {
-            mail_items: state.mail,
-            categories: [],
-            categories_etag: "1",
-          },
-        };
-      if (path === "/api/plus/v1/mailItems:readMailSummary")
-        return {
-          json: {
-            summary: state.summaries[url.searchParams.get("id") ?? ""] ?? "",
-          },
-        };
-      if (path === "/api/plus/v1/mailItems:convertMailItem") {
-        const item = state.mail.find((mail) => mail.id === body.event_id)!;
-        state.mail = state.mail.filter((mail) => mail !== item);
-        return {
-          json: { task: { id: `task-${String(item.id)}`, title: item.title } },
-        };
-      }
-      return undefined;
-    };
-    await route.fulfill(
-      answer() ?? {
-        status: 500,
-        json: { error: { message: `Unexpected synthetic request ${path}` } },
-      },
-    );
   });
   return state;
 }

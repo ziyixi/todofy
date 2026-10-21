@@ -9,7 +9,7 @@ import { PlanningApp, createPlanningActions } from "@ziyixi/planning-ui";
 import "@ziyixi/planning-ui/styles.css";
 
 const actions = {
-  ...createPlanningActions({ plus: sendPlus, tasks: sendTasks }),
+  ...createPlanningActions({ tasks: sendTasks }),
   updateEstimate, // writes the task's duration in Tasks
   completeTask, // completes in Tasks, which settles the Focus day in the same write
 };
@@ -17,17 +17,18 @@ const actions = {
 <div className="planning-ui">
   <PlanningApp
     actions={actions} view="plan" language="en"
-    onOpenTask={openTask} onOpenMail={openMail} onSettings={openSettings} onViewChange={changeView}
+    onOpenTask={openTask} onOpenMail={openMail} onOpenGtd={openGtd} onSettings={openSettings}
+    onViewChange={changeView}
   />
 </div>
 ```
 
-Transports receive the root proto `HttpCall` and return a `Response`. Plan, the tasks' planning facts and
-dependencies, and Focus are Tasks' own `TasksUiService`, sent to its same-origin `/api/tasks/v1/*`: a load is one wave
-of GetPlan, ListTasks pages, ListFocusDays and GetFocusTimer, and every planning write is one UpdateTask, ReorderTasks
-or UpdateWeeklyBet, sent under the etag Plan holds with no read first. Only the weekly review's two Todofy facts (ReadWeeklyReview, read when the review opens) and the
-Mail categories go to `/api/plus/v1/*` with CSRF, which Todofy's private Planning channel forwards. Host callbacks
-open the full task editor and Tasks' Mail page. `snapshot`/`onSnapshot` keep confirmed content in page memory; `planView`/`onPlanView`
+The transport receives the root proto `HttpCall` and returns a `Response`. Plan, the tasks' planning facts and
+dependencies, Focus, the weekly review's two facts and the Mail categories are Tasks' own `TasksUiService`, sent to
+its same-origin `/api/tasks/v1/*`: a load is one wave of GetPlan, ListTasks pages, ListFocusDays and GetFocusTimer;
+every planning write is one UpdateTask, ReorderTasks or UpdateWeeklyBet, sent under the etag Plan holds with no read
+first; the review reads GetWeeklyReview when it opens (the review task and the mail Todofy still holds). Host
+callbacks open the full task editor and Tasks' Mail and GTD pages. `snapshot`/`onSnapshot` keep confirmed content in page memory; `planView`/`onPlanView`
 optionally remember IDs and view choices, never task text. `onSession` reports whether a Focus session exists, and
 `background` lets the host keep the app mounted behind its other pages, where it renders only the Focus mini timer
 (a Document Picture-in-Picture window) and keeps it working. `idlePause`/`onIdlePause` are the host's per-device

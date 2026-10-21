@@ -26,6 +26,8 @@ export interface SyntheticMail {
   taskId?: string;
   pending?: boolean;
   categoryId?: string;
+  /** Changes the etag, as an edit of the mail would. */
+  version?: number;
 }
 export interface FakeMail {
   mail: SyntheticMail[];
@@ -38,7 +40,8 @@ export interface FakeMail {
 
 const DAY = 86_400_000;
 /** The etag the fake answers for a mail, which changes when it is marked. */
-export const mailEtag = (mail: SyntheticMail) => `${mail.id}:${mail.taskId ?? ''}:${String(mail.pending !== false)}`;
+export const mailEtag = (mail: SyntheticMail) =>
+  `${mail.id}:${String(mail.version ?? 0)}:${mail.taskId ?? ''}:${String(mail.pending !== false)}`;
 
 export function fakeMail(mail: SyntheticMail[] = []): FakeMail {
   const fake: FakeMail = {

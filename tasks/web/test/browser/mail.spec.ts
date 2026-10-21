@@ -1,112 +1,81 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
+import { readTodofy, seedMail } from "./planning-stub";
 
-async function createTask(
-  request: APIRequestContext,
-  id: string,
-  title: string,
-) {
+const ORIGIN = "http://127.0.0.1:8798";
+
+async function write(request: APIRequestContext, path: string, data: unknown) {
   const csrf = await (await request.get("/api/tasks/csrf")).json();
-  const response = await request.post(
-    `/api/tasks/v1/tasks?request_id=${id}&task_id=${id}`,
-    {
-      headers: { "x-csrf-token": csrf.token, origin: "http://127.0.0.1:8798" },
-      data: { title },
-    },
-  );
+  const response = await request.post(path, {
+    headers: { "x-csrf-token": csrf.token, origin: ORIGIN },
+    data,
+  });
   expect(response.status()).toBe(200);
   return response.json();
 }
+const search = async (request: APIRequestContext, title: string) =>
+  (
+    await (
+      await request.get(
+        `/api/tasks/v1/tasks?view=search&include_description=true&query=${encodeURIComponent(title)}`,
+      )
+    ).json()
+  ).tasks ?? [];
 
 test("native mail creates no task until requested, replays a lost reply and deletes only mail", async ({
   page,
   request,
 }) => {
-  const linked = await createTask(
+  const linked = await write(
     request,
-    crypto.randomUUID(),
-    "Synthetic existing linked task",
+    `/api/tasks/v1/tasks?request_id=${crypto.randomUUID()}`,
+    { title: "Synthetic existing linked task" },
   );
   const eventId = crypto.randomUUID();
   const oldEvent = crypto.randomUUID();
-  const title = "Synthetic native mail without a task";
-  let rows = [
+  const title = `Synthetic native mail without a task ${eventId.slice(0, 8)}`;
+  await seedMail([
     {
       id: eventId,
       title,
-      etag: "mail-1",
-      brief: "A synthetic decision to review.",
-      has_summary: true,
-      receive_time: "2026-10-17T12:30:00Z",
+      summary:
+        "The full synthetic email summary.\nNo task has been created yet.",
+      receivedAt: Date.parse("2026-10-17T12:30:00Z"),
     },
     {
       id: oldEvent,
       title: "Synthetic mail with an existing task",
-      etag: "mail-2",
-      brief: "Keep the task when deleting this mail.",
-      task: { provider: "tasks", external_id: linked.id },
+      taskId: linked.id,
     },
-  ];
+  ]);
   const fileBodies: Record<string, unknown>[] = [];
   const forbidden: string[] = [];
   let delayRead = false;
   let finishRead: (() => void) | undefined;
   page.on("request", (sent) => {
-    if (
-      /\/api\/(?:plus\/v1\/(?:plan:read|tasks(?:\?|$))|tasks\/v1\/focus)/.test(
-        sent.url(),
-      )
-    )
+    // Mail reads neither Plan nor Focus to find mail.
+    if (/\/api\/tasks\/v1\/(?:plan(?:\?|$)|focus)/.test(sent.url()))
       forbidden.push(sent.url());
   });
-  await page.route("**/api/plus/**", async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    if (path === "/api/plus/v1/mailItems") {
-      if (delayRead)
-        await new Promise<void>((resolve) => {
-          finishRead = resolve;
-        });
-      return route.fulfill({
-        json: { mail_items: rows, categories: [], categories_etag: "cats-1" },
+  await page.route("**/api/mail/v1/mailItems?*", async (route) => {
+    if (delayRead)
+      await new Promise<void>((resolve) => {
+        finishRead = resolve;
       });
-    }
-    if (path.endsWith(":readMailSummary"))
-      return route.fulfill({
-        json: {
-          summary:
-            "The full synthetic email summary.\nNo task has been created yet.",
-        },
-      });
-    if (path.endsWith(":convertMailItem")) {
-      const body = route.request().postDataJSON() as Record<string, unknown>;
-      fileBodies.push(body);
-      expect(body.event_id).toBe(eventId);
-      const task = await createTask(request, String(body.request_id), title);
-      if (fileBodies.length === 1) return route.abort("failed");
-      rows = rows.filter((item) => item.id !== eventId);
-      return route.fulfill({
-        json: { task: { id: task.id, title: task.title } },
-      });
-    }
-    if (path.endsWith(":deleteSummaries")) {
-      const body = route.request().postDataJSON() as Record<string, unknown>;
-      expect(body.event_ids).toEqual([oldEvent]);
-      expect(body.task_ids).toBeUndefined();
-      rows = [];
-      return route.fulfill({ json: { deleted_event_ids: [oldEvent] } });
-    }
-    return route.abort("blockedbyclient");
+    return route.continue();
+  });
+  // Tasks makes the task and marks the mail; the first answer is lost on the way back.
+  await page.route("**/api/tasks/v1/mailItems:convert", async (route) => {
+    fileBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (fileBodies.length > 1) return route.continue();
+    await route.fetch();
+    return route.abort("failed");
   });
   await page.goto("/#/mail");
   const first = page.locator(".native-mail-item").filter({ hasText: title });
   await expect(
     first.getByRole("button", { name: "Create task", exact: true }),
   ).toBeVisible();
-  const absent = await (
-    await request.get(
-      `/api/tasks/v1/tasks?view=search&query=${encodeURIComponent(title)}`,
-    )
-  ).json();
-  expect(absent.tasks ?? []).toEqual([]);
+  expect(await search(request, title)).toEqual([]);
   await first
     .getByRole("button", { name: /^Synthetic native mail without a task/ })
     .click();
@@ -132,12 +101,14 @@ test("native mail creates no task until requested, replays a lost reply and dele
   await expect(first).toHaveCount(0);
   expect(fileBodies).toHaveLength(2);
   expect(fileBodies[1]).toEqual(fileBodies[0]);
-  const persisted = await (
-    await request.get(
-      `/api/tasks/v1/tasks?view=search&query=${encodeURIComponent(title)}`,
-    )
-  ).json();
-  expect(persisted.tasks).toHaveLength(1);
+  const [persisted, ...more] = await search(request, title);
+  expect(more).toEqual([]);
+  expect(persisted.description).toContain(`Mail Hero event: ${eventId}`);
+  expect((await readTodofy()).mail[0]).toMatchObject({
+    id: eventId,
+    pending: false,
+    taskId: persisted.id,
+  });
   await page
     .getByRole("button", {
       name: "Delete mail Synthetic mail with an existing task",
@@ -155,87 +126,30 @@ test("native mail creates no task until requested, replays a lost reply and dele
   await expect(
     page.getByText("No mail to review", { exact: true }),
   ).toBeVisible();
+  expect((await readTodofy()).mail.map((mail) => mail.id)).toEqual([eventId]);
   expect((await request.get(`/api/tasks/v1/tasks/${linked.id}`)).status()).toBe(
     200,
   );
   expect(forbidden).toEqual([]);
 });
 
-test("a definite mail conflict permits a fresh request after refresh", async ({
+test("a definite mail conflict permits a fresh request after refresh, with the saved category", async ({
   page,
   request,
 }) => {
-  const csrf = await (await request.get("/api/tasks/csrf")).json();
-  const labelResponse = await request.post(
+  const labelTitle = `SyntheticMailShortcut${crypto.randomUUID().slice(0, 6)}`;
+  const label = await write(
+    request,
     `/api/tasks/v1/labels?request_id=${crypto.randomUUID()}`,
-    {
-      headers: { "x-csrf-token": csrf.token, origin: "http://127.0.0.1:8798" },
-      data: { title: "SyntheticMailShortcut" },
-    },
+    { title: labelTitle },
   );
-  const label = await labelResponse.json();
   const eventId = crypto.randomUUID();
-  let etag = "old";
-  let done = false;
+  const mail = { id: eventId, title: "Synthetic conflicting email" };
+  await seedMail([mail]);
   const bodies: Record<string, unknown>[] = [];
-  let categories: {
-    id: string;
-    label: { provider: string; external_id: string };
-    priority: string;
-  }[] = [];
-  await page.route("**/api/plus/**", async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    if (path === "/api/plus/v1/mailItems")
-      return route.fulfill({
-        json: {
-          mail_items: done
-            ? []
-            : [{ id: eventId, title: "Synthetic conflicting email", etag }],
-          categories_etag: "1",
-          categories,
-        },
-      });
-    if (path.endsWith("mailSettings:read"))
-      return route.fulfill({ json: { categories, etag: "1" } });
-    if (path.endsWith("mailSettings:updateCategories")) {
-      const body = route.request().postDataJSON();
-      expect(body.destination).toBeUndefined();
-      expect(body.categories[0]).toMatchObject({
-        label: { provider: "tasks", external_id: label.id },
-        priority: "p2",
-      });
-      categories = [{ id: "shortcut", ...body.categories[0] }];
-      return route.fulfill({ json: { categories, etag: "2" } });
-    }
-    if (path.endsWith(":convertMailItem")) {
-      const body = route.request().postDataJSON() as Record<string, unknown>;
-      bodies.push(body);
-      if (bodies.length === 1) {
-        etag = "fresh";
-        return route.fulfill({
-          status: 409,
-          json: {
-            error: {
-              code: 409,
-              status: "ABORTED",
-              message: "Mail changed. Refresh before trying again.",
-              details: [
-                {
-                  "@type": "type.googleapis.com/google.rpc.ErrorInfo",
-                  reason: "ETAG_MISMATCH",
-                  domain: "todofy.ziyixi.science",
-                },
-              ],
-            },
-          },
-        });
-      }
-      done = true;
-      return route.fulfill({
-        json: { task: { id: "synthetic-conflict-result" } },
-      });
-    }
-    return route.abort("blockedbyclient");
+  page.on("request", (sent) => {
+    if (sent.url().endsWith("/api/tasks/v1/mailItems:convert"))
+      bodies.push(sent.postDataJSON() as Record<string, unknown>);
   });
   await page.goto("/#/mail");
   await page
@@ -256,25 +170,47 @@ test("a definite mail conflict permits a fresh request after refresh", async ({
     .selectOption("2");
   await settings.getByRole("button", { name: "Save", exact: true }).click();
   await expect(settings).not.toBeVisible();
+  const shortcut = page.getByRole("button", {
+    name: `${labelTitle} · P2`,
+    exact: true,
+  });
+  await expect(shortcut).toBeVisible();
+  // Reopened, the dialog reads the saved set from Tasks.
+  await page
+    .getByRole("button", { name: "Mail categories", exact: true })
+    .click();
   await expect(
-    page.getByRole("button", {
-      name: "SyntheticMailShortcut · P2",
-      exact: true,
-    }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Create task", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("Mail changed");
+    settings.getByRole("combobox", { name: "Label 1", exact: true }),
+  ).toHaveValue(label.id);
+  await expect(
+    settings.getByRole("combobox", { name: "Priority 1", exact: true }),
+  ).toHaveValue("2");
+  await page.keyboard.press("Escape");
+  await expect(settings).not.toBeVisible();
+  // The mail changes in Todofy after the page read it.
+  await seedMail([{ ...mail, version: 1 }]);
+  await shortcut.click();
+  await expect(page.getByRole("alert")).toContainText("changed");
   await page.getByRole("button", { name: "Refresh mail" }).click();
   await expect(
     page.getByRole("button", { name: "Refresh mail" }),
   ).toBeEnabled();
-  await page.getByRole("button", { name: "Create task", exact: true }).click();
+  await shortcut.click();
   await expect(
     page.getByText("No mail to review", { exact: true }),
   ).toBeVisible();
-  expect(bodies[0]?.etag).toBe("old");
-  expect(bodies[1]?.etag).toBe("fresh");
+  expect(bodies).toHaveLength(2);
+  expect(bodies[0]?.etag).not.toBe(bodies[1]?.etag);
   expect(bodies[0]?.request_id).not.toBe(bodies[1]?.request_id);
+  const [converted] = (await readTodofy()).mail;
+  const task = await (
+    await request.get(`/api/tasks/v1/tasks/${String(converted?.taskId)}`)
+  ).json();
+  expect(task).toMatchObject({
+    title: "Synthetic conflicting email",
+    label_ids: [label.id],
+    priority: 2,
+  });
 });
 
 test("a filed email summary remains accessible by its link after leaving pending Mail", async ({
@@ -284,20 +220,15 @@ test("a filed email summary remains accessible by its link after leaving pending
   const fullSummary =
     "Synthetic full detail.\n".repeat(900) +
     "This final paragraph was beyond the task copy.";
-  await page.route("**/api/plus/**", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname === "/api/plus/v1/mailItems")
-      return route.fulfill({ json: { mail_items: [] } });
-    if (url.pathname.endsWith(":readMailSummary")) {
-      expect(url.searchParams.get("id")).toBe(id);
-      return route.fulfill({
-        json: {
-          summary: fullSummary,
-        },
-      });
-    }
-    return route.abort("blockedbyclient");
-  });
+  await seedMail([
+    {
+      id,
+      title: "Synthetic filed mail",
+      summary: fullSummary,
+      pending: false,
+      taskId: "synthetic-filed-task",
+    },
+  ]);
   await page.goto(`/?mail=${id}#/mail`);
   const summary = page.getByRole("dialog", {
     name: "Mail summary",

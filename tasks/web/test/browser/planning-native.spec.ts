@@ -3,6 +3,7 @@ import {
   planReads,
   readFocus,
   readTimer,
+  readTodofy,
   stubPlanning,
   tasksToday,
   type PlanningRequest,
@@ -139,6 +140,7 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
   const today = await tasksToday();
   const outcomeId = crypto.randomUUID();
   const stepId = crypto.randomUUID();
+  const mailId = crypto.randomUUID();
   const state = await stubPlanning(page, {
     tasks: [
       {
@@ -157,15 +159,12 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
     queues: { [today]: [stepId] },
     mail: [
       {
-        id: "native-message",
+        id: mailId,
         title: "Synthetic native mail",
-        etag: "mail-1",
-        receive_time: "2026-10-13T17:00:00Z",
-        brief: "Synthetic native brief",
-        has_summary: true,
+        summary: "Synthetic native summary",
+        receivedAt: Date.parse("2026-10-13T17:00:00Z"),
       },
     ],
-    summaries: { "native-message": "Synthetic native summary" },
   });
   await page.goto("/#/plan");
   await expect(
@@ -300,21 +299,24 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
     page.getByText("No mail to review", { exact: true }),
   ).toBeVisible();
   const conversions = state.requests.filter(
-    (request) => request.path === "/api/plus/v1/mailItems:convertMailItem",
+    (request) => request.path === "/api/tasks/v1/mailItems:convert",
   );
   expect(conversions).toHaveLength(1);
-  expect(conversions[0]!.body).toMatchObject({
-    event_id: "native-message",
-    etag: "mail-1",
-  });
+  expect(conversions[0]!.body).toMatchObject({ event_id: mailId });
   expect(conversions[0]!.body).not.toHaveProperty("task_id");
   expect(
-    state.requests.slice(mailStart).map((request) => request.path),
+    state.requests
+      .slice(mailStart)
+      .map((request) => request.path.split("?")[0]),
   ).toEqual([
-    "/api/plus/v1/mailItems",
-    "/api/plus/v1/mailItems:readMailSummary",
-    "/api/plus/v1/mailItems:convertMailItem",
+    "/api/mail/v1/mailItems",
+    `/api/mail/v1/mailItems/${mailId}`,
+    "/api/tasks/v1/mailItems:convert",
   ]);
+  // Tasks made the task and marked the mail in Todofy.
+  const [converted] = (await readTodofy()).mail;
+  expect(converted).toMatchObject({ id: mailId, pending: false });
+  expect(converted?.taskId).toBeTruthy();
   expect(
     state.requests.every((request) => request.authorization === null),
   ).toBe(true);

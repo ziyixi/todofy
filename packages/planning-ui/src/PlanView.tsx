@@ -45,6 +45,8 @@ export interface PlanViewProps {
   onOpenTask?: (id: string) => void;
   /** The weekly review's mail line opens the host's Mail page. */
   onOpenMail?: () => void;
+  /** The weekly review's GTD link opens the host's GTD page. */
+  onOpenGtd?: () => void;
   /** Each new positive value opens the weekly review (the review task's link); a mount with one starts with it. */
   reviewing?: number;
   /** Opened from Focus's quiet line: Review, with Start now focused. */
@@ -251,6 +253,7 @@ export function PlanView(props: PlanViewProps) {
           editTask={editTask}
           completeReview={props.completeReview}
           onOpenMail={props.onOpenMail}
+          onOpenGtd={props.onOpenGtd}
           onShowWaiting={() => showLane("waiting")}
           onPlanSteps={planSteps}
           onClose={() => {

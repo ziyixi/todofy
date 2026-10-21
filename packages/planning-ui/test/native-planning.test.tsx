@@ -166,7 +166,7 @@ it("sends flag writes as the task's planning flags in one UpdateTask", async () 
       planning_flags: ["quick", "onhold", "task"],
     });
   };
-  const actions = createPlanningActions({ plus: send, tasks: send });
+  const actions = createPlanningActions({ tasks: send });
   const updated = await actions.updateTask(task, { quick: true, onHold: true });
   expect(JSON.parse(calls[0]!.body!)).toEqual({
     planning_flags: ["quick", "onhold"],
@@ -174,8 +174,9 @@ it("sends flag writes as the task's planning flags in one UpdateTask", async () 
   expect(updated.planningFlags).toEqual(["quick", "onhold", "task"]);
 });
 
-it("shows uncreated native Mail in weekly review and opens Mail without a task identity", async () => {
+it("shows uncreated native Mail in weekly review and opens Mail and GTD without a task identity", async () => {
   const openMail = vi.fn();
+  const openGtd = vi.fn();
   const updateTask = vi.fn();
   render(
     <WeeklyReview
@@ -201,6 +202,7 @@ it("shows uncreated native Mail in weekly review and opens Mail without a task i
       onPlanSteps={vi.fn()}
       completeReview={vi.fn()}
       onOpenMail={openMail}
+      onOpenGtd={openGtd}
       onClose={vi.fn()}
     />,
   );
@@ -211,6 +213,8 @@ it("shows uncreated native Mail in weekly review and opens Mail without a task i
   );
   fireEvent.click(within(line).getByRole("button", { name: "Open" }));
   expect(openMail).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "GTD trends" }));
+  expect(openGtd).toHaveBeenCalledTimes(1);
   expect(updateTask).not.toHaveBeenCalled();
 });
 

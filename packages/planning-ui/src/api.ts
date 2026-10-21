@@ -3,7 +3,6 @@ import {
   type HttpSend,
   RpcStatusError,
 } from "@ziyixi/proto/http-client";
-import { PlusService } from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
 import {
   FocusEntry_Source,
   FocusTimer_State,
@@ -278,17 +277,15 @@ export function siblingPositions(
   });
 }
 /**
- * Adapts Tasks' planning and Focus API, and the weekly review's two facts Todofy keeps. The host
- * supplies authentication and URL routing, `updateEstimate` (an estimate is the task's duration in
- * Tasks) and `completeTask`, which completes in Tasks and settles Focus in the same write. A task
- * write reads nothing first: it goes under the etag Plan holds, which every confirmed task write
- * answers anew, and a stale one is refused, after which Plan reads again.
+ * Adapts Tasks' planning, Focus and weekly review API. The host supplies authentication and URL
+ * routing, `updateEstimate` (an estimate is the task's duration in Tasks) and `completeTask`, which
+ * completes in Tasks and settles Focus in the same write. A task write reads nothing first: it goes
+ * under the etag Plan holds, which every confirmed task write answers anew, and a stale one is
+ * refused, after which Plan reads again.
  */
 export function createPlanningActions(transports: {
-  plus: HttpSend;
   tasks: HttpSend;
 }): Omit<PlusActions, "updateEstimate" | "completeTask"> {
-  const plus = createHttpClient(PlusService, transports.plus);
   const tasks = createHttpClient(TasksUiService, transports.tasks);
   // One request ID per identical write until it is confirmed, so a retry after a lost answer
   // replays it instead of writing again.
@@ -428,10 +425,12 @@ export function createPlanningActions(transports: {
       return planMetadata(await tasks.getPlan({ name: "plan" }));
     },
     async readWeeklyReview(week) {
-      const result = await plus.readWeeklyReview({ weekStart: week });
+      const result = await tasks.getWeeklyReview({
+        name: `weeklyReviews/${week}`,
+      });
       return {
         reviewTaskId: result.reviewTaskId,
-        mailboxPendingCount: result.mailboxPendingCount,
+        mailboxPendingCount: result.mailPendingCount,
       };
     },
     async updateTask(task, update) {

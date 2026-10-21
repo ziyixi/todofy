@@ -317,7 +317,7 @@ export function createPrototype(
       delete metadata.dependencies;
       return metadata as PlanMetadata;
     },
-    // Todofy's weekly review facts: two pending mails and this week's review task.
+    // The weekly review's facts: two pending mails and this week's review task.
     async readWeeklyReview() {
       return { reviewTaskId: "weekly-review", mailboxPendingCount: 2 };
     },

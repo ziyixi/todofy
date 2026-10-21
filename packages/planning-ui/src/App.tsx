@@ -75,6 +75,8 @@ export interface PlanningAppProps {
   onViewChange?: (view: View) => void;
   /** The weekly review's mail line opens the host's Mail page. */
   onOpenMail?: () => void;
+  /** The weekly review's GTD link opens the host's GTD page. */
+  onOpenGtd?: () => void;
   /** Data from an earlier visit, shown at once while it is read again in the background. */
   snapshot?: PlusSnapshot;
   /** The last confirmed data, or undefined once a remembered board is dropped. */
@@ -112,6 +114,7 @@ export function App({
   refreshRevision,
   onViewChange,
   onOpenMail,
+  onOpenGtd,
   snapshot,
   onSnapshot,
   review,
@@ -901,6 +904,7 @@ export function App({
                     completeTask={(task, day) => void complete(task, day)}
                     onOpenTask={onOpenTask}
                     onOpenMail={onOpenMail}
+                    onOpenGtd={onOpenGtd}
                     reviewing={review}
                     planView={planView}
                     onPlanView={onPlanView}

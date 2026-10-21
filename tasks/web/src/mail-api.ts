@@ -1,43 +1,43 @@
 import { createHttpClient } from "@ziyixi/proto/http-client";
-import {
-  PlusService,
-  type MailCategory,
-  type Priority,
-} from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
+import type { MailCategories as ApiCategories } from "@ziyixi/proto/tasks/ui/v1/mail_pb";
+import { MailService } from "@ziyixi/proto/todofy/mail/v1/mail_service_pb";
 import type { MailCategories } from "@ziyixi/planning-ui";
 import type { MailCategoryActions } from "@ziyixi/planning-ui/MailCategories";
-import { send } from "./api";
+import { api, send } from "./api";
 
-export const mailApi = createHttpClient(PlusService, send);
-function categories(items: MailCategory[], etag: string): MailCategories {
+/**
+ * Todofy's Mail entry, through Tasks' same-origin `/api/mail/v1/*`: the list, one mail with its summary and deleting
+ * summaries. Converting a mail and the categories are Tasks' own (`api`).
+ */
+export const mailApi = createHttpClient(MailService, send);
+
+function categories(saved: ApiCategories): MailCategories {
   return {
-    etag,
-    categories: items.flatMap((item) =>
-      item.label?.provider === "tasks"
-        ? [
-            {
-              id: item.id,
-              labelId: item.label.externalId,
-              priority: item.priority,
-            },
-          ]
-        : [],
-    ),
+    etag: saved.etag,
+    categories: saved.categories.map((category) => ({
+      id: category.id,
+      labelId: category.labelId,
+      priority: category.priority,
+    })),
   };
 }
 export const categoryActions: MailCategoryActions = {
   async readMailSettings() {
-    const response = await mailApi.readMailSettings({});
-    return categories(response.categories, response.etag);
+    return categories(await api.getMailCategories({ name: "mailCategories" }));
   },
   async updateMailCategories(items, etag) {
-    const response = await mailApi.updateMailCategories({
-      categories: items.map((item) => ({
-        label: { provider: "tasks", externalId: item.labelId },
-        priority: item.priority as Priority,
-      })),
-      etag,
-    });
-    return categories(response.categories, response.etag);
+    return categories(
+      await api.updateMailCategories({
+        mailCategories: {
+          name: "mailCategories",
+          categories: items.map((item) => ({
+            labelId: item.labelId,
+            priority: item.priority,
+          })),
+        },
+        updateMask: { paths: ["categories"] },
+        etag,
+      }),
+    );
   },
 };

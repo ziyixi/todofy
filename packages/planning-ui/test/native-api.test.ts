@@ -3,22 +3,33 @@ import { createPlanningActions } from "../src/api";
 import type { HttpCall, HttpSend } from "@ziyixi/proto/http-client";
 import type { FocusState } from "../src/model";
 
-it("reads the weekly review's two Todofy facts for the plan's week, a zero count included", async () => {
+it("reads the weekly review's two facts for the plan's week from Tasks, a zero count included", async () => {
   const calls: HttpCall[] = [];
-  const plus: HttpSend = async (call) => {
+  const answers = [
+    {
+      name: "weeklyReviews/2026-10-12",
+      review_task_id: "synthetic-review",
+      mail_pending_count: 0,
+    },
+    { name: "weeklyReviews/2026-10-19" },
+  ];
+  const tasks: HttpSend = async (call) => {
     calls.push(call);
-    return Response.json({ review_task_id: "synthetic-review" });
+    return Response.json(answers.shift());
   };
-  const tasks: HttpSend = async () => {
-    throw new Error("The weekly review reads Todofy only");
-  };
-  const actions = createPlanningActions({ plus, tasks });
+  const actions = createPlanningActions({ tasks });
   expect(await actions.readWeeklyReview!("2026-10-12")).toEqual({
     reviewTaskId: "synthetic-review",
     mailboxPendingCount: 0,
   });
+  // Without Todofy's answer the count is unknown, not zero.
+  expect(await actions.readWeeklyReview!("2026-10-19")).toEqual({
+    reviewTaskId: "",
+    mailboxPendingCount: undefined,
+  });
   expect(calls.map((call) => call.url)).toEqual([
-    "/api/plus/v1/weeklyReview:read?week_start=2026-10-12",
+    "/api/tasks/v1/weeklyReviews/2026-10-12",
+    "/api/tasks/v1/weeklyReviews/2026-10-19",
   ]);
 });
 
@@ -62,7 +73,7 @@ it("starts a pomodoro in Tasks and uses its authoritative session across reload 
         : { timer: running },
     );
   };
-  const api = createPlanningActions({ plus: send, tasks: send });
+  const api = createPlanningActions({ tasks: send });
   const focus: FocusState = {
     date: "2026-10-17",
     taskIds: ["step"],
@@ -128,7 +139,7 @@ it("counts up when Start has no target, and an unassigned task starts with no ar
       },
     });
   };
-  const api = createPlanningActions({ plus: send, tasks: send });
+  const api = createPlanningActions({ tasks: send });
   const focus = {
     date: "2026-10-17",
     taskIds: ["step"],
@@ -178,7 +189,7 @@ it("sends when a Pause or Resume takes effect, keeps the pause time to the milli
       },
     });
   };
-  const api = createPlanningActions({ plus: send, tasks: send });
+  const api = createPlanningActions({ tasks: send });
   const focus: FocusState = {
     date: "2026-10-17",
     taskIds: ["step"],
@@ -260,7 +271,7 @@ it("takes every estimate from the task list; Tasks' Focus read only names tasks 
       });
     return Response.json({ name: "focusTimer", state: "idle", etag: "1" });
   };
-  const api = createPlanningActions({ plus: send, tasks: send });
+  const api = createPlanningActions({ tasks: send });
   expect("updateEstimate" in api).toBe(false);
   const result = await api.load();
   expect(result.plan.tasks[0]?.estimatedMinutes).toBe(90);

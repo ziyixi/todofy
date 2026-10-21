@@ -85,12 +85,12 @@ export interface WeeklyBet {
 }
 /** The plan without the task list and its dependencies. */
 export type PlanMetadata = Omit<PlanState, "tasks" | "dependencies">;
-/** The weekly review's two facts Todofy keeps, read when the review opens. */
+/** The weekly review's two facts, read from Tasks when the review opens. */
 export interface WeeklyReviewFacts {
-  /** Newest weekly review task Todofy created; the open task list says whether it is open. */
+  /** The week's review task, or the week before's while the week has none; the open task list says whether it is open. */
   reviewTaskId: string;
-  /** Mail entries still awaiting a decision. */
-  mailboxPendingCount: number;
+  /** Mail entries still awaiting a decision; undefined when Todofy did not answer. */
+  mailboxPendingCount: number | undefined;
 }
 /** Time spent on a task, counted on one day: a timer session or time added by hand. */
 export interface FocusEntry {
@@ -270,7 +270,7 @@ export interface PlanUpdate {
 export interface PlusActions {
   load(weekStart?: string): Promise<PlusData>;
   readPlan(): Promise<PlanMetadata>;
-  /** The weekly review's Todofy facts for the week starting `week`. */
+  /** The weekly review's two facts for the week starting `week` (Tasks' GetWeeklyReview). */
   readWeeklyReview?(week: string): Promise<WeeklyReviewFacts>;
   /**
    * The week from `weekStart`, Monday to Sunday: its days, with every task they name (done steps,

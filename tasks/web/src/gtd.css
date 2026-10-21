@@ -1,0 +1,189 @@
+/* The GTD page: facts, the weekly review and three small trends (components/TrendChart.tsx). */
+.gtd-page {
+  --series-1: #1f6fc5;
+  --series-2: #b85c00;
+  --series-3: #2b7a4b;
+  --series-4: #8e44ad;
+}
+.gtd-section {
+  margin-bottom: 26px;
+}
+.gtd-section h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.gtd-note {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.gtd-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
+  gap: 10px 18px;
+  margin: 0;
+}
+.gtd-facts > div {
+  min-width: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.gtd-facts dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.gtd-facts dd {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 2px 0 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.gtd-open-review {
+  font-size: 12px;
+  font-weight: 400;
+}
+.gtd-trends {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 22px 18px;
+}
+
+/* Trend charts: marks take their colour from a series class. */
+.series-1 {
+  --tone: var(--series-1);
+}
+.series-2 {
+  --tone: var(--series-2);
+}
+.series-3 {
+  --tone: var(--series-3);
+}
+.series-4 {
+  --tone: var(--series-4);
+}
+.series-danger {
+  --tone: var(--danger);
+}
+.trend {
+  margin: 0;
+  min-width: 0;
+}
+.trend-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 10px;
+  margin-bottom: 8px;
+}
+.trend-title {
+  font-weight: 600;
+}
+.trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+.trend-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.trend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--tone);
+}
+.trend-key {
+  width: 20px;
+  height: 10px;
+  stroke: var(--tone);
+  stroke-width: 2;
+}
+.trend-scale,
+.trend-axis {
+  color: var(--muted);
+  font-size: 12px;
+}
+.trend-plot svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.trend-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.trend-line {
+  fill: none;
+  stroke: var(--tone);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.trend-dot,
+.trend-bar {
+  fill: var(--tone);
+}
+/* A thin gap in the page colour between stacked segments. */
+.trend-bar {
+  stroke: #fff;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.trend-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+.trend-table {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.trend-table summary {
+  padding: 4px 0;
+  color: var(--muted);
+  cursor: pointer;
+}
+.trend-table-scroll {
+  max-height: 320px;
+  overflow: auto;
+}
+.trend-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.trend-table th,
+.trend-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+.trend-table th:first-child {
+  text-align: left;
+  font-weight: 500;
+}
+.trend-table thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  color: var(--muted);
+  font-weight: 600;
+}
+.trend-unrecorded {
+  color: var(--muted);
+}

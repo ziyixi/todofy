@@ -602,8 +602,8 @@ class Classify(unittest.TestCase):
             # todofy.ui.v1's answers.
             "proto/todofy/report/v1/report.proto": {"todofy"},
             # Todofy's owner API: its core answers it, its gateway serves it and its UI calls it.
-            "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy", "tasks", "personal-mcp"},
-            "proto/todofy/ui/v1/mail_event.proto": {"todofy", "tasks", "personal-mcp"},
+            "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy", "personal-mcp"},
+            "proto/todofy/ui/v1/mail_event.proto": {"todofy", "personal-mcp"},
             # Tasks' owner API: its Worker serves it, its UI and the Personal MCP call it.
             "proto/tasks/ui/v1/gtd.proto": {"tasks", "personal-mcp"},
             # Todofy's private Mail entry: its core answers it, its gateway serves it, Tasks calls it. Tasks'

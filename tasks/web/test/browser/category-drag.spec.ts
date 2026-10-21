@@ -1,5 +1,6 @@
 import { dragTask } from "./drag";
 import { expect, test, type APIRequestContext } from "@playwright/test";
+import { reachesTodofy } from "./planning-stub";
 
 async function writer(request: APIRequestContext) {
   const { token } = await (await request.get("/api/tasks/csrf")).json();
@@ -168,7 +169,7 @@ test("planning tags come with the rows, each task's own, and never masquerade as
   const todofy: string[] = [];
   page.on("request", (event) => {
     const path = new URL(event.url()).pathname;
-    if (path.startsWith("/api/plus/")) todofy.push(path);
+    if (reachesTodofy(path)) todofy.push(path);
   });
   await page.goto(`/#/project/${project.id}`);
   const row = page

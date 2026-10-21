@@ -55,6 +55,8 @@ interface Props {
   completeReview: (task: PlanningTask) => Promise<boolean>;
   /** Opens the host's Mail page, which lists the mail of line 1. */
   onOpenMail?: () => void;
+  /** Opens the host's GTD page, the trend of the Inbox and the open tasks. */
+  onOpenGtd?: () => void;
   onClose: () => void;
 }
 
@@ -79,6 +81,7 @@ export function WeeklyReview({
   onPlanSteps,
   completeReview,
   onOpenMail,
+  onOpenGtd,
   onClose,
 }: Props) {
   const text = words(language);
@@ -110,7 +113,7 @@ export function WeeklyReview({
   const chosen = new Set(plan.nextWeekTaskIds);
   const commitments = sunday ? weekChoices(plan) : [];
   const toKeep = commitments.filter((task) => !chosen.has(task.id));
-  // Todofy's two facts: the review task it created and the mail still pending, read when it opens.
+  // The review task Tasks created and the mail still pending in Todofy, read from Tasks when it opens.
   const [facts, setFacts] = useState<WeeklyReviewFacts>();
   useEffect(() => {
     let current = true;
@@ -487,6 +490,11 @@ export function WeeklyReview({
         {announcement}
       </p>
       <footer>
+        {onOpenGtd && (
+          <button className="weekly-review-jump" onClick={onOpenGtd}>
+            {zh ? "GTD 趋势" : "GTD trends"}
+          </button>
+        )}
         {reviewTask && !reviewDone ? (
           <button
             className="plus-button plus-primary"

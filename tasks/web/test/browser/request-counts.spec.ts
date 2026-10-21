@@ -1,5 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
-import { createTask, planReads, stubPlanning } from "./planning-stub";
+import {
+  createTask,
+  planReads,
+  reachesTodofy,
+  seedMail,
+  stubPlanning,
+} from "./planning-stub";
 
 // How many requests an interaction sends. Each count waits until the page has been idle for 500ms.
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
@@ -7,12 +13,12 @@ test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
 async function settled(page: Page) {
   await page.waitForLoadState("networkidle");
 }
-/** Requests to Todofy (`/api/plus`), which neither a task list nor Plan sends outside the weekly review. */
+/** Requests that reach Todofy, which neither a task list nor Plan sends outside the weekly review. */
 function todofyRequests(page: Page) {
   const paths: string[] = [];
   page.on("request", (event) => {
     const url = new URL(event.url());
-    if (url.pathname.startsWith("/api/plus/")) paths.push(url.pathname);
+    if (reachesTodofy(url.pathname)) paths.push(url.pathname);
   });
   return paths;
 }
@@ -150,5 +156,32 @@ test("a dialog save on a list page writes once and reads the list and the catalo
     "GET /api/tasks/v1/catalog",
     "GET /api/tasks/v1/tasks",
     `PATCH /api/tasks/v1/tasks/${task.id}`,
+  ]);
+});
+
+test("opening Mail reads the mail and the categories together, once each", async ({
+  page,
+}) => {
+  await seedMail([
+    { id: crypto.randomUUID(), title: "Synthetic counted mail" },
+  ]);
+  const paths: string[] = [];
+  page.on("request", (event) => {
+    const url = new URL(event.url());
+    if (
+      /^\/api\/(?:mail|tasks)\/v1\/(?:mailItems|mailCategories)/.test(
+        url.pathname,
+      )
+    )
+      paths.push(url.pathname);
+  });
+  await page.goto("/#/mail");
+  await expect(
+    page.getByText("Synthetic counted mail", { exact: true }),
+  ).toBeVisible();
+  await settled(page);
+  expect(paths.sort()).toEqual([
+    "/api/mail/v1/mailItems",
+    "/api/tasks/v1/mailCategories",
   ]);
 });

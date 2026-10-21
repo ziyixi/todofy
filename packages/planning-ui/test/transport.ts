@@ -1,10 +1,7 @@
 import type { HttpSend } from "@ziyixi/proto/http-client";
 import { createPlanningActions } from "../src/api";
 
-/**
- * The planning actions over one fake fetch, at the paths Tasks serves them on its own origin: Plus
- * at `/api/plus/v1/…` and Focus at `/api/tasks/v1/…`.
- */
+/** The planning actions over one fake fetch, at the paths Tasks serves them on its own origin (`/api/tasks/v1/…`). */
 export function fakeActions(
   fetcher: (input: URL, init: RequestInit) => Promise<Response>,
 ) {
@@ -13,5 +10,5 @@ export function fakeActions(
       method: call.httpMethod,
       body: call.body,
     });
-  return createPlanningActions({ plus: transport, tasks: transport });
+  return createPlanningActions({ tasks: transport });
 }

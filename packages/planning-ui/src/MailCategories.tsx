@@ -4,7 +4,7 @@ import { mailWords, words } from "./i18n";
 import { categoryName, MAX_CATEGORIES } from "./mail";
 import type { Language, MailCategories, MailCategory } from "./model";
 
-/** Todofy's ReadMailSettings and UpdateMailCategories, through the host's transport. */
+/** The mail categories Tasks keeps (GetMailCategories, UpdateMailCategories), through the host's transport. */
 export interface MailCategoryActions {
   readMailSettings(): Promise<MailCategories>;
   /** Replaces the categories saved with `etag`, none included; answers them as saved. */
@@ -32,7 +32,7 @@ const PRIORITIES = [1, 2, 3, 4];
 /**
  * The Mail categories dialog: each category is one existing label and a priority (at most four,
  * names generated, none at all is fine). Converting a mail with a category adds them to its task.
- * It reads the settings when it opens; a save writes Todofy alone, and the dialog closes.
+ * It reads the categories when it opens; a save writes Tasks alone, and the dialog closes.
  */
 export function MailCategoriesDialog({
   headingId,

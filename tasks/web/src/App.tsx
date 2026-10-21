@@ -41,10 +41,11 @@ import { TitleBar, useTitlebarOverlay } from "./titlebar";
 // The app's own styles come before the task dialog's and Plan's, as when those two loaded on demand.
 import "./styles.css";
 // The dialog and Plan load with the app: a part loaded on demand shows only after React's 300ms Suspense
-// reveal throttle when it first opens. Mail and the catalog editor are rarely opened and still load on demand.
+// reveal throttle when it first opens. Mail, GTD and the catalog editor are rarely opened and still load on demand.
 import { TaskDialog } from "./components/TaskDialog";
 import PlanningPage, { readIdlePause } from "./PlanningPage";
 const MailPage = lazy(() => import("./MailPage"));
+const GtdPage = lazy(() => import("./GtdPage"));
 const CatalogEditor = lazy(() =>
   import("./components/CatalogEditor").then((module) => ({
     default: module.CatalogEditor,
@@ -306,6 +307,7 @@ export function App() {
               plan: "Plan",
               focus: "Focus",
               mail: "Mail",
+              gtd: "GTD",
               catalog: "Labels & filters",
             }[route.page] || "Tasks";
   const editCatalog = (kind: CatalogKind, item?: CatalogItem) =>
@@ -403,6 +405,18 @@ export function App() {
                   catalog={catalog}
                   onTaskCreated={actions.taskChanged}
                 />
+              </Suspense>
+            </ErrorBoundary>
+          ) : route.page === "gtd" ? (
+            <ErrorBoundary key="gtd">
+              <Suspense
+                fallback={
+                  <p className="loading-state" role="status">
+                    Loading GTD…
+                  </p>
+                }
+              >
+                <GtdPage onOpenTask={(id) => void openTask(id)} />
               </Suspense>
             </ErrorBoundary>
           ) : planningPage ? null : route.page === "catalog" ? (

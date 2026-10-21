@@ -1,8 +1,6 @@
 import { ChevronDown, ChevronRight, Inbox, Trash2 } from "lucide-react";
-import type {
-  MailCategory,
-  MailItem,
-} from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
+import type { MailCategory } from "@ziyixi/proto/tasks/ui/v1/mail_pb";
+import type { MailItem } from "@ziyixi/proto/todofy/mail/v1/mail_service_pb";
 
 export type MailSummary = { loading?: boolean; text?: string; error?: string };
 export function MailRow({
@@ -100,7 +98,7 @@ export function MailRow({
             ? "Saving…"
             : pendingCategory !== undefined
               ? "Retry"
-              : item.task
+              : item.taskId
                 ? "Move to Inbox"
                 : "Create task"}
           <Inbox size={13} />

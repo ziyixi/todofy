@@ -51,7 +51,7 @@ export default function PlanningPage({
   const actions = useMemo<PlusActions>(() => {
     // Tasks' own planning and Focus API, and Todofy's weekly review facts, both on this origin.
     // Both writes go under the etag Plan holds, with no read first.
-    const actions = createPlanningActions({ plus: send, tasks: send });
+    const actions = createPlanningActions({ tasks: send });
     return {
       ...actions,
       async completeTask(task, requestId, focusDay) {
@@ -107,6 +107,9 @@ export default function PlanningPage({
         }}
         onOpenMail={() => {
           window.location.hash = "/mail";
+        }}
+        onOpenGtd={() => {
+          window.location.hash = "/gtd";
         }}
         snapshot={snapshot}
         onSnapshot={setSnapshot}

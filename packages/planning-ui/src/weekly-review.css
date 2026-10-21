@@ -127,7 +127,13 @@
 .weekly-review > footer {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   margin-top: 10px;
+}
+/* The GTD page's link at the start, the review task's action or state at the end. */
+.plus-root .weekly-review > footer .weekly-review-jump {
+  margin-block: 0;
+  margin-inline-end: auto;
 }
 .plus-root .planning-runway {
   display: block;

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { createTask, stubPlanning } from "./planning-stub";
+import { createTask, seedMail, stubPlanning } from "./planning-stub";
 
 // Chrome hands a launch to an open window (manifest `launch_handler: focus-existing`) only in an installed app
 // window, which headless Playwright cannot install. So `window.launchQueue` is stubbed: the page's consumer is
@@ -191,16 +191,14 @@ test("a mail summary link opens the summary in Mail, also when Mail is shown", a
   page,
 }) => {
   const id = crypto.randomUUID();
-  await page.route("**/api/plus/**", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname === "/api/plus/v1/mailItems")
-      return route.fulfill({ json: { mail_items: [] } });
-    if (url.pathname.endsWith(":readMailSummary"))
-      return route.fulfill({
-        json: { summary: `Synthetic summary of ${url.searchParams.get("id")}` },
-      });
-    return route.abort("blockedbyclient");
-  });
+  await seedMail([
+    {
+      id,
+      title: "Synthetic linked mail",
+      summary: `Synthetic summary of ${id}`,
+      pending: false,
+    },
+  ]);
   await open(page, "/#/today", "Today");
   const summary = page.getByRole("dialog", {
     name: "Mail summary",

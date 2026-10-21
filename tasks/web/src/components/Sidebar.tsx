@@ -2,6 +2,7 @@ import {
   Archive,
   CalendarDays,
   CalendarRange,
+  ChartLine,
   CheckCheck,
   ChevronDown,
   Hash,
@@ -29,6 +30,7 @@ const navigation = [
   { page: "plan", title: "Plan", icon: Target },
   { page: "focus", title: "Focus", icon: Timer },
   { page: "mail", title: "Mail", icon: Mail },
+  { page: "gtd", title: "GTD", icon: ChartLine },
 ] as const;
 
 export function Sidebar({

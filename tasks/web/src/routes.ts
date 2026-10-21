@@ -7,7 +7,7 @@ export type ListView =
   | "label"
   | "filter"
   | "completed";
-export type Page = ListView | "plan" | "focus" | "mail" | "catalog";
+export type Page = ListView | "plan" | "focus" | "mail" | "gtd" | "catalog";
 export interface Route {
   page: Page;
   id: string;
@@ -24,6 +24,7 @@ const pages: ReadonlySet<string> = new Set([
   "plan",
   "focus",
   "mail",
+  "gtd",
   "catalog",
 ]);
 export function readRoute(hash = window.location.hash): Route {

@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Inbox, RefreshCw, Settings } from "lucide-react";
 import { RpcStatusError } from "@ziyixi/proto/http-client";
-import type {
-  MailCategory,
-  MailItem,
-} from "@ziyixi/proto/todofy/ui/v1/plus_service_pb";
+import type { MailCategory } from "@ziyixi/proto/tasks/ui/v1/mail_pb";
+import type { MailItem } from "@ziyixi/proto/todofy/mail/v1/mail_service_pb";
 import { MailCategoriesDialog } from "@ziyixi/planning-ui/MailCategories";
-import { type Catalog, describeError } from "./api";
+import { api, type Catalog, describeError } from "./api";
 import { categoryActions, mailApi } from "./mail-api";
 import { removeQueryParameter } from "./routes";
 import { Dialog } from "./components/Dialog";
@@ -76,12 +74,9 @@ export default function MailPage({
     new Map(),
   );
   const [settings, setSettings] = useState(false);
-  const [deletion, setDeletion] = useState<{
-    ids: string[];
-    requestId: string;
-  }>();
+  const [deletion, setDeletion] = useState<string[]>();
   const fileRequests = useRef(
-    new Map<string, Parameters<typeof mailApi.convertMailItem>[0]>(),
+    new Map<string, Parameters<typeof api.convertMailItem>[0]>(),
   );
   const readGeneration = useRef(0);
   const read = useCallback(async (pageToken = "") => {
@@ -89,7 +84,13 @@ export default function MailPage({
     setLoading(true);
     setError("");
     try {
-      const result = await mailApi.listMailItems({ pageSize: 50, pageToken });
+      // The mail is Todofy's and the categories Tasks': read together; a later page reads only mail.
+      const [result, saved] = await Promise.all([
+        mailApi.listMailItems({ pageSize: 50, pageToken }),
+        pageToken
+          ? undefined
+          : api.getMailCategories({ name: "mailCategories" }),
+      ]);
       if (generation !== readGeneration.current) return;
       setItems((current) =>
         pageToken
@@ -101,8 +102,10 @@ export default function MailPage({
             ]
           : result.mailItems,
       );
-      setCategories(result.categories);
-      setCategoriesEtag(result.categoriesEtag);
+      if (saved) {
+        setCategories(saved.categories);
+        setCategoriesEtag(saved.etag);
+      }
       setNextPage(result.nextPageToken);
     } catch (reason) {
       if (generation === readGeneration.current)
@@ -129,7 +132,7 @@ export default function MailPage({
   const readSummary = useCallback(async (id: string) => {
     setSummaries((current) => new Map(current).set(id, { loading: true }));
     try {
-      const result = await mailApi.readMailSummary({ id });
+      const result = await mailApi.getMailItem({ name: `mailItems/${id}` });
       setSummaries((current) =>
         new Map(current).set(id, { text: result.summary }),
       );
@@ -159,8 +162,8 @@ export default function MailPage({
     setBusy(item.id);
     setError("");
     try {
-      const result = await mailApi.convertMailItem(request);
-      if (!result.task?.id) throw new Error("Unconfirmed task creation");
+      const task = await api.convertMailItem(request);
+      if (!task.id) throw new Error("Unconfirmed task creation");
       setItems((current) => current.filter((value) => value.id !== item.id));
       fileRequests.current.delete(item.id);
       setSummaries((current) => {
@@ -168,7 +171,9 @@ export default function MailPage({
         next.delete(item.id);
         return next;
       });
-      setStatus(item.task ? "Task moved to Inbox." : "Task created in Inbox.");
+      setStatus(
+        item.taskId ? "Task moved to Inbox." : "Task created in Inbox.",
+      );
       onTaskCreated();
     } catch (reason) {
       if (
@@ -186,10 +191,7 @@ export default function MailPage({
     setBusy("delete");
     setError("");
     try {
-      const result = await mailApi.deleteMailSummaries({
-        eventIds: deletion.ids,
-        requestId: deletion.requestId,
-      });
+      const result = await mailApi.deleteMailSummaries({ eventIds: deletion });
       const deleted = new Set(result.deletedEventIds);
       setItems((current) => current.filter((item) => !deleted.has(item.id)));
       setSummaries(
@@ -208,9 +210,7 @@ export default function MailPage({
     }
   }
   const choices = categories.flatMap((category) => {
-    const label = catalog.labels.find(
-      (value) => value.id === category.label?.externalId,
-    );
+    const label = catalog.labels.find((value) => value.id === category.labelId);
     return label ? [{ category, label }] : [];
   });
   return (
@@ -243,10 +243,7 @@ export default function MailPage({
             className="text-button"
             disabled={!items.length || Boolean(busy)}
             onClick={() =>
-              setDeletion({
-                ids: items.slice(0, 200).map((item) => item.id),
-                requestId: crypto.randomUUID(),
-              })
+              setDeletion(items.slice(0, 200).map((item) => item.id))
             }
           >
             Delete shown
@@ -289,7 +286,7 @@ export default function MailPage({
             onFile={(category) => void file(item, category)}
             onDelete={() => {
               setError("");
-              setDeletion({ ids: [item.id], requestId: crypto.randomUUID() });
+              setDeletion([item.id]);
             }}
           />
         ))}
@@ -316,7 +313,7 @@ export default function MailPage({
       )}
       {deletion && (
         <Dialog
-          title={`Delete ${deletion.ids.length === 1 ? "email" : `${deletion.ids.length} emails`}?`}
+          title={`Delete ${deletion.length === 1 ? "email" : `${deletion.length} emails`}?`}
           onClose={() => setDeletion(undefined)}
           className="native-mail-confirm"
         >
