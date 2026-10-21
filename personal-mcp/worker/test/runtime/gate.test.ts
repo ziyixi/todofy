@@ -15,16 +15,19 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
 });
 
-async function start(persist: string, received: unknown[], validChallenge = true) {
+async function start(persist: string, received: unknown[], validChallenge = true,
+  tasks: (request: Request) => Response | Promise<Response> = () => new Response(null, { status: 503 })) {
   const bundle = await build({ entryPoints: ['src/index.ts'], bundle: true, format: 'esm', platform: 'browser',
     conditions: ['workerd', 'worker', 'browser'], target: 'es2024', external: ['cloudflare:workers', 'node:*'], write: false, logLevel: 'silent' });
   const output = bundle.outputFiles[0];
   if (!output) throw new Error('No bundled Worker');
   const mf = new Miniflare(convertV4MiniflareOptions({
+    resourcePersistencePath: persist,
+    workers: [{
     name: 'personal-mcp', script: output.text, modules: true,
     compatibilityDate: '2026-09-08', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { SUBSCRIPTIONS: { className: 'SubscriptionStore', useSQLite: true } },
-    resourcePersistencePath: persist,
+    serviceBindings: { TASKS: tasks },
     bindings: { PUBLIC_HOST: 'mcp.example.org', ACCESS_ISSUER: 'https://test.cloudflareaccess.com',
       ACCESS_AUDIENCE: 'test', ACCESS_OWNER: 'owner@example.org', DEV_AUTH_BYPASS: 'true',
       BUILD_SHA: 'a'.repeat(40), CALLBACK_HOSTS: 'receiver.example.org' },
@@ -38,6 +41,11 @@ async function start(persist: string, received: unknown[], validChallenge = true
       received.push(verified);
       return new Response(null, { status: 204 });
     },
+    }, {
+      name: 'ops-probe', modules: true, compatibilityDate: '2026-09-08',
+      script: `export default { async fetch(request, env) { return Response.json(await env.OPS.status()); } }`,
+      serviceBindings: { OPS: { name: 'personal-mcp', entrypoint: 'Ops' } },
+    }],
   }));
   stores.push(mf);
   await mf.ready;
@@ -115,6 +123,53 @@ it('discovers tools/events and preserves the subscription across a restart, then
   const stopped = await call<ToolReply>(second, 'tools/call', { name: 'connection_status', arguments: {} });
   expect(stopped.structuredContent.status?.subscriptions).toBe(0);
   expect(stopped.structuredContent.status?.last_subscription_request).toEqual(before.structuredContent.status?.last_subscription_request);
+});
+
+it('keeps Step identities across restart after a partial native write and reports private Ops status', async () => {
+  const persist = await mkdtemp(join(tmpdir(), 'personal-mcp-steps-'));
+  directories.push(persist);
+  const saved = new Map<string, Record<string, unknown>>();
+  const attempted: string[] = [];
+  let failSecond = true;
+  const backend = async (request: Request) => {
+    expect(request.method).toBe('POST');
+    const body = await request.json<Record<string, unknown>>();
+    const taskId = new URL(request.url).searchParams.get('task_id') ?? '';
+    attempted.push(taskId);
+    if (saved.size === 1 && !saved.has(taskId) && failSecond) {
+      failSecond = false;
+      return Response.json({ error: { code: 503, status: 'UNAVAILABLE', message: 'Synthetic unavailable' } }, { status: 503 });
+    }
+    const task = saved.get(taskId) ?? { name: `tasks/${taskId}`, id: taskId, etag: '1',
+      title: body.title, kind: 'step', parent_id: body.parent_id };
+    saved.set(taskId, task);
+    return Response.json(task);
+  };
+  const first = await start(persist, [], true, backend);
+  const initialOps = await (await (await first.getWorker('ops-probe')).fetch('https://ops.internal/')).json();
+  expect(initialOps).toMatchObject({ app: 'personal-mcp', health: 'ok', signals: [], counters: { active_subscriptions: 0 } });
+  const args = { request_id: '00000000-0000-4000-8000-000000000010', task_id: 'synthetic-parent',
+    steps: [{ title: 'Synthetic first Step' }, { title: 'Synthetic second Step' }] };
+  const partial = await call<{ isError: boolean }>(first, 'tools/call', { name: 'tasks_add_steps', arguments: args });
+  expect(partial.isError).toBe(true);
+  expect(saved.size, JSON.stringify({ partial, attempted })).toBe(1);
+  await first.dispose();
+  stores.splice(stores.indexOf(first), 1);
+  const second = await start(persist, [], true, backend);
+  const complete = await call<{ structuredContent: { tasks: { id: string }[] } }>(second, 'tools/call', {
+    name: 'tasks_add_steps', arguments: args,
+  });
+  expect(saved.size).toBe(2);
+  expect(attempted.slice(2)).toEqual(attempted.slice(0, 2));
+  expect(complete.structuredContent.tasks.map(task => task.id)).toEqual([...saved.keys()]);
+  const conflict = await call<{ isError: boolean }>(second, 'tools/call', {
+    name: 'tasks_add_steps', arguments: { ...args, steps: [{ title: 'Different input' }] },
+  });
+  expect(conflict.isError).toBe(true);
+  expect(saved.size).toBe(2);
+  const ops = await (await (await second.getWorker('ops-probe')).fetch('https://ops.internal/')).json();
+  expect(ops).toMatchObject({ app: 'personal-mcp', health: 'ok', counters: { active_subscriptions: 0, pending_deliveries: 0 } });
+  expect(JSON.stringify(ops)).not.toContain('Synthetic');
 });
 
 it('reports only safe subscription fields for host, signed challenge and pre-schema failures', async () => {

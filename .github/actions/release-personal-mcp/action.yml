@@ -35,6 +35,7 @@ runs:
         cache: npm
         cache-dependency-path: |
           .release-source/personal-mcp/worker/package-lock.json
+          .release-source/proto/package-lock.json
     # Read public deployment identity from the committed config.
     - name: Read the host and the Access issuer from the committed config
       if: inputs.required == 'true'

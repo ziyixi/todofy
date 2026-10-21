@@ -64,7 +64,9 @@ async function refusal(response: Response): Promise<string> {
   return ((await response.json()) as { error: { status: string } }).error.status;
 }
 async function task(title: string, extra: Record<string, unknown> = {}): Promise<WireTask> {
-  return ok(await harness.mutate('POST', `/api/tasks/v1/tasks?request_id=${randomUUID()}`, { title, ...extra }));
+  return ok(await harness.mutate('POST', `/api/tasks/v1/tasks?request_id=${randomUUID()}`, {
+    title, planning_flags: ['task'], ...extra,
+  }));
 }
 function move(body: Record<string, unknown>, requestId = randomUUID()) {
   return harness.mutate('POST', '/api/tasks/v1/focusDays:moveStep', { request_id: requestId, ...body });

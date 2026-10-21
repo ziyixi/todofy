@@ -1,5 +1,6 @@
 import { screen, within } from '@testing-library/react'
-import { degradedApps, guardShed, healthy, todofyUnreachable, withLinkOnly, type Scenario } from '../test/fixtures'
+import type { OpsStatus } from '../../../worker/src/api-types.ts'
+import { degradedApps, guardShed, healthy, status, todofyUnreachable, withLinkOnly, type Scenario } from '../test/fixtures'
 import { freezeClock, renderApp, serve } from '../test/harness'
 
 async function showOps(scenario: Scenario) {
@@ -12,6 +13,29 @@ async function showOps(scenario: Scenario) {
 const region = (name: string) => screen.getByRole('region', { name })
 
 describe('操作与记录', () => {
+  it('shows MCP observations inside the existing app detail and keeps its alert controls', async () => {
+    const scenario = healthy()
+    const snapshot: OpsStatus = { ...status.mailHeroOk, app: 'personal-mcp', ui_url: null,
+      signals: [{ code: 'subscription_rejected', severity: 'warning' as const, metrics: { rpc_code: -32015 } },
+        { code: 'delivery_failed', severity: 'warning' as const, metrics: { count: 1 } },
+        { code: 'source_unavailable', severity: 'warning' as const, metrics: {} }],
+      counters: { active_subscriptions: 0, pending_deliveries: 0, accepted_deliveries: 0, failed_deliveries: 0 }, capabilities: [] }
+    scenario.ops = { ...scenario.ops, apps: [...scenario.ops.apps, { entry: 'personal-mcp', reachable: true,
+      checked_at: scenario.ops.generated_at, status_at: scenario.ops.generated_at, error: null, consecutive_failures: 0, status: snapshot }] }
+    scenario.ops = { ...scenario.ops, attention: { level: 'warning', items: [{ source: 'personal-mcp', code: 'subscription_rejected',
+      severity: 'warning', since: null, metrics: { rpc_code: -32015 }, target: { view: 'ops', entry: 'personal-mcp' },
+      name: 'attentionItems/synthetic-mcp', etag: 'a1-0d8f7a9e-1c2b-4d3e-8f4a-5b6c7d8e9f0a' }], info: [], held: [] } }
+    await showOps(scenario)
+    const mcp = within(region('应用详情')).getByRole('region', { name: '个人 MCP' })
+    expect(within(mcp).getByText('ChatGPT 连接与订阅')).toBeInTheDocument()
+    expect(within(mcp).getByText(/再在 Dots 中重新订阅/)).toBeInTheDocument()
+    expect(within(mcp).getByText(/在 ChatGPT 中检查订阅/)).toBeInTheDocument()
+    expect(within(mcp).getByText(/查看来源服务的检查状态/)).toBeInTheDocument()
+    expect(within(mcp).queryByText(/打开 Mail Hero/)).not.toBeInTheDocument()
+    expect(within(mcp).getByRole('button', { name: '关闭本次提醒' })).toBeInTheDocument()
+    expect(within(mcp).getByText('当前信号')).toBeInTheDocument()
+  })
+
   it('shows every ops-v1 app in full, the digest and the registry', async () => {
     await showOps(healthy())
     const details = region('应用详情')
@@ -53,10 +77,10 @@ describe('操作与记录', () => {
       '个人网站',
       '网站同步',
       'Newsletter',
+      '个人 MCP',
       '个人控制台',
       '自托管服务器',
       '平台运行时',
-      '个人 MCP',
     ])
     expect(rows[1]).toHaveTextContent('ops-v1 状态接口')
     // The links app: a probe of a path its own Worker answers outside Access.
@@ -80,10 +104,10 @@ describe('操作与记录', () => {
     expect(rows[9]).toHaveTextContent('公开地址探测')
     expect(rows[11]).toHaveTextContent('ops-v1 状态接口')
     // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
-    expect(rows[13]).toHaveTextContent('未接入监控')
-    expect(within(rows[13] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
-    expect(rows[15]).toHaveTextContent('未接入监控')
-    expect(within(rows[15] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('personal-mcp')
+    expect(rows[14]).toHaveTextContent('未接入监控')
+    expect(within(rows[14] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
+    expect(rows[12]).toHaveTextContent('ops-v1 状态接口')
+    expect(within(rows[12] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('personal-mcp')
   })
 
   it('names a link-only entry of the registry as such', async () => {

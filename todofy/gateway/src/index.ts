@@ -17,6 +17,7 @@ import { handleOwner } from './owner.ts';
 // only, for the one source its binding's props name (the watch app).
 export { Intents, Ops } from './ops.ts';
 export { Planning } from './planning.ts';
+export { MailApi } from './mail-api.ts';
 
 /** The public host is matched before the hooks hosts. */
 function hostKind(ctx: Context): HostKind {

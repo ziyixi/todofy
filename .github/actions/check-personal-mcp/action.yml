@@ -7,7 +7,9 @@ runs:
       with:
         node-version: '26'
         cache: npm
-        cache-dependency-path: personal-mcp/worker/package-lock.json
+        cache-dependency-path: |
+          personal-mcp/worker/package-lock.json
+          proto/package-lock.json
     - name: Install locked dependencies
       working-directory: personal-mcp/worker
       shell: bash -e {0}

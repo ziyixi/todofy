@@ -5,6 +5,7 @@ import { authenticate } from './auth.ts';
 import { createServer, TEST_EVENT_NAME, type GateApi, type SubscribeParams, type UnsubscribeParams } from './server.ts';
 import type { Env } from './env.ts';
 import { postSigned, validateCallback, verifyCallback } from './webhook.ts';
+import { buildOpsStatus } from './ops.ts';
 
 type Subscription = {
   id: string; owner: string; url: string; secret: string; expires_at: number | null; verified_at: number;
@@ -27,12 +28,15 @@ const RETRY_MS = [60_000, 300_000];
 export class SubscriptionStore extends DurableObject<Env> implements GateApi {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    const hasTotals = ctx.storage.sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='delivery_totals'").toArray().length > 0;
     ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS subscriptions (
         id TEXT PRIMARY KEY, owner TEXT NOT NULL, url TEXT NOT NULL, secret TEXT NOT NULL,
         expires_at INTEGER, verified_at INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS test_events (id TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS step_batches (request_id TEXT PRIMARY KEY, input_hash TEXT NOT NULL, identities TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS own_changes (task_id TEXT PRIMARY KEY, etag TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS deliveries (
         subscription_id TEXT NOT NULL, event_id TEXT NOT NULL, body TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
@@ -40,6 +44,20 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
         PRIMARY KEY(subscription_id, event_id)
       );
       CREATE INDEX IF NOT EXISTS pending_deliveries ON deliveries(state, next_at);
+      CREATE TABLE IF NOT EXISTS delivery_totals (state TEXT PRIMARY KEY, count INTEGER NOT NULL);
+    `);
+    if (!hasTotals) ctx.storage.sql.exec(`INSERT INTO delivery_totals SELECT state, count(*) FROM deliveries GROUP BY state`);
+    ctx.storage.sql.exec(`
+      CREATE TRIGGER IF NOT EXISTS delivery_insert AFTER INSERT ON deliveries BEGIN
+        INSERT INTO delivery_totals VALUES (NEW.state, 1) ON CONFLICT(state) DO UPDATE SET count=count+1;
+      END;
+      CREATE TRIGGER IF NOT EXISTS delivery_delete AFTER DELETE ON deliveries BEGIN
+        UPDATE delivery_totals SET count=count-1 WHERE state=OLD.state;
+      END;
+      CREATE TRIGGER IF NOT EXISTS delivery_state AFTER UPDATE OF state ON deliveries WHEN OLD.state<>NEW.state BEGIN
+        UPDATE delivery_totals SET count=count-1 WHERE state=OLD.state;
+        INSERT INTO delivery_totals VALUES (NEW.state, 1) ON CONFLICT(state) DO UPDATE SET count=count+1;
+      END;
     `);
     void ctx.blockConcurrencyWhile(async () => { await ctx.storage.delete('last_event_request'); });
   }
@@ -55,12 +73,13 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     }));
     const attempt = request.headers.get('Mcp-Method') === 'events/subscribe'
       ? await this.recordSubscriptionRequest(request) : undefined;
-    const handler = createMcpHandler(() => createServer(this, this.env.BUILD_SHA ?? 'development'), {
+    const handler = createMcpHandler(() => createServer(this, this.env.BUILD_SHA ?? 'development', this.env), {
       legacy: 'reject', responseMode: 'auto',
     });
     try {
       const response = await handler.fetch(request);
       if (attempt) await this.recordSubscriptionResponse(attempt, response);
+      if (request.headers.get('Mcp-Method') === 'tools/call' && response.ok) await this.ctx.storage.put('last_tool_at', Date.now());
       return withPrivateHeaders(response);
     } catch (error) {
       if (attempt) await this.ctx.storage.put('last_subscription_request', { ...attempt, phase: 'rejected', reason: 'handler_failed' });
@@ -112,6 +131,29 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
       // Do not retain response text or exception details, which may contain callback credentials.
     }
     await this.ctx.storage.put('last_subscription_request', result);
+    if (result.phase === 'accepted') await this.ctx.storage.put('last_subscription_at', Date.now());
+  }
+
+  async planSteps(requestId: string, input: string, count: number): Promise<readonly { taskId: string; requestId: string }[]> {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+    const inputHash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    return this.ctx.storage.transactionSync(() => {
+      const previous = this.ctx.storage.sql.exec<{ input_hash: string; identities: string }>(
+        'SELECT input_hash, identities FROM step_batches WHERE request_id = ?', requestId,
+      ).toArray()[0];
+      if (previous) {
+        if (previous.input_hash !== inputHash) throw new ProtocolError(-32602, 'Request ID already used for different Steps.');
+        return JSON.parse(previous.identities) as { taskId: string; requestId: string }[];
+      }
+      const identities = Array.from({ length: count }, () => ({ taskId: crypto.randomUUID(), requestId: crypto.randomUUID() }));
+      this.ctx.storage.sql.exec('INSERT INTO step_batches VALUES (?, ?, ?)', requestId, inputHash, JSON.stringify(identities));
+      return identities;
+    });
+  }
+
+  rememberTask(id: string, etag: string): Promise<void> {
+    this.ctx.storage.sql.exec('INSERT OR REPLACE INTO own_changes VALUES (?, ?)', id, etag);
+    return Promise.resolve();
   }
 
   private owner(): string {
@@ -152,20 +194,24 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     return {};
   }
 
-  async status(): Promise<unknown> {
+  async status() {
     const now = Date.now();
     const active = this.ctx.storage.sql.exec<{ count: number }>(
       'SELECT count(*) AS count FROM subscriptions WHERE owner = ? AND (expires_at IS NULL OR expires_at > ?)', this.owner(), now,
     ).one().count;
-    const counts = this.ctx.storage.sql.exec<{ state: string; count: number }>('SELECT state, count(*) AS count FROM deliveries GROUP BY state').toArray();
-    const last = this.ctx.storage.sql.exec<{ event_id: string; state: string; attempts: number; accepted_at: number | null; error_code: string | null }>(
-      'SELECT event_id, state, attempts, accepted_at, error_code FROM deliveries ORDER BY rowid DESC LIMIT 1',
+    const counts = this.ctx.storage.sql.exec<{ state: string; count: number }>('SELECT state, count FROM delivery_totals').toArray();
+    const last = this.ctx.storage.sql.exec<{ event_id: string; state: string; attempts: number; accepted_at: number | null; error_code: string | null; event_at: string }>(
+      "SELECT event_id, state, attempts, accepted_at, error_code, json_extract(body, '$.timestamp') AS event_at FROM deliveries ORDER BY rowid DESC LIMIT 1",
     ).toArray()[0] ?? null;
     return { stage: 'connection_test', build_sha: this.env.BUILD_SHA ?? 'development', subscriptions: active,
       deliveries: Object.fromEntries(counts.map(row => [row.state, row.count])), last_delivery: last,
+      last_tool_at: await this.ctx.storage.get<number>('last_tool_at') ?? null,
+      last_subscription_at: await this.ctx.storage.get<number>('last_subscription_at') ?? null,
       last_subscription_request: await this.ctx.storage.get<SubscriptionRequest>('last_subscription_request') ?? null,
       meaning: 'accepted means ChatGPT received the webhook; it does not prove the Dot finished its work.' };
   }
+
+  async getOpsStatus() { return buildOpsStatus(await this.status()); }
 
   async emitTest(requestId: string): Promise<unknown> {
     const eventId = `test_${requestId}`;

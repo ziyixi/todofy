@@ -27,6 +27,8 @@ export interface Env {
   readonly BRIEF: Service<WatchOpsEntrypoint>;
   /** Native Tasks health; no user content and no operational guard. */
   readonly TASKS: Service<WatchOpsEntrypoint>;
+  /** Personal MCP connection and delivery observations; no owner or business-content API. */
+  readonly PERSONAL_MCP: Service<WatchOpsEntrypoint>;
   readonly HOME: DurableObjectNamespace<HomeState>;
   readonly ASSETS: Fetcher;
 

@@ -92,6 +92,11 @@ binding = "TASKS"
 service = "tasks"
 entrypoint = "Ops"
 
+[[services]]
+binding = "PERSONAL_MCP"
+service = "personal-mcp"
+entrypoint = "Ops"
+
 # One trigger (the account's Free plan allows 5 in total): status, usage, guard, canary, digest.
 [triggers]
 crons = ["*/30 * * * *"]

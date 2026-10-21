@@ -343,6 +343,11 @@ def test_query_uses_its_index(db, name):
         bounded = (used is not None and used.group(1) in partial) or any(
             step.startswith(f"SCAN {alias} VIRTUAL TABLE") for alias in bound
         )
+        if name == "mailbox.READY_PAGE" and step == "SCAN t":
+            # Only the materialized 50-row cursor page is scanned; the ledger itself is a primary-key range.
+            assert "MATERIALIZE scanned" in plan and "ORDER BY id LIMIT 50" in sql
+            assert any("SEARCH event_transitions USING INTEGER PRIMARY KEY" in row for row in plan), plan
+            bounded = True
         # A SCAN reads a whole table or index (not the one constant row of a SELECT without
         # FROM, nor json_each over one bound JSON text, an IN list of the caller's values).
         # source_id is a constant, so a search on it alone does too, unless LIMIT stops an

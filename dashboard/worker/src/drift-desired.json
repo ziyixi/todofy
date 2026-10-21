@@ -270,6 +270,11 @@
           "source": "config"
         },
         {
+          "name": "PERSONAL_MCP",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "PUBLIC_HOST",
           "type": "plain_text",
           "source": "config"
@@ -640,6 +645,11 @@
         {
           "name": "SUBSCRIPTIONS",
           "type": "durable_object_namespace",
+          "source": "config"
+        },
+        {
+          "name": "TASKS",
+          "type": "service",
           "source": "config"
         }
       ],

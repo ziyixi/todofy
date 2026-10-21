@@ -43,6 +43,10 @@ class Default(WorkerEntrypoint):
             )
             text = getattr(answer, "ok", None)
             result = json.loads(text) if text is not None else {"error": answer.error}
+        elif path == "/native/ready":
+            answer = await self.env.PLUS.getByName("native-plus-test").mail_ready_poll(json.dumps(data))
+            text = getattr(answer, "ok", None)
+            result = json.loads(text) if text is not None else {"error": answer.error}
         elif path == "/native/create":
             frozen = build_task_request(
                 data["title"],

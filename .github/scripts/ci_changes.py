@@ -134,7 +134,7 @@ PREFIX = {app: app.replace("-", "_") for app in APPS}
 CHECK_ONLY: set[str] = set()
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
-HOME_BOUND = {"fleet", "mailsort", "recall", "brief", "tasks"}
+HOME_BOUND = {"fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -196,7 +196,7 @@ RELAY = "website/relay/"
 # Release (recall_extension_publish).
 EXTENSION = ("recall/extension/", "recall/shared/")
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"links", "newsletter", "personal-mcp"}
+NO_CONTRACTS = {"links", "newsletter"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")
@@ -247,6 +247,7 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "recall": ("ts",),
     "brief": ("ts",),
     "tasks": ("ts",),
+    "personal-mcp": ("ts",),
 }
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
 # profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
@@ -269,8 +270,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
     # shared transcoder and Todofy's UI calls it through the shared client.
-    "proto/todofy/ui/": ("todofy", "tasks"),
-    "proto/tasks/ui/": ("tasks", "todofy"),
+    "proto/todofy/ui/": ("todofy", "tasks", "personal-mcp"),
+    "proto/tasks/ui/": ("tasks", "todofy", "personal-mcp"),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
     # mailsort's owner API (mailsort.ui.v2, after v1): its Worker serves it, its UI calls it.
@@ -279,14 +280,15 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/fleet/telemetry/": ("fleet", "platform"),
     "proto/platform/runtime/": ("fleet", "platform"),
     # dashboard.ui.v1, the dashboard's owner API: its Worker serves it, its UI calls it.
-    "proto/dashboard/ui/": ("dashboard",),
+    "proto/dashboard/ui/": ("dashboard", "personal-mcp"),
+    "proto/dashboard/mcp/": ("dashboard", "personal-mcp"),
     # Mail Hero's owner API (mailhero.ui.v2): its Worker serves it, its UI calls it.
     "proto/mailhero/ui/": ("mail-hero",),
     # CommonReason: Platform bundles Python error aliases.
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks"),
-    "proto/website/sync/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks"),
+    "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"),
+    "proto/website/sync/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"),
     # mail.received.v1 (contracts/mail-received-v1's schema is generated from it): Mail Hero builds every event,
     # todofy-core reads every webhook body.
     "proto/mailhero/webhook/": ("mail-hero", "todofy"),
@@ -294,8 +296,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/prototest/": (),
     # recall (recall/docs/design.md): its owner API (recall.ui.v1), the extension's upload (recall.ingest.v1) and the
     # archive change feed (recall.archive.v1, contracts/recall-archive-v1): its Worker serves all three.
-    "proto/recall/ui/": ("recall",),
-    "proto/recall/ingest/": ("recall",),
+    "proto/recall/ui/": ("recall", "personal-mcp"),
+    "proto/recall/ingest/": ("recall", "personal-mcp"),
     "proto/recall/archive/": ("recall",),
     # The brief (brief/docs/design.md): its owner API (brief.ui.v1), served by its Worker.
     "proto/brief/ui/": ("brief",),

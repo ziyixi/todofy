@@ -296,7 +296,9 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
         host = primary_host(config, "worker host", zone)
         if host is not None:
             entry = next(e for e in entries if e["id"] == worker["entry"])
-            require(worker["script"] == "home" or (entry["group"] in {"apps", "sites", "hidden"} and entry["url"] is not None), "visible entry coverage")
+            linked = entry["group"] in {"apps", "sites", "hidden"} and entry["url"] is not None
+            monitored_service = entry["group"] == "services" and entry["url"] is None and entry["status"]["type"] == "ops_v1"
+            require(worker["script"] == "home" or linked or monitored_service, "visible entry coverage")
     for rule in access:
         require(rule["key"] == rule["worker"], "owner Access identity")
     try:

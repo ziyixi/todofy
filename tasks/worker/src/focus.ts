@@ -23,7 +23,7 @@ import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import { addDays, daysBetween, localDate, validDate } from '@ziyixi/task-dates';
 import { invalid, missing, precondition, storage } from './errors.ts';
 import { checkedId } from './model.ts';
-import { mondayOf } from './planning.ts';
+import { flagsOf, mondayOf } from './planning.ts';
 import { commit, fingerprint, replay } from './receipts.ts';
 
 /**
@@ -38,6 +38,7 @@ const MAX_ROWS = 500;
 const MOVED = 'This step has moved. Refresh and try again.';
 const FULL = `This day already has ${String(DAY_STEPS)} steps.`;
 const OPEN_ONLY = 'Only an open step can be planned.';
+const EXECUTABLE_ONLY = 'Daily queues accept a Step, Standalone action or Quick task.';
 
 export interface EntryRow {
   id: string;
@@ -229,7 +230,7 @@ export async function moveFocusStep(db: D1Database, input: MoveFocusStepRequest,
   if (before && (!destination || before === taskId)) invalid('before_task_id needs a destination day and another step');
   const [taskResult, rowsResult] = await storage(() =>
     db.batch<Record<string, unknown>>([
-      db.prepare('SELECT completed FROM tasks WHERE id=? AND deleted_at IS NULL').bind(taskId),
+      db.prepare('SELECT completed,kind,planning_flags FROM tasks WHERE id=? AND deleted_at IS NULL').bind(taskId),
       db
         .prepare(
           `SELECT s.day,s.task_id,s.position,s.done_at,t.completed FROM day_steps s
@@ -239,9 +240,11 @@ export async function moveFocusStep(db: D1Database, input: MoveFocusStepRequest,
         .bind(source || destination, destination || source),
     ]),
   );
-  const task = taskResult?.results[0] as { completed: number } | undefined;
+  const task = taskResult?.results[0] as { completed: number; kind: string; planning_flags: string } | undefined;
   if (!task) missing();
   if (destination && task.completed) precondition(OPEN_ONLY);
+  if (destination && task.kind !== 'step' && !flagsOf(task).some(flag => flag === 'task' || flag === 'quick'))
+    precondition(EXECUTABLE_ONLY);
   const rows = (rowsResult?.results ?? []) as unknown as QueueRow[];
   if (source && !rows.some((row) => row.day === source && row.task_id === taskId)) precondition(MOVED);
   const writes: D1PreparedStatement[] = [];
@@ -304,6 +307,9 @@ export async function moveFocusStep(db: D1Database, input: MoveFocusStepRequest,
         message: FULL,
       },
       { sql: 'EXISTS(SELECT 1 FROM tasks WHERE id=? AND completed=0)', values: [taskId], message: OPEN_ONLY },
+      { sql: `EXISTS(SELECT 1 FROM tasks WHERE id=? AND (kind='step' OR
+          EXISTS(SELECT 1 FROM json_each(tasks.planning_flags) WHERE value IN ('task','quick'))))`,
+        values: [taskId], message: EXECUTABLE_ONLY },
     );
   }
   const days = [...after].map(([day, queue]) => dayMessage(day, queue));

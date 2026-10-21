@@ -28,3 +28,9 @@ PUBLIC_HOST = "mcp.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
 ACCESS_AUDIENCE = "da5cfc7953a2ffcd617de2af3189cad24dbacd9b5518a5ec7298e5a708a38120"
 CALLBACK_HOSTS = "connectors.api.openai.com"
+
+[[services]]
+binding = "TASKS"
+service = "tasks"
+entrypoint = "TasksApi"
+props = { access = "read-write" }

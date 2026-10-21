@@ -92,6 +92,11 @@ describe('the retention window with Dropbox', () => {
     expect(shown).toMatchObject({ visitCount: 1, documentCount: 1, textIndexed: true, latestDocument: `pages/${pageId}/documents/${uuid(2)}` });
     expect((await h.api.listVisits({ parent: `pages/${pageId}` })).visits).toHaveLength(1);
     expect(await h.api.getDocument({ name: shown.latestDocument })).toMatchObject({ textArchived: true, archivePath: `blobs/${blobPath(2)}`, text: '合成正文：持久对象的闹钟 alarm 与存储 keyword-zephyr。', textBytes: 70, screenshotWebpBase64: WEBP, screenshotWidth: 1, screenshotHeight: 1, contentError: '' });
+    const privateRead = await h.serviceFetch(`/api/v1/${shown.latestDocument}`);
+    expect(privateRead.status).toBe(200);
+    const privateDocument = await privateRead.json<{ text_archived: boolean; text: string; content_error?: string }>();
+    expect(privateDocument).toMatchObject({ text_archived: true, text: '合成正文：持久对象的闹钟 alarm 与存储 keyword-zephyr。' });
+    expect(privateDocument.content_error ?? '').toBe('');
     // Still found by archived text; snippets only read R2 and remain optional.
     expect((await h.api.searchPages({ query: 'keyword-zephyr' })).results).toHaveLength(1);
     expect((await h.api.searchPages({ query: 'Alarm 指南' })).results.map((result) => [result.page, result.hasText, result.snippet.length])).toEqual([[`pages/${pageId}`, true, 0]]);

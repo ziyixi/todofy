@@ -101,7 +101,7 @@ function Controls({ item }: { item: AttentionItem & { name: string; etag: string
 }
 
 export function AttentionActions({ item }: { item: AttentionItem }) {
-  const guidance = alertGuidance(item.code)
+  const guidance = alertGuidance(item.code, item.source)
   return (
     <div className={`attention-help${item.dismissed_at ? ' attention-help-dismissed' : ''}`}>
       <p className="small">{guidance.explanation}</p>
@@ -114,7 +114,7 @@ export function AttentionActions({ item }: { item: AttentionItem }) {
 /** The raw health signal remains visible, with its current reminder state beside it. */
 export function SignalActions({ source, code, target }: { source: string; code: string; target?: Partial<Target> }) {
   const item = useAttentionFor(source, code, target)
-  const guidance = alertGuidance(code)
+  const guidance = alertGuidance(code, source)
   return item ? <AttentionActions item={item} />
     : <p className="small muted">{guidance.explanation} 下一步：{guidance.next}</p>
 }

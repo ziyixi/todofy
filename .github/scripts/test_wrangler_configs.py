@@ -185,7 +185,7 @@ def load(path: str) -> dict:
 # Production Workers with a Custom Domain but no tile on 首页, and why.
 NO_TILE = {
     "home": "the dashboard itself (dashboard/docs/design-v2.md Q11)",
-    "personal-mcp": "private MCP endpoint, no owner UI in the first gate",
+    "personal-mcp": "private MCP endpoint; monitored under services without a launcher URL",
 }
 
 
@@ -673,7 +673,10 @@ class Hosts(unittest.TestCase):
                 self.assertIn(worker, workers, f"{worker} has no WORKERS row")
                 if worker in NO_TILE:
                     self.assertTrue(hosts, f"{worker} has no Custom Domain, drop its NO_TILE exemption")
-                    self.assertEqual(entries[workers[worker]]["group"], "hidden")
+                    entry = entries[workers[worker]]
+                    self.assertEqual(entry["group"], "services" if worker == "personal-mcp" else "hidden")
+                    if worker == "personal-mcp":
+                        self.assertIsNone(entry["url"])
                     continue
                 if not hosts:
                     continue

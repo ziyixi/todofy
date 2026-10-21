@@ -77,8 +77,8 @@ describe('the registry', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
     expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'brief', 'tasks']);
     expect(byGroup('sites')).toEqual(['website']);
-    expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
-    expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime', 'personal-mcp']);
+    expect(byGroup('services')).toEqual(['notion-publish', 'newsletter', 'personal-mcp']);
+    expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime']);
     const status = Object.fromEntries(REGISTRY.entries.map((e) => [e.id, e.status.type]));
     expect(status).toEqual({
       'mail-hero': 'ops_v1',
@@ -96,7 +96,7 @@ describe('the registry', () => {
       home: 'self',
       'self-hosted': 'none',
       'platform-runtime': 'none',
-      'personal-mcp': 'none',
+      'personal-mcp': 'ops_v1',
     });
   });
 
@@ -137,7 +137,7 @@ describe('the registry', () => {
     expect(entryOfScript('personal-mcp')).toBe('personal-mcp');
     expect(flowsOfScript('personal-mcp')).toEqual([]);
     expect(REGISTRY.entries.find((e) => e.id === 'personal-mcp')).toMatchObject({
-      group: 'hidden', access: true, status: { type: 'none' },
+      group: 'services', access: true, status: { type: 'ops_v1', binding: 'PERSONAL_MCP', guard: false },
     });
     expect(resourceByMatch('r2', 'someone-elses-bucket')).toBeUndefined();
     // Not an app of the monorepo: the self-hosted servers' backups, named under a hidden entry.
@@ -161,10 +161,10 @@ describe('the registry', () => {
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 10 status() + 2 probes (website, links) + 1 GraphQL + 5 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
-    expect(outboundPerTick()).toBe(33);
+    // 11 status() + 2 probes (website, links) + 1 GraphQL + 5 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
+    expect(outboundPerTick()).toBe(34);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
-    expect(outboundPerRefresh()).toBe(12);
+    expect(outboundPerRefresh()).toBe(13);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {

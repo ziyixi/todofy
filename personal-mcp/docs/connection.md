@@ -44,7 +44,8 @@ alternative OAuth servers or modify the business applications while investigatin
 
 2026-10-20 (America/Los_Angeles): local type checks, lint and synthetic unit tests pass. The workerd runtime journey
 passes discovery, persistent subscription and queued event after restart, signed webhook delivery, repeated test request and
-unsubscribe. Real Access OAuth, ChatGPT discovery, Dots subscription and Dots receipt remain pending.
+unsubscribe. The later live acceptance completed Access OAuth, ChatGPT discovery, signed Dots subscription,
+actual receipt, same-request deduplication and unsubscribe on `422df6a0`; see the root verification record above.
 
 References: [OpenAI Events](https://developers.openai.com/plugins/build/mcp-events),
 [OpenAI auth](https://developers.openai.com/plugins/build/auth),

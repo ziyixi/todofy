@@ -315,7 +315,7 @@ class Classify(unittest.TestCase):
         self.assertFalse(push(["recall/app.toml"])["recall_deploy"])
         self.assertFalse(push(["recall/shared/scrub.ts"])["dashboard_deploy"])
         for path in ("proto/recall/ui/v1/page.proto", "proto/recall/ingest/v1/ingest.proto", "proto/recall/archive/v1/archive.proto"):
-            self.assertEqual(ci_changes.proto_deploys(path), {"recall"})
+            self.assertEqual(ci_changes.proto_deploys(path), {"recall"} if "/archive/" in path else {"recall", "personal-mcp"})
         self.assertIn("recall", ci_changes.HOME_BOUND)
         saved = ci_changes.CHECK_ONLY
         try:
@@ -586,11 +586,12 @@ class Classify(unittest.TestCase):
                 "recall": ("ts",),
                 "brief": ("ts",),
                 "tasks": ("ts",),
+                "personal-mcp": ("ts",),
             },
         )
         # Todofy is both: todofy-core vendors the Python package, its gateway and UI bundle the TypeScript
         # (todofy.ui.v1).
-        ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "tasks"}, {"todofy", "platform"}
+        ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"}, {"todofy", "platform"}
         every, none = ts | python, set()
         cases = {
             # task-intent-v1, bundled by the watch app's TypeScript and todofy-core's Python.
@@ -599,18 +600,18 @@ class Classify(unittest.TestCase):
             # todofy.ui.v1's answers.
             "proto/todofy/report/v1/report.proto": {"todofy"},
             # Todofy's owner API: its core answers it, its gateway serves it and its UI calls it.
-            "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy", "tasks"},
-            "proto/todofy/ui/v1/mail_event.proto": {"todofy", "tasks"},
+            "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy", "tasks", "personal-mcp"},
+            "proto/todofy/ui/v1/mail_event.proto": {"todofy", "tasks", "personal-mcp"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes its types only, its
             # core reads ops.v1 in Python).
-            "proto/ops/v1/ops.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks"},
+            "proto/ops/v1/ops.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"},
             # OpsStatus embeds WebsiteSyncStatus; every Ops descriptor brings this package too.
-            "proto/website/sync/v1/sync.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks"},
+            "proto/website/sync/v1/sync.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"},
             # mailsort's owner API: its Worker serves it, its UI calls it.
             "proto/mailsort/ui/v2/mailsort_ui_service.proto": {"mailsort"},
             # recall's owner API, the extension's upload and the archive feed: its Worker serves all three.
-            "proto/recall/ui/v1/recall_ui_service.proto": {"recall"},
-            "proto/recall/ingest/v1/ingest.proto": {"recall"},
+            "proto/recall/ui/v1/recall_ui_service.proto": {"recall", "personal-mcp"},
+            "proto/recall/ingest/v1/ingest.proto": {"recall", "personal-mcp"},
             "proto/recall/archive/v1/archive.proto": {"recall"},
             # The brief's owner API: its Worker serves it.
             "proto/brief/ui/v1/brief_ui_service.proto": {"brief"},
@@ -704,6 +705,8 @@ class Classify(unittest.TestCase):
                 brief_deploy="brief" in deployed,
                 tasks_check=T,
                 tasks_deploy="tasks" in deployed,
+                personal_mcp_check=T,
+                personal_mcp_deploy="personal-mcp" in deployed,
             )
 
         for path, deployed in cases.items():
@@ -1365,9 +1368,13 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "recall-deploy"),
         ("dashboard-deploy", "brief-deploy"),
         ("dashboard-deploy", "tasks-deploy"),
+        ("dashboard-deploy", "personal-mcp-deploy"),
         ("dashboard-deploy", "website-relay-deploy"),
         ("watch-deploy", "todofy-deploy"),
         ("todofy-deploy", "tasks-deploy"),
+        ("personal-mcp-deploy", "tasks-deploy"),
+        ("personal-mcp-deploy", "todofy-deploy"),
+        ("personal-mcp-deploy", "recall-deploy"),
     }
 
     # Check jobs a deploy may also find skipped, but only when this push to main reuses a green branch run of

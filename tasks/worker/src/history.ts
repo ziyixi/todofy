@@ -14,6 +14,13 @@ import { invalid, precondition, storage } from './errors.ts';
 import { pageSize } from './task-read.ts';
 
 export async function listChanges(db: D1Database, input: ListChangesRequest, today: string) {
+  if (input.baseline) {
+    if (input.pageToken) invalid('Baseline requires an empty change cursor');
+    const newest = await storage(() =>
+      db.prepare('SELECT max(sequence) AS sequence FROM changes').first<{ sequence: number | null }>(),
+    );
+    return create(ListChangesResponseSchema, { nextPageToken: String(newest?.sequence ?? 0) });
+  }
   const cursor = input.pageToken || '0';
   if (!/^\d{1,15}$/.test(cursor)) invalid('Invalid change cursor');
   const size = pageSize(input.pageSize, 100);

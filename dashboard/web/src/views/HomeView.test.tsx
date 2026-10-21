@@ -69,7 +69,16 @@ describe('首页', () => {
 
     // The dashboard itself has no tile.
     expect(within(launcher()).queryByText('个人控制台')).toBeNull()
-    expect(within(launcher()).queryByText('个人 MCP')).toBeNull()
+    expect(within(services).getByRole('link', { name: /^个人 MCP：未知.*查看操作与记录$/ })).toHaveAttribute('href', '#/ops')
+  })
+
+  it('links MCP subscription observations to the existing operation details', async () => {
+    const scenario = healthy()
+    scenario.home = { ...scenario.home, entries: [...scenario.home.entries, { id: 'personal-mcp', level: 'ok', reason: null,
+      checked_at: scenario.home.generated_at, consecutive_failures: 0, top_signals: [],
+      metric: { kind: 'counter', name: 'active_subscriptions', value: 0 } }] }
+    await showHome(scenario)
+    expect(within(launcher()).getByRole('link', { name: '个人 MCP：正常，当前订阅 0，查看操作与记录' })).toHaveAttribute('href', '#/ops')
   })
 
   it('shows a link-only tile as its host: no status button, no fake green', async () => {

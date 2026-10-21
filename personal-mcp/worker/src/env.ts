@@ -2,6 +2,7 @@ import type { SubscriptionStore } from './store.ts';
 
 export interface Env {
   SUBSCRIPTIONS: DurableObjectNamespace<SubscriptionStore>;
+  TASKS: Fetcher;
   PUBLIC_HOST: string;
   ACCESS_ISSUER: string;
   ACCESS_AUDIENCE?: string;

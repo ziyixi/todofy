@@ -43,6 +43,15 @@ the agreed four event types use the existing MCP DO's bounded polling, with no s
 publish MCP's small Ops surface before Home adds its status card; then publish source entrypoints before MCP's
 business bindings. Keep the original shared checkout untouched and preserve Claude's pending work.
 
+The bridge implementation is ready for full branch CI: Tasks' nine MCP tools plus persistent Step identity
+planning; private MailApi/RecallApi/HomeApi source adapters; current-only Tasks/Mail cursors and immutable Home
+attention episode sequence; Home's MCP service card via the existing Ops contract. Ops uses constant-size
+delivery totals instead of scanning retained history. Source controls, budgets and content workflows stay with
+their existing services. A shared Ops producer registration is required for `toWire`; reader-open does not allow
+an unregistered writer name. Source/local checks are green; full CI and same-SHA production publication remain.
+MCP currently binds only Tasks. The prepared content tool/readers are not registered until their source
+entrypoints are deployed; then wire the four subscriptions and verify synthetic business behavior separately.
+
 ### Done steps stay in Plan's Week calendar (`claude/plan-done-steps`)
 
 **Local only, not pushed**, rebased on `origin/main` `8d8ce547`. A calendar step ticked in Plan › Week stays in its day,

@@ -10,6 +10,7 @@ export const CSRF_KEY = 'ab'.repeat(32);
 
 const CORE_METHODS = [
   'plus_native_ui',
+  'mail_ready_poll',
   'ingest',
   'wake',
   'newsletter',

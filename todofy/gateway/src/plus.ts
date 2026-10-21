@@ -9,7 +9,7 @@ import { coordinator } from './coordinator.ts';
 import { flag, type Env } from './env.ts';
 import { API_DOMAIN, isReason, uiError } from './ui.ts';
 
-interface PlusContext { env: Env }
+interface PlusContext { env: Env; methods: ReadonlySet<string> }
 /**
  * What Tasks calls on its private Planning channel (packages/planning-ui/src/api.ts, tasks/web/src): Mail and the
  * weekly review's facts. That path refuses every other PlusService method.
@@ -18,6 +18,7 @@ const NATIVE_METHODS = new Set([
   'ReadWeeklyReview', 'ListMailItems', 'ReadMailSummary', 'ConvertMailItem', 'DeleteMailSummaries', 'ReadMailSettings',
   'UpdateMailCategories',
 ]);
+const MAIL_METHODS = new Set(['ListMailItems', 'ReadMailSummary', 'ConvertMailItem']);
 const PREFIX = '/api/plus/v1/';
 const DOMAIN = API_DOMAIN;
 
@@ -42,16 +43,25 @@ const api = new HttpTranscoder(PlusService, handlers(), {
   domain: DOMAIN,
   maxBodyBytes: 32 * 1024,
   authorize: (_request, route, ctx) => {
-    if (!NATIVE_METHODS.has(route.method.name)) throw uiError('ACTION_NOT_ALLOWED');
+    if (!ctx.methods.has(route.method.name)) throw uiError('ACTION_NOT_ALLOWED');
     if (!route.safe && flag(ctx.env, 'MAINTENANCE_MODE')) throw uiError('MAINTENANCE');
   },
 });
 
 /** Called only by the named Planning service binding, after its binding identity and source checks. */
 export async function nativePlanning(request: Request, env: Env): Promise<Response> {
+  return servePlus(request, env, NATIVE_METHODS);
+}
+
+/** MailApi grants exactly the mail reads and explicit Inbox conversion. */
+export async function nativeMail(request: Request, env: Env): Promise<Response> {
+  return servePlus(request, env, MAIL_METHODS);
+}
+
+async function servePlus(request: Request, env: Env, methods: ReadonlySet<string>): Promise<Response> {
   const url = new URL(request.url);
   const requestId = crypto.randomUUID();
   if (!url.pathname.startsWith(PREFIX)) return api.errorResponse(uiError('NOT_FOUND'), requestId);
-  const result = await api.handle(request, { env }, requestId);
+  const result = await api.handle(request, { env, methods }, requestId);
   return result?.response ?? api.errorResponse(uiError('NOT_FOUND'), requestId);
 }

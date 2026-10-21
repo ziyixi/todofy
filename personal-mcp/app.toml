@@ -16,17 +16,21 @@ position = 31
 id = "personal-mcp"
 name = "个人 MCP"
 description = "ChatGPT 私有工具与事件订阅"
-group = "hidden"
+group = "services"
 icon = "server"
 accent = "slate"
 access = true
 app_only_signals = []
 order = 4
 worker = "personal-mcp"
-url_path = "/"
 position = 31
 [entries.status]
-type = "none"
+type = "ops_v1"
+binding = "PERSONAL_MCP"
+guard = false
+[entries.tile_metric]
+kind = "counter"
+name = "active_subscriptions"
 
 [[access]]
 key = "personal-mcp"

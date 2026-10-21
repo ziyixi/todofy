@@ -8,6 +8,7 @@ import { handleRequest } from './http.ts';
 import { HOME_OBJECT } from './state.ts';
 
 export { HomeState } from './state.ts';
+export { HomeApi } from './mcp.ts';
 
 export default {
   fetch(request, env): Promise<Response> {

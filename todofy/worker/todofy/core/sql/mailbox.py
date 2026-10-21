@@ -38,3 +38,16 @@ EXISTING_EVENTS = Query(
 )
 
 SUMMARY = Query("SELECT summary FROM summaries WHERE event_id = ?", "sqlite_autoindex_summaries_1")
+
+# event_transitions is never cleaned. Its primary-key cursor advances across every transition, including ones that
+# have no native pending summary. LIMIT is applied before joining, so filtering cannot turn one poll into a scan.
+READY_HEAD = Query("SELECT coalesce(max(id),0) AS id FROM event_transitions", "rowid")
+READY_PAGE = Query(
+    "WITH scanned AS MATERIALIZED ("
+    " SELECT id,event_id,to_state FROM event_transitions WHERE id > ? ORDER BY id LIMIT 50"
+    ") SELECT t.id,s.event_id,s.created_at FROM scanned t"
+    " LEFT JOIN summaries s ON s.event_id=t.event_id AND t.to_state='complete'"
+    f" AND s.{NATIVE_PENDING} ORDER BY t.id",
+    "sqlite_autoindex_summaries_1",
+    sort_allowed=True,
+)

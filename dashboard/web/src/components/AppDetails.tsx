@@ -18,6 +18,7 @@ import { httpsUrl } from '../lib/url'
 import { Card, Fact, Facts, Metrics, Notice, Pill, Time } from './ui'
 import { WebsiteSyncDetails } from './WebsiteSyncPanel'
 import { SignalActions } from './AttentionActions'
+import { PersonalMcpDetails } from './PersonalMcpDetails'
 
 /** A status older than this is marked as possibly outdated (the cron reads it every 30 minutes). */
 const STATUS_STALE_MS = 60 * 60_000
@@ -104,6 +105,7 @@ function StatusDetails({ status, source, guard, now }: { status: OpsStatus; sour
   return (
     <>
       {status.website_sync ? <div className="subsection"><h4>网站同步</h4><WebsiteSyncDetails status={status.website_sync} now={now} /></div> : null}
+      {status.app === 'personal-mcp' ? <PersonalMcpDetails status={status} now={now} /> : null}
       <div className="subsection">
         <h4>运行模式</h4>
         <ul className="chips" aria-label="运行模式">
@@ -170,7 +172,7 @@ function StatusDetails({ status, source, guard, now }: { status: OpsStatus; sour
         )}
       </div>
 
-      <div className="subsection">
+      {status.app !== 'personal-mcp' ? <div className="subsection">
         <h4>计数</h4>
         {all.length === 0 ? (
           <p className="small muted">没有可读的计数。</p>
@@ -184,7 +186,7 @@ function StatusDetails({ status, source, guard, now }: { status: OpsStatus; sour
             ))}
           </dl>
         )}
-      </div>
+      </div> : null}
 
       <Facts>
         <Fact label="上次备份">{status.last_backup_at ? <Time iso={status.last_backup_at} now={now} /> : '无记录'}</Fact>

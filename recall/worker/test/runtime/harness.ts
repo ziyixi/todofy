@@ -104,6 +104,8 @@ export interface Harness {
   readonly mf: Miniflare;
   readonly logs: string[];
   fetch(path: string, init?: RequestInit): Promise<Response>;
+  /** The exact private RecallApi read surface, through a real service binding. */
+  serviceFetch(path: string, init?: RequestInit): Promise<Response>;
   readonly api: HttpClient<ShapeOf<typeof RecallUiService>>;
   /** POST /api/machine/v1/batches with the ingest token: `body` is gzipped JSON unless it is bytes already. */
   upload(body: unknown, init?: { token?: string | null; contentType?: string }): Promise<Response>;
@@ -158,8 +160,11 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           compatibilityDate: COMPATIBILITY_DATE,
           durableObjects: { RECALL: { className: 'RecallState', scriptName: options.splitObject === true ? OBJECT_WORKER : 'recall', useSQLite: true } },
           // The dashboard's view: the named entrypoint Ops of "recall" (ops-v1).
-          serviceBindings: { OPS: { name: 'recall', entrypoint: 'Ops' } },
+          serviceBindings: { OPS: { name: 'recall', entrypoint: 'Ops' }, READS: { name: 'recall', entrypoint: 'RecallApi' } },
           script: `export default { async fetch(request, env) {
+            if (new URL(request.url).pathname === '/read') {
+              return env.READS.fetch(new Request('https://recall.internal' + request.headers.get('x-read-path'), request))
+            }
             const { op, args } = await request.json()
             const stub = env.RECALL.get(env.RECALL.idFromName('recall-v1'))
             try {
@@ -212,6 +217,12 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     mf,
     logs,
     fetch: fetchRecall,
+    async serviceFetch(path, init) {
+      const worker = await mf.getWorker('probe');
+      const headers = new Headers(init?.headers);
+      headers.set('x-read-path', path);
+      return worker.fetch('http://probe/read', { ...init, headers } as never) as unknown as Promise<Response>;
+    },
     api: createHttpClient(RecallUiService, send),
     upload(body, init = {}) {
       const bytes = body instanceof Uint8Array ? body : gzipSync(JSON.stringify(body));

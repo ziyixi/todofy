@@ -21,6 +21,7 @@ import newsletterOk from '../../../contracts/ops-v1/fixtures/OpsStatus/newslette
 import recallOk from '../../../contracts/ops-v1/fixtures/OpsStatus/recall-ok.json';
 import briefOk from '../../../contracts/ops-v1/fixtures/OpsStatus/brief-ok.json';
 import tasksOk from '../../../contracts/ops-v1/fixtures/OpsStatus/tasks-ok.json';
+import personalMcpOk from './fixtures/personal-mcp-ok.json';
 import watchDegraded from '../../../contracts/ops-v1/fixtures/OpsStatus/watch-degraded.json';
 import statusUnavailable from '../../../contracts/ops-v1/fixtures/OpsStatus/status-unavailable.json';
 import guardNormal from '../../../contracts/ops-v1/fixtures/GuardState/normal.json';
@@ -77,7 +78,7 @@ const EVENT_ID = '6d3b2f0e-4c1a-4b7e-8a52-0c9e7f1d2a31';
 type Calls = { app: OpsApp; method: string; args: unknown[] }[];
 
 /** A binding that records every property called on it and answers from `answers`. */
-function recordingEnv(answers: Record<string, () => unknown>): { env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS'>; calls: Calls } {
+function recordingEnv(answers: Record<string, () => unknown>): { env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP'>; calls: Calls } {
   const calls: Calls = [];
   const binding = (app: OpsApp): unknown =>
     new Proxy(
@@ -93,18 +94,19 @@ function recordingEnv(answers: Record<string, () => unknown>): { env: Pick<Env, 
         },
       },
     );
-  return { env: { MAIL_HERO: binding('mail-hero'), TODOFY: binding('todofy'), WATCH: binding('watch'), FLEET: binding('fleet'), NEWSLETTER: binding('newsletter'), WEBSITE_SYNC: binding('notion-publish'), MAILSORT: binding('mailsort'), RECALL: binding('recall'), BRIEF: binding('brief'), TASKS: binding('tasks') } as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS'>, calls };
+  return { env: { MAIL_HERO: binding('mail-hero'), TODOFY: binding('todofy'), WATCH: binding('watch'), FLEET: binding('fleet'), NEWSLETTER: binding('newsletter'), WEBSITE_SYNC: binding('notion-publish'), MAILSORT: binding('mailsort'), RECALL: binding('recall'), BRIEF: binding('brief'), TASKS: binding('tasks'), PERSONAL_MCP: binding('personal-mcp') } as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP'>, calls };
 }
 
 const guardInput = { level: 'shed', reason: 'quota_d1_rows_read', until: '2026-09-30T00:10:00.000Z' } as const;
 
-type Wrapper = (env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS'>) => Promise<OpsCall<unknown>>;
+type Wrapper = (env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP'>) => Promise<OpsCall<unknown>>;
 const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: unknown }[] = [
   { app: 'fleet', method: 'status', call: (env) => opsStatus(env, 'fleet'), valid: fleetOk },
   { app: 'notion-publish', method: 'status', call: (env) => opsStatus(env, 'notion-publish'), valid: notionPublishOk },
   { app: 'newsletter', method: 'status', call: (env) => opsStatus(env, 'newsletter'), valid: newsletterOk },
   { app: 'recall', method: 'status', call: (env) => opsStatus(env, 'recall'), valid: recallOk },
   { app: 'tasks', method: 'status', call: (env) => opsStatus(env, 'tasks'), valid: tasksOk },
+  { app: 'personal-mcp', method: 'status', call: (env) => opsStatus(env, 'personal-mcp'), valid: personalMcpOk },
   { app: 'brief', method: 'status', call: (env) => opsStatus(env, 'brief'), valid: briefOk },
   { app: 'brief', method: 'setGuard', call: (env) => opsSetGuard(env, 'brief', { level: 'normal', reason: 'quota_normal', until: null }), valid: guardNormal },
   { app: 'mail-hero', method: 'status', call: (env) => opsStatus(env, 'mail-hero'), valid: mailHeroOk },
@@ -121,7 +123,7 @@ const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: un
 
 describe('only the methods of the services each app implements', () => {
   it('knows exactly the apps of the IDL (OpsStatus.app is open on the wire, OpsApp is this list), but those it does not bind yet', () => {
-    expect(OPS_APPS).toEqual(['mail-hero', 'todofy', 'watch', 'fleet', 'newsletter', 'notion-publish', 'mailsort', 'recall', 'brief', 'tasks'] satisfies readonly OpsApp[]);
+    expect(OPS_APPS).toEqual(['mail-hero', 'todofy', 'watch', 'fleet', 'newsletter', 'notion-publish', 'mailsort', 'recall', 'brief', 'tasks', 'personal-mcp'] satisfies readonly OpsApp[]);
     expect(Object.keys(CALLED_METHODS)).toEqual([...OPS_APPS]);
     expect(UNBOUND_OPS_APPS).toEqual([]);
     expect(fieldRules(OpsStatusSchema.field.app).allowed).toEqual([...OPS_APPS, ...UNBOUND_OPS_APPS]);
@@ -205,7 +207,7 @@ describe('error handling for every method', () => {
       expect(await wrapper.call(notAnError.env)).toEqual({ ok: false, code: 'unavailable' });
       // An older release without the method: the RPC receiver rejects.
       expect(await wrapper.call(recordingEnv({}).env)).toEqual({ ok: false, code: 'unavailable' });
-      expect(await wrapper.call({} as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS'>)).toEqual({ ok: false, code: 'not_configured' });
+      expect(await wrapper.call({} as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP'>)).toEqual({ ok: false, code: 'not_configured' });
       const bad = recordingEnv({ [wrapper.method]: () => ({ unexpected: true }) });
       expect(await wrapper.call(bad.env)).toEqual({ ok: false, code: 'invalid_output' });
       const huge = recordingEnv({ [wrapper.method]: () => ({ ...(wrapper.valid as object), padding: 'x'.repeat(40_000) }) });

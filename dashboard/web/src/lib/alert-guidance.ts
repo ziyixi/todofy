@@ -1,7 +1,12 @@
 export interface AlertGuidance { explanation: string; next: string }
 
 /** Explain observable facts and a useful next step; never guess an outage's cause. */
-export function alertGuidance(code: string): AlertGuidance {
+export function alertGuidance(code: string, source?: string): AlertGuidance {
+  if (source === 'personal-mcp') {
+    if (code === 'delivery_failed') return { explanation: '个人 MCP 有事件回调未被 ChatGPT 接管。', next: '在 ChatGPT 中检查订阅，核对连接状态后重新订阅。' }
+    if (code === 'subscription_rejected') return { explanation: '最近一次订阅请求被拒绝。', next: '先解决回调配置或连接错误，再在 Dots 中重新订阅。' }
+    if (code === 'source_unavailable') return { explanation: '个人 MCP 无法读取来源服务的当前状态。', next: '查看来源服务的检查状态，恢复后会继续检查。' }
+  }
   switch (code) {
     case 'website_sync_stale':
       return { explanation: '超过 26 小时没有完整的 Notion 内容检查记录。网站可访问不能证明内容同步正常。', next: '在首页点击立即同步；查看本次 Actions，处理失败原因后刷新状态。' }

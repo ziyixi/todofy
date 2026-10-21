@@ -107,6 +107,36 @@ def test_native_mail_conversion_needs_no_inbox_project(native):
     assert f"[查看完整邮件摘要](https://tasks.example.test/?mail={event_id}#/mail)" in task["description"]
 
 
+def test_private_readiness_advances_a_bounded_committed_cursor_without_replaying_old_mail(native):
+    baseline = call(native, "/native/ready", {"baseline": True})
+    first = int(baseline["cursor"])
+    unready = [f"scan-unready-{uuid.uuid4().hex}" for _ in range(51)]
+    native.d1(
+        ";".join(
+            f"INSERT INTO event_transitions(event_id,at,to_state,actor) VALUES('{event_id}',1,'pending','worker')"
+            for event_id in unready
+        )
+    )
+    event_id = str(uuid.uuid4())
+    # The real completion transition and summary are one atomic batch in ledger.transition; no task write occurs.
+    native.d1(
+        "INSERT INTO event_transitions(event_id,at,to_state,actor)"
+        f" VALUES('{event_id}',123,'complete','worker');"
+        "INSERT INTO summaries(event_id,created_at,subject,summary,model)"
+        f" VALUES('{event_id}',123,'Synthetic private subject','Synthetic private summary','synthetic')"
+    )
+    page = call(native, "/native/ready", {"cursor": baseline["cursor"]})
+    assert page == {"cursor": str(first + 50)}
+    next_page = call(native, "/native/ready", {"cursor": page["cursor"]})
+    assert next_page == {
+        "cursor": str(first + 52),
+        "mail_items": [{"event_id": event_id, "ready_time": "1970-01-01T00:02:03Z"}],
+    }
+    assert call(native, "/native/ready", {"cursor": page["cursor"]}) == next_page
+    assert call(native, "/native/ready", {"baseline": True}) == {"cursor": next_page["cursor"]}
+    assert call(native, "/native/ready", {"cursor": "9223372036854775807"}) == {"error": "CURSOR_RESET_REQUIRED"}
+
+
 def test_intent_child_inherits_parent_project_without_rewriting_frozen_body(native):
     project = rpc(
         native, "CreateProject", {"project": {"title": "Synthetic native project"}, "request_id": str(uuid.uuid4())}

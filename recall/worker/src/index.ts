@@ -10,6 +10,7 @@ import { handleRequest } from './http.ts';
 export { RecallState } from './state.ts';
 // ops-v1 for the dashboard's service binding (no public route).
 export { Ops } from './ops.ts';
+export { RecallApi } from './service.ts';
 
 export default {
   fetch(request, env): Promise<Response> {

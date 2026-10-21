@@ -852,7 +852,7 @@ jobs:
     # After the app deploys: the service bindings MAIL_HERO, TODOFY, WATCH, FLEET, MAILSORT, RECALL and BRIEF name their "Ops"
     # entrypoints, which must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
     # failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, brief-deploy, tasks-deploy, website-relay-deploy]
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, brief-deploy, tasks-deploy, website-relay-deploy, personal-mcp-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
@@ -867,6 +867,7 @@ jobs:
       && (needs.recall-deploy.result == 'success' || needs.recall-deploy.result == 'skipped')
       && (needs.brief-deploy.result == 'success' || needs.brief-deploy.result == 'skipped')
       && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
+      && (needs.personal-mcp-deploy.result == 'success' || needs.personal-mcp-deploy.result == 'skipped')
       && (needs.website-relay-deploy.result == 'success' || needs.website-relay-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -1121,13 +1122,16 @@ jobs:
 
   personal-mcp-deploy:
     name: Personal MCP deploy
-    needs: [changes, personal-mcp-checks, gate]
+    needs: [changes, personal-mcp-checks, gate, tasks-deploy, todofy-deploy, recall-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.personal-mcp-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.personal-mcp-checks.result == 'skipped'))
       && needs.gate.result == 'success'
+      && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
+      && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
+      && (needs.recall-deploy.result == 'success' || needs.recall-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.personal_mcp_deploy == 'true' }}

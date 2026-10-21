@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
+import { registerTaskTools, type TaskToolEnv, type TaskWriteState } from './tasks.ts';
 
 export const TEST_EVENT_NAME = 'personal_cloud.test';
 export const TEST_EVENT_MESSAGE = 'Personal MCP connection test';
@@ -47,14 +48,14 @@ export type SubscribeParams = z.infer<typeof subscribeParamsSchema>;
 export type SubscribeResult = z.infer<typeof subscribeResultSchema>;
 export type UnsubscribeParams = z.infer<typeof unsubscribeParamsSchema>;
 
-export interface GateApi {
+export interface GateApi extends TaskWriteState {
   subscribe(params: SubscribeParams): Promise<SubscribeResult>;
   unsubscribe(params: UnsubscribeParams): Promise<Record<string, never>>;
   status(): Promise<unknown>;
   emitTest(requestId: string): Promise<unknown>;
 }
 
-export function createServer(api: GateApi, buildSha: string): McpServer {
+export function createServer(api: GateApi, buildSha: string, env: TaskToolEnv): McpServer {
   const capabilities = { tools: {}, events: {} };
   const server = new McpServer({ name: 'personal-cloud', version: '0.1.0' }, { capabilities });
 
@@ -103,5 +104,6 @@ export function createServer(api: GateApi, buildSha: string): McpServer {
     return { structuredContent: result, content: [{ type: 'text', text: JSON.stringify(result) }] };
   });
 
+  registerTaskTools(server, env, api);
   return server;
 }

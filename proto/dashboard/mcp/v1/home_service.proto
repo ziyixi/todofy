@@ -1,0 +1,91 @@
+// Private cached Home read for the Personal MCP. Service bindings only; no HTTP route or upstream refresh.
+//
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: embeds Home's existing string timestamps. --)
+// (-- api-linter: core::0142::time-field-names=disabled
+//     aip.dev/not-precedent: keeps Home's generated_at name. --)
+// (-- api-linter: core::0215::foreign-type-reference=disabled
+//     aip.dev/not-precedent: reuses the existing Home projection without duplicate message definitions. --)
+// (-- api-linter: core::0127::http-annotation=disabled
+//     aip.dev/not-precedent: a private Workers service binding with no HTTP route. --)
+// (-- api-linter: core::0131::synonyms=disabled
+//     aip.dev/not-precedent: a cached projection and creation cursor, not a resource Get. --)
+// (-- api-linter: core::0140::prepositions=disabled
+//     aip.dev/not-precedent: cursor and timestamp names follow the existing Home wire. --)
+
+syntax = "proto3";
+
+package dashboard.mcp.v1;
+
+import "common/wire/v1/wire.proto";
+import "dashboard/ui/v1/attention.proto";
+import "dashboard/ui/v1/home_view.proto";
+import "google/api/field_behavior.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "HomeServiceProto";
+option java_package = "science.ziyixi.dashboard.mcp.v1";
+
+// The private HomeApi entrypoint; reads only HomeState's existing cached projection.
+service HomeService {
+  // Current service states and undismissed attention episodes after the caller's cursor.
+  rpc ReadHome(ReadHomeRequest) returns (ReadHomeResponse);
+}
+
+// A cursor over episode creation, independent of owner dismiss and restore operations.
+message ReadHomeRequest {
+  // Zero gives the current baseline. A cursor above head_seq is invalid_input.
+  int32 after_occurrence_seq = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+}
+
+// Current cached facts only. Resolved and dismissed episodes are omitted; this is not a history feed.
+message ReadHomeResponse {
+  // When Home built this projection; source freshness is in refresh and each entry's checked_at.
+  string generated_at = 1 [(google.api.field_behavior) = REQUIRED];
+  // The Home release that read the cached state.
+  string build = 2 [(google.api.field_behavior) = REQUIRED];
+  // Home's current view revision.
+  int32 rev = 3 [(google.api.field_behavior) = REQUIRED];
+  // Cached source and tick freshness. refreshed is always false for this read.
+  dashboard.ui.v1.Refresh refresh = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Current Home service tiles in registry order.
+  repeated dashboard.ui.v1.EntryState entries = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 64
+  ];
+  // Current undismissed episodes above the requested cursor, in increasing occurrence_seq order.
+  repeated AttentionOccurrence attention = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 256
+  ];
+  // Largest assigned sequence, including episodes since resolved or dismissed. Never decreases on recovery.
+  int32 head_seq = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Current conditions lacking a durable control slot; these have no episode sequence and are not in attention.
+  int32 control_unavailable_count = 8 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+}
+
+// One current episode. Owner control etags may change while occurrence_seq stays fixed.
+message AttentionOccurrence {
+  // Immutable episode identity. A signature change or confirmed recovery followed by recurrence gets a new value.
+  int32 occurrence_seq = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 1
+  ];
+  // Home's existing bounded explanation and owner-control identity.
+  dashboard.ui.v1.AttentionItem item = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}

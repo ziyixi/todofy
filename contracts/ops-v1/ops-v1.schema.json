@@ -121,7 +121,8 @@
             "mailsort",
             "recall",
             "brief",
-            "tasks"
+            "tasks",
+            "personal-mcp"
           ]
         },
         "generated_at": {
@@ -927,7 +928,8 @@
         "mailsort",
         "recall",
         "brief",
-        "tasks"
+        "tasks",
+        "personal-mcp"
       ]
     },
     "Counters": {

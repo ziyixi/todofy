@@ -651,12 +651,16 @@ message DuplicateTaskRequest {
   // Stable identity for this copy, including all descendant IDs.
   string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
 }
-// Read changes after a previously acknowledged cursor; empty starts at the beginning.
+// Read changes after a previously acknowledged cursor; empty starts at the beginning unless baseline is true.
 message ListChangesRequest {
   // Opaque cursor.
   string page_token = 1 [(google.api.field_behavior) = OPTIONAL];
   // Default and maximum 100.
   int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Return the current change cursor without historical events; requires an empty page_token.
+  // (-- api-linter: core::0132::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this feed can start from its current cursor without reading historical changes. --)
+  bool baseline = 3 [(google.api.field_behavior) = OPTIONAL];
 }
 // One current resource reached by a change, or its tombstone.
 // (-- api-linter: core::0123::resource-annotation=disabled

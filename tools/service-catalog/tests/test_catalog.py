@@ -91,6 +91,13 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(catalog.check_generated(loaded), [])
         self.assertEqual(catalog.generated_files(loaded), catalog.generated_files(catalog.load_catalog()))
 
+    def test_private_mcp_is_monitored_without_a_launcher_url(self):
+        entry = next(entry for entry in catalog.load_catalog().entries if entry["id"] == "personal-mcp")
+        self.assertEqual(entry["group"], "services")
+        self.assertIsNone(entry["url"])
+        self.assertEqual(entry["status"], {"type": "ops_v1", "binding": "PERSONAL_MCP", "guard": False})
+        self.assertEqual(entry["tile_metric"], {"kind": "counter", "name": "active_subscriptions"})
+
     def test_all_production_configs_and_consumer_maps_are_covered(self):
         loaded = catalog.load_catalog()
         self.assertEqual(set(loaded.worker_configs().values()), catalog.production_configs(catalog.REPO))

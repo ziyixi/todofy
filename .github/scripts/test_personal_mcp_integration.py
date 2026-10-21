@@ -1,4 +1,4 @@
-"""The private MCP releases independently and has no business-service bindings."""
+"""The private MCP releases independently and uses explicit private service bindings."""
 
 import re
 import tomllib
@@ -15,12 +15,12 @@ class PersonalMcpIntegration(unittest.TestCase):
         flags = ci_changes.classify(["personal-mcp/worker/src/index.ts"])
         self.assertTrue(flags["personal_mcp_check"])
         self.assertTrue(flags["personal_mcp_deploy"])
-        self.assertFalse(flags["contracts"])
+        self.assertTrue(flags["contracts"])
         self.assertEqual({key for key, value in flags.items() if key.endswith("_deploy") and value},
                          {"personal_mcp_deploy"})
-        self.assertNotIn("personal-mcp", ci_changes.HOME_BOUND)
+        self.assertIn("personal-mcp", ci_changes.HOME_BOUND)
 
-    def test_worker_uses_one_sqlite_object_and_no_business_data_binding(self):
+    def test_worker_uses_one_sqlite_object_and_the_existing_tasks_api(self):
         config = tomllib.loads((ROOT / "personal-mcp/wrangler.toml").read_text())
         self.assertFalse(config["workers_dev"])
         self.assertFalse(config["preview_urls"])
@@ -30,7 +30,8 @@ class PersonalMcpIntegration(unittest.TestCase):
         self.assertEqual(config["migrations"], [
             {"tag": "v1", "new_sqlite_classes": ["SubscriptionStore"]},
         ])
-        for key in ("d1_databases", "r2_buckets", "services", "assets", "triggers"):
+        self.assertEqual(config["services"], [{"binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"access": "read-write"}}])
+        for key in ("d1_databases", "r2_buckets", "assets", "triggers"):
             self.assertNotIn(key, config)
 
     def test_managed_oauth_applies_only_to_the_private_mcp_and_exact_callback(self):

@@ -1,5 +1,6 @@
 import type { Env } from './env.ts';
 export { SubscriptionStore } from './store.ts';
+export { Ops } from './ops.ts';
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

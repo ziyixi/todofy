@@ -12,6 +12,7 @@ import mailsortOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mailsort-ok
 import recallOk from '../../../contracts/ops-v1/fixtures/OpsStatus/recall-ok.json';
 import briefOk from '../../../contracts/ops-v1/fixtures/OpsStatus/brief-ok.json';
 import tasksOk from '../../../contracts/ops-v1/fixtures/OpsStatus/tasks-ok.json';
+import personalMcpOk from './fixtures/personal-mcp-ok.json';
 import type { OpsApp, OpsSignal, OpsStatus } from '../src/api-types.ts';
 import type { Usage } from '../src/api-types.ts';
 import type { EntryDef, RegistryDef } from '../src/registry-types.ts';
@@ -54,7 +55,7 @@ export function withLinkOnly(registry: RegistryDef = REGISTRY): RegistryDef {
 }
 
 export function status(app: OpsApp, patch: Partial<OpsStatus> = {}, at = NOW - 2 * MIN): StatusDoc {
-  const base = { 'mail-hero': mailHeroOk, todofy: todofyOk, watch: watchOk, fleet: fleetOk, newsletter: newsletterOk, 'notion-publish': notionPublishOk, mailsort: mailsortOk, recall: recallOk, brief: briefOk, tasks: tasksOk }[app] as OpsStatus;
+  const base = { 'mail-hero': mailHeroOk, todofy: todofyOk, watch: watchOk, fleet: fleetOk, newsletter: newsletterOk, 'notion-publish': notionPublishOk, mailsort: mailsortOk, recall: recallOk, brief: briefOk, tasks: tasksOk, 'personal-mcp': personalMcpOk }[app] as OpsStatus;
   const website = app === 'notion-publish' ? base.website_sync : undefined;
   const evidence = website === undefined ? {} : { website_sync: { ...website, observed_at: new Date(at).toISOString(), next_check_at: new Date(at + DAY).toISOString(), ...(website.last_check === undefined ? {} : { last_check: { ...website.last_check, checked_at: new Date(at).toISOString() } }) } };
   return { checked_at: at, ok: true, error: null, consecutive_failures: 0, status: { ...base, ...evidence, ...patch }, status_at: at };
@@ -111,7 +112,7 @@ export function input(patch: Partial<EvalInput> = {}): EvalInput {
     now: NOW,
     lastTickAt: NOW,
     analyticsConfigured: true,
-    statuses: { 'mail-hero': status('mail-hero'), todofy: status('todofy'), watch: status('watch'), fleet: status('fleet'), newsletter: status('newsletter'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks') },
+    statuses: { 'mail-hero': status('mail-hero'), todofy: status('todofy'), watch: status('watch'), fleet: status('fleet'), newsletter: status('newsletter'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp') },
     probes: { website: probe(), links: probe({ latency_ms: 40 }) },
     scripts: scripts(),
     digest: {

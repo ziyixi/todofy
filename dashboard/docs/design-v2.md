@@ -306,9 +306,9 @@ the strip's observed items, §4), the canary rows or the reminder ledger. The me
 older estimates; reads grow with retained decisions while views continue to poll every five minutes.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
-Per tick: 10 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fleet, Newsletter, mailsort, recall, the
-brief and Tasks) + 2 probes (website, links) + 1 GraphQL + ≤ 5 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12
-read-only drift calls (§10) = 33 outbound calls
+Per tick: 11 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fleet, Newsletter, mailsort, recall, the
+brief, Tasks and Personal MCP) + 2 probes (website, links) + 1 GraphQL + ≤ 5 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12
+read-only drift calls (§10) = 34 outbound calls
 (`outboundPerTick`, tested ≤ `MAX_OUTBOUND_PER_TICK` = 34 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
 status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~3 per tick
 (`cf_scripts` and one `probe:<entry>` per probe). The links probe is one request of its Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
@@ -471,3 +471,23 @@ Watch 未确认通知的 `open`/`failed` 和失效监视的 `count`；新的金�
 最多保留 256 条控制记录。容量紧张时先退休当前原始列表中缺席且未关闭的旧记录；尚未确认恢复的关闭决定保留。
 全部槽位仍被占用时，新异常的事实继续显示，`control_unavailable_count` 明确提示部分提醒暂不能管理，不令整个
 Home 返回 500。处理异常或精简监控范围释放条件后可再次尝试；容量回收不把来源服务描述为已经恢复。
+
+## 12. Personal MCP 的缓存读取
+
+`HomeApi.readHome({ after_occurrence_seq })` 是私有 service binding，合同在
+`proto/dashboard/mcp/v1/home_service.proto`。它复用 HomeState 的首页投影，返回当前服务状态、每项的
+`checked_at`、首页刷新时间、当前未关闭的提醒和 `head_seq`。读取不刷新来源，不运行金丝雀、降载或摘要发送。
+输出验证在 HomeState 内完成；普通 Worker 只检查输入并转交结果。
+
+`attention_occurrences.occurrence_seq` 是本次异常的固定序号，计数器保存在已有 `state` 表中。
+首次投影、有效签名变化、确认恢复后的再次出现会分配新序号；关闭和恢复提醒只更换 etag，保留序号。
+旧表升级只补字段，旧提醒在下次投影时获得首个序号，已有关闭决定和 etag 保留。删除已恢复的提醒不会倒退计数器。
+
+`after_occurrence_seq=0` 返回当前基线。订阅初始化读取基线并保存 `head_seq`，以后只处理大于该序号的当前提醒。
+每次最多返回 256 项，按序号递增；大于 `head_seq` 的游标返回 `invalid_input`。已恢复和已关闭的提醒不会返回，
+两次读取之间已经恢复的短暂异常也不会补发。这里不保存事件历史。槽位不足的条件用
+`control_unavailable_count` 明确说明，仍可在 Home 查看其事实。
+
+个人 MCP 使用已有 Ops 应用详情显示当前订阅、待投递和失败计数，以及最近工具调用、订阅操作、事件、投递和
+来源检查时间。时间只证明曾观测到相应操作；零订阅和没有调用记录保持中性。回调已接收表示 ChatGPT 接管了事件，
+后续对话处理结果需要单独核对。失败提示复用现有提醒关闭/恢复控件；Home 不提供订阅编辑或新管理接口。

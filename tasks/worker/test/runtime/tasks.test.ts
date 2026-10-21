@@ -247,6 +247,38 @@ test('a change cursor ahead of the database fails instead of reporting an empty,
   expect(await ahead.text()).toContain('Change cursor is ahead of this database');
 });
 
+test('a change baseline skips history and preserves subsequent edits without accepting a cursor', async () => {
+  const task = await createTask('Synthetic task before baseline');
+  const newest = await harness.db.prepare('SELECT max(sequence) AS sequence FROM changes').first<{ sequence: number }>();
+  const response = await harness.fetch('/api/tasks/v1/changes?baseline=true');
+  expect(response.status, await response.clone().text()).toBe(200);
+  interface ChangePage {
+    changes?: { name: string; task?: { title: string } }[];
+    next_page_token: string;
+    has_more?: boolean;
+    catalog_changed?: boolean;
+  }
+  const baseline = await response.json<ChangePage>();
+  expect(baseline.next_page_token).toBe(String(newest?.sequence));
+  expect(baseline.changes ?? []).toEqual([]);
+  expect(baseline.has_more ?? false).toBe(false);
+  expect(baseline.catalog_changed ?? false).toBe(false);
+  const updated = await harness.mutate(
+    'PATCH',
+    `/api/tasks/v1/${task.name}?request_id=${randomUUID()}&update_mask=title&etag=${task.etag}`,
+    { title: 'Synthetic task after baseline' },
+  );
+  expect(updated.status, await updated.clone().text()).toBe(200);
+  const changes = await harness.fetch(`/api/tasks/v1/changes?page_token=${baseline.next_page_token}`);
+  expect(changes.status, await changes.clone().text()).toBe(200);
+  expect((await changes.json<ChangePage>()).changes).toMatchObject([
+    { name: task.name, task: { title: 'Synthetic task after baseline' } },
+  ]);
+  const conflict = await harness.fetch(`/api/tasks/v1/changes?baseline=true&page_token=${baseline.next_page_token}`);
+  expect(conflict.status).toBe(400);
+  expect(await conflict.text()).toContain('Baseline requires an empty change cursor');
+});
+
 test('the CSRF token lasts as long as the Access session', async () => {
   const response = await harness.fetch('/api/tasks/csrf');
   expect(response.headers.get('set-cookie')).toContain('Max-Age=604800');

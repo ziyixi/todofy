@@ -122,6 +122,8 @@ const SIGNALS: Readonly<Record<string, string>> = {
   maintenance_mode: '维护模式已开启',
   guard_shed: '降载中',
   status_unavailable: '状态读取失败',
+  subscription_rejected: '订阅请求被拒绝',
+  source_unavailable: '来源状态读取失败',
   backup_active: '备份进行中',
   backup_stale: '备份过旧',
   // Mail Hero
@@ -395,6 +397,7 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   jobs_failed: { label: '失败任务', kind: 'count' },
   parse_failed: { label: '解析失败', kind: 'count' },
   delivery_failed: { label: '投递失败', kind: 'count' },
+  active_subscriptions: { label: '当前订阅', kind: 'count' },
   policy_error: { label: '策略错误', kind: 'count' },
   blocked_waiting: { label: '阻断等待', kind: 'count' },
   paused_waiting: { label: '暂停等待', kind: 'count' },

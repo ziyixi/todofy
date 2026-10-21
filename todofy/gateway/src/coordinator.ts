@@ -70,6 +70,8 @@ export interface Coordinator extends Rpc.DurableObjectBranded {
   setup(): Promise<CoreSetup>;
   /** One PlusService rpc from Tasks' Planning channel (Mail, the weekly review); refuses without a TASKS binding. */
   plus_native_ui(method: string, request: string): Promise<UiAnswer>;
+  /** Bounded Mail readiness scan; no content and no Tasks call. */
+  mail_ready_poll(request: string): Promise<UiAnswer>;
   // ops-v1 (the Ops entrypoint, src/ops.ts). Structured inputs travel as JSON text; the core reads them strictly and
   // writes every answer with the wire JSON profile (worker/todofy/core/ops.py).
   ops_status(): Promise<OpsAnswer<ops.OpsStatus>>;

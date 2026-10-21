@@ -79,6 +79,7 @@ from todofy.runtime import (
     gtd,
     intents,
     ledger,
+    mail_ready,
     metrics,
     native_tasks,
     ops,
@@ -205,6 +206,10 @@ class TodofyCore(DurableObject):
         if getattr(self.env, "TASKS", None) is None:
             return {"error": "UNAVAILABLE"}
         return await plus_api.handle(self, method, request)
+
+    async def mail_ready_poll(self, request: str) -> dict[str, Any]:
+        """Private MailApi readiness read: the append ledger cursor, never a mail body or Tasks call."""
+        return await mail_ready.handle(self, request)
 
     async def ingest(self, idempotency_key: str | None, body: Any) -> dict[str, Any]:
         """POST /hooks/mail after the gateway's checks: the Idempotency-Key header and the unread body stream."""

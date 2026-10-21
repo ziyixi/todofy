@@ -51,6 +51,7 @@ const SERVICES = {
   recall: [ops.OpsService],
   brief: [ops.OpsService],
   tasks: [ops.OpsService],
+  'personal-mcp': [ops.OpsService],
 } as const;
 
 /** The methods of `app`'s Ops entrypoint, sorted: the dashboard calls only these, the stubs expose exactly these. */

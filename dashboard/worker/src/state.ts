@@ -4,7 +4,7 @@
  * query and Worker discovery, guard, canary, digest, and the v2 views assembled from its tables. The
  * fetch and scheduled handlers only call these RPC methods.
  *
- * Bounds: every tick makes at most outboundPerTick() = 33 outbound calls (10 status, 2 probes, 1 GraphQL,
+ * Bounds: every tick makes at most outboundPerTick() = 34 outbound calls (11 status, 2 probes, 1 GraphQL,
  * ≤ 5 setGuard, ≤ 2 canary calls, ≤ 1 reportOps, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
  * writes a few dozen rows; a v2 view reads at most VIEW_ROWS_READ[view] rows (api-types.ts; tested in
  * workerd).
@@ -69,7 +69,11 @@ import {
   type DriftRunDoc,
 } from './drift.ts';
 import { attentionView, freshStatus, targetOf, type EvalInput } from './evaluate.ts';
-import { ATTENTION_ROW_LIMIT, ATTENTION_SCHEMA, AttentionState, NEWSLETTER_BATCH_CODES, type AttentionCondition } from './attention-state.ts';
+import { ATTENTION_ROW_LIMIT, ATTENTION_SCHEMA, AttentionState, NEWSLETTER_BATCH_CODES, migrateAttentionSequence, type AttentionCondition } from './attention-state.ts';
+import type { ReadHomeResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
+import { ReadHomeResponseSchema } from '@ziyixi/proto/dashboard/mcp/v1/home_service_pb';
+import { fromWire, toWire } from '@ziyixi/proto/wire-json';
+import type { HomeView } from './api-types.ts';
 import type { Attention, AttentionItem, Badges } from './api-types.ts';
 import { OPS_APPS, opsCanaryDelivery, opsCanaryResult, opsReportOps, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
 import { callWebsiteRequest, unconfirmedWebsiteRequest } from './website-sync.ts';
@@ -284,6 +288,7 @@ export class HomeState extends DurableObject<Env> {
     this.attentionState = new AttentionState(ctx.storage, <T extends Record<string, SqlStorageValue>>(query: string, ...bindings: SqlStorageValue[]) => this.rows<T>(query, ...bindings));
     void ctx.blockConcurrencyWhile(() => {
       for (const statement of SCHEMA) ctx.storage.sql.exec(statement);
+      migrateAttentionSequence(ctx.storage);
       migrateGuardApplied(ctx.storage);
       dropRemovedApps(ctx.storage);
       // The one global override of releases before 2026-10-04 becomes each guarded app's own. Kept because
@@ -298,6 +303,20 @@ export class HomeState extends DurableObject<Env> {
   }
 
   // ---- RPC ----------------------------------------------------------------------------------------
+
+  /** Private MCP read: the same cached Home projection, with immutable episode creation cursors. */
+  readHome(after: number, at: number | null = null): Promise<ReadHomeResponse> {
+    return this.serialize(() => {
+      if (!Number.isInteger(after) || after < 0 || after > 2_147_483_647) throw new Error('invalid_input');
+      const home = this.buildView('home', at ?? Date.now(), false) as HomeView;
+      const response: ReadHomeResponse = {
+        generated_at: home.generated_at, build: home.build, rev: home.rev, refresh: home.refresh,
+        entries: home.entries, ...this.attentionState.poll(after),
+        control_unavailable_count: home.attention.control_unavailable_count ?? 0,
+      };
+      return toWire(ReadHomeResponseSchema, fromWire(ReadHomeResponseSchema, response).message);
+    });
+  }
 
   /** One cron tick at `scheduledTime` (§5): status and probes, usage, guard, canary, digest, cleanup. */
   tick(scheduledTime: number): Promise<{ ran: boolean }> {

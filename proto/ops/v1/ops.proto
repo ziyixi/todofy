@@ -174,7 +174,8 @@ message OpsStatus {
         "mailsort",
         "recall",
         "brief",
-        "tasks"
+        "tasks",
+        "personal-mcp"
       ]
       open: true
     }
