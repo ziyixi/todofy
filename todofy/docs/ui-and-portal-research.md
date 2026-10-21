@@ -84,7 +84,7 @@ CSRF 保持 Mail Hero 原样：`GET /api/v1/csrf` 返回由 HKDF 派生密钥签
 
 ### 3.1 现状（只读 API，2026-09-28）
 
-Access 组织 `ziyixi.cloudflareaccess.com` 有 6 个应用：Mail Hero（Launcher 可见）、Mail Hero backup API（隐藏，正确）、flowday（可见）、flowday-bypass（`/pwa/*`，可见，启用 Launcher 后会出现重复 tile，应设为隐藏）、siyuan（可见）、Warp Login App；均无 tag 与 logo；列表里没有 `app_launcher` 类型应用，推断 App Launcher 尚未启用 [L4][S42]。Tunnel 主机名 changedetection/daily/dash/flowday/slash/ssh/stirling/test/unami 指向同一条隧道，siyuan 另一条；只有 flowday、siyuan 有 Access，其余公网直达 [L5]。
+当时在用的 Access 应用与 tunnel 主机名已只读核对 [L4][L5]，清单私下保存，此处不再列出。应用均无 tag 与 logo；列表里没有 `app_launcher` 类型应用，推断 App Launcher 尚未启用 [S42]；一个路径级 Bypass 应用（FlowDay 的 `/pwa/*`，已随 FlowDay 于 2026-10-20 退役）在启用 Launcher 后会出现重复 tile，应设为隐藏。
 
 ### 3.2 方案对比
 
@@ -100,18 +100,10 @@ Access 组织 `ziyixi.cloudflareaccess.com` 有 6 个应用：Mail Hero（Launch
 
 ### 3.3 推荐路径
 
-1. Zero Trust → Access settings → App Launcher：策略与 Mail Hero 相同（精确 owner 邮箱 + IdP，不用 Everyone）；Zero Trust Free 50 用户、$0 [S27]；把 flowday-bypass 设为不可见。
-2. 为 umami、stirling、slash、changedetection、dash 与外部站（Cloudflare、GitHub、Todoist）建 Bookmark；将来 `todofy.ziyixi.science` 作为自托管应用自动出现。
+1. Zero Trust → Access settings → App Launcher：策略与 Mail Hero 相同（精确 owner 邮箱 + IdP，不用 Everyone）；Zero Trust Free 50 用户、$0 [S27]；把路径级 Bypass 应用设为不可见。
+2. 为尚未上 Access 的自托管站与外部站（Cloudflare、GitHub、Todoist）建 Bookmark；将来 `todofy.ziyixi.science` 作为自托管应用自动出现。
 3. 可选：一条 Free Redirect Rule（10 条额度，源主机名需为 proxied 记录，可用 `192.0.2.0`/`100::` 占位）把 `home.ziyixi.science` 302 到团队域 [S28][S29]。
-4. 顺手把 tunnel 应用上 Access，让 Bookmark 升级为真正的 SSO tile：
-
-| 应用 | 建议 |
-|---|---|
-| umami | Allow owner；`/script.js` 与 `/api/send` 必须公开（被统计站访客调用，可用 `TRACKER_SCRIPT_NAME`/`COLLECT_API_ENDPOINT` 改名）[S44]，按 flowday-bypass 模式建路径 Bypass；Bypass 不记日志、不能用身份选择器 [S34] |
-| stirling、changedetection | 完整上 Access |
-| slash | UI 上 Access；短链 `/s/<name>` 若对外分享则 Bypass [S44] |
-| dash | 先确认是什么；若已是仪表盘工具，与门户重叠 |
-| daily / test / ssh / newsletter | 不进门户；`daily` 是现 Todofy API，迁移后退役 |
+4. 顺手把 tunnel 应用上 Access，让 Bookmark 升级为真正的 SSO tile。逐个应用决定（主机名清单私下保存）：默认整个主机名上 Access；必须被访客调用的路径（统计脚本与其上报端点、对外分享的短链）按路径级 Bypass 处理，Bypass 不记日志、不能用身份选择器 [S34][S44]；机器入口与迁移后退役的旧 API 不进门户。
 
 上 Access 的隧道主机名同时开启 Protect with Access（cloudflared 校验 `teamName + audTag`）[S36]。
 
@@ -182,7 +174,7 @@ Mail Hero 现状：`permissions: contents: read`、actions 固定到完整 SHA �
 | Worker 语言 | Rust / Python | v2 计划已定 Python（备选 Rust）；UI 结论不受影响 |
 | Access 范围 | 整主机名 + 第二 Custom Domain 放机器端点 / 路径级应用 | 前者 |
 | 公开 `/health` | 只回 `{build}` / 全部放 owner API | 只回 `{build}`，CI 断言需要 |
-| tunnel 应用上 Access | umami、stirling、slash、changedetection、dash 各自决定 | 除 dash 待确认外全部上 |
+| tunnel 应用上 Access | 每个自托管应用各自决定（清单私下保存） | 默认全部上 |
 | 门户 | 只用 Launcher / 自建 Worker | 先 Launcher；面板需求明确再自建 |
 | 门户 Worker 语言 | 是否也适用"主程序不用 TS" | 门户服务端约百行，建议允许 TS；否则 Python |
 | Access 配置代码化 | dashboard / Terraform + R2 state | 先 dashboard，应用超过 10 个再 Terraform |

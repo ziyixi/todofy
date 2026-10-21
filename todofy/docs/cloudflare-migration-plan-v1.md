@@ -30,7 +30,7 @@ Todofy 是一个单用户、每天约 100 封邮件的流水线，却被打包�
 
 | # | 严重度 | 发现 | 证据 | 迁移后 |
 |---|---|---|---|---|
-| A1 | 高 | 4 个明文、无认证、开启 reflection 的 gRPC 服务与 flowday/slash/stirling/unami 等第三方 `:latest` 镜像同在 `allexport` 网络；`QueryRecent` 向任何调用者返回全部邮件正文 | `grpc.go:60`；`utils/grpc.go:30-32`；`todo/todo.go:195,203`；`database/database.go:117-154`；self-host `docker-compose.yml:220-268` | 消失（无内部网络） |
+| A1 | 高 | 4 个明文、无认证、开启 reflection 的 gRPC 服务与第三方 `:latest` 镜像同在 `allexport` 网络；`QueryRecent` 向任何调用者返回全部邮件正文 | `grpc.go:60`；`utils/grpc.go:30-32`；`todo/todo.go:195,203`；`database/database.go:117-154`；self-host `docker-compose.yml:220-268` | 消失（无内部网络） |
 | A2 | 高 | 密钥经 argv 传递且四个容器共用一个 env 文件：面向公网的网关持有它不用的 Gemini/Todoist key | `llm/entrypoint.sh:5`；`todo/entrypoint.sh:5`；self-host compose `:227,242,252,262` | 消失（Worker secrets） |
 | A3 | 高 | prompt 注入零缓解：prompt 与不可信正文直接拼接，无 systemInstruction、无输出 schema；模型输出进 Todoist 后又被 `/api/summary`、`/api/recommendation` 当作数据再喂入第二个 prompt；解析失败时把原文当推荐项返回 | `llm/llm.go:70,162`；`handle_summary.go:34-38`；`handle_recommendation.go:86-101,124-136` | 部分：结构性缓解（§5.4），性质不变 |
 | A4 | 高 | 网关 handler 把 `*gin.Context` 当 gRPC context：无 deadline、无取消（gin 未开 `ContextWithFallback`）；`http.Server` 无超时；`/api/recommendation` 最坏约 70–196 秒，超过 Cloudflare 代理 125 秒 → newsletter 收到 524 | `handle_recommendation.go:104-116`；`handle_summary.go:50`；`main.go:163,281`；`llm/llm.go:119,174-182` | 消失（日报预计算） |
