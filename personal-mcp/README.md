@@ -32,7 +32,7 @@ subscription persistence across restart, delivery, repeated request IDs and unsu
 
 See [connection acceptance](docs/connection.md). The production endpoint, once released, is
 `https://mcp.ziyixi.science/mcp`. Deployment uses the normal branch CI, Infra apply and main Actions flow.
-`CHECK_ONLY` remains set until Access's actual audience is recorded.
+Access's actual audience is recorded; the publication gate is enabled. Real Dots acceptance is still pending.
 
 The standard MCP SDK owns protocol handling. This service requires MCP 2.0 (`2026-07-28`), uses the SDK's
 native `createMcpHandler`, and uses `standardwebhooks` for signatures. It has no Agents framework, server-side

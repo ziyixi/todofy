@@ -151,20 +151,21 @@ class ReconcileWorkflow(unittest.TestCase):
         self.assertIn("website-relay", block)
 
     def test_every_worker_app_is_compared_from_its_first_deploy_on(self):
-        """The matrix names every app of the release tool; an app whose Worker is in inventory.py's
-        FIRST_DEPLOY_PENDING has no verified deployment yet and is excluded, by name, until the commit after its first
-        deploy removes both (recall/docs/design.md section 11)."""
+        """The matrix covers every release app and excludes only CHECK_ONLY apps. Namespace capture may
+        remain FIRST_DEPLOY_PENDING through the first release; it does not disable that app's reconciliation."""
         block = job(self.text, "workers")
         matrix = block.split("      matrix:\n", 1)[1].split("\n    permissions:\n", 1)[0]
         apps = re.search(r"^        app: \[([^\]]+)\]$", matrix, re.M).group(1).split(", ")
         workers = constant("tools/cloud-release/control.py", "WORKERS")
         self.assertEqual(sorted(apps), sorted(workers))
         pending = constant("tools/service-catalog/inventory.py", "FIRST_DEPLOY_PENDING")
+        check_only = constant(".github/scripts/ci_changes.py", "CHECK_ONLY")
         scripts = {app: {tomllib.loads((REPO / path).read_text())["name"] for path in paths}
                    for app, paths in workers.items()}
         self.assertLessEqual(pending, set().union(*scripts.values()))
         excluded = re.findall(r"^          - app: (\S+)$", matrix, re.M)
-        self.assertEqual(excluded, sorted(app for app, names in scripts.items() if names & pending))
+        self.assertLessEqual(check_only, set(workers))
+        self.assertEqual(excluded, sorted(check_only))
         self.assertEqual("        exclude:" in matrix, bool(excluded))
 
     def test_vps_uses_only_typed_api_and_records_actual_evidence(self):

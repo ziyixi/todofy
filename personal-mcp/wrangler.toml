@@ -26,5 +26,5 @@ new_sqlite_classes = ["SubscriptionStore"]
 [vars]
 PUBLIC_HOST = "mcp.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
-# Added from Infra apply before enabling release; dry-run checks need no AUD.
-CALLBACK_HOSTS = ""
+ACCESS_AUDIENCE = "da5cfc7953a2ffcd617de2af3189cad24dbacd9b5518a5ec7298e5a708a38120"
+CALLBACK_HOSTS = "chatgpt.com"

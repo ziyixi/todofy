@@ -1,4 +1,4 @@
-"""The first private MCP gate cannot publish or gain business-service bindings prematurely."""
+"""The private MCP releases independently and has no business-service bindings."""
 
 import re
 import tomllib
@@ -11,12 +11,13 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class PersonalMcpIntegration(unittest.TestCase):
-    def test_first_gate_checks_without_deploying_or_coupling_other_apps(self):
+    def test_private_mcp_source_checks_and_publishes_only_its_own_worker(self):
         flags = ci_changes.classify(["personal-mcp/worker/src/index.ts"])
         self.assertTrue(flags["personal_mcp_check"])
-        self.assertFalse(flags["personal_mcp_deploy"])
+        self.assertTrue(flags["personal_mcp_deploy"])
         self.assertFalse(flags["contracts"])
-        self.assertFalse(any(value for key, value in flags.items() if key.endswith("_deploy")))
+        self.assertEqual({key for key, value in flags.items() if key.endswith("_deploy") and value},
+                         {"personal_mcp_deploy"})
         self.assertNotIn("personal-mcp", ci_changes.HOME_BOUND)
 
     def test_worker_uses_one_sqlite_object_and_no_business_data_binding(self):
@@ -42,5 +43,6 @@ class PersonalMcpIntegration(unittest.TestCase):
         allowed = re.search(r'allowed_uris\s*=\s*\[([^\]]+)\]', block).group(1)
         self.assertEqual(re.findall(r'"([^"\n]+)"', allowed), [
             'https://chatgpt.com/connector_platform_oauth_redirect',
+            'https://chatgpt.com/connector/oauth/FSrczCNZCMHZ',
         ])
         self.assertNotIn('*', allowed)

@@ -21,13 +21,14 @@ are outside this personal ChatGPT integration.
 
 ## Release and real-client checks
 
-1. Pass branch CI. The new Worker initially stays in `CHECK_ONLY`, so the first merge prepares infrastructure only.
+1. Pass branch CI. The first merge prepared infrastructure only; the new Access application now exists.
 2. Run the existing Infra drift/apply flow. Review that it creates only the new MCP Access application; record its
    actual app ID and AUD in `config/resources.toml`, then regenerate config. Preserve existing applications/policies.
-3. Managed OAuth is enabled only for this application. Verify the exact ChatGPT redirect URI in the connection UI.
-   The currently declared stable URI is valid only when the provider advertises RFC 9207 issuer identification;
-   otherwise replace it with the exact callback-ID URI shown by ChatGPT, through IaC.
-4. Remove `CHECK_ONLY`, pass CI and release the same SHA via main Actions. Record the new DO namespace in resources.
+3. Managed OAuth is enabled only for this application. IaC declares the documented issuer-aware ChatGPT redirect
+   and the exact callback-ID URI observed in this owner's live connection form. A new ChatGPT connection may
+   produce a different callback-ID URI; update that exact value through IaC. No wildcard is needed.
+4. The publication gate is now enabled. Pass CI and release the same SHA via main Actions. Record the new DO
+   namespace in resources after first deployment.
 5. Register the live MCP in the private plugin, finish the real Access login, and rescan. Confirm two tools and the
    test event are discovered. Do not use Inspector success as a substitute for ChatGPT.
 6. In a Dots or Cloud Work chat, subscribe to `personal_cloud.test`, invoke `send_test_event` with a fresh request ID,
@@ -47,3 +48,10 @@ unsubscribe. Real Access OAuth, ChatGPT discovery, Dots subscription and Dots re
 References: [OpenAI Events](https://developers.openai.com/plugins/build/mcp-events),
 [OpenAI auth](https://developers.openai.com/plugins/build/auth),
 [Cloudflare Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
+
+The first complete branch gate passed at `9e1681a1429b1ac93b99ede55822077522c59204`
+([CI 39544158967](https://github.com/ziyixi/todofy/actions/runs/39544158967)); the same SHA reached main.
+[Infra apply 39545088566](https://github.com/ziyixi/todofy/actions/runs/39545088566) created only the dedicated
+MCP Access application, left all 36 existing resources unchanged, and verified no remaining drift. Its real ID/AUD
+are recorded in `config/resources.toml`. The next release enables the Worker and exact observed OAuth redirect.
+These steps establish infrastructure readiness, not real Dots receipt.

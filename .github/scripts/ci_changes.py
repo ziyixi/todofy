@@ -131,7 +131,7 @@ APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
-CHECK_ONLY: set[str] = {"personal-mcp"}
+CHECK_ONLY: set[str] = set()
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
 HOME_BOUND = {"fleet", "mailsort", "recall", "brief", "tasks"}

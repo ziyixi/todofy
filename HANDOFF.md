@@ -17,53 +17,22 @@ instructions.
 ### Private MCP connection gate (`codex/personal-mcp`)
 
 Owner authorized implementation starting with real Dots OAuth and one synthetic event. Work is isolated in
-`/private/tmp/todofy-personal-mcp`, based on `origin/main` `3a9277c3`; the shared checkout and Claude's work are
-untouched. New `personal-mcp/` has only connection status, a test-event tool and persistent event subscriptions.
-No business-service bindings or data access yet. The catalog, first-deploy inventory, fixed provider's Managed OAuth,
-and normal CI/release integration are prepared. The new app stays CHECK_ONLY until Infra apply creates its Access
-identity and the real AUD is recorded. Existing Access apps do not enable OAuth as part of this change.
+`/private/tmp/todofy-personal-mcp`; the shared checkout and Claude's work remain untouched. `personal-mcp/` has only
+connection status, a test-event tool and persistent subscriptions; no business-service bindings or data access.
 
-Local workerd proves discovery, restart persistence, signed delivery, duplicate request handling and unsubscribe.
-Real Dots login, event subscription and receipt remain pending; follow [the gate](personal-mcp/docs/connection.md).
-Branch CI `39542156446` passed MCP/Infra checks but found an unsupported Home catalog icon; it now reuses
-the existing server icon. The replacement run also caught Home registry/worker-count expectations; the new
-entry now follows existing display limits and hidden ordering. Home lint, both type checks, all 268 unit tests and
-all 97 workerd tests, 158 web tests, web build, deployment dry run and bundle budget now pass locally.
-The remaining GetRegistry/OpsView exact-list fixtures have been corrected; MCP is absent from Home launcher tiles.
-The MCP runtime journey also proves an already queued event survives restart. The next full CI must pass before merging.
-Only after real Dots acceptance passes, add the agreed business tools and events. Keep this personal integration small; no generic
-event bus, replay platform or extra model calls. Do not treat local verification as real-client acceptance.
+Full branch CI `39544158967` passed at `9e1681a1`, promoted unchanged to main; its production run `39544986444`
+succeeded. IaC apply `39545088566` created only the new MCP Access application, kept 36 existing resources
+unchanged and verified no remaining drift. Its actual app ID/AUD are now recorded. The next branch change enables
+MCP publication and adds the exact OAuth redirect observed in the live ChatGPT form. The namespace's
+FIRST_DEPLOY_PENDING marker stays until the first deploy supplies its real ID.
 
+Local MCP workerd verification covers discovery, signed callback, subscription and pending-event persistence over
+restart, duplicate request IDs and unsubscribe. Complete local Home checks passed: 268 unit tests, 97 runtime tests,
+158 web tests, build and bundle budget. Resource registration adds no launcher tile or business Ops binding.
 
-### Home's alerts of 2026-10-20 (`claude/home-alerts`)
-
-**Local only, not pushed**, rebased on `origin/main` `bf41ce60`. Deploys Mail Hero, Brief, Home and Tasks (Tasks
-only gains a test and its docs).
-
-- **Mail Hero `backup_stale` (critical).** The daily native backup has failed with `native_backup_lease_expired`
-  since 2026-10-19: an Alarm ran at most eight steps, and the object list, deletion journal and reference checks a
-  page an Alarm, so 1,903 objects took 28 of the lease's 30 minutes. An Alarm now works until 10 s, 8 MiB or 400
-  R2/D1 calls (20 D1 queries) and copies six objects at a time; readback hashes, the manifest and the lease checks
-  are unchanged. A synthetic 2,500-object snapshot takes 33 Alarms instead of 415
-  ([how much an Alarm does](mail-hero/docs/native-backup.md#每次-alarm-做多少)). **After the release, the lead
-  requests one backup** (`POST /api/internal/backup/native/run`, [machine interface](mail-hero/docs/native-backup.md#查看与恢复))
-  and checks that `GET /native/status` reaches `complete`: Home's alert clears when that run sets `last_backup_at`,
-  not on the deploy.
-- **Brief `section_thin` and `sources_stale` (warnings).** With `BRIEF_MODE=off` no issue is made, so the status no
-  longer raises them; it says `brief_off` (info, 简报已关闭) and stays healthy. `anthropic_rejected` and a send's
-  outcome still count.
-- **Tasks CPU p99 20.5 ms (p50 2.9).** No code change: every request `cpu.test.ts` measures stays below 10 reference
-  ms even as an isolate's first, and the global scope's warm-up costs about 20 on its first run, so the p99 matches
-  isolates' starts ([performance](tasks/docs/design.md#performance-and-cloudflare)). The suite now bounds the
-  warm-up and measures Home's status and Todofy's service calls.
-
-`ci_changes.py` selects every check job (`contracts/ops-v1/README.md` documents `brief_off`). Each passed on macOS
-after the rebase: Mail Hero (the 2,500-object snapshot in 33 Alarms, at most 384 R2 and 20 D1 calls in one), Brief,
-Home (268 unit and 97 runtime tests), Tasks (the Worker's 65 unit and 99 runtime tests, the web's 55 unit tests,
-build and 109 Playwright tests), Contracts, Proto, Todofy static and runtime (all 498 in one shard), Links, Watch,
-Mailsort, Recall, Fleet, Website, Newsletter (its engine steps with an empty `HOME`), Platform's contract steps and
-Changes' tests. CI alone runs the Newsletter image, Platform's Linux steps, Mail Hero's GPG backup test and Changes'
-decide step.
+Real Dots login, subscription and receipt remain pending; follow [the gate](personal-mcp/docs/connection.md).
+The existing Dot is available in Chrome. Only after real acceptance, add the agreed business tools/events.
+Keep this personal integration small; no generic event bus, replay platform or extra model calls.
 
 ### Done steps stay in Plan's Week calendar (`claude/plan-done-steps`)
 

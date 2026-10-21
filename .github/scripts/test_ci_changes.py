@@ -277,8 +277,8 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(paths), expect(T, T, T, T, T, **DASH))
 
     def test_every_app_has_stable_check_and_deploy_outputs_during_bootstrap(self):
-        """The private MCP gate checks before its Access identity is created."""
-        self.assertEqual(ci_changes.CHECK_ONLY, {"personal-mcp"})
+        """Every app has its release prerequisites; check and deploy outputs remain explicit."""
+        self.assertEqual(ci_changes.CHECK_ONLY, set())
         for app in ci_changes.APPS:
             with self.subTest(app=app):
                 self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)

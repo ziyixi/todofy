@@ -86,16 +86,15 @@ resource "cloudflare_zero_trust_access_application" "owner" {
   options_preflight_bypass   = false
   session_duration           = each.value.session
 
-  # Private MCP only. These fields stay null for existing owner applications. The stable ChatGPT
-  # callback requires RFC 9207 issuer identification; verify the connection page before its first login
-  # and replace this exact URI if ChatGPT shows a callback-ID-specific URI. No redirect wildcard.
+  # Private MCP only; existing applications retain null. Both exact ChatGPT redirects are used by
+  # its documented issuer-aware flow and this owner's live connection form. No redirect wildcard.
   oauth_configuration = each.key == "personal-mcp" ? {
     enabled = true
     dynamic_client_registration = {
       enabled                = true
       allow_any_on_localhost = false
       allow_any_on_loopback  = false
-      allowed_uris           = ["https://chatgpt.com/connector_platform_oauth_redirect"]
+      allowed_uris           = ["https://chatgpt.com/connector_platform_oauth_redirect", "https://chatgpt.com/connector/oauth/FSrczCNZCMHZ"]
     }
     grant = {
       access_token_lifetime = "15m"
