@@ -21,9 +21,9 @@ untouched. Published main SHA `ef76b57d` passed full branch CI `39545449859`; pr
 passed on attempt 2 after its initial anonymous network probe failed. The unchanged live probe also passed.
 IaC creates/updates `39545088566` / `39546470218` touched only the MCP Access application and ended with no drift.
 
-The real Access identity and SubscriptionStore namespace are recorded in config/resources.toml. This follow-up
-removes the namespace's first-deploy marker and completes Home's resource mapping. It has passed all local
-registration checks and the full Home recipe; its branch CI/main publication still need completion.
+The real Access identity and SubscriptionStore namespace are recorded in config/resources.toml. Namespace adoption `9e72e2c8` removed the first-deploy marker and completed Home's resource mapping. Full
+branch CI `39547230019` and same-SHA production run `39547948701` succeeded, in addition to local registration
+checks and the full Home recipe. The MCP Worker itself remains the verified `ef76b57d` release.
 The MCP has only connection status, synthetic test delivery and persistent subscriptions, with no business bindings.
 
 **Blocked on owner consent:** Chrome created the private Personal Cloud connector and is at Connect Personal Cloud.

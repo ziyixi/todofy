@@ -13,6 +13,8 @@ Real ChatGPT consent, owner login and Dots event receipt are not yet verified.
 | Worker publication branch CI | [39545449859](https://github.com/ziyixi/todofy/actions/runs/39545449859), SHA `ef76b57d2105ec93668aee7fe3f2d05be837d8e8`, success |
 | Worker main release | [39546367619](https://github.com/ziyixi/todofy/actions/runs/39546367619), same SHA, success on attempt 2 |
 | Exact OAuth redirect registration | [Infra apply 39546470218](https://github.com/ziyixi/todofy/actions/runs/39546470218), one update to the MCP application; 36 existing resources unchanged; final plan empty |
+| Namespace registration CI | [39547230019](https://github.com/ziyixi/todofy/actions/runs/39547230019), SHA `9e72e2c80ba93205f71ade831f6e525314299927`, success |
+| Namespace/Home publication | [39547948701](https://github.com/ziyixi/todofy/actions/runs/39547948701), same SHA, success; MCP Worker behavior unchanged |
 
 The first Worker release deployed and passed its version check, then failed at the anonymous network probe.
 The unchanged probe passed against the live endpoint, and rerunning the failed release job passed. The original
