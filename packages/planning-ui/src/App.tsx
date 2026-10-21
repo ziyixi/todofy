@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -125,6 +126,12 @@ export function App({
   const [confirmed, setConfirmed] = useState<PlusData | undefined>(
     snapshot?.data,
   );
+  // The latest confirmed data for code that runs between renders: a write queued behind another (an away pause)
+  // reads it when it runs. A confirmed write updates it at once; reads reach it as they render.
+  const latestData = useRef(confirmed);
+  useLayoutEffect(() => {
+    latestData.current = confirmed;
+  }, [confirmed]);
   const [pending, setPending] = useState<readonly PendingChange[]>([]);
   const data = useMemo(
     () =>
@@ -297,6 +304,8 @@ export function App({
           // An earlier failure rolled back the changes this write was based on.
           if (epoch !== writes.current.epoch) return false;
           const result = await operation();
+          latestData.current =
+            latestData.current && applyConfirmed(latestData.current, result);
           setConfirmed((current) => current && applyConfirmed(current, result));
           setWritten((count) => count + 1);
           if (quiet) clearError();
@@ -461,16 +470,12 @@ export function App({
   }, [confirmed, onSnapshot]);
   // Pause when away: its commands run in the one write queue against the latest confirmed timer, read when they
   // run rather than when they were queued.
-  const latestFocus = useRef(confirmed?.focus);
-  useEffect(() => {
-    latestFocus.current = confirmed?.focus;
-  }, [confirmed]);
   const sendIdle = useCallback(
     async (command: IdleCommand, quiet: boolean) => {
       let saved: TimerSnapshot | undefined;
       const sent = await run(
         async () => {
-          const focus = latestFocus.current;
+          const focus = latestData.current?.focus;
           // The session ended meanwhile: nothing to send; the read that follows shows what changed.
           if (!focus?.timer) return undefined;
           saved = await actions.timer(

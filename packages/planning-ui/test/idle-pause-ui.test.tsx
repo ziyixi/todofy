@@ -432,6 +432,44 @@ it("a failed pause shows its error once and tries again quietly on the next beat
   page.unmount();
 });
 
+it("an away pause queued behind a timer write is sent with the etag that write returned", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+  stubIdleDetection();
+  const tasks = fakeTimer();
+  let release = () => {};
+  const timer = vi.fn(async (...args: Parameters<typeof tasks>) => {
+    if (timer.mock.calls.length === 1)
+      await new Promise<void>((resolve) => (release = resolve));
+    return tasks(...args);
+  });
+  mount(data(), {}, { timer: timer as never });
+  await settled();
+  // The bar's Pause is in flight when the screen locks: the away pause waits behind it in the write queue.
+  fireEvent.click(within(bar()).getByRole("button", { name: "Pause" }));
+  vi.setSystemTime(NOW + 5 * MIN);
+  await report("active", "locked");
+  expect(timer).toHaveBeenCalledTimes(1);
+  // As in the browser, outside act(): the queued pause starts before React renders the first answer.
+  const scope = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const actEnvironment = scope.IS_REACT_ACT_ENVIRONMENT;
+  scope.IS_REACT_ACT_ENVIRONMENT = false;
+  try {
+    release();
+    await vi.waitFor(() => expect(timer).toHaveBeenCalledTimes(2));
+  } finally {
+    scope.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+  }
+  await act(async () => {});
+  expect(timer.mock.calls.map((call) => [call[0], call[2].timerEtag])).toEqual(
+    [
+      ["pause", "e1"],
+      ["pause", "e2"],
+    ],
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 it("watches in one window only: with the watch held elsewhere, it waits for it", async () => {
   stubIdleDetection();
   let grant: () => void = () => {};
