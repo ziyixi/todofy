@@ -14,6 +14,36 @@ instructions.
 
 ## Current work
 
+### Home's alerts of 2026-10-20 (`claude/home-alerts`)
+
+**Local only, not pushed**, rebased on `origin/main` `bf41ce60`. Deploys Mail Hero, Brief, Home and Tasks (Tasks
+only gains a test and its docs).
+
+- **Mail Hero `backup_stale` (critical).** The daily native backup has failed with `native_backup_lease_expired`
+  since 2026-10-19: an Alarm ran at most eight steps, and the object list, deletion journal and reference checks a
+  page an Alarm, so 1,903 objects took 28 of the lease's 30 minutes. An Alarm now works until 10 s, 8 MiB or 400
+  R2/D1 calls (20 D1 queries) and copies six objects at a time; readback hashes, the manifest and the lease checks
+  are unchanged. A synthetic 2,500-object snapshot takes 33 Alarms instead of 415
+  ([how much an Alarm does](mail-hero/docs/native-backup.md#每次-alarm-做多少)). **After the release, the lead
+  requests one backup** (`POST /api/internal/backup/native/run`, [machine interface](mail-hero/docs/native-backup.md#查看与恢复))
+  and checks that `GET /native/status` reaches `complete`: Home's alert clears when that run sets `last_backup_at`,
+  not on the deploy.
+- **Brief `section_thin` and `sources_stale` (warnings).** With `BRIEF_MODE=off` no issue is made, so the status no
+  longer raises them; it says `brief_off` (info, 简报已关闭) and stays healthy. `anthropic_rejected` and a send's
+  outcome still count.
+- **Tasks CPU p99 20.5 ms (p50 2.9).** No code change: every request `cpu.test.ts` measures stays below 10 reference
+  ms even as an isolate's first, and the global scope's warm-up costs about 20 on its first run, so the p99 matches
+  isolates' starts ([performance](tasks/docs/design.md#performance-and-cloudflare)). The suite now bounds the
+  warm-up and measures Home's status and Todofy's service calls.
+
+`ci_changes.py` selects every check job (`contracts/ops-v1/README.md` documents `brief_off`). Each passed on macOS
+after the rebase: Mail Hero (the 2,500-object snapshot in 33 Alarms, at most 384 R2 and 20 D1 calls in one), Brief,
+Home (268 unit and 97 runtime tests), Tasks (the Worker's 65 unit and 99 runtime tests, the web's 55 unit tests,
+build and 109 Playwright tests), Contracts, Proto, Todofy static and runtime (all 498 in one shard), Links, Watch,
+Mailsort, Recall, Fleet, Website, Newsletter (its engine steps with an empty `HOME`), Platform's contract steps and
+Changes' tests. CI alone runs the Newsletter image, Platform's Linux steps, Mail Hero's GPG backup test and Changes'
+decide step.
+
 ### Done steps stay in Plan's Week calendar (`claude/plan-done-steps`)
 
 **Local only, not pushed**, rebased on `origin/main` `8d8ce547`. A calendar step ticked in Plan › Week stays in its day,
