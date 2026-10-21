@@ -64,8 +64,11 @@ export interface PlanningAppProps {
   snapshot?: PlusSnapshot;
   /** The last confirmed data, or undefined once a remembered board is dropped. */
   onSnapshot?: (snapshot?: PlusSnapshot) => void;
-  /** Opened from the weekly review task's link: Plan starts with the review checklist. */
-  review?: boolean;
+  /**
+   * Each new positive value opens Plan's weekly review checklist: the host counts the weekly review task's
+   * link, on load and each time it is launched into an open window.
+   */
+  review?: number;
   /** Plan's remembered view, and where its changes go. */
   planView?: PlanViewState;
   onPlanView?: (patch: PlanViewPatch) => void;

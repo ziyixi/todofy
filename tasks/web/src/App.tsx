@@ -68,6 +68,10 @@ export function App() {
     item?: CatalogItem;
   }>();
   const [showSidebar, setShowSidebar] = useState(false);
+  // Each new positive value opens Plan's weekly review checklist: the review link on load.
+  const [reviewRequest, setReviewRequest] = useState(() =>
+    new URL(window.location.href).searchParams.get("review") === "1" ? 1 : 0,
+  );
   // A newer build serves Tasks, so this tab's bundle may call routes it no longer has: the page and its
   // errors give way to the reload prompt.
   const outdated = useOutdated();
@@ -162,6 +166,12 @@ export function App() {
     const id = new URL(window.location.href).searchParams.get("task");
     if (id) void openTask(id, true);
   }, [openTask]);
+  // The review link acts once: a reload does not open the checklist again.
+  useEffect(() => removeQueryParameter("review"), []);
+  // A review request belongs to the Plan it opens: a later visit to Plan does not reopen the checklist.
+  useEffect(() => {
+    if (route.page !== "plan") setReviewRequest(0);
+  }, [route.page]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       if (
@@ -301,6 +311,7 @@ export function App() {
               <PlanningPage
                 onCompleteTask={actions.finishTask}
                 page={route.page}
+                review={reviewRequest}
                 refreshRevision={actions.planRevision}
                 onOpenTask={(id) => void openTask(id)}
                 onSettings={() => {

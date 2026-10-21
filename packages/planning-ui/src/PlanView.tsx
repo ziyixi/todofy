@@ -45,8 +45,8 @@ export interface PlanViewProps {
   onOpenTask?: (id: string) => void;
   /** The weekly review's mail line opens the host's Mail page. */
   onOpenMail?: () => void;
-  /** Opened from the review task's link: start with the weekly review. */
-  reviewing?: boolean;
+  /** Each new positive value opens the weekly review (the review task's link); a mount with one starts with it. */
+  reviewing?: number;
   /** Opened from Focus's quiet line: Review, with Start now focused. */
   showStart?: boolean;
   onStartShown?: () => void;

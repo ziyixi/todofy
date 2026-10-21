@@ -658,7 +658,7 @@ it("completes the review task only when Finish review is clicked, outside Focus"
       language="en"
       onOpenTask={() => {}}
       onSettings={() => {}}
-      review
+      review={1}
     />,
   );
   const review = within(

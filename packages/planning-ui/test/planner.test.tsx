@@ -594,7 +594,7 @@ it("opens the checklist from the review link even when it was left closed, and s
   render(
     <PlanView
       {...data}
-      reviewing
+      reviewing={1}
       planView={store.view}
       onPlanView={store.onPlanView}
     />,
@@ -606,4 +606,22 @@ it("opens the checklist from the review link even when it was left closed, and s
     }),
   ).toHaveProperty("checked", true);
   expect(store.patches).toEqual([{ review: { ...review, open: true } }]);
+});
+
+it("opens the checklist again for each new review request, also after it was closed", async () => {
+  const data = await props();
+  const { rerender } = render(<PlanView {...data} reviewing={0} />);
+  const region = () => screen.queryByRole("region", { name: "Weekly review" });
+  expect(region()).toBeNull();
+  rerender(<PlanView {...data} reviewing={1} />);
+  expect(region()).toBeTruthy();
+  fireEvent.click(
+    within(region()!).getByRole("button", { name: "Close" }),
+  );
+  expect(region()).toBeNull();
+  // The same request again changes nothing; the next one opens it.
+  rerender(<PlanView {...data} reviewing={1} />);
+  expect(region()).toBeNull();
+  rerender(<PlanView {...data} reviewing={2} />);
+  expect(region()).toBeTruthy();
 });

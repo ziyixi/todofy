@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   PlanningApp,
   createPlanningActions,
@@ -8,17 +8,19 @@ import {
 import "@ziyixi/planning-ui/styles.css";
 import { api, send } from "./api";
 import type { CompletedTask } from "./useTaskActions";
-import { removeQueryParameter } from "./routes";
 import { usePlanView } from "./usePlanView";
 
 export default function PlanningPage({
   page,
+  review,
   refreshRevision,
   onOpenTask,
   onSettings,
   onCompleteTask,
 }: {
   page: "plan" | "focus";
+  /** Each new positive value opens Plan's weekly review checklist (the review link, App's reviewRequest). */
+  review: number;
   /** Changes after each task write Plan did not issue (useTaskActions' planRevision). */
   refreshRevision: number;
   onOpenTask: (id: string) => void;
@@ -60,11 +62,6 @@ export default function PlanningPage({
       },
     };
   }, [onCompleteTask]);
-  // The weekly review link opens the checklist once; a reload or a later visit to Plan does not.
-  const [review] = useState(
-    () => new URLSearchParams(window.location.search).get("review") === "1",
-  );
-  useEffect(() => removeQueryParameter("review"), []);
   const [snapshot, setSnapshot] = useState<PlusSnapshot>();
   const [planView, updatePlanView] = usePlanView();
   return (

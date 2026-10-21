@@ -242,7 +242,7 @@ it("names Start now and Waiting in both languages, in words only", async () => {
 
 it("leaves the drop zone under a planned day blank and dates the weekly review", async () => {
   const props = await planProps("en");
-  render(<PlanView {...props} reviewing />);
+  render(<PlanView {...props} reviewing={1} />);
   expect(
     within(screen.getByRole("region", { name: "Weekly review" })).getByText(
       "Week 42 · from Oct 12",
