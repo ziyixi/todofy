@@ -16,11 +16,12 @@ instructions.
 
 ### Done steps stay in Plan's Week calendar (`claude/plan-done-steps`)
 
-**Local only, not pushed**, from `origin/main` `468dceb8`. A calendar step ticked in Plan › Week stays in its day,
+**Local only, not pushed**, rebased on `origin/main` `8d8ce547`. A calendar step ticked in Plan › Week stays in its day,
 done, after the open steps and outside the day's total; its title opens Tasks' dialog to reopen it; Focus is
-unchanged ([interface](packages/planning-ui/docs/interface.md#week)). Deploys Tasks only. Shared packages (planning-ui's
-271 tests) and Tasks (the Worker's 65 unit and 97 runtime tests, the web's 55 unit tests, build and 108 Playwright
-tests, the tools' 31) passed on macOS.
+unchanged ([interface](packages/planning-ui/docs/interface.md#week)). Reviewed: a repeating step dropped back on its
+done day now shows open at once; a browser journey reopens a done step from Tasks' dialog. Deploys Tasks only. After
+the rebase, `ci_changes.py` selects shared packages, contracts and Tasks; all three passed on macOS (planning-ui's 272
+tests; the Worker's 65 unit and 97 runtime tests, the web's 55 unit tests, build and 109 Playwright tests, the tools' 31).
 
 ### Retire FlowDay and drop Todofy's planning store (`claude/retire-flowday`)
 
