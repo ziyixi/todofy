@@ -406,20 +406,12 @@ class DriftAcceptance(unittest.TestCase):
                 self.assert_readonly(fixture)
 
     def test_a_retired_binding_is_one_the_app_no_longer_declares(self):
-        # The release of 2026-10-21 retires these from the live Workers.
-        self.assertEqual(control.RETIRED_SERVICE_BINDINGS, {
-            "todofy": {"FORCE_PAUSE_TODOIST", "REMINDER_ENABLED", "GTD_REVIEW_ENABLED", "GTD_COLLECT_UTC",
-                       "LOOKUP_DELAY_MS", "TASKS_PUBLIC_URL"},
-            "tasks": {"PLANNING"},
-            "watch": {"TODOFY"},
-        })
+        # The release after 2026-10-21's retires todofy-core's binding to Tasks.
+        self.assertEqual(control.RETIRED_SERVICE_BINDINGS, {"todofy": {"TASKS"}})
         for app, names in control.RETIRED_SERVICE_BINDINGS.items():
             for path in control.WORKERS[app]:
                 config = control.read_toml(ROOT / path)
                 declared = set(config.get("vars", {})) | {service["binding"] for service in config.get("services", [])}
-                if path == "todofy/gateway/wrangler.toml":
-                    # The gateway keeps linking to tasks; only todofy-core dropped it.
-                    declared -= {"TASKS_PUBLIC_URL"}
                 with self.subTest(app=app, path=path):
                     self.assertFalse(names & declared)
 

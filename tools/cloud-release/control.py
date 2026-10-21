@@ -49,24 +49,13 @@ RETIRED_WEBSITE_BINDINGS = {
     "IGNORED_EDITOR_IDS",
 }
 # Bindings the owner retired from an app; a normal release of that app removes them, a repair still stops.
-# A binding to a deleted Worker stays until that Worker is gone (see infra/README "Retiring an app"). The release of
-# 2026-10-21 (Todofy writes no task): todofy-core's switches and settings of the task writes, Tasks' binding to
-# Todofy's retired Planning entry and the watch app's to its retired Intents entry (TASKS_PUBLIC_URL stays declared on
-# the gateway, so only todofy-core reports it). Empty these once that release is live everywhere.
+# A binding to a deleted Worker stays until that Worker is gone (see infra/README "Retiring an app"). The release after
+# 2026-10-21's (Tasks backs itself up): todofy-core's TASKS, its last binding to Tasks. It needs that release of
+# 2026-10-21 live first, which removed todofy-core's task-write settings and the Tasks and watch bindings to Todofy's
+# retired entries. Empty this once Todofy's release is live.
 # A secret never goes here: a deploy keeps the secrets it does not name, so a retired secret is deleted before the push
 # or the release's record step fails.
-RETIRED_SERVICE_BINDINGS: dict[str, set[str]] = {
-    "todofy": {
-        "FORCE_PAUSE_TODOIST",
-        "REMINDER_ENABLED",
-        "GTD_REVIEW_ENABLED",
-        "GTD_COLLECT_UTC",
-        "LOOKUP_DELAY_MS",
-        "TASKS_PUBLIC_URL",
-    },
-    "tasks": {"PLANNING"},
-    "watch": {"TODOFY"},
-}
+RETIRED_SERVICE_BINDINGS: dict[str, set[str]] = {"todofy": {"TASKS"}}
 
 
 def read_toml(path):
