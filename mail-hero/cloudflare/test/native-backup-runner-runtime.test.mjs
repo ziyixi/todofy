@@ -20,10 +20,16 @@ test('daily UTC schedule rolls forward without a timer or local-time dependence'
   assert.throws(() => nextNativeBackupAt(Date.now(), '25:00'), /schedule_invalid/);
 });
 
-async function harness(extra = {}) {
+// The tests drive the Alarm themselves through /test/tick, one step at a time. The coordinator re-arms its Alarm about
+// a second after each tick, and a real Alarm firing between two of a test's steps would run the runner on its own (on
+// a slow runner it once wrote the marker between a fault injection and the check that it had not). So the test object
+// records each setAlarm (counted, and answered by getAlarm) without arming it, and only /test/tick runs the Alarm.
+// `platformAlarms` arms real Alarms instead, for the test of the platform Alarm alone, which then cannot tick by hand.
+async function harness(extra = {}, { platformAlarms = false } = {}) {
   const temporary = await mkdtemp(join(tmpdir(), 'mailhero-native-runner-'));
   const bundled = await build({ stdin: { contents: `
     import { MailCoordinator } from './src/native/coordinator';
+    const PLATFORM_ALARMS=${platformAlarms ? 'true' : 'false'};
     export class TestCoordinator extends MailCoordinator {
       constructor(state,env) {
         const faults={value:null};
@@ -43,9 +49,12 @@ async function harness(extra = {}) {
             const value=Reflect.get(target,name,target);return typeof value==='function'?value.bind(target):value;
           }});
         }};
+        const alarm={at:null};
         const trackedStorage=new Proxy(state.storage,{get(target,name){
           if(name==='sql')return trackedSQL;
-          if(name==='setAlarm')return(...args)=>{metrics.alarm_writes++;return target.setAlarm(...args)};
+          if(name==='setAlarm')return async(time,...args)=>{metrics.alarm_writes++;if(PLATFORM_ALARMS)return target.setAlarm(time,...args);alarm.at=Number(time)};
+          if(name==='getAlarm' && !PLATFORM_ALARMS)return async()=>alarm.at;
+          if(name==='deleteAlarm' && !PLATFORM_ALARMS)return async()=>{alarm.at=null};
           const value=Reflect.get(target,name,target);return typeof value==='function'?value.bind(target):value;
         }});
         const trackedState=new Proxy(state,{get(target,name){if(name==='storage')return trackedStorage;const value=Reflect.get(target,name,target);return typeof value==='function'?value.bind(target):value;}});
@@ -103,6 +112,7 @@ async function harness(extra = {}) {
       async fetch(request) {
         const path=new URL(request.url).pathname;
         if(path==='/test/tick') {
+          if(PLATFORM_ALARMS)return new Response('a manual tick would race the platform Alarm',{status:409});
           const value=this.testState.storage.sql.exec('SELECT value FROM native_backup_control WHERE id=1').toArray()[0];
           if(value) {const run=JSON.parse(value.value);run.next_at=Date.now();this.testState.storage.sql.exec('UPDATE native_backup_control SET value=? WHERE id=1',JSON.stringify(run));}
           const d1=this.metrics.d1_calls,r2=this.metrics.r2_calls;await this.alarm();
@@ -479,7 +489,7 @@ test('a process death after lease creation but before the caller ID checkpoint a
 });
 
 test('the platform Alarm finishes a native backup and arms the next day without repeated triggering requests', { timeout: 60000 }, async () => {
-  const h = await harness();
+  const h = await harness({}, { platformAlarms: true });
   try {
     await seed(h);
     await h.call('/wake', {});
