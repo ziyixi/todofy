@@ -6,11 +6,14 @@ import {
   useRef,
   useState,
   type MouseEvent,
+  type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   CalendarDays,
   Check,
   Pause,
+  PictureInPicture2,
   Play,
   RefreshCw,
   Square,
@@ -33,6 +36,13 @@ import { StepEditor } from "./StepEditor";
 import { TaskEditor } from "./TaskEditor";
 import { WeeklyGoals } from "./WeeklyGoals";
 import { localDate } from "./mail";
+import { MiniTimer } from "./MiniTimer";
+import {
+  canOpenMiniWindow,
+  openMiniWindow,
+  type MiniWindow,
+} from "./picture-in-picture";
+import { outcomeForTask } from "./planning-outcomes";
 import type { PlanViewPatch, PlanViewState } from "./plan-view-state";
 import type {
   Area,
@@ -72,6 +82,13 @@ export interface PlanningAppProps {
   /** Plan's remembered view, and where its changes go. */
   planView?: PlanViewState;
   onPlanView?: (patch: PlanViewPatch) => void;
+  /**
+   * The host shows another page: nothing renders but the mini timer, which keeps working on its data, writes
+   * and timer reads. Full reads wait until Plan or Focus shows again.
+   */
+  background?: boolean;
+  /** Whether a Focus session exists, each time that changes in the confirmed data. */
+  onSession?: (active: boolean) => void;
 }
 export function App({
   actions,
@@ -89,6 +106,8 @@ export function App({
   review,
   planView,
   onPlanView,
+  background = false,
+  onSession,
 }: PlanningAppProps) {
   // What the server confirmed, from reads and writes. Pending drags are drawn on top of it.
   const [confirmed, setConfirmed] = useState<PlusData | undefined>(
@@ -118,6 +137,10 @@ export function App({
   // Reads can overlap (Refresh, returning to the tab); an older one never replaces a newer.
   const reads = useRef({ started: 0, shown: 0 });
   const [error, setError] = useState("");
+  // The last write failed, rather than a read: the mini timer says so until the next write.
+  const [writeFailed, setWriteFailed] = useState(false);
+  // The open mini timer (Document Picture-in-Picture), one per page.
+  const [mini, setMini] = useState<MiniWindow>();
   // Confirm-first writes queued or running; they disable write controls.
   const [waiting, setWaiting] = useState(0);
   // Shown data that needs a complete read before it is written: a remembered snapshot, which
@@ -143,12 +166,15 @@ export function App({
   // "" follows Tasks' today, past midnight too.
   const [focusDate, setFocusDate] = useState("");
   const [showCompleted, setShowCompleted] = useState(false);
-  const [visited, setVisited] = useState(view);
-  if (visited !== view) {
-    setVisited(view);
+  // Shown again after another page, Plan and Focus open as on a first visit; their dialog closed with them.
+  const shownView = background ? undefined : view;
+  const [visited, setVisited] = useState(shownView);
+  if (visited !== shownView) {
+    setVisited(shownView);
     setFocusTab("day");
     setFocusDate("");
     setShowCompleted(false);
+    if (!shownView) setSelectedId("");
   }
   // Confirmed writes so far; Focus reads the other days it shows again after each.
   const [written, setWritten] = useState(0);
@@ -243,6 +269,7 @@ export function App({
       if (change) setPending((list) => [...list, change]);
       else setWaiting((count) => count + 1);
       setError("");
+      setWriteFailed(false);
       const write = queue.current.then(async () => {
         let reread = false;
         try {
@@ -256,6 +283,7 @@ export function App({
         } catch (failure) {
           writes.current.epoch++;
           setPending([]);
+          setWriteFailed(true);
           // Every write queued behind this one is dropped by the epoch check.
           const dropped = writes.current.queued - 1;
           setError(
@@ -288,13 +316,32 @@ export function App({
     },
     [revalidate, text],
   );
+  // In the background, full reads wait: one runs when Plan or Focus shows again, if a read was missed or the
+  // data has aged. A missed read means a task write elsewhere, so writes wait for that read.
+  const inBackground = useRef(background);
+  const missedRead = useRef(false);
   useEffect(() => {
-    void revalidate();
+    if (background === inBackground.current) return;
+    inBackground.current = background;
+    if (background) return;
+    if (missedRead.current) setStale(true);
+    if (
+      missedRead.current ||
+      Date.now() - loadedAt.current >= REREAD_AFTER_MS
+    ) {
+      missedRead.current = false;
+      void revalidate();
+    }
+  }, [background, revalidate]);
+  useEffect(() => {
+    if (inBackground.current) missedRead.current = true;
+    else void revalidate();
   }, [revalidate, refreshRevision]);
   useEffect(() => {
     const visible = () => {
       if (
         document.visibilityState === "visible" &&
+        !inBackground.current &&
         Date.now() - loadedAt.current >= REREAD_AFTER_MS
       ) {
         setError("");
@@ -308,14 +355,12 @@ export function App({
     if (!confirmed || !actions.readTimer) return;
     let pending = false;
     let cancelled = false;
+    // The mini timer floats in view while the main window is often hidden.
+    const visible = () =>
+      document.visibilityState === "visible" ||
+      mini?.window.document.visibilityState === "visible";
     const refreshTimer = async () => {
-      if (
-        pending ||
-        reading ||
-        writes.current.queued ||
-        document.visibilityState !== "visible"
-      )
-        return;
+      if (pending || reading || writes.current.queued || !visible()) return;
       if (
         localDate(new Date().toISOString(), confirmed.plan.timezone) !==
         confirmed.plan.today
@@ -351,15 +396,18 @@ export function App({
       REREAD_AFTER_MS,
     );
     window.addEventListener("focus", refreshTimer);
+    mini?.window.addEventListener("focus", refreshTimer);
     return () => {
       cancelled = true;
       clearInterval(interval);
       window.removeEventListener("focus", refreshTimer);
+      mini?.window.removeEventListener("focus", refreshTimer);
     };
   }, [
     actions,
     confirmed?.plan.timezone,
     confirmed?.plan.today,
+    mini,
     reading,
     revalidate,
     text.lastError,
@@ -387,6 +435,29 @@ export function App({
   useEffect(() => {
     onSnapshot?.(confirmed && { data: confirmed, readAt: loadedAt.current });
   }, [confirmed, onSnapshot]);
+  const session = confirmed && Boolean(confirmed.focus.timer);
+  useEffect(() => {
+    if (session !== undefined) onSession?.(session);
+  }, [session, onSession]);
+  // The mini timer's window closes with this page (and on a reload, with the browser's).
+  useEffect(() => {
+    if (!mini) return;
+    const closed = () => setMini(undefined);
+    mini.window.addEventListener("pagehide", closed);
+    return () => {
+      mini.window.removeEventListener("pagehide", closed);
+      mini.window.close();
+    };
+  }, [mini]);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const root = useRef<HTMLDivElement>(null);
+  const opening = useRef(false);
   useEffect(() => {
     if (externalTaskId) setSelectedId(externalTaskId);
   }, [externalTaskId]);
@@ -480,6 +551,22 @@ export function App({
     (task) => task.id === data.focus.timer?.taskId,
   );
   const timerSettling = Boolean(timerTask && completing.has(timerTask.id));
+  // The mini timer closes as the session ends: stopped, finished, completed once confirmed, or gone on a read;
+  // also when it ended while the window was opening.
+  const sessionOpen = Boolean(data?.focus.timer) && !timerSettling;
+  useEffect(() => {
+    if (mini && !sessionOpen) setMini(undefined);
+  }, [mini, sessionOpen]);
+  /** Opens the mini timer, or closes it when open. */
+  async function toggleMini() {
+    if (mini) return setMini(undefined);
+    if (opening.current || !root.current) return;
+    opening.current = true;
+    const opened = await openMiniWindow(root.current, language);
+    opening.current = false;
+    if (opened && mounted.current) setMini(opened);
+    else opened?.window.close();
+  }
   function refresh() {
     setError("");
     void revalidate();
@@ -544,187 +631,255 @@ export function App({
           <Check size={18} />
         </button>
       )}
+      {canOpenMiniWindow() && (
+        <button
+          className="plus-icon plus-pip-toggle"
+          aria-label={text.miniTimer}
+          title={text.miniTimer}
+          aria-pressed={Boolean(mini)}
+          onClick={() => void toggleMini()}
+        >
+          <PictureInPicture2 size={17} />
+        </button>
+      )}
     </aside>
   );
+  // The mini timer acts through the timer bar's own functions, so through the one write queue.
+  let miniTimer: ReactNode = null;
+  if (mini && data?.focus.timer) {
+    const timer = data.focus.timer;
+    const known = data.focus.tasks[timer.taskId];
+    const outcome = timerTask && outcomeForTask(timerTask, data.plan.tasks);
+    // The step's records on the session's day: today's, or that day's in the shown week.
+    const day =
+      timer.day === data.focus.date
+        ? data.focus
+        : data.days.find((item) => item.date === timer.day);
+    miniTimer = createPortal(
+      <MiniTimer
+        clock={mini.window}
+        language={language}
+        focus={{ ...data.focus, timer }}
+        title={
+          timerTask
+            ? displayedTitle(timerTask.title)
+            : known && displayedTitle(known.title)
+        }
+        outcome={
+          outcome && outcome.id !== timer.taskId
+            ? displayedTitle(outcome.title)
+            : undefined
+        }
+        estimate={
+          data.focus.estimates[timer.taskId] ??
+          timerTask?.estimatedMinutes ??
+          known?.estimatedMinutes ??
+          0
+        }
+        recorded={(day?.entries ?? [])
+          .filter((entry) => entry.taskId === timer.taskId)
+          .reduce((sum, entry) => sum + entry.seconds, 0)}
+        busy={busy || timerSettling}
+        failed={writeFailed && Boolean(error)}
+        onTimer={(action) => commandTimer(action, timer.taskId)}
+        onComplete={timerTask && (() => void complete(timerTask))}
+      />,
+      mini.container,
+    );
+  }
   return (
-    <div className={`plus-root plus-root-${view}`}>
-      <header className="plus-page-header">
-        <div>
-          <h1>{view === "plan" ? text.plan : text.focus}</h1>
-          <div className="plus-subtitle">
-            <CalendarDays size={13} />
-            {data
-              ? view === "plan"
-                ? weekLabel(data.days[0]?.date ?? data.plan.week, language)
-                : focusLabel(focusTab, focusDate || data.focus.date, language)
-              : ""}
-            {data && <span> · {data.plan.timezone}</span>}
-          </div>
-        </div>
-        <div className="plus-header-actions">
-          {view === "focus" && focusTab === "day" && (
-            <label className="plus-completed-toggle">
-              <input
-                type="checkbox"
-                checked={showCompleted}
-                onChange={(event) => setShowCompleted(event.target.checked)}
-              />
-              {text.completed}
-            </label>
+    // The mini timer keeps its place in the tree, so moving to the background does not remount it.
+    <>
+      {!background && (
+        <div className={`plus-root plus-root-${view}`} ref={root}>
+          <header className="plus-page-header">
+            <div>
+              <h1>{view === "plan" ? text.plan : text.focus}</h1>
+              <div className="plus-subtitle">
+                <CalendarDays size={13} />
+                {data
+                  ? view === "plan"
+                    ? weekLabel(data.days[0]?.date ?? data.plan.week, language)
+                    : focusLabel(
+                        focusTab,
+                        focusDate || data.focus.date,
+                        language,
+                      )
+                  : ""}
+                {data && <span> · {data.plan.timezone}</span>}
+              </div>
+            </div>
+            <div className="plus-header-actions">
+              {view === "focus" && focusTab === "day" && (
+                <label className="plus-completed-toggle">
+                  <input
+                    type="checkbox"
+                    checked={showCompleted}
+                    onChange={(event) => setShowCompleted(event.target.checked)}
+                  />
+                  {text.completed}
+                </label>
+              )}
+              <button
+                className="plus-icon plus-refresh"
+                aria-label={text.refresh}
+                disabled={waiting > 0}
+                onClick={refresh}
+              >
+                <RefreshCw
+                  size={17}
+                  className={
+                    waiting || weekLoading || reading ? "plus-spin" : ""
+                  }
+                />
+              </button>
+            </div>
+          </header>
+          {notices}
+          {!data && !error && (
+            <p className="plus-muted" role="status">
+              {text.loading}
+            </p>
           )}
-          <button
-            className="plus-icon plus-refresh"
-            aria-label={text.refresh}
-            disabled={waiting > 0}
-            onClick={refresh}
-          >
-            <RefreshCw
-              size={17}
-              className={waiting || weekLoading || reading ? "plus-spin" : ""}
-            />
-          </button>
-        </div>
-      </header>
-      {notices}
-      {!data && !error && (
-        <p className="plus-muted" role="status">
-          {text.loading}
-        </p>
-      )}
-      {data && (
-        <fieldset className="plus-content-fieldset">
-          {view === "plan" ? (
-            <>
-              <WeeklyGoals
-                plan={data.plan}
-                language={language}
-                busy={busy}
-                run={run}
-                actions={planActions}
-              />
-              <PlanView
-                plan={data.plan}
-                days={data.days}
-                focusTasks={data.focus.tasks}
-                timer={data.focus.timer}
-                currentDate={data.plan.today}
-                onWeekChange={changeWeek}
-                language={language}
-                busy={busy || weekLoading}
-                pending={pendingCards}
-                run={run}
-                actions={planActions}
-                editTask={openTask}
-                completeReview={(task) => complete(task, "")}
-                completeTask={(task, day) => void complete(task, day)}
-                onOpenTask={onOpenTask}
-                onOpenMail={onOpenMail}
-                reviewing={review}
-                planView={planView}
-                onPlanView={onPlanView}
-                showStart={showStart}
-                onStartShown={() => setShowStart(false)}
-              />
-            </>
-          ) : (
-            <FocusView
-              plan={data.plan}
-              focus={data.focus}
-              // The quiet line looks at this week's queues; while Plan shows another week, at today's.
-              days={
-                data.days[0]?.date === data.plan.week ? data.days : [data.focus]
+          {data && (
+            <fieldset className="plus-content-fieldset">
+              {view === "plan" ? (
+                <>
+                  <WeeklyGoals
+                    plan={data.plan}
+                    language={language}
+                    busy={busy}
+                    run={run}
+                    actions={planActions}
+                  />
+                  <PlanView
+                    plan={data.plan}
+                    days={data.days}
+                    focusTasks={data.focus.tasks}
+                    timer={data.focus.timer}
+                    currentDate={data.plan.today}
+                    onWeekChange={changeWeek}
+                    language={language}
+                    busy={busy || weekLoading}
+                    pending={pendingCards}
+                    run={run}
+                    actions={planActions}
+                    editTask={openTask}
+                    completeReview={(task) => complete(task, "")}
+                    completeTask={(task, day) => void complete(task, day)}
+                    onOpenTask={onOpenTask}
+                    onOpenMail={onOpenMail}
+                    reviewing={review}
+                    planView={planView}
+                    onPlanView={onPlanView}
+                    showStart={showStart}
+                    onStartShown={() => setShowStart(false)}
+                  />
+                </>
+              ) : (
+                <FocusView
+                  plan={data.plan}
+                  focus={data.focus}
+                  // The quiet line looks at this week's queues; while Plan shows another week, at today's.
+                  days={
+                    data.days[0]?.date === data.plan.week
+                      ? data.days
+                      : [data.focus]
+                  }
+                  onShowStart={() => {
+                    setShowStart(true);
+                    onViewChange?.("plan");
+                  }}
+                  language={language}
+                  busy={busy}
+                  pending={pendingCards}
+                  completing={completing}
+                  tab={focusTab}
+                  date={focusDate || data.focus.date}
+                  onNavigate={(tab, date) => {
+                    setFocusTab(tab);
+                    setFocusDate(date === data.focus.date ? "" : date);
+                  }}
+                  actions={planActions}
+                  run={run}
+                  written={written}
+                  showCompleted={showCompleted}
+                  onOpenTask={onOpenTask}
+                  editTask={openTask}
+                  complete={(task) => void complete(task)}
+                  onOpenPlan={() => onViewChange?.("plan")}
+                  onTimer={commandTimer}
+                />
+              )}
+            </fieldset>
+          )}
+          {timerBar}
+          <dialog
+            className="plus-dialog"
+            ref={dialog}
+            aria-labelledby={selected && data ? dialogTitle : undefined}
+            onClose={() => {
+              setSelectedId("");
+              if (opener.current?.isConnected) opener.current.focus();
+              opener.current = null;
+            }}
+            onCancel={() => setSelectedId("")}
+            onClickCapture={swallowSecondClick}
+            onMouseDownCapture={swallowSecondClick}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) {
+                dialog.current?.close();
+                setSelectedId("");
               }
-              onShowStart={() => {
-                setShowStart(true);
-                onViewChange?.("plan");
-              }}
-              language={language}
-              busy={busy}
-              pending={pendingCards}
-              completing={completing}
-              tab={focusTab}
-              date={focusDate || data.focus.date}
-              onNavigate={(tab, date) => {
-                setFocusTab(tab);
-                setFocusDate(date === data.focus.date ? "" : date);
-              }}
-              actions={planActions}
-              run={run}
-              written={written}
-              showCompleted={showCompleted}
-              onOpenTask={onOpenTask}
-              editTask={openTask}
-              complete={(task) => void complete(task)}
-              onOpenPlan={() => onViewChange?.("plan")}
-              onTimer={commandTimer}
-            />
-          )}
-        </fieldset>
+            }}
+          >
+            {selected && data && selected.kind === "step" && (
+              <StepEditor
+                // Not keyed by its pending estimate: a save keeps the panel and its focus.
+                key={selected.id}
+                task={selected}
+                tasks={data.plan.tasks}
+                language={language}
+                busy={busy || selectedPending}
+                pending={selectedPending}
+                run={run}
+                actions={planActions}
+                onOpenTask={onOpenTask}
+                titleId={dialogTitle}
+                onClose={() => {
+                  dialog.current?.close();
+                  setSelectedId("");
+                }}
+              />
+            )}
+            {selected && data && selected.kind !== "step" && (
+              <TaskEditor
+                // Once the drag settles, the fields show what the server kept.
+                key={`${selected.id}:${selectedPending}`}
+                titleId={dialogTitle}
+                task={selected}
+                tasks={data.plan.tasks}
+                dependencies={data.plan.dependencies}
+                language={language}
+                busy={busy || selectedPending}
+                pending={selectedPending}
+                run={run}
+                actions={planActions}
+                todayTaskIds={data.focus.taskIds}
+                today={data.plan.today}
+                addFocus={(id) => void addFocus(id, data.focus)}
+                onOpenTask={onOpenTask}
+                onOpenDependency={setSelectedId}
+                onClose={() => {
+                  dialog.current?.close();
+                  setSelectedId("");
+                }}
+              />
+            )}
+          </dialog>
+        </div>
       )}
-      {timerBar}
-      <dialog
-        className="plus-dialog"
-        ref={dialog}
-        aria-labelledby={selected && data ? dialogTitle : undefined}
-        onClose={() => {
-          setSelectedId("");
-          if (opener.current?.isConnected) opener.current.focus();
-          opener.current = null;
-        }}
-        onCancel={() => setSelectedId("")}
-        onClickCapture={swallowSecondClick}
-        onMouseDownCapture={swallowSecondClick}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) {
-            dialog.current?.close();
-            setSelectedId("");
-          }
-        }}
-      >
-        {selected && data && selected.kind === "step" && (
-          <StepEditor
-            // Not keyed by its pending estimate: a save keeps the panel and its focus.
-            key={selected.id}
-            task={selected}
-            tasks={data.plan.tasks}
-            language={language}
-            busy={busy || selectedPending}
-            pending={selectedPending}
-            run={run}
-            actions={planActions}
-            onOpenTask={onOpenTask}
-            titleId={dialogTitle}
-            onClose={() => {
-              dialog.current?.close();
-              setSelectedId("");
-            }}
-          />
-        )}
-        {selected && data && selected.kind !== "step" && (
-          <TaskEditor
-            // Once the drag settles, the fields show what the server kept.
-            key={`${selected.id}:${selectedPending}`}
-            titleId={dialogTitle}
-            task={selected}
-            tasks={data.plan.tasks}
-            dependencies={data.plan.dependencies}
-            language={language}
-            busy={busy || selectedPending}
-            pending={selectedPending}
-            run={run}
-            actions={planActions}
-            todayTaskIds={data.focus.taskIds}
-            today={data.plan.today}
-            addFocus={(id) => void addFocus(id, data.focus)}
-            onOpenTask={onOpenTask}
-            onOpenDependency={setSelectedId}
-            onClose={() => {
-              dialog.current?.close();
-              setSelectedId("");
-            }}
-          />
-        )}
-      </dialog>
-    </div>
+      {miniTimer}
+    </>
   );
 }

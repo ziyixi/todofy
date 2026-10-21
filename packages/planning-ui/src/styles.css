@@ -172,6 +172,10 @@
   background: var(--plus-hover);
   color: var(--plus-text) !important;
 }
+/* The timer bar's mini timer toggle takes the accent while its window is open, as a pressed toggle. */
+.plus-pip-toggle[aria-pressed="true"] {
+  color: var(--plus-accent) !important;
+}
 .plus-muted {
   color: var(--plus-muted);
   font-size: 12px;

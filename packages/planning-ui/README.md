@@ -28,11 +28,14 @@ of GetPlan, ListTasks pages, ListFocusDays and GetFocusTimer, and every planning
 or UpdateWeeklyBet, sent under the etag Plan holds with no read first. Only the weekly review's two Todofy facts (ReadWeeklyReview, read when the review opens) and the
 Mail categories go to `/api/plus/v1/*` with CSRF, which Todofy's private Planning channel forwards. Host callbacks
 open the full task editor and Tasks' Mail page. `snapshot`/`onSnapshot` keep confirmed content in page memory; `planView`/`onPlanView`
-optionally remember IDs and view choices, never task text.
+optionally remember IDs and view choices, never task text. `onSession` reports whether a Focus session exists, and
+`background` lets the host keep the app mounted behind its other pages, where it renders only the Focus mini timer
+(a Document Picture-in-Picture window) and keeps it working.
 
 The package keeps the write ordering, confirmed timer state and pending-card rendering. It does not
 synchronize task stores or own server state. CSS is compiled into Tasks and scoped to planning classes and
-`.planning-ui`; Tasks' layout owns the outer width and spacing.
+`.planning-ui`; Tasks' layout owns the outer width and spacing. The mini timer's own stylesheet
+(`src/mini-timer.css`) goes only into its window, with the page's computed tokens.
 
 Run `npm ci`, `npm run typecheck` and `npm test`. The unit suite in `test/` covers the components, the
 domain rules and the API mapping over a fake transport; Tasks' Playwright journeys

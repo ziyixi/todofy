@@ -8,5 +8,7 @@ export default defineConfig({
     environment: "jsdom",
     include: ["test/**/*.test.{ts,tsx}"],
     restoreMocks: true,
+    // The mini timer's window takes its stylesheet as text (`mini-timer.css?inline`).
+    css: { include: [/mini-timer\.css/] },
   },
 });
