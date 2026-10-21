@@ -14,43 +14,26 @@ instructions.
 
 ## Current work
 
-### Private MCP connection gate (`codex/personal-mcp`)
+### Private MCP (`codex/personal-mcp`)
 
-Implementation is isolated in `/private/tmp/todofy-personal-mcp`; the shared checkout and Claude's work are
-untouched. Published main SHA `ef76b57d` passed full branch CI `39545449859`; production release `39546367619`
-passed on attempt 2 after its initial anonymous network probe failed. The unchanged live probe also passed.
-IaC creates/updates `39545088566` / `39546470218` touched only the MCP Access application and ended with no drift.
+Work is isolated in `/private/tmp/todofy-personal-mcp`; Claude's shared checkout is untouched.
+Production is the verified connection gate `422df6a0`. Dedicated Access identity and SQLite DO namespace are
+registered in config/resources.toml. OAuth, discovery, signed subscription, actual Dots receipt, same-request
+replay and unsubscribe passed; the test left zero active subscriptions. The actual callback host is
+`connectors.api.openai.com`. [Evidence](docs/personal-mcp-verification.md).
 
-The real Access identity and SubscriptionStore namespace are recorded in config/resources.toml. Namespace adoption `9e72e2c8` removed the first-deploy marker and completed Home's resource mapping. Full
-branch CI `39547230019` and same-SHA production run `39547948701` succeeded, in addition to local registration
-checks and the full Home recipe. The MCP Worker itself remains the verified `ef76b57d` release.
-The MCP has only connection status, synthetic test delivery and persistent subscriptions, with no business bindings.
+Bridge commit `e35351c5` adds Tasks tools/Step identity persistence, a private Ops surface and Home status card,
+plus narrow MailApi/RecallApi/HomeApi source adapters. It binds only Tasks. Branch CI `39561368040` found three
+stale test assumptions: Home's exact binding list, Ops selftest mutation anchors, and a mobile drag fixture that
+chose a hidden Monday after Wednesday's date rollover. Their corrections preserve the checks; rerun full CI and
+publish the same green SHA before enabling the remaining bindings. Native/source tests, Home's 276 unit/98
+workerd/163 UI tests, MCP's 32 unit/3 workerd checks and the 437 CI-script checks passed locally.
 
-The owner approved the disclosed Connect sharing scope. The existing Chrome session completed Access GitHub
-login and OAuth grant; the private plugin discovered both tools and `personal_cloud.test`. The existing Dot read
-status successfully, but its native subscription returned a generic task-service error. Direct connected-tool
-status confirmed `ef76b57d`, zero subscriptions and no deliveries; the Dot did not send a test event.
-**Connection gate passed.** Diagnostics `ddf7820d` / `0c787e31` established the actual blocker: native Dots uses
-`connectors.api.openai.com`, while the configured callback host was `chatgpt.com`. The exact-host fix `422df6a0`
-passed branch CI `39555068340` and main publication `39555301186`. Real signed subscription succeeded, then the
-Dot reported event `test_e9d7b170-2134-4264-a590-5056feb707f5` and the correct SHA. Receiver acceptance was
-`2026-10-21T06:28:41.317Z`, one attempt. Same-UUID replay returned repeated, with no second delivery. Native
-unsubscribe stopped only the test responsibility; direct status confirms zero active subscriptions.
-No full callback URL, secret or business content was recorded. Evidence: [Personal MCP verification](docs/personal-mcp-verification.md).
-
-**Next stage in progress:** Tasks tools over its existing TasksApi; narrow Mail/Recall/Home read/collect bindings;
-the agreed four event types use the existing MCP DO's bounded polling, with no source→MCP event bindings. First
-publish MCP's small Ops surface before Home adds its status card; then publish source entrypoints before MCP's
-business bindings. Keep the original shared checkout untouched and preserve Claude's pending work.
-
-The bridge implementation is ready for full branch CI: Tasks' nine MCP tools plus persistent Step identity
-planning; private MailApi/RecallApi/HomeApi source adapters; current-only Tasks/Mail cursors and immutable Home
-attention episode sequence; Home's MCP service card via the existing Ops contract. Ops uses constant-size
-delivery totals instead of scanning retained history. Source controls, budgets and content workflows stay with
-their existing services. A shared Ops producer registration is required for `toWire`; reader-open does not allow
-an unregistered writer name. Source/local checks are green; full CI and same-SHA production publication remain.
-MCP currently binds only Tasks. The prepared content tool/readers are not registered until their source
-entrypoints are deployed; then wire the four subscriptions and verify synthetic business behavior separately.
+The working tree then wires the prepared content tools and four event readers into the existing MCP DO.
+Keep that second stage uncommitted until the bridge is green and deployed: its HomeApi binding requires the
+new Home entrypoint. Source metadata is polled only while subscribed; baseline reads skip historical events.
+Home attention excludes MCP's own failures. Source cursor plus frozen deliveries commit in one DO transaction.
+Do not claim business/production-content acceptance from the completed synthetic connection gate.
 
 ### Done steps stay in Plan's Week calendar (`claude/plan-done-steps`)
 

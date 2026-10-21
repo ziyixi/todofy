@@ -47,6 +47,7 @@ test('the Durable Object, the Ops service bindings and the one cron', () => {
     { binding: 'RECALL', service: 'recall', entrypoint: 'Ops' },
     { binding: 'BRIEF', service: 'brief', entrypoint: 'Ops' },
     { binding: 'TASKS', service: 'tasks', entrypoint: 'Ops' },
+    { binding: 'PERSONAL_MCP', service: 'personal-mcp', entrypoint: 'Ops' },
   ])
   assert.deepEqual(config.triggers, { crons: ['*/30 * * * *'] })
 })

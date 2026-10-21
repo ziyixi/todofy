@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
-  otherDays,
+  addDays,
   readFocus,
   stubPlanning,
   tasksToday,
@@ -315,7 +315,11 @@ test("on touch a card drags after a 250ms hold, and a quick swipe on it scrolls 
   page,
 }) => {
   const { today } = await openPlan(page);
-  const [day] = otherDays(today) as [string];
+  // An adjacent day stays in the three-day calendar window; Sunday uses Saturday to stay in this week.
+  const day = addDays(
+    today,
+    new Date(`${today}T12:00:00Z`).getUTCDay() === 0 ? -1 : 1,
+  );
   await week(page);
   // Playwright has no touch drag: Chromium's own touch input, through the DevTools protocol.
   const cdp = await page.context().newCDPSession(page);
