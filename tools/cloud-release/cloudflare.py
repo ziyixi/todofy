@@ -16,6 +16,7 @@ DO_KEYS = {
     "RecallState": "recall-state",
     "BriefState": "brief-state",
     "SubscriptionStore": "personal-mcp-subscriptions",
+    "TaskJobs": "tasks-jobs",
 }
 
 

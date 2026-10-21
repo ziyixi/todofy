@@ -322,8 +322,8 @@ const RESOURCES: readonly ResourceDef[] = [
   // Created for the links app's first deploy (L2, 2026-10-01).
   { id: 'links-db', kind: 'd1', name: 'links 短链接库', entry: 'links', match: RESOURCE_IDENTITIES['links-db'] ?? null },
   { id: 'tasks-db', kind: 'd1', name: 'Tasks 任务库', entry: 'tasks', match: RESOURCE_IDENTITIES['tasks-db'] ?? null },
-  // Tasks' scheduled work (GTD counts, the Sunday review), created by Tasks' first deploy with its JOBS binding.
-  { id: 'tasks-jobs', kind: 'do', name: 'TaskJobs', entry: 'tasks', script: 'tasks', match: RESOURCE_IDENTITIES['tasks-jobs'] ?? null, todo: '首次 Tasks 发布 JOBS 后，记录 DO namespace 到 config/resources.toml' },
+  // Tasks' scheduled work (GTD counts, the Sunday review, the weekly backup).
+  { id: 'tasks-jobs', kind: 'do', name: 'TaskJobs', entry: 'tasks', script: 'tasks', match: RESOURCE_IDENTITIES['tasks-jobs'] ?? null },
   // Created by the watch app's first deploy (W2, 2026-10-02); id read from the account's Durable Object namespace list.
   { id: 'watch-state', kind: 'do', name: 'WatchState', entry: 'watch', script: 'watch', match: RESOURCE_IDENTITIES['watch-state'] ?? null },
   // IDs read from the account's D1, Durable Object namespace and R2 bucket lists (2026-09-30).

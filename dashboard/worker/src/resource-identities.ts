@@ -12,6 +12,7 @@ export const RESOURCE_IDENTITIES: Readonly<Record<string, string | null>> = {
   "personal-mcp-subscriptions": "aa1c7803e2a846c191102824560a9fac",
   "recall-state": "7186ddeb99e748d19325e1e217470199",
   "tasks-db": "79a1f345-1183-46c3-bc6a-651be106f90c",
+  "tasks-jobs": "7d90ef3fb1d44ac591a3b21c99fdcccc",
   "todofy-core-do": "a013ef9fa45048d4b4f7bfcc641b57ea",
   "todofy-db": "151c1306-3885-4679-9592-08887b30ae68",
   "watch-state": "d58e1bdabacb4d14bbba1887f169c8b4",

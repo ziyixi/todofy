@@ -145,10 +145,10 @@ describe('the registry', () => {
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });
     expect(REGISTRY.entries.find((e) => e.id === 'self-hosted')).toMatchObject({ group: 'hidden', url: null, status: { type: 'none' } });
     expect(REGISTRY.workers.filter((w) => w.entry === 'self-hosted')).toEqual([]);
-    // All deployed namespaces, including Brief, are recorded in config/resources.toml; Tasks' TaskJobs namespace is
-    // created by its first deploy with JOBS and recorded after it.
+    // All deployed namespaces are recorded in config/resources.toml.
     const unmatched = REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id);
-    expect(unmatched).toEqual(['tasks-jobs']);
+    expect(unmatched).toEqual([]);
+    expect(resourceByMatch('do', '7d90ef3fb1d44ac591a3b21c99fdcccc')).toMatchObject({ id: 'tasks-jobs', kind: 'do', entry: 'tasks', script: 'tasks' });
     expect(resourceByMatch('do', '6edfe7c19d6748b186ee38bb48c686be')).toMatchObject({ id: 'brief-state', kind: 'do', entry: 'brief', script: 'brief' });
     expect(REGISTRY.resources.find((r) => r.id === 'recall-state')).toMatchObject({ kind: 'do', entry: 'recall', script: 'recall' });
     expect(resourceByMatch('r2', 'recall-store')).toMatchObject({ id: 'recall-store', entry: 'recall' });
