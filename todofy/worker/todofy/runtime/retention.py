@@ -5,9 +5,7 @@ auth-failure counters 30 days; imported legacy mail text until its
 ``expires_at`` and, when LEGACY_TEXT_RETENTION_DAYS is above 0, for that many
 days (0 keeps it). ``mail_events`` is never deleted: it is the webhook dedupe
 ledger. Nor are ``summaries`` (since 2026-10, the owner's rule): a summary is
-Mail's content and goes only when the owner deletes it. The GTD ledger's daily
-aggregates and weekly reviews stay as they are until Tasks has copied them and a
-later migration drops them.
+Mail's content and goes only when the owner deletes it.
 """
 
 import json

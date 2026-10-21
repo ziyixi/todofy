@@ -8,6 +8,7 @@ import pytest
 from tests.runtime.harness import ROOT, Worker, _wrangler, mail_event
 
 RETIRE_TASK_WRITES = "0014_retire_task_writes.sql"
+DROP_COPIED = "0015_drop_copied_stores.sql"
 # One row the code removed with 0014 would still have had to finish, for each of its guard's counts.
 GUARDED = {
     "summarized": "INSERT INTO mail_events (source_id, event_id, payload_hash, state, created_at, updated_at)"
@@ -20,6 +21,8 @@ GUARDED = {
     f" updated_at) VALUES ('watch', 'i1', 0, '{'0' * 36}', 'unknown', 1, 1)",
 }
 DROPPED = {"task_intents", "task_intent_tasks", "gtd_snapshots", "gtd_snapshot_tasks"}
+# What Tasks' one-time import copied, which 0015 drops.
+COPIED = {"gtd_daily", "gtd_reviews", "plan_settings", "plan_categories"}
 
 
 def test_all_migrations_are_applied(worker: Worker) -> None:
@@ -29,15 +32,16 @@ def test_all_migrations_are_applied(worker: Worker) -> None:
     assert [row["name"] for row in worker.d1("SELECT name FROM d1_migrations ORDER BY id")] == files
 
 
-def test_the_retired_tables_are_dropped_and_the_copied_ones_kept(worker: Worker) -> None:
+def test_the_retired_and_copied_tables_are_dropped(worker: Worker) -> None:
     tables = {row["name"] for row in worker.d1("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert not tables & {"plus_connections", "plus_actions", "plus_settings", "plus_weeks"}
     assert not tables & {"plan_task_state", "plan_tasks", "plan_edges", "plan_marks", "plan_notes"}
-    assert not tables & (DROPPED | {"_release_guard"})
-    # What Tasks' one-time import still reads.
-    assert {"plan_settings", "plan_categories", "gtd_daily", "gtd_reviews", "mail_reminders"} <= tables
+    assert not tables & (DROPPED | COPIED | {"_release_guard"})
+    # The legacy host import (tools/legacy_migration) still loads the reminders.
+    assert "mail_reminders" in tables
     indexes = {row["name"] for row in worker.d1("SELECT name FROM sqlite_master WHERE type = 'index'")}
-    assert not indexes & {"summaries_expiring", "summaries_task"} and "summaries_pending" in indexes
+    assert not indexes & {"summaries_expiring", "summaries_task", "gtd_reviews_sending", "plan_categories_name"}
+    assert "summaries_pending" in indexes
 
 
 def test_worker_writes_land_in_the_persisted_d1_that_wrangler_reads(worker: Worker) -> None:
@@ -102,3 +106,20 @@ def test_0014_applies_cleanly_over_finished_rows(tmp_path: Path) -> None:
     staged.apply()
     assert not staged.tables() & (DROPPED | {"_release_guard"})
     assert staged.sql("SELECT state FROM mail_events") == [{"state": "complete"}]
+
+
+def test_0015_drops_the_copies_with_their_rows_and_keeps_the_reminders(tmp_path: Path) -> None:
+    staged = Staged(tmp_path)
+    staged.sql(
+        "INSERT INTO gtd_reviews (week, state, subject, body, created_at, updated_at)"
+        " VALUES ('2026-W42', 'created', 'Synthetic', 'Synthetic', 1, 1);"
+        " INSERT INTO plan_categories (id, name, created_at, updated_at) VALUES (4, 'Synthetic', 1, 1);"
+        " INSERT INTO plan_settings (key, value, updated_at) VALUES ('todoist.mail', '{}', 1);"
+        " INSERT INTO mail_reminders (day, state, attention_count, created_at, updated_at)"
+        " VALUES ('2026-10-20', 'created', 1, 1, 1)"
+    )
+    for name in (RETIRE_TASK_WRITES, DROP_COPIED):
+        shutil.copy(ROOT / "migrations" / name, staged.migrations)
+    staged.apply()
+    assert not staged.tables() & COPIED
+    assert staged.sql("SELECT day FROM mail_reminders") == [{"day": "2026-10-20"}]

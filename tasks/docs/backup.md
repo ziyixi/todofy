@@ -149,5 +149,5 @@ categories and, as frozen rows, the projects its daily reminder and review went 
 ran the one-time Tasks Todofy import, a dispatched workflow whose generator copied every day and review Tasks lacked,
 the categories whose labels were live (once, keeping their IDs) and the routes `home` and `review`. The next release,
 pushed once the import's apply run had passed `--expect-none` (nothing pending), deleted the workflow, the generator
-and their tests and dropped Todofy's copies (Todofy's migration 0015); `git log -- tasks/tools/todofy-import.ts` finds
-them.
+and their tests and dropped Todofy's copies (`0015_drop_copied_stores.sql`); `git log -- tasks/tools/todofy-import.ts`
+finds them.

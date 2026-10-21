@@ -67,8 +67,8 @@ carry IDs, counts and codes, never a subject, brief or summary.
 ## The categories Todofy kept
 
 The Mail categories were `plan_categories` rows of scheme `mail`, with their Tasks label IDs in the `plan_settings`
-document `todoist.mail`. Nothing in Todofy reads them any more: Tasks owns the categories, and its one-time import
-copies these rows. They are all that is left of the planning store (migration `0007`); migration
-`0013_drop_plan_store.sql` dropped the rest after Tasks' planning import of 2026-10-20
-([tasks/docs/backup.md](../../tasks/docs/backup.md#one-time-planning-import)). The receipts of PlusService's writes
+document `todoist.mail`, the last of the planning store (migration `0007`). Tasks owns the categories now: its
+one-time Todofy import copied these rows ([tasks/docs/backup.md](../../tasks/docs/backup.md#one-time-todofy-import)),
+and migration `0015_drop_copied_stores.sql` dropped them, as `0013_drop_plan_store.sql` dropped the rest after Tasks'
+planning import of 2026-10-20. `summaries.category_id` keeps the category ID Tasks reports. The receipts of PlusService's writes
 (`plus_receipts`) and the planning writes' journal (`native_task_requests`) are dropped from TodofyCore's own SQLite.

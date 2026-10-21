@@ -99,14 +99,6 @@ def seed(db: sqlite3.Connection) -> None:
     db.execute("INSERT INTO legacy_mail_text (event_id, created_at, text, expires_at) VALUES ('legacy:2', 2, 't', 9)")
 
 
-def seed_categories(db: sqlite3.Connection) -> None:
-    """A synthetic Mail category that keeps its own ID (after a gap) and its label binding through a restore."""
-    binding = {"categories": [{"id": 4, "label_id": "L1", "label": "回复"}], "destination": ""}
-    db.execute("INSERT INTO plan_settings VALUES ('todoist.mail', ?, 1)", (json.dumps(binding, ensure_ascii=False),))
-    db.execute("INSERT INTO plan_categories (id, name, priority, created_at, updated_at) VALUES (4, '回复', 1, 1, 1)")
-    db.execute("UPDATE summaries SET category_id = 4, triaged_at = 2 WHERE event_id = 'e01'")
-
-
 def export(db: sqlite3.Connection, root: Path, table: sql.Table, prefix: str, page_rows: int = 4) -> dict:
     """What runtime/backup.py stores for one table: its pages (and deferred values), a part per two pages."""
     db.row_factory = sqlite3.Row
@@ -162,7 +154,6 @@ def dump(db: sqlite3.Connection) -> dict[str, list[tuple]]:
 def source() -> sqlite3.Connection:
     db = database()
     seed(db)
-    seed_categories(db)
     return db
 
 
@@ -182,18 +173,9 @@ def test_backup_round_trips_into_an_empty_database(source, tmp_path):
     assert dump(target) == dump(source)
 
 
-def test_restored_category_ids_are_never_handed_out_again(source, tmp_path):
-    backup_of(source, tmp_path)
-    write_sql(tmp_path, tmp_path / "restore.sql", legacy_text=True)
-    target = database()
-    target.executescript((tmp_path / "restore.sql").read_text())
-    category = target.execute("INSERT INTO plan_categories (name, created_at, updated_at) VALUES ('Read', 9, 9)")
-    assert category.lastrowid == 5
-
-
 def test_a_backup_from_before_the_planning_store_restores_into_it(tmp_path):
-    """The restore names its columns, so the new summaries columns read NULL and the Mail categories stay empty.
-    The backup's Plus tables, which 0013 dropped, are left out."""
+    """The restore names its columns, so the new summaries columns read NULL. The backup's Plus tables, which 0013
+    dropped, are left out."""
     before = [migration for migration in MIGRATIONS if migration.name < "0007"]
     old = database(migrations=before)
     seed(old)
@@ -210,7 +192,6 @@ def test_a_backup_from_before_the_planning_store_restores_into_it(tmp_path):
     assert target.execute("SELECT event_id, category_id, triaged_at, brief FROM summaries").fetchall() == [
         ("e01", None, None, None)
     ]
-    assert target.execute("SELECT count(*) FROM plan_categories").fetchone() == (0,)
     ok, lines = verify(SqliteWrangler(target), "DB", tmp_path, legacy_text=True)
     later = ", ".join(migration.name for migration in MIGRATIONS if migration not in before)
     assert ok and lines[0] == f"PASS schema_version {before[-1].name} (later migrations applied: {later})"
@@ -233,6 +214,8 @@ def test_a_backup_from_before_the_briefs_restores_them_as_never_derived(tmp_path
 
 # The planning store migration 0013 drops; backed_up() reads how the releases before it backed each table up.
 PLANNING = ("plus_settings", "plus_weeks", "plan_marks", "plan_edges", "plan_notes", "plan_task_state", "plan_tasks")
+# The copies Tasks took, which migration 0015 drops, as the releases before it backed them up.
+COPIED = ("gtd_daily", "gtd_reviews", "plan_settings", "plan_categories")
 # The idle Plus tables migration 0012 drops, as the releases before it backed them up.
 IDLE_PLUS = [
     sql.Table("plus_connections", ("id", "display_name", "token_sha256", "revoked", "created_at"), ("id",), 50),
@@ -268,7 +251,8 @@ def test_retired_tables_restore_until_a_migration_drops_them(tmp_path, monkeypat
     old.execute("INSERT INTO plan_tasks (provider, external_id, created_at) VALUES ('todoist', 'A', 1)")
     old.execute("INSERT INTO plan_settings VALUES ('week', '{\"current\":\"2026-09-28\"}', 1)")
     planning = [backed_up(old, name) for name in PLANNING]
-    release = [*sql.TABLES.values(), *planning, *IDLE_PLUS]
+    copied = [backed_up(old, name) for name in COPIED]
+    release = [*sql.TABLES.values(), *copied, *planning, *IDLE_PLUS]
     backup_of(old, tmp_path, schema_version=before[-1].name, release=release)
     # A checkout before 0012 restores them like every other table. Its 0011 drops plan_task_state, then renames the
     # rebuilt copy back: the table stays.
@@ -284,18 +268,20 @@ def test_retired_tables_restore_until_a_migration_drops_them(tmp_path, monkeypat
     lines = write_sql(tmp_path, tmp_path / "plus.sql", legacy_text=True)
     assert lines[:2] == ["SKIP plus_connections (retired)", "SKIP plus_actions (retired)"]
     assert "PASS plus_weeks rows=1 statements=1" in lines
-    # This checkout's 0013 drops the planning store too. The old backup's other plan_settings rows still restore.
+    # This checkout's 0013 drops the planning store too, and its 0015 what Tasks copied (plan_settings among it).
     monkeypatch.undo()
     assert backup_restore.retired_tables() == set(backup_restore.RETIRED_TABLES)
     lines = write_sql(tmp_path, tmp_path / "restore.sql", legacy_text=True)
-    skipped = [f"SKIP {table.name} (retired)" for table in (*planning, *IDLE_PLUS)]
+    retired = (*copied, *planning, *IDLE_PLUS)
+    skipped = [f"SKIP {table.name} (retired)" for table in retired]
     assert lines[: len(skipped)] == skipped
-    assert not any(f" {table.name} " in line for table in (*planning, *IDLE_PLUS) for line in lines[len(skipped) :])
+    assert not any(f" {table.name} " in line for table in retired for line in lines[len(skipped) :])
     target = database()
     target.executescript((tmp_path / "restore.sql").read_text())
     events = "SELECT event_id, state FROM mail_events ORDER BY event_id"
     assert target.execute(events).fetchall() == old.execute(events).fetchall()
-    assert target.execute("SELECT key FROM plan_settings").fetchall() == [("week",)]
+    tables = {name for (name,) in target.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert not tables & set(COPIED)
     ok, checked = verify(SqliteWrangler(target), "DB", tmp_path, legacy_text=True)
     assert ok and checked[1 : 1 + len(skipped)] == skipped
     assert all(line.startswith("PASS ") for line in checked[1 + len(skipped) :])

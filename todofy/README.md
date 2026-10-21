@@ -114,8 +114,8 @@ an Inbox task in Tasks, with its category's tag and priority when one is chosen;
 then marks the mail converted. Deleting one deletes its summary and keeps the ledger row. Nothing else deletes a
 summary.
 
-The [Mail API](docs/mail-api.md) covers the binding and its access, the writes and their retries, and the Mail
-categories' rows Todofy still holds until Tasks' import; the retired Todoist Plus extension is in
+The [Mail API](docs/mail-api.md) covers the binding and its access, the writes and their retries, and where the
+Mail categories Todofy kept went; the retired Todoist Plus extension is in
 [its history](../docs/history/todoist-plus.md).
 
 ## Backups

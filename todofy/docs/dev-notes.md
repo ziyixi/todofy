@@ -129,7 +129,9 @@ migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the ow
                                0005_task_intents.sql adds task_intents and task_intent_tasks (§5, task-intent-v1);
                                0006_todoist_plus.sql the Todoist Plus tables and 0007_plan_store.sql the planning
                                store (mail-api.md); 0014_retire_task_writes.sql drops the task intents and the GTD
-                               snapshot once no row still needs the task writes (its guard stops the deploy otherwise)
+                               snapshot once no row still needs the task writes (its guard stops the deploy otherwise);
+                               0015_drop_copied_stores.sql drops the GTD days and reviews and the Mail categories
+                               Tasks copied (mail_reminders stays for tools/legacy_migration)
 api/                           machine-api-v1.openapi.yaml (the hooks hosts' routes: webhook, newsletter,
                                health; the owner API is ../proto/todofy/ui/v1), newsletter report
                                schemas; the webhook body references ../contracts/mail-received-v1 (shared,
@@ -515,8 +517,7 @@ async def tick(db, env, now: int) -> bool             # one bounded sweep; True 
 Uses only `core.sql.retention` batches (≤ 5 bounded writes per call, one D1 batch: reports after 90 days,
 owner actions after 180, auth failures after 30, imported legacy text at its `expires_at` and,
 with `LEGACY_TEXT_RETENTION_DAYS`, after that many days); never deletes `mail_events`, nor `summaries` (since
-2026-10: a summary is Mail's mail, which the owner deletes). `gtd_daily` and `gtd_reviews` stay unswept until
-Tasks' one-time import has copied them.
+2026-10: a summary is Mail's mail, which the owner deletes).
 
 ### Gateway (G; `gateway/src`)
 `access.ts` and `csrf.ts` are adapters over the shared package `packages/edge-auth` (the repository

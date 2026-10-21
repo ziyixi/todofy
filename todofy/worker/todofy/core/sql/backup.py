@@ -124,60 +124,6 @@ DAILY_METRICS = Table("daily_metrics", ("day", "key", "value"), ("day", "key"), 
 # backups made before (restores of older backups never depend on a shared copy). Texts reach
 # 1.9 MB, hence the small page.
 LEGACY_MAIL_TEXT = Table("legacy_mail_text", ("event_id", "created_at", "text", "expires_at"), ("event_id",), 8)
-# The GTD ledger (migration 0004): counts only, never task text. Kept until Tasks has copied them; the raw snapshot
-# tables went with migration 0014.
-GTD_DAILY = Table(
-    "gtd_daily",
-    (
-        "day",
-        "scope",
-        "open",
-        "age_0_7",
-        "age_8_14",
-        "age_15_30",
-        "age_31_plus",
-        "oldest_days",
-        "overdue",
-        "undated",
-        "created_7d",
-        "completed_7d",
-        "completed_source",
-        "closed_1d",
-        "mail_open",
-        "complete",
-        "computed_at",
-    ),
-    ("day", "scope"),
-    500,
-)
-GTD_REVIEWS = Table(
-    "gtd_reviews",
-    (
-        "week",
-        "state",
-        "project_id",
-        "task_id",
-        "subject",
-        "body",
-        "attempts",
-        "next_attempt_at",
-        "last_error_code",
-        "completed_at",
-        "created_at",
-        "updated_at",
-    ),
-    ("week",),
-    200,
-)
-# The Mail categories: what is left of the planning store (migration 0007; 0013 dropped the rest).
-PLAN_SETTINGS = Table("plan_settings", ("key", "value", "updated_at"), ("key",), 50)
-PLAN_CATEGORIES = Table(
-    "plan_categories",
-    ("id", "scheme", "name", "priority", "sort_order", "archived_at", "created_at", "updated_at"),
-    ("id",),
-    100,
-)
-
 TABLES = {
     table.name: table
     for table in (
@@ -190,10 +136,6 @@ TABLES = {
         AUTH_FAILURES,
         DAILY_METRICS,
         LEGACY_MAIL_TEXT,
-        GTD_DAILY,
-        GTD_REVIEWS,
-        PLAN_SETTINGS,
-        PLAN_CATEGORIES,
     )
 }
 

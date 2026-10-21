@@ -63,12 +63,11 @@ APP = Path(__file__).resolve().parents[1]
 PRODUCTION_CONFIG = APP / "wrangler.toml"
 MIGRATIONS_DIR = APP / "migrations"
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-# The idle Plus tables 0012 drops, the planning store Tasks copied, which 0013 drops (only the Mail categories
-# stay: plan_categories and plan_settings 'todoist.mail'), and the task intents and GTD snapshots 0014 drops when
-# Todofy stopped writing tasks. A backup made while one exists holds it, so once a migration of this checkout drops
-# one, restore leaves it out instead of failing on a table the schema no longer has. Until that migration exists,
-# they restore like every other table. An older backup's other plan_settings rows ('week', 'board', ...) still
-# restore: nothing reads them, and leaving them out would break verify's row count.
+# The idle Plus tables 0012 drops, the planning store Tasks copied, which 0013 drops, the task intents and GTD
+# snapshots 0014 drops when Todofy stopped writing tasks, and the GTD days, weekly reviews and Mail categories Tasks
+# copied, which 0015 drops. A backup made while one exists holds it, so once a migration of this checkout drops one,
+# restore leaves it out instead of failing on a table the schema no longer has. Until that migration exists, they
+# restore like every other table.
 RETIRED_TABLES = (
     "plus_connections",
     "plus_actions",
@@ -83,6 +82,10 @@ RETIRED_TABLES = (
     "task_intent_tasks",
     "gtd_snapshots",
     "gtd_snapshot_tasks",
+    "gtd_daily",
+    "gtd_reviews",
+    "plan_settings",
+    "plan_categories",
 )
 # The statements that create, rename into or drop a table. A table's last one, in migration order, says whether this
 # checkout's schema has it: 0011 drops plan_task_state and renames its rebuilt copy back.
