@@ -10,13 +10,14 @@ outside the approved scope.
 | Component | Owns | Interface |
 | --- | --- | --- |
 | Tasks web | Navigation, draft forms, selection and rendered views | Generated `TasksUiService` client, same-origin owner requests |
-| Tasks Worker and D1 | Task/Subtask and Step content, effort, catalog, dates, completion history, planning facts, dependencies, Plan's weekly goals and lane orders, and Focus's day queues, timer and time records | Root `proto/tasks/ui/v1`, named `TasksApi`, read-only `Ops` |
-| Todofy | Mail, the weekly review task and operation receipts | Named `Planning` binding, limited to the Mail methods and ReadWeeklyReview |
+| Tasks Worker and D1 | Task/Subtask and Step content, effort, catalog, dates, completion history, planning facts, dependencies, Plan's weekly goals and lane orders, Focus's day queues, timer and time records, the Mail categories, the GTD days and the weekly reviews | Root `proto/tasks/ui/v1`, named `TasksApi`, create-only `TaskInbox` (`tasks.inbox.v1`), read-only `Ops`; the `TaskJobs` Durable Object for its scheduled jobs |
+| Todofy | Mail: the ledger, the summaries and the mail awaiting a decision | Its private Mail entry (`todofy.mail.v1`), which Tasks binds as `MAIL` (read-write) |
 | Shared planning UI | Plan, Focus and the optional Mail shortcut editor | Caller-supplied typed transport and navigation callbacks |
 
 Applications do not import each other's source or databases. `packages/planning-ui` compiles into
 Tasks; `packages/task-dates` supplies the date parser used by the Tasks Worker and import tools. A `read`
-binding may only read Tasks; Todofy receives the provisioned task API; other bindings are rejected.
+binding may only read Tasks; a `read-write` one may also write; other bindings are rejected. Home and Watch create
+their tasks through `TaskInbox`, whose binding names the source. Todofy binds Tasks only for its weekly backup.
 
 Tasks is the only task source; no consumer reads or writes Todoist. Existing task IDs and planning internal
 IDs survived the cutover.
@@ -144,22 +145,33 @@ while paused leaves it out of the record. A pause made before that migration has
 The time is part of the request's receipt, so a replay with another time is refused. The server stores what it is
 sent to the second, as every pause does.
 
-## Native Mail and planning calls
+## Mail, GTD and the weekly review
 
-Mail is Todofy's inbox, displayed in Tasks without first creating task records. A successful native summary
-finishes its existing event and saves a summary with an empty task link. The owner chooses Create task;
-Todofy then sends a generic Tasks CreateTask into the default Inbox and records the confirmed link. Existing
-linked mail tasks keep their IDs. Deleting a Mail summary does not delete a linked task. The full stored
-summary is available through `/?mail=<eventId>#/mail`, including after filing; a long Task description links
-back to it rather than discarding the tail.
+Mail is Todofy's inbox, displayed in Tasks without first creating task records: the page lists, reads and deletes
+it through Tasks' same-origin `/api/mail/v1/*`, which forwards only those three requests to Todofy's Mail entry
+after the owner and CSRF checks. The owner chooses Create task, and Tasks converts (`ConvertMailItem`, `mail.ts`):
+it reads the mail, creates the task in its own D1 and then marks the mail converted. The task's ID is
+`uuid5(NAMESPACE_URL, "todofy-plus:mail-task:<event>:0")`, the ID Todofy derived before Tasks converted mail, so a
+retry with any request_id, after any failure between the two writes, finishes the same conversion without a second
+task. A mail an older Todofy linked to an open task moves that task to the Inbox instead. Deleting a Mail summary
+does not delete a linked task. The full stored summary is available through `/?mail=<eventId>#/mail`, including
+after filing; a long Task description links back to it rather than discarding the tail.
 
-The Mail page reads only its bounded mail API and summaries expanded by the owner. It does not load Plan,
-Focus or a task-project snapshot to discover mail. Optional tag/priority shortcuts are ordinary Tasks
-labels, separate from planning flags. Weekly review and GTD carryover count the pending Mail collection.
+The Mail page reads only its bounded mail page, the categories and summaries expanded by the owner. It does not load
+Plan, Focus or a task-project snapshot to discover mail. The optional category shortcuts (at most four, a label and a
+priority each, `mail_settings`) are ordinary Tasks labels, separate from planning flags.
 
-Planning and order writes are Tasks' own; Todofy's filing writes use generated Tasks method/body requests.
-No Todoist path or fallback remains. A binding grants `read` or `read-write` access,
-so the Tasks implementation does not enumerate application names or understand mail categories.
+The `TaskJobs` Durable Object (`jobs.ts`, `schedule.ts`) arms its own Alarm; Home's Ops status re-arms a lost one.
+After 06:00 local time it writes the day's GTD counts (`gtd.ts`: open tasks by age, the oldest, overdue and undated,
+for every project and for the Inbox, the week's creations and completions, and the mail Todofy carries). On Sunday
+from 10:00 it creates the weekly review task with its `weekly_reviews` row in one batch (`review.ts`): counts and
+trends against a week before, what stands out, the mail awaiting a decision and links, never a task title. GTD
+(`#/gtd`) shows the counts as trends; Plan's weekly review reads GetWeeklyReview (the review task and the mail
+count) and links to it. Days and reviews copied from Todofy keep their values ([backup](backup.md#one-time-todofy-import)).
+
+`TaskInbox` (`inbox.ts`) creates one task with up to 30 subtasks per call in one D1 batch with its receipt, at most 20
+a day per source, in the project `task_inbox_routes` names for the source while it is live, else the Inbox. It has
+no read, update, delete or HTTP route. No Todoist path or fallback remains.
 
 Bulk order updates use one Tasks request, one receipt and a bounded D1 transaction for all supplied etags.
 They avoid one service call per task. Cloudflare documents a finite invocation chain for

@@ -1,6 +1,6 @@
 # Tasks
 
-Personal task management for the Todofy cloud. Tasks owns tasks, projects, sections, labels, filters and completion history; each task's planning facts (stage, area, start ahead, flags) and dependencies; Plan's weekly goals and lane orders; and Focus's day queues, the timer and time records. Todofy keeps mail processing and the weekly review's two facts.
+Personal task management for the Todofy cloud. Tasks owns tasks, projects, sections, labels, filters and completion history; each task's planning facts (stage, area, start ahead, flags) and dependencies; Plan's weekly goals and lane orders; and Focus's day queues, the timer and time records; turning a mail into a task with the owner's Mail categories; and the GTD statistics and the Sunday weekly review. Todofy keeps the mail: its ledger, the summaries and the mail still awaiting a decision, read through Todofy's private Mail entry. Home and Watch create their tasks through TaskInbox, a create-only entry.
 
 ## Development status
 
@@ -21,6 +21,8 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 - Drag to a sidebar project/Inbox to move, a label to add it, or Today to schedule. Native task properties appear separately from ordinary labels.
 - Visible planning stage, context, task options, start-ahead window and Deep/Shallow effort in task details.
 - Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.
+- GTD (`#/gtd`) shows the daily counts of open, overdue and undated tasks and the Inbox's age, with 30-day trends and
+  the latest weekly review. Tasks counts once a day after 06:00 and creates the review task on Sunday from 10:00.
 - Plan keeps the candidate columns above a full-width Committed row, with horizontal cards and completion controls for outcomes and Steps.
 - Plan and Focus cards drag by their whole row, like the task list (6px, or a 250ms hold on touch); Week's
   commitments reorder like Review's Committed row, and Focus reorders today's steps.
@@ -49,7 +51,7 @@ Comments, attachments, reminders, assignment, calendar integration and voice inp
 The [design](docs/design.md) explains service boundaries and the interface. [Verification](docs/verification.md)
 separates local results from the remaining release and migration work. [Import](docs/import.md) lists private
 export and identity-check commands. [Backup](docs/backup.md) describes the weekly backup through Todofy, Time
-Travel and the restore into a new database.
+Travel, the restore into a new database and the one-time copy of what Todofy kept for Tasks.
 
 A Task or Subtask describes an outcome. Add a Step beneath it to arrange an executable action in the week,
 or select Standalone action to schedule the Task itself. Only these executable items expose a clock time
@@ -97,7 +99,9 @@ day's Focus queue (Plan and Focus send their day; the task list none, which mean
 a related running or paused timer session as a record on that session's own day. An unrelated timer keeps
 running. Reopening opens those queue rows again.
 
-Lists are bounded and indexed. Completion history is separate from active tasks. Consumers use a paged change feed; the browser does not poll to animate a timer. Imports run in batches. There is no new queue, scheduler or multi-provider framework.
+Lists are bounded and indexed. Completion history is separate from active tasks. Consumers use a paged change feed; the browser does not poll to animate a timer. Imports run in batches. The one scheduler is the TaskJobs Durable Object's own Alarm (the GTD day and the weekly review); there is no queue, cron or multi-provider framework.
+
+Machine callers bind one of two entrypoints. `TasksApi` gives generic `read` or `read-write` access over the owner API's messages (the Personal MCP). `TaskInbox` only creates: one task with up to 30 subtasks per call, at most 20 a day per source (`home`, `watch`), in the project routed for the source or the Inbox. Mail conversion and the categories are Tasks features over Todofy's Mail entry (`MAIL`): the task's ID is derived from the mail, so a retry never makes a second task.
 
 ## Migration requirements
 

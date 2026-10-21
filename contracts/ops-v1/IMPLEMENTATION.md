@@ -635,6 +635,16 @@ cutoff with an owner-set $80 budget) and `OpsStatus/brief-degraded.json` are fix
 - Guard: a shed defers `embedding` (items deduplicate by key only), `learning` (the Sunday weights) and
   `source_probe` (the daily retry of paused sources). An issue is never deferred.
 
+## 3g. Tasks (GTD counters added 2026-10-21, additive)
+
+`tasks/worker/src/ops.ts`. `status()` is one D1 batch of three reads (the newest change, the newest GTD day's rows
+and the reviews' first creation and last completion) beside the TaskJobs object's `status()`, which arms its Alarm
+when none is set (the one write ops-v1 allows). Counters: `database_ready`, `change_sequence`, and from the newest
+GTD day `inbox_open`, `inbox_oldest_days`, `overdue` and `completed_7d`, and `review_age_days` (since the last
+completed weekly review, else the first one). Signals: `gtd_stale` (warning, `age_hours`) and `review_overdue`
+(info, `days`). No capability, guard or mode besides `maintenance` (always false). Tests:
+`tasks/worker/test/runtime/ops.test.ts` and `jobs.test.ts`.
+
 ## 3b. The move onto proto/ (2026-10-01, no wire change)
 
 The contract's source of truth became the IDL [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto)

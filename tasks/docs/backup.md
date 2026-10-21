@@ -47,8 +47,9 @@ npx wrangler d1 time-travel restore DB --timestamp <RFC 3339 time> --config ../w
 `mkdir -m 700 ~/.local/share/tasks-restore && PRIV=$_`. The files written there hold task content; delete them
 afterwards.
 
-1. Set the GitHub variable `TODOFY_FORCE_PAUSE_TODOIST=true` and run the workflow on `main`. Todofy then stops
-   creating tasks from mail, reminders and intents. Do not edit in Tasks or Plan until step 7.
+1. Do not edit in Tasks or Plan until step 7. Nothing else needs pausing: Home's daily task and Watch's
+   notifications retry their frozen requests, and the GTD day and the weekly review are idempotent. A task a machine
+   writer creates before the switch is in the old database only.
 2. From `tasks/worker`, create the new database: `npx wrangler d1 create tasks-restore`. It prints the new id.
 3. From `todofy/`, download the backup whose key the health page shows. `download` checks every part,
    including the Tasks parts:
@@ -105,7 +106,7 @@ afterwards.
      to it ([import notes](../../infra/README.md#import-notes)). Keep the old database until then.
 6. Open Plan: the restored tasks carry their planning facts and dependencies. Mail links of tasks created after
    the backup point at tasks the restored database lacks; converting such a Mail item creates a new Inbox task.
-7. Set `TODOFY_FORCE_PAUSE_TODOIST=false` and run the workflow on `main`.
+7. Open Mail and GTD: Mail lists the pending mail and the categories, and GTD the restored days.
 8. Open Focus. The timer comes back as it was backed up: a session that was running then still runs, counting from
    then (at most 4 hours, or its pomodoro's length). Stop it, then fix the new record's minutes if needed.
 
