@@ -228,7 +228,10 @@ state. Its click asks for the `idle-detection` permission (`IdleDetector.request
 activation); refused, it stays off with a muted note. It shows checked only while the permission is granted.
 
 Only a count-up pauses. While one runs and the setting is on, one `IdleDetector` (threshold 10 minutes, the API's
-minimum is one) and a 15-second heartbeat watch the main window. The owner left at the moment the screen locked,
+minimum is one) and a 15-second heartbeat watch the main window. They live in the planning App, so on another page
+after a reload or relaunch, or for a session started on another device, `App` reads the timer once on load and on
+each return to the window (with the setting on only) and, when a session exists, mounts PlanningPage behind the
+page, which then watches and follows the session itself. The owner left at the moment the screen locked,
 ten minutes before Chrome reported no input, or at the last heartbeat when the next event comes ten minutes later
 (the machine slept or the page was frozen); the earliest wins. The state seen when watching begins is only a
 baseline, so a session started from the phone while the Mac sits idle is not paused. The timer is paused in Tasks
@@ -243,8 +246,8 @@ With two Tasks windows, a Web Lock (`tasks.idle-pause`) lets one watch; the othe
 Records stay exact to what Tasks is sent, to the second. What remains: Chrome reports idle and lock on its own
 schedule, so the moment can trail the true one by that delay (counted as work); a sleep is bounded by one
 heartbeat (up to a minute in a hidden window); and pausing and resuming floor to whole seconds, as every pause
-does. Nothing is added while no session exists or the setting is off; with it on, a running count-up adds no
-request until the owner leaves.
+does. Nothing is added while the setting is off; with it on, a page other than Plan or Focus adds one
+`GetFocusTimer` on load and on each return, and a running count-up adds no request until the owner leaves.
 
 Headless Chromium cannot install an app: `pwa.spec.ts` checks the parsed manifest, `pwa-launch.spec.ts` stubs
 `launchQueue` and calls its consumer as Chrome would, and `titlebar.spec.ts` stubs the display mode (its

@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { Menu } from "lucide-react";
+import { FocusTimer_State } from "@ziyixi/proto/tasks/ui/v1/focus_pb";
 import {
   api,
   describeError,
@@ -42,7 +43,7 @@ import "./styles.css";
 // The dialog and Plan load with the app: a part loaded on demand shows only after React's 300ms Suspense
 // reveal throttle when it first opens. Mail and the catalog editor are rarely opened and still load on demand.
 import { TaskDialog } from "./components/TaskDialog";
-import PlanningPage from "./PlanningPage";
+import PlanningPage, { readIdlePause } from "./PlanningPage";
 const MailPage = lazy(() => import("./MailPage"));
 const CatalogEditor = lazy(() =>
   import("./components/CatalogEditor").then((module) => ({
@@ -96,6 +97,27 @@ export function App() {
   );
   if (planningPage && planningPage !== lastPlanningPage)
     setLastPlanningPage(planningPage);
+  // Pause when away watches from PlanningPage, which nothing mounts on another page after a reload or relaunch, or
+  // for a session started on another device. With the setting on, one timer read on load and on each return finds
+  // such a session; PlanningPage then mounts behind the page, watches, and follows the session itself.
+  const planningMounted = useRef(false);
+  planningMounted.current = Boolean(planningPage || focusSession);
+  const findSession = useCallback(() => {
+    if (planningMounted.current || !readIdlePause()) return;
+    api.getFocusTimer({ name: "focusTimer" }).then(
+      (timer) => {
+        if (
+          timer.taskId &&
+          (timer.state === FocusTimer_State.RUNNING ||
+            timer.state === FocusTimer_State.PAUSED)
+        )
+          setFocusSession(true);
+      },
+      // Plan and Focus read the timer themselves; the next return tries again.
+      () => {},
+    );
+  }, []);
+  useEffect(findSession, [findSession]);
   const titlebar = useTitlebarOverlay();
   // A newer build serves Tasks, so this tab's bundle may call routes it no longer has: the page and its
   // errors give way to the reload prompt.
@@ -146,6 +168,7 @@ export function App() {
   useReturnRefresh(() => {
     void list.refresh();
     void loadCatalog();
+    findSession();
   });
   useEffect(() => {
     const change = () => {

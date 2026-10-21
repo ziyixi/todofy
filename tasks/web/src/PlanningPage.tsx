@@ -12,7 +12,7 @@ import { usePlanView } from "./usePlanView";
 
 /** Focus' Pause when away, a setting of this device like Plan's view: "on", or absent for off. */
 const IDLE_PAUSE_KEY = "tasks.idle-pause";
-function readIdlePause(): boolean {
+export function readIdlePause(): boolean {
   try {
     return window.localStorage.getItem(IDLE_PAUSE_KEY) === "on";
   } catch {

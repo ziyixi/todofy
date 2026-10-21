@@ -1,6 +1,7 @@
 import { expect, test, type CDPSession, type Page } from "@playwright/test";
 import {
   readTimer,
+  startTimer,
   stubPlanning,
   tasksToday,
   type SeedTask,
@@ -195,4 +196,59 @@ test("a pomodoro is not paused when away", async ({ page }) => {
   await expect(bar(page).locator("small")).toHaveText("Focus");
   await bar(page).getByRole("button", { name: "Stop session" }).click();
   await expect(bar(page)).toHaveCount(0);
+});
+
+test("after a reload on another page, a running count-up is still watched", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const today = await tasksToday();
+  await stubPlanning(page, { tasks, queues: { [today]: [STEP] } });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const cdp = await idleControls(page);
+  await page.addInitScript(() => localStorage.setItem("tasks.idle-pause", "on"));
+  await page.goto("/#/focus");
+  await page
+    .getByRole("button", { name: "Start: Synthetic away step" })
+    .click();
+  await expect(bar(page).locator("small")).toHaveText("Focus");
+  // Today, reloaded (as the reload prompt after a deploy does): nothing has shown Plan or Focus in this page.
+  await page.getByRole("link", { name: "Today", exact: true }).click();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Today", exact: true }),
+  ).toBeVisible();
+  await seenActive(page, cdp);
+  await page.waitForTimeout(1000);
+  const locked = Date.now();
+  await setIdle(cdp, true, false);
+  await expect.poll(async () => (await readTimer()).state).toBe("paused");
+  expect(ms((await readTimer()).pause_time)).toBeGreaterThanOrEqual(
+    locked - 50,
+  );
+  // Back: the question shows over Today, and an answer lets it go.
+  await setIdle(cdp, true, true);
+  await expect(bar(page).locator("small")).toHaveText(
+    "Away for 1 min — count it?",
+  );
+  await bar(page).getByRole("button", { name: "Keep" }).click();
+  await expect(bar(page)).toHaveCount(0);
+  expect((await readTimer()).state).toBe("running");
+});
+
+test("with the setting off, a page other than Plan or Focus reads no timer", async ({
+  page,
+}) => {
+  const today = await tasksToday();
+  const state = await stubPlanning(page, { tasks, queues: { [today]: [STEP] } });
+  await startTimer(STEP);
+  await page.goto("/#/today");
+  await expect(
+    page.getByRole("heading", { name: "Today", exact: true }),
+  ).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(
+    state.tasksRequests.filter((sent) => sent.path.includes("focusTimer")),
+  ).toEqual([]);
+  await expect(page.locator(".planning-ui")).toHaveCount(0);
 });
