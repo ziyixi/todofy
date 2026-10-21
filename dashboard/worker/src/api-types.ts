@@ -332,7 +332,7 @@ export const VIEW_ROWS_READ_MAX = 320;
 
 /**
  * Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. Tasks adds one read-only status() call.
- * (10 status, 3 probes, 1 GraphQL, 5 setGuard, 2 canary, 1 reportOps, 12 drift).
+ * (10 status, 2 probes, 1 GraphQL, 5 setGuard, 2 canary, 1 reportOps, 12 drift = 33; one spare).
  */
 export const MAX_OUTBOUND_PER_TICK = 34;
 /** Outbound calls one owner refresh may make (tested). */

@@ -122,7 +122,7 @@ keeps only the Mail categories. Mail filing uses the native Inbox, with an optio
 The task UI replaces technical planning labels and favorites with those controls while retaining their underlying
 identities.
 
-Imported task IDs preserve mail references; planning identities change provider in place.
+Imported task IDs preserve mail references.
 Tasks is the only task store: no code reads or writes Todoist, and the original account remains intact as the
 migration source. See [Tasks design](../tasks/docs/design.md), [import and cutover](../tasks/docs/import.md)
 and [verification](../tasks/docs/verification.md).

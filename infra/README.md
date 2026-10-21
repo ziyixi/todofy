@@ -505,12 +505,11 @@ AUD exists only once the application does, and the Worker must be deployed with 
    still undeployed: no route, the all-zeros AUD, the host as `PUBLIC_HOST`). The outputs check accepts the unknown
    AUD because no production config names it yet ([Outputs](#outputs)).
 2. **Merge**; the push's "Infra drift" run is **red by design** (exit 2). Check it against exactly this:
-   - `create: 1`, nothing else but `no-op` (19 rows in all; with FlowDay's `update: 2` still unapplied, that too);
+   - `create: 1`, nothing else but `no-op` (19 rows in all);
    - the one row `create` `cloudflare_zero_trust_access_application.owner["<name>"]`;
    - `output changes: 1`: `update` `access_aud`;
    - the expect line. For the watch app, computed from the addresses of this commit (the method reproduces P4's
-     recorded `fe0e0ae1a4d6`): `create=1,outputs=1@3e485bfca3ad`, or `create=1,outputs=1,update=2@14144c392b45` if
-     FlowDay's staging-host removal (`update: 2`) has not been applied yet.
+     recorded `fe0e0ae1a4d6`): `create=1,outputs=1@3e485bfca3ad`.
 
    If anything differs, stop and find out why; never copy a differing line into the dispatch.
 3. **Dispatch "Infra apply"** on `main` with that `expect`. The token must be allowed to edit Access applications

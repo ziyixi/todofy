@@ -65,4 +65,4 @@ dry-run 不改变 ConfigMap resourceVersion、Deployment UID/generation；其他
 
 实际采用过程验证了中断继续：标准导入仅登记缺失对象，未改变实际权限。
 FlowDay 的 for_each 导入依赖在本机 OpenTofu 复现并修复；非 Worker audience 导出过滤后清单生成通过。
-随后只更新生产 INFRA_TFVARS，现有应用密钥保留。provider 的空 selector 兼容例外见 [infra](../infra/README.md)。
+随后只更新生产 INFRA_TFVARS，现有应用密钥保留。provider 的空 selector 兼容例外只针对 FlowDay 的两个 policy，已随 FlowDay 于 2026-10-20 退役删除（[docs/history/flowday.md](history/flowday.md)；源码在 `777d5f01`）。

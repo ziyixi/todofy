@@ -33,13 +33,20 @@ Todofy's planning tables at once: no waiting window, flag or rollback machinery.
 5. `refactor!: retire FlowDay`: `flowday/` and `proto/flowday/` (`flowday.ui.v1` in `proto/retired.json`), its CI
    jobs and actions, every `ci_changes.py` entry (a dispatch of `app=flowday` is refused), the catalog, tool and
    bootstrap entries, Home's tile, Worker row and D1 resource (a tick makes 33 calls, two probes), and infra/:
-   `infra/retired.tf` moves the two Access applications, their two reusable policies and the D1 database to
-   undeclared addresses, with the same pairs in `RETIRED` of `.github/scripts/infra_guard.py` (managed objects
-   41 → 36). Tasks' changes feed and its generic `read` access stay: its Ops counter and backup read the feed.
+   `infra/retired.tf` moves the two Access applications and the D1 database to undeclared addresses, with the same
+   pairs in `RETIRED` of `.github/scripts/infra_guard.py` (managed objects 41 → 36); the two reusable policies keep
+   their addresses (commit 9). Tasks' changes feed and its generic `read` access stay: its Ops counter and backup
+   read the feed.
 6. `docs`: the platform docs, Home's docs, edge-auth's SPEC and proto/README without FlowDay.
 7. `docs` (optional): the links, watch, mailsort, Mail Hero and recall comments. It redeploys those five apps with no
    change in behaviour; drop it to keep their releases separate.
 8. `docs`: [the FlowDay record](docs/history/flowday.md), [History](docs/history.md) and this HANDOFF.
+9. `fix(infra)`: FlowDay's two policies leave with their resource block, not by a move, so the apply deletes them
+   after the applications that use them (a move drops that order from the state, and Cloudflare refuses to delete a
+   policy in use); the guard now refuses a moved Access policy ([Retiring an app](infra/README.md#retiring-an-app)).
+10. `docs(links)`: corrects commit 7's registry sentence; it redeploys Links, so drop it together with commit 7.
+11. `docs(todofy)`: two of Todofy's planning documents describe the self-hosted hosts in general terms only.
+12. `docs`: Home's per-tick counts and pending checks, other leftovers of commits 5 and 6, and this HANDOFF.
 
 Final local check on 2026-10-20 UTC, with `777d5f01` still the tip of `origin/main`: `ci_changes.py` selects every
 check job and deploys Tasks, Todofy and Home (with commit 7 also Mail Hero, Links, Watch, Mailsort and Recall),
@@ -91,7 +98,7 @@ The lead's steps after the release, in this order:
 1. Read the merge commit's "Infra drift" run (it runs because `infra/` changed); do not apply yet. It must show
    `delete: 5` in exactly the rows `cloudflare_d1_database.retired_flowday`,
    `cloudflare_zero_trust_access_application.retired_flowday`, `cloudflare_zero_trust_access_application.retired_flowday_bypass`,
-   `cloudflare_zero_trust_access_policy.retired_flowday` and `cloudflare_zero_trust_access_policy.retired_flowday_bypass`;
+   `cloudflare_zero_trust_access_policy.flowday["flowday"]` and `cloudflare_zero_trust_access_policy.flowday["flowday-bypass"]`;
    every other row `no-op` (the previous green run's count minus 5); `output changes: 2`, both `update`
    (`access_aud`, `d1_database_ids`); no outputs problem; and the expect line `delete=5,outputs=2@<fingerprint>`.
    If it failed with "unexpected" values, step 4 above was missed: do it, then `gh workflow run infra.yml --repo ziyixi/todofy --ref main`.
@@ -104,8 +111,8 @@ The lead's steps after the release, in this order:
    Worker `flowday` (it never had a Durable Object namespace). Home's 非 CI 改动 may show these deletions once.
 5. Dispatch "Infra apply" with the line from step 1 (if `main` moved with an `infra/` change since, read the new
    drift run instead): `gh workflow run infra-apply.yml --repo ziyixi/todofy --ref main -f expect='delete=5,outputs=2@<fingerprint>' -f confirm_destructive=delete-replace-forget`.
-   It backs up the encrypted state, deletes the two Access applications, the two policies and D1 `flowday` with its
-   rows and Time Travel, and ends with a verify plan of "No changes".
+   It backs up the encrypted state, deletes the two Access applications, then the two policies, and D1 `flowday`
+   with its rows and Time Travel, and ends with a verify plan of "No changes".
 6. Delete the GitHub leftovers. List them, then delete each name printed:
    `gh secret list --env production --repo ziyixi/todofy | grep -E '^FLOWDAY_'`,
    `gh secret list --repo ziyixi/todofy | grep -E '^FLOWDAY_'` and
@@ -115,9 +122,9 @@ The lead's steps after the release, in this order:
 7. Verify: `gh workflow run infra.yml --repo ziyixi/todofy --ref main` is green with `no-op` rows only;
    `gh workflow run personal-cloud-reconcile.yml --repo ziyixi/todofy --ref main -f operation=check` passes "Verify
    complete account resource registration"; Home's 配置漂移 shows nothing `extra`.
-8. The follow-up commit, as Lab's `6f5f93e4`: delete the five `moved` blocks (`infra/retired.tf` again says no app is
-   being retired, with the apply's date) and the five `RETIRED` pairs, and update this file. Its drift run must be
-   green with no change.
+8. The follow-up commit, as Lab's `6f5f93e4`: delete the three `moved` blocks and the `retired_flowday_policies`
+   map (`infra/retired.tf` again says no app is being retired, with the apply's date) and the three `RETIRED` pairs,
+   and update this file. Its drift run must be green with no change.
 9. After the first Sunday backup after the release (2026-10-25 10:00 UTC), confirm on Todofy's health page that it
    completed. Optional read-only check from `todofy/` (names only):
    `npx wrangler d1 execute DB --remote --config wrangler.toml --command "SELECT key FROM plan_settings"` prints only

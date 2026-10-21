@@ -4,7 +4,7 @@
  * query and Worker discovery, guard, canary, digest, and the v2 views assembled from its tables. The
  * fetch and scheduled handlers only call these RPC methods.
  *
- * Bounds: every tick makes at most outboundPerTick() = 33 outbound calls (9 status, 3 probes, 1 GraphQL,
+ * Bounds: every tick makes at most outboundPerTick() = 33 outbound calls (10 status, 2 probes, 1 GraphQL,
  * ≤ 5 setGuard, ≤ 2 canary calls, ≤ 1 reportOps, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
  * writes a few dozen rows; a v2 view reads at most VIEW_ROWS_READ[view] rows (api-types.ts; tested in
  * workerd).

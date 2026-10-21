@@ -100,7 +100,7 @@ up to 3 more when the owner runs it by hand; two public GETs per tick, plus owne
 ≥ 10 min apart, so at most 144 a day each): the website's `build-info.json` (a static asset, outside
 Cloudflare's allowances) and the links app's `/robots.txt`, one request of the links Worker (about 48 a day,
 under 0.2 % of the daily requests even at the refresh cap) and no D1 query (`robots.txt` is a constant answered
-before any D1 read). Each tick writes about 10–40 SQLite rows in `HomeState` (v2 adds four: `cf_scripts` and
+before any D1 read). Each tick writes about 10–40 SQLite rows in `HomeState` (v2 adds three: `cf_scripts` and
 one `probe:<entry>` per probe). With durable reminder controls, the ordinary workerd fixtures read
 36–37 rows per rebuilt view (40-row regression budget). A 101-item synthetic warning case reads 110–111;
 retained-decision stress cases use a separate 320-row test budget. These are measured examples and test

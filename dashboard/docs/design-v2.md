@@ -310,7 +310,7 @@ Per tick: 10 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fl
 brief and Tasks) + 2 probes (website, links) + 1 GraphQL + ≤ 5 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12
 read-only drift calls (§10) = 33 outbound calls
 (`outboundPerTick`, tested ≤ `MAX_OUTBOUND_PER_TICK` = 34 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
-status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~4 per tick
+status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~3 per tick
 (`cf_scripts` and one `probe:<entry>` per probe). The links probe is one request of its Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
 [`limits.md`](limits.md).
 
