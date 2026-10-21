@@ -14,32 +14,34 @@ instructions.
 
 ## Current work
 
-### Private MCP (`codex/personal-mcp`)
+### Private MCP: released and accepted (`codex/personal-mcp`)
 
-Work is isolated in `/private/tmp/todofy-personal-mcp`; Claude's shared checkout is untouched.
-The connection gate `422df6a0` passed real owner OAuth, signed subscription, actual Dots receipt, same-request
-replay and unsubscribe (zero test subscriptions left). [Evidence](docs/personal-mcp-verification.md).
-The dedicated Access identity/SQLite namespace are registered; callbacks use exact `connectors.api.openai.com`.
+The implementation stayed in `/private/tmp/todofy-personal-mcp`; Claude's shared checkout was untouched.
+The connection gate `422df6a0` passed real owner OAuth, signed subscription, actual Dots receipt, exact-request
+replay and unsubscribe. The source bridge `44bb3ef5` passed branch `39565107285` and main `39566319560`.
+The business release `f5386a9d70d711bedd865e3b6b5dfaec605b29dc` passed complete
+[branch CI 39567087612](https://github.com/ziyixi/todofy/actions/runs/39567087612) and unchanged
+[main publication 39568082826](https://github.com/ziyixi/todofy/actions/runs/39568082826).
 
-The source bridge `44bb3ef550ee09d5b8c8a4bc2f3183666bd12117` passed complete branch CI
-[39565107285](https://github.com/ziyixi/todofy/actions/runs/39565107285) and was promoted unchanged to main.
-Its same-SHA [main publication 39566319560](https://github.com/ziyixi/todofy/actions/runs/39566319560) passed.
-It adds Tasks tools, private MCP Ops/Home monitoring and narrow MailApi/RecallApi/HomeApi source adapters;
-only Tasks is bound in that bridge. The private entrypoints are live for the business binding stage.
+The existing private Personal Cloud App/owner connection now exposes 18 tools and four business events plus the
+synthetic connection event. Its same-identity plugin is `1.1.0`, includes the repo's `personal-cloud` GTD skill,
+and remains private. App-owned description/tools were refreshed through Manage; source read-back preserved its
+binding/presentation. Home's private Ops card was observed healthy in the real owner UI.
 
-The second stage enables 18 tools and four business events in the same Worker/DO. Only subscribed sources
-are checked each minute; baselines skip history. Home events exclude MCP's own issues. Cursor progress and
-frozen deliveries commit together. Confirmed task writes are read after source I/O before event filtering;
-a superseded source baseline cannot be overwritten by an older in-flight poll. Native queue eligibility and
-receipts stay in Tasks. The local plugin skill describes owner GTD rules; account updates preserve the App ID.
-Local final checks: MCP lint/types, 35 unit tests, five real-workerd tests (restart, four event kinds, dedup,
-unsubscribe/no source polling, callback failure recovery); nine deploy tests, 14 binding/drift tests, four
-configuration generators and a deploy dry-run. Source-bridge checks include 497 TS/113 Python proto tests.
+Actual Dots acceptance: four native subscriptions, live source checks without errors, one synthetic Inbox task,
+two Steps, exact create/Step/delete replay, zero-result synthetic Recall search, and a real `task.must_start`
+receipt `must_start_1` from the DO's normal minute Alarm. All four test subscriptions were then stopped, the
+synthetic parent/two children soft-deleted and each confirmed NOT_FOUND. Final status at `08:33:59 UTC` on
+October 21 had zero subscriptions/pending/failed and two accepted callbacks (the original test plus this event).
+No existing task, real Mail collection/completion or Recall content was used as a fixture. Details and exact
+limits are in [verification](docs/personal-mcp-verification.md).
 
-After the second branch gate and same-SHA main publication, refresh tools in the existing App, update its skill,
-verify synthetic task/Steps/exact replay/soft-delete and a real business-event receipt, and check Home's MCP
-Ops card. Do not complete synthetic tasks or read real Mail/Recall content as fixtures. Stop test subscriptions
-and record actual production evidence separately from the completed connection gate and local source tests.
+Runtime is one Worker/SQLite DO, private generated Tasks/Mail/Recall/Home bindings, source polling only while
+subscribed, current baselines and cursor/delivery atomic commits. Home events exclude MCP's own issues.
+Source ownership and native receipts/eligibility stay in the applications; no new D1/Queue/Workflow/model call.
+Local checks: MCP lint/types, 35 unit/five workerd/nine deploy tests, 14 binding/drift tests, four generators and
+261.55 KiB gzip dry-run. Production acceptance does not cover natural date-only entry, real Mail collection,
+real task completion, a Recall body or a new actual Home fault. Do not restart the stopped old scheduler monitors.
 
 ### Done steps stay in Plan's Week calendar (`claude/plan-done-steps`)
 

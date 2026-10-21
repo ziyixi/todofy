@@ -1,8 +1,48 @@
-# Personal MCP connection verification
+# Personal MCP verification
 
-Status on 2026-10-20 (America/Los_Angeles): the isolated MCP Worker and OAuth infrastructure are deployed.
-Real ChatGPT consent, owner login, discovery, signed subscription, actual Dots event receipt, request deduplication
-and test unsubscribe are verified. Business tools and event sources are the next implementation stage.
+Status on 2026-10-21 UTC: the OAuth/synthetic-event gate is accepted and the business release is live.
+The existing private App and owner connection are retained. Business evidence is separate from the original
+gate and from synthetic local source tests.
+
+## Business release, 2026-10-21 UTC
+
+| Evidence | Result |
+| --- | --- |
+| Source bridge | `44bb3ef550ee09d5b8c8a4bc2f3183666bd12117`; [branch gate 39565107285](https://github.com/ziyixi/todofy/actions/runs/39565107285), [same-SHA main 39566319560](https://github.com/ziyixi/todofy/actions/runs/39566319560), success |
+| Business release | `f5386a9d70d711bedd865e3b6b5dfaec605b29dc`; [branch gate 39567087612](https://github.com/ziyixi/todofy/actions/runs/39567087612), [same-SHA main 39568082826](https://github.com/ziyixi/todofy/actions/runs/39568082826), success |
+| Actual build | Connected `connection_status` returned that full business SHA and `stage: business_tools` |
+| App discovery | Existing App's refreshed UI showed 8 write and 10 read tools plus five event types; actual Dots catalog reply `MCP_CATALOG_CHECK_f5386a9d` independently reported all 18 names, five events and the exact build |
+| Plugin skill | Same private USER/App identity, version `1.1.0`, release `pluginrel_6ad875bbf8d88191b1d77fce014f2fa8`; read-back verified skill plus unchanged binding/presentation. Plugin UI showed Skills 1 |
+| Home Ops | Real owner UI refreshed the new MCP card: normal, zero subscriptions, one previously accepted callback, no pending/failed deliveries, authenticated tool-use timestamp |
+
+Final local MCP checks passed lint/types, 35 unit tests and five real-workerd tests. The runtime journey uses actual
+SQLite DO persistence and signed local receivers: four source baselines, source cursors plus frozen deliveries,
+restart, confirmed own-write suppression, four event types, request deduplication, unsubscribe/no more source
+polling, and callback failure followed by explicit unsubscribe. Nine deploy tests, 14 binding/drift tests, four
+configuration checks and the production-config dry-run passed; the gzip bundle is 261.55 KiB.
+
+Real Dots business acceptance completed before `2026-10-21T08:33:59Z`:
+
+| Check | Observed evidence |
+| --- | --- |
+| Four live sources | Native Dots reported SUCCESS for `task.changed`, `task.must_start`, `mail.ready`, `service.attention`; connected status independently showed four active sources, advancing minute check times and no source errors |
+| Current-only baseline | Establishing the subscriptions did not deliver historical business events; the prior connection test remained the sole accepted delivery before the synthetic task entered Must start |
+| Task writes and exact retries | `643219ce-0e93-4c2d-b849-0104c8d34ede` was created once. Repeating its creation request returned the same identity; repeating Step request `466fe2a5-66bd-429a-845c-b54aadc4e30d` returned the same two Step IDs. A bounded read showed exactly two children |
+| Native startup window | The synthetic task's deadline was `2026-10-21`. Its initial default lead of zero correctly did not enter today's window; explicitly changing only `lead_days` to 1 returned etag `2` and `must_start: true` |
+| Actual business event | DO Alarm produced `must_start_1` at `2026-10-21T08:28:18.484Z`; the signed callback was accepted at `08:28:18.864Z` in one attempt. Dots' `MCP_BUSINESS_EVENT_f5386a9d` reply named that event and matched the synthetic task. A separate marked reply confirmed `automations.mcp_event` execution data, not an inference from task creation |
+| Recall binding | A unique synthetic search phrase returned zero results. No real document was opened |
+| Cleanup | Dots reported all four subscriptions STOPPED; soft-delete and an exact delete retry succeeded. Targeted reads of the synthetic parent and both known children returned NOT_FOUND |
+| Final connection state | Build remained `f5386a9d`; active subscriptions 0, active sources empty, pending 0, failed 0. Accepted count 2 consists of the original connection test plus this one business event |
+
+This run used the generated Tasks API and source Alarm, with no manual business-event emitter. The no-extra-copy
+check concerns this exact retry scenario; it does not promise global causal tracking of every descendant mutation.
+Natural date-only transitions, production Mail collection, real task completion, real Recall content and a new
+actual Home fault were not exercised. They remain covered by the scoped synthetic source tests, not by claims
+about private production content. No existing task, mail, browsing record, operating switch or budget was changed.
+
+The initial gate's binding/tool inventory below describes that earlier release. It is superseded by the business
+catalog in [Personal MCP](../personal-mcp/README.md). The Worker still has one SQLite DO and no D1/Queue/Workflow;
+its source entrypoints retain their existing application data and budgets.
 
 ## Published identity and checks
 
@@ -92,6 +132,5 @@ A preliminary task activation had no payload and is not counted as receipt. The 
 event ID and build SHA. The receiver's 2xx and the Dot's payload-specific reply are separate evidence.
 No business task, email or browsing content was read or changed during this gate.
 
-Next: add the agreed Tasks tools, followed by Mail/Recall/Home and the four business event types. Keep application
-data in its existing owner, reuse the generated contracts and the same subscription/delivery DO, and verify the
-expanded tools separately; the gate above does not establish business behavior.
+The business release above follows this accepted gate. Its additional source and live checks are recorded separately;
+this synthetic connection test does not establish business behavior.
