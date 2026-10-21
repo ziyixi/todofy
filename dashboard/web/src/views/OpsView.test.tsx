@@ -143,7 +143,7 @@ describe('操作与记录', () => {
     expect(within(actions).getAllByText(/实际：非关键工作已延后/)).toHaveLength(2)
     expect(within(actions).getByText('下发失败：超时')).toBeInTheDocument()
     const mail = within(region('应用详情')).getByRole('region', { name: 'Mail Hero' })
-    expect(within(mail).getByText('推迟的任务：原件对账、保留期清理、金丝雀清理、告警历史清理')).toBeInTheDocument()
+    expect(within(mail).getByText('推迟的任务：原件对账、保留期清理、金丝雀清理')).toBeInTheDocument()
     expect(within(within(region('应用详情')).getByRole('region', { name: 'Todofy' })).getByText(/上次下发降载设置失败：超时/)).toBeInTheDocument()
   })
 })

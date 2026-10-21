@@ -6,7 +6,6 @@
   "deferred": [
     "raw_reconcile",
     "lifecycle_retention",
-    "canary_cleanup",
-    "alert_history_purge"
+    "canary_cleanup"
   ]
 }

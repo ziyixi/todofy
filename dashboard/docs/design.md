@@ -529,7 +529,7 @@ durations in words.
     "金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false），不能手动运行。"; a 409 `canary_disabled` (switched off
     after the page loaded) is shown as "未能启动金丝雀：金丝雀已关闭（DASHBOARD_CANARY_ENABLED=false）…"
   - 强制降载 (the deferred jobs of contracts/ops-v1/IMPLEMENTATION.md §2.5 and §3.7): "立即让两个应用
-    降载 24 小时：Mail Hero 推迟原件对账、保留期清理、金丝雀清理和告警历史清理（每项最多推迟 48 小时）；
+    降载 24 小时：Mail Hero 推迟原件对账、保留期清理和金丝雀清理（每项最多推迟 48 小时）；
     Todofy 推迟开始新一轮每周备份（上次完整备份超过 7.5 天仍会执行）、过期数据清理和趋势统计汇总（最多推迟
     72 小时，之后补上）。收件、解析、投递、重试、已在进行的备份和真实邮件处理不受影响。可随时解除。"
   - 解除降载: "立即结束两个应用的降载，并在本 UTC 日剩余时间内暂停自动降载；次日 00:00 UTC（本地 HH:MM）

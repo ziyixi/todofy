@@ -177,8 +177,8 @@ within its bound (48 h, from `ops_job_runs`); `ran` records a complete run. The 
 job, not one bounded batch of it: `raw_reconcile` is deferred only when a new pass would start (a pass
 in progress, `raw_reconcile_cursor` non-empty, keeps its 10-minute pages) and records `ran` when a pass
 reaches the end of the bucket; `lifecycle_retention` records it only after a pass that left nothing due
-(`runLifecycle` answered `continueSoon: false`), `alert_history_purge` after a delete that did not fill
-its 20-row batch, `canary_cleanup` after a pass that found nothing to clean. So under a guard renewed
+(`runLifecycle` answered `continueSoon: false`), `canary_cleanup` after a pass that found nothing to
+clean. So under a guard renewed
 forever a full raw scan still ends within 48 h plus its pages, and retention never falls more than about
 48 h of mail behind (it clears about 288 items a day at its normal cadence against about 100 arriving).
 Without a deferral (tests, older callers) everything runs as today. Skipping never moves the maintenance clock or the phase cycle, so there is no
@@ -193,16 +193,16 @@ busy loop and nothing is rescheduled when the guard ends.
 | repair phase: route-block cooldown healing, `retry_window_expired` marking | keep | keeps the in-flight set and the scheduler's view correct (bounded, ≤ 20 rows) |
 | `reconcileCapacity` (DO, ≤ 4 D1 point reads) | keep | frees abandoned reservations that gate ingest |
 | lifecycle phase: resume `content_purge_pending` | keep | finishes an owner deletion already begun (no resurrection) |
-| alerts phase: `evaluateAlerts`, `deliverAlert` | keep | monitoring; `status()` and the owner's alert webhook depend on it |
+| alerts phase: `evaluateAlerts` | keep | monitoring; `status()` and the owner UI depend on it |
 | backup lease, receipt sync, backup API | keep | driven by the external collector |
 | DO `ingress_reservations` expiry | keep | DO only |
 | `raw_reconcile`: R2 `raw/` inventory page + receipt lookup, and `collectOrphans` (same block) | **defer** (48 h) | safety net: jobs are registered before the R2 write, so it only finds losses; costs R2 Class A lists; a new pass starts at most 48 h after the last complete one and then runs its pages at the normal cadence, so a lost message is still found within about two days |
 | `lifecycle_retention`: `runLifecycle` (expiry, resolved cleanup, clock sweep) | **defer** (48 h) | cleanup only; nothing is lost by running it later (capacity signals stay visible) |
 | `canary_cleanup` (new, 2.6) | **defer** (48 h) | cleanup of synthetic content |
-| `alert_history_purge`: 180-day `alert_notifications` delete | **defer** (48 h) | cleanup |
 
-`GuardState.deferred` for Mail Hero is `["raw_reconcile", "lifecycle_retention", "canary_cleanup",
-"alert_history_purge"]` while shed.
+`GuardState.deferred` for Mail Hero is `["raw_reconcile", "lifecycle_retention", "canary_cleanup"]` while
+shed. (`alert_history_purge`, the 180-day delete of the alert webhook's outbox, was the fourth until
+2026-10-21, when the webhook and its outbox were removed.)
 
 ### 2.6 Canary
 

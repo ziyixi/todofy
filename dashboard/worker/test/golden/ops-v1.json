@@ -96,8 +96,7 @@
     "deferred": [
       "raw_reconcile",
       "lifecycle_retention",
-      "canary_cleanup",
-      "alert_history_purge"
+      "canary_cleanup"
     ]
   },
   "read/GuardState/shed-todofy.json": {
@@ -293,8 +292,7 @@
       "deferred": [
         "raw_reconcile",
         "lifecycle_retention",
-        "canary_cleanup",
-        "alert_history_purge"
+        "canary_cleanup"
       ]
     },
     "signals": [

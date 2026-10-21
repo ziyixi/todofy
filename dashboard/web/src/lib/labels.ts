@@ -503,7 +503,6 @@ export function deferredJobLabel(job: string): string {
       raw_reconcile: '原件对账',
       lifecycle_retention: '保留期清理',
       canary_cleanup: '金丝雀清理',
-      alert_history_purge: '告警历史清理',
       weekly_backup: '每周备份',
       retention: '过期数据清理',
       metrics_rollup: '指标汇总',
