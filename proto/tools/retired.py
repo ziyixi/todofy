@@ -1,5 +1,5 @@
 """Retired IDL elements (proto/README.md, "Retiring an element"): the one reviewed way to delete a published
-package, enum value, allowed value, method or message without weakening the breaking gate for anything else.
+package, file, enum value, allowed value, method or message without weakening the breaking gate for anything else.
 
 Usage (scripts/breaking.sh and scripts/rules-selftest.sh run it)::
 
@@ -9,6 +9,8 @@ Both images are from ``buf build --exclude-source-info -o -#format=json``. ``ret
 full name, with the date and the reason:
 
 - ``packages``: ``{"path": "x/ui/v1/", "package": "x.ui.v1"}``: every file under the path is gone.
+- ``files``: ``{"path": "x/ui/v1/old_service.proto"}``: the file is gone with everything it defines (its services,
+  messages and enums), while the rest of its package stays.
 - ``enum_values``: ``{"enum": "a.v1.Kind", "name": "KIND_X", "number": 1}``: the value is gone and both its number
   and its name are reserved in the enum, so neither can be reused.
 - ``allowed_values``: ``{"field": "a.v1.Message.field", "value": "x"}``: the value left the field's
@@ -16,14 +18,15 @@ full name, with the date and the reason:
 - ``methods``: ``{"service": "a.v1.Service", "name": "DoThing"}``: the rpc left the service.
 - ``messages``: ``{"message": "a.v1.DoThingRequest"}``: the top-level message is gone.
 
-First the head must keep every promise: no file under a retired path or of a retired package, no retired enum value,
-its number and name reserved, no retired allowed value, method or message. Then OUT_IMAGE is the base without the
-listed elements, which ``buf breaking`` and tools/profile_breaking.py compare the head with: a listed deletion is the
-base's state, every other change is checked exactly as before. An element the base no longer has (the base is after
-the retirement) is left alone, so an entry does nothing once every base CI compares with is newer; it may then be
-removed. A base file that still imports a retired file is an error, and so is a kept field or method of the base that
-uses a retired message: a message is retired with everything that uses it. Output names elements only. Exit status 0
-when every promise holds, 1 otherwise, 2 on bad usage.
+First the head must keep every promise: no file under a retired path or of a retired package, no retired file, no
+retired enum value, its number and name reserved, no retired allowed value, method or message. Then OUT_IMAGE is the
+base without the listed elements, which ``buf breaking`` and tools/profile_breaking.py compare the head with: a
+listed deletion is the base's state, every other change is checked exactly as before. An element the base no longer
+has (the base is after the retirement) is left alone, so an entry does nothing once every base CI compares with is
+newer; it may then be removed. A kept base file that still imports a file of a retired package, or a retired file,
+is an error, and so is a kept field or method of the base that uses a retired message: a message is retired with
+everything that uses it. The files go first, so an entry for a method or message of a retired file does nothing.
+Output names elements only. Exit status 0 when every promise holds, 1 otherwise, 2 on bad usage.
 """
 
 from __future__ import annotations
@@ -107,6 +110,10 @@ def head_problems(retired: dict[str, Any], head: dict[str, Any]) -> list[str]:
         for file in head.get("file", []):
             if file["name"].startswith(entry["path"]) or file.get("package") == entry["package"]:
                 problems.append(f"RETIRED_PACKAGE_BACK {entry['package']}: {file['name']} is in the head")
+    head_files = {file["name"] for file in head.get("file", [])}
+    for entry in retired.get("files", []):
+        if entry["path"] in head_files:
+            problems.append(f"RETIRED_FILE_BACK {entry['path']} is in the head")
     head_enums = dict(enums(head))
     for entry in retired.get("enum_values", []):
         where = f"{entry['enum']}.{entry['name']} ({entry['number']})"
@@ -140,20 +147,25 @@ def without_retired(retired: dict[str, Any], base: dict[str, Any]) -> tuple[dict
     """(the base without the listed elements, what was removed, problems)."""
     removed, problems = [], []
     files = base.get("file", [])
-    gone = {
+    gone_packages = {
         file["name"]
         for entry in retired.get("packages", [])
         for file in files
         if file["name"].startswith(entry["path"]) or file.get("package") == entry["package"]
     }
     for entry in retired.get("packages", []):
-        if any(name.startswith(entry["path"]) for name in gone):
+        if any(name.startswith(entry["path"]) for name in gone_packages):
             removed.append(f"package {entry['package']}")
+    gone_files = {entry["path"] for entry in retired.get("files", [])} & {file["name"] for file in files}
+    removed += [f"file {name}" for name in sorted(gone_files - gone_packages)]
+    gone = gone_packages | gone_files
     kept = [file for file in files if file["name"] not in gone]
     for file in kept:
         for dependency in file.get("dependency", []):
-            if dependency in gone:
+            if dependency in gone_packages:
                 problems.append(f"RETIRED_PACKAGE_IMPORTED {file['name']} imports the retired {dependency}")
+            elif dependency in gone_files:
+                problems.append(f"RETIRED_FILE_IMPORTED {file['name']} imports the retired {dependency}")
     image = {**base, "file": kept}
     base_enums = dict(enums(image))
     for entry in retired.get("enum_values", []):

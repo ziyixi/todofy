@@ -1,7 +1,7 @@
 #!/bin/sh
 # Proves that the lint and breaking rules catch what they are meant to (README.md, Rules): each case
 # copies the module to a temporary directory, applies one edit to one .proto file (task_intent.proto unless
-# the case names another; the edit DELETE removes that directory instead), optionally replaces the copy's
+# the case names another; the edit DELETE removes that file or directory instead), optionally replaces the copy's
 # retired.json, and expects a verdict. "breaking" is what scripts/breaking.sh runs against its base:
 # tools/retired.py (the copy keeps its retired elements deleted; the base without them), then buf breaking (FILE)
 # plus tools/profile_breaking.py (REQUIRED and presence, which the wire profile treats as wire, the value rules and
@@ -137,6 +137,12 @@ DROP_ACK='s/\n  \/\/ Marks a confirmed change as read.*?rpc AcknowledgeChange\(.
 case_ "delete a listed rpc with its request (AcknowledgeChange)" breaking pass "$DROP_ACK" "$WATCH" "$RETIRE_WATCH_ACK"
 case_ "delete an unlisted rpc with its request (AcknowledgeChange)" breaking fail "$DROP_ACK" "$WATCH"
 case_ "list an rpc and its request as retired but keep them" breaking fail 's/(\/\/ Input of AcknowledgeChange\.)/$1 Kept./' "$WATCH" "$RETIRE_WATCH_ACK"
+# A whole file (files): the watch app's service file goes with its rpcs and messages, its package's other files stay.
+RETIRE_WATCH_SERVICE="{\"files\": [{\"path\": \"$WATCH\"}]}"
+case_ "delete a whole file (watch_ui_service.proto)" breaking fail DELETE "$WATCH"
+case_ "delete a whole file that retired.json lists" breaking pass DELETE "$WATCH" "$RETIRE_WATCH_SERVICE"
+case_ "list a file as retired but keep it" breaking fail 's/(\/\/ Input of GetWatch\.)/$1 Kept./' "$WATCH" "$RETIRE_WATCH_SERVICE"
+case_ "list a file that a kept file imports (change.proto)" breaking fail 's/(\/\/ A change of a watch)/$1, kept/' watch/ui/v1/change.proto '{"files": [{"path": "watch/ui/v1/change.proto"}]}'
 case_ "zero value without _UNSPECIFIED (MODE_UNSPECIFIED -> MODE_NONE)" lint fail 's/MODE_UNSPECIFIED = 0/MODE_NONE = 0/'
 case_ "enum value without its prefix (SOURCE_WATCH -> WATCH)" lint fail 's/SOURCE_WATCH = 2/WATCH = 2/'
 case_ "lowerCamelCase field (intent_id -> intentId)" lint fail 's/string intent_id = 3;/string intentId = 3;/; s/string intent_id = 3 /string intentId = 3 /'

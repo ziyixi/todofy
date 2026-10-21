@@ -5,6 +5,7 @@
     {"path": "mailsort/ui/v1/", "package": "mailsort.ui.v1", "since": "2026-10-10", "reason": "replaced by mailsort.ui.v2 (rules, live gating and the audit removed); the Worker and its UI moved together and /api/v1 answers 410 for one release"},
     {"path": "flowday/ui/v1/", "package": "flowday.ui.v1", "since": "2026-10-20", "reason": "the app that served it was removed"}
   ],
+  "files": [],
   "enum_values": [
     {"enum": "todofy.taskintent.v1.Source", "name": "SOURCE_LAB", "number": 1, "since": "2026-10-05", "reason": "the proposer was removed; Todofy refuses the source"}
   ],
