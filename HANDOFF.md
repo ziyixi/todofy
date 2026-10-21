@@ -30,14 +30,18 @@ The owner approved the disclosed Connect sharing scope. The existing Chrome sess
 login and OAuth grant; the private plugin discovered both tools and `personal_cloud.test`. The existing Dot read
 status successfully, but its native subscription returned a generic task-service error. Direct connected-tool
 status confirmed `ef76b57d`, zero subscriptions and no deliveries; the Dot did not send a test event.
-Diagnostic releases `ddf7820d` (CI `39553772393`, main `39553955084`) and `0c787e31` (CI `39554497873`, main
-`39554661146`) passed. The latter retains `last_subscription_request` across native cleanup and exposed the
-cause: RPC `-32015`, `callback_host_unapproved`, hostname `connectors.api.openai.com`. Production allowed only
-`chatgpt.com`. The branch replaces that host assumption with the real exact hostname and adds a regression
-against the committed config (failed before the fix). No full callback URL or secret is recorded. Publish through
-branch CI/main, then complete signed verification, receipt/dedup/unsubscribe acceptance.
-No real Dots receipt or business-content access is claimed. Evidence:
-[Personal MCP verification](docs/personal-mcp-verification.md). Only after this gate passes, add business tools/events.
+**Connection gate passed.** Diagnostics `ddf7820d` / `0c787e31` established the actual blocker: native Dots uses
+`connectors.api.openai.com`, while the configured callback host was `chatgpt.com`. The exact-host fix `422df6a0`
+passed branch CI `39555068340` and main publication `39555301186`. Real signed subscription succeeded, then the
+Dot reported event `test_e9d7b170-2134-4264-a590-5056feb707f5` and the correct SHA. Receiver acceptance was
+`2026-10-21T06:28:41.317Z`, one attempt. Same-UUID replay returned repeated, with no second delivery. Native
+unsubscribe stopped only the test responsibility; direct status confirms zero active subscriptions.
+No full callback URL, secret or business content was recorded. Evidence: [Personal MCP verification](docs/personal-mcp-verification.md).
+
+**Next stage in progress:** Tasks tools over its existing TasksApi; narrow Mail/Recall/Home read/collect bindings;
+the agreed four event types use the existing MCP DO's bounded polling, with no source→MCP event bindings. First
+publish MCP's small Ops surface before Home adds its status card; then publish source entrypoints before MCP's
+business bindings. Keep the original shared checkout untouched and preserve Claude's pending work.
 
 ### Done steps stay in Plan's Week calendar (`claude/plan-done-steps`)
 

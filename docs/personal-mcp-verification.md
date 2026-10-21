@@ -1,8 +1,8 @@
 # Personal MCP connection verification
 
 Status on 2026-10-20 (America/Los_Angeles): the isolated MCP Worker and OAuth infrastructure are deployed.
-Real ChatGPT consent, owner login and tool discovery are verified. Dots event subscription currently fails;
-event receipt is not verified.
+Real ChatGPT consent, owner login, discovery, signed subscription, actual Dots event receipt, request deduplication
+and test unsubscribe are verified. Business tools and event sources are the next implementation stage.
 
 ## Published identity and checks
 
@@ -73,13 +73,25 @@ had only `chatgpt.com`. The fix replaces that assumption with the observed exact
 using the committed production allowlist and a synthetic path failed before the fix; it now accepts the native host.
 Neither the callback path nor the signing secret is retained in this record.
 
-Remaining checks:
+## Completed gate, 2026-10-21 UTC
 
-1. Publish the exact-host fix through branch CI and main Actions, then repeat one native subscription.
-2. Confirm signed callback verification succeeds and the subscription is saved.
-3. Send the intended synthetic event with request ID `e9d7b170-2134-4264-a590-5056feb707f5` and observe actual Dots receipt.
-4. Replay that request ID once, then stop only this test subscription and record actual event/build/receipt evidence.
-   Only then add business tools or production event sources.
+The exact-host fix `422df6a0b9fc263641738beca1fac83062f2bc26` passed
+[branch CI 39555068340](https://github.com/ziyixi/todofy/actions/runs/39555068340) and
+[main publication 39555301186](https://github.com/ziyixi/todofy/actions/runs/39555301186).
 
-A webhook 2xx only proves receiver acceptance. No actual Dots receipt, business action or production-content
-query is claimed by the current evidence.
+| Check | Observed evidence |
+| --- | --- |
+| Signed verification and native subscription | `events/subscribe` accepted; direct status showed one active subscription on build `422df6a0` |
+| Test enqueue | Request `e9d7b170-2134-4264-a590-5056feb707f5` produced `test_e9d7b170-2134-4264-a590-5056feb707f5`, queued once |
+| Receiver acceptance | One attempt, accepted at `2026-10-21T06:28:41.317Z`, no delivery error |
+| Actual Dots receipt | Existing Dot reported that exact event ID and full build SHA; it reported observing the payload at `06:29:00 UTC`, and the browser inspection confirmed the payload-specific reply before `06:29:57 UTC` |
+| Duplicate request | Repeating the same UUID returned `repeated: true`; accepted delivery count and attempt count remained one |
+| Test cleanup | Dot stopped only the test subscription/responsibility; direct status returned zero subscriptions and the same one accepted delivery |
+
+A preliminary task activation had no payload and is not counted as receipt. The later reply contained the actual
+event ID and build SHA. The receiver's 2xx and the Dot's payload-specific reply are separate evidence.
+No business task, email or browsing content was read or changed during this gate.
+
+Next: add the agreed Tasks tools, followed by Mail/Recall/Home and the four business event types. Keep application
+data in its existing owner, reuse the generated contracts and the same subscription/delivery DO, and verify the
+expanded tools separately; the gate above does not establish business behavior.
