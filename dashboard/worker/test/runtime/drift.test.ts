@@ -83,7 +83,7 @@ describe('the daily drift check', () => {
   it('reports drift by name on the Cloudflare view and by counts in the digest, never a value', async () => {
     h = await startFlows();
     h.cloudflare.tweaks = {
-      bindings: { 'todofy-core': { TODOIST_DEFAULT_PROJECT_ID: 'plain_text' } },
+      bindings: { 'mail-hero': { RECEIVE_ADDRESS: 'plain_text' } },
       extraScripts: ['synthetic-orphan'],
       extraDomains: [{ hostname: 'stray.ziyixi.science', service: 'home' }],
       // A dashboard edit of a Worker, and the owner looking at analytics (not a change).
@@ -100,7 +100,7 @@ describe('the daily drift check', () => {
     expect(cloudflare.drift.findings).toContainEqual({ category: 'account_changes', script: 'dash', name: 'workers.scripts', kind: 'extra', actual: 'update 1' });
     expect(cloudflare.drift.findings).toContainEqual({ category: 'scripts', script: 'synthetic-orphan', name: 'synthetic-orphan', kind: 'extra' });
     expect(cloudflare.drift.findings).toContainEqual({ category: 'custom_domains', script: 'home', name: 'stray.ziyixi.science', kind: 'extra' });
-    expect(cloudflare.drift.findings).toContainEqual({ category: 'bindings', script: 'todofy-core', name: 'TODOIST_DEFAULT_PROJECT_ID', kind: 'changed', expected: 'secret_text', actual: 'plain_text' });
+    expect(cloudflare.drift.findings).toContainEqual({ category: 'bindings', script: 'mail-hero', name: 'RECEIVE_ADDRESS', kind: 'changed', expected: 'secret_text', actual: 'plain_text' });
     // The strip points at the Cloudflare view.
     expect(cloudflare.attention.items).toContainEqual(expect.objectContaining({ source: 'dashboard', code: 'config_drift', target: { view: 'cloudflare' } }));
 
@@ -112,7 +112,7 @@ describe('the daily drift check', () => {
     const last = reports.at(-1);
     expect(last?.items.find((i) => i.code === 'config_drift')?.metrics).toEqual({ total: 4, scripts: 1, custom_domains: 1, bindings: 1, account_changes: 1 });
     const reportText = JSON.stringify(reports);
-    expect(reportText).not.toContain('TODOIST_DEFAULT_PROJECT_ID');
+    expect(reportText).not.toContain('RECEIVE_ADDRESS');
     expect(reportText).not.toContain('synthetic-orphan');
 
     for (const text of [JSON.stringify(cloudflare), JSON.stringify(ops), reportText]) {

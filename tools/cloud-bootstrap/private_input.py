@@ -111,8 +111,8 @@ def generated_secrets(value: dict, *, generate: bool = True) -> dict:
             worker, worker.upper().replace("-", "_"))
         for name, item in bindings.items():
             if name in {"CREDENTIAL_KEY", "CSRF_SIGNING_KEY", "BACKUP_TOKEN", "BACKUP_RECEIPT_KEY", "REPORT_HMAC_KEY",
-                        "CF_ANALYTICS_TOKEN", "RECEIVE_ADDRESS", "TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"}:
-                source = ("TODOFY" if worker == "todofy-core" else prefix) + "_" + name
+                        "CF_ANALYTICS_TOKEN", "RECEIVE_ADDRESS"}:
+                source = prefix + "_" + name
                 if source in result and result[source] != item:
                     raise BootstrapError("WORKER_SECRET_CONSUMER_MISMATCH")
                 result.setdefault(source, item)

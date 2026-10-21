@@ -62,15 +62,8 @@ runs:
       env:
         TODOFY_ACCESS_OWNER: owner@example.com
         TODOFY_ACCESS_OWNER_ALIASES: ''
-        TODOFY_TODOIST_DEFAULT_PROJECT_ID: placeholder
-        TODOFY_REMINDER_ENABLED: 'false'
         TODOFY_MAINTENANCE_MODE: 'false'
         TODOFY_PROCESSING_PAUSED: 'false'
-        TODOFY_FORCE_PAUSE_TODOIST: 'false'
-        TODOFY_GTD_REVIEW_ENABLED: 'false'
-        # The optional projects: one unset (uploaded as unset) and one set, so both paths are written.
-        TODOFY_TODOIST_OPS_PROJECT_ID: ''
-        TODOFY_TODOIST_REVIEW_PROJECT_ID: placeholder
       working-directory: todofy
       shell: bash -e {0}
       run: |

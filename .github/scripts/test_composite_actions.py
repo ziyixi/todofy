@@ -174,11 +174,7 @@ class CompositeActions(unittest.TestCase):
             "release"
         ]
         switches = {
-            "todofy": (
-                "TODOFY_REMINDER_ENABLED", "TODOFY_MAINTENANCE_MODE",
-                "TODOFY_PROCESSING_PAUSED", "TODOFY_FORCE_PAUSE_TODOIST",
-                "TODOFY_GTD_REVIEW_ENABLED",
-            ),
+            "todofy": ("TODOFY_MAINTENANCE_MODE", "TODOFY_PROCESSING_PAUSED"),
             "dashboard": ("DASHBOARD_CANARY_ENABLED",),
             "mail-hero": (
                 "MAIL_HERO_FORCE_SEND_PAUSED", "MAIL_HERO_MAINTENANCE_MODE",

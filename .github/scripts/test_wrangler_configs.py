@@ -95,9 +95,6 @@ PERSONAL_INPUTS = {
     "MAIL_HERO_RECEIVE_ADDRESS",
     "MAIL_HERO_ACCESS_OWNER",
     "MAIL_HERO_ACCESS_OWNER_ALIASES",
-    "TODOFY_TODOIST_DEFAULT_PROJECT_ID",
-    "TODOFY_TODOIST_OPS_PROJECT_ID",
-    "TODOFY_TODOIST_REVIEW_PROJECT_ID",
     "TODOFY_ACCESS_OWNER",
     "TODOFY_ACCESS_OWNER_ALIASES",
     "DASHBOARD_ACCESS_OWNER",
@@ -143,9 +140,6 @@ TOGGLES = {
     "MAIL_HERO_NATIVE_BACKUP_ENABLED",
     "TODOFY_MAINTENANCE_MODE",
     "TODOFY_PROCESSING_PAUSED",
-    "TODOFY_FORCE_PAUSE_TODOIST",
-    "TODOFY_REMINDER_ENABLED",
-    "TODOFY_GTD_REVIEW_ENABLED",
     "DASHBOARD_CANARY_ENABLED",
     # mailsort's ceiling (live, shadow or off): the emergency switch of mailsort/docs/design.md section 10.
     "MAILSORT_MODE",
@@ -463,7 +457,9 @@ class Files(unittest.TestCase):
         for config in (core, gateway):
             # Tasks is the only task store: no source switch remains.
             self.assertNotIn("TASK_SOURCE", config["vars"])
-            self.assertEqual(config["vars"]["TASKS_PUBLIC_URL"], "https://" + tasks["vars"]["PUBLIC_HOST"])
+        # Only the gateway links to a task (/task/<id>); the core writes none since 2026-10-21.
+        self.assertNotIn("TASKS_PUBLIC_URL", core["vars"])
+        self.assertEqual(gateway["vars"]["TASKS_PUBLIC_URL"], "https://" + tasks["vars"]["PUBLIC_HOST"])
 
 
 class Undeployed(unittest.TestCase):
@@ -732,7 +728,8 @@ class Workflow(unittest.TestCase):
                 for step in steps(job):
                     for call in re.findall(pattern, step["run"]):
                         mode = wrapper_mode(call)
-                        needed = {name for name in inputs[mode] if not name.startswith("GITHUB_")}
+                        # A mode without inputs has no marker line (Todofy's `secrets core`).
+                        needed = {name for name in inputs.get(mode, []) if not name.startswith("GITHUB_")}
                         calls += 1
                         with self.subTest(job=job_name, step=step["name"], call=call):
                             self.assertLessEqual(needed, set(job_environment(job)) | set(step["env"]))
@@ -824,7 +821,7 @@ class Workflow(unittest.TestCase):
         self.assertEqual(needs("    needs: [changes, gate]\n"), ["changes", "gate"])
 
     def test_personal_values_are_worker_secrets(self):
-        """Every personal value (the receive address, the owners' Access identities, Todofy's Todoist projects) reaches
+        """Every personal value (the receive address, the owners' Access identities) reaches
         its Worker as a Worker secret (a wrapper's `secrets` mode, deployed with --secrets-file), never as a --var:
         Wrangler and the Cloudflare dashboard show a plain var's value. Every deploy (and dry-run) that runs `exec` of
         such a wrapper passes exactly the file that the same job's `secrets` call wrote for that Worker."""

@@ -182,18 +182,18 @@ describe('comparison', () => {
   });
 
   it('wants every personal value as a deploy secret, so a live plain_text one is a bindings change', async () => {
-    // Every wrapper writes its personal values with --secrets-file (Mail Hero's receive address, the owner addresses,
-    // Todofy's task project IDs), so no Worker lists a `personal` --var.
+    // Every wrapper writes its personal values with --secrets-file (Mail Hero's receive address, the owner
+    // addresses), so no Worker lists a `personal` --var.
     expect(Object.values(DESIRED.workers).flatMap((worker) => worker.personal)).toEqual([]);
-    const core = new Map((DESIRED.workers['todofy-core']?.bindings ?? []).map((b) => [b.name, b]));
-    for (const name of ['TODOIST_DEFAULT_PROJECT_ID', 'TODOIST_OPS_PROJECT_ID', 'TODOIST_REVIEW_PROJECT_ID']) {
-      expect(core.get(name)).toEqual({ name, type: 'secret_text', source: 'deploy' });
+    const mailHero = new Map((DESIRED.workers['mail-hero']?.bindings ?? []).map((b) => [b.name, b]));
+    for (const name of ['RECEIVE_ADDRESS', 'ACCESS_OWNER', 'ACCESS_OWNER_ALIASES']) {
+      expect(mailHero.get(name)).toEqual({ name, type: 'secret_text', source: 'deploy' });
     }
-    // The live state before the first deploy that moves them: the project a plain var, an optional one not set.
-    const { doc } = await fullCheck({ bindings: { 'todofy-core': { TODOIST_DEFAULT_PROJECT_ID: 'plain_text', TODOIST_OPS_PROJECT_ID: null } } });
+    // A personal value deployed as a plain var, and one not set.
+    const { doc } = await fullCheck({ bindings: { 'mail-hero': { RECEIVE_ADDRESS: 'plain_text', ACCESS_OWNER_ALIASES: null } } });
     expect(doc.findings).toEqual([
-      { category: 'bindings', script: 'todofy-core', name: 'TODOIST_DEFAULT_PROJECT_ID', kind: 'changed', expected: 'secret_text', actual: 'plain_text' },
-      { category: 'bindings', script: 'todofy-core', name: 'TODOIST_OPS_PROJECT_ID', kind: 'missing', expected: 'secret_text' },
+      { category: 'bindings', script: 'mail-hero', name: 'ACCESS_OWNER_ALIASES', kind: 'missing', expected: 'secret_text' },
+      { category: 'bindings', script: 'mail-hero', name: 'RECEIVE_ADDRESS', kind: 'changed', expected: 'secret_text', actual: 'plain_text' },
     ]);
     expect(driftView(doc, true, AT('03:00'))).toMatchObject({ status: 'drift', counts: { bindings: 2, personal: 0 } });
   });
@@ -237,7 +237,7 @@ describe('reading the API', () => {
       { name: 'J', type: 'json' },
       { name: 'X', type: 'plain_text' },
     ]);
-    const { doc, run } = await fullCheck({ bindings: { 'todofy-core': { TODOIST_DEFAULT_PROJECT_ID: 'plain_text' } } });
+    const { doc, run } = await fullCheck({ bindings: { 'mail-hero': { RECEIVE_ADDRESS: 'plain_text' } } });
     expect(JSON.stringify(run)).not.toContain(SENTINEL_VALUE);
     expect(JSON.stringify(doc)).not.toContain(SENTINEL_VALUE);
     expect(JSON.stringify(driftView(doc, true, AT('03:00')))).not.toContain(SENTINEL_VALUE);

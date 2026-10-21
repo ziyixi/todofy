@@ -17,18 +17,6 @@ inputs:
     description: "todofy core worker secrets"
     required: false
     default: ''
-  todofy-todoist-default-project-id:
-    description: "todofy todoist default project id"
-    required: false
-    default: ''
-  todofy-todoist-ops-project-id:
-    description: "todofy todoist ops project id"
-    required: false
-    default: ''
-  todofy-todoist-review-project-id:
-    description: "todofy todoist review project id"
-    required: false
-    default: ''
   todofy-worker-secrets:
     description: "todofy worker secrets"
     required: false
@@ -89,8 +77,8 @@ runs:
     # without a var deletes it). The switches (production variables) and BUILD_SHA are --var on both
     # Workers. The personal values are environment secrets (masked in this public log) and reach the
     # Workers as Worker secrets through --secrets-file, in the same upload as the code (wrangler and the
-    # Cloudflare dashboard show plain vars): the Todoist projects on the core, the owner's email addresses
-    # on the gateway. Only this step reads the personal secrets.
+    # Cloudflare dashboard show plain vars): the owner's email addresses on the gateway (the core has none).
+    # Only this step reads the personal secrets.
     - name: Write the Worker secrets files
       if: inputs.required == 'true'
       env:
@@ -98,9 +86,6 @@ runs:
         TODOFY_CORE_WORKER_SECRETS: ${{ inputs.todofy-core-worker-secrets }}
         TODOFY_ACCESS_OWNER: ${{ inputs.todofy-access-owner }}
         TODOFY_ACCESS_OWNER_ALIASES: ${{ inputs.todofy-access-owner-aliases }}
-        TODOFY_TODOIST_DEFAULT_PROJECT_ID: ${{ inputs.todofy-todoist-default-project-id }}
-        TODOFY_TODOIST_OPS_PROJECT_ID: ${{ inputs.todofy-todoist-ops-project-id }}
-        TODOFY_TODOIST_REVIEW_PROJECT_ID: ${{ inputs.todofy-todoist-review-project-id }}
       working-directory: .release-source/todofy
       shell: bash -e {0}
       run: |

@@ -30,13 +30,10 @@ CORE_VARS = {
     "GEMINI_MODELS",
     "GEMINI_EMAIL_MODELS",
     "GEMINI_DAILY_TOKEN_BUDGET",
-    "LOOKUP_DELAY_MS",
     "REPORT_DEFAULT_TOP",
     "REPORT_PRECOMPUTE_UTC",
     "LEGACY_TEXT_RETENTION_DAYS",
-    "GTD_COLLECT_UTC",
     "REPORT_CARRYOVER_DAYS",
-    "TASKS_PUBLIC_URL",
 }
 GATEWAY_VARS = {
     "TODOFY_PUBLIC_HOST",
@@ -84,9 +81,8 @@ def test_the_committed_vars_are_exactly_the_static_ones() -> None:
         assert name not in CORE["vars"] and name not in GATEWAY["vars"], name
 
 
-def test_the_gtd_schedule_and_the_carryover_are_production_values() -> None:
-    """docs/gtd-features.md §10: the snapshot at 13:00 UTC, before the 13:30 precompute; 14 days carried."""
-    assert CORE["vars"]["GTD_COLLECT_UTC"] == "13:00" < CORE["vars"]["REPORT_PRECOMPUTE_UTC"]
+def test_the_carryover_is_a_production_value() -> None:
+    """The brief carries up to 14 days of mail still awaiting a decision (core/carryover.py)."""
     assert _integer(CORE["vars"]["REPORT_CARRYOVER_DAYS"], 0, 14)
 
 
@@ -128,7 +124,6 @@ def test_core_vars() -> None:
         assert 1 <= len(models) <= 5 and len(set(models)) == len(models)
         assert all(re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,63}", model) for model in models)
     assert _integer(variables["GEMINI_DAILY_TOKEN_BUDGET"], 1, 1_000_000_000)
-    assert _integer(variables["LOOKUP_DELAY_MS"], 1_000, 3_600_000)
     assert _integer(variables["REPORT_DEFAULT_TOP"], 1, MAX_TOP_N)
     assert re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", variables["REPORT_PRECOMPUTE_UTC"])
     assert _integer(variables["LEGACY_TEXT_RETENTION_DAYS"], 0, 36_500)

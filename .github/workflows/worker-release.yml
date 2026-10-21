@@ -45,11 +45,8 @@ jobs:
       MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
       MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
       MAIL_HERO_NATIVE_BACKUP_ENABLED: ${{ vars.MAIL_HERO_NATIVE_BACKUP_ENABLED }}
-      TODOFY_FORCE_PAUSE_TODOIST: ${{ vars.TODOFY_FORCE_PAUSE_TODOIST }}
-      TODOFY_GTD_REVIEW_ENABLED: ${{ vars.TODOFY_GTD_REVIEW_ENABLED }}
       TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
       TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
-      TODOFY_REMINDER_ENABLED: ${{ vars.TODOFY_REMINDER_ENABLED }}
       MAILSORT_MODE: ${{ (inputs.app == 'mailsort' || inputs.app == 'brief') && vars.MAILSORT_MODE || '' }}
       BRIEF_MODE: ${{ inputs.app == 'brief' && vars.BRIEF_MODE || '' }}
     steps:
@@ -100,9 +97,6 @@ jobs:
           todofy-access-owner: ${{ secrets.TODOFY_ACCESS_OWNER }}
           todofy-access-owner-aliases: ${{ secrets.TODOFY_ACCESS_OWNER_ALIASES }}
           todofy-core-worker-secrets: ${{ secrets.TODOFY_CORE_WORKER_SECRETS }}
-          todofy-todoist-default-project-id: ${{ secrets.TODOFY_TODOIST_DEFAULT_PROJECT_ID }}
-          todofy-todoist-ops-project-id: ${{ secrets.TODOFY_TODOIST_OPS_PROJECT_ID }}
-          todofy-todoist-review-project-id: ${{ secrets.TODOFY_TODOIST_REVIEW_PROJECT_ID }}
           todofy-worker-secrets: ${{ secrets.TODOFY_WORKER_SECRETS }}
       - name: Release mail-hero
         id: mail_hero

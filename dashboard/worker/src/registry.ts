@@ -61,7 +61,7 @@ const ENTRIES: readonly EntryDef[] = [
   {
     id: 'todofy',
     name: 'Todofy',
-    description: '邮件摘要、规划与每日提醒',
+    description: '邮件摘要与每日报告',
     group: 'apps',
     icon: 'list-checks',
     accent: 'green',

@@ -947,11 +947,6 @@
           "source": "config"
         },
         {
-          "name": "FORCE_PAUSE_TODOIST",
-          "type": "plain_text",
-          "source": "deploy"
-        },
-        {
           "name": "GEMINI_API_BASE",
           "type": "plain_text",
           "source": "config"
@@ -977,22 +972,7 @@
           "source": "config"
         },
         {
-          "name": "GTD_COLLECT_UTC",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "GTD_REVIEW_ENABLED",
-          "type": "plain_text",
-          "source": "deploy"
-        },
-        {
           "name": "LEGACY_TEXT_RETENTION_DAYS",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "LOOKUP_DELAY_MS",
           "type": "plain_text",
           "source": "config"
         },
@@ -1017,11 +997,6 @@
           "source": "deploy"
         },
         {
-          "name": "REMINDER_ENABLED",
-          "type": "plain_text",
-          "source": "deploy"
-        },
-        {
           "name": "REPORT_CARRYOVER_DAYS",
           "type": "plain_text",
           "source": "config"
@@ -1042,11 +1017,6 @@
           "source": "config"
         },
         {
-          "name": "TASKS_PUBLIC_URL",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
           "name": "TODOFY_PUBLIC_HOST",
           "type": "plain_text",
           "source": "config"
@@ -1060,17 +1030,20 @@
         {
           "name": "TODOIST_DEFAULT_PROJECT_ID",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "manual",
+          "optional": true
         },
         {
           "name": "TODOIST_OPS_PROJECT_ID",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "manual",
+          "optional": true
         },
         {
           "name": "TODOIST_REVIEW_PROJECT_ID",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "manual",
+          "optional": true
         }
       ],
       "personal": []

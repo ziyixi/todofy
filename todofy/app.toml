@@ -15,10 +15,10 @@ position = 2
 
 [[workers]]
 config = "todofy/wrangler.toml"
-personal_secrets = ["TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"]
-# TODOIST_API_KEY is retired (nothing reads it) and stays optional only until the live secret is deleted.
-manual_secrets = ["GEMINI_API_KEY", "TODOIST_API_KEY"]
-optional_secrets = ["TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID", "TODOIST_API_KEY"]
+# Retired, nothing reads them: TODOIST_API_KEY, and the three Tasks projects of the reminder, the weekly review and
+# the mail tasks (2026-10-21). They stay optional only until the owner deletes the live secrets.
+manual_secrets = ["GEMINI_API_KEY", "TODOIST_API_KEY", "TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"]
+optional_secrets = ["TODOIST_API_KEY", "TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"]
 hosts = []
 entry = "todofy"
 role = "处理核心（TodofyCore）"
@@ -27,7 +27,7 @@ position = 3
 [[entries]]
 id = "todofy"
 name = "Todofy"
-description = "邮件摘要、规划与每日提醒"
+description = "邮件摘要与每日报告"
 group = "apps"
 icon = "list-checks"
 accent = "green"

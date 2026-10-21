@@ -20,8 +20,7 @@
       "CF_ANALYTICS_TOKEN": "<Cloudflare token with account analytics read>"
     },
     "todofy-core": {
-      "GEMINI_API_KEY": "<Gemini API key>",
-      "TODOIST_DEFAULT_PROJECT_ID": "<Tasks project id>"
+      "GEMINI_API_KEY": "<Gemini API key>"
     },
     "ziyixi-notion-publish": {
       "GITHUB_DISPATCH_TOKEN": "<GitHub token for this repository: Actions Read/Write and Deployments Read>"

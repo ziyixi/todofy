@@ -81,20 +81,20 @@ class DesiredState(unittest.TestCase):
                 self.assertEqual(names, set())
 
     def test_todofy_personal_values_are_deploy_secrets(self):
-        """Todofy writes the core's Todoist projects and the gateway's owner addresses with --secrets-file, one file per
-        Worker; an unset optional project is uploaded too (as unset), so every one is a required secret_text binding.
-        The vars it adds are the switches and BUILD_SHA."""
-        workers = {
-            "todofy-core": ("TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"),
-            "todofy": ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES"),
-        }
+        """Todofy writes the gateway's owner addresses with --secrets-file; an empty alias list is uploaded too (as
+        unset), so both are required secret_text bindings. The core has no personal value since 2026-10-21: its
+        retired Tasks projects are optional manual secrets until the owner deletes them. The vars it adds are the
+        switches and BUILD_SHA."""
+        workers = {"todofy-core": (), "todofy": ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES")}
         switches = {
-            "todofy-core": (
-                "BUILD_SHA", "MAINTENANCE_MODE", "REMINDER_ENABLED", "PROCESSING_PAUSED", "FORCE_PAUSE_TODOIST",
-                "GTD_REVIEW_ENABLED",
-            ),
+            "todofy-core": ("BUILD_SHA", "MAINTENANCE_MODE", "PROCESSING_PAUSED"),
             "todofy": ("BUILD_SHA", "MAINTENANCE_MODE"),
         }
+        core = {b["name"]: b for b in self.state["workers"]["todofy-core"]["bindings"]}
+        for name in ("TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"):
+            self.assertEqual(core[name], {"name": name, "type": "secret_text", "source": "manual", "optional": True})
+        for name in ("REMINDER_ENABLED", "FORCE_PAUSE_TODOIST", "GTD_REVIEW_ENABLED"):
+            self.assertNotIn(name, core)
         for worker, names in workers.items():
             bindings = {b["name"]: b for b in self.state["workers"][worker]["bindings"]}
             for name in names:
