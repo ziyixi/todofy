@@ -4,6 +4,7 @@
  * evaluate.ts) read them through a Snapshot. Times are epoch milliseconds.
  */
 import type { OpsReportItem, OpsReportReceipt, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
+import type { CreateInboxTaskRequest } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
 import type { AppErrorCode, QuotaRow } from './api-types.ts';
 import type { ResourceUsage, UsageErrorCode } from './usage.ts';
 
@@ -33,9 +34,27 @@ export interface UsageDoc {
   readonly last_attempt_at: number | null;
 }
 
+/** The day's task (digest.ts): `skipped` only for the first day of the release that brought it. */
+export type DigestTaskState = 'skipped' | 'pending' | 'created' | 'failed';
+
+/**
+ * `digest`: the last tick's items and the day's task in Tasks. The task fields are absent in a document written
+ * before 2026-10-21 (when Todofy's reminder carried the digest).
+ */
 export interface DigestDoc {
   readonly items: OpsReportItem[];
-  readonly last_key: string | null;
+  /** The last UTC day handled (`YYYY-MM-DD`). */
+  readonly day?: string;
+  readonly state?: DigestTaskState;
+  /** The frozen request while it is `pending`; null otherwise. */
+  readonly request?: CreateInboxTaskRequest | null;
+  /** The items the request lists and when they were frozen. */
+  readonly item_count?: number;
+  readonly claimed_at?: number;
+  /** Calls made for the day's task. */
+  readonly attempts?: number;
+  readonly task_id?: string | null;
+  /** When the last day's task was created, and when its items were frozen. */
   readonly last_sent_at: number | null;
   readonly last_generated_at: number | null;
   readonly last_receipt: OpsReportReceipt | null;
@@ -85,7 +104,6 @@ export const NO_USAGE: UsageDoc = {
 };
 export const NO_DIGEST: DigestDoc = {
   items: [],
-  last_key: null,
   last_sent_at: null,
   last_generated_at: null,
   last_receipt: null,

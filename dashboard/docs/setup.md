@@ -191,11 +191,10 @@ browser. [`verification.md`](verification.md) §1d records such a run.
   workflow on `main` with `app: dashboard`; a change takes effect with that deploy, not before.
   Switching back to `true` starts the day's scheduled run at the next tick if the hour has passed and
   none ran that UTC day.
-- **Digest.** Warning and critical items go to `TODOFY.reportOps` when the set changes or every 6 h
-  (not during 00:00–00:20 UTC while the last report is from the previous day, so that day's reminder
-  still lists it);
-  Todofy's daily attention reminder (at most one task in Tasks per UTC day) carries them. The dashboard
-  creates tasks in no other way. Mail Hero's own `ALERT_WEBHOOK_URL` stays unconfigured.
+- **Digest.** The first tick of a UTC day with warning or critical items creates one task in Tasks
+  through the `TASK_INBOX` binding (Tasks' create-only `TaskInbox`, `props.source = "home"`), with the same
+  request on each retry, at most 6 tries; then `digest_task_failed`. The dashboard creates tasks in no other
+  way. Mail Hero's own `ALERT_WEBHOOK_URL` stays unconfigured.
 
 ## 7. Rollback and removal
 
@@ -204,8 +203,8 @@ browser. [`verification.md`](verification.md) §1d records such a run.
   "Check that Access answers" step. So if `Dashboard deploy` fails at or after "Deploy the Worker home"
   (a probe failure, a Custom Domain error), the Worker, its Durable Object namespace, its secrets and its
   `*/30` cron are already live, and each tick calls both apps' `Ops` (status, `setGuard`, the daily
-  canary with its synthetic Mail Hero event and up to 3 Gemini calls in Todofy, `reportOps` into
-  Todofy's reminder). There is no previous version to roll back to, and **reverting the merge commit does
+  canary with its synthetic Mail Hero event and up to 3 Gemini calls in Todofy, the digest's daily task
+  in Tasks). There is no previous version to roll back to, and **reverting the merge commit does
   not undo the deploy**: the revert also removes the `Dashboard deploy` job, so CI never touches the live
   Worker again, and (because it also changes `ci.yml`) it re-checks every app. To stop it: Cloudflare
   dashboard → Workers → `home` → Settings → Trigger events → remove the Cron Trigger (the Worker stays
@@ -218,10 +217,9 @@ browser. [`verification.md`](verification.md) §1d records such a run.
   Deployments → roll back to the previous version; the next deploy from `main` replaces it again, so
   revert the commit too. The Durable Object class and its migration `v1` stay; the SQLite tables are
   created with `IF NOT EXISTS`, so older code reads the same state.
-- **Stop all dashboard activity** (canaries, guard calls, digest reports): Cloudflare dashboard →
+- **Stop all dashboard activity** (canaries, guard calls, the digest's task): Cloudflare dashboard →
   Workers → `home` → Settings → Trigger events → remove the Cron Trigger. The page keeps working from
-  its cached snapshot. Any `shed` it set expires by itself (≤ 36 h), and Todofy's reminder stops
-  carrying the last ops report once it is older than 36 h (contracts/ops-v1 `README.md`). The next deploy from `main` restores
+  its cached snapshot. Any `shed` it set expires by itself (≤ 36 h). The next deploy from `main` restores
   the trigger, so change `dashboard/wrangler.toml` too if the stop must last.
 - **Before rolling Todofy back** to a release without canary handling (contracts/ops-v1
   `IMPLEMENTATION.md` §4: such a release would turn a canary it still sees into a real Todoist task and

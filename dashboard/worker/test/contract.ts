@@ -42,7 +42,7 @@ export function contractErrors(name: ContractName, value: unknown): string[] {
 /** The generated services each app's Ops entrypoint implements. */
 const SERVICES = {
   'mail-hero': [ops.OpsService, ops.CanaryProducerService],
-  todofy: [ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService],
+  todofy: [ops.OpsService, ops.CanaryConsumerService],
   watch: [ops.OpsService],
   fleet: [ops.OpsService],
   newsletter: [ops.OpsService],

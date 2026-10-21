@@ -188,7 +188,6 @@ describe('Cloudflare 监控', () => {
     expect(within(todofy).getAllByText(/^(邮件 → 任务|每日 Newsletter|运维摘要)$/).map((tag) => tag.textContent)).toEqual([
       '邮件 → 任务',
       '每日 Newsletter',
-      '运维摘要',
     ])
     expect(within(todofy).getByText('2 · 0.9%')).toBeInTheDocument()
     expect(within(todofy).getByRole('img', { name: 'CPU p99 3.6 ms，Free 上限 10 ms' })).toBeInTheDocument()
@@ -230,7 +229,7 @@ describe('Cloudflare 监控', () => {
     const more = within(todofy).getByText('更多', { selector: 'summary' }).closest('details') as HTMLElement
     expect(more).not.toHaveAttribute('open')
     expect(within(more).getByText('子请求').nextElementSibling).toHaveTextContent(/^\d/)
-    expect(within(more).getByText('流程').nextElementSibling).toHaveTextContent('邮件 → 任务、每日 Newsletter、运维摘要')
+    expect(within(more).getByText('流程').nextElementSibling).toHaveTextContent('邮件 → 任务、每日 Newsletter')
   })
 
   it('keeps quota rows compact: an estimate is behind a disclosure unless it reaches 80 % (F9)', async () => {

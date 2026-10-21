@@ -5,7 +5,7 @@
  * fetch and scheduled handlers only call these RPC methods.
  *
  * Bounds: every tick makes at most outboundPerTick() = 34 outbound calls (11 status, 2 probes, 1 GraphQL,
- * ≤ 5 setGuard, ≤ 2 canary calls, ≤ 1 reportOps, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
+ * ≤ 5 setGuard, ≤ 2 canary calls, ≤ 1 createInboxTask, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
  * writes a few dozen rows; a v2 view reads at most VIEW_ROWS_READ[view] rows (api-types.ts; tested in
  * workerd).
  */
@@ -33,7 +33,7 @@ import {
   type CanaryRecord,
 } from './canary.ts';
 import { analyticsConfigured, buildSha, canaryEnabled, canaryHour, dashboardUrl } from './config.ts';
-import { buildReport, candidates, digestKey, finalizeItems, itemKey, shouldSend, DIGEST_REFRESH_MS, type Candidate } from './digest.ts';
+import { afterCall, candidates, claimDay, finalizeItems, itemKey, nextDigestDay, type Candidate } from './digest.ts';
 import { NO_DIGEST, NO_META, NO_STATUS, NO_USAGE, type DigestDoc, type MetaDoc, type ProbeDoc, type StatusDoc, type UsageDoc } from './docs.ts';
 import type { Env } from './env.ts';
 import {
@@ -75,7 +75,7 @@ import { ReadHomeResponseSchema } from '@ziyixi/proto/dashboard/mcp/v1/home_serv
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import type { HomeView } from './api-types.ts';
 import type { Attention, AttentionItem, Badges } from './api-types.ts';
-import { OPS_APPS, opsCanaryDelivery, opsCanaryResult, opsReportOps, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
+import { OPS_APPS, createInboxTask, opsCanaryDelivery, opsCanaryResult, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
 import { callWebsiteRequest, unconfirmedWebsiteRequest } from './website-sync.ts';
 import type { WebsiteSyncRequestResult } from './api-types.ts';
 import { nextProbeDoc, probeDue, probeUrl, type ProbeTarget } from './probe.ts';
@@ -747,28 +747,35 @@ export class HomeState extends DurableObject<Env> {
       lastTickAt,
       apps: perApp((app) => this.statusDoc(app)),
       drift: { configured: analyticsConfigured(this.env), doc: storedDrift(this.doc<DriftDoc>('drift')) },
+      digest: this.doc<DigestDoc>('digest') ?? NO_DIGEST,
     });
   }
-  /** Builds raw facts, then applies Home's reminder disposition before the scheduled report. */
+
+  /** Whether the digest's daily task can be created: Tasks' TaskInbox is bound. */
+  private digestEnabled(): boolean {
+    return this.env.TASK_INBOX !== undefined;
+  }
+
+  /**
+   * Builds raw facts, then applies Home's reminder dispositions; on a tick (`send`) the day's task: claimed at the first
+   * tick of a UTC day with undismissed items, then the same frozen request once a tick until it is created or failed.
+   */
   private async runDigest(now: number, send: boolean, lastTickAt: number | null): Promise<{ sent: string; items: number }> {
     const list = this.digestCandidates(now, lastTickAt);
     const firstSeen = this.syncSince(list.map(itemKey), now);
     const rawItems = finalizeItems(list, firstSeen, now, ATTENTION_ROW_LIMIT);
-    const projected = this.projectAttention(now, { lastTickAt, candidates: list, items: rawItems });
+    // Records the attention episodes of this tick's conditions (the strip's sequence), whatever the task does.
+    this.projectAttention(now, { lastTickAt, candidates: list, items: rawItems });
     const items = this.undismissed(rawItems);
-    const previous = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
-    let doc: DigestDoc = { ...previous, items: rawItems };
+    let doc: DigestDoc = { ...(this.doc<DigestDoc>('digest') ?? NO_DIGEST), items: rawItems };
     let sent = 'none';
-    const enabled = this.statusDoc('todofy').status?.capabilities.includes('ops_digest') === true;
-    const identities = projected.attention.items.filter((item) => item.observed === undefined).map((item) => `${item.name ?? ''}:${item.etag ?? ''}`).sort().join(',');
-    const key = `${digestKey(items)}|${identities}`;
-    if (send && enabled && shouldSend(key, previous, now)) {
-      const report = buildReport(items, now, dashboardUrl(this.env));
-      const result = await opsReportOps(this.env, report);
-      doc = result.ok
-        ? { ...doc, last_key: key, last_sent_at: now, last_generated_at: now, last_receipt: result.value, last_error: null, last_attempt_at: now }
-        : { ...doc, last_error: result.code, last_attempt_at: now };
-      sent = result.ok ? 'sent' : result.code;
+    if (send && this.digestEnabled()) {
+      doc = claimDay(doc, items, now, dashboardUrl(this.env), crypto.randomUUID());
+      if (doc.state === 'pending' && doc.request != null) {
+        const result = await createInboxTask(this.env, doc.request);
+        doc = afterCall(doc, result.ok ? { ok: true, taskId: result.value.task_id } : result, now);
+        sent = result.ok ? 'created' : result.code;
+      }
     }
     this.putDoc('digest', doc, now);
     return { sent, items: items.length };
@@ -804,7 +811,7 @@ export class HomeState extends DurableObject<Env> {
   /**
    * A refresh of a scope (RefreshHomeView, RefreshCloudflareView); true when something was fetched. home: due statuses (10 min each) and
    * probes; cloudflare: GraphQL (60 s). Each scope at most once per minute; the digest items are
-   * rebuilt from the new data (a report is sent only by a tick).
+   * rebuilt from the new data (the day's task is created only by a tick).
    */
   private async refreshScope(scope: 'home' | 'cloudflare', now: number): Promise<boolean> {
     const meta = this.doc<MetaDoc>('meta') ?? NO_META;
@@ -982,8 +989,7 @@ export class HomeState extends DurableObject<Env> {
           );
         case 'ops': {
           const digest = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
-          const todofy = this.statusDoc('todofy');
-          return opsResponse(base, this.guardView(now), this.canaryView(now), this.digestView(digest, todofy.status?.capabilities.includes('ops_digest') === true), this.statusDocs());
+          return opsResponse(base, this.guardView(now), this.canaryView(now), this.digestView(digest, this.digestEnabled()), this.statusDocs());
         }
       }
     } finally {
@@ -1068,7 +1074,7 @@ export class HomeState extends DurableObject<Env> {
       last_generated_at: isoOrNull(digest.last_generated_at),
       last_receipt: digest.last_receipt,
       last_error: digest.last_error,
-      next_due_at: digest.last_sent_at === null ? null : iso(digest.last_sent_at + DIGEST_REFRESH_MS),
+      next_due_at: isoOrNull(nextDigestDay(digest)),
     };
   }
 

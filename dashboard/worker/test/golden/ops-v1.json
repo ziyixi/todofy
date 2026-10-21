@@ -20,97 +20,6 @@
   "input/start-manual": {
     "run_id": "canary-manual-20260929T233000Z"
   },
-  "input/report": {
-    "generated_at": "2026-09-29T23:30:00.000Z",
-    "items": [
-      {
-        "source": "mail-hero",
-        "code": "endpoint_blocked",
-        "severity": "critical",
-        "since": "2026-09-29T10:02:11.000Z",
-        "metrics": {
-          "waiting_deliveries": 3,
-          "current_blocked": 1
-        }
-      },
-      {
-        "source": "cloudflare",
-        "code": "d1_rows_read_high",
-        "severity": "warning",
-        "since": "2026-09-29T23:30:00.000Z",
-        "metrics": {
-          "percent": 81.5,
-          "used": 4075000,
-          "limit": 5000000,
-          "projected_percent": 97.25
-        }
-      },
-      {
-        "source": "dashboard",
-        "code": "canary_skipped",
-        "severity": "warning",
-        "since": "2026-09-29T22:31:40.000Z",
-        "metrics": {
-          "no_endpoint": 1
-        }
-      },
-      {
-        "source": "newsletter",
-        "code": "newsletter_unknown",
-        "severity": "warning",
-        "since": "2026-09-29T23:30:00.000Z",
-        "metrics": {
-          "used": 4996.2,
-          "cap": 5000
-        }
-      },
-      {
-        "source": "todofy",
-        "code": "gemini_budget_80",
-        "severity": "warning",
-        "since": "2026-09-29T18:30:00.000Z",
-        "metrics": {
-          "percent": 82.4,
-          "used_tokens": 2460000,
-          "reserved_tokens": 12000,
-          "budget_tokens": 3000000
-        }
-      }
-    ],
-    "dashboard_url": "https://home.example.com/"
-  },
-  "input/report-no-url": {
-    "generated_at": "2026-09-29T23:30:00.000Z",
-    "items": [
-      {
-        "source": "mail-hero",
-        "code": "endpoint_blocked",
-        "severity": "critical",
-        "since": "2026-09-29T10:02:11.000Z",
-        "metrics": {
-          "waiting_deliveries": 3,
-          "current_blocked": 1
-        }
-      },
-      {
-        "source": "cloudflare",
-        "code": "d1_rows_read_high",
-        "severity": "warning",
-        "since": "2026-09-29T23:30:00.000Z",
-        "metrics": {
-          "percent": 81.5,
-          "used": 4075000,
-          "limit": 5000000,
-          "projected_percent": 97.25
-        }
-      }
-    ]
-  },
-  "input/report-empty": {
-    "generated_at": "2026-09-29T23:30:00.000Z",
-    "items": [],
-    "dashboard_url": "https://home.example.com/"
-  },
   "read/CanaryDelivery/delivered.json": {
     "state": "delivered",
     "attempts": 1,
@@ -199,8 +108,7 @@
     "deferred": [
       "weekly_backup",
       "retention",
-      "metrics_rollup",
-      "gtd_snapshot"
+      "metrics_rollup"
     ]
   },
   "read/GuardState/shed-watch.json": {
@@ -213,71 +121,10 @@
       "daily_sweep"
     ]
   },
-  "read/OpsReport/daily.json": {
-    "generated_at": "2026-09-29T23:40:00Z",
-    "items": [
-      {
-        "source": "mail-hero",
-        "code": "endpoint_blocked",
-        "severity": "critical",
-        "since": "2026-09-29T10:02:11Z",
-        "metrics": {
-          "waiting_deliveries": 3,
-          "current_blocked": 1
-        }
-      },
-      {
-        "source": "todofy",
-        "code": "backup_stale",
-        "severity": "critical",
-        "since": "2026-09-28T10:00:00Z",
-        "metrics": {
-          "age_seconds": 792000
-        }
-      },
-      {
-        "source": "dashboard",
-        "code": "canary_not_delivered",
-        "severity": "warning",
-        "since": "2026-09-29T22:30:00Z",
-        "metrics": {
-          "attempts": 3,
-          "last_http_status": 503
-        }
-      },
-      {
-        "source": "cloudflare",
-        "code": "d1_rows_read_high",
-        "severity": "warning",
-        "since": "2026-09-29T14:00:00Z",
-        "metrics": {
-          "percent": 81.5
-        }
-      },
-      {
-        "source": "dashboard",
-        "code": "canary_ok",
-        "severity": "info",
-        "since": "2026-09-28T22:31:40Z",
-        "metrics": {}
-      }
-    ],
-    "dashboard_url": "https://home.example.com/"
-  },
-  "read/OpsReport/empty.json": {
-    "generated_at": "2026-09-29T23:40:00Z",
-    "items": []
-  },
-  "read/OpsReportReceipt/kept-newer.json": {
-    "stored": false,
-    "generated_at": "2026-09-29T23:50:00Z",
-    "item_count": 0
-  },
-  "read/OpsReportReceipt/stored.json": {
-    "stored": true,
-    "generated_at": "2026-09-29T23:40:00Z",
-    "item_count": 5
-  },
+  "read/OpsReport/daily.json": null,
+  "read/OpsReport/empty.json": null,
+  "read/OpsReportReceipt/kept-newer.json": null,
+  "read/OpsReportReceipt/stored.json": null,
   "read/OpsStatus/brief-degraded.json": {
     "version": "ops-v1",
     "app": "brief",
@@ -860,9 +707,7 @@
     "health": "down",
     "modes": {
       "maintenance": false,
-      "processing_paused": false,
-      "force_pause_todoist": false,
-      "reminder_enabled": true
+      "processing_paused": false
     },
     "guard": {
       "level": "normal",
@@ -883,8 +728,7 @@
     "ui_url": "https://todofy.example.com/",
     "capabilities": [
       "canary_consumer",
-      "guard",
-      "ops_digest"
+      "guard"
     ]
   },
   "read/OpsStatus/tasks-ok.json": {
@@ -905,7 +749,12 @@
     "signals": [],
     "counters": {
       "database_ready": 1,
-      "change_sequence": 0
+      "change_sequence": 0,
+      "inbox_open": 23,
+      "inbox_oldest_days": 41,
+      "overdue": 3,
+      "completed_7d": 42,
+      "review_age_days": 2
     },
     "last_backup_at": null,
     "ui_url": "https://tasks.example.org/",
@@ -919,8 +768,6 @@
     "modes": {
       "maintenance": false,
       "processing_paused": false,
-      "force_pause_todoist": false,
-      "reminder_enabled": true,
       "backup_active": false
     },
     "guard": {
@@ -931,8 +778,7 @@
       "deferred": [
         "weekly_backup",
         "retention",
-        "metrics_rollup",
-        "gtd_snapshot"
+        "metrics_rollup"
       ]
     },
     "signals": [
@@ -978,16 +824,14 @@
       "gemini_reserved_tokens": 12000,
       "gemini_token_budget": 3000000,
       "gemini_calls": 64,
-      "todoist_window_calls": 3,
-      "todoist_window_limit": 1000,
+      "carryover_open": 4,
       "backup_age_seconds": 792000
     },
     "last_backup_at": "2026-09-20T10:00:04Z",
     "ui_url": "https://todofy.example.com/",
     "capabilities": [
       "canary_consumer",
-      "guard",
-      "ops_digest"
+      "guard"
     ]
   },
   "read/OpsStatus/todofy-ok.json": {
@@ -998,8 +842,6 @@
     "modes": {
       "maintenance": false,
       "processing_paused": false,
-      "force_pause_todoist": false,
-      "reminder_enabled": true,
       "backup_active": false
     },
     "guard": {
@@ -1019,22 +861,14 @@
       "gemini_reserved_tokens": 0,
       "gemini_token_budget": 3000000,
       "gemini_calls": 64,
-      "todoist_window_calls": 3,
-      "todoist_window_limit": 1000,
-      "backup_age_seconds": 363600,
-      "inbox_open": 23,
-      "inbox_oldest_days": 41,
-      "overdue": 3,
       "carryover_open": 9,
-      "completed_7d": 42,
-      "review_age_days": 2
+      "backup_age_seconds": 363600
     },
     "last_backup_at": "2026-09-27T10:00:02Z",
     "ui_url": "https://todofy.example.com/",
     "capabilities": [
       "canary_consumer",
-      "guard",
-      "ops_digest"
+      "guard"
     ]
   },
   "read/OpsStatus/watch-degraded.json": {
@@ -1192,21 +1026,7 @@
   "read/invalid/GuardState/level-null.json": null,
   "read/invalid/GuardState/unknown-level.json": null,
   "read/invalid/OpsReport/item-severity-null.json": null,
-  "read/invalid/OpsReport/item-with-text.json": {
-    "generated_at": "2026-09-29T23:40:00Z",
-    "items": [
-      {
-        "source": "mail-hero",
-        "code": "endpoint_blocked",
-        "severity": "critical",
-        "since": "2026-09-29T10:02:11Z",
-        "metrics": {
-          "waiting_deliveries": 3,
-          "current_blocked": 1
-        }
-      }
-    ]
-  },
+  "read/invalid/OpsReport/item-with-text.json": null,
   "read/invalid/OpsReport/string-metric.json": null,
   "read/invalid/OpsReport/too-many-items.json": null,
   "read/invalid/OpsReport/url-with-query.json": null,

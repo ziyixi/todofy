@@ -29,6 +29,15 @@ for (const method of METHODS) {
 export class Ops extends Base {}
 Object.defineProperties(Ops.prototype, prototype)
 
+// Tasks' create-only TaskInbox (proto/tasks/inbox/v1), which only the "tasks" stub is bound as: Home's digest task.
+// Like Tasks it refuses a binding whose props.source is not "home" or "watch".
+export class TaskInbox extends Base {
+  async createInboxTask(input) {
+    if (!['home', 'watch'].includes(this.ctx.props?.source)) throw new Error('invalid_input')
+    return answer('createInboxTask', [input])
+  }
+}
+
 export default {
   async fetch(request) {
     const url = new URL(request.url)

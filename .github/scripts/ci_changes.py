@@ -275,8 +275,9 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # the other apps that call it join as each imports it.
     "proto/todofy/mail/": ("todofy", "tasks"),
     "proto/tasks/ui/": ("tasks", "personal-mcp"),
-    # Tasks' create-only TaskInbox (tasks.inbox.v1): Tasks serves it; the apps that call it join as each imports it.
-    "proto/tasks/inbox/": ("tasks",),
+    # Tasks' create-only TaskInbox (tasks.inbox.v1): Tasks serves it, Home creates the digest's daily task with it; the
+    # watch app joins as it imports it.
+    "proto/tasks/inbox/": ("tasks", "dashboard"),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
     # mailsort's owner API (mailsort.ui.v2, after v1): its Worker serves it, its UI calls it.

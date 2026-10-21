@@ -23,7 +23,7 @@ Besides the page it runs four jobs:
 
 - **Canary and digest.** A daily delivery-and-processing canary (one synthetic `mail.received.v1`
   event that Mail Hero creates directly and delivers to Todofy, no task side effects) and one
-  unified ops digest that Todofy's daily reminder carries. The canary covers Mail Hero delivery →
+  unified ops digest: at most one task a UTC day in Tasks, through Tasks' create-only TaskInbox. The canary covers Mail Hero delivery →
   Todofy intake, Gemini summary and verification; it does not cover source forwarding, Email Routing,
   raw storage or MIME parsing, so a green run says nothing about whether mail is being received.
   The GitHub variable `DASHBOARD_CANARY_ENABLED=false` stops new runs (for example before a Todofy

@@ -64,7 +64,7 @@ describe('start preconditions', () => {
     expect(startPrecondition({ ...mh, status_at: NOW - 61 * 60_000 }, td, NOW)).toEqual({ kind: 'wait' });
     const noProducer = { ...mh, status: { ...mh.status, capabilities: ['guard'] } };
     expect(startPrecondition(noProducer, td, NOW)).toEqual({ kind: 'skip', code: 'canary_producer_missing' });
-    const noConsumer = { ...td, status: { ...td.status, capabilities: ['guard', 'ops_digest'] } };
+    const noConsumer = { ...td, status: { ...td.status, capabilities: ['guard'] } };
     expect(startPrecondition(mh, noConsumer, NOW)).toEqual({ kind: 'skip', code: 'canary_consumer_missing' });
   });
 });

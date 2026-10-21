@@ -1,7 +1,8 @@
 /**
  * workerd harness (docs/design.md §9): bundles src/index.ts with esbuild and runs it in Miniflare as
- * the Worker "home" with a real SQLite HomeState, next to stub "mail-hero", "todofy", "watch", "fleet", "newsletter" and
- * "notion-publish" Workers whose `Ops` entrypoints answer with contracts/ops-v1 fixtures, and an outbound fetch handler that plays the
+ * the Worker "home" with a real SQLite HomeState, next to stub "mail-hero", "todofy", "watch", "fleet", "newsletter",
+ * "notion-publish" (and the other ops-v1 apps') Workers whose `Ops` entrypoints answer with contracts/ops-v1 fixtures,
+ * the "tasks" stub's TaskInbox as TASK_INBOX (the digest's daily task), and an outbound fetch handler that plays the
  * Cloudflare GraphQL API and the Access certs endpoint. All data is synthetic.
  */
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -18,6 +19,9 @@ const CONTRACT = resolve(ROOT, '../../contracts/ops-v1');
 
 export type StubApp = OpsApp;
 
+/** What the "tasks" stub's TaskInbox answers by default: a created task. */
+export const SYNTHETIC_TASK = { task_id: '00000000-0000-4000-8000-0000000000aa', subtask_ids: [], replayed: false } as const;
+
 /** The methods of `app`'s Ops entrypoint (the generated services it implements): the stubs expose exactly these. */
 export function declaredMethodsOf(app: StubApp): string[] {
   return declaredMethods(app);
@@ -27,7 +31,7 @@ export async function fixture(path: string): Promise<unknown> {
   return JSON.parse(await readFile(join(CONTRACT, 'fixtures', path), 'utf8')) as unknown;
 }
 
-/** Default answers of each stub: healthy apps, a queued/delivered/ok canary, a stored report. */
+/** Default answers of each stub: healthy apps, a queued/delivered/ok canary, a created digest task. */
 async function defaults(app: StubApp): Promise<Record<string, unknown>> {
   if (app === 'mail-hero') {
     return {
@@ -39,7 +43,7 @@ async function defaults(app: StubApp): Promise<Record<string, unknown>> {
   }
   if (app === 'notion-publish') return { status: await fixture('OpsStatus/notion-publish-ok.json') };
   // recall has no guard: its setGuard always refuses, and Home never calls it.
-  if (app === 'tasks') return { status: await fixture('OpsStatus/tasks-ok.json') };
+  if (app === 'tasks') return { status: await fixture('OpsStatus/tasks-ok.json'), createInboxTask: SYNTHETIC_TASK };
   if (app === 'personal-mcp') return { status: JSON.parse(await readFile(join(ROOT, 'test/fixtures/personal-mcp-ok.json'), 'utf8')) as unknown };
   if (app === 'recall') return { status: await fixture('OpsStatus/recall-ok.json') };
   if (app === 'fleet' || app === 'newsletter') {
@@ -52,7 +56,6 @@ async function defaults(app: StubApp): Promise<Record<string, unknown>> {
     status: await fixture('OpsStatus/todofy-ok.json'),
     setGuard: await fixture('GuardState/normal.json'),
     canaryResult: await fixture('CanaryResult/ok.json'),
-    reportOps: await fixture('OpsReportReceipt/stored.json'),
   };
 }
 
@@ -161,6 +164,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
             BRIEF: { name: 'brief', entrypoint: 'Ops' },
             TASKS: { name: 'tasks', entrypoint: 'Ops' },
             PERSONAL_MCP: { name: 'personal-mcp', entrypoint: 'Ops' },
+            // As dashboard/wrangler.toml binds it: Tasks' TaskInbox for source home.
+            TASK_INBOX: { name: 'tasks', entrypoint: 'TaskInbox', props: { source: 'home' } },
             ASSETS: () => new Response('<!doctype html><title>home</title>', { headers: { 'content-type': 'text/html' } }),
           },
           bindings,

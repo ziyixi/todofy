@@ -104,9 +104,7 @@ def test_guard_state_expires_at_until():
     guard = ops.Guard("shed", "d1_reads_high", NOW_MS + 1000, NOW_MS - 5000)
     shed = ops.guard_state(guard, NOW_MS)
     expected = fixture("GuardState/shed-todofy.json")
-    # The fixture still lists the GTD snapshot, which Todofy deferred until 2026-10-21.
-    deferred = [job for job in expected["deferred"] if job != "gtd_snapshot"]
-    assert shed == expected | {"until": "2026-09-29T15:00:01Z", "set_at": "2026-09-29T14:59:55Z", "deferred": deferred}
+    assert shed == expected | {"until": "2026-09-29T15:00:01Z", "set_at": "2026-09-29T14:59:55Z"}
     for state in (shed, ops.guard_state(guard, NOW_MS + 1000), ops.guard_state(ops.NORMAL, NOW_MS)):
         assert errors("GuardState", state) == []
     assert ops.guard_state(guard, NOW_MS + 1000) == fixture("GuardState/normal.json")
@@ -230,26 +228,6 @@ FACTS = ops.Facts(
     guard=ops.NORMAL,
     public_host="todofy.example.com",
 )
-# What the contract's Todofy fixtures (written before 2026-10-21) still show and Todofy no longer reports: the two
-# switches and the capability of the task writes, and the counters of the Todoist call window and of GTD.
-RETIRED_MODES = {"force_pause_todoist", "reminder_enabled"}
-RETIRED_COUNTERS = {"inbox_open", "inbox_oldest_days", "overdue", "completed_7d", "review_age_days"}
-
-
-def current(doc: dict[str, Any]) -> dict[str, Any]:
-    """A Todofy fixture without what Todofy no longer reports."""
-    counters = {
-        name: value
-        for name, value in doc["counters"].items()
-        if not name.startswith("todoist_") and name not in RETIRED_COUNTERS
-    }
-    return doc | {
-        "modes": {name: value for name, value in doc["modes"].items() if name not in RETIRED_MODES},
-        "counters": counters,
-        "capabilities": [name for name in doc["capabilities"] if name != "ops_digest"],
-    }
-
-
 def codes(status: dict[str, Any]) -> list[tuple[str, str]]:
     return [(signal["code"], signal["severity"]) for signal in status["signals"]]
 
@@ -258,7 +236,7 @@ def test_a_healthy_status_matches_the_contract_fixture_shape():
     status = ops.status(FACTS)
     assert errors("OpsStatus", status) == []
     # Modes and counters are open maps; the counters keep the fixture's order.
-    expected = current(fixture("OpsStatus/todofy-ok.json"))
+    expected = fixture("OpsStatus/todofy-ok.json")
     assert status == expected | {"generated_at": "2026-09-29T15:00:00Z", "last_backup_at": "2026-09-25T10:00:00Z"}
 
 
@@ -341,7 +319,7 @@ def test_unavailable_status_matches_the_contract_fixture():
     assert status["health"] == "down"
     assert status["signals"] == [{"code": "status_unavailable", "severity": "critical", "metrics": {}}]
     assert status["counters"] == {}
-    expected = current(fixture("OpsStatus/status-unavailable.json"))
+    expected = fixture("OpsStatus/status-unavailable.json")
     assert status == expected | {"generated_at": "2026-09-29T15:00:00Z"}
 
 

@@ -80,7 +80,7 @@ and the page says so.
 | --- | --- | --- | --- |
 | CPU per HTTP request and per Cron Trigger invocation | 10 ms | the fetch and scheduled handlers only authenticate, route and make one RPC to `HomeState` | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) |
 | CPU per Durable Object invocation | 30 s (default) | all GraphQL parsing, aggregation, guard, canary and digest work runs in `HomeState` | [DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/) |
-| Subrequests | 50 per request | a tick makes at most 34 outbound calls (11 `status`, 2 probes (website, links), ≤ 5 `setGuard`, ≤ 2 canary calls, ≤ 1 `reportOps`, 1 GraphQL, ≤ 12 read-only drift calls; `outboundPerTick()` in the registry, tested ≤ `MAX_OUTBOUND_PER_TICK` = 34, including Brief's status and guard and Tasks' and Personal MCP's read-only status) | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) |
+| Subrequests | 50 per request | a tick makes at most 34 outbound calls (11 `status`, 2 probes (website, links), ≤ 5 `setGuard`, ≤ 2 canary calls, ≤ 1 `createInboxTask`, 1 GraphQL, ≤ 12 read-only drift calls; `outboundPerTick()` in the registry, tested ≤ `MAX_OUTBOUND_PER_TICK` = 34, including Brief's status and guard and Tasks' and Personal MCP's read-only status) | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) |
 | Worker invocations per request | 32; each service-binding call counts, and counts as a subrequest | same bound as above | [Service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/) |
 | Service-binding request fees | "do not incur additional request fees" | the `Ops` calls | [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) |
 | Static assets | free and not counted only when served without invoking the Worker; with `run_worker_first` every asset request invokes the Worker and counts as a Worker request (above the daily limit it gets a 429, no fallback to free asset serving) | the UI (`ASSETS`): `run_worker_first = true` (Access check and private headers on every path), so each HTML, JS, CSS and icon fetch counts in `workers_requests`, and once the account reaches 100,000 requests a day the page itself is unavailable until 00:00 UTC | [Static assets billing](https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/) |
@@ -94,7 +94,7 @@ and the page says so.
 
 48 cron ticks: 48 Worker requests and 48 Durable Object requests; at most 528 `status()` calls across 11 apps (Mail
 Hero ≤ 6 and Todofy ≤ 5 indexed D1 statements each, contracts/ops-v1); at most 48 GraphQL queries; a
-few `setGuard`, canary and `reportOps` calls; one canary a day (one synthetic message stored in Mail
+few `setGuard` and canary calls, at most 6 `createInboxTask` calls a day; one canary a day (one synthetic message stored in Mail
 Hero's R2 and D1 and normally one Gemini call in Todofy, up to 3 when a transient failure is retried),
 up to 3 more when the owner runs it by hand; two public GETs per tick, plus owner refreshes (each probe
 ≥ 10 min apart, so at most 144 a day each): the website's `build-info.json` (a static asset, outside

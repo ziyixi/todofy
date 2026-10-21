@@ -1,4 +1,5 @@
 import type { Digest } from '../../../worker/src/api-types.ts'
+import { DIGEST_TASK_ATTEMPTS } from '../../../worker/src/api-types.ts'
 import { SEVERITY, appErrorLabel, signalLabel } from '../lib/labels'
 import { nameOf, type Reg } from '../lib/registry'
 import { Card, Fact, Facts, Metrics, Notice, Pill, Time } from './ui'
@@ -7,12 +8,14 @@ export function DigestSection({ reg, digest, now }: { reg: Reg; digest: Digest; 
   return (
     <Card id="digest" title="运维摘要" level={2}>
       <p className="small muted">
-        每次定时检查汇总警告和严重项目；项目变化时或至少每 6 小时发给 Todofy，由 Todofy 的每日提醒在 Tasks 中最多创建一条任务。
+        每次定时检查汇总警告和严重项目；每个 UTC 日第一次有项目时，在 Tasks 创建一条摘要任务，当天不再创建。
       </p>
-      {!digest.enabled ? (
-        <Notice tone="warn">Todofy 当前没有提供运维摘要功能（ops_digest），摘要暂不发送。</Notice>
+      {!digest.enabled ? <Notice tone="warn">没有绑定 Tasks 的建任务入口（TASK_INBOX），不会创建摘要任务。</Notice> : null}
+      {digest.last_error ? (
+        <Notice tone="danger">
+          上次创建失败：{appErrorLabel(digest.last_error)}。下次定时检查会用同一请求重试，每天最多 {DIGEST_TASK_ATTEMPTS} 次。
+        </Notice>
       ) : null}
-      {digest.last_error ? <Notice tone="danger">上次发送失败：{appErrorLabel(digest.last_error)}，下次定时检查会重试。</Notice> : null}
 
       {digest.items.length === 0 ? (
         <p className="small">当前没有需要汇报的项目。</p>
@@ -40,14 +43,10 @@ export function DigestSection({ reg, digest, now }: { reg: Reg; digest: Digest; 
       )}
 
       <Facts>
-        <Fact label="上次发送">{digest.last_sent_at ? <Time iso={digest.last_sent_at} now={now} /> : '尚未发送'}</Fact>
-        {digest.last_receipt ? (
-          <Fact label="Todofy 回执">
-            {digest.last_receipt.stored ? '已保存' : '未替换（Todofy 已有更新的报告）'}，{digest.last_receipt.item_count} 项
-          </Fact>
-        ) : null}
+        <Fact label="上次摘要任务">{digest.last_sent_at ? <Time iso={digest.last_sent_at} now={now} /> : '尚未创建'}</Fact>
+        {digest.last_receipt ? <Fact label="任务列出">{digest.last_receipt.item_count} 项</Fact> : null}
         {digest.next_due_at ? (
-          <Fact label="最迟下次发送">
+          <Fact label="下一条最早">
             <Time iso={digest.next_due_at} now={now} />
           </Fact>
         ) : null}

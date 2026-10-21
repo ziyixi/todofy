@@ -6,8 +6,6 @@
   "modes": {
     "maintenance": false,
     "processing_paused": false,
-    "force_pause_todoist": false,
-    "reminder_enabled": true,
     "backup_active": false
   },
   "guard": {
@@ -27,21 +25,13 @@
     "gemini_reserved_tokens": 0,
     "gemini_token_budget": 3000000,
     "gemini_calls": 64,
-    "todoist_window_calls": 3,
-    "todoist_window_limit": 1000,
-    "backup_age_seconds": 363600,
-    "inbox_open": 23,
-    "inbox_oldest_days": 41,
-    "overdue": 3,
     "carryover_open": 9,
-    "completed_7d": 42,
-    "review_age_days": 2
+    "backup_age_seconds": 363600
   },
   "last_backup_at": "2026-09-27T10:00:02Z",
   "ui_url": "https://todofy.example.com/",
   "capabilities": [
     "canary_consumer",
-    "guard",
-    "ops_digest"
+    "guard"
   ]
 }

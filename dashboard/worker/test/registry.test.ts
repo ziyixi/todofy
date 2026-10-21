@@ -114,8 +114,9 @@ describe('the registry', () => {
     expect(entryOfScript('ziyixi-website')).toBe('website');
     expect(entryOfScript('new-worker')).toBeUndefined();
     expect(flowsOfScript('mail-hero')).toEqual(['mail-to-task']);
-    expect(flowsOfScript('todofy')).toEqual(['mail-to-task', 'daily-newsletter', 'ops-digest']);
+    expect(flowsOfScript('todofy')).toEqual(['mail-to-task', 'daily-newsletter']);
     expect(flowsOfScript('todofy-core')).toEqual(['mail-to-task', 'gtd']);
+    expect(flowsOfScript('tasks')).toEqual(['gtd']);
     expect(flowsOfScript('watch')).toEqual(['web-watch']);
     expect(flowsOfScript('home')).toEqual(['ops-digest']);
     expect(flowsOfScript('ziyixi-notion-publish')).toEqual(['site-publish']);
@@ -144,9 +145,10 @@ describe('the registry', () => {
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });
     expect(REGISTRY.entries.find((e) => e.id === 'self-hosted')).toMatchObject({ group: 'hidden', url: null, status: { type: 'none' } });
     expect(REGISTRY.workers.filter((w) => w.entry === 'self-hosted')).toEqual([]);
-    // All deployed namespaces, including Brief, are recorded in config/resources.toml.
+    // All deployed namespaces, including Brief, are recorded in config/resources.toml; Tasks' TaskJobs namespace is
+    // created by its first deploy with JOBS and recorded after it.
     const unmatched = REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id);
-    expect(unmatched).toEqual([]);
+    expect(unmatched).toEqual(['tasks-jobs']);
     expect(resourceByMatch('do', '6edfe7c19d6748b186ee38bb48c686be')).toMatchObject({ id: 'brief-state', kind: 'do', entry: 'brief', script: 'brief' });
     expect(REGISTRY.resources.find((r) => r.id === 'recall-state')).toMatchObject({ kind: 'do', entry: 'recall', script: 'recall' });
     expect(resourceByMatch('r2', 'recall-store')).toMatchObject({ id: 'recall-store', entry: 'recall' });
@@ -161,7 +163,7 @@ describe('the registry', () => {
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 11 status() + 2 probes (website, links) + 1 GraphQL + 5 setGuard + 2 canary calls + 1 reportOps + 12 drift calls.
+    // 11 status() + 2 probes (website, links) + 1 GraphQL + 5 setGuard + 2 canary calls + 1 createInboxTask + 12 drift calls.
     expect(outboundPerTick()).toBe(34);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
     expect(outboundPerRefresh()).toBe(13);
@@ -184,7 +186,7 @@ describe('the registry', () => {
     expect(linkOnly).toMatchObject({ status_type: 'link_only', host: 'link-demo.ziyixi.science', scripts: [] });
     expect(linkOnly).not.toHaveProperty('status');
     expect(view.entries.find((e) => e.id === 'todofy')?.scripts).toEqual(['todofy', 'todofy-core']);
-    expect(view.workers.find((w) => w.script === 'todofy')?.flows).toEqual(['mail-to-task', 'daily-newsletter', 'ops-digest']);
+    expect(view.workers.find((w) => w.script === 'todofy')?.flows).toEqual(['mail-to-task', 'daily-newsletter']);
     for (const icon of view.entries.map((e) => e.icon)) expect(ICON_KEYS).toContain(icon);
   });
 });

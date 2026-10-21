@@ -5,7 +5,6 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { parseStatus } from '@ziyixi/proto/rpc-status';
-import type { OpsReport } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { RunCanaryResponse } from '../../src/api-types.ts';
 import { expectValid, latest, NOW, PATHS, startFlows, status, type FlowHarness } from './flows.ts';
 import { fixture } from './harness.ts';
@@ -86,15 +85,12 @@ describe('the scheduled canary', () => {
     await h.tick('2026-09-29T16:00:00Z');
     for (const at of ['16:30', '17:00', '17:30']) await h.tick(`2026-09-29T${at}:00Z`);
     expect(latest(await h.snapshot()).phase).toBe('delivering');
-    await h.callsOf('todofy', 'reportOps');
     await h.tick('2026-09-29T18:00:00Z');
-    const run = latest(await h.snapshot());
+    const snap = await h.snapshot();
+    const run = latest(snap);
     expect(run).toMatchObject({ phase: 'done', outcome: 'failed', stage: 'delivery', code: 'timeout', polls: 5 });
     expect(run.delivery).toMatchObject({ state: 'pending', attempts: 2, last_http_status: 503, error_code: 'http_503' });
-    const reports = (await h.callsOf('todofy', 'reportOps')).map((args) => args[0] as OpsReport);
-    expect(reports).toHaveLength(1);
-    expectValid('OpsReport', reports[0]);
-    expect(reports[0]?.items).toContainEqual({
+    expect(snap.digest.items).toContainEqual({
       source: 'dashboard',
       code: 'canary_not_delivered',
       severity: 'critical',
@@ -139,7 +135,7 @@ describe('the scheduled canary', () => {
 
   it('never starts a canary when Todofy lacks canary_consumer', async () => {
     h = await startFlows();
-    await h.answer('todofy', 'status', { value: await status('todofy', { capabilities: ['guard', 'ops_digest'] }) });
+    await h.answer('todofy', 'status', { value: await status('todofy', { capabilities: ['guard'] }) });
     await h.tick('2026-09-29T16:00:00Z');
     expect(await h.callsOf('mail-hero', 'startCanary')).toEqual([]);
     const snap = await h.snapshot();
@@ -205,13 +201,8 @@ describe('the canary switch (CANARY_ENABLED)', () => {
     // Hour 0: every tick is past the canary hour. Ticks up to a minute before NOW keep the views current.
     h = await startFlows({ bindings: { CANARY_ENABLED: 'false', CANARY_UTC_HOUR: '0' } });
     for (const minutes of [150, 120, 90, 60, 30, 1]) await h.tick(NOW - minutes * 60_000);
-    // The digest went out, without any canary item (none for "not run today" either).
-    const reports = (await h.callsOf('todofy', 'reportOps')).map((args) => args[0] as OpsReport);
-    expect(reports.length).toBeGreaterThan(0);
-    for (const report of reports) {
-      expectValid('OpsReport', report);
-      expect(report.items.filter((item) => item.code.startsWith('canary_'))).toEqual([]);
-    }
+    // No canary item in the digest (none for "not run today" either).
+    expect((await h.snapshot()).digest.items.filter((item) => item.code.startsWith('canary_'))).toEqual([]);
     expect(await canaryCalls(h)).toEqual([]);
 
     const response = await h.post(PATHS.canary, {});

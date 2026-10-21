@@ -46,9 +46,6 @@ import resultNotSeen from '../../../contracts/ops-v1/fixtures/CanaryResult/not-s
 import resultOk from '../../../contracts/ops-v1/fixtures/CanaryResult/ok.json';
 import resultProcessingPaused from '../../../contracts/ops-v1/fixtures/CanaryResult/processing-paused.json';
 import resultProcessing from '../../../contracts/ops-v1/fixtures/CanaryResult/processing.json';
-import receiptKept from '../../../contracts/ops-v1/fixtures/OpsReportReceipt/kept-newer.json';
-import receiptStored from '../../../contracts/ops-v1/fixtures/OpsReportReceipt/stored.json';
-import reportDaily from '../../../contracts/ops-v1/fixtures/OpsReport/daily.json';
 import type { Env } from '../src/env.ts';
 import { contractErrors, declaredMethods } from './contract.ts';
 import {
@@ -58,14 +55,14 @@ import {
   asCanaryDelivery,
   asCanaryResult,
   asGuardState,
-  asReceipt,
+  asInboxTask,
   asStartCanaryResult,
   asStatus,
   callOps,
   conform,
+  createInboxTask,
   opsCanaryDelivery,
   opsCanaryResult,
-  opsReportOps,
   opsSetGuard,
   opsStartCanary,
   opsStatus,
@@ -116,7 +113,6 @@ const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: un
   { app: 'todofy', method: 'status', call: (env) => opsStatus(env, 'todofy'), valid: todofyOk },
   { app: 'todofy', method: 'setGuard', call: (env) => opsSetGuard(env, 'todofy', guardInput), valid: guardShedTodofy },
   { app: 'todofy', method: 'canaryResult', call: (env) => opsCanaryResult(env, EVENT_ID), valid: resultOk },
-  { app: 'todofy', method: 'reportOps', call: (env) => opsReportOps(env, reportDaily as never), valid: receiptStored },
   { app: 'watch', method: 'status', call: (env) => opsStatus(env, 'watch'), valid: watchOk },
   { app: 'watch', method: 'setGuard', call: (env) => opsSetGuard(env, 'watch', guardInput), valid: guardShedWatch },
 ];
@@ -162,7 +158,6 @@ describe('only the methods of the services each app implements', () => {
       if (wrapper.method === 'setGuard') expect(contractErrors('SetGuardInput', arg)).toEqual([]);
       if (wrapper.method === 'startCanary') expect(contractErrors('StartCanaryInput', arg)).toEqual([]);
       if (wrapper.method === 'canaryDelivery' || wrapper.method === 'canaryResult') expect(contractErrors('EventId', arg)).toEqual([]);
-      if (wrapper.method === 'reportOps') expect(contractErrors('OpsReport', arg)).toEqual([]);
     }
     // Every declared method is covered.
     expect(WRAPPERS.filter((w) => w.app === 'mail-hero').map((w) => w.method).sort()).toEqual(declaredMethods('mail-hero'));
@@ -184,7 +179,6 @@ describe('only the methods of the services each app implements', () => {
     expect(await opsStartCanary(env, { run_id: 'canary 1' })).toEqual({ ok: false, code: 'invalid_input' });
     expect(await opsCanaryDelivery(env, 'not-an-event')).toEqual({ ok: false, code: 'invalid_input' });
     expect(await opsCanaryResult(env, EVENT_ID.toUpperCase())).toEqual({ ok: false, code: 'invalid_input' });
-    expect(await opsReportOps(env, { generated_at: '2026-09-29T23:40:00Z', items: [], dashboard_url: 'http://home.example.com/' })).toEqual({ ok: false, code: 'invalid_input' });
     expect(calls).toEqual([]);
   });
 });
@@ -232,7 +226,6 @@ describe('answers are read with the contract\'s rules', () => {
       expect(asCanaryDelivery(d)).toEqual(d);
     }
     for (const r of [resultFailed, resultNotSeen, resultOk, resultProcessingPaused, resultProcessing]) expect(asCanaryResult(r)).toEqual(r);
-    for (const r of [receiptKept, receiptStored]) expect(asReceipt(r)).toEqual(r);
   });
 
   // Every invalid fixture of an output type. The contract's consumer rules (README "Versioning")
@@ -244,7 +237,6 @@ describe('answers are read with the contract\'s rules', () => {
     StartCanaryResult: asStartCanaryResult,
     CanaryDelivery: asCanaryDelivery,
     CanaryResult: asCanaryResult,
-    OpsReportReceipt: asReceipt,
   };
   const without = (field: string) => (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([key]) => key !== field));
   const TOLERATED: Readonly<Record<string, (value: Record<string, unknown>) => unknown>> = {
@@ -259,7 +251,8 @@ describe('answers are read with the contract\'s rules', () => {
       const name = /invalid\/([^/]+)\/([^/]+)$/.exec(path);
       const type = name?.[1] ?? '';
       const read = OUTPUTS[type];
-      if (read === undefined) continue; // inputs (SetGuardInput, StartCanaryInput, OpsReport) are ours
+      // Inputs (SetGuardInput, StartCanaryInput) are ours; the digest's OpsReport and its receipt are no longer sent.
+      if (read === undefined) continue;
       const key = `${type}/${name?.[2] ?? ''}`;
       seen.push(key);
       const tolerated = TOLERATED[key];
@@ -314,6 +307,34 @@ describe('answers are read with the contract\'s rules', () => {
     // So the canary's tick never reads a delivery or a result without a state (applyDelivery's switch has no default).
     expect(await callOps(() => Promise.resolve({ state: null, attempts: 0 }), asCanaryDelivery)).toEqual({ ok: false, code: 'invalid_output' });
     expect(await callOps(() => Promise.resolve({ state: null }), asCanaryResult)).toEqual({ ok: false, code: 'invalid_output' });
+  });
+});
+
+describe("the digest's daily task (Tasks' TaskInbox)", () => {
+  const REQUEST = { request_id: '00000000-0000-4000-8000-000000000001', title: '运维摘要 2026-09-29：1 项需要关注', description: '- warning · dashboard · tick_stale' };
+  const ANSWER = { task_id: 'task-1', subtask_ids: [], replayed: false };
+
+  function inbox(answer: () => unknown): { env: Pick<Env, 'TASK_INBOX'>; sent: unknown[] } {
+    const sent: unknown[] = [];
+    return { env: { TASK_INBOX: { createInboxTask: (input: unknown) => { sent.push(input); return Promise.resolve().then(answer); } } } as unknown as Pick<Env, 'TASK_INBOX'>, sent };
+  }
+
+  it('sends the request in its wire form and reads the answer', async () => {
+    const { env, sent } = inbox(() => ANSWER);
+    expect(await createInboxTask(env, REQUEST)).toEqual({ ok: true, value: ANSWER });
+    expect(sent).toEqual([REQUEST]);
+    expect(asInboxTask({ ...ANSWER, extra: 'skipped' })).toEqual(ANSWER);
+  });
+
+  it("never sends what TaskInbox refuses, and maps its codes: daily_limit reads as busy", async () => {
+    const { env, sent } = inbox(() => ANSWER);
+    expect(await createInboxTask(env, { ...REQUEST, request_id: 'not-a-uuid' })).toEqual({ ok: false, code: 'invalid_input' });
+    expect(sent).toEqual([]);
+    for (const [thrown, code] of [['invalid_input', 'invalid_input'], ['daily_limit', 'busy'], ['unavailable', 'unavailable'], ['Storage exploded', 'unavailable']] as const) {
+      expect(await createInboxTask(inbox(() => { throw new Error(thrown); }).env, REQUEST)).toEqual({ ok: false, code });
+    }
+    expect(await createInboxTask({}, REQUEST)).toEqual({ ok: false, code: 'not_configured' });
+    expect(await createInboxTask(inbox(() => ({ task_id: 1 })).env, REQUEST)).toEqual({ ok: false, code: 'invalid_output' });
   });
 });
 

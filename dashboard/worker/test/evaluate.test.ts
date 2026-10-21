@@ -30,7 +30,7 @@ function stage(f: Omit<FlowState, 'canary'>, id: string) {
   return found;
 }
 
-const withSignals = (app: 'mail-hero' | 'todofy', signals: OpsStatus['signals'], health: OpsStatus['health'] = 'degraded') =>
+const withSignals = (app: 'mail-hero' | 'todofy' | 'tasks', signals: OpsStatus['signals'], health: OpsStatus['health'] = 'degraded') =>
   status(app, { health, signals });
 
 describe('levels', () => {
@@ -194,23 +194,28 @@ describe('flows (stage chains)', () => {
     expect(flows['web-watch']).toMatchObject({ level: 'ok', partial: false, coverage: { monitored: 3, total: 4 } });
   });
 
-  it('maps the GTD loop onto Todofy counters; a late review is shown but is not a fault', () => {
+  it("maps the GTD loop onto Todofy's pending mail and Tasks' counts; a late review is shown but is not a fault", () => {
     const gtd = flow('gtd');
     expect(gtd.coverage).toEqual({ monitored: 4, total: 5 });
+    expect(stage(gtd, 'capture').counters).toEqual([
+      { name: 'received_24h', value: 63 },
+      { name: 'carryover_open', value: 9 },
+    ]);
     expect(stage(gtd, 'clarify').counters).toEqual([
       { name: 'inbox_open', value: 23 },
       { name: 'inbox_oldest_days', value: 41 },
     ]);
     expect(stage(gtd, 'reflect').counters.map((c) => c.name)).toEqual(['review_age_days', 'completed_7d']);
     expect(stage(gtd, 'engage').level).toBe('unmonitored'); // done in Tasks, outside the dashboard
-    const overdue = withSignals('todofy', [signal('review_overdue', 'info')], 'ok');
-    const late = flow('gtd', { statuses: { 'mail-hero': status('mail-hero'), todofy: overdue } });
+    const statuses = { 'mail-hero': status('mail-hero'), todofy: status('todofy') };
+    const overdue = withSignals('tasks', [signal('review_overdue', 'info')], 'ok');
+    const late = flow('gtd', { statuses: { ...statuses, tasks: overdue } });
     expect(stage(late, 'reflect').level).toBe('ok');
     expect(stage(late, 'reflect').signals.map((s) => s.code)).toEqual(['review_overdue']);
-    const stale = withSignals('todofy', [signal('gtd_snapshot_stale', 'warning')]);
-    expect(stage(flow('gtd', { statuses: { 'mail-hero': status('mail-hero'), todofy: stale } }), 'reflect')).toMatchObject({
+    const stale = withSignals('tasks', [signal('gtd_stale', 'warning')]);
+    expect(stage(flow('gtd', { statuses: { ...statuses, tasks: stale } }), 'reflect')).toMatchObject({
       level: 'warning',
-      reason: 'gtd_snapshot_stale',
+      reason: 'gtd_stale',
     });
   });
 
@@ -252,8 +257,8 @@ describe('flows (stage chains)', () => {
     expect(flows.find((f) => f.id === 'mail-to-task')?.unclassified).toEqual([{ entry: 'todofy', code: 'future_signal', severity: 'warning' }]);
     for (const other of flows.filter((f) => f.id !== 'mail-to-task')) expect(other.unclassified).toEqual([]);
     // A code another flow places is not unclassified anywhere.
-    const reminder = withSignals('todofy', [signal('reminder_failed', 'warning')]);
-    expect(flowStates(input({ statuses: { todofy: reminder } })).flatMap((f) => f.unclassified)).toEqual([]);
+    const attention = withSignals('todofy', [signal('attention', 'warning')]);
+    expect(flowStates(input({ statuses: { todofy: attention } })).flatMap((f) => f.unclassified)).toEqual([]);
   });
 
   it('names the worst stage as the first issue, not an earlier lesser one', () => {
@@ -286,7 +291,9 @@ describe('the attention strip', () => {
 
   it('targets each item at the flow stage that claims it, else its entry or view', () => {
     expect(targetOf('todofy', 'gemini_budget_80')).toEqual({ view: 'flows', flow: 'mail-to-task', stage: 'consume', entry: 'todofy' });
-    expect(targetOf('todofy', 'reminder_failed')).toEqual({ view: 'flows', flow: 'mail-to-task', stage: 'tasks', entry: 'todofy' });
+    expect(targetOf('todofy', 'attention')).toEqual({ view: 'flows', flow: 'mail-to-task', stage: 'tasks', entry: 'todofy' });
+    expect(targetOf('tasks', 'gtd_stale')).toEqual({ view: 'flows', flow: 'gtd', stage: 'reflect', entry: 'tasks' });
+    expect(targetOf('dashboard', 'digest_task_failed')).toEqual({ view: 'ops' });
     expect(targetOf('mail-hero', 'backup_stale')).toEqual({ view: 'ops', entry: 'mail-hero' });
     expect(targetOf('mail-hero', 'app_unreachable')).toEqual({ view: 'home', entry: 'mail-hero' });
     expect(targetOf('todofy', 'guard_apply_failed')).toEqual({ view: 'ops', entry: 'todofy' });
@@ -324,7 +331,7 @@ describe('the attention strip', () => {
       { entry: 'todofy', code: 'processing_paused', target: { view: 'flows', flow: 'mail-to-task', stage: 'consume', entry: 'todofy' } },
     ]);
     expect(badges.flows).toBe(1);
-    expect(holdCodes('todofy')).toEqual(new Set(['processing_paused', 'todoist_paused', 'reminder_disabled']));
+    expect(holdCodes('todofy')).toEqual(new Set(['processing_paused']));
   });
 
   it('never says 全部正常 while a tile or a flow is worse: a failing site probe becomes one observed item (F1)', () => {

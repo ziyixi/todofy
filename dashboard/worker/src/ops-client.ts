@@ -1,9 +1,9 @@
 /**
  * The only code that calls the apps (docs/design.md §5.1): one wrapper per method of the generated ops-v1 services
- * (proto/ops/v1/ops.proto: OpsService on every app, CanaryProducerService on Mail Hero, CanaryConsumerService and
- * OpsDigestService on Todofy), each with a timeout, the contract's error codes and the wire codec on both sides: what
- * the dashboard sends is checked with the contract's rules first, every answer is read with them. Results are values,
- * never exceptions.
+ * (proto/ops/v1/ops.proto: OpsService on every app, CanaryProducerService on Mail Hero, CanaryConsumerService on
+ * Todofy), and one for Tasks' create-only TaskInbox (proto/tasks/inbox/v1: the digest's daily task), each with a
+ * timeout, the contract's error codes and the wire codec on both sides: what the dashboard sends is checked with the
+ * contract's rules first, every answer is read with them. Results are values, never exceptions.
  */
 import type { DescMessage, DescMethod } from '@ziyixi/proto/protobuf';
 import {
@@ -17,15 +17,15 @@ import {
   GuardLevel,
   GuardLevelSchema,
   GuardStateSchema,
-  OpsDigestService,
   OpsReportItemSchema,
-  OpsReportReceiptSchema,
   OpsReportSchema,
   OpsService,
   OpsStatusSchema,
   StartCanaryResultSchema,
 } from '@ziyixi/proto/ops/v1/ops_pb';
 import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
+import { CreateInboxTaskRequestSchema, CreateInboxTaskResponseSchema } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_pb';
+import type * as inbox from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
 import { fieldRules, formatMatches, fromWire, fromWireArguments, toWire, toWireArguments, wireEnum, WireJsonError, type WireOf } from '@ziyixi/proto/wire-json';
 import type { AppErrorCode, OpsApp } from './api-types.ts';
 import type { Env } from './env.ts';
@@ -133,7 +133,7 @@ export const asGuardState: Conformer<ops.GuardState> = conformer(GuardStateSchem
 export const asStartCanaryResult: Conformer<ops.StartCanaryResult> = conformer(StartCanaryResultSchema);
 export const asCanaryDelivery: Conformer<ops.CanaryDelivery> = conformer(CanaryDeliverySchema);
 export const asCanaryResult: Conformer<ops.CanaryResult> = conformer(CanaryResultSchema);
-export const asReceipt: Conformer<ops.OpsReportReceipt> = conformer(OpsReportReceiptSchema);
+export const asInboxTask: Conformer<inbox.CreateInboxTaskResponse> = conformer(CreateInboxTaskResponseSchema);
 
 /** An OpsStatus of `app` (the contract allows every app). */
 export function asStatus(app: OpsApp): Conformer<ops.OpsStatus> {
@@ -167,7 +167,7 @@ const refused: OpsCall<never> = { ok: false, code: 'invalid_input' };
 /** The methods each app's entrypoint has (the generated services it implements); a test compares them with the IDL. */
 export const CALLED_METHODS = {
   'mail-hero': ['status', 'setGuard', 'startCanary', 'canaryDelivery'],
-  todofy: ['status', 'setGuard', 'canaryResult', 'reportOps'],
+  todofy: ['status', 'setGuard', 'canaryResult'],
   watch: ['status', 'setGuard'],
   fleet: ['status', 'setGuard'],
   newsletter: ['status', 'setGuard'],
@@ -179,7 +179,7 @@ export const CALLED_METHODS = {
   'personal-mcp': ['status', 'setGuard'],
 } as const;
 
-type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP'>;
+type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'TASK_INBOX'>;
 
 function missing(): Promise<never> {
   return Promise.reject(new MissingBinding('not_configured'));
@@ -236,9 +236,26 @@ export async function opsCanaryResult(env: Bindings, eventId: string): Promise<O
   return callOps(() => (env.TODOFY as Bindings['TODOFY'] | undefined)?.canaryResult(sent) ?? missing(), asCanaryResult);
 }
 
-export async function opsReportOps(env: Bindings, report: ops.OpsReport): Promise<OpsCall<ops.OpsReportReceipt>> {
-  const args = encode(OpsDigestService.method.reportOps, [report]);
-  if (args === null) return refused;
-  const sent = args[0] as ops.OpsReport;
-  return callOps(() => (env.TODOFY as Bindings['TODOFY'] | undefined)?.reportOps(sent) ?? missing(), asReceipt);
+/**
+ * The digest's daily task through Tasks' TaskInbox (props.source "home"). TaskInbox throws its own codes: invalid_input
+ * stays, daily_limit (20 tasks of this source in a UTC day; Home makes one) reads as busy, anything else unavailable.
+ */
+export async function createInboxTask(env: Pick<Bindings, 'TASK_INBOX'>, input: inbox.CreateInboxTaskRequest): Promise<OpsCall<inbox.CreateInboxTaskResponse>> {
+  let sent: inbox.CreateInboxTaskRequest;
+  try {
+    sent = toWire(CreateInboxTaskRequestSchema, fromWire(CreateInboxTaskRequestSchema, input, { strict: true }).message);
+  } catch (error) {
+    if (error instanceof WireJsonError) return refused;
+    throw error;
+  }
+  return callOps(async () => {
+    const binding = env.TASK_INBOX;
+    if (binding === undefined) return missing();
+    try {
+      return await binding.createInboxTask(sent);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      throw new Error(code === 'invalid_input' ? 'invalid_input' : code === 'daily_limit' ? 'busy' : 'unavailable', { cause: error });
+    }
+  }, asInboxTask);
 }

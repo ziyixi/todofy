@@ -53,7 +53,7 @@ describe('业务流程', () => {
     expect(within(newsletter).queryByText('正常', { selector: '.level-badge .level-word' })).toBeNull()
     expect(within(newsletter).getByText('无法判断新鲜度：部分阶段尚未接入')).toBeInTheDocument()
 
-    expect(within(card('运维摘要')).getByText('上次摘要 昨天 23:00 · Todofy 已接收')).toBeInTheDocument()
+    expect(within(card('运维摘要')).getByText('上次摘要 昨天 23:00 · 已在 Tasks 创建')).toBeInTheDocument()
   })
 
   it('shows a partial flow\'s real level when it is not ok: 部分接入 only replaces 正常 (F2)', async () => {
@@ -139,7 +139,7 @@ describe('业务流程', () => {
       '阶段 3 解析：正常，待处理任务 0',
       '阶段 4 Webhook 投递：正常，投递失败 0，金丝雀已验证',
       '阶段 5 Todofy 摘要：需关注，24 小时 41 封，金丝雀已验证',
-      '阶段 6 任务与提醒：正常，需处理事件 0',
+      '阶段 6 待处理邮件：正常，需处理事件 0',
     ])
     expect(nodes[4]).toHaveAttribute('aria-pressed', 'true')
 

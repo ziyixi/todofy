@@ -1,16 +1,19 @@
 /**
  * Bindings, vars and secrets of the Worker "home" (../wrangler.toml, docs/design.md §2). The apps are
  * reached only through their `Ops` entrypoints (contracts/ops-v1), typed by the generated services of
- * proto/ops/v1 that each one implements; nothing here imports app code.
+ * proto/ops/v1 that each one implements, and Tasks also through its create-only TaskInbox
+ * (proto/tasks/inbox/v1) for the digest's daily task; nothing here imports app code.
  */
 import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
+import type { TaskInboxService } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
 import type { WebsiteSyncService } from '@ziyixi/proto/website/sync/v1/sync_wire';
 import type { HomeState } from './state.ts';
 
 export interface MailHeroOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryProducerService {}
-export interface TodofyOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService {}
+export interface TodofyOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryConsumerService {}
 export interface WatchOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService {}
 export interface WebsiteSyncEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, WebsiteSyncService {}
+export interface TaskInboxEntrypoint extends Rpc.WorkerEntrypointBranded, TaskInboxService {}
 
 export interface Env {
   readonly MAIL_HERO: Service<MailHeroOpsEntrypoint>;
@@ -29,11 +32,16 @@ export interface Env {
   readonly TASKS: Service<WatchOpsEntrypoint>;
   /** Personal MCP connection and delivery observations; no owner or business-content API. */
   readonly PERSONAL_MCP: Service<WatchOpsEntrypoint>;
+  /**
+   * Tasks' TaskInbox with `props.source = "home"`: it creates tasks only (no read, update or delete). The digest's one
+   * task a UTC day (digest.ts); absent in a local config without it, which then creates none.
+   */
+  readonly TASK_INBOX?: Service<TaskInboxEntrypoint>;
   readonly HOME: DurableObjectNamespace<HomeState>;
   readonly ASSETS: Fetcher;
 
   // vars (committed in ../wrangler.toml; BUILD_SHA and CANARY_ENABLED added at deploy by deploy/deploy-vars.mjs)
-  /** The dashboard's own host, e.g. home.ziyixi.science: CSRF Origin and the digest's dashboard_url. */
+  /** The dashboard's own host, e.g. home.ziyixi.science: CSRF Origin and the link in the digest's task. */
   readonly PUBLIC_HOST: string;
   readonly ACCESS_ISSUER: string;
   readonly ACCESS_AUDIENCE: string;

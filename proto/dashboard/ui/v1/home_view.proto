@@ -77,7 +77,7 @@ message HomeView {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).non_null = true
   ];
-  // The digest's last send.
+  // The digest's last task.
   HomeDigest digest = 11 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).non_null = true
@@ -242,7 +242,7 @@ message Freshness {
     KIND_CANARY = 1;
     // The last request of the flow's Workers.
     KIND_ACTIVITY = 2;
-    // The digest's last send.
+    // The digest's last task.
     KIND_DIGEST = 3;
     // Nothing the dashboard sees.
     KIND_NONE = 4;
@@ -288,7 +288,7 @@ message Freshness {
       otherwise: PRESENCE_ABSENT
     }
   ];
-  // Whether Todofy stored the last report (digest); unset before the first receipt.
+  // Whether the day's task was stored (digest: always true once one was created); unset before the first.
   optional bool accepted = 5 [
     (google.api.field_behavior) = OUTPUT_ONLY,
     (common.wire.v1.field) = {
@@ -329,13 +329,13 @@ message CloudflareSummary {
   ];
 }
 
-// The digest's last send, on the home view.
+// The digest's last task, on the home view.
 message HomeDigest {
-  // When the last report went out.
+  // When the last day's task was created.
   optional string last_sent_at = 1 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "Timestamp"
   ];
-  // Whether Todofy stored it; null before the first receipt.
+  // Whether it was stored (always true once one was created); null before the first.
   optional bool accepted = 2 [(google.api.field_behavior) = REQUIRED];
 }

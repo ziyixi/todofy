@@ -1,34 +1,25 @@
 /**
- * The unified ops digest (docs/design.md §5.5): pure functions building the OpsReport items (codes,
- * severities, times and numbers only) and deciding when to send them to Todofy's `reportOps`.
+ * The unified ops digest (docs/design.md §5.5): pure functions building the items (codes, severities, times and
+ * numbers only) and the one task a UTC day Home creates with them in Tasks, through Tasks' create-only TaskInbox.
  */
-import type { OpsReport, OpsReportItem } from '@ziyixi/proto/ops/v1/ops_wire';
-import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
-import { GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type CanaryStage, type OpsApp, type OpsSeverity, type OpsStatus, type QuotaRow } from './api-types.ts';
+import type { OpsReportItem } from '@ziyixi/proto/ops/v1/ops_wire';
+import type { CreateInboxTaskRequest } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
+import { DIGEST_TASK_ATTEMPTS, GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type AppErrorCode, type CanaryStage, type OpsApp, type OpsSeverity, type OpsStatus, type QuotaRow } from './api-types.ts';
 import { DRIFT_UNAVAILABLE_AFTER_DAYS } from './api-types.ts';
 import { DRIFT_CATEGORIES } from './idl.ts';
 import { CANARY_DISABLED_CODE, type CanaryRecord } from './canary.ts';
+import type { DigestDoc } from './docs.ts';
 import { totalFindings, type DriftDoc } from './drift.ts';
 import { hoursLeft, reachesPercent, type DesiredGuard } from './guard.ts';
 import { isOpsCode, isOpsSource, METRICS_MAX_KEYS, OPS_APPS, REPORT_MAX_ITEMS } from './ops-client.ts';
-import { HOUR_MS, MINUTE_MS, iso, isTimestamp, startOfUtcDay } from './time.ts';
+import { DAY_MS, HOUR_MS, MINUTE_MS, iso, isTimestamp, utcDay } from './time.ts';
 
-export const DIGEST_REFRESH_MS = 6 * HOUR_MS;
-/**
- * No report replaces one from an earlier UTC day during this start of the day. Todofy keeps only the
- * latest report and lists it in a day's reminder only if it was generated before that day began
- * (contracts/ops-v1 README: report at about 23:40 for the next day's reminder); its reminder check runs
- * every 10 min. The 00:00 tick therefore must not overwrite the 23:30 report before that check has
- * claimed it (a quota item that clears at midnight would never be reported); the 00:30 tick may send.
- */
-export const DIGEST_DAY_START_HOLD_MS = 20 * MINUTE_MS;
 /** A usage fetch failing for this long becomes `usage_unavailable`. */
 export const USAGE_UNAVAILABLE_AFTER_MS = 2 * HOUR_MS;
 /** App statuses older than this do not contribute signals. */
 export const STATUS_SIGNAL_MAX_AGE_MS = HOUR_MS;
 /** No completed cron tick for this long (two and a half ticks) is `tick_stale`: guard, canary and digest have stopped. */
 export const TICK_STALE_MS = 75 * MINUTE_MS;
-
 
 /** An item before its `since` is resolved. */
 export interface Candidate {
@@ -64,6 +55,8 @@ export interface DigestInput {
   readonly apps: Readonly<Record<OpsApp, AppHealthInput>>;
   /** The drift check (design-v2.md §10): its last result; absent in tests that predate it. */
   readonly drift?: { readonly configured: boolean; readonly doc: DriftDoc };
+  /** The digest's own record (its day's task); absent in tests that predate it. */
+  readonly digest?: DigestDoc;
 }
 
 /** Numbers only, named by codes, at most 12 keys. */
@@ -140,6 +133,8 @@ export function candidates(input: DigestInput): Candidate[] {
 
   const stale = tickStale(input.lastTickAt, now);
   if (stale !== null) out.push(stale);
+  const failed = input.digest === undefined ? null : digestTaskFailed(input.digest, now);
+  if (failed !== null) out.push(failed);
 
   // Configuration drift: counts per category only (the names stay on the Cloudflare view). A known
   // difference is reported like any other until the live account or the committed state changes.
@@ -248,53 +243,78 @@ export function finalizeItems(list: readonly Candidate[], firstSeen: ReadonlyMap
     }));
 }
 
-const encoder = new TextEncoder();
+// ---- the day's task -------------------------------------------------------------------------------------------------
 
-export function reportBytes(report: OpsReport): number {
-  return encoder.encode(JSON.stringify(report)).byteLength;
-}
-
-/** The report, trimmed from the end until its compact JSON is at most 8192 bytes. */
-export function buildReport(items: readonly OpsReportItem[], now: number, dashboardUrl: string | null): OpsReport {
-  const kept = items.slice(0, REPORT_MAX_ITEMS);
-  const make = (list: readonly OpsReportItem[]): OpsReport => ({
-    generated_at: iso(now),
-    items: list,
-    ...(dashboardUrl !== null ? { dashboard_url: dashboardUrl } : {}),
+/** The day's task: its items as codes, severities, times and numbers (never an app's text), and a link to Home. */
+export function digestTask(items: readonly OpsReportItem[], day: string, dashboardUrl: string | null): { title: string; description: string } {
+  const listed = items.slice(0, REPORT_MAX_ITEMS);
+  const lines = listed.map((item) => {
+    const metrics = Object.entries(item.metrics).map(([name, value]) => `${name}=${String(value)}`);
+    return `- ${[item.severity, item.source, item.code, `自 ${item.since}`, ...(metrics.length > 0 ? [metrics.join(', ')] : [])].join(' · ')}`;
   });
-  let report = make(kept);
-  while (kept.length > 0 && reportBytes(report) > OPS_LIMITS.reportMaxBytes) {
-    kept.pop();
-    report = make(kept);
-  }
-  return report;
-}
-
-/** The change key: sorted `source:code:severity`. */
-export function digestKey(items: readonly OpsReportItem[]): string {
-  return items
-    .map((item) => `${item.source}:${item.code}:${item.severity}`)
-    .sort()
-    .join(',');
-}
-
-export interface DigestSendState {
-  readonly last_key: string | null;
-  readonly last_sent_at: number | null;
+  if (items.length > listed.length) lines.push(`- … 另有 ${String(items.length - listed.length)} 项`);
+  return {
+    title: `运维摘要 ${day}：${String(items.length)} 项需要关注`,
+    description: [
+      `Home 在 UTC ${day} 第一次有警告或严重项目时创建此任务，每个 UTC 日最多一次：`,
+      '',
+      ...lines,
+      ...(dashboardUrl === null ? [] : ['', `查看 Home：${dashboardUrl}`]),
+    ].join('\n'),
+  };
 }
 
 /**
- * Send on a change, at least every 6 h, and at the 23:30 UTC tick when the last send is ≥ 60 min old;
- * never during the first DIGEST_DAY_START_HOLD_MS of a UTC day when the last report is from an earlier
- * day (it is still waiting for today's reminder).
+ * The digest document before this tick's call. A document from before the day's task (no `day`) records today as
+ * handled, so the day of the release gets no task next to the one Todofy's reminder made. A later day is claimed at its
+ * first tick with items: the request, with a new request ID, is frozen, so every retry sends the same one.
  */
-export function shouldSend(key: string, state: DigestSendState, now: number): boolean {
-  if (state.last_sent_at === null || state.last_key === null) return true;
-  const dayStart = startOfUtcDay(now);
-  if (now - dayStart < DIGEST_DAY_START_HOLD_MS && state.last_sent_at < dayStart) return false;
-  if (key !== state.last_key) return true;
-  const age = now - state.last_sent_at;
-  if (age >= DIGEST_REFRESH_MS) return true;
-  const date = new Date(now);
-  return date.getUTCHours() === 23 && date.getUTCMinutes() >= 30 && age >= 60 * MINUTE_MS;
+export function claimDay(doc: DigestDoc, items: readonly OpsReportItem[], now: number, dashboardUrl: string | null, requestId: string): DigestDoc {
+  const day = utcDay(now);
+  if (doc.day === undefined) return { ...doc, day, state: 'skipped', request: null, attempts: 0, task_id: null };
+  if (doc.day === day || items.length === 0) return doc;
+  const request: CreateInboxTaskRequest = { request_id: requestId, ...digestTask(items, day, dashboardUrl) };
+  return { ...doc, day, state: 'pending', request, item_count: items.length, claimed_at: now, attempts: 0, task_id: null };
+}
+
+/** The result of one call for the day's task. */
+export type TaskCall = { readonly ok: true; readonly taskId: string } | { readonly ok: false; readonly code: AppErrorCode };
+
+/** The document after one call: created; or failed for good after an invalid input or the last attempt; else pending. */
+export function afterCall(doc: DigestDoc, call: TaskCall, now: number): DigestDoc {
+  const attempts = (doc.attempts ?? 0) + 1;
+  if (call.ok) {
+    const claimedAt = doc.claimed_at ?? now;
+    return {
+      ...doc,
+      state: 'created',
+      request: null,
+      attempts,
+      task_id: call.taskId,
+      last_sent_at: now,
+      last_generated_at: claimedAt,
+      last_receipt: { stored: true, generated_at: iso(claimedAt), item_count: doc.item_count ?? 0 },
+      last_error: null,
+      last_attempt_at: now,
+    };
+  }
+  const final = call.code === 'invalid_input' || attempts >= DIGEST_TASK_ATTEMPTS;
+  return { ...doc, state: final ? 'failed' : 'pending', ...(final ? { request: null } : {}), attempts, last_error: call.code, last_attempt_at: now };
+}
+
+/** `digest_task_failed` while today's task could not be created; the next day's claim ends it. */
+export function digestTaskFailed(doc: DigestDoc, now: number): Candidate | null {
+  if (doc.day !== utcDay(now) || doc.state !== 'failed') return null;
+  return {
+    source: 'dashboard',
+    code: 'digest_task_failed',
+    severity: 'warning',
+    metrics: { attempts: doc.attempts ?? 0 },
+    ...(doc.last_attempt_at == null ? {} : { since: iso(doc.last_attempt_at) }),
+  };
+}
+
+/** The start of the UTC day after the last one handled, when one was. */
+export function nextDigestDay(doc: DigestDoc): number | null {
+  return doc.day === undefined ? null : Date.parse(`${doc.day}T00:00:00Z`) + DAY_MS;
 }

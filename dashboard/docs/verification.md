@@ -386,7 +386,8 @@ Hero with ops-v1 are live) and, where stated, the owner in a browser.
 | Workers AI neurons | once the account makes Workers AI calls, the `ai_neurons` row matches the Workers AI dashboard's Neurons for the same UTC day (only the empty `[]` answer has been seen live, 2026-09-30) | pending |
 | First scheduled canary | the day's run reaches `ok` (Mail Hero delivered, Todofy summarized it, no task, not listed as mail); this does not exercise Email Routing, raw storage or parsing | pending |
 | Guard round trip | only if a real ≥ 80 % day happens, or by the owner's 强制降载 then 解除降载: both apps report the guard in `status()` and clear it | pending |
-| Digest | Todofy's next daily reminder carries the dashboard's warning/critical items, or none | pending |
+| Digest | Todofy's next daily reminder carries the dashboard's warning/critical items, or none | superseded 2026-10-21: see the next row |
+| Digest task (2026-10-21) | the UTC day after the release: exactly one 运维摘要 task in Tasks if the day had warning/critical items (in the project routed to `home`, else the Inbox); 操作与记录 shows 上次摘要任务 and no error | pending |
 | Canary switch | once, before or after the first canary: deploy with `DASHBOARD_CANARY_ENABLED=false`, check the banner item, the disabled button and that no run starts at the canary hour; deploy again with `true` (or unset) | pending |
 | v2: the four views as the owner | after the v2 deploy: `#/`, `#/flows`, `#/cloudflare`, `#/ops` load on a desktop browser and a phone; `/health` shows the merged `BUILD_SHA`; the old v1 anchors (`#apps`, `#quota`, `#canary`, ...) land on their v2 views | pending |
 | v2: storage migration | the first v2 tick adds `canary_runs.canary_id` once (existing runs become `mail-todofy`); the canary history and manual count carry over | pending |

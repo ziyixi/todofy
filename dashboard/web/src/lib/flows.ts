@@ -4,7 +4,7 @@ import { formatDayHour, formatDayTime } from './format'
 import { LEVEL, reasonLabel } from './labels'
 import { flowOf, stageOf, type Reg } from './registry'
 
-/** The freshness of a flow in one phrase: "端到端成功 今天 09:06", "上次摘要 今天 07:00 · Todofy 已接收". */
+/** The freshness of a flow in one phrase: "端到端成功 今天 09:06", "上次摘要 今天 07:00 · 已在 Tasks 创建". */
 export function freshnessText(freshness: Freshness, now: Date): string | null {
   switch (freshness.kind) {
     case 'canary':
@@ -15,7 +15,7 @@ export function freshnessText(freshness: Freshness, now: Date): string | null {
       return freshness.at ? `最近有请求 ${formatDayHour(freshness.at, now)}` : '还没有观察到活动'
     case 'digest':
       if (!freshness.at) return '还没有发送过摘要'
-      return `上次摘要 ${formatDayTime(freshness.at, now)}${freshness.accepted === true ? ' · Todofy 已接收' : freshness.accepted === false ? ' · Todofy 未接收' : ''}`
+      return `上次摘要 ${formatDayTime(freshness.at, now)}${freshness.accepted === true ? ' · 已在 Tasks 创建' : ''}`
     case 'none':
       return null
   }

@@ -58,7 +58,7 @@ describe('操作与记录', () => {
 
     const digest = region('运维摘要')
     expect(within(digest).getByText('当前没有需要汇报的项目。')).toBeInTheDocument()
-    expect(within(digest).getByText('已保存，0 项')).toBeInTheDocument()
+    expect(within(digest).getByText('0 项')).toBeInTheDocument()
 
     const about = region('构建与注册表')
     expect(within(about).getByText('0123456789ab')).toBeInTheDocument()

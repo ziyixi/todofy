@@ -6,7 +6,6 @@
   "deferred": [
     "weekly_backup",
     "retention",
-    "metrics_rollup",
-    "gtd_snapshot"
+    "metrics_rollup"
   ]
 }

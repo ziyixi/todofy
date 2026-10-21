@@ -2,7 +2,7 @@
  * Evaluation of the v2 views (docs/design-v2.md §2, §4): entry health, flow stages and the attention
  * strip, as pure functions of what HomeState stored (`now` passed in). Page requests only read: nothing
  * here calls out or writes. Flows reorganize what the ticks already know; they never add alarm items,
- * so the digest sent to Todofy is unchanged.
+ * so the digest's daily task is unchanged.
  */
 import { CANARY_DISABLED_ITEM, type OpsSignal, type OpsStatus } from './api-types.ts';
 import { LEVEL_RANK, type AttentionItem, type Attention, type Badges, type CanaryBadge, type EntryState, type FlowState, type FlowSummary, type Freshness, type HeldItem, type Level, type RollupLevel, type StageState, type Target, type TileMetric, type ViewId } from './api-types.ts';

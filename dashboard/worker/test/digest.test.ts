@@ -1,26 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { contractErrors } from './contract.ts';
+import { fromWire } from '@ziyixi/proto/wire-json';
+import { CreateInboxTaskRequestSchema } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_pb';
 import mailHeroDegraded from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-degraded.json';
 import todofyOk from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json';
 import unavailable from '../../../contracts/ops-v1/fixtures/OpsStatus/status-unavailable.json';
 import type { OpsReportItem, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
-import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
 import { METRICS_MAX_KEYS, REPORT_MAX_ITEMS } from '../src/ops-client.ts';
 import type { QuotaRow } from '../src/api-types.ts';
 import { finish, newRun } from '../src/canary.ts';
 import { NO_DRIFT } from '../src/drift.ts';
+import { DIGEST_TASK_ATTEMPTS } from '../src/api-types.ts';
 import {
-  buildReport,
+  afterCall,
   candidates,
+  claimDay,
   cleanMetrics,
-  digestKey,
+  digestTask,
   finalizeItems,
   itemKey,
-  reportBytes,
-  shouldSend,
+  nextDigestDay,
   withTickState,
   type DigestInput,
 } from '../src/digest.ts';
+import { NO_DIGEST, type DigestDoc } from '../src/docs.ts';
 
 const NOW = Date.parse('2026-09-29T14:00:00Z');
 const URL_ = 'https://home.example.com/';
@@ -233,73 +235,79 @@ describe('digest items', () => {
   });
 });
 
-describe('reports', () => {
-  it('validates as OpsReport, empty included', () => {
-    const list = items({ usage: { ...input().usage, rows: [quota('d1_rows_read', 81.5)] }, desired: { level: 'shed', reason: 'quota_d1_rows_read', until: NOW + 3_600_000, source: 'auto' } });
-    for (const report of [buildReport(list, NOW, URL_), buildReport([], NOW, URL_), buildReport(list, NOW, null)]) {
-      expect(contractErrors('OpsReport', report)).toEqual([]);
-    }
-  });
+describe("the day's task", () => {
+  const REQUEST_ID = '00000000-0000-4000-8000-000000000001';
+  const listed = (): OpsReportItem[] =>
+    items({ usage: { ...input().usage, rows: [quota('d1_rows_read', 96)] }, desired: { level: 'shed', reason: 'quota_d1_rows_read', until: NOW + 3_600_000, source: 'auto' } });
+  /** A document of a day before NOW's, as an earlier release's tick left it. */
+  const yesterday: DigestDoc = { ...NO_DIGEST, day: '2026-09-28', state: 'created', attempts: 1, task_id: 'task-0' };
 
-  it('is trimmed from the end to 8192 bytes of compact JSON', () => {
-    const big: OpsReportItem[] = Array.from({ length: 20 }, (_, i) => ({
-      source: 'mail-hero',
-      code: `signal_with_a_rather_long_code_number_${String(i).padStart(2, '0')}`,
-      severity: 'warning',
-      since: '2026-09-29T14:00:00.000Z',
-      metrics: Object.fromEntries(Array.from({ length: 12 }, (_, j) => [`metric_name_long_${String(j)}`, 123456789.123])),
-    }));
-    const report = buildReport(big, NOW, URL_);
-    expect(reportBytes(report)).toBeLessThanOrEqual(OPS_LIMITS.reportMaxBytes);
-    expect(report.items.length).toBeLessThan(20);
-    expect(report.items).toEqual(big.slice(0, report.items.length));
-    expect(contractErrors('OpsReport', report)).toEqual([]);
-  });
-});
-
-describe('sending', () => {
-  const list = [{ source: 'x', code: 'b', severity: 'critical', since: '2026-09-29T00:00:00Z', metrics: {} }, { source: 'x', code: 'a', severity: 'warning', since: '2026-09-29T00:00:00Z', metrics: {} }] as const;
-
-  it('keys on the sorted source:code:severity set', () => {
-    expect(digestKey(list)).toBe('x:a:warning,x:b:critical');
-    expect(digestKey([...list].reverse())).toBe(digestKey(list));
-    expect(digestKey([])).toBe('');
-  });
-
-  it('sends on first run, on change, after 6 h and at 23:30 UTC when an hour old', () => {
-    const key = digestKey(list);
-    expect(shouldSend(key, { last_key: null, last_sent_at: null }, NOW)).toBe(true);
-    expect(shouldSend('', { last_key: null, last_sent_at: null }, NOW)).toBe(true);
-    expect(shouldSend(key, { last_key: key, last_sent_at: NOW - 30 * 60_000 }, NOW)).toBe(false);
-    expect(shouldSend(key, { last_key: 'other', last_sent_at: NOW - 60_000 }, NOW)).toBe(true);
-    expect(shouldSend(key, { last_key: key, last_sent_at: NOW - 6 * 3_600_000 }, NOW)).toBe(true);
-    const late = Date.parse('2026-09-29T23:30:00Z');
-    expect(shouldSend(key, { last_key: key, last_sent_at: late - 60 * 60_000 }, late)).toBe(true);
-    expect(shouldSend(key, { last_key: key, last_sent_at: late - 30 * 60_000 }, late)).toBe(false);
-    expect(shouldSend(key, { last_key: key, last_sent_at: late - 90 * 60_000 }, Date.parse('2026-09-29T23:00:00Z') + 0)).toBe(false);
-  });
-
-  it('does not overwrite the 23:30 report at the 00:00 tick (Todofy lists only the latest, from before the day)', () => {
-    // 23:30: D1 reads at 86 % and the guard shed; the report is sent for the next day's reminder.
-    const lateAt = Date.parse('2026-09-15T23:30:00Z');
-    const breach = digestKey([
-      { source: 'cloudflare', code: 'd1_rows_read_high', severity: 'warning', since: '2026-09-15T20:00:00Z', metrics: {} },
-      { source: 'dashboard', code: 'guard_shed', severity: 'warning', since: '2026-09-15T20:00:00Z', metrics: {} },
+  it("lists codes, severities, times and numbers, and is a valid TaskInbox request", () => {
+    const task = digestTask(listed(), '2026-09-29', URL_);
+    expect(task.title).toBe('运维摘要 2026-09-29：2 项需要关注');
+    expect(task.description.split('\n')).toEqual([
+      'Home 在 UTC 2026-09-29 第一次有警告或严重项目时创建此任务，每个 UTC 日最多一次：',
+      '',
+      '- critical · cloudflare · d1_rows_read_high · 自 2026-09-29T14:00:00.000Z · percent=96, used=96000, limit=100000, projected_percent=144',
+      '- warning · dashboard · guard_shed · 自 2026-09-29T14:00:00.000Z · hours_left=1, manual=0',
+      '',
+      `查看 Home：${URL_}`,
     ]);
-    const sent = { last_key: breach, last_sent_at: lateAt };
-    // 00:00: the daily quota reset, the items are gone. Sending now would replace the 23:30 report
-    // before Todofy's first reminder check of the day (every 10 min) claimed it.
-    expect(shouldSend('', sent, Date.parse('2026-09-16T00:00:00Z'))).toBe(false);
-    expect(shouldSend('', sent, Date.parse('2026-09-16T00:00:30Z'))).toBe(false);
-    // Also a plain refresh (same key, last success ≥ 6 h old) waits.
-    expect(shouldSend(breach, { last_key: breach, last_sent_at: Date.parse('2026-09-15T17:00:00Z') }, Date.parse('2026-09-16T00:00:00Z'))).toBe(false);
-    // 00:30: the reminder check has run; the change is sent.
-    expect(shouldSend('', sent, Date.parse('2026-09-16T00:30:00Z'))).toBe(true);
-    // A report already sent today is not held; nor is the very first report.
-    const today = { last_key: breach, last_sent_at: Date.parse('2026-09-16T00:00:00Z') };
-    expect(shouldSend('', today, Date.parse('2026-09-16T00:10:00Z'))).toBe(true);
-    expect(shouldSend('', { last_key: null, last_sent_at: null }, Date.parse('2026-09-16T00:00:00Z'))).toBe(true);
-    // The first of a month (a monthly R2 item clearing) is the same rule.
-    expect(shouldSend('', sent, Date.parse('2026-10-01T00:00:00Z'))).toBe(false);
+    expect(() => fromWire(CreateInboxTaskRequestSchema, { request_id: REQUEST_ID, ...task }, { strict: true })).not.toThrow();
+  });
+
+  it('lists 20 items and counts the rest', () => {
+    const many: OpsReportItem[] = Array.from({ length: 23 }, (_, i) => ({ source: 'mail-hero', code: `code_${String(i)}`, severity: 'warning', since: '2026-09-29T14:00:00.000Z', metrics: {} }));
+    const lines = digestTask(many, '2026-09-29', null).description.split('\n');
+    expect(lines.filter((line) => line.startsWith('- warning'))).toHaveLength(REPORT_MAX_ITEMS);
+    expect(lines.at(-1)).toBe('- … 另有 3 项');
+  });
+
+  it('records the first day of the release as handled, then claims a later day at its first tick with items', () => {
+    const first = claimDay({ ...NO_DIGEST }, listed(), NOW, URL_, REQUEST_ID);
+    expect(first).toMatchObject({ day: '2026-09-29', state: 'skipped', request: null });
+    expect(claimDay(first, listed(), NOW + 3_600_000, URL_, REQUEST_ID)).toBe(first);
+    const tomorrow = NOW + 86_400_000;
+    expect(claimDay(first, [], tomorrow, URL_, REQUEST_ID)).toBe(first);
+    const claimed = claimDay(first, listed(), tomorrow, URL_, REQUEST_ID);
+    expect(claimed).toMatchObject({ day: '2026-09-30', state: 'pending', attempts: 0, item_count: 2, claimed_at: tomorrow });
+    expect(claimed.request).toMatchObject({ request_id: REQUEST_ID, title: '运维摘要 2026-09-30：2 项需要关注' });
+    // The day is claimed once: a later tick of it keeps the frozen request.
+    expect(claimDay(claimed, [], tomorrow + 60_000, URL_, 'another')).toBe(claimed);
+  });
+
+  it('is created once, with Home\'s own receipt', () => {
+    const claimed = claimDay(yesterday, listed(), NOW, URL_, REQUEST_ID);
+    const created = afterCall(claimed, { ok: true, taskId: 'task-1' }, NOW + 1000);
+    expect(created).toMatchObject({ state: 'created', request: null, attempts: 1, task_id: 'task-1', last_sent_at: NOW + 1000, last_generated_at: NOW, last_error: null });
+    expect(created.last_receipt).toEqual({ stored: true, generated_at: '2026-09-29T14:00:00.000Z', item_count: 2 });
+    expect(nextDigestDay(created)).toBe(Date.parse('2026-09-30T00:00:00Z'));
+    expect(nextDigestDay(NO_DIGEST)).toBeNull();
+  });
+
+  it(`retries the same request ${String(DIGEST_TASK_ATTEMPTS)} times, then fails the day with digest_task_failed`, () => {
+    let doc = claimDay(yesterday, listed(), NOW, URL_, REQUEST_ID);
+    for (let attempt = 1; attempt < DIGEST_TASK_ATTEMPTS; attempt++) {
+      doc = afterCall(doc, { ok: false, code: 'unavailable' }, NOW + attempt);
+      expect(doc).toMatchObject({ state: 'pending', attempts: attempt, last_error: 'unavailable' });
+      expect(doc.request?.request_id).toBe(REQUEST_ID);
+    }
+    expect(candidates(input({ digest: doc })).map((c) => c.code)).not.toContain('digest_task_failed');
+    doc = afterCall(doc, { ok: false, code: 'busy' }, NOW + DIGEST_TASK_ATTEMPTS);
+    expect(doc).toMatchObject({ state: 'failed', request: null, attempts: DIGEST_TASK_ATTEMPTS, last_error: 'busy' });
+    expect(candidates(input({ digest: doc })).find((c) => c.code === 'digest_task_failed')).toEqual({
+      source: 'dashboard',
+      code: 'digest_task_failed',
+      severity: 'warning',
+      metrics: { attempts: DIGEST_TASK_ATTEMPTS },
+      since: new Date(NOW + DIGEST_TASK_ATTEMPTS).toISOString(),
+    });
+    // The next day's claim ends it.
+    expect(candidates(input({ now: NOW + 86_400_000, digest: doc })).map((c) => c.code)).not.toContain('digest_task_failed');
+  });
+
+  it('fails at once on invalid input', () => {
+    const doc = afterCall(claimDay(yesterday, listed(), NOW, URL_, REQUEST_ID), { ok: false, code: 'invalid_input' }, NOW);
+    expect(doc).toMatchObject({ state: 'failed', attempts: 1 });
   });
 });

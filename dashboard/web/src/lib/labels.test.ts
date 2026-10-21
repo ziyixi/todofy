@@ -61,12 +61,13 @@ describe('labels', () => {
     expect(counterValue('review_age_days', 12)).toBe('12 天')
     expect(counterShort('inbox_open', 23)).toBe('收件箱开放 23')
     expect(signalLabel('review_overdue')).toBe('每周回顾已超过 10 天')
-    expect(deferredJobLabel('gtd_snapshot')).toBe('GTD 每日快照')
+    expect(signalLabel('gtd_stale')).toBe('GTD 统计超过 48 小时未更新')
   })
 
-  it('labels the task-intent counters of Todofy', () => {
-    expect(counterInfo('intents_pending').label).toBe('待创建的任务提议')
-    expect(counterInfo('intents_failed_7d').label).toBe('近 7 天失败的任务提议')
+  it("labels the watch app's hand-over to Tasks and the digest's daily task", () => {
+    expect(counterInfo('intents_sent_today').label).toBe('今日交给 Tasks')
+    expect(signalLabel('notify_unsettled')).toBe('提醒交给 Tasks 未完成')
+    expect(signalLabel('digest_task_failed')).toBe('今日运维摘要任务创建失败')
   })
 
   it('shows Brief costs as dollars and names its deferred work', () => {

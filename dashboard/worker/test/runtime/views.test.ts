@@ -173,7 +173,8 @@ describe('GetHomeView and RefreshHomeView', () => {
     ]);
     expect(home.cloudflare).toMatchObject({ usage_status: 'ok', workers: REGISTRY.workers.length, errors_today: 3, guard_level: 'normal' });
     expect(home.cloudflare.quota.map((q) => q.id)).toEqual(['workers_requests', 'd1_rows_read', 'ai_neurons', 'r2_storage']);
-    expect(home.digest.accepted).toBe(true);
+    // A healthy first day: the digest made no task (the release's day is Todofy's reminder's).
+    expect(home.digest).toEqual({ last_sent_at: null, accepted: null });
 
     const again = await h.view('home', first.etag);
     expect(again).toMatchObject({ status: 304, body: null });
@@ -459,7 +460,7 @@ describe('budgets of a tick', () => {
     h = await mockupDay({ CANARY_UTC_HOUR: String(new Date(start).getUTCHours()) });
     await h.tick(start);
     const first = [...(await h.called()), ...h.outboundLog.splice(0)];
-    // 4 status (this log keeps Mail Hero's and Todofy's) + 3 probes + 1 GraphQL + startCanary + canaryDelivery + reportOps
+    // 4 status (this log keeps Mail Hero's and Todofy's) + 3 probes + 1 GraphQL + startCanary + canaryDelivery
     // (+ canaryResult when delivered at once) + the drift check's calls.
     expect(first.length).toBeLessThanOrEqual(outboundPerTick());
     for (const probe of Object.values(PROBES)) expect(first).toContain(probe);

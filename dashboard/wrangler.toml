@@ -92,6 +92,13 @@ binding = "TASKS"
 service = "tasks"
 entrypoint = "Ops"
 
+# Tasks' create-only machine entry: the digest's one task a UTC day (worker/src/digest.ts).
+[[services]]
+binding = "TASK_INBOX"
+service = "tasks"
+entrypoint = "TaskInbox"
+props = { source = "home" }
+
 [[services]]
 binding = "PERSONAL_MCP"
 service = "personal-mcp"

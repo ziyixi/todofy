@@ -276,9 +276,11 @@ export const GUARD_CLEAR_PERCENT = 70;
 export const QUOTA_CRITICAL_PERCENT = 95;
 /** Manual canary runs per UTC day. */
 export const CANARY_MANUAL_PER_DAY = 3;
+/** Calls for the digest's daily task (one a tick, with the same frozen request) before it is `digest_task_failed`. */
+export const DIGEST_TASK_ATTEMPTS = 6;
 /**
  * The info item the attention strip shows while CANARY_ENABLED=false. Page only: the digest carries warning and
- * critical items, so it never reaches Todofy's reportOps.
+ * critical items, so it never reaches the day's task.
  */
 export const CANARY_DISABLED_ITEM = { source: 'dashboard', code: 'canary_disabled', severity: 'info' } as const;
 /** Minimum seconds between two owner refreshes of the home scope (RefreshHomeView). */
@@ -332,7 +334,7 @@ export const VIEW_ROWS_READ_MAX = 320;
 
 /**
  * Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. Personal MCP adds one read-only status() call.
- * (11 status, 2 probes, 1 GraphQL, 5 setGuard, 2 canary, 1 reportOps, 12 drift = 34).
+ * (11 status, 2 probes, 1 GraphQL, 5 setGuard, 2 canary, 1 createInboxTask, 12 drift = 34).
  */
 export const MAX_OUTBOUND_PER_TICK = 34;
 /** Outbound calls one owner refresh may make (tested). */

@@ -144,20 +144,17 @@ const SIGNALS: Readonly<Record<string, string>> = {
   attention: '有需要处理的事件',
   due_backlog: '到期事件积压',
   processing_paused: '处理已暂停',
-  todoist_paused: '任务写入已暂停',
-  todoist_blocked: 'Todoist 调用被阻断',
   gemini_budget_80: 'Gemini 预算超过 80%',
   gemini_budget_95: 'Gemini 预算超过 95%',
   backup_failed: '上次备份失败',
   backup_disabled: '备份未启用',
-  reminder_failed: '每日提醒发送失败',
-  reminder_disabled: '每日提醒已关闭',
-  gtd_snapshot_stale: 'GTD 快照过旧',
+  // Tasks
+  gtd_stale: 'GTD 统计超过 48 小时未更新',
   review_overdue: '每周回顾已超过 10 天',
   // the watch app
   watches_broken: '有监视已失效',
   scheduler_stale: '调度已停止',
-  notify_unsettled: '提醒交给 Todofy 未完成',
+  notify_unsettled: '提醒交给 Tasks 未完成',
   // mailsort
   gmail_auth_failed: 'Gmail 授权失效，已停止分拣',
   gmail_not_configured: 'Gmail 尚未授权',
@@ -199,6 +196,7 @@ const SIGNALS: Readonly<Record<string, string>> = {
   usage_not_configured: '未配置用量查询令牌',
   config_drift: '线上配置与代码不一致',
   drift_unavailable: '配置漂移检查连续失败',
+  digest_task_failed: '今日运维摘要任务创建失败',
   guard_apply_failed: '降载设置下发失败',
   canary_start_failed: '金丝雀启动失败',
   canary_not_delivered: '金丝雀未投递',
@@ -206,8 +204,7 @@ const SIGNALS: Readonly<Record<string, string>> = {
   canary_skipped: '金丝雀已跳过（未测试链路）',
   // Page only (info): CANARY_ENABLED=false.
   canary_disabled: '金丝雀已关闭',
-  // Not emitted by this dashboard (it reports warning/critical only); kept for reports such as the
-  // contract's OpsReport fixture, which Todofy also renders.
+  // Not emitted by this dashboard (its digest has warning/critical only); kept for the contract's OpsReport fixture.
   canary_ok: '金丝雀成功',
   tick_stale: '定时检查已停止',
   app_unreachable: '应用无法连接',
@@ -360,10 +357,8 @@ const MODES: Readonly<Record<string, { label: string; normal: boolean }>> = {
   backup_active: { label: '备份进行中', normal: false },
   processing_paused: { label: '暂停处理', normal: false },
   deployment_paused: { label: 'Newsletter 发布已排空或冻结', normal: false },
-  force_pause_todoist: { label: '暂停写入任务', normal: false },
-  reminder_enabled: { label: '每日提醒', normal: true },
-  // the watch app: its reminders go to Todofy (the TODOFY binding)
-  notifications: { label: '通知 Todofy', normal: true },
+  // the watch app: its reminders go to Tasks (the TASKS binding, Tasks' TaskInbox)
+  notifications: { label: '通知 Tasks', normal: true },
   paused: { label: '已暂停', normal: false },
   mode_limited: { label: '未启用正式模式', normal: false },
 }
@@ -418,19 +413,14 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   gemini_reserved_tokens: { label: 'Gemini 预留 token', kind: 'tokens' },
   gemini_token_budget: { label: 'Gemini token 预算', kind: 'tokens' },
   gemini_calls: { label: 'Gemini 调用', kind: 'count' },
-  todoist_window_calls: { label: 'Todoist 窗口内调用', kind: 'count' },
-  todoist_window_limit: { label: 'Todoist 窗口上限', kind: 'count' },
   backup_age_seconds: { label: '距上次备份', kind: 'seconds' },
-  // Todofy's GTD ledger (daily snapshot of Tasks, counts only)
+  carryover_open: { label: '前几天仍待处理的邮件', kind: 'count' },
+  // Tasks' GTD counts (its daily row, counts only)
   inbox_open: { label: '收件箱开放', kind: 'count' },
   inbox_oldest_days: { label: '收件箱最老', kind: 'days' },
   overdue: { label: '逾期', kind: 'count' },
-  carryover_open: { label: '多日未完成邮件任务', kind: 'count' },
   completed_7d: { label: '近 7 天完成', kind: 'count' },
   review_age_days: { label: '距上次回顾', kind: 'days' },
-  // Todofy's task-intent-v1 intake (proposals from the watch app)
-  intents_pending: { label: '待创建的任务提议', kind: 'count' },
-  intents_failed_7d: { label: '近 7 天失败的任务提议', kind: 'count' },
   // the watch app
   watches_active: { label: '正常监视', kind: 'count' },
   watches_paused: { label: '已暂停监视', kind: 'count' },
@@ -439,8 +429,8 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   changes_new: { label: '新变化', kind: 'count' },
   fetches_today: { label: '今日抓取', kind: 'count' },
   notifications_pending: { label: '待发提醒', kind: 'count' },
-  intents_open: { label: '未完成的任务提议', kind: 'count' },
-  intents_sent_today: { label: '今日交给 Todofy', kind: 'count' },
+  intents_open: { label: '未交给 Tasks 的提醒', kind: 'count' },
+  intents_sent_today: { label: '今日交给 Tasks', kind: 'count' },
   // mailsort
   decided_today: { label: '今日判断', kind: 'count' },
   applied_today: { label: '今日打标签', kind: 'count' },
@@ -517,7 +507,6 @@ export function deferredJobLabel(job: string): string {
       weekly_backup: '每周备份',
       retention: '过期数据清理',
       metrics_rollup: '指标汇总',
-      gtd_snapshot: 'GTD 每日快照',
       scheduled_checks: '定时检查',
       daily_sweep: '每日整理',
       embedding: '候选条目向量计算',

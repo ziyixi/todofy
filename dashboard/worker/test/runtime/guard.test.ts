@@ -193,7 +193,7 @@ describe('automatic guard', () => {
 
   it('never calls setGuard on an app that does not list the guard capability', async () => {
     h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
-    await h.answer('todofy', 'status', { value: await status('todofy', { capabilities: ['canary_consumer', 'ops_digest'] }) });
+    await h.answer('todofy', 'status', { value: await status('todofy', { capabilities: ['canary_consumer'] }) });
     await h.tick('2026-09-29T10:00:00Z');
     const calls = await guardCalls(h);
     expect(calls['mail-hero']).toHaveLength(1);

@@ -126,11 +126,10 @@ describe('the ops and cloudflare views', () => {
     expect(refreshed.body?.refresh.refreshed).toBe(true);
     expect((await h.called()).sort()).toEqual(['mail-hero.status', 'todofy.status']);
     const polledAt = Date.parse((await h.snapshot()).apps.todofy.checked_at ?? '');
-    // A tick 5 minutes after the refresh reuses those statuses (and still reports).
+    // A tick 5 minutes after the refresh reuses those statuses.
     await h.tick(polledAt + 5 * 60_000);
     const calls = await h.called();
     expect(calls.filter((call) => call.endsWith('.status'))).toEqual([]);
-    expect(calls).toContain('todofy.reportOps');
     expect(Date.parse((await h.snapshot()).apps.todofy.checked_at ?? '')).toBe(polledAt);
     // The next tick, 35 minutes after the refresh, polls again.
     await h.tick(polledAt + 35 * 60_000);

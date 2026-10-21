@@ -1,11 +1,11 @@
 /**
  * The configuration drift check in workerd (docs/design-v2.md §10): the real HomeState runs the day's check
  * across cron ticks against a fake Cloudflare API built from the bundled desired state (synthetic ids and
- * values), stores the result, shows it on GetCloudflareView and reports it in the ops digest that
- * Todofy's stub receives. Names only: no value, id or token reaches a view or the report.
+ * values), stores the result, shows it on GetCloudflareView and lists it in the digest's daily task that
+ * the Tasks stub receives. Names only: no value, id or token reaches a view or the task.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { OpsReport } from '@ziyixi/proto/ops/v1/ops_wire';
+import type { CreateInboxTaskRequest } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
 import { DRIFT_CALLS_PER_TICK, DRIFT_UTC_HOUR, type CloudflareView, type OpsView } from '../../src/api-types.ts';
 import { outboundPerTick } from '../../src/registry.ts';
 import { CF_API, SENTINEL_VALUE } from '../drift-fixture.ts';
@@ -107,11 +107,13 @@ describe('the daily drift check', () => {
     const ops = await view<OpsView>(h, 'ops');
     const item = ops.digest.items.find((i) => i.code === 'config_drift');
     expect(item).toMatchObject({ source: 'dashboard', severity: 'warning', metrics: { total: 4, scripts: 1, custom_domains: 1, bindings: 1, account_changes: 1 } });
-    // Todofy got it in a report: counts only.
-    const reports = (await h.callsOf('todofy', 'reportOps')).map((args) => args[0] as OpsReport);
-    const last = reports.at(-1);
-    expect(last?.items.find((i) => i.code === 'config_drift')?.metrics).toEqual({ total: 4, scripts: 1, custom_domains: 1, bindings: 1, account_changes: 1 });
-    const reportText = JSON.stringify(reports);
+    // The next day's task lists it: counts only.
+    await h.tick(Math.floor(NOW / DAY_MS) * DAY_MS);
+    const tasks = (await h.callsOf('tasks', 'createInboxTask')).map((args) => args[0] as CreateInboxTaskRequest);
+    expect(tasks).toHaveLength(1);
+    const line = tasks[0]?.description?.split('\n').find((text) => text.includes(' · config_drift · ')) ?? '';
+    for (const metric of ['total=4', 'scripts=1', 'custom_domains=1', 'bindings=1', 'account_changes=1']) expect(line).toContain(metric);
+    const reportText = JSON.stringify(tasks);
     expect(reportText).not.toContain('RECEIVE_ADDRESS');
     expect(reportText).not.toContain('synthetic-orphan');
 
@@ -119,7 +121,7 @@ describe('the daily drift check', () => {
       expect(text).not.toContain(SENTINEL_VALUE);
       expect(text).not.toContain(TOKEN);
     }
-    // The audit actor's address and IP never reach a view or the report.
+    // The audit actor's address and IP never reach a view or the task.
     for (const text of [JSON.stringify(cloudflare), JSON.stringify(ops), reportText]) expect(text).not.toContain('192.0.2.1');
     // No id of the API answers (account, zone, script tags, binding ids) reaches the drift panel.
     expect(JSON.stringify(cloudflare.drift)).not.toMatch(/[0-9a-f]{32}/);

@@ -133,7 +133,7 @@ describe('首页', () => {
       '邮件 → 任务：正常，端到端成功 今天 00:06，已监测 5/6',
       '网站发布：正常，内容检查 今天 00:00，已监测 2/3',
       '每日 Newsletter：部分接入，部分阶段尚未接入，已监测 1/3',
-      '运维摘要：正常，上次摘要 昨天 23:00 · Todofy 已接收',
+      '运维摘要：正常，上次摘要 昨天 23:00 · 已在 Tasks 创建',
     ])
     expect(within(flows).getByRole('link', { name: '全部流程 →' })).toHaveAttribute('href', '#/flows')
 
@@ -189,7 +189,6 @@ describe('首页', () => {
       ['查看流程：邮件 → 任务 →', '#/flows/mail-to-task'],
       ['查看流程：GTD 循环 →', '#/flows/gtd'],
       ['查看流程：每日 Newsletter →', '#/flows/daily-newsletter'],
-      ['查看流程：运维摘要 →', '#/flows/ops-digest'],
       ['查看 Worker：todofy →', '#/cloudflare/worker/todofy'],
       ['查看 Worker：todofy-core →', '#/cloudflare/worker/todofy-core'],
       ['应用详情 →', '#/ops'],

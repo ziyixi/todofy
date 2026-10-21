@@ -24,11 +24,11 @@ describe('应用详情 of the watch app', () => {
   it('shows its healthy modes as usual and every counter by name, never a raw code', () => {
     show(watchOk as unknown as OpsStatus)
     const modes = screen.getByRole('list', { name: '运行模式' })
-    expect(within(modes).getByText(/通知 Todofy：开/)).toBeInTheDocument()
+    expect(within(modes).getByText(/通知 Tasks：开/)).toBeInTheDocument()
     expect(within(modes).queryByText('（非常规）')).toBeNull()
     expect(modes.querySelector('.chip-attention')).toBeNull()
     for (const code of Object.keys(watchOk.counters)) expect(screen.queryByText(new RegExp(`^${code}\\b`))).toBeNull()
-    expect(screen.getByText('今日交给 Todofy')).toBeInTheDocument()
+    expect(screen.getByText('今日交给 Tasks')).toBeInTheDocument()
   })
 
   it('names its signals (the code stays beside the name, as for every app)', () => {

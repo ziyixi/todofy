@@ -1,6 +1,6 @@
 /**
  * contracts/ops-v1 from the dashboard's side, byte for byte: every input it sends the apps (SetGuardInput,
- * StartCanaryInput, OpsReport) and every answer it keeps after reading one (what its reader returns, which
+ * StartCanaryInput) and every answer it keeps after reading one (what its reader returns, which
  * HomeState stores and the page shows), for fixed synthetic state and for every fixture, valid or not (the
  * reader tolerates some invalid outputs by the contract's consumer rules, and refuses the rest as null). A
  * refactor of the client (its move onto the generated proto types and codec, for one) must not change one byte:
@@ -9,13 +9,12 @@
  * contract, never to make a refactor pass.
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { OpsReportSchema, SetGuardInputSchema, StartCanaryInputSchema } from '@ziyixi/proto/ops/v1/ops_pb';
+import { SetGuardInputSchema, StartCanaryInputSchema } from '@ziyixi/proto/ops/v1/ops_pb';
 import { expect, test } from 'vitest';
 import { scheduledRunId, manualRunId } from '../src/canary.ts';
-import { buildReport, finalizeItems, type Candidate } from '../src/digest.ts';
 import { guardInput } from '../src/guard.ts';
 import type { OpsApp } from '../src/api-types.ts';
-import { asCanaryDelivery, asCanaryResult, asGuardState, asReceipt, asStartCanaryResult, asStatus, conform, OPS_APPS } from '../src/ops-client.ts';
+import { asCanaryDelivery, asCanaryResult, asGuardState, asStartCanaryResult, asStatus, conform, OPS_APPS } from '../src/ops-client.ts';
 
 /** A file path next to this test (the Workers URL type is not Node's, so paths are strings). */
 const path = (relative: string): string => decodeURIComponent(new URL(relative, import.meta.url).pathname);
@@ -44,7 +43,6 @@ const READERS: Readonly<Record<string, ((value: unknown) => unknown) | undefined
   StartCanaryResult: asStartCanaryResult,
   CanaryDelivery: asCanaryDelivery,
   CanaryResult: asCanaryResult,
-  OpsReportReceipt: asReceipt,
   // The app the dashboard called is the one the answer must name: the fixture's own when the dashboard binds it. A
   // name it does not bind (OpsStatus.app is open on the wire) can only come from a binding of another app: refused.
   OpsStatus: (value) => {
@@ -54,7 +52,7 @@ const READERS: Readonly<Record<string, ((value: unknown) => unknown) | undefined
   // Inputs the dashboard sends: the same schema check, as its own tests run on what it builds.
   SetGuardInput: (value) => conform(SetGuardInputSchema, value),
   StartCanaryInput: (value) => conform(StartCanaryInputSchema, value),
-  OpsReport: (value) => conform(OpsReportSchema, value),
+  // OpsReport and OpsReportReceipt (reportOps): the digest is a task in Tasks since 2026-10-21, nothing is sent or read.
 };
 
 const statusOk = JSON.parse(readFileSync(`${FIXTURES}OpsStatus/mail-hero-ok.json`, 'utf8')) as Record<string, unknown>;
@@ -67,18 +65,6 @@ function cases(): Record<string, unknown> {
     'input/start-scheduled': { run_id: scheduledRunId(NOW) },
     'input/start-manual': { run_id: manualRunId(NOW) },
   };
-  const candidates: Candidate[] = [
-    { source: 'mail-hero', code: 'endpoint_blocked', severity: 'critical', since: '2026-09-29T10:02:11.000Z', metrics: { waiting_deliveries: 3, current_blocked: 1 } },
-    { source: 'todofy', code: 'gemini_budget_80', severity: 'warning', metrics: { percent: 82.4, used_tokens: 2_460_000, reserved_tokens: 12_000, budget_tokens: 3_000_000 } },
-    { source: 'cloudflare', code: 'd1_rows_read_high', severity: 'warning', metrics: { percent: 81.5, used: 4_075_000, limit: 5_000_000, projected_percent: 97.25 } },
-    { source: 'dashboard', code: 'canary_skipped', severity: 'warning', since: '2026-09-29T22:31:40.000Z', metrics: { no_endpoint: 1 } },
-    { source: 'newsletter', code: 'newsletter_unknown', severity: 'warning', metrics: { used: 4996.2, cap: 5000, 'Not A Code': 1 } },
-    { source: 'mail-hero', code: 'guard_shed', severity: 'info', metrics: { seconds_left: 3600 } },
-  ];
-  const items = finalizeItems(candidates, new Map([['todofy:gemini_budget_80', NOW - 5 * HOUR]]), NOW);
-  out['input/report'] = buildReport(items, NOW, 'https://home.example.com/');
-  out['input/report-no-url'] = buildReport(items.slice(0, 2), NOW, null);
-  out['input/report-empty'] = buildReport([], NOW, 'https://home.example.com/');
   for (const [name, def, value] of fixtures()) out[`read/${name}`] = READERS[def]?.(value) ?? null;
   // A newer producer: fields and codes this build does not know yet.
   out['read/newer/status-extra-fields'] = asStatus('mail-hero')({ ...statusOk, next_field: 1, guard: { ...(statusOk.guard as object), hint: 'x' } });

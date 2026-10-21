@@ -5,9 +5,7 @@
   "health": "down",
   "modes": {
     "maintenance": false,
-    "processing_paused": false,
-    "force_pause_todoist": false,
-    "reminder_enabled": true
+    "processing_paused": false
   },
   "guard": {
     "level": "normal",
@@ -28,7 +26,6 @@
   "ui_url": "https://todofy.example.com/",
   "capabilities": [
     "canary_consumer",
-    "guard",
-    "ops_digest"
+    "guard"
   ]
 }

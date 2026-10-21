@@ -22,9 +22,10 @@ describe('workerd harness', () => {
     expect(response.status).toBeGreaterThanOrEqual(200);
     await response.arrayBuffer();
     await harness.scheduled(new Date('2026-09-29T16:00:00Z'));
-    // The tick's own calls (statuses, the day's canary start, the first digest); flows are tested elsewhere.
+    // The tick's own calls (statuses, the day's canary start; the first day has no digest task); flows are tested elsewhere.
     expect((await harness.calls('mail-hero')).map((call) => call.method)).toEqual(['status', 'startCanary']);
-    expect((await harness.calls('todofy')).map((call) => call.method)).toEqual(['status', 'reportOps']);
+    expect((await harness.calls('todofy')).map((call) => call.method)).toEqual(['status']);
+    expect((await harness.calls('tasks')).map((call) => call.method)).toEqual(['status']);
   });
 
   it('serves schema-valid fixtures over RPC and records the calls', async () => {
@@ -54,7 +55,7 @@ describe('workerd harness', () => {
   it('exposes every method the contract declares for the app', async () => {
     for (const app of ['mail-hero', 'todofy'] as const) {
       const declared = declaredMethodsOf(app);
-      expect(declared.length).toBeGreaterThanOrEqual(4);
+      expect(declared.length).toBeGreaterThanOrEqual(3);
       for (const method of declared) expect((await harness.rpc(app, method)).error ?? '').not.toMatch(/does not implement|not a function/);
     }
     await harness.calls('mail-hero');
@@ -62,7 +63,7 @@ describe('workerd harness', () => {
   });
 
   it('rejects methods the contract does not declare for that app', async () => {
-    const wrongApp = await harness.rpc('mail-hero', 'reportOps', { generated_at: '2026-09-29T00:00:00Z', items: [] });
+    const wrongApp = await harness.rpc('mail-hero', 'canaryResult', '6d3b2f0e-4c1a-4b7e-8a52-0c9e7f1d2a31');
     expect(wrongApp.error).toBeTypeOf('string');
     expect(wrongApp.ok).toBeUndefined();
     const other = await harness.rpc('todofy', 'startCanary', { run_id: 'canary-2026-09-29' });

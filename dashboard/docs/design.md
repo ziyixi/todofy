@@ -169,13 +169,15 @@ A failure of the object itself (reset, storage error) is an exception, which the
 
 Order: (1) status, (2) usage, (3) guard, (4) canary, (5) digest, (6) cleanup and persist. Every
 service call has a 10 s timeout; the GraphQL call 15 s; the tick makes at most 8 outbound calls
-(2 `status`, ≤ 2 `setGuard`, ≤ 2 canary calls, ≤ 1 `reportOps`, 1 GraphQL), well under Free's 50
+(2 `status`, ≤ 2 `setGuard`, ≤ 2 canary calls, ≤ 1 `createInboxTask`, 1 GraphQL), well under Free's 50
 subrequests and 32 Worker invocations per request.
 
 ### 5.1 Calling the apps (`ops-client.ts`)
 
 - Only the methods of each app's generated ops-v1 services (`proto/ops/v1/ops.proto`: `OpsService`,
-  `CanaryProducerService`, `CanaryConsumerService`, `OpsDigestService`) are called (tested, §9).
+  `CanaryProducerService`, `CanaryConsumerService`) are called (tested, §9), plus Tasks' create-only
+  `TaskInbox.createInboxTask` (`proto/tasks/inbox/v1`) for the digest's daily task (§5.5). No app implements
+  `OpsDigestService` since 2026-10-21.
 - Result: `{ok: true, value}` or `{ok: false, code}`. A rejection whose `Error.message` is an
   `ErrorCode` (`invalid_input`, `busy`, `unavailable`) keeps that code; the timeout gives `timeout`;
   any other rejection (binding error, deploy in progress, unknown method) gives `unavailable`; a value
@@ -196,8 +198,7 @@ subrequests and 32 Worker invocations per request.
   is ≥ 10 min old (or carries a later clock). A tick that skips the poll uses the stored status (if
   that attempt succeeded) as this tick's observation for the guard. Both apps in parallel.
 - Capabilities come from the last successful status of that app: `guard` gates `setGuard`;
-  `canary_producer` (Mail Hero) and `canary_consumer` (Todofy) gate the canary; `ops_digest` (Todofy)
-  gates `reportOps`.
+  `canary_producer` (Mail Hero) and `canary_consumer` (Todofy) gate the canary.
 
 ### 5.2 Usage (`usage.ts`)
 
@@ -350,21 +351,22 @@ present, else the first tick the key was active (`item_since`).
 | `dashboard` | `tick_stale` | warning | no cron tick completed for 75 min, or none ever (only on refresh-built items; the overview also adds it at read time) | `minutes_since` |
 | `mail-hero` / `todofy` | `app_unreachable` | critical | ≥ 2 consecutive failed `status()` calls | `consecutive_failures` |
 | `mail-hero` / `todofy` | `app_down` | critical | last status `health: down` | – |
+| `dashboard` | `digest_task_failed` | warning | today's task could not be created (below) | `attempts` |
 | `mail-hero` / `todofy` | each active signal's `code` | its severity | warning/critical signals of the last status (≤ 60 min old) | the signal's metrics |
 
-Sending (`TODOFY.reportOps`, only while Todofy's last status lists `ops_digest`): the key is the sorted
-list of `source:code:severity`. Send when the key differs from the last **successfully** sent key, or
-the last success is ≥ 6 h old, or at the 23:30 UTC tick when the last success is ≥ 60 min old (so the
-next day's reminder carries fresh metrics). Nothing is sent during the first 20 min of a UTC day while
-the last success is from an earlier day (the 00:00 tick waits for 00:30): Todofy keeps only the latest
-report and lists it in a day's reminder only if it was generated before that day, and its reminder
-check runs every 10 min, so an 00:00 report (for example an empty one because the daily quotas reset)
-would replace the 23:30 report before that day's reminder claimed it, and the breach would never be
-reported. Report: `{generated_at: tick time, items,
-dashboard_url: 'https://<PUBLIC_HOST>/'}`; an empty `items` list is sent when the set becomes empty (it
-clears Todofy's ops section). A receipt with `stored: false` counts as sent. Failures keep the old key,
-so the next tick retries. This is the only way the dashboard creates tasks in Tasks (through Todofy's
-one-per-day reminder); Mail Hero's `ALERT_WEBHOOK_URL` stays unconfigured.
+**The day's task** (`TASK_INBOX.createInboxTask`, Tasks' create-only `TaskInbox` with `props.source = "home"`;
+since 2026-10-21, replacing Todofy's daily reminder and its `reportOps`). The first tick of a UTC day whose
+undismissed items are not empty claims the day in the `digest` document: it freezes a request with a new
+random `request_id`, the title `运维摘要 <day>：N 项需要关注` and a description of at most 20 items (severity,
+source, code, `since` and metrics; the rest counted) with the link `https://<PUBLIC_HOST>/`, codes and numbers
+only. Every later tick of that day sends the same frozen request until Tasks answers: TaskInbox replays an
+answered `request_id`, so a lost answer makes no second task. `invalid_input`, or the 6th failed call
+(`DIGEST_TASK_ATTEMPTS`), ends the day as `failed` and raises `digest_task_failed` until the next day's claim;
+TaskInbox's `daily_limit` reads as `busy`. A day without items gets no task. A document from before the task
+(no `day`) records its first tick's day as handled, so the release day gets no task next to Todofy's last
+reminder. Tasks puts the task in the project it routes `home` to (`task_inbox_routes`, copied once from the
+reminder's project), else the Inbox. This is the only way the dashboard creates tasks; Mail Hero's
+`ALERT_WEBHOOK_URL` stays unconfigured.
 
 The overview banner (`overall`) is `critical` if any item is critical, else `warning` if any is
 warning, else `ok`; `unknown` before anything ran. While `CANARY_ENABLED` is `false` the banner's items
@@ -486,7 +488,8 @@ quantiles (µs) and error counts are not quota rows; the UI may show them per sc
 ### 7.4 What the dashboard itself costs per day
 
 48 cron ticks → 48 Worker requests + 48 DO requests; ≤ 96 `status()` calls (Mail Hero ≤ 6 and Todofy
-≤ 5 D1 statements each); ≤ 48 GraphQL queries; a few `setGuard`/canary/`reportOps` calls; one canary a
+≤ 5 D1 statements each); ≤ 48 GraphQL queries; a few `setGuard`/canary calls and at most 6 `createInboxTask`
+calls; one canary a
 day (one synthetic message; normally one Gemini call in Todofy, up to 3 when a transient failure is
 retried). Owner page loads add a few Worker and DO
 requests each. All far below every row above.
@@ -588,8 +591,9 @@ sets another; `test/runtime/flows.ts`), and the eslint config refuses `Date.now(
   same Durable Object storage) is polled to `ok`, a run still `starting` ends as
   `skipped/start/canary_disabled` without another `startCanary` and without a digest item, no run starts
   the next day, and switching back on starts the day's run;
-- digest: first report; unchanged items → no call; change → call; 6 h refresh; 23:30 rule; Todofy
-  without `ops_digest` → no call; `reportOps` failing → retried next tick;
+- digest: the release day gets no task; the first tick of a later day with items creates one, later ticks
+  none; a day without items none; the same frozen request on every retry, `digest_task_failed` after 6;
+  `daily_limit` read as `busy`; dismissed items left out of the next day's task;
 - an unreachable app (stub throws/unknown method) → `app_unreachable` after 2 ticks, other app still
   handled; GraphQL 401/500/errors → `usage_unavailable`, guard unchanged;
 - auth end to end (JWT from the test JWKS through the outbound handler), overview shape, refresh rate

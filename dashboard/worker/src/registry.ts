@@ -322,6 +322,8 @@ const RESOURCES: readonly ResourceDef[] = [
   // Created for the links app's first deploy (L2, 2026-10-01).
   { id: 'links-db', kind: 'd1', name: 'links 短链接库', entry: 'links', match: RESOURCE_IDENTITIES['links-db'] ?? null },
   { id: 'tasks-db', kind: 'd1', name: 'Tasks 任务库', entry: 'tasks', match: RESOURCE_IDENTITIES['tasks-db'] ?? null },
+  // Tasks' scheduled work (GTD counts, the Sunday review), created by Tasks' first deploy with its JOBS binding.
+  { id: 'tasks-jobs', kind: 'do', name: 'TaskJobs', entry: 'tasks', script: 'tasks', match: RESOURCE_IDENTITIES['tasks-jobs'] ?? null, todo: '首次 Tasks 发布 JOBS 后，记录 DO namespace 到 config/resources.toml' },
   // Created by the watch app's first deploy (W2, 2026-10-02); id read from the account's Durable Object namespace list.
   { id: 'watch-state', kind: 'do', name: 'WatchState', entry: 'watch', script: 'watch', match: RESOURCE_IDENTITIES['watch-state'] ?? null },
   // IDs read from the account's D1, Durable Object namespace and R2 bucket lists (2026-09-30).
@@ -378,12 +380,12 @@ const FLOWS: readonly FlowDef[] = [
       },
       {
         id: 'tasks',
-        name: '任务与提醒',
+        name: '待处理邮件',
         entry: 'todofy',
         workers: ['todofy-core'],
-        signals: ['todoist_paused', 'attention', 'reminder_failed', 'reminder_disabled'],
-        hold_signals: ['todoist_paused', 'reminder_disabled'],
+        signals: ['attention'],
         counters: ['attention_events'],
+        note: '在 Tasks 的 Mail 页转成任务',
       },
     ],
     canary: {
@@ -395,21 +397,21 @@ const FLOWS: readonly FlowDef[] = [
     },
   },
   {
-    // docs: todofy/docs/gtd-features.md §9. The GTD loop over what Todofy already measures: mail
-    // arrives (收集), the daily snapshot of Tasks counts the Inbox, overdue work and still-open mail
-    // tasks, and the Sunday review task closes the week. 理清 and 组织 stay manual in Tasks.
+    // docs: tasks/docs/design.md (GTD). The GTD loop: mail arrives and waits in Todofy (收集), Tasks
+    // counts its Inbox, overdue work and completions once a day, and its Sunday review task closes the
+    // week. 理清 and 组织 stay manual in Tasks.
     id: 'gtd',
     name: 'GTD 循环',
     group: 'mail',
-    description: '邮件在 Tasks 的 Mail 页转成任务后，每日快照计数、每周日生成回顾任务；理清与组织在 Tasks 中手动完成。',
+    description: '邮件在 Tasks 的 Mail 页转成任务后，Tasks 每日计数、每周日生成回顾任务；理清与组织在 Tasks 中手动完成。',
     order: 2,
     stages: [
-      { id: 'capture', name: '收集', entry: 'todofy', workers: ['todofy-core'], signals: [], counters: ['received_24h'] },
+      { id: 'capture', name: '收集', entry: 'todofy', workers: ['todofy-core'], signals: [], counters: ['received_24h', 'carryover_open'] },
       {
         id: 'clarify',
         name: '理清',
-        entry: 'todofy',
-        workers: ['todofy-core'],
+        entry: 'tasks',
+        workers: ['tasks'],
         signals: [],
         counters: ['inbox_open', 'inbox_oldest_days'],
         note: '标题仍是邮件主题；理清靠人工',
@@ -417,18 +419,18 @@ const FLOWS: readonly FlowDef[] = [
       {
         id: 'organize',
         name: '组织',
-        entry: 'todofy',
-        workers: ['todofy-core'],
+        entry: 'tasks',
+        workers: ['tasks'],
         signals: [],
-        counters: ['overdue', 'carryover_open'],
+        counters: ['overdue'],
         note: '在 Tasks 中手动整理',
       },
       {
         id: 'reflect',
         name: '回顾',
-        entry: 'todofy',
-        workers: ['todofy-core'],
-        signals: ['review_overdue', 'gtd_snapshot_stale'],
+        entry: 'tasks',
+        workers: ['tasks'],
+        signals: ['review_overdue', 'gtd_stale'],
         counters: ['review_age_days', 'completed_7d'],
       },
       { id: 'engage', name: '执行', entry: null, signals: [], note: '在 Tasks 中完成，面板之外' },
@@ -465,13 +467,13 @@ const FLOWS: readonly FlowDef[] = [
     id: 'web-watch',
     name: '网页监视',
     group: 'content',
-    description: '网页、订阅与接口按计划检查，确认的变化进收件箱，每日摘要与紧急变化交给 Todofy 创建任务。',
+    description: '网页、订阅与接口按计划检查，确认的变化进收件箱，每日摘要与紧急变化在 Tasks 创建任务。',
     order: 3,
     stages: [
       { id: 'source', name: '网站', entry: null, signals: [], note: '被监视的网站在面板之外' },
       { id: 'check', name: '检查', entry: 'watch', signals: ['scheduler_stale', 'watches_broken'], counters: ['fetches_today', 'watches_failing'] },
       { id: 'inbox', name: '变化收件箱', entry: 'watch', signals: [], counters: ['changes_new'] },
-      { id: 'send', name: '交给 Todofy', entry: 'watch', signals: ['notify_unsettled'], counters: ['intents_sent_today'] },
+      { id: 'send', name: '交给 Tasks', entry: 'watch', signals: ['notify_unsettled'], counters: ['intents_sent_today'] },
     ],
     canary: null,
   },
@@ -479,19 +481,12 @@ const FLOWS: readonly FlowDef[] = [
     id: 'ops-digest',
     name: '运维摘要',
     group: 'platform',
-    description: '面板汇总告警，经 Todofy 每日提醒送达。',
+    description: '面板汇总告警，每个 UTC 日第一次有告警时在 Tasks 建一条摘要任务。',
     order: 1,
     stages: [
       { id: 'collect', name: '巡检', entry: 'home', signals: [] },
-      { id: 'report', name: '提交摘要', entry: 'todofy', workers: ['todofy'], signals: [] },
-      {
-        id: 'remind',
-        name: '每日提醒',
-        entry: 'todofy',
-        workers: ['todofy'],
-        signals: ['reminder_failed', 'reminder_disabled'],
-        hold_signals: ['reminder_disabled'],
-      },
+      // Creation failures are the digest's own item `digest_task_failed` (on the attention strip and in 操作与记录).
+      { id: 'remind', name: '摘要任务', entry: 'home', signals: [] },
     ],
     canary: null,
   },
@@ -546,7 +541,8 @@ export function resourceByMatch(kind: ResourceDef['kind'], id: string, registry:
 /**
  * Outbound calls of one tick computed from the registry (design-v2.md §5): status() per ops_v1 entry,
  * one GET per enabled public_http probe, the GraphQL query, setGuard per guarded entry, two canary
- * calls per canary, one reportOps and the drift check's read-only calls (at most DRIFT_CALLS_PER_TICK).
+ * calls per canary, one createInboxTask (the digest's daily task) and the drift check's read-only calls (at most
+ * DRIFT_CALLS_PER_TICK).
  */
 export function outboundPerTick(registry: RegistryDef = REGISTRY): number {
   const ops = registry.entries.filter((entry) => entry.status.type === 'ops_v1');

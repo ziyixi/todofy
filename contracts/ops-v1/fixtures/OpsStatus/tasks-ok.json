@@ -16,7 +16,12 @@
   "signals": [],
   "counters": {
     "database_ready": 1,
-    "change_sequence": 0
+    "change_sequence": 0,
+    "inbox_open": 23,
+    "inbox_oldest_days": 41,
+    "overdue": 3,
+    "completed_7d": 42,
+    "review_age_days": 2
   },
   "last_backup_at": null,
   "ui_url": "https://tasks.example.org/",

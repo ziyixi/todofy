@@ -290,6 +290,11 @@
           "source": "config"
         },
         {
+          "name": "TASK_INBOX",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "TODOFY",
           "type": "service",
           "source": "config"

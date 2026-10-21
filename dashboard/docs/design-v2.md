@@ -39,10 +39,10 @@ The attention strip is on every view: one quiet line "● 全部正常 · 下次
 warning) and "还有 N 项"; each item links to its target (a flow stage opens with that stage selected).
 Held switches show as a small ‖ 已暂停 tag (`attention.held`), outside the level and the badges: every
 stage `hold_signals` code of an app's current status (force-paused or owner-paused delivery, forwarding
-off, paused processing, paused task writes, reminder off) and an owner's forced shed (`home:owner_shed`,
+off, paused processing) and an owner's forced shed (`home:owner_shed`,
 which then replaces the `dashboard:guard_shed` item); an automatic shed stays an item, and
 `maintenance_mode` stays critical. The item set is otherwise v1's (digest items, `tick_stale`, usage and
-canary items, `canary_disabled` info); v2 only adds a `target`, so the digest sent to Todofy does not
+canary items, `canary_disabled` info); v2 only adds a `target`, so the digest's daily task does not
 change. On the page only, the strip also lists **observed** items (`observed: level`, `since: null`)
 so it never says 全部正常 while a tile, a stage or a Worker is worse: one per cause, skipped when an
 item already explains it — a tile at warning/critical/unknown (unless a digest item of that entry has
@@ -104,14 +104,14 @@ GetRegistry (`GET /api/v1/registry`; no binding names or probe URLs), so no host
 | 个人控制台 (`home`) | hidden | `self` (`tick_stale`) | no tile; Cloudflare row only |
 | 自托管服务器 (`self-hosted`, no Worker) | hidden | `none` | no tile; exists only to name the R2 bucket `vultr-backup` (VPS 备份: the self-hosted VPS and home server's backups, not a monorepo app), since a resource must belong to an entry |
 
-Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → Webhook 投递 → Todofy 摘要 → 任务与提醒; canary
-`mail-todofy` verifies 投递 and 摘要 only), 网站发布 (Notion ○ → 发布 → 网站可用), 每日 Newsletter
-(Todofy 报告 → 读取报告 ○ → 写入 Notion ○; partial), 网页监视 (网站 ○ → 检查 → 变化收件箱 → 交给 Todofy: the watch app's
-`scheduler_stale` and `watches_broken` at 检查, `notify_unsettled` at 交给 Todofy; `maintenance_mode` is app-only),
-运维摘要 (巡检 → 提交摘要 → 每日提醒), and GTD 循环
-(收集 → 理清 → 组织 → 回顾 → 执行 ○: Todofy's `received_24h`, then the counters of its daily read-only
-snapshot of Tasks, `review_overdue` (info) and `gtd_snapshot_stale` at 回顾; 执行 is done in Tasks, outside the dashboard (the work itself is not something the dashboard can see);
-todofy/docs/gtd-features.md §9).
+Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → Webhook 投递 → Todofy 摘要 → 待处理邮件, Todofy's `attention`;
+canary `mail-todofy` verifies 投递 and 摘要 only), 网站发布 (Notion ○ → 发布 → 网站可用), 每日 Newsletter
+(Todofy 报告 → 读取报告 ○ → 写入 Notion ○; partial), 网页监视 (网站 ○ → 检查 → 变化收件箱 → 交给 Tasks: the watch app's
+`scheduler_stale` and `watches_broken` at 检查, `notify_unsettled` at 交给 Tasks; `maintenance_mode` is app-only),
+运维摘要 (巡检 → 摘要任务, both Home's own: a failed day's task is the item `digest_task_failed`), and GTD 循环
+(收集 → 理清 → 组织 → 回顾 → 执行 ○: Todofy's `received_24h` and `carryover_open`, then Tasks' daily counts,
+its `review_overdue` (info) and `gtd_stale` at 回顾; 执行 is done in Tasks, outside the dashboard (the work itself is
+not something the dashboard can see); tasks/docs/design.md).
 
 `validateRegistry` (`src/registry-check.ts`, run by test/registry.test.ts; apart from the registry's data, which the
 UI's tests import) checks ids and references, ops-v1 codes with the contract's own `Code` format (the IDL), https URLs inside
@@ -307,7 +307,7 @@ older estimates; reads grow with retained decisions while views continue to poll
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
 Per tick: 11 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fleet, Newsletter, mailsort, recall, the
-brief, Tasks and Personal MCP) + 2 probes (website, links) + 1 GraphQL + ≤ 5 `setGuard` + ≤ 2 canary calls + ≤ 1 `reportOps` + ≤ 12
+brief, Tasks and Personal MCP) + 2 probes (website, links) + 1 GraphQL + ≤ 5 `setGuard` + ≤ 2 canary calls + ≤ 1 `createInboxTask` + ≤ 12
 read-only drift calls (§10) = 34 outbound calls
 (`outboundPerTick`, tested ≤ `MAX_OUTBOUND_PER_TICK` = 34 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
 status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~3 per tick
@@ -364,7 +364,7 @@ real schedule; the TODO resource identifiers of §3. The full list of pending pr
 
 A private check, inside this Worker and never on GitHub, that the live Cloudflare account still matches
 what the repository commits, and that nothing changed it outside CI since the previous check. Nothing about it is published: the result lives in `HomeState`, is shown
-only on the Access-protected Cloudflare view, and reaches Tasks only as counts in the ops digest's reminder.
+only on the Access-protected Cloudflare view, and reaches Tasks only as counts in the digest's daily task.
 
 **Desired state.** [`.github/scripts/drift_desired.py`](../../.github/scripts/drift_desired.py) writes
 `worker/src/drift-desired.json` from every production `wrangler.toml` (Worker names, Custom Domains,

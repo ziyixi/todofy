@@ -424,14 +424,20 @@ class Files(unittest.TestCase):
         [binding] = gateway["durable_objects"]["bindings"]
         self.assertIn(binding["script_name"], PRODUCTION)
         self.assertEqual(binding["script_name"], "todofy-core")
-        for worker in ("home",):
-            for service in load(PRODUCTION[worker])["services"]:
-                with self.subTest(worker=worker, service=service["binding"]):
-                    self.assertIn(service["service"], PRODUCTION)
-                    expected = "NewsletterOps" if worker == "home" and service["binding"] == "NEWSLETTER" else "Ops"
-                    self.assertEqual(service["entrypoint"], expected)
-                    if expected == "NewsletterOps":
-                        self.assertEqual(service["service"], "fleet")
+        # Home reaches every app through its Ops entrypoint, and Tasks also through the create-only TaskInbox (the
+        # digest's daily task), bound to its own source.
+        for service in load(PRODUCTION["home"])["services"]:
+            with self.subTest(worker="home", service=service["binding"]):
+                self.assertIn(service["service"], PRODUCTION)
+                if service["binding"] == "TASK_INBOX":
+                    self.assertEqual(service, {
+                        "binding": "TASK_INBOX", "service": "tasks", "entrypoint": "TaskInbox", "props": {"source": "home"},
+                    })
+                    continue
+                expected = "NewsletterOps" if service["binding"] == "NEWSLETTER" else "Ops"
+                self.assertEqual(service["entrypoint"], expected)
+                if expected == "NewsletterOps":
+                    self.assertEqual(service["service"], "fleet")
         # The watch app parses untrusted pages: it reached Todofy only through the least-privilege Intents entrypoint,
         # bound to its own source, never through Ops. Todofy retired Intents on 2026-10-21 and keeps it as a refusal
         # until the watch app binds Tasks' TaskInbox.

@@ -74,7 +74,7 @@ message Attention {
 
 // A digest item (an ops-v1 report item) with where it is shown, or a page-only observed item: a level a view
 // shows (a tile, a flow stage, a Worker's error rate) that no digest item explains. Observed items never reach
-// Todofy.
+// the day's task.
 message AttentionItem {
   option (google.api.resource) = {
     type: "home.ziyixi.science/AttentionItem"

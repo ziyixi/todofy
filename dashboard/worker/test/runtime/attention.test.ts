@@ -1,6 +1,7 @@
 /** Owner reminder controls against real SQLite HomeState; only synthetic statuses. */
 import { afterEach, describe, expect, it } from 'vitest';
 import { DRIFT_UTC_HOUR, VIEW_BODY_MAX, VIEW_ROWS_READ_MAX, type AttentionItem, type HomeView, type OpsView } from '../../src/api-types.ts';
+import type { CreateInboxTaskRequest } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
 import { REALISTIC_USAGE } from '../graphql-fixture.ts';
 import { answerProbes, NOW, startFlows, status, type FlowHarness } from './flows.ts';
 
@@ -38,6 +39,13 @@ async function advance(step: number): Promise<void> {
   await activeHarness().redeploy({ DEV_NOW: new Date(at).toISOString(), BUILD_SHA: `synthetic-${String(step)}` });
   await activeHarness().tick(at);
 }
+/** The first tick of the next UTC day (NOW's is the release's, which gets no task): the digest's task, if any. */
+async function nextDayTasks(): Promise<CreateInboxTaskRequest[]> {
+  const at = (Math.floor(NOW / (1440 * MINUTE)) + 1) * 1440 * MINUTE;
+  await activeHarness().redeploy({ DEV_NOW: new Date(at).toISOString(), BUILD_SHA: 'synthetic-next-day' });
+  await activeHarness().tick(at);
+  return (await activeHarness().callsOf('tasks', 'createInboxTask')).map((args) => args[0] as CreateInboxTaskRequest);
+}
 
 describe('persistent occurrence controls', () => {
   // Current Fleet warns with newsletter_side_effect_unknown; an older Fleet still warns with newsletter_unknown.
@@ -67,7 +75,7 @@ describe('persistent occurrence controls', () => {
     expect(await open()).toBe(true);
   });
 
-  it('dismisses across restart/views without changing facts, and reports only on a later scheduled tick', async () => {
+  it("dismisses across restart/views without changing facts, and leaves the next day's task out", async () => {
     h = await start();
     await h.answer('newsletter', 'status', { value: await newsletter(32) });
     await h.tick(NOW);
@@ -77,7 +85,7 @@ describe('persistent occurrence controls', () => {
     expect(first.status).toBe(200);
     const answer = await first.json() as AttentionItem;
     expect(answer.dismissed_at).toBeDefined(); expect(answer.etag).not.toBe(item.etag);
-    expect(await h.callsOf('todofy', 'reportOps')).toEqual([]);
+    expect(await h.callsOf('tasks', 'createInboxTask')).toEqual([]);
     const replay = await change(item, 'dismiss', id);
     expect(await replay.json()).toEqual(answer);
     const reused = await change(answer, 'dismiss', id);
@@ -91,10 +99,12 @@ describe('persistent occurrence controls', () => {
     const before = await h.view<OpsView>('ops');
     expect(before.body?.apps.find((app) => app.entry === 'newsletter')?.status?.counters.unknown_count).toBe(32);
     expect(before.body?.digest.items.some((entry) => entry.code === 'newsletter_unknown')).toBe(false);
-    await advance(1);
-    const reports = await h.callsOf('todofy', 'reportOps');
-    expect(reports).toHaveLength(1);
-    expect((reports[0]?.[0] as { items: AttentionItem[] }).items.some((entry) => entry.code === 'newsletter_unknown')).toBe(false);
+    // Another condition, so the next day has a task to leave the dismissed one out of.
+    await h.answer('mail-hero', 'status', { value: await status('mail-hero', { health: 'degraded', signals: [{ code: 'parse_failed', severity: 'warning', metrics: {} }] }) });
+    const [task, ...more] = await nextDayTasks();
+    expect(more).toEqual([]);
+    expect(task?.description).toContain('· mail-hero · parse_failed ·');
+    expect(task?.description).not.toContain('newsletter_unknown');
   });
 
   it('keeps the same 32 dismissed through a fresh RPC with an unavailable underlying host, then resurfaces changes', async () => {
@@ -151,9 +161,9 @@ describe('persistent occurrence controls', () => {
     for (const item of initial.slice(0, 20)) expect((await change(item, 'dismiss')).status).toBe(200);
     const current = await h.view<OpsView>('ops');
     expect(current.body?.digest.items.filter((item) => item.code.startsWith('synthetic_warning_'))).toHaveLength(16);
-    await h.callsOf('todofy', 'reportOps'); await advance(1);
-    const reports = await h.callsOf('todofy', 'reportOps');
-    expect((reports[0]?.[0] as { items: AttentionItem[] }).items.filter((item) => item.code.startsWith('synthetic_warning_'))).toHaveLength(16);
+    const [task] = await nextDayTasks();
+    for (const item of initial.slice(0, 20)) expect(task?.description).not.toContain(`· ${item.source} · ${item.code} ·`);
+    expect(task?.description).toContain(`· ${initial[20]?.source ?? ''} · ${initial[20]?.code ?? ''} ·`);
   });
 
   it('REST drift recovery retires a dismissal even while GraphQL usage is unavailable', async () => {
