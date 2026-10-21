@@ -37,6 +37,7 @@ import { TaskDragProvider } from "./components/TaskDrag";
 import { useReturnRefresh } from "./useReturnRefresh";
 import { useOutdated } from "./outdated";
 import { useLaunchQueue, type Launch } from "./launch";
+import { TitleBar, useTitlebarOverlay } from "./titlebar";
 // The app's own styles come before the task dialog's and Plan's, as when those two loaded on demand.
 import "./styles.css";
 // The dialog and Plan load with the app: a part loaded on demand shows only after React's 300ms Suspense
@@ -86,6 +87,7 @@ export function App() {
   );
   // Mail reads its summary link (`?mail=`) when it mounts; a mail launch remounts it.
   const [mailLaunches, setMailLaunches] = useState(0);
+  const titlebar = useTitlebarOverlay();
   // A newer build serves Tasks, so this tab's bundle may call routes it no longer has: the page and its
   // errors give way to the reload prompt.
   const outdated = useOutdated();
@@ -189,6 +191,10 @@ export function App() {
   useEffect(() => {
     if (route.page !== "plan") setReviewRequest(0);
   }, [route.page]);
+  // The title bar's field shows Search's query only on Search.
+  useEffect(() => {
+    if (titlebar && route.page !== "search") setSearch("");
+  }, [titlebar, route.page]);
   // A launch into this open window (launch.ts): its route, the review checklist and a mail summary apply at
   // once; a task or Quick add opens through launchToOpen.
   useLaunchQueue((launch) => {
@@ -287,6 +293,17 @@ export function App() {
       }}
     >
       <div className={`app-shell ${showSidebar ? "sidebar-open" : ""}`}>
+        {titlebar && (
+          <TitleBar
+            search={search}
+            searching={route.page === "search"}
+            onSearch={(text) => {
+              setSearch(text);
+              if (route.page !== "search") window.location.hash = "/search";
+            }}
+            searchRef={searchRef}
+          />
+        )}
         <Sidebar
           route={route}
           catalog={catalog}
@@ -390,6 +407,7 @@ export function App() {
               search={search}
               setSearch={setSearch}
               searchRef={searchRef}
+              titlebarSearch={titlebar}
               date={upcomingDate}
               setDate={setDate}
               includeCompleted={includeCompleted}

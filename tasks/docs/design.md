@@ -158,7 +158,7 @@ They avoid one service call per task. Cloudflare documents a finite invocation c
 
 ## Installed app
 
-The manifest (`web/public/manifest.webmanifest`) keeps `display: standalone` and adds two members:
+The manifest (`web/public/manifest.webmanifest`) keeps `display: standalone` and adds three members:
 
 - `shortcuts`, on the Dock icon's menu in this order: Quick add (`/?add=1`), Today, Plan and Focus. macOS shows no
   shortcut icons. Quick add opens the Add task dialog with no project and no date: the Dock has no page context, so
@@ -176,10 +176,20 @@ The manifest (`web/public/manifest.webmanifest`) keeps `display: standalone` and
   hold: a reload reopens it, closing removes it. Chrome also queues the launch that created a window, whose URL the
   load path has handled, so a first launch equal to the document's URL is skipped. Home's `/` only focuses the
   window. In a plain tab the consumer is never called and links load as pages, as before.
+- `display_override: ["window-controls-overlay", "standalone"]`. When the owner hides Chrome's title bar, a strip
+  in its place drags the window (`app-region: drag`) and continues the sidebar's and the page's colours to the
+  window's top edge (white below 760px). Inside the titlebar area, clear of the traffic lights and Chrome's own
+  controls, sit one search field and the page's refresh button. Typing in the field on another page goes to
+  Search; `/` and Cmd/Ctrl-K open Search with the caret in it; Search shows no field of its own, and leaving it
+  clears the field. The refresh button keeps its component; CSS moves it there (`.view-refresh`, `.plus-refresh`).
+  The theme colour turns white meanwhile. `web/src/titlebar.tsx` follows the display mode's media query, whose
+  `change` event fires both ways, and puts `titlebar-overlay` on `<html>`; every overlay rule hangs off that class,
+  so the normal layout is unchanged.
 
-Headless Chromium cannot install an app: `pwa.spec.ts` checks the parsed manifest, and `pwa-launch.spec.ts` stubs
-`launchQueue` and calls its consumer as Chrome would. The Dock menu, and links from Gmail and Todofy's `/task/<id>`
-redirect landing in the open window, are checked by hand in the installed app.
+Headless Chromium cannot install an app: `pwa.spec.ts` checks the parsed manifest, `pwa-launch.spec.ts` stubs
+`launchQueue` and calls its consumer as Chrome would, and `titlebar.spec.ts` stubs the display mode (its
+`env(titlebar-area-*)` fallbacks apply). The Dock menu, links from Gmail and Todofy's `/task/<id>` redirect landing
+in the open window, and the title bar's toggle and clearances are checked by hand in the installed app.
 
 ## Performance and Cloudflare
 

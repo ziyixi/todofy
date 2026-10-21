@@ -33,6 +33,8 @@ interface Props {
   search: string;
   setSearch: Dispatch<SetStateAction<string>>;
   searchRef: RefObject<HTMLInputElement | null>;
+  /** The title bar holds the search field (Window Controls Overlay), so Search shows none of its own. */
+  titlebarSearch: boolean;
   date: string;
   setDate: Dispatch<SetStateAction<string>>;
   includeCompleted: boolean;
@@ -53,6 +55,7 @@ export function TaskWorkspace({
   search,
   setSearch,
   searchRef,
+  titlebarSearch,
   date,
   setDate,
   includeCompleted,
@@ -127,7 +130,7 @@ export function TaskWorkspace({
             </>
           )}
           <button
-            className="icon-button"
+            className="icon-button view-refresh"
             aria-label="Refresh tasks"
             disabled={list.loading}
             onClick={() => void list.read()}
@@ -136,7 +139,7 @@ export function TaskWorkspace({
           </button>
         </div>
       </header>
-      {route.page === "search" && (
+      {route.page === "search" && !titlebarSearch && (
         <div className="search-box">
           <Search size={19} />
           <input

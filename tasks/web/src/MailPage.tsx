@@ -232,7 +232,7 @@ export default function MailPage({
             <Settings size={17} />
           </button>
           <button
-            className="icon-button"
+            className="icon-button view-refresh"
             aria-label="Refresh mail"
             disabled={loading || Boolean(busy)}
             onClick={() => void read()}

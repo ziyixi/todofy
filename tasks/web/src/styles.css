@@ -1277,3 +1277,99 @@ h1 {
 .quick-add-dialog .task-edit-main .description-input {
   min-height: 40px;
 }
+
+/*
+ * The installed app's own title bar (Window Controls Overlay, titlebar.tsx). A strip over the old title bar
+ * drags the window; its colours continue the columns beneath it, so the sidebar runs to the window's top edge.
+ * Its search field and the page's refresh button stay inside the titlebar area, clear of the macOS traffic
+ * lights on the left and Chrome's own controls on the right. Without the overlay none of this applies.
+ */
+.titlebar-overlay {
+  --titlebar-height: env(titlebar-area-height, 33px);
+}
+.titlebar {
+  position: fixed;
+  z-index: 9;
+  inset: 0 0 auto;
+  height: var(--titlebar-height);
+  background: linear-gradient(
+    to right,
+    var(--sidebar) var(--sidebar-width),
+    #fff var(--sidebar-width)
+  );
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+.titlebar-area {
+  position: absolute;
+  top: env(titlebar-area-y, 0px);
+  left: env(titlebar-area-x, 0px);
+  width: env(titlebar-area-width, 100%);
+  height: var(--titlebar-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.titlebar-search {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  width: min(420px, 100% - 96px);
+  height: max(24px, var(--titlebar-height) - 8px);
+  padding: 0 8px;
+  border: 1px solid #dce1d4;
+  border-radius: 6px;
+  background: #fff;
+  color: #8c9580;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+.titlebar-search:focus-within {
+  border-color: #6b9155;
+}
+.titlebar-search input {
+  flex: 1;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: none;
+  font-size: 13px;
+  outline: none;
+}
+/* Escape clears the field; Chrome's blue clear button is not in Tasks' palette. */
+.titlebar-search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+.titlebar-overlay .app-shell {
+  padding-top: var(--titlebar-height);
+}
+.titlebar-overlay .sidebar {
+  top: var(--titlebar-height);
+  height: calc(100vh - var(--titlebar-height));
+}
+.titlebar-overlay .app-shell > .sidebar-resize {
+  top: var(--titlebar-height);
+}
+.titlebar-overlay .selection-bar {
+  top: calc(var(--titlebar-height) + 10px);
+}
+/* The current page's refresh, kept in its own component, at the titlebar area's right end. */
+.titlebar-overlay :is(.view-refresh, .plus-refresh) {
+  position: fixed;
+  z-index: 10;
+  top: calc(env(titlebar-area-y, 0px) + (var(--titlebar-height) - 28px) / 2);
+  left: calc(
+    env(titlebar-area-x, 0px) + env(titlebar-area-width, 100vw) - 34px
+  );
+  width: 28px;
+  height: 28px;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+@media (max-width: 760px) {
+  .titlebar {
+    background: #fff;
+  }
+}

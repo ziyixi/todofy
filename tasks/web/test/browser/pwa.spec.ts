@@ -35,6 +35,7 @@ test("desktop PWA meets Chrome install checks and shows an honest offline page",
       );
     // Links focus the open window, which routes them itself (launch.ts), instead of reloading it.
     expect(manifest.launch_handler.client_mode[0]).toBe("focus-existing");
+    expect(manifest.display_override[0]).toBe("window-controls-overlay");
     expect(
       manifest.icons.map((icon: { sizes: string }) => icon.sizes),
     ).toContain("512x512");

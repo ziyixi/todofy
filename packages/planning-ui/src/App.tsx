@@ -573,7 +573,7 @@ export function App({
             </label>
           )}
           <button
-            className="plus-icon"
+            className="plus-icon plus-refresh"
             aria-label={text.refresh}
             disabled={waiting > 0}
             onClick={refresh}

@@ -32,7 +32,8 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 - Installable desktop PWA; an explicit offline page, with task data available online. The Dock icon's menu offers
   Quick add (Inbox, no date, over the current page), Today, Plan and Focus. Links into Tasks (Home, mail reminders,
   `?task=` links, the weekly review) open in the already-open app window without reloading it; a linked task waits
-  for an open task dialog to close.
+  for an open task dialog to close. With Chrome's title bar hidden (Window Controls Overlay), the search field and
+  the page's refresh sit in the window's title bar.
 - Owner-only Cloudflare Worker and D1, using the repository's proto API and authentication conventions.
 - A verified Todoist import and coordinated native source for Todofy.
 
