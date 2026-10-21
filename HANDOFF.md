@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-20 UTC. Keep this file focused on active work, open acceptance and dated compatibility constraints.
+Updated 2026-10-21 UTC. Keep this file focused on active work, open acceptance and dated compatibility constraints.
 Move completed rollout detail to a dated record and link it here. Repository rules are in [AGENTS](AGENTS.md);
 service entry points are in [README](README.md). Never put private content, credentials or raw production output here.
 
@@ -48,7 +48,7 @@ Todofy's planning tables at once: no waiting window, flag or rollback machinery.
 11. `docs(todofy)`: two of Todofy's planning documents describe the self-hosted hosts in general terms only.
 12. `docs`: Home's per-tick counts and pending checks, other leftovers of commits 5 and 6, and this HANDOFF.
 
-Final local check on 2026-10-20 UTC, with `777d5f01` still the tip of `origin/main`: `ci_changes.py` selects every
+Final local check on 2026-10-21 UTC, with `777d5f01` still the tip of `origin/main`: `ci_changes.py` selects every
 check job and deploys Tasks, Todofy and Home (with commit 7 also Mail Hero, Links, Watch, Mailsort and Recall),
 prints no `flowday_*` key and refuses `-f app=flowday`. Each job passed on macOS: Changes' tests (`.github/scripts`,
 the cloud-config, cloud-release, cloud-bootstrap and service-catalog tests and the four generators' `--check`),
@@ -56,9 +56,12 @@ Shared packages, Proto (breaking against `777d5f01` with `flowday.ui.v1` retired
 `tofu fmt` and `tofu validate`; its plan needs the state), Todofy static (1887 host tests) and runtime (all 498 in
 one shard, the completeness check included), Tasks (the Worker's 65 unit and 97 runtime tests, the web's 55 unit
 tests, build and 107 Playwright tests, the tools' 29 tests), Home (268 unit and 97 runtime tests, the UI's 158),
-Mail Hero, Links, Watch, Mailsort, Recall, Brief, Fleet, Website (its export and Worker dry runs on another free
-port), Newsletter (its engine steps with an empty `HOME`) and Platform's contract steps. CI alone runs the
-Newsletter image, Platform's Linux steps, Mail Hero's GPG backup test and Changes' decide step. Not verified here:
+Mail Hero, Links, Watch, Mailsort, Recall, Brief, Fleet, Website (every step, its export and Worker dry runs
+included), Newsletter (its engine steps with an empty `HOME`) and Platform's contract steps. Two tests failed once
+and passed when their job ran again, neither in code this branch changes: a Todofy runtime test (a plain `SELECT`
+that local D1 answered with "internal error" under four workers) and Recall's 413 runtime case (`EPIPE` while the
+client still wrote the large body). CI alone runs the Newsletter image, Platform's Linux steps, Mail Hero's GPG
+backup test and Changes' decide step. Not verified here:
 the plan against the real state of the three `moved` blocks and of the two policies that leave with their block
 (step 1 below reads it; Lab's moves applied cleanly on 2026-10-07, but this is the first time a `from` names an
 instance of a resource no block declares).
@@ -70,11 +73,15 @@ instance of a resource no block declares).
      `TASK_SOURCE`, `TODOIST_API_BASE` or `PLUS_METADATA`). The empty `RETIRED_SERVICE_BINDINGS` stops a release
      that still finds one (`REPAIR_MANUAL_REQUIRED`).
   2. This read-only check must print nothing:
-     `gh secret list --env production --repo ziyixi/todofy | grep -E '^(TODOFY_CORE_WORKER_SECRETS|FLOWDAY_WORKER_SECRETS)\s'`
+     `gh secret list --env production --repo ziyixi/todofy | grep -E '^TODOFY_CORE_WORKER_SECRETS\s'`. If it lists
+     the map, set it again without `TODOIST_API_KEY` (`tools/cloud-bootstrap/bootstrap.py secrets`): Todofy's deploy
+     refuses a name todofy-core no longer declares. (`FLOWDAY_WORKER_SECRETS`, if it exists, is read by nothing after
+     the merge; step 6 below deletes it.)
   3. Delete the retired Todoist key from todofy-core; a deploy keeps a secret it does not name, so an undeclared live
-     one stops the release. From `todofy/gateway`: `npx wrangler secret list --name todofy-core` (names only), then
-     `npx wrangler secret delete TODOIST_API_KEY --name todofy-core`. Home's 非 CI 改动 shows this once. If
-     `gh secret list --env production --repo ziyixi/todofy` shows `TODOFY_TODOIST_API_KEY`, delete it too.
+     one stops the release. From `todofy/` (its pinned Wrangler): `npx wrangler secret list --config wrangler.toml`
+     (names only), then `npx wrangler secret delete TODOIST_API_KEY --config wrangler.toml`. Home's 非 CI 改动 shows
+     this once. If `gh secret list --env production --repo ziyixi/todofy` shows `TODOFY_TODOIST_API_KEY`, delete it
+     too.
   4. Remove the FlowDay values from the infrastructure inputs: after this release `infra_state.py` refuses
      unexpected variables. `grep -c flowday_policy ~/.config/todofy-infra/local.tfvars` prints a count; if it is not
      0, delete the `flowday_policy_names` and `flowday_policy_options` entries (and in the private bootstrap input's
@@ -104,7 +111,7 @@ The lead's steps after the release, in this order:
    (`access_aud`, `d1_database_ids`); no outputs problem; and the expect line `delete=5,outputs=2@<fingerprint>`.
    If it failed with "unexpected" values, step 4 above was missed: do it, then `gh workflow run infra.yml --repo ziyixi/todofy --ref main`.
 2. Confirm that Home deployed, so no live Home still probes FlowDay's manifest.
-3. *(Owner's choice; by decision, none.)* A cold copy of FlowDay's D1 before it goes:
+3. *(Owner's choice; by decision, none.)* A cold copy of FlowDay's D1 before it goes, from `todofy/`:
    `npx wrangler d1 export flowday --remote --output <private 0700 dir>/flowday.sql`.
 4. Delete the Worker by hand (Wrangler owns it, not `infra/`): Cloudflare dashboard → Workers & Pages → `flowday` →
    Settings → Domains & Routes → remove `flowday.ziyixi.science` (this removes its DNS record), then delete the
