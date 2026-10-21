@@ -250,7 +250,8 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
        9 Workers in `dashboard/worker/test/drift.test.ts` ("names every production Worker") and in
        `dashboard/docs/design-v2.md` (the drift check's "8 Workers ... three ticks": 9 still take three ticks, 3 + 4 + 2).
      - The dashboard registry (`dashboard/worker/src/registry.ts` `WORKERS` and `RESOURCES`: the Worker `links` and the
-       D1 database `links` by id), or an explicit exclusion with its reason in `dashboard/worker/test/registry.test.ts`.
+       D1 database `links` by id) and a visible `ENTRIES` row; `test_wrangler_configs.py` enforces both
+       (`dashboard/docs/design-v2.md` §3).
      - Adopt the D1 database and the Access application into `infra/` as for the other apps (done by IaC P4, above).
   5. Verify with synthetic links only: a public and a private link, anonymous and logged in, the continuation, and
      that nothing is logged.
