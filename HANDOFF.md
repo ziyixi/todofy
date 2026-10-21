@@ -4,396 +4,139 @@ Updated 2026-10-20 UTC. Keep this file focused on active work, open acceptance a
 Move completed rollout detail to a dated record and link it here. Repository rules are in [AGENTS](AGENTS.md);
 service entry points are in [README](README.md). Never put private content, credentials or raw production output here.
 
-Completed work is archived: the October 19 releases (Plan write reliability, whole-row drag, inline subtasks and Plan
-completion) in [docs/history/handoff-2026-10-19.md](docs/history/handoff-2026-10-19.md), through October 18 (Tasks
-refinement and cutover, VPS recovery, Recall, Mailsort) in
-[docs/history/handoff-2026-10-18.md](docs/history/handoff-2026-10-18.md), earlier in
-[docs/history/handoff-2026-10-11.md](docs/history/handoff-2026-10-11.md). Their waiting lists are not instructions.
+Completed work is archived: the October 20 notes (planning in Tasks and its import, the Tasks cleanup and Todoist Plus
+removal, the Plan and Focus owner changes) in [docs/history/handoff-2026-10-20.md](docs/history/handoff-2026-10-20.md),
+the October 19 releases (Plan write reliability, whole-row drag, inline subtasks and Plan completion) in
+[docs/history/handoff-2026-10-19.md](docs/history/handoff-2026-10-19.md), through October 18 (Tasks refinement and
+cutover, VPS recovery, Recall, Mailsort) in [docs/history/handoff-2026-10-18.md](docs/history/handoff-2026-10-18.md),
+earlier in [docs/history/handoff-2026-10-11.md](docs/history/handoff-2026-10-11.md). Their waiting lists are not
+instructions.
 
 ## Current work
 
-### Tasks performance: planning in Tasks (`claude/tasks-planning`)
+### Retire FlowDay and drop Todofy's planning store (`claude/retire-flowday`)
 
-**Ready to release.** Pushed through `57bd6b99`, whose CI run 39459937383 failed only Tasks' `cpu.test.ts`; the
-first-request CPU fix after it (below) is local, not pushed. A branch from `origin/main` `abd0da1a`, which holds the
-Plan and Focus release. It implements the performance design in one release, by the owner's choice without flags,
-staged rollout or a shadow phase: P0 front end, P1 planning facts in Tasks, the one-time import workflow and P2 Todofy
-cleanup (Todofy stops serving planning and drops its FlowDay proxy), with the review's fixes. P3, dropping Todofy's
-planning tables, follows once the import is verified.
+**Ready to release; local only, not pushed.** A branch from `origin/main` `777d5f01`, which holds the Tasks
+performance release, the one-time planning import (verified on 2026-10-20 with 0 pending) and the Plan and Focus
+release. By the owner's decisions of 2026-10-20 it removes FlowDay completely, with no data migration, and drops
+Todofy's planning tables at once: no waiting window, flag or rollback machinery. The commits, in order:
 
-Final local check on 2026-10-20 UTC at `d1d20199` (the CPU fix), with `abd0da1a` still the tip of `origin/main`:
-`ci_changes.py` selects every check job, and each passed on macOS: Changes' tests, Shared packages, Proto,
-Contracts, Todofy static and runtime (all 498 runtime tests in one shard, the completeness check included), Tasks
-(the Worker's 65 unit tests and 20 runtime files with 98 tests; the web's 55 unit tests, build and 107 Playwright
-tests; the tools' 44 tests), FlowDay, Mail Hero, Home, Links, Watch, Mailsort, Recall, Brief, Fleet, Website,
-Newsletter (its engine steps with an empty `HOME`, as on a runner), Infra and Platform's contract steps. CI alone runs
-what macOS cannot: the Newsletter image (a linux/amd64 Docker build) and CJK font install, Platform's manifest
-compiler, AppArmor, runtime image and k3s steps, Mail Hero's GPG backup test and Changes' decide step (it needs
-GitHub's token; `ci_changes.py` ran directly). The web's main chunk is 884.8 kB (283.2 kB gzip), the gateway 74.6
-KiB gzip (budget 87), todofy-core's upload 198.5 KiB gzip.
+1. `chore(tasks)`: deletes the finished planning import workflow, its generator, its guard test and the
+   planning-identity cutover tool ([record](tasks/docs/backup.md#one-time-planning-import)).
+2. `feat(todofy)`: migration `0013_drop_plan_store.sql` drops `plan_task_state`, `plan_tasks`, `plan_edges`,
+   `plan_marks`, `plan_notes`, `plus_weeks`, `plus_settings` and every `plan_settings` row but `todoist.mail`. The
+   Mail categories stay (`plan_categories` and that row; `runtime/plan_store.py` reads them); nothing else in Todofy
+   read the dropped tables. The weekly backup copies 17 Todofy tables; `tools/backup_restore.py` prints
+   `SKIP <table> (retired)` for the dropped ones in an older backup.
+3. `chore(release)`: todofy-core no longer declares `TODOIST_API_KEY`, and `RETIRED_SERVICE_BINDINGS` is empty.
+4. `chore(tasks)`: deletes the one-time FlowDay estimate backfill; Tasks' runbooks no longer reset FlowDay's mirror.
+5. `refactor!: retire FlowDay`: `flowday/` and `proto/flowday/` (`flowday.ui.v1` in `proto/retired.json`), its CI
+   jobs and actions, every `ci_changes.py` entry (a dispatch of `app=flowday` is refused), the catalog, tool and
+   bootstrap entries, Home's tile, Worker row and D1 resource (a tick makes 33 calls, two probes), and infra/:
+   `infra/retired.tf` moves the two Access applications, their two reusable policies and the D1 database to
+   undeclared addresses, with the same pairs in `RETIRED` of `.github/scripts/infra_guard.py` (managed objects
+   41 → 36). Tasks' changes feed and its generic `read` access stay: its Ops counter and backup read the feed.
+6. `docs`: the platform docs, Home's docs, edge-auth's SPEC and proto/README without FlowDay.
+7. `docs` (optional): the links, watch, mailsort, Mail Hero and recall comments. It redeploys those five apps with no
+   change in behaviour; drop it to keep their releases separate.
+8. `docs`: [the FlowDay record](docs/history/flowday.md), [History](docs/history.md) and this HANDOFF.
 
-Measured in the synthetic preview (the Tasks dev server's D1 in Chromium, 3 runs each, with no added latency and
-with 45 ms added to every request): the first task open 59-69 and 79-83 ms (one GetTask); Plan from the list 45-47
-and 92-99 ms to its cards (GetPlan, ListTasks and Focus's timer and days in one wave); Focus from the list 14-16 ms
-to its page; Plan to Focus and back 12-35 ms with no request. A Plan stage change, lane reorder or dependency change
-is one request; completing a card is one CompleteTask, then one reload wave.
+Final local check on 2026-10-20 UTC, with `777d5f01` still the tip of `origin/main`: `ci_changes.py` selects every
+check job and deploys Tasks, Todofy and Home (with commit 7 also Mail Hero, Links, Watch, Mailsort and Recall),
+prints no `flowday_*` key and refuses `-f app=flowday`. Each job passed on macOS: Changes' tests (`.github/scripts`,
+the cloud-config, cloud-release, cloud-bootstrap and service-catalog tests and the four generators' `--check`),
+Shared packages, Proto (breaking against `777d5f01` with `flowday.ui.v1` retired), Contracts, Infra (guards,
+`tofu fmt` and `tofu validate`; its plan needs the state), Todofy static (1887 host tests) and runtime (all 498 in
+one shard, the completeness check included), Tasks (the Worker's 65 unit and 97 runtime tests, the web's 55 unit
+tests, build and 107 Playwright tests, the tools' 29 tests), Home (268 unit and 97 runtime tests, the UI's 158),
+Mail Hero, Links, Watch, Mailsort, Recall, Brief, Fleet, Website (its export and Worker dry runs on another free
+port), Newsletter (its engine steps with an empty `HOME`) and Platform's contract steps. CI alone runs the
+Newsletter image, Platform's Linux steps, Mail Hero's GPG backup test and Changes' decide step. Not verified here:
+the plan of the five `moved` blocks against the real state (step 1 below reads it; Lab's identical pattern applied
+cleanly on 2026-10-07, but this is the first time a `from` names an instance of a resource no block declares).
 
-- **Release.** Push, wait for the complete gate, then fast-forward `main` to the same green SHA. CI deploys Tasks
-  (migration `0006`) first, then Todofy and FlowDay (unchanged in what it does; it uses the changed proto), then
-  Home. Between Tasks' and Todofy's deploys Plan's weekly review shows "—" for its two Todofy numbers. From Tasks'
-  deploy until the import, production rows show no planning facts, so the import follows at once. Tabs opened
-  before this release call the retired paths until reloaded once; after it, an outdated tab asks for the reload.
-- **The lead, right after the release, in order** (nothing was dispatched from this branch;
-  [runbook](tasks/docs/backup.md#one-time-planning-import)):
-  1. `gh workflow run tasks-planning-import.yml --repo ziyixi/todofy --ref main -f apply=false`. The log prints counts
-     only: `states`, `dependencies`, `bets` and `board`, each `pending` (what the apply copies), `present` and
-     `orphan` (names no live Tasks task; left out).
-  2. The same with `-f apply=true`, away from the account's Sunday-to-Monday midnight. Note the printed Time Travel
-     bookmark; the run counts again and fails unless `pending` is 0.
-  3. Once more with `-f apply=false`: `pending` 0. Then, in the browser, a row's tags, the dialog, Review, Week and
-     Focus.
-  4. P3 later, with the owner's OK once the import is verified: drop Todofy's planning tables (listed under P2) and
-     their backup entries, delete the workflow, both import tools and their tests, and empty the two
-     `RETIRED_SERVICE_BINDINGS` entries once Todofy's release is verified.
 
-- **P0 (2026-10-20 UTC), done.** Front end only, plus one Worker header.
-  - The task dialog and Plan/Focus load with the app instead of on demand, which waited for their chunk and React's
-    300ms Suspense reveal. Locally in Chromium (dev server, synthetic data, 5 runs each) the first dialog open went
-    from 359-374 to 56-63 ms and Plan's shell from the Inbox from 329-333 to 19-21 ms. The main chunk grew from
-    698 kB (223.3 kB gzip) to 895 kB (285.1 kB gzip) and its CSS from 29.9 to 90.1 kB; Mail (11.9 kB), the catalog
-    editor (7.2 kB) and the description renderer (155.3 kB) still load on demand. The app's styles keep their old
-    cascade order: every element's computed style on synthetic Inbox, task details, Plan and Focus pages was the
-    same in both builds.
-  - Completing a card in Plan reads Plan once (it read twice more: `useTaskActions` now keeps `planRevision` for
-    the writes Plan did not issue), and switching between Plan and Focus reads nothing (`finishTask` changed
-    identity with the route). The dialog reads a task's children only when GetTask counts some.
-    `request-counts.spec.ts` guards these counts.
-  - A tab running an older bundle asks for a reload: every authenticated Tasks answer names its `BUILD_SHA` in
-    `x-tasks-build`, the web is built with the same commit, and a mismatch (or, where a build is unnamed, an
-    unknown-route answer) shows "Tasks was updated." with Reload in place of the page and its errors. Tabs opened
-    before this release do not have it yet; they need one manual reload after it. The Tasks Worker bundle was 130.8
-    of its own 132 KiB gzip budget (the platform allows 3 MiB); P1 raised the budget.
-- **P1 (2026-10-20 UTC), done.** Planning facts, dependencies and Plan live in Tasks.
-  - Todofy: `ReadWeeklyReview`, the weekly review's two facts (the newest review task of the week or the week
-    before, the pending Mail count) in one D1 batch with no Tasks call; the gateway allows it.
-  - Tasks: migration `0006_planning.sql` (planning columns on `tasks` and the partial `tasks_committed` index,
-    `task_dependencies`, `weekly_bets`, `plan_board`); Task fields 31-38 and `plan.proto` (GetPlan,
-    UpdateWeeklyBet, `ReorderTasks.lane_order`), all additive; the rules ported from Todofy's Python in
-    `worker/src/planning.ts`; dependency writes as one set with their cycle, open-prerequisite and 300-edge checks
-    inside the write's batch; backup and restore of the new columns and tables (a pre-0006 backup restores with
-    the defaults).
-  - planning-ui reads GetPlan beside the ListTasks pages and writes only to Tasks; Todofy answers only Mail and
-    ReadWeeklyReview. The web reads planning with each row and with GetTask, saves content and planning in one
-    UpdateTask, and lost the 30-second detail cache and the separate planning reads. The browser specs seed
-    planning in the dev server's D1 through its API (`planning-stub.ts`); only Todofy's Mail and review facts
-    are synthetic.
-  - Deviations from the design: `UpdateWeeklyBetRequest.etag` is a request field (the shared HTTP client sends
-    only the masked fields of a resource, so an etag inside `WeeklyBet` never arrived; `a83b4272`).
-    `ListFocusDays`' days and `ReorderTasks.positions` stay REQUIRED, since the wire profile forbids dropping
-    REQUIRED: empty days mean Tasks' today's week, and empty positions with a `lane_order` save only the lane.
-  - Measured locally: the Tasks Worker bundle is 137.1 KiB gzip (was 130.8), budget raised to 165 KiB. The web's
-    main chunk is 891.1 kB (285.4 kB gzip), from 895.8 (285.5). `cpu.test.ts`' first page of 100 planned tasks
-    measured 8.62 reference ms against its bound of 10, and the fullest plan and a dependency write among 300
-    stay under the file's bounds. `read-budget.test.ts`: a task with 5 dependencies reads 16 rows (2 without),
-    GetPlan 3 statements and 9 rows, its next-week read through `tasks_committed`.
-  - Todofy's weekly backup carries the new columns and tables; its runtime round trip seeds and compares them.
-- **Import (2026-10-20 UTC), done.** The one-time copy of Todofy's planning store into Tasks
-  ([runbook](tasks/docs/backup.md#one-time-planning-import)).
-  - `tasks/tools/planning-import.ts` turns read-only exports of Todofy's `plan_tasks`, `plan_task_state`,
-    `plan_edges` (waits_for), `plan_notes` (bets), `plan_settings` (board), `plus_weeks` and `plus_settings`, and of
-    Tasks' planning state, into guarded SQL: facts only onto live rows still at their defaults, dependencies of open
-    tasks on live ones unless Tasks has the pair (even removed), goals Tasks lacks, and the lanes while Tasks' board
-    is at revision 1. Applying it again changes nothing. `prepare-planning-import.ts` lists the exports and prints
-    counts only.
-  - `.github/workflows/tasks-planning-import.yml`: `workflow_dispatch` with one boolean `apply`, main only, the
-    `production` environment, the `tasks-production` lock, `CF_API_TOKEN`. Exports go to a private directory on the
-    runner; with `apply` it prints Tasks' Time Travel bookmark, applies the SQL with `--file` and counts again,
-    failing unless 0 are pending. `test_tasks_planning_import_workflow.py` pins it; `docs/ci-cd.md` lists it.
-  - Deviations from the design: a dependency whose waiting task is completed is not copied (Todofy deletes those
-    edges at the waiter's completion; Tasks soft-deletes them), and the Tasks export carries `completed` for that.
-    The CLI reads a directory of `<name>.json` answers instead of per-table flags.
-  - Tested by `planning-import.test.mjs` (both schemas from their migrations, exports on read-only connections,
-    guards against changes made between export and import, malformed exports, the CLI, and the imported rows read
-    back through GetTask and GetPlan on the Tasks Worker's D1); each SQL guard was removed once to confirm a test
-    fails without it. A rehearsal of the workflow's exact step against local D1 (wrangler 4.142.0 `--local`,
-    synthetic seeds) printed 9 pending, imported, and printed 0 pending twice; its private directory was gone
-    afterwards.
-- **P2 (2026-10-20 UTC), done.** Todofy stops serving planning and drops its FlowDay proxy (the Plan and Focus
-  release's queued Todofy cleanup, below).
-  - Gateway: the Planning channel allows only the Mail methods and `ReadWeeklyReview`. The `/api/plus/flowday`
-    proxy, `FOCUS_METHODS`, `settleCompleted`, the `flowday_url` injection, the `FLOWDAY_NATIVE_FOCUS` binding and
-    the `FLOWDAY_PUBLIC_URL` var are gone, also from the cloud-config generator and Home's `drift-desired.json`.
-    `tools/cloud-release/control.py` lets the next Todofy release remove both from the live Worker; empty those two
-    `RETIRED_SERVICE_BINDINGS` entries once it is verified.
-  - todofy-core: the planning modules, the overlay in `native_tasks.py`, the frozen focus claim, the alarm's weekly
-    tick (a Tasks page scan every 10 minutes) and the finished `tools/prepare_native_plan.py` are deleted with their
-    tests. Mail keeps its receipts; a resent conversion reuses its derived Tasks request ID, which Tasks answers from
-    its own receipt, instead of the planning operation journal. A conversion answers the task's ID, title and
-    project. The weekly review task always links Plan's checklist.
-  - Proto: `ReadPlan`, `ListPlanningTasks`, `SetTaskPlan`, `AppendTaskSteps`, `SetTaskLead`, `SetTaskDependency`,
-    `ResolveDependencies`, `VerifyPlanStore`, `SetWeeklyBet`, `ReorderTasks` and `CompleteTask` are retired in
-    `proto/retired.json` with their messages, `Plan` (and its `flowday_url`) and the planning-only messages.
-  - CI: Todofy's deploy waits for Tasks' instead of FlowDay's, so Tasks stops calling a method before Todofy stops
-    serving it.
-  - Deviations from the design: `PlanningTask` is not retired, since `ConvertMailItemResponse` still answers it;
-    `PlanView` stays unused (no retirement kind for a top-level enum). `core/plan.py` went entirely: its one Mail
-    constant moved into `core/sql/plan.py`. The request helpers Mail needs moved unchanged from `core/plus.py` into
-    `core/mailbox.py` (`command_id` is pinned by a test). The restore runbook no longer opens `VerifyPlanStore`;
-    `backup_restore.py verify` already compares every table's rows with the manifest.
-  - **Left for P3**, with the owner's OK after the import is verified: Todofy's planning tables (`plan_tasks`,
-    `plan_task_state`, `plan_edges`, `plan_marks`, `plan_notes`, every `plan_settings` row except
-    `todoist.mail`, `plus_settings`, `plus_weeks`) and their backup entries; in TodofyCore's SQLite, the planning
-    writes' receipts and `native_task_requests`, which nothing reads; the import workflow and its tools.
-  - Measured locally: the gateway bundle is 298.5 KiB raw, 74.2 KiB gzip (was 338.5 and 85.4; budget 87), and
-    todofy-core's upload 825.7 KiB, 200.9 KiB gzip (was 906.3 and 224.5).
-- **Review fixes (2026-10-20 UTC), done.** Nine confirmed review findings, each fixed with a test.
-  - Dependencies: a prerequisite in an archived project is done in Tasks too (`prerequisiteDone`), as Plan shows
-    it, so the dialog, the five-limit and the cycle guard agree with Plan's picker; unarchiving makes it hold
-    again. Choosing a done recurring prerequisite again in Plan now waits for its next completion: Tasks keeps a
-    dependency the set already has, so Plan removes it and adds it again (two UpdateTasks).
-  - Plan writes under the etags it holds, with no read first. An estimate answers the task's new etag (before, the
-    next planning save of that task got a 409 and Plan reloaded); a lane or Next-steps reorder is one
-    ReorderTasks; a dependency change is one UpdateTask of the whole set, "remove the done ones" included;
-    completing and estimating send no GetTask.
-  - The web: a dialog save on a list page reads the list and the catalog once (it read both twice), and the CSRF
-    token is read at startup, so the first write does not wait for it.
-  - The import copies facts once: its SQL ends by recording when it ran in `plan_board.created_at` (0 until then),
-    so a second apply never brings back a fact the owner cleared in Tasks.
-  - Without the archived-project rule, the estimate's etag or the import's run record, the matching new test fails.
-- **First-request CPU (2026-10-20 UTC), done.** The branch's CI run 39459937383 failed only `cpu.test.ts`, twice:
-  an isolate's first read of the fullest Focus week and its first page of planned tasks read 10.01 reference ms
-  against their bound of 10 (the first task page 8.51). Inspector profiles of the first request (50 µs samples)
-  put about 4.6 ms above the warm request: lazy compilation of the request path (about 2.4 ms; V8's `--no-lazy`
-  removed it), the wire codec's rule walk over every field of an answer no rule applies to (1.1 ms first, 0.7
-  warm), descriptor options read on first use, the account zone's first Intl formatter (0.16 ms) and per-row date
-  parsing (0.5 ms warm). The Access JWT path (certs fetch, one key import, the RS256 check) cost about 1 ms first and
-  0.25 warm; its key cache is already per isolate, and the global scope can neither fetch nor build a Response.
-  - Fixed without touching the tests: the rule check skips a type no rule reaches, and the codec keeps each type's
-    field order and names (`proto/ts`); the transcoder reads the codec's descriptor tables at construction
-    (`prepareWire`); `task-dates` parses a day once; planning derives the week and horizon once per day; Tasks'
-    `warmUp` (index.ts calls it with the account's zone) creates that zone's formatter, reads a request strictly
-    and runs `listTasks` whole over synthetic rows through a stub D1.
-  - Four interleaved local runs of `cpu.test.ts` (medians of three isolates, reference ms, first run): the task page
-    7.03 → 5.22, the Focus week 7.99 → 5.52, planned tasks 8.90 → 5.77; warm medians down or within their spread.
-  - Local checks at the fix: Tasks, Proto, Shared packages, Contracts, Mail Hero, FlowDay, Links, Watch, Dashboard,
-    Todofy static and all 498 Todofy runtime tests passed; a `proto/ts` change re-checks every TypeScript app in CI.
-  - Review: four more interleaved runs against 57bd6b99 read 7.04 → 5.17, 7.79 → 5.35 and 8.77 → 5.74. First
-    requests the suite does not measure gained too (three isolates, three runs each): the catalog 4.73 → 3.65, the
-    inbox page 6.69 → 4.87, the plan 4.07 → 3.37, one task 3.97 → 3.37. A 169 ms loop added to the warm-up's async
-    step left the first request unchanged: it runs during startup. Auth (`auth.ts`, `edge-auth`) is unchanged.
-    `test/startup.test.ts` now fails when the warm-up's stub D1 no longer answers `listTasks`, which it only logs.
-  - Final check at `d1d20199`: two more interleaved runs against 57bd6b99 read 7.09-7.20 → 4.80-5.18, 7.38-7.72 →
-    5.51-5.56 and 8.76-8.78 → 5.83-6.15; three runs at the fix read 4.99-5.19, 5.34-5.50 and 5.76-5.91. Scaled by
-    CI's ratio to local before the fix (1.12-1.25), CI should read about 6-7.5 against the bound of 10.
-
-### Tasks cleanup and Todoist Plus removal (`claude/tasks-cleanup`)
-
-**Ready to release.** A local branch from `f6c08aaf`, not pushed yet: the verified Tasks review fixes, Tasks' D1 in
-Todofy's weekly backup, the Tasks duration as the only estimate, the Planning channel allowlist, and the removal of
-the Todoist Plus extension and of every Todoist path in Todofy and FlowDay. It merges `origin/main` at `69ddb339`,
-keeping Codex's already-released October 18-19 Tasks and Plan work (inline subtasks, whole-row drag, Plan
-completion, the bounded native rollover) on the native-only path. By the owner's decision the end state ships at
-once: no compatibility window, staged rollout, flag or rollback machinery.
-
-Final local check on 2026-10-20 UTC, with `69ddb339` still the tip of `origin/main`: `ci_changes.py` selects every
-check job for the branch, and each passed on macOS: Changes' tests, Todofy static and runtime (all 512 runtime tests
-in one shard, the completeness check included), Tasks, FlowDay, Dashboard, Mail Hero, Links, Watch, Mailsort, Recall,
-Brief, Fleet, Website, Newsletter, Contracts, Shared packages, Infra and Proto. CI alone runs what macOS cannot: the
-Newsletter image (a linux/amd64 Docker build), Platform's kubectl checksum, AppArmor, runtime image and k3s steps
-(its contract tests passed), Newsletter's CJK font install and Mail Hero's GPG backup test. Locally, Website's
-export and Worker dry-run steps ran on another free port and Newsletter's steps with an empty `HOME`, as on a CI
-runner. If `origin/main` moves before the push, merge it again and rerun the jobs `ci_changes.py` selects.
-
-- **Before pushing,** in this order:
-  1. This read-only check must print nothing. If a map is listed, set it again without `TODOIST_API_KEY` and
-     `CREDENTIAL_KEY` (`tools/cloud-bootstrap/bootstrap.py secrets`); the deploy wrappers now refuse those names.
+- **Before pushing**, in this order:
+  1. Confirm that P2's Todofy release is live: its "Todofy deploy" job succeeded, or Home's 配置漂移 shows nothing
+     `extra` on `todofy` or `todofy-core` (no `FLOWDAY_FOCUS`, `FLOWDAY_NATIVE_FOCUS`, `FLOWDAY_PUBLIC_URL`,
+     `TASK_SOURCE`, `TODOIST_API_BASE` or `PLUS_METADATA`). The empty `RETIRED_SERVICE_BINDINGS` stops a release
+     that still finds one (`REPAIR_MANUAL_REQUIRED`).
+  2. This read-only check must print nothing:
      `gh secret list --env production --repo ziyixi/todofy | grep -E '^(TODOFY_CORE_WORKER_SECRETS|FLOWDAY_WORKER_SECRETS)\s'`
-  2. `TODOIST_API_KEY` (todofy-core) and `CREDENTIAL_KEY` (flowday) stay declared as optional secrets in their
-     `app.toml` until the live secrets are deleted, so the release does not depend on deleting them first. Nothing
-     reads either. Delete them with `wrangler secret delete` (and the GitHub secret `FLOWDAY_CREDENTIAL_KEY`), then
-     remove the two declarations and regenerate (`tools/cloud-config/generate.py`, `.github/scripts/drift_desired.py`).
-- **Release.** Push, wait for the complete gate, then fast-forward `main` to the same green SHA. CI releases Tasks →
-  FlowDay → Todofy → Home, and each works while the later apps still run the previous release. Migrations: Tasks
-  `0004`, FlowDay `0005` (deletes the Todoist settings rows), Todofy `0012` (drops `plus_connections`, `plus_actions`).
-  Todofy's release drops the gateway's `FLOWDAY_FOCUS` and the `TASK_SOURCE`, `TODOIST_API_BASE` and `PLUS_METADATA`
-  vars under `RETIRED_SERVICE_BINDINGS` (`tools/cloud-release/control.py`); a later commit empties that entry.
-- **Expected effects.** Until Home deploys, the old Home reports the two deleted secrets as missing. A
-  ConvertMailItem or DeleteMailSummaries retry across the release with the same request ID is refused; a new request
-  works. FlowDay drops `FocusEntrypoint` while the old gateway still binds it (nothing calls it). If Cloudflare
-  refuses that upload, Todofy is skipped too, since it waits for FlowDay. Then deploy only Todofy, which drops the
-  binding, and once it is green, FlowDay:
-  `gh workflow run ci.yml --repo ziyixi/todofy --ref main -f app=todofy`, then the same with `-f app=flowday`.
+  3. Delete the retired Todoist key from todofy-core; a deploy keeps a secret it does not name, so an undeclared live
+     one stops the release. From `todofy/gateway`: `npx wrangler secret list --name todofy-core` (names only), then
+     `npx wrangler secret delete TODOIST_API_KEY --name todofy-core`. Home's 非 CI 改动 shows this once. If
+     `gh secret list --env production --repo ziyixi/todofy` shows `TODOFY_TODOIST_API_KEY`, delete it too.
+  4. Remove the FlowDay values from the infrastructure inputs: after this release `infra_state.py` refuses
+     unexpected variables. `grep -c flowday_policy ~/.config/todofy-infra/local.tfvars` prints a count; if it is not
+     0, delete the `flowday_policy_names` and `flowday_policy_options` entries (and in the private bootstrap input's
+     `infra_values`, if kept), then, from this branch's checkout:
+     `python3 infra/scripts/infra_state.py values-json --var-file ~/.config/todofy-infra/local.tfvars | gh secret set INFRA_TFVARS --env production -R ziyixi/todofy`
+  5. Release outside Sunday 09:30-11:00 UTC: Todofy's weekly backup starts at 10:00, and a job planned before
+     `0013` fails on a dropped table (after 3 errors `storage_error`, retried 6 hours later).
+- **Release.** Push, wait for the complete gate, then fast-forward `main` to the same green SHA. CI deploys Tasks
+  (no migration), then Todofy (`0013` applies before core and gateway; only D1 Time Travel, 7 days, can undo it),
+  then Home; with commit 7, Mail Hero, Links, Mailsort and Recall too, and Watch after Todofy. Nothing deploys
+  Fleet, Brief, the website, the relay, Newsletter or Platform. Then: Todofy's health page is green; Tasks' Mail
+  page lists the categories and their tags and a category edit saves; Home shows no FlowDay tile; reload Tasks once.
+  If Todofy's deploy stops (a live `TODOIST_API_KEY` or retired binding), fix it and run
+  `gh workflow run ci.yml --repo ziyixi/todofy --ref main -f app=todofy`, then the same with `-f app=dashboard`
+  (and `-f app=watch` with commit 7).
+- **Red or noisy by design until step 5 below:** "Infra drift" exits 3; Home's 配置漂移 shows the `flowday` script
+  and its custom domain as `extra`; "Personal cloud reconcile" fails "Verify complete account resource
+  registration" (the Worker and the D1 database `flowday` unregistered) and applies nothing.
 
-The lead's production steps right after the release, in this order:
+The lead's steps after the release, in this order:
 
-1. The one-time FlowDay estimate backfill, all of it, as soon as the release is live:
-   [commands and checks](tasks/docs/backup.md#one-time-flowday-estimate-backfill). FlowDay's saved estimates were not
-   exported before the push (the session could not read production D1); the new FlowDay replaces one only when its
-   task changes in Tasks, so export FlowDay first and the tasks changed meanwhile are the only loss.
-2. Delete what nothing reads any more, then refresh Home's drift check and expect no differences. The owner may also
-   revoke the Todoist API token; nothing uses it.
-   ```sh
-   gh secret delete FLOWDAY_CREDENTIAL_KEY --env production --repo ziyixi/todofy
-   gh variable delete TODOFY_PLUS_METADATA --env production --repo ziyixi/todofy
-   ```
-3. Confirm the first Tasks backup, taken at Todofy's first alarm after the release: its time on Todofy's health page
-   or Home is newer than the release. Restore it locally as [Rehearse locally](tasks/docs/backup.md#rehearse-locally) says.
-4. Remove the Plus releases and the merged branches. `git branch -r --merged origin/main | grep codex/` lists exactly
-   these fourteen; the three unmerged Recall experiment branches stay by the owner's earlier decision. Git refuses to
-   delete a branch a worktree has checked out, so remove the worktree first (`git worktree list`).
-   ```sh
-   for t in $(gh release list --repo ziyixi/todofy --limit 100 --json tagName \
-       --jq '.[].tagName | select(startswith("todoist-plus-v"))'); do
-     gh release delete "$t" --cleanup-tag --yes --repo ziyixi/todofy
-   done
-   git push origin --delete codex/cloud-recovery-tasks codex/plan-write-reliability codex/plan-write-verification \
-     codex/plus-ui-refinement codex/plus-ui-refinement-verification \
-     codex/tasks-dependency-layout codex/tasks-details-polish codex/tasks-layout-verification codex/tasks-native \
-     codex/tasks-read-efficiency codex/tasks-read-verification codex/tasks-refinement-verification \
-     codex/tasks-workflow-refinement codex/vps-release-recovery claude/tasks-cleanup
-   git worktree remove <its path>   # or `git worktree prune` once its directory is gone
-   git branch -d claude/tasks-cleanup
-   ```
-5. Owner, on the Mac: remove Todoist Plus at `chrome://extensions` with its unpacked folder, and delete the cutover's
-   temporary operator files listed in the private notes.
+1. Read the merge commit's "Infra drift" run (it runs because `infra/` changed); do not apply yet. It must show
+   `delete: 5` in exactly the rows `cloudflare_d1_database.retired_flowday`,
+   `cloudflare_zero_trust_access_application.retired_flowday`, `cloudflare_zero_trust_access_application.retired_flowday_bypass`,
+   `cloudflare_zero_trust_access_policy.retired_flowday` and `cloudflare_zero_trust_access_policy.retired_flowday_bypass`;
+   every other row `no-op` (the previous green run's count minus 5); `output changes: 2`, both `update`
+   (`access_aud`, `d1_database_ids`); no outputs problem; and the expect line `delete=5,outputs=2@<fingerprint>`.
+   If it failed with "unexpected" values, step 4 above was missed: do it, then `gh workflow run infra.yml --repo ziyixi/todofy --ref main`.
+2. Confirm that Home deployed, so no live Home still probes FlowDay's manifest.
+3. *(Owner's choice; by decision, none.)* A cold copy of FlowDay's D1 before it goes:
+   `npx wrangler d1 export flowday --remote --output <private 0700 dir>/flowday.sql`.
+4. Delete the Worker by hand (Wrangler owns it, not `infra/`): Cloudflare dashboard → Workers & Pages → `flowday` →
+   Settings → Domains & Routes → remove `flowday.ziyixi.science` (this removes its DNS record), then delete the
+   Worker (its secrets, versions and assets go with it). Check that DNS has no `flowday` record and the account no
+   Worker `flowday` (it never had a Durable Object namespace). Home's 非 CI 改动 may show these deletions once.
+5. Dispatch "Infra apply" with the line from step 1 (if `main` moved with an `infra/` change since, read the new
+   drift run instead): `gh workflow run infra-apply.yml --repo ziyixi/todofy --ref main -f expect='delete=5,outputs=2@<fingerprint>' -f confirm_destructive=delete-replace-forget`.
+   It backs up the encrypted state, deletes the two Access applications, the two policies and D1 `flowday` with its
+   rows and Time Travel, and ends with a verify plan of "No changes".
+6. Delete the GitHub leftovers. List them, then delete each name printed:
+   `gh secret list --env production --repo ziyixi/todofy | grep -E '^FLOWDAY_'`,
+   `gh secret list --repo ziyixi/todofy | grep -E '^FLOWDAY_'` and
+   `gh variable list --env production --repo ziyixi/todofy | grep -E '^FLOWDAY_'`; for example
+   `gh secret delete FLOWDAY_CSRF_SIGNING_KEY --env production --repo ziyixi/todofy` (and `FLOWDAY_WORKER_SECRETS`,
+   `FLOWDAY_CREDENTIAL_KEY` if listed). Leave the `deploy:flowday` deployment records as history.
+7. Verify: `gh workflow run infra.yml --repo ziyixi/todofy --ref main` is green with `no-op` rows only;
+   `gh workflow run personal-cloud-reconcile.yml --repo ziyixi/todofy --ref main -f operation=check` passes "Verify
+   complete account resource registration"; Home's 配置漂移 shows nothing `extra`.
+8. The follow-up commit, as Lab's `6f5f93e4`: delete the five `moved` blocks (`infra/retired.tf` again says no app is
+   being retired, with the apply's date) and the five `RETIRED` pairs, and update this file. Its drift run must be
+   green with no change.
+9. After the first Sunday backup after the release (2026-10-25 10:00 UTC), confirm on Todofy's health page that it
+   completed. Optional read-only check from `todofy/` (names only):
+   `npx wrangler d1 execute DB --remote --config wrangler.toml --command "SELECT key FROM plan_settings"` prints only
+   `todoist.mail`.
+10. Owner: remove the installed FlowDay PWA from each device. Optionally, in `self-host-on-vultr`, delete the stopped
+    FlowDay container's Compose service and data and any leftover tunnel ingress rule for `flowday.ziyixi.science`;
+    that repository is outside this one and needs the owner's OK.
 
-### Plan and Focus owner changes (`claude/plan-focus-ui`)
+### Carried forward from the October 20 archive (unconfirmed)
 
-**Done, local only; not pushed.** A branch from `origin/main` `b7b52e75` for the owner's ten Plan and Focus
-changes of 2026-10-19, which ship in one release. Slices, in order: A (card layout and area colours), B (the Step
-panel and double-click), C (whole-row drag in Plan), D1 (Tasks' Focus backend), D2 (planning-ui and the Tasks host
-switch to it) and D3 (Focus reorder, Completed and the Day/Week/Month views) are all done. FlowDay keeps running
-untouched, nothing new uses it, and its queue and time data are not migrated (owner decision). To ship: merge
-`origin/main` again if it has moved, rerun the jobs `ci_changes.py` selects (every check, since D1 changed the Tasks
-API and D2 `.github/scripts`), push, wait for the complete gate and fast-forward `main` to the same green SHA. CI
-deploys Tasks (migration `0005` first), then FlowDay, then Todofy. FlowDay and Todofy redeploy only because they use
-the additive `proto/tasks/ui/` (and Todofy's tests and docs changed); neither changes what it does. If FlowDay's
-deploy fails, Todofy is skipped, since it waits for FlowDay, and Tasks keeps working with the previous Todofy.
+The [October 20 archive](docs/history/handoff-2026-10-20.md) lists these lead steps of the Tasks cleanup release.
+Whether each is done was not confirmed when it was archived; check before acting.
 
-Final local check on 2026-10-20 UTC, with `b7b52e75` still the tip of `origin/main`: `ci_changes.py` selects every
-check job for the branch, and each passed on macOS: Changes' tests, Shared packages, Todofy static and runtime (all
-512 runtime tests in one shard, the completeness check included), Tasks (81 Worker runtime tests; the web's 65 unit
-and 102 Playwright tests), FlowDay, Mail Hero, Home, Links, Watch, Mailsort, Recall, Brief, Fleet, Website,
-Newsletter (its engine steps with an empty `HOME`, as on a runner), Infra, Proto and Contracts. CI alone runs what
-macOS cannot: the Newsletter image build (its source audit passed), Platform's kubectl, AppArmor, image and k3s steps
-(its contract tests passed), Newsletter's CJK font install, Mail Hero's GPG backup test and Changes' decide step
-(`ci_changes.py` ran directly).
-
-- **Slice A (2026-10-20 UTC).** Plan and Focus cards are coloured by area (Work slate, Personal ochre, Unassigned
-  none) with legend dots; outcome cards are 77px with one left-aligned meta line, the deadline first in a two-part
-  status; Next steps cards are 60px; Quick chips share a 150px-minimum grid with "N more" by the heading; cut titles
-  show in full in a bubble on hover or keyboard focus. Week's Committed already showed every commitment; a unit and a
-  browser test now guard it. Behaviour: `packages/planning-ui/docs/interface.md`.
-- **Slice B (2026-10-20 UTC).** A Step opens a panel that sets only its time (15/30/60/90 min or 1-1440 typed); the
-  choice shows at once and the saved duration Tasks answers (`updateEstimate` returns `{ estimate }`) merges without
-  a re-read. Week's Add steps has a time select beside its input (30 min by default), sent as `estimated_minutes`;
-  the task panel's "Steps & timing" uses the same times without "Not estimated". A click on a Week commitment
-  selects it and a double-click opens it; elsewhere the dialog swallows a double-click's second press and click for
-  600ms after it opens, and focus returns to the opener when it closes.
-- **Slice C (2026-10-20 UTC).** Plan's cards drag by their whole row like the task list: 6px with a mouse, a 250ms
-  hold on touch, never from complete, Start or remove (`packages/planning-ui/src/row-drag.ts`, in Review's and
-  Week's providers). Next steps, Quick and calendar grips are 14px overlays shown on hover or keyboard focus, so
-  titles never move; outcome grips stay shown. Week's commitments reorder as Review's Committed lane through the
-  shared `useLaneReorder` (ReorderTasks, lane `committed`), with Review's grip, a 2px line and "Committed,
-  position N". Insertion lines are 2px and a dragged card fades to 0.3. D3's Focus provider reuses the sensors.
-- **Checked locally on macOS** for slice A: `ci_changes.py` selects Changes, Shared packages, Contracts and Tasks.
-  Shared packages, Contracts and Tasks passed (Tasks' worker lint, typecheck, unit and runtime suites; its web lint,
-  typecheck, unit tests, build and all 89 Playwright tests, with the new `plan-layout.spec.ts` at 1440, 1024, 800 and
-  680px). Changes' test steps passed; its decide step needs GitHub's token, so `ci_changes.py` ran directly.
-  For slice B the same four jobs ran again on macOS and passed: Shared packages (planning-ui's 240 unit tests),
-  Contracts, and Tasks with all 92 Playwright tests, including the new Step panel, timed Add steps and
-  double-click journeys in `planning-journeys.spec.ts`; Changes' test steps passed and its decide step again could
-  not run locally.
-  For slice C the same four jobs passed again on macOS: Shared packages (planning-ui's 245 unit tests), Contracts,
-  and Tasks with all 98 Playwright tests, including the six new `planning-drag.spec.ts` journeys (each card type
-  drags by its body, one commitment selects, opens and moves, its keyboard reorder keeps focus on the grip, small
-  grips show only on hover or focus, and Chromium touch input through CDP drags only after a 250ms hold while a
-  quick swipe scrolls); Changes' test steps passed and its decide step again could not run locally.
-  For slice D1 `ci_changes.py` selects every proto user's checks, because the Tasks API changed. On macOS these
-  passed: Proto checks (buf lint, api-linter, breaking against `b7b52e75`, generation and both codecs), Shared
-  packages, Contracts, Tasks (18 worker runtime files with the new Focus, write-budget, read-budget and CPU tests;
-  the web's unit tests and all 98 Playwright tests), FlowDay (its Worker bundle 125.7 of 140 KiB), Todofy static
-  and all 512 Todofy runtime tests (the weekly backup's round trip now carries Focus rows), Mail Hero, Home, links,
-  watch, mailsort, recall, brief and fleet. The website's export and Worker dry runs passed on a free port
-  (another session holds 4173). Platform's contract step passed; its manifest compiler, AppArmor, image and k3s
-  steps need Linux. Changes' test steps and the 453 `.github/scripts` tests passed; its decide step again could not
-  run locally.
-  For slice D2 `ci_changes.py` selects every check, because `.github/scripts` changed. D2 touches planning-ui, Tasks
-  and the CI map only, so these ran on macOS and passed: Shared packages (planning-ui's 249 unit tests), Contracts,
-  Tasks (the Worker's runtime suite of 18 files and 80 tests, the CPU and budget tests included; the web's 65 unit
-  tests, build and all 98 Playwright tests against the dev server's Focus) and Changes' test steps (453
-  `.github/scripts` tests); its decide step again could not run locally. The other apps' code is unchanged since
-  the D1 runs above. The Tasks Worker bundle stays 130.5 of 132 KiB. The web's shared `api` chunk (124 kB) folded
-  into its index (590 to 698 kB); the two together went from 714 to 698 kB, 230 to 223 kB gzip.
-  For slice D3 `ci_changes.py` selects Changes, Shared packages, Contracts and Tasks for its own commits (D3 touches
-  planning-ui, Tasks' browser tests and docs). On macOS these passed: Shared packages (planning-ui's 266 unit tests
-  in 37 files), Contracts, and Tasks (the Worker's 18 runtime files and 80 tests unchanged; the web's lint,
-  typecheck, 65 unit tests, build and all 102 Playwright tests, including the new `focus-time.spec.ts` and the Focus
-  reorder journey in `planning-drag.spec.ts`). Changes' test steps and the 453 `.github/scripts` tests passed; its
-  decide step again could not run locally. The count-up journey waits past a minute, because Tasks saves only a
-  session of a minute or more. Plan and Focus's lazy chunk grew from 118.9 to 137.3 kB (37.3 to 43.0 kB gzip) and its
-  CSS from 43.9 to 51.5 kB; the main chunk is unchanged at 698 kB.
-  For the review fixes `ci_changes.py` selects Shared packages, Contracts, Tasks and Todofy (for its planning API
-  doc). On macOS Shared packages (planning-ui's 268 unit tests), Contracts and Todofy static passed. Tasks passed
-  its Worker lint, typecheck, unit and 18 runtime files (81 tests, CPU and budgets included), the web's lint,
-  typecheck, 65 unit tests and build, and 101 of 102 Playwright tests; the one failure was a wrong assertion in the
-  new Week check (`Set` has no length), fixed and rerun with `focus-time.spec.ts` and `planning-drag.spec.ts` (10
-  passed). `.github/scripts/test_doc_references.py` passed. Todofy's runtime shards were not rerun: only a Todofy
-  doc changed.
-- **Slice D1 (2026-10-20 UTC).** Tasks owns Focus; nothing calls it until D2. Migration `0005_focus.sql` adds day
-  queues (`day_steps`), time records (`focus_entries`) and the one timer row (`focus_timer`), never hard-deleted.
-  `proto/tasks/ui/v1/focus.proto` and seven methods: `ListFocusDays` (1-7 days, their records, every task they name
-  and Tasks' today), `MoveFocusStep` (`focusDays:moveStep`: add, remove, reorder or move one step), `GetFocusTimer`,
-  `CommandFocusTimer` (start, pause, resume, stop, finish; a session of a minute or more becomes one record) and
-  Create/Update/Delete `FocusEntry`. `CompleteTask.focus_day` (empty: Tasks' today) settles the queue and a related
-  session in the completion's own batch, and `ReopenTask` opens those rows again. A day holds 20 steps and 30
-  records, an active session holding one place: the spec's 30 and 40 put an isolate's first read of the fullest
-  week at 9.7-10.7 reference ms, now 8.5-8.9. The weekly backup exports the three tables; the restore tool also
-  restores older backups, with empty Focus tables and an idle timer (`tasks/docs/backup.md`). The Tasks Worker
-  bundle grew from 122.0 to 130.5 KiB gzip, of its 132 KiB budget.
-- **Slice D2 (2026-10-20 UTC).** Plan and Focus use Tasks' Focus API: `createPlanningActions({ plus, tasks })`
-  reads a week and Tasks' today with `ListFocusDays`, writes each queue change as one `MoveFocusStep`, runs the
-  timer through `GetFocusTimer`/`CommandFocusTimer`, and has `readFocus` (a month in reads of at most 7 days) and the
-  record writes for D3. `completeTask` is the host's: one Tasks `CompleteTask` with `focus_day` (a calendar card's
-  own day, else Focus's; the task list sends none, meaning Tasks' today) settles the queue and a related timer in
-  the same batch, so the FlowDay settlement and its "Focus could not confirm" warning are gone. A completion keeps
-  its first request ID and day until confirmed. Plan still counts from Todofy's today (`PlanState.today`), Focus
-  from Tasks'. Count-up shows at most 4 hours, as Tasks saves it. The Worker no longer forwards
-  `/api/plus/flowday/*` (404), and `ci_changes.py` no longer lists Tasks as a user of `proto/flowday/ui/`. No code
-  in `tasks/` or `packages/planning-ui/` uses FlowDay; the one-time estimate backfill (`tasks/tools/estimate-backfill.ts`
-  and its `backup.md` section) stays until it has run, and `backup.md`'s FlowDay mirror reset stays while FlowDay
-  runs. Browser journeys keep Focus in the dev server's D1 (`planning-stub.ts` `seedFocus`).
-- **Slice D3 (2026-10-20 UTC).** Focus has Day, Week and Month tabs with previous/next and Today; the page
-  header follows the view and date, and Focus always opens on today's Day. Count up is the default timer and Start
-  sends the step's area. Each card's one time number is its logged time ("Est. 30m · 35m logged", ticking as a
-  clock while its session runs, inside a small `LoggedTime`), which opens the day's records (`FocusEntries.tsx`):
-  change whole minutes, add time or delete, each write through the App's queue (`pendingEntry`). Other days are
-  read-only, though today's and past days' records still change. A header checkbox shows the day's completed steps
-  after the open ones, off on every visit. Week shows logged time by area, steps done, time against the estimate, a
-  bar a day stacked by area and where the time went (grouped by each step's parent); Month a shaded calendar of its
-  days (`focus-stats.ts`). Other ranges are read with `readFocus`, kept while Focus is open and read again after
-  each confirmed write. Today's open steps reorder by their whole row (one `MoveFocusStep` within the day).
-- **Review fixes (2026-10-20 UTC).** A Focus step's grip starts its drag (it was missing from the row sensors'
-  surfaces), its drag preview is as wide as the row, and a grip that cannot be used stays hidden until hover (the
-  shared dimmed `button:disabled` showed it on the timed card and flashed it on every card during a write). A day's
-  records of steps that left its queue (moved on or removed) show read-only under "Other time", so the summary
-  adds up and every record stays editable. Week and Month count a recurring step's estimate once per completion.
-  Where the time went has one bar track, and Week's day labels are always two lines. Deleting a task, project or
-  section takes its steps off every day queue in the same batch, so they no longer fill a day's 20-step cap.
-- **Owner, with this release (D1-D3):** stop any FlowDay timer that is running before it. After the release,
-  reload every open Tasks window, the installed app too: a window from before it still calls FlowDay's old Focus
-  paths, which now answer 404, so Plan and Focus show errors until it reloads (no data is at risk). Afterwards this
-  week's day queues are empty, because nothing is migrated: arrange the week once in Plan › Week. Focus now counts up
-  by default: Start, work, then ✓ saves the time; each step's logged time opens its records. Focus cards drag by
-  their whole row. FlowDay's own site keeps working until its decommission; nothing reads it any more.
-- **Next, after this release.** Two follow-ups, in order; neither moves any data.
-  1. **Todofy cleanup release**: done in P2 of `claude/tasks-planning` (above), with the planning retirement.
-  2. **FlowDay decommission**, an owner action after the performance pass. Its checklist is this command, run again
-     then: `git grep -l -i flowday -- . ':!flowday' ':!proto/flowday' ':!docs/history'` (FlowDay's app and proto,
-     its CI jobs and `ci_changes.py` entries, infrastructure, tools, Home's registry and drift files, other apps'
-     mentions and the root docs).
-- **Known limit.** With all seven Review lanes at a 1440px window (six cards a row, about 155px each) the step counts
-  end in an ellipsis; the cards keep their 77px.
+- Delete the GitHub variable `TODOFY_PLUS_METADATA` (nothing reads it).
+- Confirm the first Tasks backup ran after that release, and restore it locally as
+  [Rehearse locally](tasks/docs/backup.md#rehearse-locally) says.
+- Remove the `todoist-plus-v*` releases and the merged `codex/*` branches (the archive has the commands).
+- Owner, on the Mac: remove Todoist Plus at `chrome://extensions` with its unpacked folder.
+- Known limit: with all seven Review lanes at a 1440px window the step counts end in an ellipsis.
 
 ## Open acceptance
 
@@ -440,8 +183,7 @@ Answered in chat; do not re-ask.
 - Bootstrap and safe drift repair are verified in the existing environment. Empty-account / clean-VPS setup, DNS and
   host-entry recovery and full historical data recovery remain separate exercises; follow [rebuild](docs/rebuild.md)
   and [its verification table](docs/rebuild-verification.md), which supersede the October 3 audit's gaps.
-- Not rechecked since: Watch's first real changed-watch digest, FlowDay's owner setup/device check before F6
-  retirement, and Newsletter's natural provider/send acceptance. Check fresh status before treating an old waiting
+- Not rechecked since: Watch's first real changed-watch digest and Newsletter's natural provider/send acceptance. Check fresh status before treating an old waiting
   item as open; do not restart Compose, replay a send or request credentials solely from an archived note.
 - Mail Hero (`mail-hero/docs/todofy-integration.md`, `cloudflare-setup.md`, `ci-cd.md`) and Watch (`README.md`,
   `docs/design.md`) docs still say Todoist. Todofy writes Tasks, and mail stays a summary until it is converted.
@@ -474,13 +216,13 @@ The authoritative [compatibility table](docs/history.md#owner-api-compatibility)
 | Surface | Earliest removal |
 | --- | --- |
 | Mail Hero legacy owner routes | 2026-11-01 |
-| Home, FlowDay and Todofy legacy owner routes | 2026-11-02 |
+| Home and Todofy legacy owner routes | 2026-11-02 |
 | Mailsort v1 owner routes | 2026-11-10 |
 
 Keep Todofy core's `owner_api` RPC until the corresponding gateway compatibility window is complete. Dates permit a
 reviewed follow-up; they do not schedule deletion or authorise changing frozen webhook bytes or migrations. Todofy's
 retained host cutover snapshot stays through **2026-10-29**; deletion is a separate action
-([verification](todofy/docs/verification.md)). FlowDay F6 teardown also remains an explicit owner action.
+([verification](todofy/docs/verification.md)).
 
 ## Working and maintenance entry points
 
@@ -490,6 +232,7 @@ retained host cutover snapshot stays through **2026-10-29**; deletion is a separ
   [VPS bootstrap/recovery](tools/vps-bootstrap/README.md), [infra](infra/README.md): current operating commands.
 - [Documentation guide](docs/README.md), [architecture](docs/architecture.md), [service catalog](docs/service-catalog.md),
   [proto](proto/README.md), [contracts](contracts/README.md): canonical boundaries and application entry points.
-- [History](docs/history.md) and the handoff archives of [October 19](docs/history/handoff-2026-10-19.md),
+- [History](docs/history.md) and the handoff archives of [October 20](docs/history/handoff-2026-10-20.md),
+  [October 19](docs/history/handoff-2026-10-19.md),
   [October 18](docs/history/handoff-2026-10-18.md) and [October 11](docs/history/handoff-2026-10-11.md): earlier
   releases and evidence. Move completed details there.

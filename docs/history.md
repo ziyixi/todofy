@@ -5,6 +5,9 @@ current production state; [HANDOFF](../HANDOFF.md) names the current rollout and
 
 ## Archived handoffs
 
+[Handoff of October 20, 2026](history/handoff-2026-10-20.md) keeps the completed notes of the Tasks performance
+release (planning in Tasks, the one-time planning import and Todofy's cleanup), the Tasks cleanup with the Todoist
+Plus removal, and the Plan and Focus owner changes.
 [Handoff of October 19, 2026](history/handoff-2026-10-19.md) keeps Codex's release notes for Plan write reliability,
 whole-row drag and the cloud recovery with inline subtasks and Plan completion.
 [Handoff through October 18, 2026](history/handoff-2026-10-18.md) keeps the release receipts and completed notes
@@ -14,6 +17,22 @@ and the October 11 maintenance, with counts of private data replaced by neutral 
 waiting lists from `414925e`. Later observations in that snapshot supersede many earlier entries. Current work and
 remaining acceptance are in [HANDOFF](../HANDOFF.md); current rebuild steps and verified limits are in
 [Rebuild](rebuild.md) and [rebuild verification](rebuild-verification.md).
+
+## FlowDay retirement and the planning store drop, decided October 20
+
+By the owner's decision of 2026-10-20, the release that merged `claude/retire-flowday` removed FlowDay completely,
+with no data migration: the app, its owner API `flowday.ui.v1` (`proto/retired.json`), its CI jobs, Home's tile and
+the catalog, tool and infrastructure entries. Its Access applications, their reusable policies and its D1 database
+leave through `infra/retired.tf`; its Worker script and the GitHub `FLOWDAY_*` secrets are deleted by hand. Tasks
+keeps Focus. The last commit with FlowDay's source is `777d5f01`; see [FlowDay (retired)](history/flowday.md).
+
+The same release dropped Todofy's planning store. Tasks holds planning since `tasks/migrations/0006_planning.sql`,
+and the one-time planning import of 2026-10-20 copied the store into it (its last dry run counted 0 pending).
+Todofy's migration `0013_drop_plan_store.sql` drops `plan_task_state`, `plan_tasks`, `plan_edges`, `plan_marks`,
+`plan_notes`, `plus_weeks` and `plus_settings`, and every `plan_settings` row but `todoist.mail`: that row and
+`plan_categories` keep the Mail categories. Todofy's weekly backup no longer copies the dropped tables, and its
+restore tool prints `SKIP <table> (retired)` for them in older backups. The import workflow, its generator and the
+planning-identity cutover tool were deleted after the import; they are at `777d5f01`.
 
 ## Todoist Plus removal, decided October 18
 
