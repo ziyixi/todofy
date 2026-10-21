@@ -14,6 +14,74 @@ instructions.
 
 ## Current work
 
+### Boundary B: Tasks owns mail conversion, GTD and task creation (`claude/boundary-b`)
+
+**In flight, not pushed.** A branch from `origin/main` `b9d18aba`, built in slices (plan: owner decisions of
+2026-10-21: no waiting window, flag, shadow phase or rollback machinery; Home sends the daily digest task; the
+morning brief carries only mail still awaiting a decision; the GTD history is copied once by a dispatched generator).
+Release 1 is this branch's tip; release 2 follows it.
+
+- **Slice 1** (`851823d2`..`24b7836c`): the IDL (`todofy.mail.v1`, `tasks.inbox.v1`, Tasks' Mail and GTD methods),
+  `retired.json`'s `files` kind and the preflight fix for a new D1/R2 binding.
+- **Slice 2** (`0df4c7a5`..`c1010d4e`): Todofy writes no task. It serves the `Mail` entry, migration
+  `0014_retire_task_writes.sql` refuses to run while legacy mail rows or open task intents exist, and its gateway
+  keeps `Intents`, `Planning` and `MailApi` as refusals for release 1 only.
+- **Slice 3** (`fce5201b`..`02f848b4`): Tasks converts mail, keeps the Mail categories, the GTD counts and the Sunday
+  review (`TaskJobs`), serves `TaskInbox`, and carries the one-time Todofy import (`tasks-todofy-import.yml`). Tasks
+  deploys after Todofy; `tasks-backups` is declared ahead of its binding.
+- **Slice 4** (`439b51b0`..this commit): Home creates the digest's one task a UTC day through `TaskInbox`
+  (`dashboard/docs/design.md` §5.5); Watch creates its notifications through `TaskInbox` and deploys after Tasks; the
+  Personal MCP reads Todofy's read-only `Mail` entry and converts in Tasks; `PlusService`, `MailReadinessService`
+  and `todofy.taskintent.v1` are retired (`contracts/task-intent-v1/` deleted); `RETIRED_SERVICE_BINDINGS` lists what
+  release 1 removes from the live Workers.
+- **Not done:** the optional Mail Hero alert-outbox slice (it would deploy Mail Hero; kept separate) and release 2.
+
+**Release 1 deploys** Todofy (migration `0014` first), then Tasks (migration `0008`), then Watch, the Personal MCP and
+Home. It also reaches every proto user's checks. Do not push it on Sunday from 09:30 UTC until Monday 00:00 UTC
+(Todofy's backup and Tasks' first Sunday review).
+
+Before pushing release 1 (read-only):
+
+1. The counts, with the lead's wrangler login, from the repository root:
+   `tasks/worker/node_modules/.bin/wrangler d1 execute DB --remote --config todofy/wrangler.toml --json --command
+   "SELECT (SELECT count(*) FROM mail_events WHERE state IN ('summarized','todo_sending','todo_unknown','todo_created')) AS legacy, (SELECT count(*) FROM task_intents WHERE state='pending') AS intents_pending, (SELECT count(*) FROM task_intent_tasks WHERE state NOT IN ('created','failed')) AS intent_tasks_open, (SELECT count(*) FROM summaries WHERE imported=0 AND triaged_at IS NULL AND task_id<>'') AS linked_pending"`.
+   `legacy`, `intents_pending` and `intent_tasks_open` must be 0 (else settle them first; `0014` refuses them anyway).
+   Record the counts here.
+2. Home → Watch: `intents_open` is 0 and `notify_unsettled` is absent (Watch's outbox is in its Durable Object; a row
+   still held by Todofy ends as `sink_retired` and raises `notify_unsettled`).
+3. `gh variable list --env production --repo ziyixi/todofy | grep -E 'TODOFY_(REMINDER|GTD_REVIEW)_ENABLED'`: if either
+   is `false`, ask the owner (after release 1 Home's task and Tasks' review have no switch).
+4. Push, wait for the complete gate, fast-forward `main` to the same green SHA.
+
+After release 1:
+
+1. Todofy, Tasks, Watch, the Personal MCP and Home deployed; Home's 配置漂移 shows nothing extra on `todofy-core`,
+   `tasks` or `watch`.
+2. "Infra drift" shows exactly `create: 1` for `cloudflare_r2_bucket.app["tasks-backups"]`: dispatch "Infra apply"
+   with that expect line, then a no-change verify plan. Until release 2 binds the bucket, the daily account
+   inventory reports it as unregistered.
+3. Before the first Sunday 10:00 account-local time: `gh workflow run tasks-todofy-import.yml --repo ziyixi/todofy
+   --ref main -f apply=false` (counts only), then `-f apply=true`; it must end with `--expect-none` passing. Record the
+   counts and the Time Travel bookmark line here.
+4. Owner UI, read-only: Tasks › Mail lists mail and its categories; Plan's weekly review shows the pending-mail count;
+   Tasks › GTD shows the copied trend; Home's Tasks tile has `inbox_open` and `overdue` after the first 06:00 local
+   alarm and no `gtd_stale`; Home's Todofy tile has no `todoist_paused` or `reminder_*`; Home's digest card says
+   enabled; Watch has no `notify_unsettled`; the MCP's `mail_list` and `mail_read` answer (never `mail_collect` on
+   real mail).
+5. The next UTC day: exactly one 运维摘要 task if that day had warning or critical items (the release day gets none).
+6. Read the `TaskJobs` namespace ID (read-only; the namespace list row with script `tasks`, class `TaskJobs`) for
+   release 2's `config/resources.toml` line.
+7. Delete the GitHub production variables `TODOFY_REMINDER_ENABLED`, `TODOFY_FORCE_PAUSE_TODOIST`,
+   `TODOFY_GTD_REVIEW_ENABLED` and the secrets `TODOFY_TODOIST_DEFAULT_PROJECT_ID`, `TODOFY_TODOIST_OPS_PROJECT_ID`,
+   `TODOFY_TODOIST_REVIEW_PROJECT_ID`; nothing reads them.
+
+**Release 2** (to build): Tasks backs itself up into `tasks-backups` (its own Alarm, the restore tool reads both
+formats), Todofy unbinds `TASKS` and drops the copied tables (`0015`), the one-time import and `TasksApi.exportBackup`
+are deleted, the gateway's refusal stubs go, `RETIRED_SERVICE_BINDINGS` becomes `{"todofy": {"TASKS"}}`, and the
+lead's `TaskJobs` namespace line lands. Owner item, a blocked secret operation: delete todofy-core's Worker secrets
+`TODOIST_DEFAULT_PROJECT_ID`, `TODOIST_OPS_PROJECT_ID`, `TODOIST_REVIEW_PROJECT_ID` with `TODOIST_API_KEY`, then their
+optional declarations in `todofy/app.toml`.
+
 ### Private MCP: released and accepted (`codex/personal-mcp`)
 
 The implementation stayed in `/private/tmp/todofy-personal-mcp`; Claude's shared checkout was untouched.

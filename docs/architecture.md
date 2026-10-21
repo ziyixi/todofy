@@ -12,11 +12,11 @@ entry points are in the [root README](../README.md).
 flowchart LR
   Mail[Forwarded mail] --> MH[Mail Hero]
   MH -->|mail.received.v1 HTTPS| Todo[Todofy]
-  Watch[Watch] -->|task-intent-v1 binding| Todo
-  Todo -->|private TasksApi binding| Tasks[Tasks: native task store and PWA]
+  Watch[Watch] -->|private TaskInbox binding| Tasks[Tasks: native task store and PWA]
   Todo -->|reports, HTTPS Basic auth| News[Newsletter on VPS]
-  Tasks -->|private Planning binding: Mail| Todo
-  Home[Home] -->|Ops bindings| MH
+  Tasks -->|private Mail binding| Todo
+  Home[Home] -->|private TaskInbox binding: the daily digest task| Tasks
+  Home -->|Ops bindings| MH
   Home -->|Ops bindings| Todo
   Home -->|Ops binding| Tasks
   Home -->|Ops bindings| Watch
@@ -36,7 +36,7 @@ flowchart LR
   Notion[Notion] -->|GitHub build and relay| Site[Static website]
   Dots[ChatGPT Dots] <-->|OAuth MCP tools and signed events| MCP[Personal MCP]
   MCP -->|private TasksApi| Tasks
-  MCP -->|private MailApi| Todo
+  MCP -->|private read-only Mail| Todo
   MCP -->|private RecallApi| Recall
   MCP -->|private cached HomeApi| Home
   Home -->|private Ops| MCP
@@ -110,9 +110,9 @@ private Ops status, while MCP's cached Home event reader excludes its own issues
 Tools, GTD rules and event payloads are in [Personal MCP](../personal-mcp/README.md).
 
 Schemas generated from IDL are consumer artifacts, not competing handwritten sources. Golden payloads pin
-published bytes, while legacy fixtures/schemas prove compatibility with persisted older events. `task-intent-v1`
-still has handwritten value rules/schema checked against generated codecs. Do not delete these because
-the owner APIs moved to proto. Dated old-owner routes are listed in [history](history.md#owner-api-compatibility).
+published bytes, while legacy fixtures/schemas prove compatibility with persisted older events. Do not delete these
+because the owner APIs moved to proto. (`task-intent-v1`, the last contract with handwritten value rules, was retired
+on 2026-10-21.) Dated old-owner routes are listed in [history](history.md#owner-api-compatibility).
 
 ## Tasks and planning
 
@@ -123,16 +123,18 @@ The PWA provides an offline notice and uses task data online.
 
 Plan, Focus and Mail reuse `packages/planning-ui`. Planning is Tasks' own: each task's stage, area, start-ahead
 days, flags and dependencies are task fields under its one etag, and GetPlan reads the weekly goals, the Review
-lane orders and next week's commitments (`proto/tasks/ui/v1/plan.proto`). Mail requests and the weekly review's
-two facts (`ReadWeeklyReview`) cross the private `Planning` binding to Todofy; Todofy writes task changes through
-Tasks' provisioned `TasksApi`. Focus's day queues, timer and time records are Tasks' own
+lane orders and next week's commitments (`proto/tasks/ui/v1/plan.proto`). The Mail page reads mail through Tasks'
+private `MAIL` binding to Todofy's Mail entry (`todofy.mail.v1`); Tasks converts a mail into a task itself and keeps
+the Mail category shortcuts, the GTD counts and the Sunday review (its `TaskJobs` Durable Object). Todofy writes no
+task. Focus's day queues, timer and time records are Tasks' own
 (`proto/tasks/ui/v1/focus.proto`): a day drag is one Tasks `MoveFocusStep`, and a task completion settles its
 Focus day and a related timer in the same Tasks write. A task's estimate is its Tasks duration.
 
 Tasks reads the weekly rollover as a rule rather than a job: a commitment is for its week, and once that week ends
-it reads as a weekly candidate with no write. Counts stay soft limits. Todofy retains mail receipts and the weekly
-review task, and serves no planning; migration `0013_drop_plan_store.sql` dropped its old planning tables, and it
-keeps only the Mail categories. Mail filing uses the native Inbox, with an optional category's label and priority.
+it reads as a weekly candidate with no write. Counts stay soft limits. Todofy retains mail receipts, summaries and
+the mail inbox, and serves no planning; migration `0013_drop_plan_store.sql` dropped its old planning tables. Mail
+filing uses the native Inbox, with an optional category's label and priority. Home and Watch create tasks only
+through Tasks' create-only `TaskInbox` (`proto/tasks/inbox/v1`), each under its own `source`.
 The task UI replaces technical planning labels and favorites with those controls while retaining their underlying
 identities.
 
@@ -171,7 +173,8 @@ Bounded work remains mandatory:
   Only counts enter the daily ops report.
 - Usage at 80% of a daily allowance or monthly R2 operation allowance applies shed; below 70% or a new UTC day
   clears it. Shed expires and delays only explicitly deferrable work, never real-mail handling.
-- Reminders go only through `TODOFY.reportOps`, at most one per UTC day; Mail Hero's `ALERT_WEBHOOK_URL` stays unconfigured.
+- Reminders go only through the digest's own task (`TASK_INBOX.createInboxTask`), at most one per UTC day; Mail
+  Hero's `ALERT_WEBHOOK_URL` stays unconfigured.
   Quota numbers cite Cloudflare and match [limits](../dashboard/docs/limits.md).
 
 The synthetic mail canary covers Mail Hero intake/delivery and Todofy model processing. It does not create
@@ -192,7 +195,7 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   [AGENTS](../mail-hero/AGENTS.md) and [setup](../mail-hero/docs/cloudflare-setup.md) govern storage, budget,
   backup leases, deletion and recovery. The backup collector image is separate from the Worker.
 - **Todofy:** TypeScript gateway plus Python SQLite DO core, the ledger's only writer/scheduler. Mail receipts,
-  summary work, native task outcomes and reconciliation use distinct durable states. See the
+  summary work and reconciliation use distinct durable states; it writes no task since 2026-10-21. See the
   [development invariants](../todofy/docs/dev-notes.md) and [gateway contract](../todofy/docs/gateway-contract.md).
 - **Tasks:** primary task content and completion history in D1, with the owner-only desktop PWA and private
   consumer bindings. Planning and date code are shared packages, not additional services. See the
@@ -201,9 +204,10 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   zero writes/logs, and uses 302 only. A private key and a nonexistent key give anonymous callers the same
   response. Only `/_` and `/_/*` are behind Access. See [AGENTS](../links/AGENTS.md).
 - **Watch:** one SQLite DO, no D1/R2 and no cron. Its exact fetch/redirect/robots/size/time budgets and URL
-  refusals are in [AGENTS](../watch/AGENTS.md). Tests use synthetic sites. Notifications freeze task intents,
+  refusals are in [AGENTS](../watch/AGENTS.md). Tests use synthetic sites. Notifications freeze TaskInbox requests,
   include only owner-created names, trigger types/counts and app links, and never include page text or watched
-  URLs. One digest after 14:00 UTC plus at most nine urgent intents obey Todofy's source limit of ten/day.
+  URLs. One digest after 14:00 UTC plus at most nine urgent tasks keep to its own budget of ten a day (TaskInbox
+  refuses a source's 21st).
   BROKEN and automatic pauses enter the digest; status/guard reach Home through Ops.
 - **Mailsort:** one SQLite DO, no D1/R2 and no cron, plus the Workers AI binding (Clef, Clef-flash, bge-m3). It
   reads the owner's Gmail with the owner's own OAuth grant and only ever adds or removes its own labels (created by it

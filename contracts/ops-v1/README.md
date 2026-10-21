@@ -85,14 +85,15 @@ entrypoint = "Ops"
 ```
 
 The method signatures are the generated services' wire types (`@ziyixi/proto/ops/v1/ops_wire`, types
-only): `OpsService` on every app, `CanaryProducerService` on Mail Hero, `CanaryConsumerService` and
-`OpsDigestService` on Todofy. An app's `Ops` class `implements` them; the dashboard types its bindings
-with them:
+only): `OpsService` on every app, `CanaryProducerService` on Mail Hero and `CanaryConsumerService` on Todofy.
+`OpsDigestService` (`reportOps`, below) has no implementer since 2026-10-21: Home creates the digest's daily task in
+Tasks itself (`dashboard/docs/design.md` §5.5), and the service leaves the IDL with the next `ops.proto` change. An
+app's `Ops` class `implements` its services; the dashboard types its bindings with them:
 
 ```ts
 import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
 interface MailHeroOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryProducerService {}
-interface TodofyOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryConsumerService, ops.OpsDigestService {}
+interface TodofyOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryConsumerService {}
 interface Env { MAIL_HERO: Service<MailHeroOpsEntrypoint>; TODOFY: Service<TodofyOpsEntrypoint> }
 ```
 
@@ -128,7 +129,7 @@ refreshes do not reopen a dismissed incident and a different failed run can aler
 | `startCanary(input)` | Mail Hero | `StartCanaryInput` | `StartCanaryResult` | one synthetic message and delivery (D1, R2) when queued |
 | `canaryDelivery(eventId)` | Mail Hero | `EventId` | `CanaryDelivery` | none |
 | `canaryResult(eventId)` | Todofy | `EventId` | `CanaryResult` | none |
-| `reportOps(report)` | Todofy | `OpsReport` | `OpsReportReceipt` | Todofy's Durable Object storage |
+| `reportOps(report)` | none since 2026-10-21 (Todofy until then) | `OpsReport` | `OpsReportReceipt` | – |
 
 **Errors.** A method rejects only with `new Error(code)` where `code` is an `ErrorCode` (`ops.v1.ErrorCode`; the
 schema's `OpsErrorCode` is the same list under its earlier name)
@@ -177,7 +178,7 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
 - `last_backup_at`: the app's last complete backup, or null.
 - `ui_url`: `https://<owner UI host>/`, or null when the Worker does not know its host.
 - `capabilities`: what this release supports. Mail Hero `canary_producer`, `guard`; Todofy
-  `canary_consumer`, `guard`, `ops_digest`; the watch app, mailsort and the brief `guard`. The dashboard checks them before
+  `canary_consumer`, `guard` (`ops_digest` until 2026-10-21); the watch app, mailsort and the brief `guard`. The dashboard checks them before
   using a feature. Fleet and Newsletter monitoring and recall expose no capabilities and never accept a quota guard
   mutation.
 
@@ -259,7 +260,10 @@ failure), `ok` (the summary call answered and the result passed Todofy's validat
 `failed` (`completed_at`, `error_code` from Todofy's vocabulary, e.g. `llm_quota`,
 `llm_budget_exhausted`). A canary never reaches Tasks, reports, the attention list or the reminder.
 
-### `reportOps(report)` → `OpsReportReceipt` (Todofy)
+### `reportOps(report)` → `OpsReportReceipt` (no implementer since 2026-10-21)
+
+Retired with Todofy's task writes: Home now creates the one digest task a UTC day in Tasks through Tasks' create-only
+`TaskInbox` (`dashboard/docs/design.md` §5.5), and no app implements this method. Until then it worked as follows.
 
 Stores the dashboard's latest report: `generated_at`, up to 20 items `{source, code, severity, since,
 metrics}` and an optional `dashboard_url`, at most 8 KiB as compact JSON. It replaces the stored report

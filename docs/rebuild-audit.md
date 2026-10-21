@@ -38,7 +38,7 @@ Fleet/Home 读取真实运行证据。无需再加 GitOps controller、SSH key�
 | 缺口 | 影响 | 已核对的代码入口 |
 | --- | --- | --- |
 | Relay 验收 URL 与 Watch 自有域写死旧 workers.dev；relay health 只有 ok | 新账户可能验到旧服务，或把自己的 Worker 当外部网址 | [ci.yml](../.github/workflows/ci.yml)、[buttons.ts](../website/relay/src/buttons.ts)、[url-policy.ts](../watch/worker/src/url-policy.ts) |
-| generator 尚未覆盖 Fleet route/PUBLIC_HOST、所有 route/canonical/业务 host 授权 | 改 profile 后仍有配置漏改；换域名时 Watch→Todofy 被拒绝 | [generate.py](../tools/cloud-config/generate.py)、[Fleet config](../fleet/wrangler.toml)、[task-intent contract](../contracts/task-intent-v1/task-intent-v1.ts)、[intents.py](../todofy/worker/todofy/core/intents.py) |
+| generator 尚未覆盖 Fleet route/PUBLIC_HOST、所有 route/canonical/业务 host 授权 | 改 profile 后仍有配置漏改（Watch→Todofy 的 task-intent 主机白名单已随 2026-10-21 的退役移除） | [generate.py](../tools/cloud-config/generate.py)、[Fleet config](../fleet/wrangler.toml) |
 | state bootstrap 只 import；正式 apply 要求既知 AUD/D1 与 Wrangler 一致 | 空账户的 ID 尚未创建，正常流程不能凭空闭合 | [bootstrap_state.py](../infra/scripts/bootstrap_state.py)、[infra_state.py](../infra/scripts/infra_state.py) |
 | 缺 state 桶时用旧 account helper；adoption references/FROZEN ID 分散 | 可能指向旧账户；新账户仍要手改多处 refs | [cloudflare-admin.py](../mail-hero/deploy/cloudflare-admin.py)、[ids.tf](../infra/ids.tf)、[access.tf](../infra/access.tf) |
 | 普通 deploy wrapper 不负责全部 runtime secrets；Access client secret 创建后不能假设找回 | 新账户 deploy 绿了，运行功能仍缺秘密；import 后可能无法交接 | [CI/CD inputs](ci-cd.md#production-environment)、[secret inventory](rebuild.md#secret-inventory)、[platform_export.py](../infra/scripts/platform_export.py) |
