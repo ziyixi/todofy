@@ -56,6 +56,7 @@ describe('操作与记录', () => {
       '个人控制台',
       '自托管服务器',
       '平台运行时',
+      '个人 MCP',
     ])
     expect(rows[1]).toHaveTextContent('ops-v1 状态接口')
     // The links app: a probe of a path its own Worker answers outside Access.
@@ -81,6 +82,8 @@ describe('操作与记录', () => {
     // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
     expect(rows[13]).toHaveTextContent('未接入监控')
     expect(within(rows[13] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
+    expect(rows[15]).toHaveTextContent('未接入监控')
+    expect(within(rows[15] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('personal-mcp')
   })
 
   it('names a link-only entry of the registry as such', async () => {

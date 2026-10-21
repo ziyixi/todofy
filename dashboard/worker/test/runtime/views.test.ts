@@ -105,7 +105,10 @@ describe('GetRegistry', () => {
     const first = await h.view<Registry>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(VIEW_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'tasks', 'self-hosted']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'tasks', 'personal-mcp', 'self-hosted']);
+    expect(first.body?.entries.find((entry) => entry.id === 'personal-mcp')).toMatchObject({
+      group: 'hidden', access: true, status_type: 'none', scripts: ['personal-mcp'],
+    });
     const text = JSON.stringify(first.body);
     for (const url of Object.values(PROBES)) expect(text).not.toContain(new URL(url).pathname);
     expect(text).not.toContain('MAIL_HERO');

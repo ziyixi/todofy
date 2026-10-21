@@ -69,6 +69,7 @@ describe('首页', () => {
 
     // The dashboard itself has no tile.
     expect(within(launcher()).queryByText('个人控制台')).toBeNull()
+    expect(within(launcher()).queryByText('个人 MCP')).toBeNull()
   })
 
   it('shows a link-only tile as its host: no status button, no fake green', async () => {

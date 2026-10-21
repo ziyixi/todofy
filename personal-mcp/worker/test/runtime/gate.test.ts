@@ -83,7 +83,7 @@ it('discovers tools/events and preserves the subscription across a restart, then
   expect(subscription.refreshBefore).toBeNull();
   await first.dispose();
   stores.splice(stores.indexOf(first), 1);
-  const second = await start(persist, received);
+  let second = await start(persist, received);
   const before = await call<ToolReply>(second, 'tools/call', { name: 'connection_status', arguments: {} });
   expect(before.structuredContent.status?.subscriptions).toBe(1);
   const request = { name: 'send_test_event', arguments: { request_id: '00000000-0000-4000-8000-000000000001' } };
@@ -91,6 +91,10 @@ it('discovers tools/events and preserves the subscription across a restart, then
   expect(queued.structuredContent.result?.queued).toBe(1);
   const repeated = await call<ToolReply>(second, 'tools/call', request);
   expect(repeated.structuredContent.result?.repeated).toBe(true);
+  // A deployment can restart the object between enqueue and its Alarm. The saved event still arrives.
+  await second.dispose();
+  stores.splice(stores.indexOf(second), 1);
+  second = await start(persist, received);
   await expect.poll(() => received.length, { timeout: 10_000 }).toBe(1);
   expect(received[0]).toMatchObject({ eventId: 'test_00000000-0000-4000-8000-000000000001', name: 'personal_cloud.test',
     data: { message: 'Personal MCP connection test', build_sha: 'a'.repeat(40) }, cursor: null });

@@ -28,7 +28,9 @@ Real Dots login, event subscription and receipt remain pending; follow [the gate
 Branch CI `39542156446` passed MCP/Infra checks but found an unsupported Home catalog icon; it now reuses
 the existing server icon. The replacement run also caught Home registry/worker-count expectations; the new
 entry now follows existing display limits and hidden ordering. Home lint, both type checks, all 268 unit tests and
-four workerd drift tests pass locally. The next full CI must pass before merging.
+all 97 workerd tests, 158 web tests, web build, deployment dry run and bundle budget now pass locally.
+The remaining GetRegistry/OpsView exact-list fixtures have been corrected; MCP is absent from Home launcher tiles.
+The MCP runtime journey also proves an already queued event survives restart. The next full CI must pass before merging.
 Only after real Dots acceptance passes, add the agreed business tools and events. Keep this personal integration small; no generic
 event bus, replay platform or extra model calls. Do not treat local verification as real-client acceptance.
 
