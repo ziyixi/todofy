@@ -1,4 +1,4 @@
-"""Test-only Worker that drives reports, reminder, retention and the GTD ledger directly (never shipped).
+"""Test-only Worker that drives reports, the ledger's transition and retention directly (never shipped).
 
 `tests/runtime/reports_probe/__init__.py` stages it next to a copy of
 `worker/todofy`, so these modules run in real workerd with real D1 but without
@@ -11,19 +11,15 @@ overrides from the ``x-probe-vars`` header.
 """
 
 import json
-import types
-from dataclasses import asdict, replace
+from dataclasses import replace
 from typing import Any
 from urllib.parse import urlsplit
 
-from workers import DurableObject, Response, WorkerEntrypoint
+from workers import Response, WorkerEntrypoint
 
-from todofy.core import gtd as gtd_rules
-from todofy.core import ops
 from todofy.core.backoff import REPORT_ON_DEMAND_BUDGET
 from todofy.core.vocab import EventState
-from todofy.runtime import gtd, ledger, reminder, reports, retention
-from todofy.runtime import ops as ops_runtime
+from todofy.runtime import ledger, reports, retention
 from todofy.runtime.http import Result
 
 JSON = "application/json; charset=utf-8"
@@ -57,26 +53,11 @@ class FailingDb:
         return self._db.batch(statements)
 
 
-class FailingTasks:
-    """The TASKS binding whose ``methods`` answer 503, as an outage of Tasks would; every other call reaches
-    Tasks."""
-
-    def __init__(self, tasks: Any, methods: set[str]) -> None:
-        self._tasks = tasks
-        self._methods = methods
-
-    async def call(self, method: str, body: str) -> Any:
-        if method in self._methods:
-            return types.SimpleNamespace(status=503, body="{}")
-        return await self._tasks.call(method, body)
-
-
 class Budget:
     """Stands in for the coordinator: its hourly report cap, Gemini token budget,
     precompute failure counts (``failures`` maps "kind/top_n/day" to a count),
-    the largest token reservation it grants (``token_limit``; None: any),
-    on-demand report computation and the stored ops report (``ops_report``, an
-    OpsReport the object would hold)."""
+    the largest token reservation it grants (``token_limit``; None: any) and
+    on-demand report computation."""
 
     def __init__(
         self,
@@ -84,7 +65,6 @@ class Budget:
         slots: bool = True,
         tokens: bool = True,
         failures: dict[str, int] | None = None,
-        ops_report: dict[str, Any] | None = None,
         token_limit: int | None = None,
     ) -> None:
         self.env = env
@@ -92,11 +72,7 @@ class Budget:
         self.tokens = tokens
         self.token_limit = token_limit
         self.failures = dict(failures or {})
-        self.ops_report = None if ops_report is None else ops.stored_report(ops.compact(ops_report))
         self.calls: list[list[Any]] = []
-
-    def latest_ops_report(self) -> ops.Report | None:
-        return self.ops_report
 
     def report_failures(self, kind: str, top_n: int, day: str) -> int:
         return self.failures.get(f"{kind}/{top_n}/{day}", 0)
@@ -126,72 +102,6 @@ class Budget:
             return exc.status, exc.code
 
 
-class GtdHost:
-    """Stands in for the coordinator in runtime/gtd.py: the object's storage, step metrics and the stored ops
-    report. ``calls`` records what the module asked for."""
-
-    def __init__(self, env: Any, store: Any, ops_report: dict[str, Any] | None) -> None:
-        self.env = env
-        self.sql = store
-        self.ops_report = None if ops_report is None else ops.stored_report(ops.compact(ops_report))
-        self.calls: list[list[Any]] = []
-
-    def record_step(self, point: Any, now: int) -> None:
-        self.calls.append(["step", str(point.step), str(point.outcome), point.code])
-
-    def latest_ops_report(self) -> ops.Report | None:
-        return self.ops_report
-
-
-class GtdProbe(DurableObject):
-    """A real object storage for runtime/gtd.py; ``run`` takes one JSON request and answers JSON."""
-
-    def __init__(self, ctx: Any, env: Any) -> None:
-        super().__init__(ctx, env)
-        self.sql = ctx.storage.sql
-        for statement in (*gtd.DO_SCHEMA, *ops_runtime.DO_SCHEMA):
-            self.sql.exec(statement)
-
-    async def run(self, text: str) -> str:
-        args = json.loads(text)
-        overrides: dict[str, Any] = dict(args.get("vars", {}))
-        if methods := args.get("fail_tasks"):
-            overrides["TASKS"] = FailingTasks(self.env.TASKS, set(methods))
-        env = Overlay(self.env, overrides)
-        host = GtdHost(env, self.sql, args.get("ops_report"))
-        data: dict[str, Any] = {}
-        match args["op"]:
-            case "tick":
-                if patch := args.get("state"):
-                    state = gtd.load(self.sql)
-                    for name, value in patch.items():
-                        setattr(state, name, value)
-                    gtd.save(self.sql, state)
-                await gtd.tick(env, host, args["now"])
-            case "reset":
-                for table in ("gtd_state", "ops_guard", "ops_job_runs"):
-                    self.sql.exec(f"DELETE FROM {table}")
-            case "guard":
-                wanted = ops.guard_input(args["guard"], args["now"] * 1000)
-                ops_runtime.set_guard(self.sql, wanted, args["now"] * 1000)
-                if args.get("ran") is not None:
-                    ops_runtime.ran(self.sql, ops.Job.GTD_SNAPSHOT, args["ran"])
-            case "release":
-                gtd.release(self.sql, args["now"])
-            case "retry_later":
-                gtd.retry_later(self.sql, args["now"], args["at"])
-        facts = gtd.facts(env, self.sql)
-        now = args.get("now", 0)
-        data["state"] = asdict(gtd.load(self.sql))
-        data["facts"] = asdict(facts) | {
-            "snapshot_age": gtd_rules.snapshot_age(facts, now),
-            "review_age_days": gtd_rules.review_age_days(facts, now),
-        }
-        data["next_at"] = gtd.next_at(self.sql)
-        data["calls"] = host.calls
-        return json.dumps(data, ensure_ascii=False)
-
-
 def _http(result: Result) -> Response:
     """The gateway's response for a core result (gateway/src/coordinator.ts), with a fixed request ID."""
     wire = result.wire()
@@ -218,12 +128,7 @@ class Default(WorkerEntrypoint):
             overrides["DB"] = FailingDb(self.env.DB, marker)
         env = Overlay(self.env, overrides)
         budget = Budget(
-            env,
-            args.get("slots", True),
-            args.get("tokens", True),
-            args.get("failures"),
-            args.get("ops_report"),
-            args.get("token_limit"),
+            env, args.get("slots", True), args.get("tokens", True), args.get("failures"), args.get("token_limit")
         )
         data: dict[str, Any] = {}
         match path:
@@ -243,11 +148,6 @@ class Default(WorkerEntrypoint):
                 data["next"] = await reports.tick(env, budget, args["now"])
             case "/reports/latest":
                 data["latest"] = await reports.latest(self.env.DB)
-            case "/reminder/tick":
-                data["next"] = await reminder.tick(env, budget, args["now"])
-            case "/reminder/page":
-                items, next_day = await reminder.page(self.env.DB, args.get("before_day"), args["limit"])
-                data |= {"items": items, "next_day": next_day}
             case "/ledger/transition":
                 # ledger.transition from a row snapshot whose state and version the test chooses.
                 row = await ledger.get(self.env.DB, args["source_id"], args["event_id"])
@@ -265,20 +165,6 @@ class Default(WorkerEntrypoint):
                 data["moved"] = moved is not None
             case "/retention/tick":
                 data["more"] = await retention.tick(self.env.DB, env, args["now"])
-            case "/gtd":
-                # runtime/gtd.py in the probe's object (GtdProbe): op tick, reset, guard, release.
-                stub = self.env.GTD_PROBE.getByName("probe")
-                data |= json.loads(await stub.run(json.dumps(args)))
-            case "/gtd/daily":
-                data["daily"] = await gtd.daily(self.env.DB, args["days"], args["now"])
-            case "/gtd/days":
-                data["days"], data["before"] = await gtd.day_page(
-                    self.env.DB, args["size"], args.get("before"), args["now"]
-                )
-            case "/gtd/reviews":
-                data["reviews"], data["last"] = await gtd.review_page(
-                    self.env.DB, args["size"], args.get("before"), args["now"]
-                )
             case _:
                 return Response("not found", status=404)
         data["budget"] = budget.calls

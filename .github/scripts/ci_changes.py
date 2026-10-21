@@ -265,7 +265,7 @@ PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
 # value imports, Python imports; test_proto.py checks this against the sources). A package missing here
 # reaches every user (fail safe; test_proto.py fails until it is listed).
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
-    "proto/todofy/taskintent/": ("todofy", "watch"),
+    "proto/todofy/taskintent/": ("watch",),
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
@@ -274,7 +274,7 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # Todofy's private Mail entry (todofy.mail.v1): todofy-core answers it and the gateway serves it; the apps that
     # call it join as each imports it.
     "proto/todofy/mail/": ("todofy",),
-    "proto/tasks/ui/": ("tasks", "todofy", "personal-mcp"),
+    "proto/tasks/ui/": ("tasks", "personal-mcp"),
     # Tasks' create-only TaskInbox (tasks.inbox.v1): the apps that serve or call it, as each imports it.
     "proto/tasks/inbox/": (),
     "proto/links/ui/": ("links",),
@@ -348,10 +348,9 @@ PROTO_NOT_BUNDLED = (
 # (PROTO_PACKAGES).
 # test_ci_changes.py checks this map against the Workers' imports.
 BUNDLED_BY = {
-    "contracts/ops-v1/ops-v1.ts": ("todofy", "mail-hero", "dashboard", "watch", "mailsort", "brief"),
-    # task-intent-v1: the watch app proposes (bounds), Todofy's gateway forwards (the input bound). The types are
-    # generated from proto/ (PROTO_USERS).
-    "contracts/task-intent-v1/task-intent-v1.ts": ("todofy", "watch"),
+    "contracts/ops-v1/ops-v1.ts": ("mail-hero", "dashboard", "watch", "mailsort", "brief"),
+    # task-intent-v1: the watch app proposes (bounds). The types are generated from proto/ (PROTO_USERS).
+    "contracts/task-intent-v1/task-intent-v1.ts": ("watch",),
 }
 
 # Outputs that describe a reused branch run (strings, one line each).

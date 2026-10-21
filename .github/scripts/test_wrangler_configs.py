@@ -438,10 +438,11 @@ class Files(unittest.TestCase):
                     self.assertEqual(service["entrypoint"], expected)
                     if expected == "NewsletterOps":
                         self.assertEqual(service["service"], "fleet")
-        # The watch app parses untrusted pages: it reaches Todofy only through the least-privilege Intents entrypoint,
-        # bound to its own source (proposeTasks and taskIntentStatus only), never through Ops.
+        # The watch app parses untrusted pages: it reached Todofy only through the least-privilege Intents entrypoint,
+        # bound to its own source, never through Ops. Todofy retired Intents on 2026-10-21 and keeps it as a refusal
+        # until the watch app binds Tasks' TaskInbox.
         gateway_exports = (REPO / "todofy/gateway/src/index.ts").read_text()
-        self.assertRegex(gateway_exports, r"export \{[^}]*\bIntents\b[^}]*\} from './ops\.ts'")
+        self.assertRegex(gateway_exports, r"export \{[^}]*\bIntents\b[^}]*\} from './retired\.ts'")
         self.assertEqual(
             load(PRODUCTION["watch"])["services"],
             [{"binding": "TODOFY", "service": "todofy", "entrypoint": "Intents", "props": {"source": "watch"}}],

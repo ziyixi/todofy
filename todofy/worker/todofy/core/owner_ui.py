@@ -3,11 +3,11 @@
 The gateway serves TodofyUiService through the shared transcoder and asks TodofyCore for each answer
 (runtime/owner_ui.py). This module is the pure part: the request rules the IDL cannot state (page sizes, names,
 cursors, a reconcile's task ID), the error reasons TodofyCore answers, and the mapping from the dicts the
-ledger's readers build (runtime/api.py, the coordinator, reminder.py, metrics.py, gtd.py, backup.py) to the
-generated messages, which ``answer`` writes with the wire JSON codec. The codec checks every message before a
-byte leaves. The gateway reads only a list's page (to add the page token) and sends every other answer to the
-browser byte for byte (PreEncoded, gateway/test/pre-encoded.test.ts), so ``answer`` must keep writing the compact
-wire profile toWire writes: no other separators, escaping or indentation.
+ledger's readers build (runtime/api.py, the coordinator, metrics.py, backup.py) to the generated messages, which
+``answer`` writes with the wire JSON codec. The codec checks every message before a byte leaves. The gateway reads
+only a list's page (to add the page token) and sends every other answer to the browser byte for byte (PreEncoded,
+gateway/test/pre-encoded.test.ts), so ``answer`` must keep writing the compact wire profile toWire writes: no other
+separators, escaping or indentation.
 """
 
 import json
@@ -26,7 +26,6 @@ from .sql import ACTIVE_STATES
 
 TASK_ID = re.compile(r"[0-9A-Za-z_-]{1,64}")
 DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
-WEEK = re.compile(r"[0-9]{4}-W[0-9]{2}")
 # Before any day the ledger keeps; a cursor older is BAD_REQUEST.
 MIN_CURSOR_YEAR = 1970
 # ListMailEvents' AIP-160 filter: one restriction, `state = <MailEvent.State name>` or `attention = true`.
@@ -181,31 +180,28 @@ def event_cursor(text: str | None) -> tuple[int, str] | None:
     return at, last
 
 
-def _real(item: str, pattern: re.Pattern[str]) -> bool:
-    """Whether a day or a week of the right shape exists on the calendar (2026-02-30 and 2026-W99 do not), from
-    1970 on (a page goes back a day from its cursor, which 0001-01-01 could not)."""
-    if int(item[:4]) < MIN_CURSOR_YEAR:
+def _real(day: str) -> bool:
+    """Whether a day of the right shape exists on the calendar (2026-02-30 does not), from 1970 on (a page goes
+    back a day from its cursor, which 0001-01-01 could not)."""
+    if int(day[:4]) < MIN_CURSOR_YEAR:
         return False
     try:
-        if pattern is WEEK:
-            date.fromisocalendar(int(item[:4]), int(item[6:]), 1)
-        else:
-            date.fromisoformat(item)
+        date.fromisoformat(day)
     except ValueError:
         return False
     return True
 
 
-def text_cursor(text: str | None, key: str, pattern: re.Pattern[str]) -> str | None:
-    """A cursor of one string matching ``pattern`` (DAY or WEEK) that names a real day or ISO week. A page token
-    is untrusted input (proto/ts/page-token.ts): anything else is BAD_REQUEST, never a later exception."""
+def day_cursor(text: str | None) -> str | None:
+    """A cursor ``{"day": YYYY-MM-DD}`` that names a real day. A page token is untrusted input
+    (proto/ts/page-token.ts): anything else is BAD_REQUEST, never a later exception."""
     value = _cursor_object(text)
     if value is None:
         return None
-    item = value.get(key)
-    if not isinstance(item, str) or not pattern.fullmatch(item) or not _real(item, pattern):
+    day = value.get("day")
+    if not isinstance(day, str) or not DAY.fullmatch(day) or not _real(day):
         raise UiError(Reason.BAD_REQUEST)
-    return item
+    return day
 
 
 def cursor_text(value: Any) -> str | None:
@@ -279,40 +275,20 @@ def mail_event(row: Mapping[str, Any], *, full: bool = True) -> mail_event_pb.Ma
     return mail_event_pb.MailEvent(**fields)
 
 
-def daily_reminder(row: Mapping[str, Any]) -> status_pb.DailyReminder:
-    """A DailyReminder from a reminder dict (runtime/reminder.py)."""
-    return status_pb.DailyReminder(
-        name=f"dailyReminders/{row['day']}",
-        state=_enum(status_pb.DailyReminder_State, row["state"]),
-        task_id=row["task_id"] or "",
-        attention_count=row["attention_count"],
-        attempt_count=row["attempts"],
-        error_code=_enum(status_pb.ReminderErrorCode, row["error_code"]),
-        next_attempt_time=row["next_attempt_at"],
-        create_time=row["created_at"],
-        update_time=row["updated_at"],
-        imported=row["imported"],
-    )
-
-
 def service_status(overview: Mapping[str, Any]) -> status_pb.ServiceStatus:
     """The ServiceStatus from the Overview dict (runtime/api.py overview_data)."""
     flags, counts, gemini, backup = overview["flags"], overview["counts"], overview["gemini"], overview["backup"]
-    latest = overview["latest_reminder"]
+    # latest_reminder stays unset and the two retired switches false (status.proto): Home sends the reminder.
     return status_pb.ServiceStatus(
         name="serviceStatus",
         build=overview["build"],
         read_time=overview["now"],
         switches=status_pb.Switches(
-            maintenance_mode=flags["maintenance_mode"],
-            processing_paused=flags["processing_paused"],
-            force_pause_todoist=flags["force_pause_todoist"],
-            reminder_enabled=flags["reminder_enabled"],
+            maintenance_mode=flags["maintenance_mode"], processing_paused=flags["processing_paused"]
         ),
         active_counts=status_pb.ActiveCounts(**{f"{state}_count": counts[state] for state in ACTIVE_STATES}),
         attention_count=overview["attention_count"],
         received_last_day_count=overview["received_24h"],
-        latest_reminder=None if latest is None else daily_reminder(latest),
         next_alarm_time=overview["next_alarm_at"],
         oldest_due_time=overview["oldest_due_at"],
         gemini=status_pb.GeminiBudget(
@@ -351,47 +327,6 @@ def metric_day(day: Mapping[str, Any]) -> history_pb.MetricDay:
         gemini_tokens={model: _int32(tokens) for model, tokens in day["gemini_tokens"].items()},
         todoist_create_count=day["todoist_creates"],
         todoist_lookup_count=day["todoist_lookups"],
-    )
-
-
-def _gtd_scope(scope: Mapping[str, Any] | None) -> history_pb.GtdScope | None:
-    if scope is None:
-        return None
-    return history_pb.GtdScope(
-        open_count=scope["open"],
-        fresh_count=scope["age_0_7"],
-        recent_count=scope["age_8_14"],
-        stale_count=scope["age_15_30"],
-        old_count=scope["age_31_plus"],
-        oldest_age_days=scope["oldest_days"],
-        overdue_count=scope["overdue"],
-        undated_count=scope["undated"],
-        created_last_week_count=scope["created_7d"],
-        completed_last_week_count=scope["completed_7d"],
-        completed_source=_enum(history_pb.GtdScope_CompletedSource, scope["completed_source"]),
-        closed_last_day_count=scope["closed_1d"],
-        open_mail_count=scope["mail_open"],
-        complete=scope["complete"],
-    )
-
-
-def gtd_day(day: Mapping[str, Any]) -> history_pb.GtdDay:
-    """A GtdDay from a GtdDay dict (core/gtd.py daily_api)."""
-    return history_pb.GtdDay(
-        name=f"gtdDays/{day['day']}",
-        recorded=day["recorded"],
-        all_projects=_gtd_scope(day["all"]),
-        inbox=_gtd_scope(day["inbox"]),
-    )
-
-
-def gtd_review(review: Mapping[str, Any]) -> history_pb.GtdReview:
-    """A GtdReview from a review dict (runtime/gtd.py review_page)."""
-    return history_pb.GtdReview(
-        name=f"gtdReviews/{review['week'].lower()}",
-        state=_enum(history_pb.GtdReview_State, review["state"]),
-        create_time=review["created_at"],
-        complete_time=review["completed_at"],
     )
 
 

@@ -21,16 +21,8 @@ MAX_RETRY_AFTER = DAY
 SUMMARY_CRASH_LIMIT = 3
 WATCHDOG = 2 * MINUTE
 
-REMINDER_CHECK_INTERVAL = 10 * MINUTE
-REMINDER_RETRY_DELAY = HOUR
-REMINDER_MAX_ATTEMPTS = 5
-
 GEMINI_MODEL_TIMEOUT = 60
 GEMINI_STEP_BUDGET = 90
-# One Tasks create (runtime/native_tasks.create_task) may take this long.
-TASK_STEP_BUDGET = 45
-LOOKUP_PAGE_TIMEOUT = 20
-LOOKUP_MAX_PAGES = 10
 REPORT_ON_DEMAND_BUDGET = 40
 
 # Outages and quota heal with time, so they get the week-long window; a

@@ -4,12 +4,10 @@ import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
-from tests.runtime.harness import ROOT, Worker, _run, tasks_config
+from tests.runtime.harness import ROOT, Worker, _run
 
-# Same runtime as the shipped core; D1 with the real migrations and the real Tasks Worker as TASKS. No
-# assets or cron: the probe passes its own budget to the modules as the coordinator. Its one Durable
-# Object, GtdProbe, only gives runtime/gtd.py a real object storage (its gtd_state and the ops tables); it
-# runs no alarm.
+# Same runtime as the shipped core; D1 with the real migrations. No assets, cron or Durable Object: the probe
+# passes its own budget to the modules as the coordinator.
 CONFIG = """\
 name = "todofy-reports-probe"
 main = "entry.py"
@@ -23,20 +21,6 @@ binding = "DB"
 database_name = "todofy"
 database_id = "00000000-0000-4000-8000-000000000000"
 migrations_dir = "{migrations}"
-
-[[durable_objects.bindings]]
-name = "GTD_PROBE"
-class_name = "GtdProbe"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["GtdProbe"]
-
-[[services]]
-binding = "TASKS"
-service = "todofy-tasks-test"
-entrypoint = "TasksApi"
-props = {{ access = "read-write" }}
 """
 
 
@@ -48,5 +32,4 @@ def start_probe(state: Path, variables: dict[str, str]) -> Iterator[Worker]:
     (stage / "python_modules").symlink_to(ROOT / "python_modules", target_is_directory=True)
     config = stage / "wrangler.toml"
     config.write_text(CONFIG.format(migrations=ROOT / "migrations"))
-    tasks = str(tasks_config(state / "tasks.json"))
-    yield from _run(Worker([str(config), tasks], str(config), state, variables, tasks))
+    yield from _run(Worker([str(config)], str(config), state, variables))

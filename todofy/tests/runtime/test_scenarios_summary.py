@@ -7,7 +7,6 @@ import pytest
 
 from tests.fakes.gemini_fake import GeminiFake, error_reply, text_reply
 from tests.fakes.server import retry_after_http_date, retry_after_seconds
-from tests.runtime import tasks_support as tasks
 from tests.runtime.harness import Worker, mail_event, transitions
 from todofy.core.contract import parse_mail_event
 from todofy.core.gemini_wire import BEGIN, END
@@ -63,9 +62,7 @@ def test_truncated_mail_is_disclosed_to_the_model(worker: Worker, fresh_gemini: 
     [{"needs_review": True, "warnings": ["attached_or_opaque_message"]}, {"html_omitted": True, "text": ""}],
     ids=["needs_review", "html_omitted_without_text"],
 )
-def test_review_flagged_mail_never_reaches_gemini_or_tasks(
-    worker: Worker, fresh_gemini: GeminiFake, fields: dict
-) -> None:
+def test_review_flagged_mail_never_reaches_gemini(worker: Worker, fresh_gemini: GeminiFake, fields: dict) -> None:
     event_id, _ = _arrive(worker, subject=f"review {uuid.uuid4()}", **fields)
 
     event = worker.wait_event(event_id, {"failed_summary"})
@@ -76,7 +73,6 @@ def test_review_flagged_mail_never_reaches_gemini_or_tasks(
         ["dismiss"],
     )
     assert fresh_gemini.calls_mentioning(event_id) == []
-    assert not [task for task in tasks.created(worker) if event_id in task["description"]]
 
 
 @pytest.mark.reaches("llm_quota")

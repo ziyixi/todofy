@@ -384,7 +384,7 @@ zone_id = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         self.assertNotIn('ziyixi.science', outputs['watch/worker/src/deployment.ts'])
         self.assertNotIn('cloudflare-579', outputs['watch/worker/src/deployment.ts'])
         self.assertIn('new-workers.workers.dev', outputs['watch/worker/src/deployment.ts'])
-        self.assertIn('watch.example.test', outputs['todofy/worker/todofy/deployment.py'])
+        self.assertNotIn('todofy/worker/todofy/deployment.py', outputs)
         self.assertIn('https://github.com/new-owner/new-cloud/actions/workflows/personal-cloud-reconcile.yml',
                       outputs['fleet/web/src/deployment.ts'])
         self.assertIn('https://github.com/new-owner/new-cloud/blob/main/docs/rebuild.md#host-recovery',

@@ -17,7 +17,6 @@ import todofy.core.sql as sql_package
 from todofy.core.report_schema import ReportStatus
 from todofy.core.sql import ACTIVE_STATES, Query, views
 from todofy.core.sql import metrics as metrics_sql
-from todofy.core.sql import reminders as reminder_sql
 from todofy.core.vocab import TERMINAL_STATES, EventState, ReminderState
 
 MIGRATIONS = sorted((Path(__file__).parents[2] / "migrations").glob("*.sql"))
@@ -95,12 +94,8 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "auth_failures",
         "legacy_mail_text",
         "daily_metrics",
-        "gtd_snapshots",
-        "gtd_snapshot_tasks",
         "gtd_daily",
         "gtd_reviews",
-        "task_intents",
-        "task_intent_tasks",
         "plan_settings",
         "plan_categories",
     }
@@ -112,17 +107,12 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
         "event_transitions_event",
         "mail_reminders_sending",
         "summaries_created",
-        "summaries_expiring",
         "daily_reports_day",
         "owner_actions_created",
         "legacy_mail_text_expires",
         "legacy_mail_text_created",
         "gtd_reviews_sending",
-        "task_intents_due",
-        "task_intents_updated",
-        "task_intents_created",
         "plan_categories_name",
-        "summaries_task",
         "summaries_pending",
     }
 
@@ -270,7 +260,7 @@ def test_ops_columns_are_additive_and_checked(db):
     assert db.execute("SELECT ops_count, ops_generated_at FROM mail_reminders").fetchall() == [(0, 0)]
 
 
-def test_canary_events_are_never_listed_counted_or_reminded_of(db):
+def test_canary_events_are_never_listed_or_counted(db):
     now = 100_000
     cutoff = now - 6 * 3600
     for prefix, run in (("real", None), ("canary", "canary-1")):
@@ -281,12 +271,10 @@ def test_canary_events_are_never_listed_counted_or_reminded_of(db):
         "attention_page": db.execute(views.ATTENTION_PAGE.sql, (SOURCE, cutoff, -1, "", 10)).fetchall(),
         "recent": db.execute(views.RECENT_PAGE.sql, (SOURCE, 2**52, "", 10)).fetchall(),
         "recent_by_state": db.execute(views.RECENT_PAGE_BY_STATE.sql, (SOURCE, "complete", 2**52, "", 10)).fetchall(),
-        "reminder_rows": db.execute(reminder_sql.ATTENTION_ROWS.sql, (SOURCE, cutoff, 20)).fetchall(),
     }
     for name, rows in listed.items():
         assert rows and all(row[0].startswith("real-") for row in rows), name
     assert db.execute(views.ATTENTION_COUNT.sql, (SOURCE, cutoff)).fetchone() == (2,)
-    assert db.execute(reminder_sql.ATTENTION_COUNT.sql, (SOURCE, cutoff)).fetchone() == (2,)
     assert dict(db.execute(views.ACTIVE_COUNTS.sql, (SOURCE,)).fetchall()) == {"failed_summary": 1, "pending": 1}
     assert db.execute(views.RECEIVED_SINCE.sql, (SOURCE, 0)).fetchone() == (3,)
     assert db.execute(views.OLDEST_DUE.sql, (now,)).fetchone() == (cutoff - 1,)

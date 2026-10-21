@@ -98,7 +98,8 @@ def test_event_detail_is_served_by_the_coordinator(actions_worker: Worker) -> No
     response = actions_worker.owner.get(f"/api/v1/mailEvents/{UNKNOWN}")
     detail = assert_message(response, mail_event_pb.MailEvent)
     assert (detail["state"], detail["version"], detail["etag"]) == ("todo_unknown", 1, "1")
-    assert detail["allowed_actions"] == ["task_created", "task_not_created", "dismiss"]
+    # An older task row (none are left after migration 0014) may only be dismissed.
+    assert detail["allowed_actions"] == ["dismiss"]
     assert detail["sender"] == "sender@example.org" and detail["subject"] == "Synthetic reconcile fixture"
     assert_private(response)
 

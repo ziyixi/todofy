@@ -1,6 +1,6 @@
-"""Reports, reminder and retention through the shipped Worker: the cron wake runs the
-coordinator alarm, whose ticks precompute the reports and send the reminder, and
-the machine host serves the newsletter endpoints (stored, then on demand)."""
+"""Reports through the shipped Worker: the cron wake runs the coordinator alarm, whose
+ticks precompute the reports and create no task, and the machine host serves the
+newsletter endpoints (stored, then on demand)."""
 
 import time
 from collections.abc import Callable, Iterator
@@ -14,7 +14,6 @@ from tests.runtime import tasks_support as tasks
 from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import assert_contract
 from tests.runtime.reports_support import NEWSLETTER, digest
-from todofy.core.reminder_text import reminder_title
 
 NOW = int(time.time())
 
@@ -40,7 +39,6 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
         "GEMINI_API_KEY": GEMINI_KEY,
         "REPORT_BASIC_AUTH_SHA256": digest(*NEWSLETTER),
         "REPORT_PRECOMPUTE_UTC": "00:00",
-        "REMINDER_ENABLED": "true",
     }
     try:
         for worker in start_gateway(tmp_path_factory.mktemp("reports-alarm"), variables):
@@ -90,12 +88,10 @@ def test_other_top_is_computed_on_demand_by_the_coordinator(stack):
     assert stack.worker.d1("SELECT status FROM daily_reports WHERE top_n = 4") == [{"status": "ok"}]
 
 
-def test_alarm_sends_one_reminder_for_the_day(stack):
-    [created] = stack.until(lambda: tasks.created(stack.worker))
-    assert created["title"] == reminder_title(1)
-    assert "e-failed · failed_summary · summary_failed" in created["description"]
-    [row] = stack.until(lambda: stack.worker.d1("SELECT state, task_id FROM mail_reminders WHERE state != 'sending'"))
-    assert row == {"state": "created", "task_id": created["id"]}
+def test_the_alarm_writes_no_reminder_for_mail_that_needs_the_owner(stack):
+    """Home creates the daily reminder in Tasks (2026-10-21); Todofy only lists the mail on its attention page."""
+    stack.until(lambda: len(stack.worker.d1("SELECT day FROM daily_reports WHERE top_n IN (0, 10)")) == 2)
     assert stack.worker.trigger_cron("*/10 * * * *").status_code == 200
     time.sleep(2)
-    assert len(tasks.created(stack.worker)) == 1
+    assert tasks.created(stack.worker) == []
+    assert stack.worker.d1("SELECT count(*) AS n FROM mail_reminders") == [{"n": 0}]

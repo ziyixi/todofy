@@ -26,7 +26,6 @@ from todofy.core.vocab import EventState
 from todofy.runtime.config import source_id
 from todofy.runtime.gemini import GeminiResult
 from todofy.runtime.interop import to_js
-from todofy.runtime.native_tasks import CreateResult
 
 DO_SCHEMA = (
     # Counters of days not yet written to D1, by UTC day of the event.
@@ -77,11 +76,6 @@ def gemini_point(step: Step, result: GeminiResult, upstream_ms: int) -> StepPoin
         tokens_out=max(result.tokens - result.prompt_tokens, 0),
         attempts=result.attempts,
     )
-
-
-def task_point(step: Step, result: CreateResult, upstream_ms: int) -> StepPoint:
-    verdict = result.verdict
-    return StepPoint(step, verdict.result, code=verdict.code or "", upstream_ms=upstream_ms, attempts=result.attempts)
 
 
 def write_point(env: Any, point: StepPoint) -> None:

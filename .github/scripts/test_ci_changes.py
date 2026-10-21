@@ -438,12 +438,12 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **WATCH))
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, T, F, F, **WATCH))
 
-    def test_task_intent_code_deploys_watch_and_todofy(self):
-        """TASK_INTENT_LIMITS ship in the watch app and Todofy's gateway; no Worker bundles the schema (the types are
-        generated). proto/'s tests read the contract, so Proto checks runs too (PROTO_READS)."""
+    def test_task_intent_code_deploys_watch(self):
+        """TASK_INTENT_LIMITS ship in the watch app; no Worker bundles the schema (the types are generated). proto/'s
+        tests read the contract, so Proto checks runs too (PROTO_READS)."""
         self.assertEqual(
             push(["contracts/task-intent-v1/task-intent-v1.ts"]),
-            expect(T, T, T, T, F, **ALL_CHECKED, watch_deploy=T, proto=T),
+            expect(T, T, T, F, F, **ALL_CHECKED, watch_deploy=T, proto=T),
         )
         self.assertEqual(
             push(["contracts/task-intent-v1/task-intent-v1.schema.json"]),
@@ -492,10 +492,12 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(["contracts/ops-v1/validate.mjs"]), expect(T, T, T, F, F, **ALL_CHECKED, proto=T))
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
-        """OPS_LIMITS and friends ship inside all three Workers, so a change must redeploy each."""
-        bundled = expect(T, T, T, T, T, **ALL, website_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, **MAILSORT, recall_check=T, **BRIEF, proto=T, tasks_check=T, personal_mcp_check=T)
+        """OPS_LIMITS and friends ship inside the Workers that import them, so a change must redeploy each."""
+        bundled = expect(T, T, T, F, T, **ALL, website_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, **MAILSORT, recall_check=T, **BRIEF, proto=T, tasks_check=T, personal_mcp_check=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
-        self.assertEqual(push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), bundled)
+        self.assertEqual(
+            push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), {**bundled, "todofy_deploy": True}
+        )
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"], ref=BRANCH), bundled)
 
     def test_bundled_by_lists_exactly_the_apps_whose_worker_imports_each_contract_file(self):
@@ -594,16 +596,16 @@ class Classify(unittest.TestCase):
         ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"}, {"todofy", "platform"}
         every, none = ts | python, set()
         cases = {
-            # task-intent-v1, bundled by the watch app's TypeScript and todofy-core's Python.
-            "proto/todofy/taskintent/v1/task_intent.proto": {"todofy", "watch"},
+            # task-intent-v1, bundled by the watch app's TypeScript.
+            "proto/todofy/taskintent/v1/task_intent.proto": {"watch"},
             # recommendation-v1 and summary-v1: todofy-core builds the reports, Todofy's gateway and UI read them in
             # todofy.ui.v1's answers.
             "proto/todofy/report/v1/report.proto": {"todofy"},
             # Todofy's owner API: its core answers it, its gateway serves it and its UI calls it.
             "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy", "tasks", "personal-mcp"},
             "proto/todofy/ui/v1/mail_event.proto": {"todofy", "tasks", "personal-mcp"},
-            # Tasks' owner API: its Worker serves it, its UI and the Personal MCP call it, todofy-core reads tasks.
-            "proto/tasks/ui/v1/gtd.proto": {"tasks", "todofy", "personal-mcp"},
+            # Tasks' owner API: its Worker serves it, its UI and the Personal MCP call it.
+            "proto/tasks/ui/v1/gtd.proto": {"tasks", "personal-mcp"},
             # Todofy's private Mail entry: its core answers it, its gateway serves it. Tasks' create-only TaskInbox:
             # only the bundles that import it.
             "proto/todofy/mail/v1/mail_service.proto": {"todofy"},
@@ -1340,10 +1342,8 @@ class ContractsJob(unittest.TestCase):
                 # bytes it read and sent before the move onto proto/.
                 "dashboard/worker/test/ops-client.test.ts",
                 "dashboard/worker/test/ops-golden.test.ts",
-                # task-intent-v1: both validators give every fixture the same verdict (the proposer's dependency-free
-                # one and the standard one); Todofy's gateway forwards the two methods.
+                # task-intent-v1: the proposer's dependency-free validator gives every fixture the standard verdict.
                 "watch/worker/test/task-intent-contract.test.ts",
-                "todofy/tests/unit/test_task_intent_contract.py",
                 # The watch app's digest and urgent intents (the contract's watch fixtures, byte for byte) and its
                 # ops-v1 answers.
                 "watch/worker/test/todofy.test.ts",

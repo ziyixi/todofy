@@ -22,10 +22,8 @@ allowlists, Access issuer/AUD, account and D1 IDs, Fleet's node key, the Website
 Newsletter/Platform images (`ghcr.io/<repository>-newsletter` and `ghcr.io/<repository>-platform`).
 
 Watch receives its own generated deployment module containing the zone and exact workers.dev suffix that its
-URL policy must refuse. Todofy receives its own generated Watch hostname for new intent validation. Runtime apps
-do not import this tool or one another. Stable protocol names, authentication domain separation strings,
-historical fixtures and frozen event bytes keep their existing identity. A stored intent replay remains valid
-under its original bytes; a new proposal must use the deployment's exact Watch hostname.
+URL policy must refuse. Runtime apps do not import this tool or one another. Stable protocol names, authentication
+domain separation strings, historical fixtures and frozen event bytes keep their existing identity.
 
 Generation also writes Home's private `resource-identities.ts`, `infra/platform-identity.tf` public DNS locals,
 the existing `infra/ids.tf` inventory locals, Fleet's public repair links, and the public `worker-secrets.json`

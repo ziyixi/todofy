@@ -51,7 +51,7 @@ class EventRow:
     imported: bool
     created_at: int
     updated_at: int
-    # Set for a canary event (contracts/ops-v1): processed, never sent to Tasks.
+    # Set for a canary event (contracts/ops-v1): summarised, never stored as report input.
     canary_run_id: str | None = None
 
     @property
@@ -146,87 +146,37 @@ async def get(db: Any, source_id: str, event_id: str) -> EventRow | None:
     return EventRow.from_d1(row) if row else None
 
 
-async def next_due(db: Any, now: int, *, writes: bool = True) -> EventRow | None:
-    """The oldest due pending/summarized/todo_created row; no summarized rows while task writes are paused."""
-    query = sql.NEXT_DUE if writes else sql.NEXT_DUE_WITHOUT_TODOIST
-    row = await db.prepare(query.sql).bind(now).first()
+async def next_due(db: Any, now: int) -> EventRow | None:
+    """The oldest pending row due for its summary."""
+    row = await db.prepare(sql.NEXT_DUE.sql).bind(now).first()
     return EventRow.from_d1(row) if row else None
 
 
-async def next_lookup(db: Any, now: int) -> EventRow | None:
-    row = await db.prepare(sql.LOOKUP_DUE.sql).bind(now).first()
-    return EventRow.from_d1(row) if row else None
+async def next_wake_at(db: Any) -> int | None:
+    """When the earliest pending row is due."""
+    row = await db.prepare(sql.NEXT_WAKE.sql).first()
+    return None if row is None or row["at"] is None else int(row["at"])
 
 
-async def next_wake_at(db: Any, *, writes: bool = True) -> int | None:
-    """Earliest scheduled ledger work (lookups only while task writes are open)."""
-    due = sql.NEXT_WAKE if writes else sql.NEXT_WAKE_WITHOUT_TODOIST
-    statements = [db.prepare(due.sql)]
-    if writes:
-        statements.append(db.prepare(sql.NEXT_LOOKUP.sql))
-    results = await db.batch(statements)
-    times = [result.results[0]["at"] for result in results]
-    return min((int(at) for at in times if at is not None), default=None)
-
-
-async def owner_confirmed_resend(db: Any, event_id: str) -> bool:
-    """Whether the owner's task_not_created is the latest word on this todo_unknown row.
-
-    That is the only owner transition that leaves a row in todo_unknown; any
-    later worker transition (a lookup result) supersedes it.
-    """
-    row = await db.prepare(sql.LATEST_TRANSITION.sql).bind(event_id).first()
-    return bool(row) and row["actor"] == OWNER and row["to_state"] == EventState.TODO_UNKNOWN
-
-
-async def recover_interrupted(db: Any, now: int, *, lookup_at: int) -> None:
-    """Settle rows a previous run left mid-call (it was evicted or timed out).
-
-    An interrupted summary is simply repeated, up to the crash limit; an
-    interrupted task create may have created the task, so it is never resent.
-    A canary ends ``ignored`` where real mail would need the owner.
-    """
+async def recover_interrupted(db: Any, now: int) -> None:
+    """Settle a summary a previous run left mid-call (it was evicted or timed out): it is simply repeated, up to the
+    crash limit. A canary ends ``ignored`` where real mail would need the owner."""
     rows = (await db.prepare(sql.INTERRUPTED.sql).all()).results
     for row in map(EventRow.from_d1, rows):
-        if row.canary and row.state == EventState.TODO_SENDING:
-            # Only a release without canary handling sends a canary to the task store; never look it up.
+        crashes = row.crashes + 1
+        if crashes >= SUMMARY_CRASH_LIMIT:
             await transition(
                 db,
                 row,
-                EventState.IGNORED,
+                EventState.IGNORED if row.canary else EventState.FAILED_SUMMARY,
                 actor=WORKER,
                 now=now,
-                code=Code.CANARY_SIDE_EFFECT_BLOCKED,
+                code=Code.PROCESSING_INTERRUPTED_LIMIT,
+                crashes=crashes,
                 next_attempt_at=0,
             )
-        elif row.state == EventState.SUMMARIZING:
-            crashes = row.crashes + 1
-            if crashes >= SUMMARY_CRASH_LIMIT:
-                await transition(
-                    db,
-                    row,
-                    EventState.IGNORED if row.canary else EventState.FAILED_SUMMARY,
-                    actor=WORKER,
-                    now=now,
-                    code=Code.PROCESSING_INTERRUPTED_LIMIT,
-                    crashes=crashes,
-                    next_attempt_at=0,
-                )
-            else:
-                await transition(
-                    db, row, EventState.PENDING, actor=WORKER, now=now, crashes=crashes, next_attempt_at=now
-                )
         else:
-            await transition(
-                db,
-                row,
-                EventState.TODO_UNKNOWN,
-                actor=WORKER,
-                now=now,
-                code=Code.INTERRUPTED_TODO_CALL,
-                attempt_count=0,
-                next_attempt_at=lookup_at,
-            )
+            await transition(db, row, EventState.PENDING, actor=WORKER, now=now, crashes=crashes, next_attempt_at=now)
 
 
 async def transition(

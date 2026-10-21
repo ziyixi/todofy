@@ -1,24 +1,22 @@
 """The ops-v1 surface inside TodofyCore (contracts/ops-v1; core/ops.py has the rules).
 
 The gateway's ``Ops`` entrypoint calls the coordinator's ``ops_*`` RPC methods, which use
-this module. State lives in the object's SQLite only (not D1, not in backups): the guard,
-the last run of each deferrable job and the dashboard's latest report. Losing it reads as a
-normal guard, jobs that may run now and no report until the next one.
+this module. State lives in the object's SQLite only (not D1, not in backups): the guard
+and the last run of each deferrable job. Losing it reads as a normal guard and jobs that
+may run now.
 
-D1 budget: ``status`` runs one batch of six bounded reads (STATUS_STATEMENTS; the GTD ledger's
-counters and signals come from the object's ``gtd_state``, runtime/gtd.py); ``canary``
-one primary-key read; ``set_guard`` and ``store_report`` none.
+D1 budget: ``status`` runs one batch of five bounded reads (STATUS_STATEMENTS); ``canary``
+one primary-key read; ``set_guard`` none.
 """
 
 from typing import Any
 
-from todofy.core import gtd as gtd_rules
 from todofy.core import ops as core
-from todofy.core.backoff import DAY, REMINDER_MAX_ATTEMPTS
-from todofy.core.sql import intents as intent_sql
-from todofy.core.sql import reminders as reminder_sql
+from todofy.core.backoff import DAY
+from todofy.core.carryover import MAX_CARRYOVER_DAYS
+from todofy.core.sql import mailbox as mailbox_sql
 from todofy.core.sql import views
-from todofy.core.vocab import ATTENTION_AGE_SECONDS, ReminderState
+from todofy.core.vocab import ATTENTION_AGE_SECONDS
 from todofy.runtime import backup, ledger
 from todofy.runtime.config import flag, source_id, var
 
@@ -28,22 +26,12 @@ DO_SCHEMA = (
     " reason TEXT, until INTEGER, set_at INTEGER)",
     # The last run of each deferrable job (Unix seconds), for its bound.
     "CREATE TABLE IF NOT EXISTS ops_job_runs (job TEXT PRIMARY KEY, at INTEGER NOT NULL)",
-    # The dashboard's latest OpsReport as compact JSON; generated_at in epoch ms.
-    "CREATE TABLE IF NOT EXISTS ops_report (id INTEGER PRIMARY KEY CHECK (id = 1), generated_at INTEGER NOT NULL,"
-    " received_at INTEGER NOT NULL, doc TEXT NOT NULL CHECK (length(doc) <= 8192))",
 )
-STATUS_STATEMENTS = 6
-# status() counts task intents that failed within this window (contracts/task-intent-v1).
-INTENTS_FAILED_WINDOW = 7 * DAY
+STATUS_STATEMENTS = 5
 
 
 def switches(env: Any) -> core.Switches:
-    return core.Switches(
-        maintenance=flag(env, "MAINTENANCE_MODE"),
-        processing_paused=flag(env, "PROCESSING_PAUSED"),
-        force_pause_todoist=flag(env, "FORCE_PAUSE_TODOIST"),
-        reminder_enabled=flag(env, "REMINDER_ENABLED"),
-    )
+    return core.Switches(maintenance=flag(env, "MAINTENANCE_MODE"), processing_paused=flag(env, "PROCESSING_PAUSED"))
 
 
 # ---- guard ---------------------------------------------------------------------------------
@@ -105,30 +93,6 @@ def backup_defer_until(store: Any, now: int) -> int | None:
     return core.defer_until(guard(store), now, last, core.BACKUP_BOUND)
 
 
-# ---- report --------------------------------------------------------------------------------
-
-
-def latest_report(store: Any) -> core.Report | None:
-    rows = store.exec("SELECT doc FROM ops_report WHERE id = 1").toArray()
-    return core.stored_report(str(rows[0].doc)) if rows else None
-
-
-def store_report(store: Any, received: core.Report, now: int) -> dict[str, Any]:
-    """Replace the stored report unless it has a later generated_at; the OpsReportReceipt."""
-    kept = latest_report(store)
-    if kept is not None and kept.generated_ms > received.generated_ms:
-        return core.receipt(False, kept)
-    store.exec(
-        "INSERT INTO ops_report (id, generated_at, received_at, doc) VALUES (1, ?, ?, ?)"
-        " ON CONFLICT (id) DO UPDATE SET generated_at = excluded.generated_at,"
-        " received_at = excluded.received_at, doc = excluded.doc",
-        received.generated_ms,
-        now,
-        received.doc,
-    )
-    return core.receipt(True, received)
-
-
 # ---- reads ---------------------------------------------------------------------------------
 
 
@@ -154,23 +118,17 @@ async def canary(env: Any, store: Any, event_id: str, now: int) -> dict[str, Any
 async def status(env: Any, coordinator: Any, now: int) -> dict[str, Any]:
     """OpsStatus from one batch of STATUS_STATEMENTS bounded reads plus the object's storage."""
     db, source, store = env.DB, source_id(env), coordinator.sql
-    today = core.timestamp(now)[:10]
-    counts, attention, received, due, day, intent_counts = await db.batch(
+    counts, attention, received, due, carried = await db.batch(
         [
             db.prepare(views.ACTIVE_COUNTS.sql).bind(source),
             db.prepare(views.ATTENTION_COUNT.sql).bind(source, now - ATTENTION_AGE_SECONDS),
             db.prepare(views.RECEIVED_SINCE.sql).bind(source, now - DAY),
             db.prepare(views.OLDEST_DUE.sql).bind(now),
-            db.prepare(reminder_sql.REMINDER_DAY.sql).bind(today),
-            db.prepare(intent_sql.COUNTS.sql).bind(now - INTENTS_FAILED_WINDOW),
+            db.prepare(mailbox_sql.PENDING_BETWEEN.sql).bind(now - MAX_CARRYOVER_DAYS * DAY, now - DAY),
         ]
     )
-    intent_row = intent_counts.results[0]
     usage = coordinator.usage_facts(now)
     state = backup.status_facts(env, store, now)
-    # The GTD ledger's counters and signals come from the object's storage too (no D1 read).
-    ledger_facts = coordinator.gtd_facts()
-    reminder = day.results[0] if day.results else None
     oldest = due.results[0]["at"]
     switch = switches(env)
     return core.status(
@@ -178,17 +136,11 @@ async def status(env: Any, coordinator: Any, now: int) -> dict[str, Any]:
             now=now,
             maintenance=switch.maintenance,
             processing_paused=switch.processing_paused,
-            force_pause_todoist=switch.force_pause_todoist,
-            reminder_enabled=switch.reminder_enabled,
             active_events=sum(int(row["n"]) for row in counts.results),
             attention_events=int(attention.results[0]["n"]),
             received_24h=int(received.results[0]["n"]),
             oldest_due_at=None if oldest is None else int(oldest),
-            reminder_state=None if reminder is None else str(reminder["state"]),
-            reminder_attempts=0 if reminder is None else int(reminder["attempts"]),
-            reminder_retries_left=reminder is not None
-            and reminder["state"] == ReminderState.FAILED
-            and int(reminder["attempts"]) < REMINDER_MAX_ATTEMPTS,
+            carryover_open=int(carried.results[0]["n"]),
             gemini_used=usage["used_tokens"],
             gemini_reserved=usage["reserved_tokens"],
             gemini_budget=usage["token_budget"],
@@ -199,12 +151,6 @@ async def status(env: Any, coordinator: Any, now: int) -> dict[str, Any]:
             last_backup_at=state["last_backup_at"],
             guard=guard(store),
             public_host=var(env, "TODOFY_PUBLIC_HOST"),
-            gtd_counters=ledger_facts.counters,
-            gtd_stale_seconds=gtd_rules.snapshot_age(ledger_facts, now),
-            review_enabled=gtd_rules.review_watched(ledger_facts),
-            review_age_days=gtd_rules.review_age_days(ledger_facts, now),
-            intents_pending=int(intent_row["pending"]),
-            intents_failed_7d=int(intent_row["failed"]),
         )
     )
 

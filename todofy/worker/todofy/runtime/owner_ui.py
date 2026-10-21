@@ -13,9 +13,10 @@ object being unavailable). D1 and storage failures (JsException) are UNAVAILABLE
 same request_id; any other exception, including an answer the codec refuses to write, is a bug: INTERNAL, which no
 client repeats by itself, with only the exception's type logged (docs/gateway-contract.md §3.5).
 
-The ledger's readers (runtime/api.py, the coordinator, reminder.py, metrics.py, gtd.py, backup.py) build the
-same dicts as the owner API before todofy.ui.v1; core/owner_ui.py maps them to the generated messages. Reads are
-the same bounded, indexed D1 queries as before.
+The ledger's readers (runtime/api.py, the coordinator, metrics.py, backup.py) build the same dicts as the owner API
+before todofy.ui.v1; core/owner_ui.py maps them to the generated messages. Reads are the same bounded, indexed D1
+queries as before. The daily reminders and the GTD history left with the reminder and GTD (2026-10-21): Home sends
+the reminder and Tasks keeps GTD.
 """
 
 import json
@@ -32,16 +33,13 @@ from todofy.core import owner_ui as ui
 from todofy.core.api_errors import ApiError
 from todofy.core.owner_ui import Reason, UiError
 from todofy.core.report_schema import MAX_TOP_N
-from todofy.runtime import api, backup, gtd, metrics, reminder, reports
+from todofy.runtime import api, backup, metrics, reports
 from todofy.runtime.config import flag, report_default_top
 from todofy.runtime.interop import now_s
 
 MAX_OWNER_CHARS = 254
 EVENTS_PAGE = (50, 100)
-REMINDERS_PAGE = (50, 100)
 METRIC_DAYS_PAGE = (metrics.DEFAULT_API_DAYS, metrics.MAX_API_DAYS)
-GTD_DAYS_PAGE = (gtd.DEFAULT_API_DAYS, gtd.MAX_API_DAYS)
-REVIEWS_PAGE = (gtd.HISTORY_WEEKS, gtd.HISTORY_WEEKS)
 # The old owner API's codes as todofy.ui.v1 reasons (the reconcile and recompute paths are shared).
 REASONS = {
     ApiError.NOT_FOUND: Reason.NOT_FOUND,
@@ -125,15 +123,6 @@ async def _reconcile_mail_event(call: Call) -> Answer:
     return Answer(await _detail(call.coordinator, event_id))
 
 
-async def _list_daily_reminders(call: Call) -> Answer:
-    size = ui.page_size(call.request.page_size, *REMINDERS_PAGE)
-    items, next_day = await reminder.page(call.env.DB, ui.text_cursor(call.cursor, "day", ui.DAY), size)
-    return Answer(
-        pb.ListDailyRemindersResponse(daily_reminders=tuple(ui.daily_reminder(item) for item in items)),
-        ui.cursor_text(None if next_day is None else {"day": next_day}),
-    )
-
-
 def _check_singleton(name: str, expected: str) -> None:
     if name != expected:
         raise UiError(Reason.BAD_REQUEST)
@@ -178,28 +167,10 @@ async def _recompute_report(call: Call) -> Answer:
 
 async def _list_metric_days(call: Call) -> Answer:
     size = ui.page_size(call.request.page_size, *METRIC_DAYS_PAGE)
-    days, before = await metrics.day_page(call.env.DB, size, ui.text_cursor(call.cursor, "day", ui.DAY), now_s())
+    days, before = await metrics.day_page(call.env.DB, size, ui.day_cursor(call.cursor), now_s())
     return Answer(
         pb.ListMetricDaysResponse(metric_days=tuple(ui.metric_day(day) for day in days)),
         ui.cursor_text(None if before is None else {"day": before}),
-    )
-
-
-async def _list_gtd_days(call: Call) -> Answer:
-    size = ui.page_size(call.request.page_size, *GTD_DAYS_PAGE)
-    days, before = await gtd.day_page(call.env.DB, size, ui.text_cursor(call.cursor, "day", ui.DAY), now_s())
-    return Answer(
-        pb.ListGtdDaysResponse(gtd_days=tuple(ui.gtd_day(day) for day in days)),
-        ui.cursor_text(None if before is None else {"day": before}),
-    )
-
-
-async def _list_gtd_reviews(call: Call) -> Answer:
-    size = ui.page_size(call.request.page_size, *REVIEWS_PAGE)
-    reviews, last = await gtd.review_page(call.env.DB, size, ui.text_cursor(call.cursor, "week", ui.WEEK), now_s())
-    return Answer(
-        pb.ListGtdReviewsResponse(gtd_reviews=tuple(ui.gtd_review(review) for review in reviews)),
-        ui.cursor_text(None if last is None else {"week": last}),
     )
 
 
@@ -223,12 +194,9 @@ METHODS: dict[str, tuple[type, Handler, bool]] = {
     "ListMailEvents": (pb.ListMailEventsRequest, _list_mail_events, False),
     "GetMailEvent": (pb.GetMailEventRequest, _get_mail_event, False),
     "ReconcileMailEvent": (pb.ReconcileMailEventRequest, _reconcile_mail_event, True),
-    "ListDailyReminders": (pb.ListDailyRemindersRequest, _list_daily_reminders, False),
     "GetLatestReports": (pb.GetLatestReportsRequest, _get_latest_reports, False),
     "RecomputeReport": (pb.RecomputeReportRequest, _recompute_report, True),
     "ListMetricDays": (pb.ListMetricDaysRequest, _list_metric_days, False),
-    "ListGtdDays": (pb.ListGtdDaysRequest, _list_gtd_days, False),
-    "ListGtdReviews": (pb.ListGtdReviewsRequest, _list_gtd_reviews, False),
     "GetLegacyText": (pb.GetLegacyTextRequest, _get_legacy_text, False),
 }
 

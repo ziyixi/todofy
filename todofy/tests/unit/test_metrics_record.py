@@ -68,14 +68,14 @@ def _logged(capsys: pytest.CaptureFixture[str]) -> list[dict[str, Any]]:
 
 def test_counters_and_data_point_are_written(runtime_metrics: Any) -> None:
     env, store = types.SimpleNamespace(METRICS=Dataset()), Store()
-    runtime_metrics.record(env, store, StepPoint(Step.TASK, "created", attempts=2), NOW)
+    runtime_metrics.record(env, store, StepPoint(Step.REPORT, "ok", attempts=2), NOW)
     assert len(env.METRICS.points) == 1
-    assert [call[1:] for call in store.calls] == [("2026-09-21", "todoist_creates", 2)]
+    assert [call[1:] for call in store.calls] == [("2026-09-21", "gemini_calls", 2)]
 
 
 def test_a_failing_counter_write_is_only_logged(runtime_metrics: Any, capsys: pytest.CaptureFixture[str]) -> None:
     env = types.SimpleNamespace(METRICS=Dataset())
-    runtime_metrics.record(env, Store(fail=True), StepPoint(Step.TASK, "created", attempts=1), NOW)
+    runtime_metrics.record(env, Store(fail=True), StepPoint(Step.REPORT, "ok", attempts=1), NOW)
     assert len(env.METRICS.points) == 1  # the data point went out before the counter failed
     assert _logged(capsys) == [{"metrics": "count_failed", "error": "RuntimeError"}]
 

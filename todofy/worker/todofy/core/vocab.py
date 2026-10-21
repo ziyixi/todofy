@@ -1,10 +1,16 @@
 """Single source of the ledger vocabulary: states, error codes and owner actions.
 
-Codes marked ``legacy`` were written by a retired writer, the Go service or the
-release that still wrote Todoist (``todoist_auth_blocked``), and older ledger rows
-still carry them. The Worker produces none of them for its own events; it writes
+Codes marked ``legacy`` were written by a retired writer, the Go service, the
+release that still wrote Todoist (``todoist_auth_blocked``) or the releases that
+still wrote tasks (until 2026-10-21: the task create, lookup and reminder codes),
+and older ledger rows still carry them. The Worker produces none of them for its own events; it writes
 ``invalid_saved_event`` only for an imported row that is still due but has no
 stored payload the contract accepts.
+
+Since 2026-10-21 Todofy writes no task: the states summarized, todo_sending,
+todo_unknown and todo_created, the task codes and the reconcile actions
+task_created and task_not_created are kept as stored vocabulary only (older rows,
+transitions and owner actions hold them); nothing moves a row there any more.
 """
 
 from dataclasses import dataclass
@@ -31,6 +37,7 @@ class ReminderState(StrEnum):
 
 
 class Reconcile(StrEnum):
+    # Legacy: the answers to a task create whose outcome was lost, offered until 2026-10-21.
     TASK_CREATED = "task_created"
     TASK_NOT_CREATED = "task_not_created"
     RETRY_SUMMARY = "retry_summary"
@@ -54,7 +61,7 @@ class Code(StrEnum):
     LOOKUP_FAILED = "lookup_failed"
     LOOKUP_AMBIGUOUS = "lookup_ambiguous"
     DISMISSED_BY_OWNER = "dismissed_by_owner"
-    # A canary event (contracts/ops-v1) reached a step that would call Todoist; it ends there.
+    # A canary event (contracts/ops-v1) reached a step that would have written a task; it ended there.
     CANARY_SIDE_EFFECT_BLOCKED = "canary_side_effect_blocked"
     REMINDER_CREATE_FAILED = "reminder_create_failed"
     REMINDER_RESULT_UNKNOWN = "reminder_result_unknown"
@@ -85,17 +92,17 @@ EVENT_ERROR_CODES: dict[Code, CodeInfo] = {
     Code.LLM_BUDGET_EXHAUSTED: CodeInfo(),
     Code.LLM_REQUEST_REJECTED: CodeInfo(),
     Code.PROCESSING_INTERRUPTED_LIMIT: CodeInfo(),
-    Code.TODOIST_REJECTED: CodeInfo(),
+    Code.TODOIST_REJECTED: CodeInfo(legacy=True),
     Code.TODOIST_AUTH_BLOCKED: CodeInfo(legacy=True),
-    Code.TODOIST_RATE_LIMITED: CodeInfo(),
-    Code.TODOIST_UNAVAILABLE: CodeInfo(),
-    Code.TODO_RESULT_UNKNOWN: CodeInfo(),
-    Code.INTERRUPTED_TODO_CALL: CodeInfo(),
-    Code.LOOKUP_NOT_FOUND: CodeInfo(),
-    Code.LOOKUP_FAILED: CodeInfo(),
-    Code.LOOKUP_AMBIGUOUS: CodeInfo(),
+    Code.TODOIST_RATE_LIMITED: CodeInfo(legacy=True),
+    Code.TODOIST_UNAVAILABLE: CodeInfo(legacy=True),
+    Code.TODO_RESULT_UNKNOWN: CodeInfo(legacy=True),
+    Code.INTERRUPTED_TODO_CALL: CodeInfo(legacy=True),
+    Code.LOOKUP_NOT_FOUND: CodeInfo(legacy=True),
+    Code.LOOKUP_FAILED: CodeInfo(legacy=True),
+    Code.LOOKUP_AMBIGUOUS: CodeInfo(legacy=True),
     Code.DISMISSED_BY_OWNER: CodeInfo(),
-    Code.CANARY_SIDE_EFFECT_BLOCKED: CodeInfo(),
+    Code.CANARY_SIDE_EFFECT_BLOCKED: CodeInfo(legacy=True),
     Code.INVALID_SAVED_EVENT: CodeInfo(legacy=True),
     Code.LLM_CLIENT_UNAVAILABLE: CodeInfo(legacy=True),
     Code.SUMMARY_RENDER_FAILED: CodeInfo(legacy=True),
@@ -105,10 +112,11 @@ EVENT_ERROR_CODES: dict[Code, CodeInfo] = {
     Code.CHECKPOINT_FAILED: CodeInfo(legacy=True),
 }
 
+# mail_reminders' codes: every one legacy since Home sends the daily reminder (2026-10-21).
 REMINDER_ERROR_CODES: dict[Code, CodeInfo] = {
-    Code.REMINDER_CREATE_FAILED: CodeInfo(),
-    Code.REMINDER_RESULT_UNKNOWN: CodeInfo(),
-    Code.INTERRUPTED_REMINDER_CALL: CodeInfo(),
+    Code.REMINDER_CREATE_FAILED: CodeInfo(legacy=True),
+    Code.REMINDER_RESULT_UNKNOWN: CodeInfo(legacy=True),
+    Code.INTERRUPTED_REMINDER_CALL: CodeInfo(legacy=True),
     Code.EMPTY_TASK_ID: CodeInfo(legacy=True),
     Code.TODO_CLIENT_UNAVAILABLE: CodeInfo(legacy=True),
 }
@@ -126,21 +134,16 @@ def current_codes(table: dict[Code, CodeInfo]) -> frozenset[Code]:
 
 
 def allowed_actions(state: str, error_code: str, *, canary: bool = False) -> tuple[Reconcile, ...]:
-    """Owner reconcile actions valid for a row, in display order.
+    """Owner reconcile actions valid for a row, in display order: retry a failed summary, or dismiss a row that needs
+    the owner.
 
-    A canary event (contracts/ops-v1) has none: every action could lead to a Todoist call."""
+    A canary event (contracts/ops-v1) has none: it ends by itself."""
     if canary:
         return ()
     actions: list[Reconcile] = []
-    if state == EventState.TODO_UNKNOWN:
-        actions += [Reconcile.TASK_CREATED, Reconcile.TASK_NOT_CREATED]
     # A review-flagged body cannot become summarisable by retrying.
     if state == EventState.FAILED_SUMMARY and error_code != Code.MAIL_NEEDS_REVIEW:
         actions.append(Reconcile.RETRY_SUMMARY)
     if state in ALWAYS_ATTENTION_STATES:
-        actions.append(Reconcile.DISMISS)
-    # Todoist definitely refused the last request (or it was never sent), so no task exists;
-    # the row keeps retrying (a config fix can heal a 404) but the owner may give it up.
-    if state == EventState.SUMMARIZED and error_code == Code.TODOIST_REJECTED:
         actions.append(Reconcile.DISMISS)
     return tuple(actions)

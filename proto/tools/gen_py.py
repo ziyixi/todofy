@@ -47,7 +47,8 @@ SCALARS = {
 TIMESTAMP = ".google.protobuf.Timestamp"
 FIELD_MASK = ".google.protobuf.FieldMask"
 # The proto packages generated for Python: True when the package ships in the wheel (todofy-core imports
-# todofy.taskintent.v1, todofy.report.v1, ops.v1 and mailhero.webhook.v1, and pywrangler vendors the wheel), False
+# todofy.report.v1, ops.v1, mailhero.webhook.v1, todofy.ui.v1 and todofy.mail.v1, and pywrangler vendors the wheel;
+# todofy.taskintent.v1 stays for proto/'s own tests of the contract until the package is retired), False
 # when only proto/'s own Python tests use it (python/build_backend.py leaves it out of the wheel: TEST_ONLY_PACKAGES).
 # Every other package is TypeScript only. .github/scripts/test_proto.py keeps this, the wheel and the apps' imports in
 # step.
@@ -59,7 +60,6 @@ PYTHON_PACKAGES = {
     "mailhero.webhook.v1": True,
     "todofy.ui.v1": True,
     "todofy.mail.v1": True,
-    "tasks.ui.v1": True,
     "platform.runtime.v1": True,
     "fleet.telemetry.v1": True,
     "common.errors.v1": True,

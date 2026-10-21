@@ -14,22 +14,19 @@ COORDINATOR binding, which calls these methods over JS RPC after its own checks
                                            during this deploy only; removed in the next release
     setup()                                the core's facts for the setup page -> dict
     ops_status() / ops_set_guard(json) /   the gateway's ``Ops`` entrypoint (contracts/ops-v1):
-    ops_canary_result(id) / ops_report(json)   {"ok": value} or {"error": OpsErrorCode}
-    task_intent_propose(json) /            the same entrypoint's task-intent-v1 methods (runtime/intents.py):
-    task_intent_status(json)                   {"ok": TaskIntentResult} or {"error": OpsErrorCode}
+    ops_canary_result(id)                      {"ok": value} or {"error": OpsErrorCode}
 
-``fetch`` answers 404: the object has no HTTP routes. For this one release it
-answers the previous, fetch-based gateway 503 with Retry-After (see ``fetch``).
+``fetch`` answers 404: the object has no HTTP routes.
 
-Everything that reads D1, parses mail or calls Gemini or Tasks runs here: a
-Durable Object invocation has 30 s of CPU, a Worker request 10 ms on Workers Free.
+Everything that reads D1, parses mail or calls Gemini runs here: a Durable Object
+invocation has 30 s of CPU, a Worker request 10 ms on Workers Free. Todofy creates,
+reads and changes no task: Tasks converts a mail itself through the Mail entry. The
+weekly backup is the only Tasks call (its export, through the TASKS binding).
 
-Each alarm runs at most one ledger step (summary; or the task creation, lookup or
-completion of a row summarised before Mail stopped creating tasks) or one task-intent
-step (when both are due they take turns), then any due reminder, report and retention
-ticks (v2 plan §5.3).
+Each alarm runs at most one ledger step (a summary), then any due report and
+retention ticks (v2 plan §5.3).
 A canary event (contracts/ops-v1) takes the same summary step and then ends:
-it never reaches Tasks, the reports, the attention list or the reminder.
+it never reaches the reports or the attention list.
 An ops guard (``shed``) defers only the weekly backup, retention and the
 metrics rollup, each within its own bound (runtime/ops.py).
 DO SQLite holds only counters and schedule times that may be lost: every
@@ -48,7 +45,6 @@ from pyodide.ffi import JsException
 from workers import DurableObject, Response
 
 from todofy.core import gemini_wire, prompts
-from todofy.core import intents as intent_rules
 from todofy.core import ops as ops_rules
 from todofy.core.api_errors import ApiError
 from todofy.core.backoff import (
@@ -58,50 +54,28 @@ from todofy.core.backoff import (
     HOUR,
     MINUTE,
     REPORT_ON_DEMAND_BUDGET,
-    TASK_STEP_BUDGET,
     WATCHDOG,
     postpone_delay,
-    retry_delay,
     summary_gives_up,
 )
-from todofy.core.classify import TaskResult, classify_lookup
 from todofy.core.contract import MAX_EVENT_BYTES, UUID, ContractError, MailEvent, parse_mail_event
 from todofy.core.metrics import Step, StepPoint
-from todofy.core.render import clean_summary, content_notice, render_todo_body, task_title
-from todofy.core.request_id import todoist_request_id
+from todofy.core.render import clean_summary, content_notice
 from todofy.core.sql import views
-from todofy.core.todoist_request import RequestTooLarge, build_task_request
 from todofy.core.vocab import Code, EventState, Reconcile, allowed_actions
-from todofy.runtime import (
-    api,
-    backup,
-    gemini,
-    gtd,
-    intents,
-    ledger,
-    mail,
-    metrics,
-    native_tasks,
-    ops,
-    reminder,
-    reports,
-    retention,
-)
-from todofy.runtime.config import flag, gemini_email_models, gemini_models, integer, source_id, var
+from todofy.runtime import api, backup, gemini, ledger, mail, metrics, ops, reports, retention
+from todofy.runtime.config import flag, gemini_email_models, gemini_models, integer, source_id
 from todofy.runtime.http import NO_CONTENT, Result, failed, not_found, ok
 from todofy.runtime.interop import now_ms, now_s, read_capped, sha256_hex
 from todofy.runtime.ledger import WORKER, CompletedSummary, EventRow, OwnerAction
 from todofy.runtime.owner_ui import handle as handle_owner_ui
 
 DEFAULT_TOKEN_BUDGET = 3_000_000
-DEFAULT_LOOKUP_DELAY_MS = 2 * MINUTE * 1000
 DEFAULT_BACKOFF_BASE_MS = BACKOFF_BASE * 1000
 DEFAULT_WATCHDOG_MS = WATCHDOG * 1000
 # Room for the model's answer on top of the prompt estimate (v2 plan §5.3 step A).
 OUTPUT_TOKEN_ALLOWANCE = 4096
 MAX_SUMMARY_BYTES = 64 << 10
-# An automatic footer lookup that fails is retried with backoff about an hour, then left to the owner.
-LOOKUP_MAX_ATTEMPTS = 6
 REPORT_HOURLY_LIMIT = 30
 # An owner recompute's claim older than this whose run never finished (the object was evicted, or releasing it
 # failed) is taken over by the same request_id: three times the Gemini budget of one on-demand report.
@@ -115,7 +89,8 @@ RETENTION_CONTINUE = MINUTE
 USAGE_KEEP_DAYS = 7
 
 DO_SCHEMA = (
-    # todoist_blocked_until is no longer read: Tasks has no account-wide block.
+    # Neither todoist_blocked_until nor next_reminder_check is read any more: Tasks has no account-wide block, and
+    # Home sends the daily reminder.
     "CREATE TABLE IF NOT EXISTS control (id INTEGER PRIMARY KEY CHECK (id = 1),"
     " next_reminder_check INTEGER NOT NULL DEFAULT 0, next_report INTEGER NOT NULL DEFAULT 0,"
     " next_maintenance INTEGER NOT NULL DEFAULT 0, todoist_blocked_until INTEGER NOT NULL DEFAULT 0)",
@@ -130,6 +105,10 @@ DO_SCHEMA = (
     # The receipts of PlusService's writes and the journal of Todofy's planning writes: the Mail entry needs neither.
     "DROP TABLE IF EXISTS plus_receipts",
     "DROP TABLE IF EXISTS native_task_requests",
+    # The GTD ledger's job state and the dashboard's latest ops report (the reminder's digest): Tasks keeps GTD and
+    # Home sends the digest.
+    "DROP TABLE IF EXISTS gtd_state",
+    "DROP TABLE IF EXISTS ops_report",
     "CREATE TABLE IF NOT EXISTS report_requests (hour_bucket INTEGER PRIMARY KEY, count INTEGER NOT NULL)",
     # Failed precompute attempts per report and UTC day (reports.tick caps them).
     "CREATE TABLE IF NOT EXISTS report_failures (kind TEXT NOT NULL, top_n INTEGER NOT NULL, day TEXT NOT NULL,"
@@ -140,7 +119,7 @@ DO_SCHEMA = (
 )
 MAX_OWNER_CHARS = 254
 NEWSLETTER_KINDS = frozenset({reports.SUMMARY, reports.RECOMMENDATION})
-TICK_COLUMNS = ("next_reminder_check", "next_report", "next_maintenance")
+TICK_COLUMNS = ("next_report", "next_maintenance")
 SET_CONTROL = {column: f"UPDATE control SET {column} = ? WHERE id = 1" for column in TICK_COLUMNS}
 
 
@@ -175,14 +154,11 @@ class TodofyCore(DurableObject):
             *backup.DO_SCHEMA,
             *metrics.DO_SCHEMA,
             *ops.DO_SCHEMA,
-            *gtd.DO_SCHEMA,
         ):
             self.sql.exec(statement)
         self.running = False
         # A wake-up that arrived while the alarm loop was busy; honoured when it finishes.
         self.woken = False
-        # Whether a due task intent goes before due mail at the next step (they take turns).
-        self.intent_turn = False
 
     # ---- RPC methods (the gateway's COORDINATOR binding) -------------------------------------
 
@@ -252,7 +228,7 @@ class TodofyCore(DurableObject):
 
     # ---- ops-v1 (the gateway's Ops entrypoint; contracts/ops-v1) ------------------------------
     # Each returns {"ok": value} or {"error": OpsErrorCode} and never raises. They also work in
-    # maintenance mode: status reports it, setGuard and reportOps write only object storage.
+    # maintenance mode: status reports it, setGuard writes only object storage.
 
     @staticmethod
     def _ops_error(code: ops_rules.OpsError) -> dict[str, Any]:
@@ -276,7 +252,6 @@ class TodofyCore(DurableObject):
                 now = now_s()
                 self.sql.exec("UPDATE control SET next_maintenance = min(next_maintenance, ?) WHERE id = 1", now)
                 metrics.set_next_flush(self.sql, min(metrics.next_flush(self.sql), now))
-                gtd.release(self.sql, now)
                 await self.wake()
         except ops_rules.InvalidInput:
             return self._ops_error(ops_rules.OpsError.INVALID_INPUT)
@@ -295,69 +270,6 @@ class TodofyCore(DurableObject):
         except Exception as exc:
             _log(ops="canary_result_failed", error=type(exc).__name__)
             return self._ops_error(ops_rules.OpsError.UNAVAILABLE)
-
-    async def ops_report(self, report_json: str) -> dict[str, Any]:
-        now = now_s()
-        try:
-            received = ops_rules.report(ops_rules.loads(report_json), now)
-            result = ops.store_report(self.sql, received, now)
-            if result["stored"]:
-                # A day whose reminder is not created yet considers the new report at once (on its
-                # own it is due only from the UTC day after it was generated; reminder._ops_due).
-                self.sql.exec("UPDATE control SET next_reminder_check = min(next_reminder_check, ?) WHERE id = 1", now)
-                await self.wake()
-        except ops_rules.InvalidInput:
-            return self._ops_error(ops_rules.OpsError.INVALID_INPUT)
-        except Exception as exc:
-            _log(ops="report_failed", error=type(exc).__name__)
-            return self._ops_error(ops_rules.OpsError.UNAVAILABLE)
-        _log(ops="report", stored=result["stored"], items=result["item_count"])
-        return {"ok": result}
-
-    # ---- task-intent-v1 (the Intents entrypoint; contracts/task-intent-v1) --------------------
-    # Each returns {"ok": TaskIntentResult} or {"error": OpsErrorCode} and never raises.
-
-    async def task_intent_propose(self, input_json: str) -> dict[str, Any]:
-        return await self._intent_call("propose", intents.propose, input_json)
-
-    async def task_intent_status(self, input_json: str) -> dict[str, Any]:
-        return await self._intent_call("status", intents.status, input_json)
-
-    async def _intent_call(self, name: str, method: Any, input_json: str) -> dict[str, Any]:
-        try:
-            return {"ok": await method(self.env, self, input_json, now_s())}
-        except ops_rules.InvalidInput:
-            return self._ops_error(ops_rules.OpsError.INVALID_INPUT)
-        except Exception as exc:
-            _log(intent=f"{name}_failed", error=type(exc).__name__)
-            return self._ops_error(ops_rules.OpsError.UNAVAILABLE)
-
-    def intent_pause(self, now: int) -> intent_rules.Pause | None:
-        """Why intents are held now (nothing new is recorded, recorded ones wait), or None."""
-        env = self.env
-        return intent_rules.pause(
-            maintenance=flag(env, "MAINTENANCE_MODE"),
-            processing_paused=flag(env, "PROCESSING_PAUSED"),
-            force_pause=flag(env, "FORCE_PAUSE_TODOIST"),
-            backup_active=backup.holds_ledger(env, self.sql, now),
-        )
-
-    async def arm_watchdog(self) -> None:
-        await self._arm_watchdog()
-
-    def backoff_base(self) -> float:
-        return self._backoff_base()
-
-    def lookup_delay(self) -> float:
-        return self._lookup_delay()
-
-    def latest_ops_report(self) -> ops_rules.Report | None:
-        """The dashboard's latest report, for the reminder's ops digest (reminder.tick)."""
-        return ops.latest_report(self.sql)
-
-    def gtd_facts(self) -> Any:
-        """The GTD ledger's facts for ops status() (core.gtd.GtdFacts, object storage only)."""
-        return gtd.facts(self.env, self.sql)
 
     def usage_facts(self, now: int) -> dict[str, int]:
         """The Gemini budget as numbers, for ops status()."""
@@ -428,18 +340,11 @@ class TodofyCore(DurableObject):
         if action not in allowed_actions(row.state, row.last_error_code, canary=row.canary):
             return ApiError.ACTION_NOT_ALLOWED
         recorded = OwnerAction(owner, action_request_id, action, request_hash)
-        match action:
-            case Reconcile.TASK_CREATED:
-                # The alarm then completes it, like a task found by the lookup.
-                to, code, columns = EventState.TODO_CREATED, "", {"task_id": task_id, "next_attempt_at": now}
-            case Reconcile.TASK_NOT_CREATED:
-                # A footer lookup runs first; only if it finds nothing is the frozen request resent.
-                to, code, columns = EventState.TODO_UNKNOWN, "", {"attempt_count": 0, "next_attempt_at": now}
-            case Reconcile.RETRY_SUMMARY:
-                to, code = EventState.PENDING, ""
-                columns = {"attempt_count": 0, "crashes": 0, "next_attempt_at": now}
-            case _:
-                to, code, columns = EventState.IGNORED, Code.DISMISSED_BY_OWNER, {"next_attempt_at": 0}
+        if action == Reconcile.RETRY_SUMMARY:
+            to, code = EventState.PENDING, ""
+            columns = {"attempt_count": 0, "crashes": 0, "next_attempt_at": now}
+        else:  # allowed_actions offers nothing else but DISMISS
+            to, code, columns = EventState.IGNORED, Code.DISMISSED_BY_OWNER, {"next_attempt_at": 0}
         moved = await ledger.transition(db, row, to, actor=ledger.OWNER, now=now, code=code, action=recorded, **columns)
         if moved is None:
             return ApiError.VERSION_CONFLICT
@@ -640,11 +545,6 @@ class TodofyCore(DurableObject):
             )
             self.sql.exec("DELETE FROM llm_inflight WHERE event_id = ?", row.event_id)
 
-    # The pause of every task write, shared with runtime/gtd.py (the weekly review) and runtime/intents.py
-    # (task-intent-v1 creates).
-    def task_writes_wait(self, now: int) -> int | None:
-        return self._task_writes_wait(now)
-
     def _usage(self, now: int) -> dict[str, int]:
         rows = self.sql.exec(
             "SELECT reserved_tokens, used_tokens, calls FROM llm_usage WHERE day = ?", _day(now)
@@ -659,11 +559,6 @@ class TodofyCore(DurableObject):
     def _control(self) -> dict[str, int]:
         row = self.sql.exec("SELECT * FROM control WHERE id = 1").toArray()[0]
         return {name: int(getattr(row, name)) for name in TICK_COLUMNS}
-
-    def _task_writes_wait(self, now: int) -> int | None:
-        """None when tasks may be written now; 0 while FORCE_PAUSE_TODOIST pauses them (look at the next
-        wake-up)."""
-        return 0 if flag(self.env, "FORCE_PAUSE_TODOIST") else None
 
     def _ms(self, name: str, default: int) -> int:
         return integer(self.env, name, default)
@@ -692,7 +587,7 @@ class TodofyCore(DurableObject):
         now = now_s()
         await self._arm_watchdog()
         self._settle_interrupted_summaries()
-        await ledger.recover_interrupted(env.DB, now, lookup_at=_after(self._lookup_delay()))
+        await ledger.recover_interrupted(env.DB, now)
         may_start = ops.backup_defer_until(self.sql, now) is None
         resume_at = await backup.run(env, self.sql, now, may_start=may_start)
         if resume_at is not None:
@@ -701,41 +596,21 @@ class TodofyCore(DurableObject):
             return
         worked = False
         if not flag(env, "PROCESSING_PAUSED"):
-            worked = await self._step(now, writes_open=self._task_writes_wait(now) is None)
+            worked = await self._step(now)
         await self._ticks()
-        await self._gtd_tick()
         await storage.setAlarm(await self._next_alarm_ms(worked))
 
     async def _arm_watchdog(self) -> None:
         """Written before every external call, so an evicted run is resumed."""
         await self.ctx.storage.setAlarm(now_ms() + self._ms("WATCHDOG_MS", DEFAULT_WATCHDOG_MS))
 
-    async def _step(self, now: int, *, writes_open: bool) -> bool:
-        """At most one unit of ledger or task-intent work; whether there was any.
-
-        Intents write tasks at every step, so they are considered only while task writes are open; when
-        mail and an intent are both due they take turns, so neither holds up the other."""
-        db = self.env.DB
-        row = await ledger.next_due(db, now, writes=writes_open)
-        intent_first = writes_open and (row is None or self.intent_turn)
-        if intent_first and (intent := await intents.next_due(db, now)) is not None:
-            self.intent_turn = False
-            await intents.step(self.env, self, intent)
-            return True
-        self.intent_turn = True
-        if row is not None:
-            match row.state:
-                case EventState.PENDING:
-                    await self._summarize(row, now)
-                case EventState.SUMMARIZED:
-                    await self._create_task(row, now)
-                case _:
-                    await self._complete(row, now)
-            return True
-        if writes_open and (row := await ledger.next_lookup(db, now)) is not None:
-            await self._lookup(row, now)
-            return True
-        return False
+    async def _step(self, now: int) -> bool:
+        """At most one summary step; whether there was one."""
+        row = await ledger.next_due(self.env.DB, now)
+        if row is None:
+            return False
+        await self._summarize(row, now)
+        return True
 
     def _stored_event(self, row: EventRow) -> MailEvent | None:
         if row.payload is None:
@@ -747,9 +622,6 @@ class TodofyCore(DurableObject):
 
     def _backoff_base(self) -> float:
         return self._ms("BACKOFF_BASE_MS", DEFAULT_BACKOFF_BASE_MS) / 1000
-
-    def _lookup_delay(self) -> float:
-        return self._ms("LOOKUP_DELAY_MS", DEFAULT_LOOKUP_DELAY_MS) / 1000
 
     def _retry_at(self, attempts: int, retry_after: float = 0.0) -> int:
         return _after(postpone_delay(attempts, retry_after, self._backoff_base()))
@@ -813,7 +685,7 @@ class TodofyCore(DurableObject):
         done = now_s()
         verdict = result.verdict
         if canary:
-            await self._finish_canary(running, event, result, done)
+            await self._finish_canary(running, result, done)
         elif verdict.ok:
             summary = clean_summary(_utf8_prefix(result.text, MAX_SUMMARY_BYTES), event)
             # Mail is content until the owner converts it to a task from Tasks' Mail view.
@@ -840,27 +712,11 @@ class TodofyCore(DurableObject):
             )
         self.record_step(point, now)
 
-    async def _finish_canary(self, running: EventRow, event: MailEvent, result: gemini.GeminiResult, done: int) -> None:
-        """A canary's summary step ends it: ``complete`` when the answer passes the same checks a
-        real summary does (a task request is built, never sent), else retried or ``ignored``."""
+    async def _finish_canary(self, running: EventRow, result: gemini.GeminiResult, done: int) -> None:
+        """A canary's summary step ends it: ``complete`` when Gemini answered, else retried or ``ignored``. Its
+        summary is never stored, so it never becomes report input."""
         db, verdict = self.env.DB, result.verdict
         if verdict.ok:
-            summary = clean_summary(_utf8_prefix(result.text, MAX_SUMMARY_BYTES), event)
-            body = render_todo_body(event, summary)
-            sender = event.from_addresses[0].address if event.from_addresses else ""
-            try:
-                build_task_request(
-                    task_title(event),
-                    body,
-                    var(self.env, "TODOIST_DEFAULT_PROJECT_ID"),
-                    todoist_request_id(task_title(event), body, sender),
-                )
-            except RequestTooLarge:
-                await ledger.transition(
-                    db, running, EventState.IGNORED, actor=WORKER, now=done, code=Code.TODOIST_REJECTED
-                )
-                return
-            # No CompletedSummary: a canary never becomes report input.
             await ledger.transition(
                 db,
                 running,
@@ -883,138 +739,8 @@ class TodofyCore(DurableObject):
         )
         _log(canary=to, event_id=running.event_id, code=code)
 
-    async def _block_canary(self, row: EventRow, now: int) -> None:
-        """A canary at a step that would write a task (only an older release puts it there): end it."""
-        await ledger.transition(
-            self.env.DB,
-            row,
-            EventState.IGNORED,
-            actor=WORKER,
-            now=now,
-            code=Code.CANARY_SIDE_EFFECT_BLOCKED,
-            next_attempt_at=0,
-        )
-        _log(canary="blocked", event_id=row.event_id, state=row.state)
-
-    async def _create_task(self, row: EventRow, now: int) -> None:
-        """summarized -> complete: the Tasks create of a row summarised before Mail stopped creating tasks, or one
-        the owner asked to resend."""
-        db, env = self.env.DB, self.env
-        event = self._stored_event(row)
-        if row.canary or (event is not None and event.canary_run_id is not None):
-            await self._block_canary(row, now)
-            return
-        if event is None:
-            await ledger.transition(
-                db, row, EventState.FAILED_SUMMARY, actor=WORKER, now=now, code=Code.INVALID_SAVED_EVENT
-            )
-            return
-        try:
-            request = build_task_request(
-                task_title(event),
-                row.todo_body,
-                var(env, "TODOIST_DEFAULT_PROJECT_ID"),
-                row.todoist_request_id,
-            )
-        except RequestTooLarge:
-            await self._retry_task_later(row, Code.TODOIST_REJECTED, 0.0, now)
-            return
-        sending = await ledger.transition(db, row, EventState.TODO_SENDING, actor=WORKER, now=now)
-        if sending is None:
-            return
-        started = now_ms()
-        result = await native_tasks.create_task(env, request, budget_ms=TASK_STEP_BUDGET * 1000)
-        point = metrics.task_point(Step.TASK, result, now_ms() - started)
-        verdict, done = result.verdict, now_s()
-        _log(task=verdict.result, event_id=row.event_id, code=verdict.code)
-        match verdict.result:
-            case TaskResult.CREATED:
-                completed = CompletedSummary(event.subject, row.summary, row.summary_model, result.task_id)
-                await ledger.transition(
-                    db,
-                    sending,
-                    EventState.COMPLETE,
-                    actor=WORKER,
-                    now=done,
-                    completed=completed,
-                    task_id=result.task_id,
-                    attempt_count=0,
-                    next_attempt_at=0,
-                )
-            case TaskResult.UNKNOWN:
-                lookup_at = _after(self._lookup_delay())
-                await ledger.transition(
-                    db,
-                    sending,
-                    EventState.TODO_UNKNOWN,
-                    actor=WORKER,
-                    now=done,
-                    code=verdict.code or Code.TODO_RESULT_UNKNOWN,
-                    attempt_count=0,
-                    next_attempt_at=lookup_at,
-                )
-            case TaskResult.RETRY_LATER:
-                code = verdict.code or Code.TODOIST_UNAVAILABLE
-                await self._retry_task_later(sending, code, verdict.retry_after, done)
-        # After the commit: the task already exists, and only the ledger may say so first.
-        self.record_step(point, now)
-
-    async def _retry_task_later(self, row: EventRow, code: str, retry_after: float, now: int) -> None:
-        await ledger.transition(
-            self.env.DB,
-            row,
-            EventState.SUMMARIZED,
-            actor=WORKER,
-            now=now,
-            code=code,
-            attempt_count=row.attempt_count + 1,
-            next_attempt_at=self._retry_at(row.attempt_count, retry_after),
-        )
-
-    async def _complete(self, row: EventRow, now: int) -> None:
-        """todo_created -> complete: the task exists, record it for the reports."""
-        event = self._stored_event(row)
-        if row.canary or (event is not None and event.canary_run_id is not None):
-            # Never report input, whatever an older release did with it.
-            await ledger.transition(self.env.DB, row, EventState.COMPLETE, actor=WORKER, now=now, next_attempt_at=0)
-            return
-        completed = CompletedSummary(event.subject if event else "", row.summary, row.summary_model, row.task_id)
-        await ledger.transition(
-            self.env.DB, row, EventState.COMPLETE, actor=WORKER, now=now, completed=completed, next_attempt_at=0
-        )
-
-    async def _lookup(self, row: EventRow, now: int) -> None:
-        """Read-only footer lookup for a todo_unknown row (v2 plan §5.3 step B′)."""
-        db = self.env.DB
-        if row.canary:
-            await self._block_canary(row, now)
-            return
-        confirmed = await ledger.owner_confirmed_resend(db, row.event_id)
-        started = now_ms()
-        found = await native_tasks.find_footer_tasks(self.env, row.event_id)
-        state, code = classify_lookup(None if found is None else len(found))
-        point = StepPoint(Step.LOOKUP, state, code=code or "", upstream_ms=now_ms() - started)
-        done, attempts = now_s(), row.attempt_count + 1
-        _log(lookup=code or state, event_id=row.event_id, owner_confirmed=confirmed)
-        if state == EventState.TODO_CREATED:
-            await ledger.transition(
-                db, row, state, actor=WORKER, now=done, task_id=found[0], attempt_count=0, next_attempt_at=done
-            )
-        elif code == Code.LOOKUP_NOT_FOUND and confirmed:
-            # The owner confirmed no task exists and the lookup agrees: resend the frozen request.
-            await ledger.transition(
-                db, row, EventState.SUMMARIZED, actor=WORKER, now=done, attempt_count=0, next_attempt_at=done
-            )
-        else:
-            retry = code == Code.LOOKUP_FAILED and not confirmed and attempts < LOOKUP_MAX_ATTEMPTS
-            next_at = _after(retry_delay(row.attempt_count, self._backoff_base())) if retry else 0
-            await ledger.transition(
-                db, row, state, actor=WORKER, now=done, code=code, attempt_count=attempts, next_attempt_at=next_at
-            )
-        self.record_step(point, now)
-
     async def _ticks(self) -> None:
-        """Reminder, report precompute and retention, each when its control time is due."""
+        """Report precompute and retention, each when its control time is due."""
         control = self._control()
         for column in TICK_COLUMNS:
             now = now_s()
@@ -1060,28 +786,11 @@ class TodofyCore(DurableObject):
         if ops_rules.completed_run(finished, next_at, now, metrics.CONTINUE):
             ops.ran(self.sql, ops_rules.Job.METRICS_ROLLUP, now)
 
-    async def _gtd_tick(self) -> None:
-        """The GTD ledger's daily snapshot and weekly review (runtime/gtd.py), when either is due."""
-        now = now_s()
-        if gtd.next_at(self.sql) > now:
-            return
-        await self._arm_watchdog()
-        try:
-            await gtd.tick(self.env, self, now)
-        except Exception as exc:
-            # Like the other ticks: one failure must not stall the ledger; the job resumes from its state.
-            _log(tick="gtd", error=type(exc).__name__)
-            gtd.retry_later(self.sql, now, now + TICK_RETRY)
-
     async def _tick(self, column: str, now: int) -> int:
-        match column:
-            case "next_reminder_check":
-                return await reminder.tick(self.env, self, now)
-            case "next_report":
-                return await reports.tick(self.env, self, now)
-            case _:
-                more = await retention.tick(self.env.DB, self.env, now)
-                return now + (RETENTION_CONTINUE if more else DAY)
+        if column == "next_report":
+            return await reports.tick(self.env, self, now)
+        more = await retention.tick(self.env.DB, self.env, now)
+        return now + (RETENTION_CONTINUE if more else DAY)
 
     async def _next_alarm_ms(self, worked: bool) -> int:
         soon = now_ms() + 1000
@@ -1089,17 +798,10 @@ class TodofyCore(DurableObject):
             return soon  # keep draining
         now = now_s()
         control = self._control()
-        times = [*(control[column] for column in TICK_COLUMNS), metrics.next_flush(self.sql), gtd.next_at(self.sql)]
+        times = [*(control[column] for column in TICK_COLUMNS), metrics.next_flush(self.sql)]
         if (backup_at := backup.next_run(self.env, self.sql)) is not None:
             # A backup an ops guard holds back is considered again when the guard allows it.
             times.append(max(backup_at, ops.backup_defer_until(self.sql, now) or 0))
-        if not flag(self.env, "PROCESSING_PAUSED"):
-            wait = self._task_writes_wait(now)
-            if wait:
-                times.append(wait)
-            due = await ledger.next_wake_at(self.env.DB, writes=wait is None)
-            if due is not None:
-                times.append(due)
-            if wait is None and (intent_due := await intents.next_wake_at(self.env.DB)) is not None:
-                times.append(intent_due)
+        if not flag(self.env, "PROCESSING_PAUSED") and (due := await ledger.next_wake_at(self.env.DB)) is not None:
+            times.append(due)
         return max(min(times) * 1000, soon)

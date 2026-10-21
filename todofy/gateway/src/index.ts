@@ -2,9 +2,8 @@
  * Worker "todofy": the thin TypeScript gateway in front of todofy-core.
  *
  * On Workers Free a plain Worker invocation has 10 ms of CPU; this Worker only routes by Host,
- * checks credentials and serves assets, and hands everything that touches D1, mail payloads,
- * Gemini or Todoist to the TodofyCore object (30 s per invocation). See
- * docs/gateway-contract.md.
+ * checks credentials and serves assets, and hands everything that touches D1, mail payloads
+ * or Gemini to the TodofyCore object (30 s per invocation). See docs/gateway-contract.md.
  */
 import { coordinator } from './coordinator.ts';
 import { csv, variable, type Env } from './env.ts';
@@ -13,11 +12,12 @@ import { errorResponse, newRequestId, type Context } from './http.ts';
 import { declaredBytes, recordRequest, routeOf, type HostKind } from './metrics.ts';
 import { handleOwner } from './owner.ts';
 
-// ops-v1: the named entrypoint a dashboard Worker binds (contracts/ops-v1); no public route. Intents: task-intent-v1
-// only, for the one source its binding's props name (the watch app). Mail: todofy.mail.v1, for the access its
-// binding's props grant (Tasks, the Personal MCP).
-export { Intents, Ops } from './ops.ts';
+// The named entrypoints other Workers of the account bind; no public route serves any. Ops: ops-v1, for the
+// dashboard (contracts/ops-v1). Mail: todofy.mail.v1, for the access its binding's props grant (Tasks, the Personal
+// MCP). Planning, MailApi and Intents: retired, refusals for this release only (retired.ts).
+export { Ops } from './ops.ts';
 export { Mail } from './mail.ts';
+export { Intents, MailApi, Planning } from './retired.ts';
 
 /** The public host is matched before the hooks hosts. */
 function hostKind(ctx: Context): HostKind {

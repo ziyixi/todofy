@@ -25,7 +25,7 @@ from todofy.core.contract import (
     utf8_len,
 )
 from todofy.core.gemini_wire import summary_content
-from todofy.core.render import FOOTER_PREFIX, content_notice, render_todo_body, task_title
+from todofy.core.render import content_notice
 
 FIXTURES = mail_contract.fixtures()
 NAMES = list(FIXTURES)
@@ -131,12 +131,9 @@ def test_only_legacy_fixtures_are_frozen_byte_for_byte():
 
 
 @pytest.mark.parametrize("name", NAMES)
-def test_every_mail_hero_shape_is_accepted_and_renders(name):
+def test_every_mail_hero_shape_is_accepted(name):
     parsed = event(name)
     assert parsed.received_at == RECEIVED
-    body = render_todo_body(parsed, "摘要")
-    assert body.endswith(f"\n\n{FOOTER_PREFIX}{parsed.event_id}")
-    assert task_title(parsed).strip()
     if not parsed.unreadable:
         assert summary_content(parsed).strip()
 
@@ -145,7 +142,6 @@ def test_optional_fields_absent_or_null_as_mail_hero_sends_them():
     bare = event("no_date_no_message_id")
     assert (bare.sent_at, bare.rfc_message_id, bare.to_addresses) == (None, None, ())
     assert bare.from_addresses[0].name == ""
-    assert "**DATE: 2026-09-28T08:00:00Z**" in render_todo_body(bare, "s")
 
     old = event("pre_storage_v1")
     assert (old.text_truncated, old.original_text_bytes, old.content_policy_version, old.warnings) == (
@@ -157,10 +153,6 @@ def test_optional_fields_absent_or_null_as_mail_hero_sends_them():
 
     synthetic = event("synthetic_test_event")
     assert (synthetic.subject, synthetic.to_addresses, synthetic.sent_at) == ("Mail Hero webhook test", (), None)
-
-
-def test_body_only_mail_gets_the_placeholder_title():
-    assert task_title(event("body_only_no_subject")) == "(No subject)"
 
 
 def test_chinese_and_html_derived_text_arrive_verbatim():
@@ -214,7 +206,6 @@ def test_the_largest_event_fits_the_webhook_limit():
 def test_extended_year_sent_at_is_accepted():
     """Mail Hero writes ``new Date(header).toISOString()``: a Date header in year 10000
     becomes ``+010000-01-01T00:00:00.000Z``. Python cannot represent it, so the event
-    must be accepted with no send time and the task falls back to ``received_at``."""
+    must be accepted with no send time; it keeps its ``received_at``."""
     parsed = event("sent_at_extended_year")
-    assert parsed.sent_at is None
-    assert "**DATE: 2026-09-28T08:00:00Z**" in render_todo_body(parsed, "s")
+    assert (parsed.sent_at, parsed.received_at) == (None, RECEIVED)

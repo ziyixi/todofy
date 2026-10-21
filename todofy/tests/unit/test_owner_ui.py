@@ -148,32 +148,16 @@ class TestCursors:
         with refused(Reason.BAD_REQUEST):
             ui.event_cursor(text)
 
-    def test_text_cursors(self):
-        assert ui.text_cursor('{"day": "2026-09-28"}', "day", ui.DAY) == "2026-09-28"
-        assert ui.text_cursor('{"week": "2026-W39"}', "week", ui.WEEK) == "2026-W39"
-        assert ui.text_cursor('{"week": "2026-W53"}', "week", ui.WEEK) == "2026-W53"  # 2026 has 53 ISO weeks
+    def test_day_cursors(self):
+        assert ui.day_cursor('{"day": "2026-09-28"}') == "2026-09-28"
         with refused(Reason.BAD_REQUEST):
-            ui.text_cursor('{"day": "2026-9-28"}', "day", ui.DAY)
+            ui.day_cursor('{"day": "2026-9-28"}')
         assert ui.cursor_text(None) is None
 
-    @pytest.mark.parametrize(
-        ("key", "value"),
-        [
-            ("day", "2026-02-30"),
-            ("day", "2026-13-01"),
-            ("day", "2026-00-10"),
-            ("day", "0001-01-01"),
-            ("day", "1969-12-31"),
-            ("week", "2026-W99"),
-            ("week", "2026-W00"),
-            ("week", "2025-W53"),  # 2025 has 52
-            ("week", "0001-W01"),
-        ],
-    )
-    def test_a_cursor_must_name_a_real_day_or_week(self, key, value):
-        pattern = ui.DAY if key == "day" else ui.WEEK
+    @pytest.mark.parametrize("value", ["2026-02-30", "2026-13-01", "2026-00-10", "0001-01-01", "1969-12-31"])
+    def test_a_cursor_must_name_a_real_day(self, value):
         with refused(Reason.BAD_REQUEST):
-            ui.text_cursor(json.dumps({key: value}), key, pattern)
+            ui.day_cursor(json.dumps({"day": value}))
 
 
 def summary_row(**overrides):
@@ -259,10 +243,6 @@ class TestMessages:
         assert wire["legacy_text"] == f"legacyTexts/{EVENT}"
         assert wire["canary"] is True and "allowed_actions" not in wire
 
-    def test_a_review_id_is_its_iso_week_in_lower_case(self):
-        review = {"week": "2026-W40", "state": "created", "created_at": AT, "completed_at": None}
-        assert json.loads(ui.answer(ui.gtd_review(review)))["name"] == "gtdReviews/2026-w40"
-
     def test_an_unknown_code_reads_as_unset(self):
         wire = json.loads(ui.answer(ui.mail_event(summary_row(error_code="something_new"), full=False)))
         assert "error_code" not in wire
@@ -272,27 +252,17 @@ class TestMessages:
         overview = {
             "build": "abc",
             "now": AT,
+            # The legacy owner API's shape keeps the retired switches (false) and an empty latest reminder.
             "flags": {
                 "maintenance_mode": False,
                 "processing_paused": True,
                 "force_pause_todoist": False,
-                "reminder_enabled": True,
+                "reminder_enabled": False,
             },
             "counts": {state: index for index, state in enumerate(ACTIVE_STATES)},
             "attention_count": 1,
             "received_24h": 42,
-            "latest_reminder": {
-                "day": "2026-09-28",
-                "state": "created",
-                "task_id": "123",
-                "attention_count": 2,
-                "attempts": 1,
-                "error_code": None,
-                "next_attempt_at": None,
-                "created_at": AT,
-                "updated_at": AT,
-                "imported": False,
-            },
+            "latest_reminder": None,
             "next_alarm_at": AT,
             "oldest_due_at": None,
             "gemini": {
@@ -319,9 +289,9 @@ class TestMessages:
             overview["gemini"]["email_models"] = email_models
         wire = json.loads(ui.answer(ui.service_status(overview)))
         assert wire["name"] == "serviceStatus" and wire["read_time"] == AT
-        assert wire["switches"] == {"processing_paused": True, "reminder_enabled": True}
+        assert wire["switches"] == {"processing_paused": True}
         assert wire["active_counts"]["failed_summary_count"] == 6
-        assert wire["latest_reminder"]["name"] == "dailyReminders/2026-09-28"
+        assert "latest_reminder" not in wire
         # A budget beyond int32 is written as the bound instead of failing the page.
         assert wire["gemini"]["token_budget"] == 2**31 - 1
         assert wire["gemini"]["models"] == ["m1", "m2"]
@@ -334,7 +304,7 @@ class TestMessages:
         assert decoded.gemini.email_models == tuple(email_models or ())
         assert wire["backup"]["state"] == "ok" and "next_alarm_time" in wire
 
-    def test_metric_and_gtd_days(self):
+    def test_metric_days(self):
         day = {
             "day": "2026-09-27",
             "recorded": True,
@@ -351,25 +321,6 @@ class TestMessages:
         wire = json.loads(ui.answer(ui.metric_day(day)))
         assert wire["name"] == "metricDays/2026-09-27" and wire["latency_p50_seconds"] == 18
         assert "latency_p90_seconds" not in wire and wire["gemini_tokens"] == {"m1": 402113}
-        scope = {
-            "open": 9,
-            "age_0_7": 1,
-            "age_8_14": 2,
-            "age_15_30": 3,
-            "age_31_plus": 3,
-            "oldest_days": 40,
-            "overdue": 0,
-            "undated": 5,
-            "created_7d": None,
-            "completed_7d": 0,
-            "completed_source": "api",
-            "closed_1d": 2,
-            "mail_open": None,
-            "complete": True,
-        }
-        gtd = json.loads(ui.answer(ui.gtd_day({"day": "2026-09-28", "recorded": True, "all": scope, "inbox": None})))
-        assert gtd["all_projects"]["old_count"] == 3 and gtd["all_projects"]["completed_last_week_count"] == 0
-        assert "created_last_week_count" not in gtd["all_projects"] and "inbox" not in gtd
 
     def test_reports_read_leniently(self):
         report = {

@@ -2,16 +2,15 @@
 entrypoint over a service binding, in front of the real gateway, core, D1 and object.
 
 Canary events are processed through (fake) Gemini and end ``ok`` without any Tasks write,
-report input, list entry, count or reminder; status/setGuard/canaryResult/reportOps answer
-values that validate against the shared schema; a shed guard defers retention and lets it run
-once it ends; the daily reminder carries the ops digest, one task per day.
+report input, list entry or count; status/setGuard/canaryResult answer values that validate
+against the shared schema; a shed guard defers retention and lets it run once it ends. Todofy
+offers no reportOps since 2026-10-21: Home creates the daily reminder itself.
 """
 
 import json
 import time
 import uuid
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -20,11 +19,10 @@ from tests import mail_contract
 from tests.fakes.gemini_fake import GeminiFake, error_reply
 from tests.runtime import tasks_support as tasks
 from tests.runtime.conftest import pipeline_vars
-from tests.runtime.harness import error_code, mail_event, reason, transitions, wait_until
+from tests.runtime.harness import error_code, mail_event, transitions, wait_until
 from tests.runtime.ops_support import OpsStack, start_ops_stack
 from todofy.core import ops
 from todofy.core.prompts import SUMMARY_RANGE
-from todofy.core.reminder_text import reminder_body, reminder_title
 
 CANARY = mail_contract.fixtures()["canary_event"].read_bytes()
 CANARY_ID = json.loads(CANARY)["event_id"]
@@ -108,12 +106,9 @@ def test_status_validates_and_carries_no_mail_content(stack: OpsStack) -> None:
     status = stack.ok("status", definition="OpsStatus")
 
     assert marker not in json.dumps(status)
-    assert (status["app"], status["health"], status["capabilities"]) == (
-        "todofy",
-        "ok",
-        ["canary_consumer", "guard", "ops_digest"],
-    )
-    assert [s["code"] for s in status["signals"]] == ["backup_disabled", "reminder_disabled"]
+    assert (status["app"], status["health"], status["capabilities"]) == ("todofy", "ok", ["canary_consumer", "guard"])
+    assert [s["code"] for s in status["signals"]] == ["backup_disabled"]
+    assert set(status["modes"]) == {"maintenance", "processing_paused", "backup_active"}
     assert status["counters"]["received_24h"] >= 1
     assert status["ui_url"] == "https://todofy.localhost/"
     assert status["guard"]["level"] == "normal"
@@ -181,50 +176,18 @@ def test_a_canary_whose_summary_keeps_failing_ends_failed_after_three_attempts(
     assert stack.ok("status", definition="OpsStatus")["counters"]["attention_events"] == 0
 
 
-@pytest.mark.reaches("canary_side_effect_blocked")
-def test_a_canary_left_at_a_task_step_by_an_older_release_never_reaches_tasks(stack: OpsStack) -> None:
-    now = int(time.time())
-    summarized, unknown, created = (str(uuid.uuid4()) for _ in range(3))
-    _, body = canary_event()
-    seed(stack, summarized, "summarized", body=body, created_at=now - 60, summary="s", todo_body="b")
-    seed(stack, unknown, "todo_unknown", body=body, created_at=now - 60, next_attempt_at=now - 1)
-    seed(stack, created, "todo_created", body=body, created_at=now - 60, task_id="6Xolder")
-    refused = stack.reconcile(unknown, "task_not_created")
-    assert (refused.status_code, reason(refused)) == (400, "ACTION_NOT_ALLOWED")
-
-    real_id, real = mail_event()  # wakes the alarm loop
-    assert stack.post_event(real).status_code == 204
-    stack.wait_event(real_id, {"complete"})
-
-    for event_id in (summarized, unknown):
-        stack.wait_event(event_id, {"ignored"})
-        blocked = stack.event(event_id)
-        assert (blocked["error_code"], blocked["canary"]) == ("canary_side_effect_blocked", True)
-        result = stack.ok("canaryResult", event_id, definition="CanaryResult")
-        assert (result["state"], result["error_code"]) == ("failed", "canary_side_effect_blocked")
-    assert stack.wait_event(created, {"complete"})["canary"] is True
-    assert stack.ok("canaryResult", created, definition="CanaryResult")["state"] == "ok"
-    assert tasks.created(stack) == []
-    ids = "', '".join((summarized, unknown, created))
-    assert stack.d1(f"SELECT count(*) AS n FROM summaries WHERE event_id IN ('{ids}')") == [{"n": 0}]
-
-
 def test_an_interrupted_canary_ends_failed_where_mail_would_wait_for_the_owner(stack: OpsStack) -> None:
-    now = int(time.time())
-    crashed, sending = str(uuid.uuid4()), str(uuid.uuid4())
+    crashed = str(uuid.uuid4())
     _, body = canary_event()
-    seed(stack, crashed, "summarizing", body=body, created_at=now - 60, crashes=2)
-    seed(stack, sending, "todo_sending", body=body, created_at=now - 60, summary="s", todo_body="b")
+    seed(stack, crashed, "summarizing", body=body, created_at=int(time.time()) - 60, crashes=2)
 
     real_id, real = mail_event()  # wakes the alarm loop, which first settles interrupted rows
     assert stack.post_event(real).status_code == 204
     stack.wait_event(real_id, {"complete"})
 
     assert stack.wait_event(crashed, {"ignored"})["error_code"] == "processing_interrupted_limit"
-    assert stack.wait_event(sending, {"ignored"})["error_code"] == "canary_side_effect_blocked"
-    for event_id, code in ((crashed, "processing_interrupted_limit"), (sending, "canary_side_effect_blocked")):
-        result = stack.ok("canaryResult", event_id, definition="CanaryResult")
-        assert (result["state"], result["error_code"]) == ("failed", code)
+    result = stack.ok("canaryResult", crashed, definition="CanaryResult")
+    assert (result["state"], result["error_code"]) == ("failed", "processing_interrupted_limit")
     assert tasks.created(stack) == []
 
 
@@ -239,39 +202,12 @@ def test_canary_result_of_a_real_mail_or_a_bad_id(stack: OpsStack) -> None:
 # ---- reportOps ---------------------------------------------------------------------------------
 
 
-def daily_report(generated_at: float, **changes: Any) -> dict[str, Any]:
-    path = mail_contract.TODOFY.parent / "contracts" / "ops-v1" / "fixtures" / "OpsReport" / "daily.json"
-    return json.loads(path.read_text()) | {"generated_at": stamp(generated_at)} | changes
-
-
-def test_report_ops_stores_the_latest_report_within_its_bounds(stack: OpsStack) -> None:
-    now = time.time()
-    report = daily_report(now - 60)
-    item = report["items"][0]
-    invalid = [
-        daily_report(now, items=[item] * 21),
-        daily_report(now + 600),  # more than 5 minutes ahead
-        daily_report(now, items=[item | {"metrics": {"subject": "Invoice 42"}}]),
-        daily_report(now, items=[item | {"note": "free text"}]),
-        daily_report(now, items=[item | {"code": "Endpoint blocked"}]),
-        daily_report(now, dashboard_url="http://home.example.com/"),
-        {"items": []},
-        [],
-        daily_report(  # over 8 KiB of compact JSON (refused by the gateway)
-            now, items=[item | {"code": "c" * 48, "metrics": {f"m{i}_{'x' * 40}": 1.5 for i in range(12)}}] * 20
-        ),
-    ]
-    for value in invalid:
-        assert stack.ops("reportOps", value) == {"error": "invalid_input", "name": "Error"}
-
-    stored = stack.ok("reportOps", report, definition="OpsReportReceipt")
-    assert stored == {"stored": True, "generated_at": stamp(now - 60), "item_count": 5}
-    older = stack.ok("reportOps", daily_report(now - 3600, items=[]), definition="OpsReportReceipt")
-    assert older == stored | {"stored": False}
-    cleared = stack.ok("reportOps", daily_report(now, items=[]), definition="OpsReportReceipt")
-    assert cleared == {"stored": True, "generated_at": stamp(now), "item_count": 0}
-    # This server's reminder is off: no reminder task.
-    assert [task for task in tasks.created(stack) if task["title"].startswith("[Todofy System]")] == []
+def test_report_ops_is_not_offered(stack: OpsStack) -> None:
+    """Home creates the daily reminder in Tasks itself; Todofy implements no OpsDigestService."""
+    report = {"generated_at": stamp(time.time() - 60), "items": []}
+    answer = stack.ops("reportOps", report)
+    assert "ok" not in answer and answer["error"]
+    assert "ops_digest" not in stack.ok("status", definition="OpsStatus")["capabilities"]
 
 
 # ---- setGuard ----------------------------------------------------------------------------------
@@ -282,7 +218,7 @@ def test_set_guard_is_idempotent_bounded_and_expires(stack: OpsStack) -> None:
     shed = {"level": "shed", "reason": "d1_reads_high", "until": stamp(now + 3600)}
     first = stack.ok("setGuard", shed, definition="GuardState")
     assert (first["level"], first["reason"], first["until"]) == ("shed", "d1_reads_high", shed["until"])
-    assert first["deferred"] == ["weekly_backup", "retention", "metrics_rollup", "gtd_snapshot"]
+    assert first["deferred"] == ["weekly_backup", "retention", "metrics_rollup"]
     time.sleep(1.1)
     assert stack.ok("setGuard", shed, definition="GuardState") == first  # same set_at
     status = stack.ok("status", definition="OpsStatus")
@@ -358,42 +294,3 @@ def test_maintenance_reads_as_down_and_the_surface_keeps_working(launch_stack: S
     }
     guard = {"level": "shed", "reason": "maintenance", "until": stamp(time.time() + 600)}
     assert down.ok("setGuard", guard, definition="GuardState")["level"] == "shed"
-    assert down.ok("reportOps", daily_report(time.time()), definition="OpsReportReceipt")["stored"] is True
-
-
-# ---- digest --------------------------------------------------------------------------------------
-
-
-def test_the_daily_reminder_carries_the_ops_digest_once_a_day(
-    launch_stack: StackLaunch, fresh_gemini: GeminiFake
-) -> None:
-    digesting = launch_stack(REMINDER_ENABLED="true")
-    now = time.time()
-    # A canary that would need attention if it were mail: never counted or listed in the reminder.
-    stuck = str(uuid.uuid4())
-    _, body = canary_event()
-    seed(digesting, stuck, "failed_summary", body=body, created_at=int(now) - 7 * 3600)
-    canary_id, canary = canary_event()
-    assert digesting.post_event(canary).status_code == 204
-    wait_canary(digesting, canary_id, {"ok"})
-    assert tasks.created(digesting) == []  # nothing needs attention and there is no ops report yet
-
-    # A report generated before today's UTC day began (the dashboard's 23:40 report) is today's
-    # digest; one from today would wait for tomorrow (test_reminder_daily.py).
-    report = daily_report(now - now % 86_400 - 60)
-    digesting.ok("reportOps", report, definition="OpsReportReceipt")
-    [task] = wait_until(lambda: tasks.created(digesting) or None, 30, "the reminder task")
-
-    day = datetime.fromtimestamp(now, UTC).date().isoformat()
-    digest = ops.digest(ops.report(report, int(now)), int(now))
-    assert digest is not None and len(digest.items) == 4
-    assert task["title"] == reminder_title(0, 4) == "[Todofy System] 运维：4 项需要关注"
-    assert task["description"] == reminder_body(0, day, [], "todofy.localhost", digest)
-    assert stuck not in task["description"] and canary_id not in task["description"]
-    row = digesting.d1(f"SELECT state, attention_count, ops_count FROM mail_reminders WHERE day = '{day}'")
-    assert row == [{"state": "created", "attention_count": 0, "ops_count": 4}]
-
-    # A newer report the same day never makes a second task.
-    digesting.ok("reportOps", daily_report(time.time()), definition="OpsReportReceipt")
-    time.sleep(4)
-    assert len(tasks.created(digesting)) == 1

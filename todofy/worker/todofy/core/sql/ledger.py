@@ -8,11 +8,7 @@ above them won. The version alone is not enough: a writer one version behind
 would still match the row that another writer has just moved to that version.
 """
 
-from ..vocab import EventState
-from . import DUE, Query, sql_list
-
-# Due states that write no task (used while task writes are paused).
-DUE_WITHOUT_TODOIST = f"state IN ({sql_list([EventState.PENDING, EventState.TODO_CREATED])})"
+from . import DUE, Query
 
 EVENT = Query("SELECT * FROM mail_events WHERE source_id = ? AND event_id = ?", "sqlite_autoindex_mail_events_1")
 
@@ -61,39 +57,15 @@ COMPLETE_SUMMARY = Query(
     " ON CONFLICT (event_id) DO NOTHING",
     "sqlite_autoindex_mail_events_1",
 )
-LATEST_TRANSITION = Query(
-    "SELECT from_state, to_state, actor FROM event_transitions WHERE event_id = ? ORDER BY at DESC, id DESC LIMIT 1",
-    "event_transitions_event",
-)
 
 NEXT_DUE = Query(
     f"SELECT * FROM mail_events WHERE {DUE} AND next_attempt_at <= ? ORDER BY created_at LIMIT 1",
     "mail_events_due",
     sort_allowed=True,
 )
-NEXT_DUE_WITHOUT_TODOIST = Query(
-    f"SELECT * FROM mail_events WHERE {DUE_WITHOUT_TODOIST} AND next_attempt_at <= ? ORDER BY created_at LIMIT 1",
-    "mail_events_due",
-    sort_allowed=True,
-)
 NEXT_WAKE = Query(f"SELECT min(next_attempt_at) AS at FROM mail_events WHERE {DUE}", "mail_events_due")
-NEXT_WAKE_WITHOUT_TODOIST = Query(
-    f"SELECT min(next_attempt_at) AS at FROM mail_events WHERE {DUE_WITHOUT_TODOIST}", "mail_events_due"
-)
-# next_attempt_at = 0 means no lookup is scheduled.
-LOOKUP_DUE = Query(
-    "SELECT * FROM mail_events WHERE state = 'todo_unknown' AND next_attempt_at > 0"
-    " AND next_attempt_at <= ? ORDER BY next_attempt_at LIMIT 1",
-    "mail_events_due",
-)
-NEXT_LOOKUP = Query(
-    "SELECT min(next_attempt_at) AS at FROM mail_events WHERE state = 'todo_unknown' AND next_attempt_at > 0",
-    "mail_events_due",
-)
 # Only one step runs at a time, so at most one row is ever caught mid-call.
-INTERRUPTED = Query(
-    "SELECT * FROM mail_events WHERE state IN ('summarizing', 'todo_sending') LIMIT 10", "mail_events_due"
-)
+INTERRUPTED = Query("SELECT * FROM mail_events WHERE state = 'summarizing' LIMIT 10", "mail_events_due")
 
 OWNER_ACTION = Query(
     "SELECT request_hash, result_ref, http_status FROM owner_actions WHERE owner = ? AND action_request_id = ?",

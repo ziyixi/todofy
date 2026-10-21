@@ -307,6 +307,7 @@ describe('task links', () => {
 describe('GetIntegration', () => {
   const coreSetup = {
     mail_source_id: 'mail-hero-personal',
+    // A core before 2026-10-21 also answered todoist_project; Todofy files no task any more, so it is never shown.
     configured: { gemini_api_key: true, todoist_project: true },
   };
 
@@ -326,7 +327,7 @@ describe('GetIntegration', () => {
       webhook_path: '/hooks/mail',
       mail_source_id: 'mail-hero-personal',
       access_owner: OWNER,
-      configured: { mail_webhook_token: true, gemini_api_key: true, todoist_project: true },
+      configured: { mail_webhook_token: true, gemini_api_key: true },
     });
     expect(calls).toEqual([{ instance: 'inbox-v1', method: 'setup', args: [] }]);
   });

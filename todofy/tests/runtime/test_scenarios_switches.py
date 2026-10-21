@@ -1,4 +1,4 @@
-"""Global brakes: the three operator switches and the daily token budget.
+"""Global brakes: the two operator switches and the daily token budget.
 
 Each state is global to the Durable Object, so every test here starts its own Worker.
 """
@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from tests.fakes.gemini_fake import GeminiFake
-from tests.runtime import tasks_support as tasks
 from tests.runtime.conftest import Launch
 from tests.runtime.harness import AUTH, HOOKS_HOST, Worker, mail_event, reason
 
@@ -78,14 +77,3 @@ def test_processing_paused_accepts_mail_but_does_no_work(launch: Launch, fresh_g
     assert worker.event(event_id)["state"] == "pending"
     assert fresh_gemini.calls() == []
     assert worker.overview()["switches"]["processing_paused"] is True
-
-
-def test_force_pause_todoist_summarises_mail_and_writes_no_task(launch: Launch, fresh_gemini: GeminiFake) -> None:
-    worker = launch(FORCE_PAUSE_TODOIST="true")
-    event_id = _arrive(worker)
-
-    worker.wait_event(event_id, {"complete"})  # Mail needs no task
-    time.sleep(QUIET_S)
-
-    assert len(fresh_gemini.calls_mentioning(event_id)) == 1 and tasks.created(worker) == []
-    assert worker.overview()["switches"]["force_pause_todoist"] is True

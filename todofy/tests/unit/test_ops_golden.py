@@ -4,9 +4,9 @@ The dashboard reads these answers (a Python dict crosses the Durable Object RPC 
 refactor of core/ops.py (its move onto the generated proto types, for one) must not change one byte of them.
 Every case is compared as the compact JSON the dashboard would see (JSON.stringify of the JavaScript object:
 key order kept, an integral float written as an integer) with golden/ops-v1.json, which the code before that
-move wrote. The stored report (``Report.doc``) is text Todofy keeps in its object storage and is compared as
-it is. ``UPDATE_GOLDEN=1 uv run pytest tests/unit/test_ops_golden.py`` rewrites the file; only for an intended
-change of the contract, never to make a refactor pass.
+move wrote. ``UPDATE_GOLDEN=1 uv run pytest tests/unit/test_ops_golden.py`` rewrites the file; only for an
+intended change of the answers (2026-10-21: no reminder, GTD or task-intent facts, and no OpsDigestService), never
+to make a refactor pass.
 """
 
 import json
@@ -26,7 +26,7 @@ CONTRACT = mail_contract.TODOFY.parent / "contracts" / "ops-v1"
 FIXTURES = CONTRACT / "fixtures"
 # The hand-written schema the dashboards deployed before ops-v1 moved onto proto/ validate every answer with.
 LEGACY = json.loads((CONTRACT / "legacy" / "ops-v1.schema.json").read_text())
-DEFS = {"status": "OpsStatus", "guard": "GuardState", "canary": "CanaryResult", "receipt": "OpsReportReceipt"}
+DEFS = {"status": "OpsStatus", "guard": "GuardState", "canary": "CanaryResult"}
 NOW = int(datetime(2026, 9, 29, 15, tzinfo=UTC).timestamp())
 NOW_MS = NOW * 1000
 HOUR = 3600
@@ -35,15 +35,11 @@ FACTS = ops.Facts(
     now=NOW,
     maintenance=False,
     processing_paused=False,
-    force_pause_todoist=False,
-    reminder_enabled=True,
     active_events=2,
     attention_events=0,
     received_24h=63,
     oldest_due_at=None,
-    reminder_state="created",
-    reminder_attempts=1,
-    reminder_retries_left=False,
+    carryover_open=9,
     gemini_used=412_880,
     gemini_reserved=0,
     gemini_budget=3_000_000,
@@ -54,9 +50,6 @@ FACTS = ops.Facts(
     last_backup_at=NOW - 363_600,
     guard=ops.NORMAL,
     public_host="todofy.example.com",
-    gtd_counters={"inbox_open": 23, "inbox_oldest_days": 41, "overdue": 3, "carryover_open": 9, "completed_7d": 42},
-    review_enabled=True,
-    review_age_days=2,
 )
 SHED = ops.Guard("shed", "d1_reads_high", NOW_MS + 9 * HOUR * 1000, NOW_MS - 3_300_000)
 
@@ -86,11 +79,7 @@ def canary(state: str | None, code: str = "", **holds: bool) -> dict[str, Any]:
 
 
 def cases() -> dict[str, Any]:
-    daily = json.loads((FIXTURES / "OpsReport" / "daily.json").read_text())
-    report = ops.report(daily, NOW + 86400)
-    empty = ops.report({"generated_at": ops.timestamp(NOW - 60), "items": []}, NOW)
-    millis = ops.report({"generated_at": "2026-09-29T14:59:00.250Z", "items": []}, NOW)
-    switches = ops.Switches(maintenance=False, processing_paused=True, force_pause_todoist=False, reminder_enabled=True)
+    switches = ops.Switches(maintenance=False, processing_paused=True)
     return {
         "status/ok": ops.status(FACTS),
         "status/degraded": ops.status(
@@ -103,13 +92,7 @@ def cases() -> dict[str, Any]:
                 last_backup_at=NOW - 792_000,
                 backup_status="failed",
                 backup_active=True,
-                reminder_state="failed",
-                reminder_attempts=4,
                 guard=SHED,
-                gtd_stale_seconds=50 * HOUR,
-                review_age_days=12,
-                intents_pending=1,
-                intents_failed_7d=2,
             )
         ),
         "status/every-switch": ops.status(
@@ -117,15 +100,12 @@ def cases() -> dict[str, Any]:
                 FACTS,
                 maintenance=True,
                 processing_paused=True,
-                force_pause_todoist=True,
-                reminder_enabled=False,
                 gemini_used=2_990_000,
                 gemini_budget=3_000_000,
                 backup_bound=False,
                 last_backup_at=None,
                 public_host="",
-                gtd_counters={},
-                review_age_days=None,
+                carryover_open=0,
             )
         ),
         "status/no-backup-yet": ops.status(replace(FACTS, last_backup_at=None, gemini_budget=0)),
@@ -147,11 +127,6 @@ def cases() -> dict[str, Any]:
         "canary/ok": canary("complete"),
         "canary/failed": canary("ignored", "llm_quota"),
         "canary/side-effect": canary("created"),
-        "receipt/stored": ops.receipt(True, report),
-        "receipt/kept-newer": ops.receipt(False, empty),
-        "receipt/millis": ops.receipt(True, millis),
-        "report/doc-daily": report.doc,
-        "report/doc-empty": empty.doc,
     }
 
 
@@ -162,10 +137,7 @@ def test_every_ops_answer_for_the_synthetic_states_is_byte_for_byte_the_golden_o
     golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
     assert list(actual) == list(golden)
     for name, value in actual.items():
-        if isinstance(value, str):
-            assert value == golden[name], name
-        else:
-            assert compact(value) == compact(golden[name]), name
+        assert compact(value) == compact(golden[name]), name
 
 
 def test_every_golden_answer_passes_the_checks_of_the_dashboards_deployed_before_the_move():
@@ -174,7 +146,5 @@ def test_every_golden_answer_passes_the_checks_of_the_dashboards_deployed_before
     earlier Todofy's, so that Todofy and a new dashboard do too (the dashboard's own tests read every fixture)."""
     for name, value in cases().items():
         kind = name.split("/")[0]
-        if kind == "report":
-            continue  # stored text, not an answer
         validator = jsonschema.Draft202012Validator({**LEGACY, "$ref": f"#/$defs/{DEFS[kind]}"})
         assert [error.message for error in validator.iter_errors(js(value))] == [], name

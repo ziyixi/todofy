@@ -44,12 +44,9 @@ runs:
     # codec; the generated mail.received.v1 schema gives the frozen hand-written one's verdict, and the parser the frozen
     # parser's, on every fixture and ~9,000 mutations (test_mail_received_*_legacy);
     # ops-v1 fixtures get the reference JSON Schema validator's verdict on the generated schema (the Python wire
-    # codec agrees with it), and every value core/ops.py derives (status, guard, canary result, report, digest
-    # items) keeps its golden bytes, the contract's rules and the legacy schema older dashboards check. task-intent-v1:
-    # the generated types and the Python wire JSON codec agree with the schema on every fixture, the core
-    # (strict read plus value rules) gives the schema's verdict, and every result it builds passes it. The newsletter
-    # reports (todofy.report.v1): every report keeps its golden bytes and the generated schemas give the frozen
-    # hand-written ones' verdict.
+    # codec agrees with it), and every value core/ops.py derives (status, guard, canary result) keeps its golden bytes,
+    # the contract's rules and the legacy schema older dashboards check. The newsletter reports (todofy.report.v1):
+    # every report keeps its golden bytes and the generated schemas give the frozen hand-written ones' verdict.
     - name: Todofy accepts every fixture and checks ops-v1
       working-directory: todofy
       shell: bash -e {0}
@@ -58,8 +55,7 @@ runs:
         uv run pytest tests/unit/test_mail_hero_compat.py tests/unit/test_contract.py tests/unit/test_machine_api.py \
           tests/unit/test_mail_received_schema_legacy.py tests/unit/test_mail_received_parser_legacy.py \
           tests/unit/test_ops_contract.py tests/unit/test_ops_core.py tests/unit/test_ops_golden.py \
-          tests/unit/test_task_intent_contract.py tests/unit/test_report_wire.py tests/unit/test_report_schemas.py \
-          tests/unit/test_report_schema_legacy.py
+          tests/unit/test_report_wire.py tests/unit/test_report_schemas.py tests/unit/test_report_schema_legacy.py
     # The gateway's Ops entrypoint (what the dashboard binds) forwards to todofy-core and returns values the
     # wire codec reads strictly (the generated services type it).
     - name: Todofy's Ops entrypoint returns ops-v1 values
@@ -79,12 +75,11 @@ runs:
       run: |
         npm ci --no-audit --no-fund
         npx --no-install vitest run test/ops-client.test.ts test/ops-golden.test.ts test/guard.test.ts test/canary.test.ts test/digest.test.ts
-    # task-intent-v1, the watch app's notification sink (W3): every fixture gets validate.mjs's verdict (Todofy's step
-    # above gives the same fixtures the Python jsonschema verdict), the generated types and the TypeScript codec agree
-    # with the schema on every fixture, and the ts constants match it (task-intent-contract.test.ts); its daily digest and an urgent change keep the bytes of
-    # the contract's watch fixtures (which Todofy's step above accepts and pins), every intent it can build passes
-    # validate.mjs with only the owner's names, trigger types, counts and links to the app, and every result Todofy
-    # may give maps to recorded, refused or a retry. ops-v1: its status and guard answers keep their golden bytes and
+    # task-intent-v1, the watch app's notification sink (W3): every fixture gets validate.mjs's verdict, the generated
+    # types and the TypeScript codec agree with the schema on every fixture, and the ts constants match it
+    # (task-intent-contract.test.ts); its daily digest and an urgent change keep the bytes of the contract's watch
+    # fixtures, every intent it can build passes validate.mjs with only the owner's names, trigger types, counts and
+    # links to the app, and every result the contract allows maps to recorded, refused or a retry. ops-v1: its status and guard answers keep their golden bytes and
     # the contract's watch fixtures, pass the generated schema, and carry counts and codes only. Host only; Watch
     # checks runs the sink with a stub Todofy and the Ops entrypoint over a service binding in workerd.
     - name: The watch app proposes task-intent-v1 and answers ops-v1 as declared

@@ -19,10 +19,14 @@ from todofy.core.vocab import Code
 
 # A correct Worker cannot be driven to an unhandled exception from outside.
 UNREACHABLE = {ApiError.INTERNAL_ERROR}
-# Outcomes the real Tasks Worker cannot be made to give from outside: a create whose answer is lost (or a 5xx),
-# and a 429. Their classification is host-tested (tests/unit/test_classify.py, test_native_tasks.py), and the
-# rows they leave are seeded where a scenario resolves them (test_scenarios_reconcile.py).
-NOT_DRIVEN = {Code.TODO_RESULT_UNKNOWN, Code.TODOIST_RATE_LIMITED}
+# mail_reminders' codes: no API reads that table since Home sends the daily reminder (2026-10-21), and nothing
+# writes it; the event codes the task writes left are seeded and read back (test_scenarios_owner.py).
+NOT_DRIVEN = {
+    Code.REMINDER_CREATE_FAILED,
+    Code.REMINDER_RESULT_UNKNOWN,
+    Code.INTERRUPTED_REMINDER_CALL,
+    Code.EMPTY_TASK_ID,
+}
 # Only the owner API before todofy.ui.v1 answered these (TodofyCore.owner_api, which only the previous gateway
 # calls during this deploy; removed in the next release): the gateway's own routes never do.
 BEFORE_UI_V1 = {

@@ -10,37 +10,29 @@ from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 from tests.runtime.conftest import Launch
 from tests.runtime.harness import GATEWAY_AUTH_CONFIG, OWNER, AccessIssuer, Worker, error_code, mail_event
 from tests.runtime.owner_support import assert_message, assert_status
-from todofy.core.vocab import EVENT_ERROR_CODES, REMINDER_ERROR_CODES
+from todofy.core.vocab import EVENT_ERROR_CODES
 
 LEGACY_EVENT_CODES = [code for code, info in EVENT_ERROR_CODES.items() if info.legacy]
-LEGACY_REMINDER_CODES = [code for code, info in REMINDER_ERROR_CODES.items() if info.legacy]
 ALIAS = "owner.alias@example.net"
 
 
-@pytest.mark.reaches(*LEGACY_EVENT_CODES, *LEGACY_REMINDER_CODES)
-def test_imported_rows_keep_their_go_error_codes(worker: Worker) -> None:
+@pytest.mark.reaches(*LEGACY_EVENT_CODES)
+def test_older_rows_keep_their_retired_error_codes(worker: Worker) -> None:
+    """Rows the Go service, or the releases that still wrote tasks, left with a code nothing writes any more."""
     old = int(time.time()) - 40 * 86400
     ids = {code: str(uuid.uuid4()) for code in LEGACY_EVENT_CODES}
     rows = ", ".join(
         f"('mail-hero-personal', '{event_id}', '{'0' * 64}', NULL, 'ignored', '{code}', 1, {old}, {old})"
         for code, event_id in ids.items()
     )
-    reminders = ", ".join(
-        f"('2026-0{n + 1}-01', 'failed', '{code}', 1, 1, {old}, {old})" for n, code in enumerate(LEGACY_REMINDER_CODES)
-    )
     worker.d1(
         "INSERT INTO mail_events (source_id, event_id, payload_hash, payload, state, last_error_code, imported,"
-        f" created_at, updated_at) VALUES {rows};"
-        "INSERT INTO mail_reminders (day, state, last_error_code, attention_count, imported, created_at,"
-        f" updated_at) VALUES {reminders}"
+        f" created_at, updated_at) VALUES {rows}"
     )
 
     for code, event_id in ids.items():
         event = assert_message(worker.owner.get(f"/api/v1/mailEvents/{event_id}"), mail_event_pb.MailEvent)
         assert (event["error_code"], event["imported"], "allowed_actions" in event) == (code, True, False), code
-    response = worker.owner.get("/api/v1/dailyReminders", params={"page_size": 100})
-    page = assert_message(response, pb.ListDailyRemindersResponse)
-    assert {item.get("error_code") for item in page["daily_reminders"]} >= set(LEGACY_REMINDER_CODES)
 
 
 def test_every_read_matches_the_idl_after_traffic(worker: Worker) -> None:
@@ -62,8 +54,6 @@ def test_every_read_matches_the_idl_after_traffic(worker: Worker) -> None:
     assert worker.owner.get("/api/csrf").status_code == 200
     assert_message(worker.owner.get("/api/v1/latestReports"), reports_pb.LatestReports)
     assert_message(worker.owner.get("/api/v1/metricDays"), pb.ListMetricDaysResponse)
-    assert_message(worker.owner.get("/api/v1/gtdDays"), pb.ListGtdDaysResponse)
-    assert_message(worker.owner.get("/api/v1/gtdReviews"), pb.ListGtdReviewsResponse)
 
 
 def test_an_alias_login_acts_as_the_owner(auth_worker: Worker, access: AccessIssuer) -> None:

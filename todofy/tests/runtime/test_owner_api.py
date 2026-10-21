@@ -59,34 +59,14 @@ def _day(offset: int) -> str:
     return time.strftime("%Y-%m-%d", time.gmtime(NOW - offset * DAY))
 
 
-REMINDERS = [
-    {
-        "day": _day(offset),
-        "state": state,
-        "task_id": task_id,
-        "attention_count": 3,
-        "attempts": 1,
-        "last_error_code": code,
-        "created_at": NOW - offset * DAY,
-        "updated_at": NOW - offset * DAY,
-    }
-    for offset, state, task_id, code in [
-        (1, "created", "9001", ""),
-        (2, "unknown", "", "reminder_result_unknown"),
-        (3, "failed", "", "reminder_create_failed"),
-    ]
-]
-
-
 @pytest.fixture(scope="module")
 def api_worker(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Worker]:
     for worker in start_gateway(
         tmp_path_factory.mktemp("owner-api-worker"),
-        {"CSRF_SIGNING_KEY": CSRF_KEY, "PROCESSING_PAUSED": "true", "REMINDER_ENABLED": "true"},
+        {"CSRF_SIGNING_KEY": CSRF_KEY, "PROCESSING_PAUSED": "true"},
     ):
         seed(worker, "mail_events", EVENTS)
         seed(worker, "legacy_mail_text", LEGACY_TEXT)
-        seed(worker, "mail_reminders", REMINDERS)
         yield worker
 
 
@@ -113,7 +93,7 @@ def test_recent_pages_walk_every_event_newest_first(api_worker: Worker) -> None:
     assert _pages(api_worker) == items
     by_id = {_id(item): item for item in items}
     assert by_id[PENDING]["next_attempt_time"] == by_id[PENDING]["receive_time"]  # due since arrival
-    assert "next_attempt_time" in by_id[UNKNOWN]  # its scheduled footer lookup
+    assert "next_attempt_time" not in by_id[UNKNOWN]  # an older task row: nothing looks its task up any more
     assert "next_attempt_time" not in by_id[FAILED] and "next_attempt_time" not in by_id[DONE]
     assert by_id[DONE]["task_id"] == "6X7rM8997g3RQmvh" and "task_id" not in by_id[PENDING]
     assert "error_code" not in by_id[PENDING] and by_id[FAILED]["error_code"] == "summary_failed"
@@ -263,26 +243,11 @@ def test_service_status_counts_active_rows_of_this_source(api_worker: Worker) ->
     }
     assert body["attention_count"] == 3
     assert body["received_last_day_count"] == 5
-    assert body["switches"] == {"processing_paused": True, "reminder_enabled": True}
-    # The pending row is due since arrival; the summarized one is not due yet.
+    # Home sends the daily reminder: the two retired switches read false and no reminder is listed.
+    assert body["switches"] == {"processing_paused": True} and "latest_reminder" not in body
+    # The pending row is due since arrival; only pending rows are summarised.
     assert body["oldest_due_time"] == _pages(api_worker, filter="state = PENDING")[0]["receive_time"]
-    assert body["latest_reminder"]["name"] == f"dailyReminders/{REMINDERS[0]['day']}"
     assert_private(response)
-
-
-def test_reminders_page_newest_day_first(api_worker: Worker) -> None:
-    days, token = [], None
-    while True:
-        response = api_worker.owner.get(
-            "/api/v1/dailyReminders", params={"page_size": 2} | ({"page_token": token} if token else {})
-        )
-        page = assert_message(response, pb.ListDailyRemindersResponse)
-        days += [item["name"].removeprefix("dailyReminders/") for item in page["daily_reminders"]]
-        if not (token := page.get("next_page_token")):
-            break
-    assert days == [reminder["day"] for reminder in REMINDERS]
-    bad = api_worker.owner.get("/api/v1/dailyReminders", params={"page_token": "bm90LWEtZGF5"})
-    assert_status(bad, 400, "BAD_REQUEST")
 
 
 def test_latest_reports_without_any_report(api_worker: Worker) -> None:
@@ -290,7 +255,7 @@ def test_latest_reports_without_any_report(api_worker: Worker) -> None:
     assert assert_message(response, reports_pb.LatestReports) == {"name": "latestReports"}
 
 
-def test_metric_and_gtd_days_page_newest_first(api_worker: Worker) -> None:
+def test_metric_days_page_newest_first(api_worker: Worker) -> None:
     yesterday = time.strftime("%Y-%m-%d", time.gmtime(NOW - DAY))
     first = assert_message(
         api_worker.owner.get("/api/v1/metricDays", params={"page_size": 2}), pb.ListMetricDaysResponse
@@ -303,14 +268,6 @@ def test_metric_and_gtd_days_page_newest_first(api_worker: Worker) -> None:
         f"metricDays/{_day(3)}",
         f"metricDays/{_day(4)}",
     ]
-    gtd = assert_message(api_worker.owner.get("/api/v1/gtdDays", params={"page_size": 3}), pb.ListGtdDaysResponse)
-    assert [day["name"] for day in gtd["gtd_days"]] == [f"gtdDays/{_day(n)}" for n in range(3)]
-    everything = assert_message(
-        api_worker.owner.get("/api/v1/gtdDays", params={"page_size": 1000}), pb.ListGtdDaysResponse
-    )
-    assert len(everything["gtd_days"]) == 120 and "next_page_token" not in everything
-    reviews = assert_message(api_worker.owner.get("/api/v1/gtdReviews"), pb.ListGtdReviewsResponse)
-    assert reviews == {}
 
 
 def test_unknown_or_malformed_event_names_are_not_found(api_worker: Worker) -> None:
@@ -384,14 +341,11 @@ def _with_cursor(token: str, cursor: dict[str, str]) -> str:
     [
         ("/api/v1/metricDays", {"day": "2026-02-30"}),
         ("/api/v1/metricDays", {"day": "0001-01-01"}),
-        ("/api/v1/gtdDays", {"day": "2026-13-01"}),
-        ("/api/v1/dailyReminders", {"day": "2026-02-30"}),
-        ("/api/v1/gtdReviews", {"week": "2026-W99"}),
-        ("/api/v1/gtdReviews", {"week": "2025-W53"}),
+        ("/api/v1/metricDays", {"day": "2026-13-01"}),
     ],
 )
 def test_a_page_token_naming_no_real_day_is_bad_request(api_worker: Worker, path: str, cursor: dict[str, str]) -> None:
-    # Every one of these lists binds its token to no parameter, so a metricDays token's fingerprint fits them all.
+    # The list binds its token to no parameter, so its own token with another cursor reaches the core.
     real = assert_message(
         api_worker.owner.get("/api/v1/metricDays", params={"page_size": 1}), pb.ListMetricDaysResponse
     )

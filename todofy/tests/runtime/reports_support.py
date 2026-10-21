@@ -1,9 +1,9 @@
-"""Shared setup for the reports, reminder and retention runtime tests.
+"""Shared setup for the reports and retention runtime tests.
 
 They drive the modules through the reports probe (tests/runtime/reports_probe)
-against the loopback Gemini fake and the real Tasks Worker, with real D1 in
-workerd. Test modules import ``probe_fixture`` and ``clean_fixture``: each module
-gets its own probe, and every test starts from empty tables (Tasks' too) and fakes.
+against the loopback Gemini fake, with real D1 in workerd. Test modules import
+``probe_fixture`` and ``clean_fixture``: each module gets its own probe, and every
+test starts from empty tables and fakes.
 """
 
 import hashlib
@@ -16,7 +16,6 @@ from ziyixi_proto.wire_json import WireJsonError
 
 from tests.fakes.gemini_fake import API_KEY as GEMINI_KEY
 from tests.fakes.gemini_fake import GeminiFake
-from tests.runtime import tasks_support as tasks
 from tests.runtime.harness import Worker
 from tests.runtime.reports_probe import start_probe
 from todofy.core import owner_ui
@@ -25,10 +24,8 @@ MODEL = "gemini-probe"
 PUBLIC_HOST = "todofy.example"
 NEWSLETTER = ("newsletter", "correct horse")
 ROTATED = ("newsletter", "battery staple")
-TABLES = ("mail_events", "mail_reminders", "summaries", "daily_reports", "owner_actions", "auth_failures")
-TABLES += ("legacy_mail_text", "event_transitions", "gtd_snapshots", "gtd_snapshot_tasks", "gtd_daily", "gtd_reviews")
-# Tasks' rows, emptied before every test (projects other than the Inbox, which a test may create).
-TASKS_TABLES = ("tasks", "task_labels", "completions", "requests", "changes", "projects", "labels")
+TABLES = ("mail_events", "summaries", "daily_reports", "owner_actions", "auth_failures", "legacy_mail_text")
+TABLES += ("event_transitions",)
 # 2026-09-28T15:00:00Z, after the 13:30 precompute time.
 NOW = int(datetime(2026, 9, 28, 15, tzinfo=UTC).timestamp())
 
@@ -53,16 +50,6 @@ class Probe:
     def insert(self, table: str, **row: Any) -> None:
         self.sql(f"INSERT INTO {table} ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", *row.values())
 
-    def created(self) -> list[dict[str, Any]]:
-        """The tasks Tasks holds, oldest first: what the modules created."""
-        return tasks.created(self.worker)
-
-    def request_ids(self) -> list[str]:
-        return tasks.request_ids(self.worker)
-
-    def project(self, project_id: str) -> None:
-        tasks.project(self.worker, project_id)
-
 
 @pytest.fixture(scope="module", name="probe")
 def probe_fixture(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Probe]:
@@ -72,9 +59,7 @@ def probe_fixture(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Probe]:
         "GEMINI_API_KEY": GEMINI_KEY,
         "GEMINI_MODELS": MODEL,
         "GEMINI_TIMEOUT_MS": "5000",
-        "TASKS_PUBLIC_URL": "https://tasks.example.test",
         "REPORT_BASIC_AUTH_SHA256": f"{digest(*NEWSLETTER)},{digest(*ROTATED)}",
-        "REMINDER_ENABLED": "true",
         "TODOFY_PUBLIC_HOST": PUBLIC_HOST,
     }
     try:
@@ -88,22 +73,15 @@ def probe_fixture(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Probe]:
 def clean_fixture(probe: Probe) -> Probe:
     probe.gemini.reset()
     probe.call("/d1", statements=[[f"DELETE FROM {table}", []] for table in TABLES])
-    probe.worker.tasks_d1(";".join(f"DELETE FROM {table}" for table in TASKS_TABLES))
     return probe
 
 
 def idl_errors(name: str, instance: Any) -> list[str]:
     """What keeps a ledger reader's dict from being the todofy.ui.v1 message the owner API answers with it
-    (core/owner_ui.py maps it, and the codec checks every rule as it writes): DailyReminder, GtdDay, GtdReview or
-    LatestReports (whose stored reports must read as todofy.report.v1 messages)."""
+    (core/owner_ui.py maps it, and the codec checks every rule as it writes): LatestReports, whose stored reports
+    must read as todofy.report.v1 messages."""
     try:
         match name:
-            case "DailyReminder":
-                owner_ui.answer(owner_ui.daily_reminder(instance))
-            case "GtdDay":
-                owner_ui.answer(owner_ui.gtd_day(instance))
-            case "GtdReview":
-                owner_ui.answer(owner_ui.gtd_review(instance))
             case "LatestReports":
                 if instance["summary"] is not None and owner_ui.summary_report(instance["summary"]) is None:
                     return ["summary"]

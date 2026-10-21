@@ -31,7 +31,7 @@ from todofy.core.vocab import (
     EventState,
     Reconcile,
 )
-from todofy.runtime import backup, gtd, metrics, reminder, reports
+from todofy.runtime import backup, metrics, reports
 from todofy.runtime.config import flag, report_default_top, source_id, var
 from todofy.runtime.http import Result, failed, ok
 from todofy.runtime.interop import now_ms, read_capped
@@ -48,13 +48,10 @@ OLDEST_FIRST_START = (-1, "")
 
 LEGACY_ID = re.compile(r"legacy:[0-9A-Za-z-]{1,128}")
 TASK_ID = re.compile(r"[0-9A-Za-z_-]{1,64}")
-DAY_CURSOR = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 EVENT_PATH = re.compile(r"/api/v1/events/([^/]+)")
 RECONCILE_PATH = re.compile(r"/api/v1/events/([^/]+)/reconcile")
 LEGACY_TEXT_PATH = re.compile(r"/api/v1/legacy_text/([^/]+)")
 
-# The states of sql.DUE: the Worker acts on them at next_attempt_at (0 = since arrival).
-DUE_STATES = frozenset({EventState.PENDING, EventState.SUMMARIZED, EventState.TODO_CREATED})
 REPORT_KINDS = frozenset({"summary", "recommendation"})
 # additionalProperties: false in ReconcileRequest and RecomputeRequest.
 RECONCILE_REQUIRED = frozenset({"action", "version", "action_request_id"})
@@ -88,12 +85,8 @@ def timestamp(seconds: int) -> str:
 def event_summary(row: Mapping[str, Any], now: int) -> dict[str, Any]:
     """One mail_events row (views.EVENT_SUMMARY columns or more) as an OpenAPI EventSummary."""
     state = row["state"]
-    if state in DUE_STATES:
-        next_attempt: str | None = timestamp(max(row["next_attempt_at"], row["created_at"]))
-    elif state == EventState.TODO_UNKNOWN and row["next_attempt_at"] > 0:
-        next_attempt = timestamp(row["next_attempt_at"])  # the scheduled footer lookup
-    else:
-        next_attempt = None
+    # A pending row is summarised at next_attempt_at (0: since it arrived; sql.DUE).
+    next_attempt = timestamp(max(row["next_attempt_at"], row["created_at"])) if state == EventState.PENDING else None
     return {
         "event_id": row["event_id"],
         "state": state,
@@ -201,22 +194,22 @@ async def overview_data(env: Any, coordinator: Any) -> dict[str, Any]:
     )
     # next_alarm_at and the Gemini budget live in the coordinator's storage, in API shape.
     budgets = await coordinator.budgets()
-    latest_reminders, _ = await reminder.page(db, None, 1)
     per_state = {row["state"]: row["n"] for row in counts.results}
     oldest_due = due.results[0]["at"]
     return {
         "build": var(env, "BUILD_SHA", "unknown"),
         "now": timestamp(now),
+        # The retired switches answer false and no reminder is listed: Home sends the daily reminder.
         "flags": {
             "maintenance_mode": flag(env, "MAINTENANCE_MODE"),
             "processing_paused": flag(env, "PROCESSING_PAUSED"),
-            "force_pause_todoist": flag(env, "FORCE_PAUSE_TODOIST"),
-            "reminder_enabled": flag(env, "REMINDER_ENABLED"),
+            "force_pause_todoist": False,
+            "reminder_enabled": False,
         },
         "counts": {state: per_state.get(state, 0) for state in ACTIVE_STATES},
         "attention_count": attention.results[0]["n"],
         "received_24h": received.results[0]["n"],
-        "latest_reminder": latest_reminders[0] if latest_reminders else None,
+        "latest_reminder": None,
         "next_alarm_at": budgets["next_alarm_at"],
         "oldest_due_at": None if oldest_due is None else timestamp(oldest_due),
         "gemini": budgets["gemini"],
@@ -308,17 +301,6 @@ async def recompute(request: OwnerRequest, env: Any, coordinator: Any, owner: st
     return await coordinator.recompute(owner, _action_request_id(body), kind, top_n)
 
 
-async def reminders(env: Any, query: dict[str, str]) -> Result:
-    limit = _limit(query.get("limit"))
-    before_day = None
-    if (cursor := query.get("cursor")) is not None:
-        before_day = _decode_cursor(cursor)
-        if not DAY_CURSOR.fullmatch(before_day):
-            raise InvalidRequest
-    items, next_day = await reminder.page(env.DB, before_day, limit)
-    return ok({"items": items, "next_cursor": _encode_cursor(next_day) if next_day else None})
-
-
 async def daily_metrics(env: Any, query: dict[str, str]) -> Result:
     """GET /api/v1/metrics/daily?days=: finished UTC days from daily_metrics, oldest first."""
     value = query.get("days")
@@ -328,17 +310,6 @@ async def daily_metrics(env: Any, query: dict[str, str]) -> Result:
             raise InvalidRequest
         days = int(value)
     return ok(await metrics.daily(env.DB, days, now_ms() // 1000))
-
-
-async def gtd_daily(env: Any, query: dict[str, str]) -> Result:
-    """GET /api/v1/gtd/daily?days=: the GTD ledger's daily aggregates up to today, oldest first."""
-    value = query.get("days")
-    days = gtd.DEFAULT_API_DAYS
-    if value is not None:
-        if not value.isascii() or not value.isdigit() or not 1 <= int(value) <= gtd.MAX_API_DAYS:
-            raise InvalidRequest
-        days = int(value)
-    return ok(await gtd.daily(env.DB, days, now_ms() // 1000))
 
 
 async def legacy_text_data(env: Any, key: str) -> dict[str, Any] | None:
@@ -365,10 +336,7 @@ def setup(env: Any) -> dict[str, Any]:
     """The core's facts for the setup page (the gateway adds its own): whether each secret is set, never its value."""
     return {
         "mail_source_id": source_id(env),
-        "configured": {
-            "gemini_api_key": bool(var(env, "GEMINI_API_KEY")),
-            "todoist_project": bool(var(env, "TODOIST_DEFAULT_PROJECT_ID")),
-        },
+        "configured": {"gemini_api_key": bool(var(env, "GEMINI_API_KEY"))},
     }
 
 
@@ -379,12 +347,8 @@ async def _route(request: OwnerRequest, env: Any, coordinator: Any, owner: str) 
             return await overview(env, coordinator)
         case "GET", "/api/v1/events":
             return await events(env, _query(request))
-        case "GET", "/api/v1/reminders":
-            return await reminders(env, _query(request))
         case "GET", "/api/v1/metrics/daily":
             return await daily_metrics(env, _query(request))
-        case "GET", "/api/v1/gtd/daily":
-            return await gtd_daily(env, _query(request))
         case "GET", "/api/v1/reports/latest":
             return ok(await reports.latest(env.DB))
         case "POST", "/api/v1/reports/recompute":

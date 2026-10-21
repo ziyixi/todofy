@@ -1,9 +1,10 @@
-"""Model input and Todoist task text for one mail event.
+"""The summary text of one mail event, and the times the APIs write.
 
-Byte-compatible with the Go worker (mail_inbox_worker.go:120-173 and
-templates/todoDescription.tmpl @ 6c46ed4) except for two deliberate fixes:
-nothing is HTML-escaped (Markdown, not HTML) and a stray ``#tag`` becomes a
-single space instead of ``<removed tag>``.
+Byte-compatible with the Go worker (mail_inbox_worker.go:120-173 @ 6c46ed4)
+except for one deliberate fix: a stray ``#tag`` becomes a single space instead
+of ``<removed tag>``. The Todoist task description Todofy wrote until 2026-10-21
+(``**FROM:`` ... ``**SUBJECT: `` ..., the summary, then ``Mail Hero event: <id>``)
+survives only in older rows' ``todo_body`` and in imported summaries.
 """
 
 import re
@@ -12,9 +13,8 @@ from datetime import UTC, datetime
 from .contract import MailEvent, utf8_len
 
 NO_SUBJECT = "(No subject)"
-FOOTER_PREFIX = "Mail Hero event: "
+# The subject line of that task description, which tools/legacy_migration reads from the retired Go cache.
 SUBJECT_LABEL = "**SUBJECT: "
-SEPARATOR = "=" * 24
 
 # Go's RE2 \s is ASCII-only [\t\n\f\r ]; Python's \s would also eat Unicode spaces.
 _TAG = re.compile(r"[\t\n\f\r ]#[a-zA-Z0-9]{1,10}[\t\n\f\r ]")
@@ -41,28 +41,3 @@ def clean_summary(model_output: str, event: MailEvent) -> str:
     summary = _TAG.sub(" ", model_output)
     notice = content_notice(event)
     return f"{notice}\n\n{summary}" if notice else summary
-
-
-def task_title(event: MailEvent) -> str:
-    # mail.received.v1 allows a body-only mail but Todoist needs a title.
-    return event.subject if event.subject.strip() else NO_SUBJECT
-
-
-def render_todo_body(event: MailEvent, summary: str) -> str:
-    """The Todoist task description, ending in the event footer used for lookup."""
-    sender = event.from_addresses[0].address if event.from_addresses else ""
-    recipient = event.to_addresses[0].address if event.to_addresses else ""
-    sent = rfc3339(event.sent_at or event.received_at)
-    return (
-        f"**FROM: {sender}**\n"
-        f"**DATE: {sent}**\n"
-        f"**RECEIVED: {recipient}**\n"
-        f"{SUBJECT_LABEL}{event.subject}**\n\n"
-        f"{SEPARATOR}\n"
-        f"{summary}\n\n{FOOTER_PREFIX}{event.event_id}"
-    )
-
-
-def has_footer(description: str, event_id: str) -> bool:
-    """Whether a task description carries this event's footer (and not a longer ID)."""
-    return re.search(re.escape(FOOTER_PREFIX + event_id) + r"(?![0-9A-Za-z-])", description) is not None

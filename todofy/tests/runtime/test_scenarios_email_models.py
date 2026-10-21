@@ -78,7 +78,7 @@ def test_daily_summary_and_top_recommendations_keep_flash_first(
         assert calls[0].response_schema["maxItems"] == top_n
 
 
-def test_upgrade_preserves_completed_and_frozen_summaries_but_pending_and_owner_retry_use_lite(
+def test_upgrade_preserves_completed_summaries_but_pending_and_owner_retry_use_lite(
     launch: Launch, fresh_gemini: GeminiFake
 ):
     # This instance starts without the new var, just like the previous release.
@@ -91,7 +91,6 @@ def test_upgrade_preserves_completed_and_frozen_summaries_but_pending_and_owner_
     pending = arrive(worker)
     assert worker.event(pending)["state"] == "pending"
     failed, failed_body = mail_event()
-    frozen, frozen_body = mail_event()
     seed(
         worker,
         "mail_events",
@@ -106,34 +105,15 @@ def test_upgrade_preserves_completed_and_frozen_summaries_but_pending_and_owner_
             ),
         ],
     )
-    seed(
-        worker,
-        "mail_events",
-        [
-            event_row(
-                frozen,
-                "summarized",
-                int(time.time()),
-                payload=frozen_body.decode(),
-                payload_hash=sha256_hex(frozen_body),
-                summary="Already accepted summary",
-                summary_model=REPORT_MODELS[0],
-                todo_body="Frozen task body",
-                todoist_request_id=f"todofy-{uuid.uuid4().hex[:26]}",
-            ),
-        ],
-    )
     fresh_gemini.reset()
 
     restart_with(worker, PROCESSING_PAUSED="false", GEMINI_EMAIL_MODELS=",".join(EMAIL_MODELS))
     assert worker.wait_event(pending, {"complete"})["summary_model"] == EMAIL_MODELS[0]
-    unchanged = worker.wait_event(frozen, {"complete"})
-    assert (unchanged["summary"], unchanged["summary_model"]) == ("Already accepted summary", REPORT_MODELS[0])
     assert worker.reconcile(failed, "retry_summary").status_code == 200
     assert worker.wait_event(failed, {"complete"})["summary_model"] == EMAIL_MODELS[0]
 
     assert worker.event(completed)["summary"] == original["summary"]
     assert worker.event(completed)["summary_model"] == original["summary_model"]
-    assert fresh_gemini.calls_mentioning(completed) == fresh_gemini.calls_mentioning(frozen) == []
+    assert fresh_gemini.calls_mentioning(completed) == []
     for event_id in (pending, failed):
         assert [call.model for call in fresh_gemini.calls_mentioning(event_id)] == [EMAIL_MODELS[0]]

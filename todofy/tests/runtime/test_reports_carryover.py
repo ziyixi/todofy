@@ -1,8 +1,7 @@
 """The morning brief that remembers (core/carryover.py) in real workerd: the recommendation also sees the mail
 of the last 14 days that still awaits a decision in Mail, tagged "[N 天前]" and spread over the days it
 arrived; with the carryover switched off, after a failed attempt that day, or when the token budget cannot take
-the carried lines, the model input, prompt and payload are exactly the 24 h report; and the [Todofy System]
-reminder goes to its own project, frozen with the day's claim."""
+the carried lines, the model input, prompt and payload are exactly the 24 h report."""
 
 import json
 import time
@@ -187,72 +186,3 @@ def test_the_newsletter_gets_the_counts_on_demand(probe):
     assert list(jsonschema.Draft202012Validator(SCHEMA).iter_errors(old)) == []
     latest = probe.call("/reports/latest")["latest"]
     assert idl_errors("LatestReports", latest) == []
-
-
-# ---- the reminder's project ------------------------------------------------------------------
-
-SOURCE = "mail-hero-personal"
-
-
-def attention(probe: Probe) -> None:
-    probe.insert(
-        "mail_events",
-        source_id=SOURCE,
-        event_id="e-failed",
-        payload_hash="0" * 64,
-        payload="{}",
-        state="failed_summary",
-        last_error_code="summary_failed",
-        created_at=NOW - 100,
-        updated_at=NOW - 100,
-    )
-
-
-def test_the_reminder_goes_to_the_ops_project_when_one_is_set(probe):
-    attention(probe)
-    probe.project("ops-project")
-    probe.call("/reminder/tick", now=NOW, vars={"TODOIST_OPS_PROJECT_ID": "ops-project"})
-    [created] = probe.created()
-    assert created["project_id"] == "ops-project"
-    assert probe.sql("SELECT project_id FROM mail_reminders") == [{"project_id": "ops-project"}]
-
-
-# The deploy uploads an unset optional project as a single space (the secret must be overwritten,
-# not kept), so a blank value must read as unset.
-@pytest.mark.parametrize("unset", [{}, {"TODOIST_OPS_PROJECT_ID": " "}])
-def test_without_an_ops_project_the_reminder_goes_to_the_inbox(probe, unset):
-    attention(probe)
-    probe.call("/reminder/tick", now=NOW, vars=unset)
-    [created] = probe.created()
-    assert created["project_id"] == ""
-    assert probe.sql("SELECT project_id FROM mail_reminders") == [{"project_id": ""}]
-
-
-def test_a_retry_keeps_the_frozen_project_after_the_setting_changed(probe):
-    attention(probe)
-    probe.call("/reminder/tick", now=NOW, vars={"TODOIST_OPS_PROJECT_ID": "ops-project"})  # Tasks has none yet
-    assert probe.created() == []
-    probe.project("ops-project")
-    probe.project("another-project")
-    probe.call("/reminder/tick", now=NOW + HOUR, vars={"TODOIST_OPS_PROJECT_ID": "another-project"})
-    [created] = probe.created()
-    assert created["project_id"] == "ops-project"
-
-
-def test_a_day_claimed_before_the_migration_retries_into_the_inbox(probe):
-    attention(probe)
-    probe.insert(
-        "mail_reminders",
-        day=TODAY,
-        state="failed",
-        subject="t",
-        body="b",
-        attention_count=1,
-        attempts=1,
-        next_attempt_at=NOW,
-        created_at=NOW - HOUR,
-        updated_at=NOW - HOUR,
-    )
-    probe.call("/reminder/tick", now=NOW, vars={"TODOIST_OPS_PROJECT_ID": "ops-project"})
-    [created] = probe.created()
-    assert (created["title"], created["description"], created["project_id"]) == ("t", "b", "")

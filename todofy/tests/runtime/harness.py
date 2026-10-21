@@ -647,15 +647,6 @@ def mail_event(
     return event_id, body
 
 
-def settled_reminder(worker: Worker) -> dict[str, Any] | None:
-    """Today's reminder row once its Todoist call has an outcome (newest day first)."""
-    response = worker.owner.get("/api/v1/dailyReminders")
-    assert response.status_code == 200, response.text
-    items = [filled(status_pb.DailyReminder, item) for item in response.json().get("daily_reminders", [])]
-    today = f"dailyReminders/{datetime.now(UTC).date().isoformat()}"
-    return items[0] if items and items[0]["name"] == today and items[0]["state"] != "sending" else None
-
-
 def transitions(event: dict[str, Any]) -> list[tuple[str | None, str, str | None, str]]:
     """An event's state changes as (prior state, state, error code, actor), None for what the wire omits."""
     return [(t.get("prior_state"), t["state"], t.get("error_code"), t["actor"]) for t in event.get("transitions", [])]

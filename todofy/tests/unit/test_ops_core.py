@@ -5,7 +5,6 @@ import ast
 import json
 from dataclasses import replace
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import jsonschema
@@ -38,17 +37,11 @@ def stamp(seconds: int) -> str:
 
 
 def test_limits_equal_the_contract_constants():
-    """The rules the IDL cannot hold are ops-v1.ts's OPS_LIMITS; the bounds it states come from the generated tables."""
-    source = (CONTRACT / "ops-v1.ts").read_text()
-    for name, value in {
-        "guardMaxAheadSeconds: 36 * 3600": ops.GUARD_MAX_AHEAD,
-        "digestWindowSeconds: 36 * 3600": ops.DIGEST_WINDOW,
-        "reportFutureSkewSeconds: 300": ops.REPORT_FUTURE_SKEW,
-        "reportMaxBytes: 8192": ops.REPORT_MAX_BYTES,
-    }.items():
-        assert name in source
-        assert eval(name.split(": ")[1]) == value
-    assert (ops.REPORT_MAX_ITEMS, ops.MAX_SIGNALS, ops.MAX_METRICS) == (20, 16, 12)
+    """The rule the IDL cannot hold is ops-v1.ts's OPS_LIMITS; the bounds it states come from the generated tables."""
+    name = "guardMaxAheadSeconds: 36 * 3600"
+    assert name in (CONTRACT / "ops-v1.ts").read_text()
+    assert eval(name.split(": ")[1]) == ops.GUARD_MAX_AHEAD
+    assert (ops.MAX_SIGNALS, ops.MAX_METRICS) == (16, 12)
 
 
 @pytest.mark.parametrize(
@@ -104,80 +97,16 @@ def test_event_ids_are_lowercase_uuids():
             ops.event_id(value)
 
 
-# ---- report --------------------------------------------------------------------------------
-
-VALID_REPORTS = sorted((CONTRACT / "fixtures" / "OpsReport").glob("*.json"))
-INVALID_REPORTS = sorted((CONTRACT / "fixtures" / "invalid" / "OpsReport").glob("*.json"))
-
-
-@pytest.mark.parametrize("path", VALID_REPORTS, ids=lambda p: p.stem)
-def test_every_valid_report_fixture_is_accepted(path: Path):
-    value = json.loads(path.read_text())
-    report = ops.report(value, NOW + 86400)
-    assert json.loads(report.doc) == value
-    assert len(report.doc.encode()) <= ops.REPORT_MAX_BYTES
-    assert ops.stored_report(report.doc) == report
-
-
-@pytest.mark.parametrize("path", INVALID_REPORTS, ids=lambda p: p.stem)
-def test_every_invalid_report_fixture_is_refused(path: Path):
-    with pytest.raises(ops.InvalidInput):
-        ops.report(json.loads(path.read_text()), NOW + 86400)
-
-
-def daily() -> dict[str, Any]:
-    return fixture("OpsReport/daily.json")
-
-
-@pytest.mark.parametrize(
-    "change",
-    [
-        lambda r: r | {"generated_at": stamp(NOW + 301)},  # beyond the 5-minute clock skew
-        lambda r: r | {"items": r["items"] * 5},  # 25 items
-        lambda r: r | {"dashboard_url": "http://home.example.com/"},
-        lambda r: r | {"dashboard_url": "https://home.example.com/?q=1"},
-        lambda r: r | {"note": "free text"},
-        lambda r: r | {"items": [r["items"][0] | {"severity": "fatal"}]},
-        lambda r: r | {"items": [r["items"][0] | {"source": "Mail Hero"}]},
-        lambda r: r | {"items": [r["items"][0] | {"metrics": {"count": True}}]},
-        lambda r: r | {"items": [r["items"][0] | {"metrics": {"subject": "Invoice"}}]},
-        lambda r: r | {"items": [r["items"][0] | {"metrics": {f"m{i}": i for i in range(13)}}]},
-        lambda r: r | {"items": [{k: v for k, v in r["items"][0].items() if k != "since"}]},
-    ],
-)
-def test_report_rules(change):
-    report = change(daily())
-    with pytest.raises(ops.InvalidInput):
-        ops.report(report, NOW)
-
-
-def test_a_report_over_8_kib_is_refused_even_within_20_items():
-    item = {"source": "dashboard", "code": "c" * 48, "severity": "warning", "since": stamp(NOW)}
-    metrics = {f"m{i}_{'x' * 40}": 123456789.125 for i in range(12)}
-    big = {"generated_at": stamp(NOW), "items": [item | {"metrics": metrics}] * 20}
-    assert errors("OpsReport", big) == []
-    with pytest.raises(ops.InvalidInput):
-        ops.report(big, NOW)
-
-
-def test_receipts_validate():
-    report = ops.report(daily(), NOW + 86400)
-    for stored in (True, False):
-        receipt = ops.receipt(stored, report)
-        assert errors("OpsReportReceipt", receipt) == []
-        assert receipt == {"stored": stored, "generated_at": "2026-09-29T23:40:00Z", "item_count": 5}
-
-
 # ---- guard ---------------------------------------------------------------------------------
 
 
 def test_guard_state_expires_at_until():
     guard = ops.Guard("shed", "d1_reads_high", NOW_MS + 1000, NOW_MS - 5000)
     shed = ops.guard_state(guard, NOW_MS)
-    assert shed == fixture("GuardState/shed-todofy.json") | {
-        "until": "2026-09-29T15:00:01Z",
-        "set_at": "2026-09-29T14:59:55Z",
-    }
+    expected = fixture("GuardState/shed-todofy.json")
+    # The fixture still lists the GTD snapshot, which Todofy deferred until 2026-10-21.
+    deferred = [job for job in expected["deferred"] if job != "gtd_snapshot"]
+    assert shed == expected | {"until": "2026-09-29T15:00:01Z", "set_at": "2026-09-29T14:59:55Z", "deferred": deferred}
     for state in (shed, ops.guard_state(guard, NOW_MS + 1000), ops.guard_state(ops.NORMAL, NOW_MS)):
         assert errors("GuardState", state) == []
     assert ops.guard_state(guard, NOW_MS + 1000) == fixture("GuardState/normal.json")
@@ -203,11 +132,9 @@ def test_defer_until_holds_a_job_within_its_bound(guard, last_run, expected):
     assert ops.defer_until(guard, NOW, last_run, 72 * HOUR) == expected
 
 
-def test_only_the_four_deferrable_jobs_are_listed():
-    assert [str(job) for job in ops.DEFERRED] == ["weekly_backup", "retention", "metrics_rollup", "gtd_snapshot"]
-    assert set(ops.JOB_BOUND) == {ops.Job.RETENTION, ops.Job.METRICS_ROLLUP, ops.Job.GTD_SNAPSHOT}
-    # A held snapshot still runs within 48 h: carryover and the counters are then at most two days old.
-    assert ops.JOB_BOUND[ops.Job.GTD_SNAPSHOT] == 48 * 3600
+def test_only_the_three_deferrable_jobs_are_listed():
+    assert [str(job) for job in ops.DEFERRED] == ["weekly_backup", "retention", "metrics_rollup"]
+    assert set(ops.JOB_BOUND) == {ops.Job.RETENTION, ops.Job.METRICS_ROLLUP}
     assert ops.BACKUP_BOUND == 7 * 86400 + 12 * HOUR
     assert ops.BACKUP_STALE - ops.BACKUP_BOUND >= 12 * HOUR
 
@@ -287,15 +214,11 @@ FACTS = ops.Facts(
     now=NOW,
     maintenance=False,
     processing_paused=False,
-    force_pause_todoist=False,
-    reminder_enabled=True,
     active_events=2,
     attention_events=0,
     received_24h=63,
     oldest_due_at=None,
-    reminder_state="created",
-    reminder_attempts=1,
-    reminder_retries_left=False,
+    carryover_open=9,
     gemini_used=412_880,
     gemini_reserved=0,
     gemini_budget=3_000_000,
@@ -306,10 +229,25 @@ FACTS = ops.Facts(
     last_backup_at=NOW - 363_600,
     guard=ops.NORMAL,
     public_host="todofy.example.com",
-    gtd_counters={"inbox_open": 23, "inbox_oldest_days": 41, "overdue": 3, "carryover_open": 9, "completed_7d": 42},
-    review_enabled=True,
-    review_age_days=2,
 )
+# What the contract's Todofy fixtures (written before 2026-10-21) still show and Todofy no longer reports: the two
+# switches and the capability of the task writes, and the counters of the Todoist call window and of GTD.
+RETIRED_MODES = {"force_pause_todoist", "reminder_enabled"}
+RETIRED_COUNTERS = {"inbox_open", "inbox_oldest_days", "overdue", "completed_7d", "review_age_days"}
+
+
+def current(doc: dict[str, Any]) -> dict[str, Any]:
+    """A Todofy fixture without what Todofy no longer reports."""
+    counters = {
+        name: value
+        for name, value in doc["counters"].items()
+        if not name.startswith("todoist_") and name not in RETIRED_COUNTERS
+    }
+    return doc | {
+        "modes": {name: value for name, value in doc["modes"].items() if name not in RETIRED_MODES},
+        "counters": counters,
+        "capabilities": [name for name in doc["capabilities"] if name != "ops_digest"],
+    }
 
 
 def codes(status: dict[str, Any]) -> list[tuple[str, str]]:
@@ -319,23 +257,15 @@ def codes(status: dict[str, Any]) -> list[tuple[str, str]]:
 def test_a_healthy_status_matches_the_contract_fixture_shape():
     status = ops.status(FACTS)
     assert errors("OpsStatus", status) == []
-    expected = fixture("OpsStatus/todofy-ok.json")
-    # Counters are an open map: task-intent-v1 added two after the fixture was written, and Todofy no longer
-    # reports the Todoist call window since Tasks is its only task store.
-    counters = {name: value for name, value in expected["counters"].items() if not name.startswith("todoist_")}
-    counters |= {"intents_pending": 0, "intents_failed_7d": 0}
-    assert status == expected | {
-        "generated_at": "2026-09-29T15:00:00Z",
-        "last_backup_at": "2026-09-25T10:00:00Z",
-        "counters": counters,
-    }
+    # Modes and counters are open maps; the counters keep the fixture's order.
+    expected = current(fixture("OpsStatus/todofy-ok.json"))
+    assert status == expected | {"generated_at": "2026-09-29T15:00:00Z", "last_backup_at": "2026-09-25T10:00:00Z"}
 
 
-def test_status_counts_task_intents():
-    status = ops.status(replace(FACTS, intents_pending=2, intents_failed_7d=1))
+def test_status_counts_the_pending_mail_the_brief_carries():
+    status = ops.status(replace(FACTS, carryover_open=31))
     assert errors("OpsStatus", status) == []
-    assert (status["counters"]["intents_pending"], status["counters"]["intents_failed_7d"]) == (2, 1)
-    assert status["health"] == "ok"  # counters only: a failed intent is the proposer's to show
+    assert (status["counters"]["carryover_open"], status["health"]) == (31, "ok")  # a count, never a signal
 
 
 def test_signals_health_and_order():
@@ -347,8 +277,6 @@ def test_signals_health_and_order():
         gemini_reserved=12_000,
         last_backup_at=NOW - 792_000,
         guard=ops.Guard("shed", "d1_reads_high", NOW_MS + 32_400_000, NOW_MS - 3_300_000),
-        reminder_state="failed",
-        reminder_attempts=5,
     )
     status = ops.status(facts)
     assert errors("OpsStatus", status) == []
@@ -358,7 +286,6 @@ def test_signals_health_and_order():
         ("attention", "warning"),
         ("due_backlog", "warning"),
         ("gemini_budget_80", "warning"),
-        ("reminder_failed", "warning"),
         ("guard_shed", "info"),
     ]
     by_code = {signal["code"]: signal["metrics"] for signal in status["signals"]}
@@ -370,7 +297,7 @@ def test_signals_health_and_order():
     }
     assert by_code["backup_stale"] == {"age_seconds": 792_000, "has_backup": 1}
     assert by_code["guard_shed"] == {"seconds_left": 32_400}
-    assert status["guard"]["deferred"] == ["weekly_backup", "retention", "metrics_rollup", "gtd_snapshot"]
+    assert status["guard"]["deferred"] == ["weekly_backup", "retention", "metrics_rollup"]
     assert status["counters"]["oldest_due_age_seconds"] == 2 * HOUR
 
 
@@ -380,12 +307,9 @@ def test_switches_and_backup_signals():
             FACTS,
             maintenance=True,
             processing_paused=True,
-            force_pause_todoist=True,
-            reminder_enabled=False,
             gemini_used=2_900_000,
             backup_status="failed",
             last_backup_at=None,
-            reminder_state="unknown",
         )
     )
     assert errors("OpsStatus", status) == []
@@ -396,67 +320,36 @@ def test_switches_and_backup_signals():
         ("maintenance_mode", "critical"),
         ("backup_failed", "warning"),
         ("processing_paused", "warning"),
-        ("reminder_failed", "warning"),
-        ("todoist_paused", "warning"),
-        ("reminder_disabled", "info"),
     ]
-    assert status["modes"] == {
-        "maintenance": True,
-        "processing_paused": True,
-        "force_pause_todoist": True,
-        "reminder_enabled": False,
-        "backup_active": False,
-    }
+    assert status["modes"] == {"maintenance": True, "processing_paused": True, "backup_active": False}
     assert "backup_age_seconds" not in status["counters"]
     assert status["last_backup_at"] is None
 
 
 def test_info_signals_keep_health_ok():
-    status = ops.status(replace(FACTS, backup_bound=False, reminder_enabled=False))
-    assert codes(status) == [("backup_disabled", "info"), ("reminder_disabled", "info")]
+    status = ops.status(replace(FACTS, backup_bound=False))
+    assert codes(status) == [("backup_disabled", "info")]
     assert status["health"] == "ok"
     running = ops.status(replace(FACTS, backup_active=True, backup_status="running"))
     assert (codes(running), running["modes"]["backup_active"]) == ([("backup_active", "info")], True)
 
 
-def test_gtd_counters_and_signals():
-    gtd = {"inbox_open": 23, "inbox_oldest_days": 41, "overdue": 3, "carryover_open": 9, "completed_7d": 42}
-    status = ops.status(replace(FACTS, gtd_counters=gtd | {"stray": 1}, review_enabled=True, review_age_days=7))
-    assert errors("OpsStatus", status) == []
-    assert {name: status["counters"][name] for name in gtd} == gtd and "stray" not in status["counters"]
-    assert status["counters"]["review_age_days"] == 7
-    assert len(status["counters"]) <= 32 and codes(status) == [] and status["health"] == "ok"
-    # review_overdue is info: after 10 days it is shown, and the app stays ok (never in the digest).
-    assert codes(ops.status(replace(FACTS, review_enabled=True, review_age_days=10))) == []
-    overdue = ops.status(replace(FACTS, review_enabled=True, review_age_days=11))
-    assert (codes(overdue), overdue["health"]) == ([("review_overdue", "info")], "ok")
-    assert overdue["signals"][0]["metrics"] == {"days": 11}
-    assert codes(ops.status(replace(FACTS, review_enabled=False, review_age_days=30))) == []
-    stale = ops.status(replace(FACTS, gtd_stale_seconds=50 * HOUR + 59))
-    assert errors("OpsStatus", stale) == []
-    assert (codes(stale), stale["health"]) == ([("gtd_snapshot_stale", "warning")], "degraded")
-    assert stale["signals"][0]["metrics"] == {"age_hours": 50}
-
-
-def test_a_failed_reminder_with_retries_left_is_not_a_signal():
-    assert codes(ops.status(replace(FACTS, reminder_state="failed", reminder_retries_left=True))) == []
-
-
 def test_unavailable_status_matches_the_contract_fixture():
-    switches = ops.Switches(False, False, False, True)
+    switches = ops.Switches(False, False)
     status = ops.unavailable_status(NOW, switches, ops.NORMAL, "todofy.example.com")
     assert errors("OpsStatus", status) == []
     assert status["health"] == "down"
     assert status["signals"] == [{"code": "status_unavailable", "severity": "critical", "metrics": {}}]
     assert status["counters"] == {}
-    assert status == fixture("OpsStatus/status-unavailable.json") | {"generated_at": "2026-09-29T15:00:00Z"}
+    expected = current(fixture("OpsStatus/status-unavailable.json"))
+    assert status == expected | {"generated_at": "2026-09-29T15:00:00Z"}
 
 
 # The modes each app writes even on a status_unavailable status: its deployment variables (contracts/ops-v1 README
 # "modes"); a mode read from storage is left out then, never guessed.
 DEPLOYMENT_MODES = {
     "mail-hero": ["maintenance", "force_send_paused"],
-    "todofy": ["maintenance", "processing_paused", "force_pause_todoist", "reminder_enabled"],
+    "todofy": ["maintenance", "processing_paused"],
     "watch": ["maintenance", "notifications"],
     "fleet": ["maintenance"],
     "newsletter": ["maintenance"],
@@ -470,7 +363,7 @@ DEPLOYMENT_MODES = {
 
 def test_every_deployment_mode_is_a_boolean_also_when_unavailable():
     required = DEPLOYMENT_MODES["todofy"]
-    switches = ops.Switches(True, True, False, True)
+    switches = ops.Switches(True, True)
     for status in (ops.status(FACTS), ops.unavailable_status(NOW, switches, ops.NORMAL, "todofy.example.com")):
         assert all(isinstance(status["modes"][key], bool) for key in required), status["modes"]
     for path in sorted((CONTRACT / "fixtures" / "OpsStatus").glob("*.json")):
@@ -496,56 +389,20 @@ def test_ui_url(host, url):
     assert ops.ui_url(host) == url
 
 
-# ---- digest --------------------------------------------------------------------------------
-
-
-def test_digest_lists_warning_and_critical_items_critical_first():
-    report = ops.report(daily(), NOW + 86400)
-    digest = ops.digest(report, int(datetime(2026, 9, 30, 0, 5, tzinfo=UTC).timestamp()))
-    assert digest is not None
-    assert [(i.severity, i.source, i.code) for i in digest.items] == [
-        ("critical", "mail-hero", "endpoint_blocked"),
-        ("critical", "todofy", "backup_stale"),
-        ("warning", "cloudflare", "d1_rows_read_high"),
-        ("warning", "dashboard", "canary_not_delivered"),
-    ]
-    assert digest.items[0].metrics == (("current_blocked", 1), ("waiting_deliveries", 3))
-    assert digest.dashboard_url == "https://home.example.com/"
-
-
-def test_digest_window_and_empty_reports():
-    report = ops.report(daily(), NOW + 86400)
-    generated = report.generated_ms // 1000
-    assert ops.digest(report, generated + ops.DIGEST_WINDOW) is not None
-    assert ops.digest(report, generated + ops.DIGEST_WINDOW + 1) is None
-    assert ops.digest(None, NOW) is None
-    assert ops.digest(ops.report(fixture("OpsReport/empty.json"), NOW + 86400), generated) is None
-    info_only = daily() | {"items": [daily()["items"][-1]]}
-    assert ops.digest(ops.report(info_only, NOW + 86400), generated) is None
-
-
-@pytest.mark.parametrize(
-    ("value", "text"), [(3, "3"), (3.0, "3"), (81.5, "81.5"), (0.1234, "0.123"), (2.5e-7, "0"), (-1.25, "-1.25")]
-)
-def test_metric_text(value, text):
-    assert ops.metric_text(value) == text
-
-
 # ---- D1 budget of the runtime (the object runs it; its source is checked here) ---------------
 
 
-def test_status_reads_d1_once_with_six_bounded_statements():
-    """ops-v1 budget: status() is one D1 batch of six indexed reads (five of the mail ledger, one
-    of task intents; test_schema_sql checks their plans); canaryResult one primary-key read;
-    setGuard and reportOps none."""
+def test_status_reads_d1_once_with_five_bounded_statements():
+    """ops-v1 budget: status() is one D1 batch of five indexed reads (four of the mail ledger, one of the pending mail;
+    test_schema_sql checks their plans); canaryResult one primary-key read; setGuard none."""
     source = (mail_contract.TODOFY / "worker" / "todofy" / "runtime" / "ops.py").read_text()
     functions = {node.name: node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.AsyncFunctionDef)}
     status = ast.unparse(functions["status"])
-    assert status.count("db.prepare(") == 6 == ops_runtime_statements(source)
+    assert status.count("db.prepare(") == 5 == ops_runtime_statements(source)
     assert status.count("await db.batch(") == 1 and status.count("await ") == 1
     canary = ast.unparse(functions["canary"])
     assert canary.count("await ") == 1 and "ledger.get(" in canary
-    for sync in ("set_guard", "store_report", "latest_report", "guard"):
+    for sync in ("set_guard", "guard"):
         assert sync not in functions  # object storage only: no await, no D1
 
 

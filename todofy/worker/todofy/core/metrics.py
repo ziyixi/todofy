@@ -23,29 +23,18 @@ from .vocab import EventState
 
 
 class Step(StrEnum):
-    """The pipeline steps that call an upstream; the index of their data points."""
+    """The pipeline steps that call an upstream; the index of their data points. Until 2026-10-21 the task writes
+    had steps too (task, lookup, reminder, gtd, review, intent, intent_lookup), which older points still carry."""
 
     SUMMARY = "summary"
-    TASK = "task"
-    LOOKUP = "lookup"
-    REMINDER = "reminder"
     REPORT = "report"
     BACKUP = "backup"
     # The summary call of a canary event (contracts/ops-v1): its own step, so the summary
     # latency stays real mail only; its Gemini calls and tokens still count against the day.
     CANARY = "canary"
-    # The GTD ledger (docs/gtd-features.md): one point per read-only Todoist page of the daily
-    # snapshot, and the weekly review task's create call.
-    GTD = "gtd"
-    REVIEW = "review"
-    # task-intent-v1: one Todoist create of a proposed task, and the footer lookup after an unknown one.
-    INTENT = "intent"
-    INTENT_LOOKUP = "intent_lookup"
 
 
 GEMINI_STEPS = frozenset({Step.SUMMARY, Step.REPORT, Step.CANARY})
-TODOIST_CREATE_STEPS = frozenset({Step.TASK, Step.REMINDER, Step.REVIEW, Step.INTENT})
-LOOKUP_STEPS = frozenset({Step.LOOKUP, Step.INTENT_LOOKUP})
 
 # Analytics Engine accepts at most 20 blobs, 20 doubles and one index of at most
 # 96 bytes per point, and 250 points per invocation. A point here has 4 of each and
@@ -66,6 +55,7 @@ class Key(StrEnum):
     LATENCY_P50 = "latency_p50_s"
     LATENCY_P90 = "latency_p90_s"
     GEMINI_CALLS = "gemini_calls"
+    # Task creates and lookups, counted until 2026-10-21; older days keep them.
     TODOIST_CREATES = "todoist_creates"
     TODOIST_LOOKUPS = "todoist_lookups"
 
@@ -95,13 +85,13 @@ class StepPoint:
     """One upstream step: what it was, how it ended and what it cost."""
 
     step: Step
-    outcome: str  # ok / failed, a TaskResult, or the ledger state a lookup left
+    outcome: str  # ok / failed
     code: str = ""  # core.vocab.Code or "" on success
     model: str = ""  # the Gemini model that answered (or was tried last)
     upstream_ms: int = 0  # wall time of the upstream call(s), retries included
     tokens_in: int = 0
     tokens_out: int = 0
-    attempts: int = 0  # requests sent: models tried or POSTs; 0 when not counted (lookup pages)
+    attempts: int = 0  # requests sent: the models tried; 0 when not counted
 
     def data_point(self) -> dict[str, list[str] | list[float]]:
         """The ``writeDataPoint`` argument: index = step; blobs = step, outcome, code, model;
@@ -114,16 +104,11 @@ class StepPoint:
 
     def counters(self) -> dict[str, int]:
         """What this step adds to the day's counters (zero entries left out)."""
-        if self.step in GEMINI_STEPS:
-            counts = {Key.GEMINI_CALLS.value: self.attempts}
-            if self.model:
-                counts[tokens_key(self.model)] = self.tokens_in + self.tokens_out
-        elif self.step in TODOIST_CREATE_STEPS:
-            counts = {Key.TODOIST_CREATES.value: self.attempts}
-        elif self.step in LOOKUP_STEPS:
-            counts = {Key.TODOIST_LOOKUPS.value: 1}
-        else:
-            counts = {}
+        if self.step not in GEMINI_STEPS:
+            return {}
+        counts = {Key.GEMINI_CALLS.value: self.attempts}
+        if self.model:
+            counts[tokens_key(self.model)] = self.tokens_in + self.tokens_out
         return {key: value for key, value in counts.items() if value > 0}
 
 

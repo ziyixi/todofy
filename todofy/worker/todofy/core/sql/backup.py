@@ -124,33 +124,8 @@ DAILY_METRICS = Table("daily_metrics", ("day", "key", "value"), ("day", "key"), 
 # backups made before (restores of older backups never depend on a shared copy). Texts reach
 # 1.9 MB, hence the small page.
 LEGACY_MAIL_TEXT = Table("legacy_mail_text", ("event_id", "created_at", "text", "expires_at"), ("event_id",), 8)
-# The GTD ledger (migration 0004): metadata and counts only, never task text.
-GTD_SNAPSHOTS = Table(
-    "gtd_snapshots",
-    ("day", "status", "task_count", "skipped", "pages", "error_code", "started_at", "finished_at"),
-    ("day",),
-    500,
-)
-GTD_SNAPSHOT_TASKS = Table(
-    "gtd_snapshot_tasks",
-    (
-        "day",
-        "task_id",
-        "project_id",
-        "parent_id",
-        "labels",
-        "priority",
-        "due_date",
-        "due_at",
-        "due_recurring",
-        "deadline_date",
-        "added_at",
-        "checked",
-        "content_hmac",
-    ),
-    ("day", "task_id"),
-    500,
-)
+# The GTD ledger (migration 0004): counts only, never task text. Kept until Tasks has copied them; the raw snapshot
+# tables went with migration 0014.
 GTD_DAILY = Table(
     "gtd_daily",
     (
@@ -194,45 +169,6 @@ GTD_REVIEWS = Table(
     ("week",),
     200,
 )
-# task-intent-v1 (migrations/0005_task_intents.sql); payload_json reaches 64 KiB, hence the small page.
-TASK_INTENTS = Table(
-    "task_intents",
-    (
-        "source",
-        "intent_id",
-        "payload_sha256",
-        "mode",
-        "tasks_total",
-        "tasks_created",
-        "state",
-        "error_code",
-        "payload_json",
-        "next_attempt_at",
-        "created_at",
-        "updated_at",
-    ),
-    ("source", "intent_id"),
-    50,
-)
-TASK_INTENT_TASKS = Table(
-    "task_intent_tasks",
-    (
-        "source",
-        "intent_id",
-        "n",
-        "request_id",
-        "state",
-        "attempts",
-        "next_attempt_at",
-        "todoist_id",
-        "error_code",
-        "started_at",
-        "updated_at",
-    ),
-    ("source", "intent_id", "n"),
-    500,
-)
-
 # The Mail categories: what is left of the planning store (migration 0007; 0013 dropped the rest).
 PLAN_SETTINGS = Table("plan_settings", ("key", "value", "updated_at"), ("key",), 50)
 PLAN_CATEGORIES = Table(
@@ -254,12 +190,8 @@ TABLES = {
         AUTH_FAILURES,
         DAILY_METRICS,
         LEGACY_MAIL_TEXT,
-        GTD_SNAPSHOTS,
-        GTD_SNAPSHOT_TASKS,
         GTD_DAILY,
         GTD_REVIEWS,
-        TASK_INTENTS,
-        TASK_INTENT_TASKS,
         PLAN_SETTINGS,
         PLAN_CATEGORIES,
     )
