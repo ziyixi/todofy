@@ -155,6 +155,7 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.deepEqual(totals.totals, { succeeded_count: 1, retried_count: 1 }, 'workerd reads actual completed attempts');
     assert.deepEqual((await db.prepare('SELECT outcome FROM delivery_attempts WHERE event_id=? ORDER BY attempt_no').bind(event.event_id).all()).results.map(row => row.outcome), ['retryable', 'delivered']);
     assert.ok(await db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='delivery_attempts_finished_idx'").first(), 'range index migrated in workerd D1');
+    assert.equal(await db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'alert_notifications%'").first(), null, 'the alert outbox and its indexes are dropped');
     assert.equal(calls[0].body, calls[1].body);
     assert.equal(calls[0].key, event.event_id);
     assert.equal(calls[1].key, event.event_id);

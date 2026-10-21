@@ -60,7 +60,7 @@ API 为 `mailhero.ui.v2` 的 `PreviewRetentionPolicy`（`GET /api/v2/settings:pr
 
 D1 保存容量 70% / 85% / 95%、备份超过 36 小时、处理积压超过 1 小时、解析失败等状态；容量取 D1 逻辑字节与 DO 容量计账的较大值，覆盖尚未登记的原件及预留空间，仅激活当前最高档。DO 暂不可用时指标明确标出计账不可用，暂用 D1 数据；两者都不等于实际账户账单。状态变化在下一次评估（约每 10 分钟）登记，每个提醒代码在 `alerts` 表中一行。活跃提醒显示在工作台顶部和设置页，并作为 `Ops.status()` 的 signals 由 Home 读取，汇入 Home 在 Tasks 中每天至多一条的运维摘要任务。提醒只含代码、计数和时间，不含收件地址、发件人、主题、正文、附件或远端响应。提醒不是扣费硬上限，也不是完整备份成功的替代证据。
 
-Mail Hero 没有自己的外部提醒通道。按 ops-v1 计划保持未配置的可选 `ALERT_WEBHOOK_URL` 及其发件箱于 2026-10-21 删除；`alert_notifications` 表不再读写，由之后的一次 Mail Hero 发布用迁移删除（迁移在旧 Worker 仍运行时执行，必须向后兼容）。
+Mail Hero 没有自己的外部提醒通道。按 ops-v1 计划保持未配置的可选 `ALERT_WEBHOOK_URL` 及其发件箱于 2026-10-21 删除；不再读写的 `alert_notifications` 表由之后一次发布的迁移 `0011_drop_alert_outbox.sql` 删除（迁移在旧 Worker 仍运行时执行，必须向后兼容，所以晚一次发布）。
 
 ## 2.3 运维入口（ops-v1）
 
