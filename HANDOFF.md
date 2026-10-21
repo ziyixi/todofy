@@ -72,16 +72,13 @@ instance of a resource no block declares).
      `extra` on `todofy` or `todofy-core` (no `FLOWDAY_FOCUS`, `FLOWDAY_NATIVE_FOCUS`, `FLOWDAY_PUBLIC_URL`,
      `TASK_SOURCE`, `TODOIST_API_BASE` or `PLUS_METADATA`). The empty `RETIRED_SERVICE_BINDINGS` stops a release
      that still finds one (`REPAIR_MANUAL_REQUIRED`).
-  2. This read-only check must print nothing:
-     `gh secret list --env production --repo ziyixi/todofy | grep -E '^TODOFY_CORE_WORKER_SECRETS\s'`. If it lists
-     the map, set it again without `TODOIST_API_KEY` (`tools/cloud-bootstrap/bootstrap.py secrets`): Todofy's deploy
-     refuses a name todofy-core no longer declares. (`FLOWDAY_WORKER_SECRETS`, if it exists, is read by nothing after
+  2. This read-only check must print nothing (checked 2026-10-21: nothing):
+     `gh secret list --env production --repo ziyixi/todofy | grep -E '^TODOFY_CORE_WORKER_SECRETS\s'`. (`FLOWDAY_WORKER_SECRETS`, if it exists, is read by nothing after
      the merge; step 6 below deletes it.)
-  3. Delete the retired Todoist key from todofy-core; a deploy keeps a secret it does not name, so an undeclared live
-     one stops the release. From `todofy/` (its pinned Wrangler): `npx wrangler secret list --config wrangler.toml`
-     (names only), then `npx wrangler secret delete TODOIST_API_KEY --config wrangler.toml`. Home's 非 CI 改动 shows
-     this once. If `gh secret list --env production --repo ziyixi/todofy` shows `TODOFY_TODOIST_API_KEY`, delete it
-     too.
+  3. `TODOIST_API_KEY` stays declared as an optional manual secret of todofy-core (`todofy/app.toml`) until the live
+     secret is deleted, so the release does not depend on that deletion. Nothing reads it. Afterwards: from `todofy/`,
+     `npx wrangler secret delete TODOIST_API_KEY --config wrangler.toml`, then remove the declaration and regenerate
+     (`tools/cloud-config/generate.py`, `.github/scripts/drift_desired.py`).
   4. Remove the FlowDay values from the infrastructure inputs: after this release `infra_state.py` refuses
      unexpected variables. `grep -c flowday_policy ~/.config/todofy-infra/local.tfvars` prints a count; if it is not
      0, delete the `flowday_policy_names` and `flowday_policy_options` entries (and in the private bootstrap input's

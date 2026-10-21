@@ -16,8 +16,9 @@ position = 2
 [[workers]]
 config = "todofy/wrangler.toml"
 personal_secrets = ["TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"]
-manual_secrets = ["GEMINI_API_KEY"]
-optional_secrets = ["TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"]
+# TODOIST_API_KEY is retired (nothing reads it) and stays optional only until the live secret is deleted.
+manual_secrets = ["GEMINI_API_KEY", "TODOIST_API_KEY"]
+optional_secrets = ["TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID", "TODOIST_API_KEY"]
 hosts = []
 entry = "todofy"
 role = "处理核心（TodofyCore）"
