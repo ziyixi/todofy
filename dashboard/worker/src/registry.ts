@@ -255,17 +255,17 @@ const ENTRIES: readonly EntryDef[] = [
   },
   {
     id: 'personal-mcp',
-    name: 'Personal MCP',
-    description: 'Private tools and event subscriptions for ChatGPT',
+    name: '个人 MCP',
+    description: 'ChatGPT 私有工具与事件订阅',
     group: 'hidden',
     icon: 'server',
     accent: 'slate',
-    url: 'https://mcp.ziyixi.science/mcp',
+    url: 'https://mcp.ziyixi.science/',
     access: true,
     status: { type: 'none' },
     tile_metric: null,
     app_only_signals: [],
-    order: 1,
+    order: 4,
   },
   // END service-catalog entries
   {
@@ -302,7 +302,7 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'recall', entry: 'recall', role: '浏览记录、搜索与归档' },
   { script: 'brief', entry: 'brief', role: '每日简报、深读与归档' },
   { script: 'tasks', entry: 'tasks', role: '任务存储与桌面规划' },
-  { script: 'personal-mcp', entry: 'personal-mcp', role: 'Private MCP tools and event subscriptions' },
+  { script: 'personal-mcp', entry: 'personal-mcp', role: '私有工具与事件订阅' },
   // END service-catalog workers
 ];
 

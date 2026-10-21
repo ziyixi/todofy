@@ -78,7 +78,7 @@ describe('the registry', () => {
     expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'brief', 'tasks']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter']);
-    expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime']);
+    expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime', 'personal-mcp']);
     const status = Object.fromEntries(REGISTRY.entries.map((e) => [e.id, e.status.type]));
     expect(status).toEqual({
       'mail-hero': 'ops_v1',
@@ -96,6 +96,7 @@ describe('the registry', () => {
       home: 'self',
       'self-hosted': 'none',
       'platform-runtime': 'none',
+      'personal-mcp': 'none',
     });
   });
 
@@ -133,6 +134,11 @@ describe('the registry', () => {
     expect(resourceByMatch('d1', '2f8c5331-06ce-4347-8c0a-90fe51c82260')).toMatchObject({ id: 'links-db', entry: 'links' });
     expect(entryOfScript('links')).toBe('links');
     expect(flowsOfScript('links')).toEqual([]);
+    expect(entryOfScript('personal-mcp')).toBe('personal-mcp');
+    expect(flowsOfScript('personal-mcp')).toEqual([]);
+    expect(REGISTRY.entries.find((e) => e.id === 'personal-mcp')).toMatchObject({
+      group: 'hidden', access: true, status: { type: 'none' },
+    });
     expect(resourceByMatch('r2', 'someone-elses-bucket')).toBeUndefined();
     // Not an app of the monorepo: the self-hosted servers' backups, named under a hidden entry.
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });
