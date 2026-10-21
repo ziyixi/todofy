@@ -39,10 +39,11 @@ PENDING_BETWEEN = Query(
     f" WHERE created_at > ? AND created_at <= ? AND {NATIVE_PENDING}",
     "summaries_pending",
 )
-# Compare-and-set on the pending mail as it was read: bind the task, the time, the category, the event and the task
-# link read with its etag (the only part of the etag that can change while the mail is pending).
+# Compare-and-set on the pending mail as it was read: bind the task, the time, the event and the task link read with
+# its etag (the only part of the etag that can change while the mail is pending). summaries.category_id stays as the
+# old Plan left it; the mail category a conversion takes is Tasks' alone.
 MARK_CONVERTED = Query(
-    f"UPDATE summaries SET task_id=?,triaged_at=?,category_id=? WHERE event_id=? AND task_id=? AND {NATIVE_PENDING}",
+    f"UPDATE summaries SET task_id=?,triaged_at=? WHERE event_id=? AND task_id=? AND {NATIVE_PENDING}",
     "sqlite_autoindex_summaries_1",
 )
 FORGET_EVENTS = Query(

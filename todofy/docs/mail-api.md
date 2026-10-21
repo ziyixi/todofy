@@ -31,7 +31,7 @@ Requests and answers are the wire JSON profile through the shared transcoder; ea
 | --- | --- | --- |
 | `ListMailItems` | `GET /api/mail/v1/mailItems` | Pending mail, newest first, 25 by default and at most 50, by an opaque keyset `page_token`: ID, subject, one-sentence brief, receive time, etag and the task an older release linked. No summary. |
 | `GetMailItem` | `GET /api/mail/v1/mailItems/{id}` | One mail, pending or not, with its full summary (at most 64 KiB; plain text a reader never interprets) and `pending`. |
-| `MarkMailConverted` | `POST /api/mail/v1/mailItems/{id}:markConverted` | `{etag, task_id, category_id?}`: records the task Tasks made from a pending mail. |
+| `MarkMailConverted` | `POST /api/mail/v1/mailItems/{id}:markConverted` | `{etag, task_id}`: records the task Tasks made from a pending mail. |
 | `DeleteMailSummaries` | `POST /api/mail/v1/mailItems:deleteSummaries` | `{event_ids}` (1 to 200): deletes pending summaries; a mail no longer pending is kept. |
 | `GetMailInbox` | `GET /api/mail/v1/mailInbox` | The pending count, and of it the mail that arrived 1 to 14 days ago (the morning brief's carryover). |
 | `PollMailReady` | `GET /api/mail/v1/mailItems:pollReady` | At most 50 ledger transitions after a cursor and the pending mail among them, IDs and times only. |
@@ -45,7 +45,8 @@ event page. The imported archive is never pending.
 Both writes are compare-and-sets in D1 alone and carry no request ID:
 
 - `MarkMailConverted` checks the etag the task was made from (the mail's identity and its task link), then sets
-  `summaries.task_id`, `triaged_at` and `category_id` where the mail is still pending and still links what it linked.
+  `summaries.task_id` and `triaged_at` where the mail is still pending and still links what it linked. The mail
+  category the task took stays in Tasks; `summaries.category_id` keeps only what the retired Plan once wrote.
   The same task again answers the mail as it is, so a lost answer is repeated safely; another task is `NOT_PENDING`. A
   mail changed since its etag is `ETAG_MISMATCH`.
 - `DeleteMailSummaries` deletes the pending rows among the IDs and answers the rest as kept; an ID already gone counts

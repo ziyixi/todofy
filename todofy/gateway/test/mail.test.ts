@@ -62,7 +62,7 @@ describe('the Mail entrypoint (todofy.mail.v1)', () => {
     const mail = client(env);
     expect((await mail.listMailItems({ pageSize: 10 })).mailItems.map((item) => item.id)).toEqual([EVENT]);
     expect((await mail.getMailItem({ name: `mailItems/${EVENT}` })).summary).toBe('合成摘要');
-    const marked = await mail.markMailConverted({ name: `mailItems/${EVENT}`, etag: 'e1', taskId: 'task-1', categoryId: '2' });
+    const marked = await mail.markMailConverted({ name: `mailItems/${EVENT}`, etag: 'e1', taskId: 'task-1' });
     expect([marked.taskId, marked.pending]).toEqual(['task-1', false]);
     expect((await mail.deleteMailSummaries({ eventIds: [EVENT] })).deletedEventIds).toEqual([EVENT]);
     expect((await mail.getMailInbox({ name: 'mailInbox' })).pendingCount).toBe(3);
@@ -70,7 +70,7 @@ describe('the Mail entrypoint (todofy.mail.v1)', () => {
     expect(core.map((call) => [call.instance, call.method, call.args[0], JSON.parse(String(call.args[1])) as unknown])).toEqual([
       ['inbox-v1', 'mail', 'ListMailItems', { page_size: 10 }],
       ['inbox-v1', 'mail', 'GetMailItem', { name: `mailItems/${EVENT}` }],
-      ['inbox-v1', 'mail', 'MarkMailConverted', { name: `mailItems/${EVENT}`, etag: 'e1', task_id: 'task-1', category_id: '2' }],
+      ['inbox-v1', 'mail', 'MarkMailConverted', { name: `mailItems/${EVENT}`, etag: 'e1', task_id: 'task-1' }],
       ['inbox-v1', 'mail', 'DeleteMailSummaries', { event_ids: [EVENT] }],
       ['inbox-v1', 'mail', 'GetMailInbox', { name: 'mailInbox' }],
       ['inbox-v1', 'mail', 'PollMailReady', { baseline: true }],

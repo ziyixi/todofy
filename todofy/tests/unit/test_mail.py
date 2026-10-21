@@ -185,15 +185,23 @@ def test_marking_a_mail_converted_links_its_task_once(stack):
     name = f"mailItems/{E1}"
     assert stack.call("MarkMailConverted", name=name, etag="stale", task_id="t1") == {"error": "ETAG_MISMATCH"}
     assert stack.row(E1) == {"task_id": "", "triaged_at": None, "category_id": None}
-    marked = stack.call("MarkMailConverted", name=name, etag=listed["etag"], task_id="t1", category_id="3")
+    marked = stack.call("MarkMailConverted", name=name, etag=listed["etag"], task_id="t1")
     assert (marked["task_id"], marked.get("pending", False), "summary" in marked) == ("t1", False, False)
-    assert stack.row(E1) == {"task_id": "t1", "triaged_at": NOW, "category_id": 3}
+    assert stack.row(E1) == {"task_id": "t1", "triaged_at": NOW, "category_id": None}
     assert stack.call("ListMailItems") == {}
     # A repeat (a lost answer) with the same etag and task answers the mail as it is.
     assert stack.call("MarkMailConverted", name=name, etag=listed["etag"], task_id="t1") == marked
     assert stack.call("MarkMailConverted", name=name, etag=marked["etag"], task_id="t1") == marked
     assert stack.call("MarkMailConverted", name=name, etag=listed["etag"], task_id="t2") == {"error": "NOT_PENDING"}
-    assert stack.row(E1) == {"task_id": "t1", "triaged_at": NOW, "category_id": 3}
+    assert stack.row(E1) == {"task_id": "t1", "triaged_at": NOW, "category_id": None}
+
+
+def test_marking_leaves_the_category_the_retired_plan_wrote(stack):
+    # The mail category a conversion takes is Tasks' alone; summaries.category_id keeps what the old Plan wrote.
+    stack.mail(E1, category_id=4)
+    [listed] = stack.call("ListMailItems")["mail_items"]
+    stack.call("MarkMailConverted", name=f"mailItems/{E1}", etag=listed["etag"], task_id="t1")
+    assert stack.row(E1) == {"task_id": "t1", "triaged_at": NOW, "category_id": 4}
 
 
 def test_an_adopted_older_mail_takes_the_task_it_was_converted_to(stack):
@@ -225,8 +233,7 @@ def test_a_mail_changed_between_the_read_and_the_write_is_not_marked(stack, monk
         {"name": f"mailItems/{E1}", "etag": "", "task_id": "t1"},
         {"name": f"mailItems/{E1}", "etag": "x", "task_id": ""},
         {"name": f"mailItems/{E1}", "etag": "x", "task_id": "tmp-local"},
-        {"name": f"mailItems/{E1}", "etag": "x", "task_id": "t1", "category_id": "0"},
-        {"name": f"mailItems/{E1}", "etag": "x", "task_id": "t1", "category_id": "personal"},
+        {"name": f"mailItems/{E1}", "etag": "x", "task_id": "t1", "category_id": "3"},
         {"name": f"mailItems/{E1}", "etag": "x", "task_id": "t1", "request_id": str(uuid.uuid4())},
     ],
 )

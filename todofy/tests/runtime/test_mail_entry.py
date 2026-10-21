@@ -113,9 +113,7 @@ def test_pending_mail_is_listed_read_converted_and_deleted(probe: Worker) -> Non
     mark = f"/rw/api/mail/v1/mailItems/{first}:markConverted"
     stale = probe.hooks.post(mark, json={"etag": "stale", "task_id": "task-1"})
     assert refusal(stale) == (409, "ABORTED", "ETAG_MISMATCH")
-    done = answer(
-        probe.hooks.post(mark, json={"etag": item.etag, "task_id": "task-1", "category_id": "2"}), pb.MailItem
-    )
+    done = answer(probe.hooks.post(mark, json={"etag": item.etag, "task_id": "task-1"}), pb.MailItem)
     assert (done.task_id, done.pending) == ("task-1", False)
     assert answer(probe.hooks.post(mark, json={"etag": item.etag, "task_id": "task-1"}), pb.MailItem) == done
     other = probe.hooks.post(mark, json={"etag": item.etag, "task_id": "task-2"})
@@ -123,7 +121,7 @@ def test_pending_mail_is_listed_read_converted_and_deleted(probe: Worker) -> Non
     [row] = probe.d1(
         f"SELECT task_id, category_id, triaged_at IS NOT NULL AS triaged FROM summaries WHERE event_id = '{first}'"
     )
-    assert row == {"task_id": "task-1", "category_id": 2, "triaged": 1}
+    assert row == {"task_id": "task-1", "category_id": None, "triaged": 1}
 
     deleted = probe.hooks.post("/rw/api/mail/v1/mailItems:deleteSummaries", json={"event_ids": [second, converted]})
     assert answer(deleted, pb.DeleteMailSummariesResponse) == pb.DeleteMailSummariesResponse(

@@ -125,7 +125,8 @@ test('a conversion makes the derived task in the Inbox with the category, then m
     'Pay the synthetic invoice.\n\n[查看完整邮件摘要](https://tasks.example.test/?mail=evt-convert#/mail)' +
       '\n\nMail Hero event: evt-convert',
   );
-  expect(mailOf('evt-convert')).toMatchObject({ pending: false, taskId, categoryId: firstCategory(set) });
+  // Todofy learns only the task; the category stays in Tasks, on the task.
+  expect(mailOf('evt-convert')).toMatchObject({ pending: false, taskId });
   // The same request again answers the same task; Todofy answers the repeated mark as done.
   const replay = await convert(body);
   expect(replay.status).toBe(200);

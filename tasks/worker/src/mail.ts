@@ -294,7 +294,6 @@ function markConverted(env: Env, input: ConvertMailItemRequest, task: Task) {
       name: `mailItems/${input.eventId}`,
       etag: input.etag,
       taskId: task.id,
-      categoryId: input.categoryId,
     }),
   );
 }

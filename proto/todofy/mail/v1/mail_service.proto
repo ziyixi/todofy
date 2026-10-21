@@ -140,8 +140,6 @@ message MarkMailConvertedRequest {
   string etag = 2 [(google.api.field_behavior) = REQUIRED];
   // The task made from the mail.
   string task_id = 3 [(google.api.field_behavior) = REQUIRED];
-  // The Tasks mail category the task took, by its ID; empty for none.
-  string category_id = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Deletes a bounded set of pending summaries only.

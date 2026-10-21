@@ -39,8 +39,6 @@ MAX_DELETE = 200
 MAX_SUMMARY_BYTES = 64 << 10
 MAX_CURSOR = 2**63 - 1
 CURSOR = re.compile(r"0|[1-9][0-9]{0,18}")
-# summaries.category_id: the ID of a Tasks mail category, a positive integer (Tasks keeps Todofy's former IDs).
-CATEGORY_ID = re.compile(r"[1-9][0-9]{0,8}")
 COLLECTION = "mailItems/"
 WRITES = frozenset({"MarkMailConverted", "DeleteMailSummaries"})
 # Seconds a write waits: a backup holds the ledger for a minute or so, maintenance until the owner ends it.
@@ -176,9 +174,8 @@ async def _mark_converted(core: Any, request: pb.MarkMailConvertedRequest) -> pb
     """Records the task Tasks made from a pending mail, by compare-and-set on the mail its etag names: one read, then
     one batch of the write and the read back. The same task again answers the mail as it is."""
     event_id, task_id = _event_id(request.name), _id(request.task_id)
-    if not request.etag or (request.category_id and not CATEGORY_ID.fullmatch(request.category_id)):
+    if not request.etag:
         raise MailError("BAD_REQUEST")
-    category = int(request.category_id) if request.category_id else None
     row = await _row(core, event_id)
     if row is not None and _pending(row):
         if request.etag != mailbox.item_etag(row):
@@ -186,7 +183,7 @@ async def _mark_converted(core: Any, request: pb.MarkMailConvertedRequest) -> pb
         db = core.env.DB
         marked, after = await db.batch(
             [
-                db.prepare(sql.MARK_CONVERTED.sql).bind(task_id, now_s(), category, event_id, row["task_id"]),
+                db.prepare(sql.MARK_CONVERTED.sql).bind(task_id, now_s(), event_id, row["task_id"]),
                 db.prepare(sql.ITEM.sql).bind(source_id(core.env), event_id),
             ]
         )

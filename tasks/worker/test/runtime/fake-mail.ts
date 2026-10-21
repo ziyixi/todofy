@@ -25,7 +25,6 @@ export interface SyntheticMail {
   /** A task an older Todofy linked, or the converted one. */
   taskId?: string;
   pending?: boolean;
-  categoryId?: string;
   /** Changes the etag, as an edit of the mail would. */
   version?: number;
 }
@@ -96,7 +95,7 @@ export function fakeMail(mail: SyntheticMail[] = []): FakeMail {
         const mail = find(input.name);
         if (mail.pending !== false) {
           if (input.etag !== mailEtag(mail)) throw new RpcError(Code.ABORTED, 'ETAG_MISMATCH', 'the mail changed');
-          Object.assign(mail, { pending: false, taskId: input.taskId, categoryId: input.categoryId });
+          Object.assign(mail, { pending: false, taskId: input.taskId });
           return item(mail);
         }
         if (mail.taskId === input.taskId) return item(mail);
