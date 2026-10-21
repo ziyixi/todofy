@@ -75,6 +75,8 @@ afterwards.
    line. The planning facts of that time were in Todofy's planning store, which Todofy's migration
    `0013_drop_plan_store.sql` dropped; Todofy's backups made before it still hold them as files, and its restore
    tool leaves those tables out.
+   A backup made before `0007_timer_pause.sql` has no `focus_timer.paused_at`: the timer restores without it, so a
+   paused session resumes now.
    `verify` ends with `verify PASS`.
 5. Switch the Tasks Worker to the new database. This step is not rehearsed, and a push alone does not do it:
    the release's preflight finds the live `DB` binding on the old id and stops (`STATEFUL_BINDING_CHANGED`

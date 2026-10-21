@@ -122,4 +122,6 @@ message FocusTimer {
   int32 finished_seconds = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Current etag.
   string etag = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When a paused session paused; unset unless paused.
+  google.protobuf.Timestamp pause_time = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

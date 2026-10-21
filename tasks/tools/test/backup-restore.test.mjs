@@ -65,8 +65,8 @@ function seed(db) {
       ('2026-10-19','t-child',1.5,NULL,1,1),('2026-10-19','t-done',0.75,7,1,7);
     INSERT INTO focus_entries(id,task_id,day,seconds,started_at,source,area,created_at,updated_at) VALUES
       ('e-timer','t-done','2026-10-19',1500,5,'timer','work',7,7),('e-manual','t-child','2026-10-18',900,NULL,'manual','',3,3);
-    UPDATE focus_timer SET state='running',task_id='t-child',day='2026-10-19',area='personal',started_at=10,
-      segment_start=12,saved_seconds=60,revision=3,updated_at=12 WHERE id='timer';
+    UPDATE focus_timer SET state='paused',task_id='t-child',day='2026-10-19',area='personal',started_at=10,
+      saved_seconds=60,paused_at=12,revision=3,updated_at=12 WHERE id='timer';
     UPDATE tasks SET stage='committed',committed_week='2026-10-19',area='work',lead_days=3,deadline='2026-10-23',
       planning_flags='["active"]' WHERE id='t-parent';
     INSERT INTO task_dependencies(task_id,prerequisite_id,baseline_count,created_at,updated_at,deleted_at) VALUES
@@ -91,16 +91,25 @@ function columns(db, table) {
 const PLANNING_COLUMNS = ['stage', 'committed_week', 'area', 'lead_days', 'planning_flags'];
 /**
  * What Todofy's job stores for the Tasks section: two parts per table, skipping the rows `skip` names. A backup made
- * before 0006_planning.sql has neither its tables nor its tasks columns (`beforePlanning`).
+ * before 0006_planning.sql has neither its tables nor its tasks columns (`beforePlanning`); one made before
+ * 0007_timer_pause.sql has no focus_timer.paused_at (`beforeTimerPause`).
  */
 function backupOf(
   db,
   root,
-  { skip = () => false, change = { start: 3, end: 3 }, tables: names = RESTORE_ORDER, beforePlanning = false } = {},
+  {
+    skip = () => false,
+    change = { start: 3, end: 3 },
+    tables: names = RESTORE_ORDER,
+    beforePlanning = false,
+    beforeTimerPause = false,
+  } = {},
 ) {
   const tables = names.map((name) => {
     const names = columns(db, name).filter(
-      (column) => !(beforePlanning && name === 'tasks' && PLANNING_COLUMNS.includes(column)),
+      (column) =>
+        !(beforePlanning && name === 'tasks' && PLANNING_COLUMNS.includes(column)) &&
+        !(beforeTimerPause && name === 'focus_timer' && column === 'paused_at'),
     );
     const rows = db
       .prepare(`SELECT ${names.join(',')} FROM ${name} ORDER BY rowid`)
@@ -174,7 +183,10 @@ test('a backup round-trips with its ids, revisions, sequences and labels, and a 
     target.exec(sql);
     assert.deepEqual(dump(target), dump(source));
     assert.ok(target.prepare('SELECT count(*) AS n FROM changes').get().n > 0, 'the inserts rebuilt the change feed');
-    assert.equal(target.prepare("SELECT state FROM focus_timer WHERE id='timer'").get().state, 'running');
+    assert.deepEqual(
+      { ...target.prepare("SELECT state,paused_at FROM focus_timer WHERE id='timer'").get() },
+      { state: 'paused', paused_at: 12 },
+    );
     assert.equal(target.prepare("SELECT revision FROM plan_board WHERE id='board'").get().revision, 4);
     target.exec("INSERT INTO completions(id,task_id,title,completed_at) VALUES('c-new','t-done','Done',8)");
     assert.equal(target.prepare("SELECT sequence FROM completions WHERE id='c-new'").get().sequence, 10);
@@ -240,6 +252,26 @@ test('a backup made before planning moved into Tasks restores no planning facts,
       );
     },
     { tables: BEFORE_PLANNING, beforePlanning: true },
+  ));
+
+test('a backup made before the timer kept its pause time restores the paused timer without one', () =>
+  withBackup(
+    (root, source) => {
+      const backup = readBackup(root);
+      assert.ok(!backup.section.tables.find((table) => table.name === 'focus_timer').columns.includes('paused_at'));
+      const target = migrated();
+      target.exec(restoreSql(backup).sql);
+      const restored = dump(target);
+      const before = dump(source);
+      for (const name of RESTORE_ORDER.filter((table) => table !== 'focus_timer'))
+        assert.deepEqual(restored[name], before[name], name);
+      // Resumed, it resumes now, as a pause made before the release does.
+      assert.deepEqual(
+        restored.focus_timer.map((row) => ({ ...row })),
+        before.focus_timer.map((row) => ({ ...row, paused_at: null })),
+      );
+    },
+    { beforeTimerPause: true },
   ));
 
 test('a backup with only some of the Focus tables is refused', () =>

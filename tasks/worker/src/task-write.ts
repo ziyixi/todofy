@@ -73,8 +73,8 @@ function settleFocus(db: D1Database, id: string, day: string, now: number): D1Pr
     db
       .prepare(
         `${subtree} UPDATE focus_timer SET state='idle',task_id='',day='',area='',target_seconds=NULL,started_at=NULL,
-        segment_start=NULL,saved_seconds=0,revision=revision+1,updated_at=? WHERE id='timer' AND state<>'idle'
-        AND task_id IN (SELECT id FROM descendants)`,
+        segment_start=NULL,saved_seconds=0,paused_at=NULL,revision=revision+1,updated_at=? WHERE id='timer'
+        AND state<>'idle' AND task_id IN (SELECT id FROM descendants)`,
       )
       .bind(id, now),
   ];

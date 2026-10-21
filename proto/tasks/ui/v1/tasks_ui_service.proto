@@ -869,6 +869,11 @@ message CommandFocusTimerRequest {
   optional int32 target_seconds = 6 [(google.api.field_behavior) = OPTIONAL];
   // START only: "", "work" or "personal", kept on the session's record.
   string area = 7 [(google.api.field_behavior) = OPTIONAL];
+  // PAUSE and RESUME only: when the command takes effect; unset is now. A PAUSE takes effect between its running
+  // segment's start and now, a RESUME between the moment the session paused (FocusTimer.pause_time) and now; a time
+  // outside that range is moved to its nearer end. Away detection pauses at the moment the owner left; keeping
+  // that time resumes at pause_time, as if the session never paused.
+  google.protobuf.Timestamp effective_time = 8 [(google.api.field_behavior) = OPTIONAL];
 }
 // The timer after a command, and the record it saved.
 message CommandFocusTimerResponse {

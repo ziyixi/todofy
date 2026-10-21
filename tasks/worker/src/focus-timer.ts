@@ -2,10 +2,11 @@
  * The one Focus timer (proto/tasks/ui/v1/focus.proto). Every command is guarded by the timer's revision. A session
  * counts on Tasks' today when it starts and is saved as one record of whole minutes when it stops, finishes or its
  * task completes (task-write.ts), and only when it reaches a minute. Count up stops counting at 4 hours, a pomodoro
- * at its target.
+ * at its target. Pause and Resume may take effect earlier than now (effective_time): away detection pauses at the
+ * moment the owner left, and keeping that time resumes at the moment the session paused.
  */
 import { create } from '@ziyixi/proto/protobuf';
-import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
+import { timestampFromMs, timestampMs } from '@ziyixi/proto/protobuf/wkt';
 import { FocusTimer_State, FocusTimerSchema, type FocusTimer } from '@ziyixi/proto/tasks/ui/v1/focus_pb';
 import {
   CommandFocusTimerRequest_Action as Action,
@@ -36,6 +37,8 @@ interface TimerRow {
   saved_seconds: number;
   finished_task_id: string;
   finished_seconds: number;
+  /** When a paused session paused; NULL unless paused, and for a pause made before 0007_timer_pause.sql. */
+  paused_at: number | null;
   revision: number;
 }
 const IDLE = {
@@ -47,6 +50,7 @@ const IDLE = {
   started_at: null,
   segment_start: null,
   saved_seconds: 0,
+  paused_at: null,
 } as const;
 
 function timerMessage(row: TimerRow): FocusTimer {
@@ -63,6 +67,7 @@ function timerMessage(row: TimerRow): FocusTimer {
     finishedTaskId: row.finished_task_id,
     finishedSeconds: row.finished_seconds,
     etag: String(row.revision),
+    ...(row.paused_at === null ? {} : { pauseTime: timestampFromMs(row.paused_at) }),
   });
 }
 /** The session's seconds at `now`: closed time plus the running segment, at most its limit. */
@@ -94,6 +99,11 @@ export async function commandFocusTimer(db: D1Database, input: CommandFocusTimer
   if (String(old.revision) !== input.etag) conflict();
   if (input.action !== Action.START && input.taskId && input.taskId !== old.task_id)
     precondition('The timer is timing another step.');
+  if (input.effectiveTime && input.action !== Action.PAUSE && input.action !== Action.RESUME)
+    invalid('Only PAUSE and RESUME take an effective_time');
+  // When a PAUSE or RESUME takes effect, moved into the range it may: never before what it follows, never after now.
+  const at = (earliest: number) =>
+    Math.min(Math.max(input.effectiveTime ? timestampMs(input.effectiveTime) : now, earliest), now);
   let next: TimerRow = { ...old, revision: old.revision + 1 };
   let entry: EntryRow | undefined;
   const checks: Check[] = [];
@@ -117,6 +127,7 @@ export async function commandFocusTimer(db: D1Database, input: CommandFocusTimer
         saved_seconds: 0,
         finished_task_id: '',
         finished_seconds: 0,
+        paused_at: null,
       };
       // The session holds a place on its day, so its record always fits when it ends.
       checks.push(
@@ -133,13 +144,22 @@ export async function commandFocusTimer(db: D1Database, input: CommandFocusTimer
       );
       break;
     }
-    case Action.PAUSE:
+    case Action.PAUSE: {
       if (old.state !== 'running') precondition('The timer is not running.');
-      next = { ...next, state: 'paused', saved_seconds: elapsed(old, now), segment_start: null };
+      const pausedAt = at(old.segment_start ?? now);
+      next = {
+        ...next,
+        state: 'paused',
+        saved_seconds: elapsed(old, pausedAt),
+        segment_start: null,
+        paused_at: pausedAt,
+      };
       break;
+    }
     case Action.RESUME:
       if (old.state !== 'paused') precondition('The timer is not paused.');
-      next = { ...next, state: 'running', segment_start: now };
+      // A pause made before 0007_timer_pause.sql has no paused_at, so it resumes now.
+      next = { ...next, state: 'running', segment_start: at(old.paused_at ?? now), paused_at: null };
       break;
     case Action.STOP:
     case Action.FINISH: {
@@ -168,7 +188,8 @@ export async function commandFocusTimer(db: D1Database, input: CommandFocusTimer
     db
       .prepare(
         `UPDATE focus_timer SET state=?,task_id=?,day=?,area=?,target_seconds=?,started_at=?,segment_start=?,
-          saved_seconds=?,finished_task_id=?,finished_seconds=?,revision=revision+1,updated_at=? WHERE id='timer'`,
+          saved_seconds=?,finished_task_id=?,finished_seconds=?,paused_at=?,revision=revision+1,updated_at=?
+          WHERE id='timer'`,
       )
       .bind(
         next.state,
@@ -181,6 +202,7 @@ export async function commandFocusTimer(db: D1Database, input: CommandFocusTimer
         next.saved_seconds,
         next.finished_task_id,
         next.finished_seconds,
+        next.paused_at,
         now,
       ),
   ];

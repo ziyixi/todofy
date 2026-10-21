@@ -12,7 +12,9 @@
  *
  * A backup made before 0005_focus.sql has no Focus tables; it restores with them empty and the migration's idle timer.
  * One made before 0006_planning.sql has no planning columns or tables: its tasks take the columns' defaults (no
- * planning facts) and the tables restore empty, but for the migration's empty Review board.
+ * planning facts) and the tables restore empty, but for the migration's empty Review board. One made before
+ * 0007_timer_pause.sql has no focus_timer.paused_at: the INSERT names the backup's columns, so a paused timer restores
+ * with it NULL and resumes now, as a pause made before that release does.
  *
  *   node tools/backup-restore.ts config --database-name tasks-restore --database-id <uuid> --out <outside>/restore.toml
  *   node tools/backup-restore.ts sql --in <download dir> --out <outside>/tasks-restore.sql

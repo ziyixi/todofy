@@ -135,6 +135,15 @@ fail. Records are edited, added and deleted one at a time with their etags; Focu
 days with `ListFocusDays` (at most seven days a call) and total them in the browser, so the Worker does no
 aggregation.
 
+Pause and Resume may take effect earlier than now: `CommandFocusTimer.effective_time` (PAUSE and RESUME only,
+anything else is `INVALID_ARGUMENT`) is moved into its range, a PAUSE's between its running segment's start and now
+and a RESUME's between the moment the session paused and now. `FocusTimer.pause_time` (`focus_timer.paused_at`,
+migration `0007_timer_pause.sql`) says when a paused session paused. So away detection pauses at the moment the owner
+left; keeping that time resumes at `pause_time`, as if the session never paused; discarding it resumes now; and Stop
+while paused leaves it out of the record. A pause made before that migration has no `pause_time` and resumes now.
+The time is part of the request's receipt, so a replay with another time is refused. The server stores what it is
+sent to the second, as every pause does.
+
 ## Native Mail and planning calls
 
 Mail is Todofy's inbox, displayed in Tasks without first creating task records. A successful native summary

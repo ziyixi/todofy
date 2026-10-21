@@ -45,6 +45,8 @@ interface WireTimer {
   saved_seconds?: number;
   finished_task_id?: string;
   finished_seconds?: number;
+  segment_start_time?: string;
+  pause_time?: string;
   etag: string;
 }
 interface WireFocus {
@@ -85,13 +87,31 @@ async function command(action: string, extra: Record<string, unknown> = {}, requ
   const { etag } = await timer();
   return harness.mutate('POST', '/api/tasks/v1/focusTimer:command', { etag, request_id: requestId, action, ...extra });
 }
-/** Moves the running session's start back, as if `seconds` had passed. */
+/** Moves the session's times back, as if `seconds` had passed. */
 async function elapse(seconds: number) {
   await harness.db
-    .prepare("UPDATE focus_timer SET started_at=started_at-?1,segment_start=segment_start-?1 WHERE id='timer'")
+    .prepare(
+      `UPDATE focus_timer SET started_at=started_at-?1,segment_start=segment_start-?1,paused_at=paused_at-?1
+      WHERE id='timer'`,
+    )
     .bind(seconds * 1000)
     .run();
 }
+/** The timer's stored times, in ms. */
+async function timerRow() {
+  const row = await harness.db
+    .prepare("SELECT segment_start,paused_at,saved_seconds FROM focus_timer WHERE id='timer'")
+    .first<{ segment_start: number | null; paused_at: number | null; saved_seconds: number }>();
+  if (!row) throw new Error('The Focus timer row is missing');
+  return row;
+}
+/** When the running segment began, in ms. */
+async function segmentStart(): Promise<number> {
+  const { segment_start: start } = await timerRow();
+  if (start === null) throw new Error('The timer is not running');
+  return start;
+}
+const iso = (ms: number) => new Date(ms).toISOString();
 function addEntry(fields: Record<string, unknown>, requestId = randomUUID()) {
   return harness.mutate('POST', `/api/tasks/v1/focusEntries?request_id=${requestId}`, fields);
 }
@@ -474,6 +494,110 @@ async function complete(step: WireTask, focusDay?: string, action: 'complete' | 
     ...(focusDay === undefined ? {} : { focus_day: focusDay }),
   });
 }
+test('away detection pauses at the moment the owner left, and Keep resumes as if the session never paused', async () => {
+  const step = await task('Synthetic away step');
+  await ok(await command('start', { task_id: step.id, area: 'work' }));
+  // The session started at t0, 20 minutes ago; the owner left at t0+5m.
+  await elapse(1200);
+  const t0 = await segmentStart();
+  const paused = await ok<{ timer: WireTimer }>(await command('pause', { effective_time: iso(t0 + 300_000) }));
+  expect(paused.timer).toMatchObject({ state: 'paused', saved_seconds: 300 });
+  expect(Date.parse(paused.timer.pause_time ?? '')).toBe(t0 + 300_000);
+  expect(await timer()).toEqual(paused.timer);
+  // Keep, sent at t0+30m: Resume at pause_time.
+  await elapse(600);
+  const pauseTime = (await timer()).pause_time ?? '';
+  const kept = await ok<{ timer: WireTimer }>(await command('resume', { effective_time: pauseTime }));
+  expect(kept.timer).toMatchObject({ state: 'running', saved_seconds: 300, segment_start_time: pauseTime });
+  expect(kept.timer.pause_time).toBeUndefined();
+  expect((await timerRow()).paused_at).toBeNull();
+  // Stopped at t0+40m: forty minutes, as if it never paused.
+  await elapse(600);
+  const stopped = await ok<{ entry?: WireEntry }>(await command('stop'));
+  expect(stopped.entry).toMatchObject({ task_id: step.id, seconds: 2400, source: 'timer', area: 'work' });
+});
+
+test('Discard resumes from now, and Stop while paused leaves the away time out', async () => {
+  const step = await task('Synthetic discarded away time');
+  await ok(await command('start', { task_id: step.id }));
+  await elapse(1200);
+  const t0 = await segmentStart();
+  await ok(await command('pause', { effective_time: iso(t0 + 300_000) }));
+  await elapse(600);
+  const before = Date.now();
+  const discarded = await ok<{ timer: WireTimer }>(await command('resume'));
+  expect(Date.parse(discarded.timer.segment_start_time ?? '')).toBeGreaterThanOrEqual(before);
+  await elapse(600);
+  expect((await ok<{ entry?: WireEntry }>(await command('stop'))).entry?.seconds).toBe(900);
+
+  await ok(await command('start', { task_id: step.id }));
+  await elapse(1200);
+  const t1 = await segmentStart();
+  await ok(await command('pause', { effective_time: iso(t1 + 300_000) }));
+  await elapse(600);
+  expect((await ok<{ entry?: WireEntry }>(await command('stop'))).entry?.seconds).toBe(300);
+});
+
+test('a pause or resume time outside its range is moved to the nearer end', async () => {
+  const step = await task('Synthetic clamped pause');
+  await ok(await command('start', { task_id: step.id }));
+  await elapse(600);
+  const start = await segmentStart();
+  // Before the running segment began: it pauses at its start, and that segment counts nothing.
+  const early = await ok<{ timer: WireTimer }>(await command('pause', { effective_time: iso(start - 3_600_000) }));
+  // The wire form leaves a zero out.
+  expect(early.timer.saved_seconds).toBeUndefined();
+  expect(Date.parse(early.timer.pause_time ?? '')).toBe(start);
+  // Resumed before the pause: it resumes at the pause.
+  const resumed = await ok<{ timer: WireTimer }>(await command('resume', { effective_time: iso(start - 60_000) }));
+  expect(Date.parse(resumed.timer.segment_start_time ?? '')).toBe(start);
+  // In the future: now.
+  const before = Date.now();
+  const late = await ok<{ timer: WireTimer }>(await command('pause', { effective_time: iso(before + 3_600_000) }));
+  const pausedAt = Date.parse(late.timer.pause_time ?? '');
+  expect(pausedAt).toBeGreaterThanOrEqual(before);
+  expect(pausedAt).toBeLessThanOrEqual(Date.now());
+  expect(late.timer.saved_seconds).toBeGreaterThanOrEqual(600);
+  expect(late.timer.saved_seconds).toBeLessThan(605);
+  // A pause made before the release has no pause time: it resumes now.
+  await harness.db.prepare("UPDATE focus_timer SET paused_at=NULL WHERE id='timer'").run();
+  expect((await timer()).pause_time).toBeUndefined();
+  const legacy = Date.now();
+  const resumedNow = await ok<{ timer: WireTimer }>(await command('resume', { effective_time: iso(start) }));
+  expect(Date.parse(resumedNow.timer.segment_start_time ?? '')).toBeGreaterThanOrEqual(legacy);
+  await ok(await command('stop'));
+});
+
+test('only Pause and Resume take an effective time, and a replay with another time is refused', async () => {
+  const step = await task('Synthetic effective time');
+  const at = iso(Date.now());
+  expect(await refusal(await command('start', { task_id: step.id, effective_time: at }))).toBe('INVALID_ARGUMENT');
+  await ok(await command('start', { task_id: step.id }));
+  expect(await refusal(await command('stop', { effective_time: at }))).toBe('INVALID_ARGUMENT');
+  const { etag } = await timer();
+  const requestId = randomUUID();
+  const body = { etag, request_id: requestId, action: 'pause', effective_time: at };
+  const first = await ok(await harness.mutate('POST', '/api/tasks/v1/focusTimer:command', body));
+  expect(await ok(await harness.mutate('POST', '/api/tasks/v1/focusTimer:command', body))).toEqual(first);
+  const other = await harness.mutate('POST', '/api/tasks/v1/focusTimer:command', {
+    ...body,
+    effective_time: iso(Date.parse(at) - 60_000),
+  });
+  expect(await refusal(other)).toBe('INVALID_ARGUMENT');
+  await ok(await command('stop'));
+});
+
+test('completing a paused step clears its pause time with the session', async () => {
+  const step = await task('Synthetic paused completion');
+  await ok(await command('start', { task_id: step.id }));
+  await elapse(600);
+  await ok(await command('pause'));
+  expect((await timerRow()).paused_at).not.toBeNull();
+  await ok(await complete(step));
+  expect((await timer()).state).toBe('idle');
+  expect((await timerRow()).paused_at).toBeNull();
+});
+
 async function entriesOf(step: WireTask, day: string): Promise<WireEntry[]> {
   return ((await read(day)).entries ?? []).filter((entry) => entry.task_id === step.id);
 }

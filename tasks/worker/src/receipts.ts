@@ -17,7 +17,11 @@ export interface RequestHash {
 const requestSchemas = new Map(TasksUiService.methods.map((method) => [method.input.typeName, method.input]));
 
 async function sha256(value: unknown): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  // A decoded Timestamp (CommandFocusTimer's effective_time) holds a bigint, which JSON cannot; no request older than
+  // the wire form had one, so its text form only has to be stable.
+  const bytes = new TextEncoder().encode(
+    JSON.stringify(value, (_, field: unknown) => (typeof field === 'bigint' ? String(field) : field)),
+  );
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

@@ -83,7 +83,7 @@ export const BACKUP_TABLES: readonly BackupTable[] = [
     name: 'focus_timer',
     columns: [
       'id', 'state', 'task_id', 'day', 'area', 'target_seconds', 'started_at', 'segment_start', 'saved_seconds',
-      'finished_task_id', 'finished_seconds', 'revision', 'created_at', 'updated_at', 'deleted_at',
+      'finished_task_id', 'finished_seconds', 'revision', 'created_at', 'updated_at', 'deleted_at', 'paused_at',
     ],
     key: ['id'],
   },
