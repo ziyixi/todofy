@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { Webhook } from 'standardwebhooks';
 import { postSigned, validateCallback, verifyCallback } from '../src/webhook.ts';
 
@@ -6,6 +7,12 @@ const secret = `whsec_${btoa('s'.repeat(32))}`;
 const callback = { id: 'sub_test', url: 'https://chatgpt.example.org/callback', secret };
 
 describe('ChatGPT webhook', () => {
+  it('accepts the native Dots callback with the production allowlist', () => {
+    const config = readFileSync(new URL('../../wrangler.toml', import.meta.url), 'utf8');
+    const hosts = /^CALLBACK_HOSTS\s*=\s*"([^"]+)"/m.exec(config)?.[1] ?? '';
+    expect(() => { validateCallback('https://connectors.api.openai.com/synthetic-callback', secret, hosts); }).not.toThrow();
+  });
+
   it('restricts callbacks to the configured HTTPS host', () => {
     expect(() => { validateCallback(callback.url, secret, 'chatgpt.example.org'); }).not.toThrow();
     expect(() => { validateCallback('http://chatgpt.example.org/callback', secret, 'chatgpt.example.org'); }).toThrow();

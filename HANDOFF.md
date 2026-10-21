@@ -30,11 +30,12 @@ The owner approved the disclosed Connect sharing scope. The existing Chrome sess
 login and OAuth grant; the private plugin discovered both tools and `personal_cloud.test`. The existing Dot read
 status successfully, but its native subscription returned a generic task-service error. Direct connected-tool
 status confirmed `ef76b57d`, zero subscriptions and no deliveries; the Dot did not send a test event.
-Diagnostic release `ddf7820d` passed branch CI `39553772393` and main publication `39553955084`. A native retry
-again failed; client cleanup called `events/unsubscribe` and overwrote the subscription result. The branch now
-narrows the same diagnostic slot to `last_subscription_request`, which cleanup cannot overwrite. It records no
-full callback URL, secret or raw errors, and leaves subscription validation unchanged. Publish through branch
-CI/main, inspect the actual subscription result, then complete receipt/dedup/unsubscribe acceptance.
+Diagnostic releases `ddf7820d` (CI `39553772393`, main `39553955084`) and `0c787e31` (CI `39554497873`, main
+`39554661146`) passed. The latter retains `last_subscription_request` across native cleanup and exposed the
+cause: RPC `-32015`, `callback_host_unapproved`, hostname `connectors.api.openai.com`. Production allowed only
+`chatgpt.com`. The branch replaces that host assumption with the real exact hostname and adds a regression
+against the committed config (failed before the fix). No full callback URL or secret is recorded. Publish through
+branch CI/main, then complete signed verification, receipt/dedup/unsubscribe acceptance.
 No real Dots receipt or business-content access is claimed. Evidence:
 [Personal MCP verification](docs/personal-mcp-verification.md). Only after this gate passes, add business tools/events.
 

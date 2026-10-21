@@ -59,16 +59,24 @@ and [main publication 39553955084](https://github.com/ziyixi/todofy/actions/runs
 failed. Its last authenticated event request was a successful `events/unsubscribe`, although the Dot had not
 requested cancellation; the client cleanup had overwritten the subscription diagnostic.
 
-The next diagnostic release narrows the single slot to `last_subscription_request`. It records only authenticated
+Diagnostic release `0c787e31` passed [branch CI 39554497873](https://github.com/ziyixi/todofy/actions/runs/39554497873)
+and [main publication 39554661146](https://github.com/ziyixi/todofy/actions/runs/39554661146).
+It narrows the single slot to `last_subscription_request` and records only authenticated
 subscription phase, known event name, TTL, delivery mode, callback hostname and safe HTTP/RPC error codes.
 Catalog reads and cleanup unsubscribe cannot overwrite it. It excludes full callback URLs, signing secrets,
 raw requests and raw errors. Local workerd tests cover accepted requests, schema rejection, unapproved hostname,
 failed signed challenge and unchanged status after an unauthenticated request. Subscription validation is unchanged.
 
+The next native attempt established the cause: `events/subscribe` returned RPC `-32015` with
+`reason: callback_host_unapproved` and callback hostname `connectors.api.openai.com`. The production allowlist
+had only `chatgpt.com`. The fix replaces that assumption with the observed exact hostname. A regression test
+using the committed production allowlist and a synthetic path failed before the fix; it now accepts the native host.
+Neither the callback path nor the signing secret is retained in this record.
+
 Remaining checks:
 
-1. Publish the diagnostic release through branch CI and main Actions, then repeat one native subscription.
-2. Correct the demonstrated cause and confirm the subscription is saved.
+1. Publish the exact-host fix through branch CI and main Actions, then repeat one native subscription.
+2. Confirm signed callback verification succeeds and the subscription is saved.
 3. Send the intended synthetic event with request ID `e9d7b170-2134-4264-a590-5056feb707f5` and observe actual Dots receipt.
 4. Replay that request ID once, then stop only this test subscription and record actual event/build/receipt evidence.
    Only then add business tools or production event sources.
