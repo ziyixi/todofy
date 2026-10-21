@@ -25,7 +25,9 @@ identity and the real AUD is recorded. Existing Access apps do not enable OAuth 
 
 Local workerd proves discovery, restart persistence, signed delivery, duplicate request handling and unsubscribe.
 Real Dots login, event subscription and receipt remain pending; follow [the gate](personal-mcp/docs/connection.md).
-Only after it passes, add the agreed business tools and events. Keep this personal integration small; no generic
+Branch CI `39542156446` passed MCP/Infra checks but found an unsupported Home catalog icon; it now reuses
+the existing server icon. The replacement full CI must pass before merging.
+Only after real Dots acceptance passes, add the agreed business tools and events. Keep this personal integration small; no generic
 event bus, replay platform or extra model calls. Do not treat local verification as real-client acceptance.
 
 

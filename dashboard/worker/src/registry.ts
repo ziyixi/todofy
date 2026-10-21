@@ -258,7 +258,7 @@ const ENTRIES: readonly EntryDef[] = [
     name: 'Personal MCP',
     description: 'Private tools and event subscriptions for ChatGPT',
     group: 'hidden',
-    icon: 'plug',
+    icon: 'server',
     accent: 'slate',
     url: 'https://mcp.ziyixi.science/mcp',
     access: true,
