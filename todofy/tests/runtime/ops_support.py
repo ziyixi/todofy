@@ -30,7 +30,6 @@ from tests.runtime.harness import (
     SHARED_VARS,
     Worker,
     _run,
-    tasks_config,
 )
 
 CONTRACT = ROOT.parent / "contracts" / "ops-v1"
@@ -93,7 +92,7 @@ class OpsStack(Worker):
 
 
 def start_ops_stack(state: Path, variables: dict[str, str]) -> Iterator[OpsStack]:
-    """The probe (primary), the gateway, todofy-core and Tasks in one process, with ``variables`` split
+    """The probe (primary), the gateway and todofy-core in one process, with ``variables`` split
     between the gateway and the core as ``start_gateway`` splits them."""
     shared = {name: value for name, value in variables.items() if name in SHARED_VARS}
     gateway_vars = {name: value for name, value in variables.items() if GATEWAY_VARS.fullmatch(name)} | shared
@@ -110,10 +109,9 @@ def start_ops_stack(state: Path, variables: dict[str, str]) -> Iterator[OpsStack
     (state / "wrangler.toml").write_text(PROBE_CONFIG.replace("{gateway}", gateway["name"]))
     gateway_path.write_text(json.dumps(gateway))
     core_path.write_text(json.dumps(core))
-    tasks = str(tasks_config(state / "tasks.json"))
-    configs = [str(state / "wrangler.toml"), str(gateway_path.relative_to(ROOT)), core_path.name, tasks]
+    configs = [str(state / "wrangler.toml"), str(gateway_path.relative_to(ROOT)), core_path.name]
     try:
-        yield from _run(OpsStack(configs, core_path.name, state, {}, tasks))
+        yield from _run(OpsStack(configs, core_path.name, state, {}))
     finally:
         gateway_path.unlink(missing_ok=True)
         core_path.unlink(missing_ok=True)

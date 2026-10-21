@@ -10,7 +10,6 @@ import pytest
 
 from tests.fakes.gemini_fake import API_KEY as GEMINI_KEY
 from tests.fakes.gemini_fake import GeminiFake
-from tests.runtime import tasks_support as tasks
 from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import assert_contract
 from tests.runtime.reports_support import NEWSLETTER, digest
@@ -93,5 +92,4 @@ def test_the_alarm_writes_no_reminder_for_mail_that_needs_the_owner(stack):
     stack.until(lambda: len(stack.worker.d1("SELECT day FROM daily_reports WHERE top_n IN (0, 10)")) == 2)
     assert stack.worker.trigger_cron("*/10 * * * *").status_code == 200
     time.sleep(2)
-    assert tasks.created(stack.worker) == []
     assert stack.worker.d1("SELECT count(*) AS n FROM mail_reminders") == [{"n": 0}]

@@ -17,7 +17,6 @@ import pytest
 
 from tests import mail_contract
 from tests.fakes.gemini_fake import GeminiFake, error_reply
-from tests.runtime import tasks_support as tasks
 from tests.runtime.conftest import pipeline_vars
 from tests.runtime.harness import error_code, mail_event, transitions, wait_until
 from tests.runtime.ops_support import OpsStack, start_ops_stack
@@ -127,7 +126,6 @@ def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(stack: OpsSt
     assert result["state"] == "ok", result
     [call] = fresh_gemini.calls_mentioning(CANARY_TEXT)
     assert call.system.strip() and call.model == "gemini-3.5-flash-lite"
-    assert tasks.created(stack) == []
     event = stack.event(CANARY_ID)
     assert (event["state"], event["canary"], event["allowed_actions"], event["summary"]) == ("complete", True, [], None)
     assert transitions(event) == [
@@ -172,7 +170,6 @@ def test_a_canary_whose_summary_keeps_failing_ends_failed_after_three_attempts(
     event = stack.event(event_id)
     assert (event["state"], event["attempt_count"], event["allowed_actions"]) == ("ignored", 3, [])
     assert len(fresh_gemini.calls_mentioning(CANARY_TEXT)) == 9
-    assert tasks.created(stack) == []
     assert stack.ok("status", definition="OpsStatus")["counters"]["attention_events"] == 0
 
 
@@ -188,7 +185,6 @@ def test_an_interrupted_canary_ends_failed_where_mail_would_wait_for_the_owner(s
     assert stack.wait_event(crashed, {"ignored"})["error_code"] == "processing_interrupted_limit"
     result = stack.ok("canaryResult", crashed, definition="CanaryResult")
     assert (result["state"], result["error_code"]) == ("failed", "processing_interrupted_limit")
-    assert tasks.created(stack) == []
 
 
 def test_canary_result_of_a_real_mail_or_a_bad_id(stack: OpsStack) -> None:
