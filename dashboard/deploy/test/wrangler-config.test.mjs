@@ -33,7 +33,7 @@ test('entry and assets resolve from the dashboard root', () => {
   assert.deepEqual(config.assets, { directory: 'web/dist', binding: 'ASSETS', run_worker_first: true, not_found_handling: 'single-page-application' })
 })
 
-test('the Durable Object, the Ops service bindings and the one cron', () => {
+test("the Durable Object, the Ops service bindings, Tasks' create-only TaskInbox and the one cron", () => {
   assert.deepEqual(config.durable_objects, { bindings: [{ name: 'HOME', class_name: 'HomeState' }] })
   assert.deepEqual(config.migrations, [{ tag: 'v1', new_sqlite_classes: ['HomeState'] }])
   assert.deepEqual(config.services, [
@@ -47,6 +47,8 @@ test('the Durable Object, the Ops service bindings and the one cron', () => {
     { binding: 'RECALL', service: 'recall', entrypoint: 'Ops' },
     { binding: 'BRIEF', service: 'brief', entrypoint: 'Ops' },
     { binding: 'TASKS', service: 'tasks', entrypoint: 'Ops' },
+    // The digest's daily task: create only, under source home.
+    { binding: 'TASK_INBOX', service: 'tasks', entrypoint: 'TaskInbox', props: { source: 'home' } },
     { binding: 'PERSONAL_MCP', service: 'personal-mcp', entrypoint: 'Ops' },
   ])
   assert.deepEqual(config.triggers, { crons: ['*/30 * * * *'] })

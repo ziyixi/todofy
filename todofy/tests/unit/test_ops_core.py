@@ -228,6 +228,8 @@ FACTS = ops.Facts(
     guard=ops.NORMAL,
     public_host="todofy.example.com",
 )
+
+
 def codes(status: dict[str, Any]) -> list[tuple[str, str]]:
     return [(signal["code"], signal["severity"]) for signal in status["signals"]]
 
