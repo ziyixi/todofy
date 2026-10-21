@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { createMcpHandler, ProtocolError } from '@modelcontextprotocol/server';
 import { asciiLowerCase, withPrivateHeaders } from '@ziyixi/edge-auth';
 import { authenticate } from './auth.ts';
-import { createServer, type GateApi, type SubscribeParams, type UnsubscribeParams } from './server.ts';
+import { createServer, TEST_EVENT_NAME, type GateApi, type SubscribeParams, type UnsubscribeParams } from './server.ts';
 import type { Env } from './env.ts';
 import { postSigned, validateCallback, verifyCallback } from './webhook.ts';
 
@@ -10,6 +10,17 @@ type Subscription = {
   id: string; owner: string; url: string; secret: string; expires_at: number | null; verified_at: number;
 };
 type Delivery = { subscription_id: string; event_id: string; body: string; attempts: number };
+type EventRequest = {
+  method: 'events/list' | 'events/subscribe' | 'events/unsubscribe';
+  phase: 'received' | 'accepted' | 'rejected';
+  event_name?: typeof TEST_EVENT_NAME;
+  ttl_ms?: number | null;
+  delivery_mode?: 'webhook' | 'poll' | 'push';
+  callback_hostname?: string;
+  http_status?: number;
+  rpc_code?: number;
+  reason?: string;
+};
 const DEFAULT_LIFETIME_MS = 30 * 24 * 60 * 60_000;
 const RETRY_MS = [60_000, 300_000];
 
@@ -41,11 +52,66 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     if (!auth.ok) return withPrivateHeaders(Response.json({ error: auth.failure }, {
       status: ['not_configured', 'keys_unavailable'].includes(auth.failure) ? 503 : 401,
     }));
+    const method = request.headers.get('Mcp-Method');
+    const attempt = method === 'events/list' || method === 'events/subscribe' || method === 'events/unsubscribe'
+      ? await this.recordEventRequest(request, method) : undefined;
     const handler = createMcpHandler(() => createServer(this, this.env.BUILD_SHA ?? 'development'), {
       legacy: 'reject', responseMode: 'auto',
     });
-    try { return withPrivateHeaders(await handler.fetch(request)); }
+    try {
+      const response = await handler.fetch(request);
+      if (attempt) await this.recordEventResponse(attempt, response);
+      return withPrivateHeaders(response);
+    } catch (error) {
+      if (attempt) await this.ctx.storage.put('last_event_request', { ...attempt, phase: 'rejected', reason: 'handler_failed' });
+      throw error;
+    }
     finally { await handler.close(); }
+  }
+
+  private async recordEventRequest(request: Request, method: EventRequest['method']): Promise<EventRequest> {
+    let attempt: EventRequest = { method, phase: 'received' };
+    try {
+      const body: unknown = method === 'events/subscribe' ? await request.clone().json() : null;
+      if (typeof body === 'object' && body !== null && 'params' in body
+        && typeof body.params === 'object' && body.params !== null) {
+        const params = body.params as Record<string, unknown>;
+        const delivery = typeof params.delivery === 'object' && params.delivery !== null
+          ? params.delivery as Record<string, unknown> : {};
+        attempt = {
+          ...attempt,
+          ...(params.name === TEST_EVENT_NAME ? { event_name: TEST_EVENT_NAME } : {}),
+          ...(params.ttlMs === null || typeof params.ttlMs === 'number' && Number.isFinite(params.ttlMs)
+            ? { ttl_ms: params.ttlMs } : {}),
+          ...(delivery.mode === 'webhook' || delivery.mode === 'poll' || delivery.mode === 'push'
+            ? { delivery_mode: delivery.mode } : {}),
+        };
+        if (typeof delivery.url === 'string') attempt = { ...attempt, callback_hostname: new URL(delivery.url).hostname };
+      }
+    } catch {
+      // Malformed input still reaches the SDK; diagnostics retain only the safe fields already extracted.
+    }
+    await this.ctx.storage.put('last_event_request', attempt);
+    return attempt;
+  }
+
+  private async recordEventResponse(attempt: EventRequest, response: Response): Promise<void> {
+    let result: EventRequest = { ...attempt, phase: 'rejected', http_status: response.status, reason: 'invalid_response' };
+    try {
+      const reply: unknown = await response.clone().json();
+      if (typeof reply === 'object' && reply !== null) {
+        if ('error' in reply && typeof reply.error === 'object' && reply.error !== null) {
+          const error = reply.error as Record<string, unknown>;
+          const data = typeof error.data === 'object' && error.data !== null ? error.data as Record<string, unknown> : {};
+          const reason = ['callback_host_unapproved', 'challenge_failed', 'unreachable_or_timeout'].includes(String(data.reason))
+            ? String(data.reason) : error.code === -32602 ? 'invalid_params' : 'protocol_error';
+          result = { ...result, reason, ...(typeof error.code === 'number' ? { rpc_code: error.code } : {}) };
+        } else if (response.ok && 'result' in reply) result = { ...attempt, phase: 'accepted', http_status: response.status };
+      }
+    } catch {
+      // Do not retain response text or exception details, which may contain callback credentials.
+    }
+    await this.ctx.storage.put('last_event_request', result);
   }
 
   private owner(): string {
@@ -86,7 +152,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     return {};
   }
 
-  status(): Promise<unknown> {
+  async status(): Promise<unknown> {
     const now = Date.now();
     const active = this.ctx.storage.sql.exec<{ count: number }>(
       'SELECT count(*) AS count FROM subscriptions WHERE owner = ? AND (expires_at IS NULL OR expires_at > ?)', this.owner(), now,
@@ -95,9 +161,10 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     const last = this.ctx.storage.sql.exec<{ event_id: string; state: string; attempts: number; accepted_at: number | null; error_code: string | null }>(
       'SELECT event_id, state, attempts, accepted_at, error_code FROM deliveries ORDER BY rowid DESC LIMIT 1',
     ).toArray()[0] ?? null;
-    return Promise.resolve({ stage: 'connection_test', build_sha: this.env.BUILD_SHA ?? 'development', subscriptions: active,
+    return { stage: 'connection_test', build_sha: this.env.BUILD_SHA ?? 'development', subscriptions: active,
       deliveries: Object.fromEntries(counts.map(row => [row.state, row.count])), last_delivery: last,
-      meaning: 'accepted means ChatGPT received the webhook; it does not prove the Dot finished its work.' });
+      last_event_request: await this.ctx.storage.get<EventRequest>('last_event_request') ?? null,
+      meaning: 'accepted means ChatGPT received the webhook; it does not prove the Dot finished its work.' };
   }
 
   async emitTest(requestId: string): Promise<unknown> {

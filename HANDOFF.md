@@ -26,11 +26,15 @@ branch CI `39547230019` and same-SHA production run `39547948701` succeeded, in 
 checks and the full Home recipe. The MCP Worker itself remains the verified `ef76b57d` release.
 The MCP has only connection status, synthetic test delivery and persistent subscriptions, with no business bindings.
 
-**Blocked on owner consent:** Chrome created the private Personal Cloud connector and is at Connect Personal Cloud.
-Automatic approval review requires explicit confirmation of the page's newly disclosed potential chat/memory
-sharing scope. The approval question is pending. Do not bypass it, create another connector, or extract browser
-credentials. Continue the retained page after confirmation, then use the existing Dot for real subscription/receipt.
-No real Dots receipt or business-content access is claimed. Evidence and next steps:
+The owner approved the disclosed Connect sharing scope. The existing Chrome session completed Access GitHub
+login and OAuth grant; the private plugin discovered both tools and `personal_cloud.test`. The existing Dot read
+status successfully, but its native subscription returned a generic task-service error. Direct connected-tool
+status confirmed `ef76b57d`, zero subscriptions and no deliveries; the Dot did not send a test event.
+The branch adds a single sanitized `last_event_request` slot to the existing status tool to identify the failure
+on one further native attempt. Local lint/type, 6 unit, 2 workerd runtime, 9 deployment checks and dry-run pass.
+It records no full callback URL, secret or raw errors, and leaves subscription validation unchanged.
+Publish through branch CI/main, inspect the actual rejection, then complete receipt/dedup/unsubscribe acceptance.
+No real Dots receipt or business-content access is claimed. Evidence:
 [Personal MCP verification](docs/personal-mcp-verification.md). Only after this gate passes, add business tools/events.
 
 ### Done steps stay in Plan's Week calendar (`claude/plan-done-steps`)

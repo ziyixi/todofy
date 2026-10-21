@@ -1,7 +1,8 @@
 # Personal MCP connection verification
 
 Status on 2026-10-20 (America/Los_Angeles): the isolated MCP Worker and OAuth infrastructure are deployed.
-Real ChatGPT consent, owner login and Dots event receipt are not yet verified.
+Real ChatGPT consent, owner login and tool discovery are verified. Dots event subscription currently fails;
+event receipt is not verified.
 
 ## Published identity and checks
 
@@ -42,19 +43,30 @@ Resource integration also passed the full Home recipe: 268 Worker unit tests, 97
 tests, lint/type checks, build, deployment dry-run and the existing bundle budget. Registry tests confirm no MCP
 launcher tile is added and its namespace belongs to the MCP service.
 
-## Remaining real-client acceptance
+## Real-client acceptance
 
-The existing Chrome session created the private Personal Cloud connector and reached **Connect Personal Cloud**.
-Automatic approval review stopped that click because the page newly discloses potential sharing of relevant chats
-and memories with the app. An explicit owner confirmation is pending. The confirmation page is retained; do not
-create a second connector, change authentication to bypass consent, or extract a session token.
+The owner approved **Connect Personal Cloud** and its disclosed sharing scope. The existing Chrome session then
+completed Cloudflare Access's GitHub login and OAuth grant. The same private Personal Cloud plugin discovered
+`connection_status`, `send_test_event` and `personal_cloud.test`; no second connector was created.
 
-After the owner confirms:
+The existing Dot successfully called `connection_status`, but its native subscription attempt returned
+`status: ERROR`, “The task service returned an unexpected error.” No server reason or callback hostname was
+visible. A direct call through the connected plugin confirmed build `ef76b57d`, zero subscriptions and no
+deliveries. The Dot did not call `send_test_event`, so no event receipt is claimed.
 
-1. Continue the existing connector's regular Access login and confirm both tools and the event are discovered.
-2. In the existing Dot, subscribe to `personal_cloud.test`, send one test event and observe actual Dots receipt.
-3. Read connection status, replay the same test request ID once, then stop only this test subscription.
-4. Record actual event/build/receipt evidence here. Only then add business tools or production event sources.
+The next diagnostic release adds one `last_event_request` slot to the existing status tool. It records only
+authenticated event method, phase, known event name, TTL, delivery mode, callback hostname and safe HTTP/RPC
+error codes. It excludes full callback URLs, signing secrets, raw requests and raw errors. Local workerd tests
+cover accepted requests, schema rejection, unapproved hostname, failed signed challenge and unchanged status
+after an unauthenticated request. This does not change subscription validation.
+
+Remaining checks:
+
+1. Publish the diagnostic release through branch CI and main Actions, then repeat one native subscription.
+2. Correct the demonstrated cause and confirm the subscription is saved.
+3. Send the intended synthetic event with request ID `e9d7b170-2134-4264-a590-5056feb707f5` and observe actual Dots receipt.
+4. Replay that request ID once, then stop only this test subscription and record actual event/build/receipt evidence.
+   Only then add business tools or production event sources.
 
 A webhook 2xx only proves receiver acceptance. No actual Dots receipt, business action or production-content
 query is claimed by the current evidence.
