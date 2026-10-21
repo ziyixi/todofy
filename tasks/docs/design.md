@@ -167,6 +167,18 @@ dependencies (one correlated subquery), so nothing reads planning separately. `c
 100 planned tasks (60 waiting for 5 each), the fullest plan and a dependency write; `read-budget.test.ts` bounds
 the rows GetPlan and a task's dependencies read.
 
+An isolate's start costs more than any request. The global scope's warm-up (`src/startup.ts`) measured 19.4-20.8
+reference ms on its first run (three runs, 2026-10-20): about 11 for the first Intl initialization and 9 for
+warming the task page's and the Focus week's code. Every request path stays below 10 even as an isolate's first
+request and below 8 warm (`cpu.test.ts`): owner pages, GetPlan, reorders, duplicates, the backup's pages and plan,
+Home's `Ops.status()` and Todofy's service calls (a footer search of 20 full descriptions, a page of 100); 5.8 was
+the highest first run and 4.2 the highest warm median. Completing a family is a fixed number of D1 statements, its
+subtree walked in D1, not in the Worker. So the only work near the CPU p99 Home's Cloudflare view showed on
+2026-10-20 (20.5 ms, p50 2.9 ms) is an isolate's start: the p99 matches new isolates (after a deploy, or an evicted
+one) whose start the metric counts with their first invocation, not a heavy request. Cloudflare limits startup
+separately (1 s), and its metrics page notes that high quantiles can pass the CPU limit without errors.
+`cpu.test.ts` bounds the warm-up's first run at 30 reference ms.
+
 Migration 0004 keeps reads independent of history. An open-roots index serves the Inbox and project roots
 without completed tasks, and a partial index counts only native completions, not imported occurrences.
 Section and project visibility triggers run only when `archived` (or a project's parent) changes, so a

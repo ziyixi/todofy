@@ -1,3 +1,7 @@
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { test, expect } from 'vitest';
 import {
   COLD_ISOLATES,
@@ -426,6 +430,171 @@ test(
     for (const measurement of result.reference.values()) {
       expect(measurement.first, measurement.label).toBeLessThan(10);
       if (measurement.label !== FIRST_PLANNING_PAGE) expect(measurement.median, measurement.label).toBeLessThan(8);
+    }
+  },
+  CPU_TEST_TIMEOUT_MS,
+);
+
+/**
+ * The isolate's one-time start (src/startup.ts): the global scope's warm-up, run here in a request so the meter sees
+ * it, in an isolate whose first request did nothing else. Its first run is what a fresh isolate's start costs: about
+ * 11 reference ms of first Intl initialization and 9 of warming the task page's and the Focus week's code and codec
+ * (2026-10-20). No request path of Tasks reaches 10 reference ms even as an isolate's first request (the tests above
+ * and below), so a CPU p99 near 20 ms in production matches isolates' starts, not a heavy request. Startup has its own
+ * limit (1 s), not Free's 10 ms; the bound keeps the warm-up from growing unnoticed.
+ */
+const FIRST_WARM_UP = 'the startup warm-up, on its first run in an isolate';
+test(
+  'an isolate starts within its warm-up bound',
+  async () => {
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+    const bundled = await build({
+      stdin: {
+        contents: `import { warmUp } from './src/startup.ts';
+          export default { async fetch(request) { if (new URL(request.url).pathname === '/warm') await warmUp('US/Pacific'); return new Response(null, { status: 204 }); } };`,
+        resolveDir: root,
+        sourcefile: 'warm-up-probe.ts',
+        loader: 'ts',
+      },
+      bundle: true,
+      format: 'esm',
+      platform: 'neutral',
+      target: 'es2024',
+      mainFields: ['module', 'main'],
+      conditions: ['workerd', 'worker', 'import'],
+      external: ['cloudflare:workers'],
+      write: false,
+      logLevel: 'silent',
+    });
+    const script = bundled.outputFiles[0]?.text ?? '';
+    const result = await measureInIsolates(
+      COLD_ISOLATES,
+      async () => {
+        const mf = new Miniflare(
+          convertV4MiniflareOptions({
+            host: '127.0.0.1',
+            port: 0,
+            inspectorPort: 0,
+            workers: [{ name: 'warm-up', modules: true, script, compatibilityDate: '2026-09-08' }],
+          }),
+        );
+        await mf.ready;
+        const meter = await connectCpuMeter(mf, 'warm-up');
+        return {
+          mf,
+          meter,
+          async dispose() {
+            meter.close();
+            await mf.dispose();
+          },
+        };
+      },
+      async ({ mf, meter }) => {
+        const call = async (path: string) => {
+          const response = await mf.dispatchFetch(`http://warm-up.test${path}`);
+          expect(response.status).toBe(204);
+        };
+        return [
+          await meter.measure('a request that does nothing, first in its isolate', () => call('/'), 1),
+          await meter.measure(FIRST_WARM_UP, () => call('/warm'), 1),
+        ];
+      },
+    );
+    for (const measurement of result.reference.values())
+      console.log(JSON.stringify({ event: 'tasks_cpu', ...measurement }));
+    expect(result.reference.get(FIRST_WARM_UP)?.first).toBeLessThan(30);
+  },
+  CPU_TEST_TIMEOUT_MS,
+);
+
+/**
+ * What other Workers call: Home's Ops.status() as an isolate's very first request, and Todofy's service calls through
+ * TasksApi.call (decoded, answered with toWire and JSON.stringify, unlike the owner API's pre-encoded pages): a mail
+ * footer lookup (search, 20 tasks with full 16,000-character descriptions), a GTD page of 100 and the backup's plan.
+ */
+const FIRST_OPS_STATUS = "Home's Ops.status() as an isolate's first request";
+test(
+  "Home's status and Todofy's service calls stay within the request bounds",
+  async () => {
+    const result = await measureInIsolates(
+      COLD_ISOLATES,
+      async () => {
+        const harness = await startHarness({ inspectorPort: 0 });
+        const rows = Array.from({ length: 100 }, (_, index) => ({ id: `service-${String(index).padStart(3, '0')}` }));
+        await harness.db
+          .prepare(
+            `INSERT INTO tasks(id,title,description,sort_order,created_at,updated_at) SELECT value->>'id','Synthetic mail task',?,key,?,? FROM json_each(?)`,
+          )
+          .bind(
+            'Synthetic mail "body" 汉字\n'.repeat(800).slice(0, 15900) + ' footer-synthetic',
+            Date.now(),
+            Date.now(),
+            JSON.stringify(rows),
+          )
+          .run();
+        const meter = await connectCpuMeter(harness.mf, 'tasks');
+        return {
+          harness,
+          meter,
+          async dispose() {
+            meter.close();
+            await harness.dispose();
+          },
+        };
+      },
+      async ({ harness, meter }) => {
+        const ops = await harness.mf.getWorker('tasks-ops');
+        const todofy = await harness.mf.getWorker('tasks-read-write');
+        const status = async () => {
+          const answer = (await (await ops.fetch('https://tasks.internal/status')).json()) as { health: string };
+          expect(answer.health).toBe('ok');
+        };
+        const call = async (method: string, body: unknown, count: number) => {
+          const response = await todofy.fetch('https://tasks.internal/rpc', {
+            method: 'POST',
+            body: JSON.stringify({ method, body: JSON.stringify(body) }),
+          });
+          const answer = (await response.json()) as { status: number; body: string };
+          expect(answer.status, answer.body.slice(0, 200)).toBe(200);
+          expect((JSON.parse(answer.body) as { tasks: unknown[] }).tasks).toHaveLength(count);
+        };
+        return [
+          await meter.measure(FIRST_OPS_STATUS, status, 1),
+          await meter.measure("Home's Ops.status()", status, 7),
+          await meter.measure(
+            'a footer search: 20 tasks with full 16,000-character descriptions',
+            () =>
+              call(
+                'ListTasks',
+                { view: 'search', query: 'footer-synthetic', page_size: 20, include_description: true },
+                20,
+              ),
+            7,
+          ),
+          await meter.measure(
+            'a service page of 100 tasks',
+            () => call('ListTasks', { view: 'all', page_size: 100 }, 100),
+            7,
+          ),
+          await meter.measure(
+            "the backup's plan",
+            async () => {
+              const response = await todofy.fetch('https://tasks.internal/backup', {
+                method: 'POST',
+                body: JSON.stringify({ table: '' }),
+              });
+              expect(((await response.json()) as { status: number }).status).toBe(200);
+            },
+            7,
+          ),
+        ];
+      },
+    );
+    for (const measurement of result.reference.values())
+      console.log(JSON.stringify({ event: 'tasks_cpu', ...measurement }));
+    for (const measurement of result.reference.values()) {
+      expect(measurement.first, measurement.label).toBeLessThan(10);
+      if (measurement.label !== FIRST_OPS_STATUS) expect(measurement.median, measurement.label).toBeLessThan(8);
     }
   },
   CPU_TEST_TIMEOUT_MS,
