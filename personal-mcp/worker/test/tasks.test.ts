@@ -37,7 +37,7 @@ function tools(backend: (request: NativeRequest) => Response | Promise<Response>
   const seen: NativeRequest[] = [];
   const env = { TASKS: { async fetch(request: Request) {
     const url = new URL(request.url);
-    const body = request.method === 'GET' ? {} : await request.json<Record<string, unknown>>();
+    const body = request.method === 'GET' || request.method === 'DELETE' ? {} : await request.json<Record<string, unknown>>();
     const call = { method: request.method, path: url.pathname, query: url.searchParams, body };
     seen.push(call);
     return backend(call);
@@ -172,6 +172,38 @@ it('uses native completion with the owner-selected Focus day and remembers its r
     focus_day: '2026-10-20' });
   expect(result.result?.structuredContent).toMatchObject({ task: { completed: true, etag: '4' } });
   expect(client.writes.remembered.get('task-1')).toBe('4');
+});
+
+it('soft-deletes through the native DELETE route and retains the exact retry identity', async () => {
+  let deletedAt: number | null = null;
+  const receipts = new Set<string>();
+  const client = tools(request => {
+    const requestId = request.query.get('request_id') ?? '';
+    if (!receipts.has(requestId)) { deletedAt = 1; receipts.add(requestId); }
+    return Response.json({});
+  });
+  const input = { request_id: REQUEST_ID, task_id: 'synthetic-task', etag: '3' };
+  const first = await client.call('tasks_delete', input);
+  const repeated = await client.call('tasks_delete', input);
+  expect(first.result?.structuredContent).toEqual({ deleted_task_id: 'synthetic-task' });
+  expect(repeated.result?.structuredContent).toEqual(first.result?.structuredContent);
+  expect(deletedAt).toBe(1);
+  expect([...receipts]).toEqual([REQUEST_ID]);
+  expect(client.seen.map(request => ({ method: request.method, path: request.path,
+    query: Object.fromEntries(request.query), body: request.body }))).toEqual([0, 1].map(() => ({
+    method: 'DELETE', path: '/api/tasks/v1/tasks/synthetic-task', query: { etag: '3', request_id: REQUEST_ID }, body: {},
+  })));
+});
+
+it('preserves a native stale-etag refusal without reporting the task as deleted', async () => {
+  const client = tools(() => Response.json({ error: { code: 409, status: 'ABORTED', message: 'Refresh before deleting.',
+    details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'ETAG_MISMATCH', domain: 'tasks.ziyixi.science' }] } }, { status: 409 }));
+  const result = await client.call('tasks_delete', { request_id: REQUEST_ID, task_id: 'synthetic-task', etag: 'stale' });
+  expect(result.result).toMatchObject({ isError: true, structuredContent: {
+    error: { code: 'ETAG_MISMATCH', message: 'Refresh before deleting.' },
+  } });
+  expect(result.result?.structuredContent).not.toHaveProperty('deleted_task_id');
+  expect(client.seen[0]?.query.get('etag')).toBe('stale');
 });
 
 it('returns native Plan facts and page cursors without deriving candidate lanes', async () => {

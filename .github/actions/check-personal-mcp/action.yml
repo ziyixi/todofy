@@ -1,5 +1,5 @@
 name: check-personal-mcp
-description: "Check the private MCP gate with synthetic events and a real SQLite Durable Object."
+description: "Check private MCP tools and event subscriptions with a real SQLite Durable Object."
 runs:
   using: composite
   steps:

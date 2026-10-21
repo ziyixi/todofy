@@ -2,19 +2,22 @@ import { DurableObject } from 'cloudflare:workers';
 import { createMcpHandler, ProtocolError } from '@modelcontextprotocol/server';
 import { asciiLowerCase, withPrivateHeaders } from '@ziyixi/edge-auth';
 import { authenticate } from './auth.ts';
-import { createServer, TEST_EVENT_NAME, type GateApi, type SubscribeParams, type UnsubscribeParams } from './server.ts';
+import { createServer, EVENT_NAMES, TEST_EVENT_NAME, type EventName, type GateApi, type SubscribeParams, type UnsubscribeParams } from './server.ts';
+import { baselineSource, pollSource, SOURCE_NAMES, type SourceEvent, type SourceName, type SourceState } from './events.ts';
 import type { Env } from './env.ts';
 import { postSigned, validateCallback, verifyCallback } from './webhook.ts';
 import { buildOpsStatus } from './ops.ts';
+import { RpcStatusError } from '@ziyixi/proto/http-client';
 
 type Subscription = {
-  id: string; owner: string; url: string; secret: string; expires_at: number | null; verified_at: number;
+  id: string; owner: string; name: EventName; url: string; secret: string; expires_at: number | null; verified_at: number;
 };
+type SourceRow = { name: SourceName; state: string; checked_at: number; error_code: string | null };
 type Delivery = { subscription_id: string; event_id: string; body: string; attempts: number };
 type SubscriptionRequest = {
   method: 'events/subscribe';
   phase: 'received' | 'accepted' | 'rejected';
-  event_name?: typeof TEST_EVENT_NAME;
+  event_name?: EventName;
   ttl_ms?: number | null;
   delivery_mode?: 'webhook' | 'poll' | 'push';
   callback_hostname?: string;
@@ -24,6 +27,7 @@ type SubscriptionRequest = {
 };
 const DEFAULT_LIFETIME_MS = 30 * 24 * 60 * 60_000;
 const RETRY_MS = [60_000, 300_000];
+const SOURCE_INTERVAL_MS = 60_000;
 
 export class SubscriptionStore extends DurableObject<Env> implements GateApi {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -37,6 +41,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
       CREATE TABLE IF NOT EXISTS test_events (id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS step_batches (request_id TEXT PRIMARY KEY, input_hash TEXT NOT NULL, identities TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS own_changes (task_id TEXT PRIMARY KEY, etag TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS event_sources (name TEXT PRIMARY KEY, state TEXT NOT NULL, checked_at INTEGER NOT NULL, error_code TEXT);
       CREATE TABLE IF NOT EXISTS deliveries (
         subscription_id TEXT NOT NULL, event_id TEXT NOT NULL, body TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
@@ -46,6 +51,8 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
       CREATE INDEX IF NOT EXISTS pending_deliveries ON deliveries(state, next_at);
       CREATE TABLE IF NOT EXISTS delivery_totals (state TEXT PRIMARY KEY, count INTEGER NOT NULL);
     `);
+    if (!ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(subscriptions)').toArray().some(column => column.name === 'name'))
+      ctx.storage.sql.exec("ALTER TABLE subscriptions ADD COLUMN name TEXT NOT NULL DEFAULT 'personal_cloud.test'");
     if (!hasTotals) ctx.storage.sql.exec(`INSERT INTO delivery_totals SELECT state, count(*) FROM deliveries GROUP BY state`);
     ctx.storage.sql.exec(`
       CREATE TRIGGER IF NOT EXISTS delivery_insert AFTER INSERT ON deliveries BEGIN
@@ -99,7 +106,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
           ? params.delivery as Record<string, unknown> : {};
         attempt = {
           ...attempt,
-          ...(params.name === TEST_EVENT_NAME ? { event_name: TEST_EVENT_NAME } : {}),
+          ...(EVENT_NAMES.includes(params.name as EventName) ? { event_name: params.name as EventName } : {}),
           ...(params.ttlMs === null || typeof params.ttlMs === 'number' && Number.isFinite(params.ttlMs)
             ? { ttl_ms: params.ttlMs } : {}),
           ...(delivery.mode === 'webhook' || delivery.mode === 'poll' || delivery.mode === 'push'
@@ -122,7 +129,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
         if ('error' in reply && typeof reply.error === 'object' && reply.error !== null) {
           const error = reply.error as Record<string, unknown>;
           const data = typeof error.data === 'object' && error.data !== null ? error.data as Record<string, unknown> : {};
-          const reason = ['callback_host_unapproved', 'challenge_failed', 'unreachable_or_timeout'].includes(String(data.reason))
+          const reason = ['callback_host_unapproved', 'challenge_failed', 'unreachable_or_timeout', 'source_unavailable'].includes(String(data.reason))
             ? String(data.reason) : error.code === -32602 ? 'invalid_params' : 'protocol_error';
           result = { ...result, reason, ...(typeof error.code === 'number' ? { rpc_code: error.code } : {}) };
         } else if (response.ok && 'result' in reply) result = { ...attempt, phase: 'accepted', http_status: response.status };
@@ -161,7 +168,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
   }
 
   private async subscriptionId(params: UnsubscribeParams): Promise<string> {
-    // The sole event has no arguments, so its canonical identity has no key-order ambiguity.
+    // These personal events have no filter arguments, so their identity has no key-order ambiguity.
     const identity = JSON.stringify([this.owner(), params.delivery.url, params.name, {}]);
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity));
     return `sub_${Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')}`;
@@ -178,9 +185,19 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
       verifiedAt = Date.now();
     }
     const expiresAt = params.ttlMs === null ? null : now + (params.ttlMs ?? DEFAULT_LIFETIME_MS);
-    this.ctx.storage.sql.exec(`INSERT INTO subscriptions VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET secret=excluded.secret, expires_at=excluded.expires_at, verified_at=excluded.verified_at`,
-    id, this.owner(), params.delivery.url, params.delivery.secret, expiresAt, verifiedAt);
+    let baseline: SourceState | undefined;
+    if (params.name !== TEST_EVENT_NAME && !this.activeSources().includes(params.name)) {
+      const previous = this.source(params.name);
+      try { baseline = await baselineSource(params.name, this.env, previous ? JSON.parse(previous.state) as SourceState : undefined); }
+      catch { throw new ProtocolError(-32000, 'The event source is unavailable. Check its Home status before subscribing again.', { reason: 'source_unavailable' }); }
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(`INSERT INTO subscriptions (id, owner, name, url, secret, expires_at, verified_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET secret=excluded.secret, expires_at=excluded.expires_at, verified_at=excluded.verified_at`,
+      id, this.owner(), params.name, params.delivery.url, params.delivery.secret, expiresAt, verifiedAt);
+      if (baseline) this.ctx.storage.sql.exec('INSERT OR REPLACE INTO event_sources VALUES (?, ?, ?, NULL)', params.name, JSON.stringify(baseline), now);
+    });
+    await this.schedulePending();
     return { id, refreshBefore: expiresAt === null ? null : new Date(expiresAt).toISOString(), cursor: null, truncated: false };
   }
 
@@ -188,7 +205,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     const id = await this.subscriptionId(params);
     this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec('DELETE FROM subscriptions WHERE id = ?', id);
-      this.ctx.storage.sql.exec("DELETE FROM deliveries WHERE subscription_id = ? AND state = 'pending'", id);
+      this.ctx.storage.sql.exec("DELETE FROM deliveries WHERE subscription_id = ? AND state <> 'accepted'", id);
     });
     await this.schedulePending();
     return {};
@@ -203,8 +220,13 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     const last = this.ctx.storage.sql.exec<{ event_id: string; state: string; attempts: number; accepted_at: number | null; error_code: string | null; event_at: string }>(
       "SELECT event_id, state, attempts, accepted_at, error_code, json_extract(body, '$.timestamp') AS event_at FROM deliveries ORDER BY rowid DESC LIMIT 1",
     ).toArray()[0] ?? null;
-    return { stage: 'connection_test', build_sha: this.env.BUILD_SHA ?? 'development', subscriptions: active,
+    const sources = this.activeSources().map(name => {
+      const row = this.source(name);
+      return { name, checked_at: row?.checked_at ?? null, error_code: row?.error_code ?? (row ? null : 'source_state_missing') };
+    });
+    return { stage: 'business_tools', build_sha: this.env.BUILD_SHA ?? 'development', subscriptions: active,
       deliveries: Object.fromEntries(counts.map(row => [row.state, row.count])), last_delivery: last,
+      sources,
       last_tool_at: await this.ctx.storage.get<number>('last_tool_at') ?? null,
       last_subscription_at: await this.ctx.storage.get<number>('last_subscription_at') ?? null,
       last_subscription_request: await this.ctx.storage.get<SubscriptionRequest>('last_subscription_request') ?? null,
@@ -219,7 +241,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     if (previous) return { event_id: eventId, repeated: true };
     const now = Date.now();
     const subscriptions = this.ctx.storage.sql.exec<Subscription>(
-      'SELECT * FROM subscriptions WHERE owner = ? AND (expires_at IS NULL OR expires_at > ?)', this.owner(), now,
+      'SELECT * FROM subscriptions WHERE owner = ? AND name = ? AND (expires_at IS NULL OR expires_at > ?)', this.owner(), TEST_EVENT_NAME, now,
     ).toArray();
     if (!subscriptions.length) throw new ProtocolError(-32602, 'Subscribe to personal_cloud.test first.');
     const body = JSON.stringify({ eventId, name: 'personal_cloud.test', timestamp: new Date(now).toISOString(),
@@ -239,6 +261,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
   }
 
   override async alarm(): Promise<void> {
+    await this.pollSources();
     const pending = this.ctx.storage.sql.exec<Delivery>(
       "SELECT subscription_id, event_id, body, attempts FROM deliveries WHERE state = 'pending' AND next_at <= ? ORDER BY next_at LIMIT 5", Date.now(),
     ).toArray();
@@ -271,9 +294,60 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     await this.schedulePending();
   }
 
+  private activeSources(): SourceName[] {
+    return this.ctx.storage.sql.exec<{ name: SourceName }>(
+      `SELECT DISTINCT name FROM subscriptions WHERE owner = ? AND (expires_at IS NULL OR expires_at > ?)
+       AND name IN (SELECT value FROM json_each(?))`, this.owner(), Date.now(), JSON.stringify(SOURCE_NAMES),
+    ).toArray().map(row => row.name);
+  }
+
+  private source(name: SourceName): SourceRow | undefined {
+    return this.ctx.storage.sql.exec<SourceRow>('SELECT * FROM event_sources WHERE name = ?', name).toArray()[0];
+  }
+
+  /** Source progress and its frozen deliveries commit together; no business content is copied into this store. */
+  private async pollSources(): Promise<void> {
+    for (const name of this.activeSources()) {
+      const row = this.source(name);
+      if (!row || Date.now() - row.checked_at < SOURCE_INTERVAL_MS) continue;
+      try {
+        const result = await pollSource(name, JSON.parse(row.state) as SourceState, this.env,
+          () => new Map(this.ctx.storage.sql.exec<{ task_id: string; etag: string }>(
+            'SELECT task_id, etag FROM own_changes ORDER BY rowid DESC LIMIT 2000',
+          ).toArray().map(task => [task.task_id, task.etag])));
+        const now = Date.now();
+        this.ctx.storage.transactionSync(() => {
+          const current = this.source(name);
+          if (current?.state !== row.state || current.checked_at !== row.checked_at) return;
+          for (const event of result.events) this.queueSourceEvent(event, now);
+          this.ctx.storage.sql.exec('UPDATE event_sources SET state=?, checked_at=?, error_code=NULL WHERE name=?',
+            JSON.stringify(result.state), now, name);
+        });
+      } catch (error) {
+        const code = error instanceof RpcStatusError && error.status.reason === 'CURSOR_RESET_REQUIRED'
+          ? 'cursor_reset_required' : 'source_unavailable';
+        this.ctx.storage.sql.exec('UPDATE event_sources SET checked_at=?, error_code=? WHERE name=? AND state=? AND checked_at=?',
+          Date.now(), code, name, row.state, row.checked_at);
+      }
+    }
+  }
+
+  private queueSourceEvent(event: SourceEvent, now: number): void {
+    const body = JSON.stringify({ eventId: event.id, name: event.name, timestamp: new Date(now).toISOString(), data: event.data, cursor: null });
+    const subscriptions = this.ctx.storage.sql.exec<Subscription>(
+      'SELECT * FROM subscriptions WHERE owner=? AND name=? AND (expires_at IS NULL OR expires_at>?)', this.owner(), event.name, now,
+    ).toArray();
+    for (const sub of subscriptions) this.ctx.storage.sql.exec(
+      'INSERT OR IGNORE INTO deliveries (subscription_id,event_id,body,next_at) VALUES (?,?,?,?)', sub.id, event.id, body, now,
+    );
+  }
+
   private async schedulePending(): Promise<void> {
     const row = this.ctx.storage.sql.exec<{ next_at: number | null }>("SELECT min(next_at) AS next_at FROM deliveries WHERE state = 'pending'").one();
-    if (row.next_at === null) await this.ctx.storage.deleteAlarm();
-    else await this.ctx.storage.setAlarm(Math.max(Date.now() + 1000, row.next_at));
+    const checks = this.activeSources().map(name => this.source(name)?.checked_at ?? Date.now());
+    const sourceAt = checks.length ? Math.min(...checks) + SOURCE_INTERVAL_MS : null;
+    const next = [row.next_at, sourceAt].filter((value): value is number => value !== null);
+    if (!next.length) await this.ctx.storage.deleteAlarm();
+    else await this.ctx.storage.setAlarm(Math.max(Date.now() + 1000, Math.min(...next)));
   }
 }

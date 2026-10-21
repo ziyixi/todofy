@@ -57,3 +57,33 @@ The first complete branch gate passed at `9e1681a1429b1ac93b99ede55822077522c592
 MCP Access application, left all 36 existing resources unchanged, and verified no remaining drift. Its real ID/AUD
 are recorded in `config/resources.toml`. The next release enables the Worker and exact observed OAuth redirect.
 These steps establish infrastructure readiness, not real Dots receipt.
+
+## Business release
+
+The connection gate above passed before business sources were connected. The current source catalog is listed in
+[README](../README.md). Private `TasksApi`, `MailApi`, `RecallApi` and `HomeApi` entrypoints must be deployed before
+the MCP binds them. The staged bridge does this through the normal source-app Actions releases; it also adds MCP's
+private Ops entrypoint before Home begins monitoring it.
+
+After the business Worker release:
+
+1. Open the existing Personal Cloud plugin's **Manage** page and choose **Refresh tools**. Keep the existing
+   account and OAuth connection; do not register a second App. Verify 18 tools and five event types.
+2. Verify a temporary synthetic Inbox task, Steps, exact request replay, read-back and soft-delete. Do not test
+   completion against real tasks or use real mail/browsing contents as fixtures.
+3. Subscribe to a business event using Dots' native lifecycle. Subscriptions establish a current baseline;
+   historical tasks, existing ready mail and current Home attention are not replayed.
+4. Check `connection_status` source check times/errors and the Home MCP Ops card. Test callbacks accepted by the
+   receiver separately from the Dot's actual payload-specific reply. Stop test responsibilities afterward.
+
+The GTD skill source is `plugin/skills/personal-cloud/SKILL.md`. Before an account update, retrieve the existing
+App-backed plugin manifest, bump its version and package it with that skill in a temporary directory. The upload
+preserves the App binding, title, description and sharing; only skill/support files and version change. Refresh the App-owned tool
+catalog and descriptions through its own management page, then re-read the manifest before packaging to avoid
+restoring stale App metadata. GitHub deploys the Worker; skill publication remains a separate authorized account
+update. The verification record distinguishes published code from live business checks still to do.
+
+A subscription source error appears in Home. For `cursor_reset_required`, inspect the source's restore status,
+then explicitly stop and recreate only that source subscription to establish a current baseline. This does not
+replay missing history. A failed callback remains visible until the owner stops that subscription; recreating it
+verifies the new callback and starts from current state. No automatic replay or second notification path is added.

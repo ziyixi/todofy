@@ -5,6 +5,12 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { Webhook } from 'standardwebhooks';
+import { create } from '@ziyixi/proto/protobuf';
+import { toWire, fromWire } from '@ziyixi/proto/wire-json';
+import type { HomeService, ReadHomeRequest, ReadHomeResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
+import { TaskSchema, type Task } from '@ziyixi/proto/tasks/ui/v1/task_pb';
+import { ListChangesResponseSchema, ListTasksResponseSchema, TaskChangeSchema, type TaskChange } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
+import { PollMailReadyResponseSchema } from '@ziyixi/proto/todofy/ui/v1/mail_ready_pb';
 
 const secret = `whsec_${btoa('s'.repeat(32))}`;
 const callback = { mode: 'webhook', url: 'https://receiver.example.org/callback', secret };
@@ -15,8 +21,22 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
 });
 
-async function start(persist: string, received: unknown[], validChallenge = true,
-  tasks: (request: Request) => Response | Promise<Response> = () => new Response(null, { status: 503 })) {
+interface RuntimeOptions {
+  validChallenge?: boolean;
+  tasks?: (request: Request) => Response | Promise<Response>;
+  mail?: (request: Request) => Response | Promise<Response>;
+  home?: HomeService['readHome'];
+  callbackStatus?: number;
+}
+
+function emptyHome(): ReadHomeResponse {
+  const at = '2026-10-20T12:00:00Z';
+  return { generated_at: at, build: 'synthetic', rev: 1,
+    refresh: { last_tick_at: at, next_tick_at: at, last_refresh_at: null, next_refresh_at: at, refreshed: false },
+    entries: [], attention: [], head_seq: 0, control_unavailable_count: 0 };
+}
+
+async function start(persist: string, received: unknown[], options: RuntimeOptions = {}) {
   const bundle = await build({ entryPoints: ['src/index.ts'], bundle: true, format: 'esm', platform: 'browser',
     conditions: ['workerd', 'worker', 'browser'], target: 'es2024', external: ['cloudflare:workers', 'node:*'], write: false, logLevel: 'silent' });
   const output = bundle.outputFiles[0];
@@ -27,7 +47,12 @@ async function start(persist: string, received: unknown[], validChallenge = true
     name: 'personal-mcp', script: output.text, modules: true,
     compatibilityDate: '2026-09-08', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { SUBSCRIPTIONS: { className: 'SubscriptionStore', useSQLite: true } },
-    serviceBindings: { TASKS: tasks },
+    serviceBindings: {
+      TASKS: options.tasks ?? (() => new Response(null, { status: 503 })),
+      TODOFY_MAIL: options.mail ?? (() => new Response(null, { status: 503 })),
+      RECALL: () => new Response(null, { status: 503 }),
+      HOME: { name: 'home-fixture', entrypoint: 'HomeApi' },
+    },
     bindings: { PUBLIC_HOST: 'mcp.example.org', ACCESS_ISSUER: 'https://test.cloudflareaccess.com',
       ACCESS_AUDIENCE: 'test', ACCESS_OWNER: 'owner@example.org', DEV_AUTH_BYPASS: 'true',
       BUILD_SHA: 'a'.repeat(40), CALLBACK_HOSTS: 'receiver.example.org' },
@@ -36,15 +61,31 @@ async function start(persist: string, received: unknown[], validChallenge = true
       const body = await request.text();
       const verified = new Webhook(secret).verify(body, Object.fromEntries(request.headers)) as Record<string, unknown>;
       expect(request.headers.get('x-mcp-subscription-id')).toMatch(/^sub_/);
-      if (verified.type === 'verification') return Response.json({ challenge: validChallenge ? verified.challenge : 'wrong' });
+      if (verified.type === 'verification') return Response.json({ challenge: options.validChallenge === false ? 'wrong' : verified.challenge });
       expect(request.headers.get('webhook-id')).toBe(verified.eventId);
       received.push(verified);
-      return new Response(null, { status: 204 });
+      return new Response(null, { status: options.callbackStatus ?? 204 });
     },
     }, {
       name: 'ops-probe', modules: true, compatibilityDate: '2026-09-08',
       script: `export default { async fetch(request, env) { return Response.json(await env.OPS.status()); } }`,
       serviceBindings: { OPS: { name: 'personal-mcp', entrypoint: 'Ops' } },
+    }, {
+      name: 'home-fixture', modules: true, compatibilityDate: '2026-09-08',
+      script: `import { WorkerEntrypoint } from 'cloudflare:workers';
+        export class HomeApi extends WorkerEntrypoint {
+          async readHome(input) {
+            const response = await this.env.FIXTURE.fetch(new Request('https://home.fixture/read', {
+              method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input)
+            }));
+            return response.json();
+          }
+        }
+        export default { fetch() { return new Response(null, { status: 404 }); } };`,
+      serviceBindings: { FIXTURE: async (request: Request) => {
+        const input = await request.json<ReadHomeRequest>();
+        return Response.json(await (options.home?.(input) ?? Promise.resolve(emptyHome())));
+      } },
     }],
   }));
   stores.push(mf);
@@ -77,9 +118,174 @@ async function call<T>(mf: Miniflare, method: string, params: Record<string, unk
 
 type ToolReply = { structuredContent: { result?: { event_id: string; repeated?: boolean; queued?: number }; status?: {
   subscriptions: number; deliveries: Record<string, number>;
+  sources: { name: string; checked_at: number; error_code: string | null }[];
   last_subscription_request: { method: string; phase: string; event_name?: string; ttl_ms?: number | null; delivery_mode?: string;
     callback_hostname?: string; http_status?: number; rpc_code?: number; reason?: string } | null;
 } } };
+
+/** The native interfaces expose current synthetic facts; cursors and event delivery belong to the real MCP DO. */
+function businessSources() {
+  const at = '2026-10-20T12:00:00Z';
+  const tasks = new Map<string, Task>([
+    ['already-due', create(TaskSchema, { name: 'tasks/already-due', id: 'already-due', etag: '1', mustStart: true })],
+    ['newly-due', create(TaskSchema, { name: 'tasks/newly-due', id: 'newly-due', etag: '1' })],
+    ['external', create(TaskSchema, { name: 'tasks/external', id: 'external', etag: '1' })],
+  ]);
+  const changes: TaskChange[] = [];
+  let taskHead = 10;
+  let mailHead = 20;
+  let readyMail = false;
+  let home = { ...emptyHome(), head_seq: 30 };
+  const reads = { taskBaselines: 0, taskCursors: [] as string[], taskPages: 0,
+    mailBaselines: 0, mailCursors: [] as string[], homeCursors: [] as number[] };
+  const options: RuntimeOptions = {
+    async tasks(request) {
+      const url = new URL(request.url);
+      if (request.method === 'POST' && url.pathname === '/api/tasks/v1/tasks') {
+        const input = fromWire(TaskSchema, await request.json<Record<string, unknown>>(), { strict: true }).message;
+        const id = url.searchParams.get('task_id') ?? '';
+        const saved = create(TaskSchema, { ...input, name: `tasks/${id}`, id, etag: '1' });
+        tasks.set(id, saved);
+        changes.push(create(TaskChangeSchema, { cursor: String(++taskHead), name: saved.name, task: saved }));
+        return Response.json(toWire(TaskSchema, saved));
+      }
+      expect(request.method).toBe('GET');
+      if (url.pathname === '/api/tasks/v1/changes') {
+        if (url.searchParams.get('baseline') === 'true') {
+          reads.taskBaselines++;
+          return Response.json(toWire(ListChangesResponseSchema, create(ListChangesResponseSchema, { nextPageToken: String(taskHead) })));
+        }
+        const cursor = url.searchParams.get('page_token') ?? '';
+        reads.taskCursors.push(cursor);
+        return Response.json(toWire(ListChangesResponseSchema, create(ListChangesResponseSchema, {
+          nextPageToken: String(taskHead), changes: changes.filter(change => Number(change.cursor) > Number(cursor)),
+        })));
+      }
+      expect(url.pathname).toBe('/api/tasks/v1/tasks');
+      reads.taskPages++;
+      return Response.json(toWire(ListTasksResponseSchema, create(ListTasksResponseSchema, { tasks: [...tasks.values()] })));
+    },
+    mail(request) {
+      expect(request.method).toBe('GET');
+      const url = new URL(request.url);
+      expect(url.pathname).toBe('/api/plus/v1/mailItems:pollReady');
+      const baseline = url.searchParams.get('baseline') === 'true';
+      if (baseline) reads.mailBaselines++;
+      else reads.mailCursors.push(url.searchParams.get('cursor') ?? '');
+      const page = fromWire(PollMailReadyResponseSchema, { cursor: String(mailHead), mail_items:
+        !baseline && readyMail && Number(url.searchParams.get('cursor')) < mailHead
+          ? [{ event_id: 'mail-business', ready_time: at }] : [] }, { strict: true }).message;
+      return Response.json(toWire(PollMailReadyResponseSchema, page));
+    },
+    home(input) {
+      reads.homeCursors.push(input.after_occurrence_seq);
+      return Promise.resolve({ ...home, attention: home.attention.filter(item => item.occurrence_seq > input.after_occurrence_seq) });
+    },
+  };
+  return {
+    options, reads,
+    advance() {
+      const external = create(TaskSchema, { name: 'tasks/external', id: 'external', etag: '2', title: 'Synthetic external private title' });
+      tasks.set('external', external);
+      changes.push(create(TaskChangeSchema, { cursor: String(++taskHead), name: external.name, task: external }));
+      tasks.set('newly-due', create(TaskSchema, { name: 'tasks/newly-due', id: 'newly-due', etag: '1', mustStart: true }));
+      mailHead = 21;
+      readyMail = true;
+      home = { ...home, head_seq: 31, attention: [{ occurrence_seq: 31, item: {
+        source: 'recall', code: 'archive_not_connected', severity: 'warning', since: at, metrics: {},
+        target: { view: 'ops', entry: 'recall' },
+      } }] };
+    },
+  };
+}
+
+it('persists four business baselines and own writes, then delivers once after restart and stops unsubscribed sources', async () => {
+  const persist = await mkdtemp(join(tmpdir(), 'personal-mcp-business-'));
+  directories.push(persist);
+  const received: unknown[] = [];
+  const sources = businessSources();
+  const names = ['task.changed', 'task.must_start', 'mail.ready', 'service.attention'];
+  const first = await start(persist, received, sources.options);
+  for (const name of names) await call(first, 'events/subscribe', {
+    name, arguments: {}, delivery: callback, ttlMs: null, cursor: null,
+  });
+  expect(received).toEqual([]);
+  expect(sources.reads).toEqual({ taskBaselines: 1, taskCursors: [], taskPages: 1,
+    mailBaselines: 1, mailCursors: [], homeCursors: [0] });
+  const ownId = '00000000-0000-4000-8000-000000000071';
+  const own = await call<{ structuredContent: { task: { id: string } } }>(first, 'tools/call', {
+    name: 'tasks_create_inbox', arguments: { request_id: ownId, title: 'Synthetic own task' },
+  });
+  expect(own.structuredContent.task.id).toBe(ownId);
+  const testArgs = { name: 'send_test_event', arguments: { request_id: '00000000-0000-4000-8000-000000000072' } };
+  expect((await call<{ isError: boolean }>(first, 'tools/call', testArgs)).isError).toBe(true);
+  sources.advance();
+  await first.dispose();
+  stores.splice(stores.indexOf(first), 1);
+  const second = await start(persist, received, sources.options);
+  const restored = await call<ToolReply>(second, 'tools/call', { name: 'connection_status', arguments: {} });
+  expect(restored.structuredContent.status?.subscriptions).toBe(4);
+  // Keep the production 60-second source Alarm: no direct invocation, fake clock or interval override.
+  await expect.poll(() => received.length, { timeout: 70_000, interval: 500 }).toBe(4);
+  const events = received as { eventId: string; name: string; data: Record<string, unknown> }[];
+  expect(events.map(event => event.name).sort()).toEqual([...names].sort());
+  expect(events.find(event => event.name === 'task.changed')).toMatchObject({ eventId: 'task_changed_12',
+    data: { changes: [{ id: 'external', etag: '2', deleted: false }] } });
+  expect(events.find(event => event.name === 'task.must_start')).toMatchObject({ eventId: 'must_start_1',
+    data: { task_ids: ['newly-due'] } });
+  expect(events.find(event => event.name === 'mail.ready')).toMatchObject({ eventId: 'mail_mail-business',
+    data: { event_id: 'mail-business', ready_time: '2026-10-20T12:00:00Z' } });
+  expect(events.find(event => event.name === 'service.attention')).toMatchObject({ eventId: 'attention_31',
+    data: { occurrence_seq: 31, source: 'recall', code: 'archive_not_connected' } });
+  expect(JSON.stringify(received)).not.toContain(ownId);
+  expect(JSON.stringify(received)).not.toContain('Synthetic external private title');
+  expect(sources.reads.taskCursors).toEqual(['10']);
+  expect(sources.reads.mailCursors).toEqual(['20']);
+  expect(sources.reads.homeCursors).toEqual([0, 30]);
+  await expect.poll(async () => (await call<ToolReply>(second, 'tools/call', {
+    name: 'connection_status', arguments: {},
+  })).structuredContent.status?.deliveries.accepted).toBe(4);
+  await second.dispose();
+  stores.splice(stores.indexOf(second), 1);
+  const third = await start(persist, received, sources.options);
+  const persisted = await call<ToolReply>(third, 'tools/call', { name: 'connection_status', arguments: {} });
+  expect(persisted.structuredContent.status?.deliveries.accepted).toBe(4);
+  expect(persisted.structuredContent.status?.sources.map(source => source.error_code)).toEqual([null, null, null, null]);
+  for (const name of names) await call(third, 'events/unsubscribe', {
+    name, arguments: {}, delivery: { mode: callback.mode, url: callback.url },
+  });
+  const readsBeforeTestAlarm = structuredClone(sources.reads);
+  await call(third, 'events/subscribe', { name: 'personal_cloud.test', arguments: {}, delivery: callback, ttlMs: null });
+  await call(third, 'tools/call', testArgs);
+  await expect.poll(() => received.length, { timeout: 10_000 }).toBe(5);
+  expect(received[4]).toMatchObject({ name: 'personal_cloud.test' });
+  expect(sources.reads).toEqual(readsBeforeTestAlarm);
+  const stopped = await call<ToolReply>(third, 'tools/call', { name: 'connection_status', arguments: {} });
+  expect(stopped.structuredContent.status?.sources).toEqual([]);
+}, 90_000);
+
+it('reports a permanent callback failure in Ops and clears it on explicit unsubscribe', async () => {
+  const persist = await mkdtemp(join(tmpdir(), 'personal-mcp-callback-failure-'));
+  directories.push(persist);
+  const mf = await start(persist, [], { callbackStatus: 400 });
+  const params = { name: 'personal_cloud.test', arguments: {}, delivery: callback, ttlMs: null };
+  await call(mf, 'events/subscribe', params);
+  await call(mf, 'tools/call', { name: 'send_test_event', arguments: {
+    request_id: '00000000-0000-4000-8000-000000000073',
+  } });
+  const probe = await mf.getWorker('ops-probe');
+  await expect.poll(async () => {
+    const status = await (await probe.fetch('https://ops.internal/')).json() as { counters: { failed_deliveries: number } };
+    return status.counters.failed_deliveries;
+  }, { timeout: 10_000 }).toBe(1);
+  expect(await (await probe.fetch('https://ops.internal/')).json()).toMatchObject({
+    health: 'degraded', signals: [{ code: 'delivery_failed' }], counters: { failed_deliveries: 1 },
+  });
+  await call(mf, 'events/unsubscribe', { name: params.name, arguments: {}, delivery: { mode: callback.mode, url: callback.url } });
+  expect(await (await probe.fetch('https://ops.internal/')).json()).toMatchObject({
+    health: 'ok', signals: [], counters: { active_subscriptions: 0, failed_deliveries: 0 },
+  });
+});
 
 it('discovers tools/events and preserves the subscription across a restart, then delivers once and unsubscribes', async () => {
   const persist = await mkdtemp(join(tmpdir(), 'personal-mcp-test-'));
@@ -89,7 +295,9 @@ it('discovers tools/events and preserves the subscription across a restart, then
   const discovery = await call<{ capabilities: Record<string, unknown> }>(first, 'server/discover');
   expect(discovery.capabilities).toHaveProperty('events');
   const catalog = await call<{ events: { name: string }[] }>(first, 'events/list');
-  expect(catalog.events.map(event => event.name)).toEqual(['personal_cloud.test']);
+  expect(catalog.events.map(event => event.name)).toEqual([
+    'personal_cloud.test', 'task.changed', 'task.must_start', 'mail.ready', 'service.attention',
+  ]);
   const catalogStatus = await call<ToolReply>(first, 'tools/call', { name: 'connection_status', arguments: {} });
   expect(catalogStatus.structuredContent.status?.last_subscription_request).toBeNull();
   const params = { name: 'personal_cloud.test', arguments: {}, delivery: callback, ttlMs: null, cursor: null };
@@ -145,7 +353,7 @@ it('keeps Step identities across restart after a partial native write and report
     saved.set(taskId, task);
     return Response.json(task);
   };
-  const first = await start(persist, [], true, backend);
+  const first = await start(persist, [], { tasks: backend });
   const initialOps = await (await (await first.getWorker('ops-probe')).fetch('https://ops.internal/')).json();
   expect(initialOps).toMatchObject({ app: 'personal-mcp', health: 'ok', signals: [], counters: { active_subscriptions: 0 } });
   const args = { request_id: '00000000-0000-4000-8000-000000000010', task_id: 'synthetic-parent',
@@ -155,7 +363,7 @@ it('keeps Step identities across restart after a partial native write and report
   expect(saved.size, JSON.stringify({ partial, attempted })).toBe(1);
   await first.dispose();
   stores.splice(stores.indexOf(first), 1);
-  const second = await start(persist, [], true, backend);
+  const second = await start(persist, [], { tasks: backend });
   const complete = await call<{ structuredContent: { tasks: { id: string }[] } }>(second, 'tools/call', {
     name: 'tasks_add_steps', arguments: args,
   });
@@ -176,7 +384,7 @@ it('reports only safe subscription fields for host, signed challenge and pre-sch
   const persist = await mkdtemp(join(tmpdir(), 'personal-mcp-test-'));
   directories.push(persist);
   const received: unknown[] = [];
-  const mf = await start(persist, received, false);
+  const mf = await start(persist, received, { validChallenge: false });
   const before = await call<ToolReply>(mf, 'tools/call', { name: 'connection_status', arguments: {} });
   expect(before.structuredContent.status?.last_subscription_request).toBeNull();
   const unauthorized = await mf.dispatchFetch('https://mcp.example.org/mcp', { method: 'POST',

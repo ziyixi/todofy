@@ -1,6 +1,7 @@
 import type { SubscriptionStore } from './store.ts';
+import type { ContentToolEnv } from './content.ts';
 
-export interface Env {
+export interface Env extends ContentToolEnv {
   SUBSCRIPTIONS: DurableObjectNamespace<SubscriptionStore>;
   TASKS: Fetcher;
   PUBLIC_HOST: string;

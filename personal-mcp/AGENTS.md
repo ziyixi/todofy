@@ -2,14 +2,20 @@
 
 Read the root AGENTS, this app's README and docs/connection.md.
 
-- Keep the first gate limited to real Dots OAuth and one synthetic event. Do not add business bindings before
-  that gate is accepted. The user explicitly prioritizes a small personal implementation.
-- OAuth is owned by the new Access application only. Reuse edge-auth to validate its injected assertion; never
-  turn browser cookies into machine credentials. Callback URLs and webhook secrets must not appear in logs.
-- MCP protocol uses the official SDK and Zod; it is an external protocol, not a second owner JSON API.
-  Internal business interfaces added later use the root proto and existing service boundaries.
-- Use only synthetic content in tests. The first gate must not read or alter Tasks, Mail or Recall records.
-- `accepted` means ChatGPT acknowledged a webhook, not that a Dot completed its action.
-- Tests should demonstrate discovery, persistent subscriptions, signed delivery and no duplicate test actions.
-  Do not build a generic event bus, replay service, compensation system or broad compatibility framework.
-- Release through the repository CI and infra workflow. Keep real connection evidence separate from local tests.
+- The real Dots OAuth/synthetic-event gate passed on `422df6a0`; business behavior needs its own acceptance.
+  Keep this a small personal integration: one Worker, the existing SQLite DO and existing source APIs.
+- Access owns OAuth. Reuse edge-auth for its injected assertion; never turn browser cookies into credentials.
+  Callback URLs and webhook secrets must not appear in logs or status. Preserve the existing private App identity.
+- Use the official MCP SDK and Zod for the external protocol, root proto/generated clients for private bindings.
+  Do not import other applications or create arbitrary RPC dispatch tools.
+- Tasks, Mail, Recall and Home own their data. Poll only active subscription sources, at most once per minute.
+  Initial baselines skip history. Commit frozen deliveries with cursor progress; stop polling after unsubscribe.
+  Confirmed MCP task revisions are suppressed; Home events exclude MCP's own attention to prevent a loop.
+- `accepted` means ChatGPT acknowledged a webhook, not that a Dot completed its action. Home must expose real
+  callback/source failures; use its existing dismissal behavior, not permanent new warning state.
+- Use native receipts, etags and stable Step identities. Inbox/Step automation needs an explicit owner responsibility;
+  dates, commitments, completion and deletion need owner instructions. Queue moves preserve dates and deadlines.
+- Tests use synthetic content and local receivers. Do not read real task, mail or browsing content to test a tool.
+  Do not add a generic event bus, replay service, compensation framework or extra scheduling infrastructure.
+- Release by branch CI and the same-SHA main Actions path. Deploy private source entrypoints before binding them.
+  Keep local, deployed, callback-accepted and actual Dots behavior separate in the verification record.

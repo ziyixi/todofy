@@ -3,7 +3,8 @@ import { toWire } from '@ziyixi/proto/wire-json';
 import { createReadinessClient, readHomeSnapshot, type ContentToolEnv } from './content.ts';
 import { createTasksClient, type TaskToolEnv } from './tasks.ts';
 
-export type SourceName = 'task.changed' | 'task.must_start' | 'mail.ready' | 'service.attention';
+export const SOURCE_NAMES = ['task.changed', 'task.must_start', 'mail.ready', 'service.attention'] as const;
+export type SourceName = typeof SOURCE_NAMES[number];
 export type SourceState =
   | { name: 'task.changed'; cursor: string }
   | { name: 'task.must_start'; ids: readonly string[]; revision: number }
@@ -54,7 +55,7 @@ export async function pollSource(
   name: SourceName,
   state: SourceState,
   env: SourceEnv,
-  ownChanges: ReadonlyMap<string, string>,
+  readOwnChanges: () => ReadonlyMap<string, string>,
 ): Promise<{ state: SourceState; events: SourceEvent[] }> {
   if (state.name !== name) throw new Error('EVENT_SOURCE_STATE_MISMATCH');
   switch (state.name) {
@@ -67,6 +68,7 @@ export async function pollSource(
         const id = change.name.slice('tasks/'.length);
         latest.set(id, { id, etag: change.task?.etag ?? '', deleted: change.deleted });
       }
+      const ownChanges = readOwnChanges();
       const changes = [...latest.values()].filter(change => change.deleted || ownChanges.get(change.id) !== change.etag);
       return { state: { name: state.name, cursor: result.nextPageToken },
         events: changes.length ? [{ id: `task_changed_${result.nextPageToken}`, name, data: { changes } }] : [] };

@@ -17,25 +17,29 @@ instructions.
 ### Private MCP (`codex/personal-mcp`)
 
 Work is isolated in `/private/tmp/todofy-personal-mcp`; Claude's shared checkout is untouched.
-Production is the verified connection gate `422df6a0`. Dedicated Access identity and SQLite DO namespace are
-registered in config/resources.toml. OAuth, discovery, signed subscription, actual Dots receipt, same-request
-replay and unsubscribe passed; the test left zero active subscriptions. The actual callback host is
-`connectors.api.openai.com`. [Evidence](docs/personal-mcp-verification.md).
+The connection gate `422df6a0` passed real owner OAuth, signed subscription, actual Dots receipt, same-request
+replay and unsubscribe (zero test subscriptions left). [Evidence](docs/personal-mcp-verification.md).
+The dedicated Access identity/SQLite namespace are registered; callbacks use exact `connectors.api.openai.com`.
 
-Bridge commit `e35351c5` adds Tasks tools/Step identity persistence, a private Ops surface and Home status card,
-plus narrow MailApi/RecallApi/HomeApi source adapters. It binds only Tasks. Branch CI `39561368040` found three
-stale test assumptions: Home's exact binding list, Ops selftest mutation anchors, and a mobile drag fixture that
-chose a hidden Monday after Wednesday's date rollover. Rerun `39563107309` passed those jobs and all source
-checks. Its remaining failure was the TypeScript Ops producer-list expectation. The Python twin and schema
-expectations are updated with it; proto's 497 TS and 113 Python tests now pass locally. Rerun the complete gate
-before enabling the remaining bindings. Native/source tests, Home's 276 unit/98 workerd/163 UI tests,
-MCP's 32 unit/3 workerd checks and the 437 CI-script checks passed locally.
+The source bridge `44bb3ef550ee09d5b8c8a4bc2f3183666bd12117` passed complete branch CI
+[39565107285](https://github.com/ziyixi/todofy/actions/runs/39565107285) and was promoted unchanged to main.
+Its same-SHA [main publication 39566319560](https://github.com/ziyixi/todofy/actions/runs/39566319560) passed.
+It adds Tasks tools, private MCP Ops/Home monitoring and narrow MailApi/RecallApi/HomeApi source adapters;
+only Tasks is bound in that bridge. The private entrypoints are live for the business binding stage.
 
-The working tree then wires the prepared content tools and four event readers into the existing MCP DO.
-Keep that second stage uncommitted until the bridge is green and deployed: its HomeApi binding requires the
-new Home entrypoint. Source metadata is polled only while subscribed; baseline reads skip historical events.
-Home attention excludes MCP's own failures. Source cursor plus frozen deliveries commit in one DO transaction.
-Do not claim business/production-content acceptance from the completed synthetic connection gate.
+The second stage enables 18 tools and four business events in the same Worker/DO. Only subscribed sources
+are checked each minute; baselines skip history. Home events exclude MCP's own issues. Cursor progress and
+frozen deliveries commit together. Confirmed task writes are read after source I/O before event filtering;
+a superseded source baseline cannot be overwritten by an older in-flight poll. Native queue eligibility and
+receipts stay in Tasks. The local plugin skill describes owner GTD rules; account updates preserve the App ID.
+Local final checks: MCP lint/types, 35 unit tests, five real-workerd tests (restart, four event kinds, dedup,
+unsubscribe/no source polling, callback failure recovery); nine deploy tests, 14 binding/drift tests, four
+configuration generators and a deploy dry-run. Source-bridge checks include 497 TS/113 Python proto tests.
+
+After the second branch gate and same-SHA main publication, refresh tools in the existing App, update its skill,
+verify synthetic task/Steps/exact replay/soft-delete and a real business-event receipt, and check Home's MCP
+Ops card. Do not complete synthetic tasks or read real Mail/Recall content as fixtures. Stop test subscriptions
+and record actual production evidence separately from the completed connection gate and local source tests.
 
 ### Done steps stay in Plan's Week calendar (`claude/plan-done-steps`)
 

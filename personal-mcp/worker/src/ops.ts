@@ -18,6 +18,8 @@ export function buildOpsStatus(status?: ConnectionStatus): wire.OpsStatus {
   } : {};
   if (status?.last_tool_at) counters.last_tool_at_ms = status.last_tool_at;
   if (status?.last_subscription_at) counters.last_subscription_at_ms = status.last_subscription_at;
+  const checked = status?.sources.flatMap(source => source.checked_at === null ? [] : [source.checked_at]) ?? [];
+  if (checked.length) counters.last_source_check_at_ms = Math.max(...checked);
   if (status?.last_delivery) {
     counters.last_event_at_ms = Date.parse(status.last_delivery.event_at);
     if (status.last_delivery.accepted_at) counters.last_delivery_at_ms = status.last_delivery.accepted_at;
@@ -28,6 +30,8 @@ export function buildOpsStatus(status?: ConnectionStatus): wire.OpsStatus {
     code: 'subscription_rejected', severity: Severity.WARNING,
     metrics: { rpc_code: status.last_subscription_request.rpc_code ?? 0 },
   });
+  const sourceErrors = status?.sources.filter(source => source.error_code !== null).length ?? 0;
+  if (sourceErrors) signals.push({ code: 'source_unavailable', severity: Severity.WARNING, metrics: { count: sourceErrors } });
   return toWire(OpsStatusSchema, create(OpsStatusSchema, {
     version: 'ops-v1', app: 'personal-mcp', generatedAt: new Date().toISOString(),
     health: !status ? Health.DOWN : signals.length ? Health.DEGRADED : Health.OK,

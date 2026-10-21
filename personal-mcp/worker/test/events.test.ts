@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { baselineSource, pollSource, type SourceEnv, type SourceState } from '../src/events.ts';
 
 const AT = '2026-10-20T12:00:00Z';
-const NO_OWN_CHANGES = new Map<string, string>();
+const NO_OWN_CHANGES = () => new Map<string, string>();
 
 function snapshot(extra: Partial<ReadHomeResponse> = {}): ReadHomeResponse {
   return { generated_at: AT, build: 'synthetic', rev: 1,
@@ -63,13 +63,37 @@ it('coalesces each task before suppressing confirmed own revisions and retains t
     { name: 'tasks/deleted-task', cursor: '8', deleted: true },
   ] }) });
   const state: SourceState = { name: 'task.changed', cursor: '2' };
-  const result = await pollSource('task.changed', state, env, new Map([['own-task', '3']]));
+  const result = await pollSource('task.changed', state, env, () => new Map([['own-task', '3']]));
   expect(result).toEqual({ state: { name: 'task.changed', cursor: '8' }, events: [
     { id: 'task_changed_8', name: 'task.changed', data: { changes: [
       { id: 'external-task', etag: '2', deleted: false }, { id: 'deleted-task', etag: '', deleted: true },
     ] } },
   ] });
   expect(state).toEqual({ name: 'task.changed', cursor: '2' });
+});
+
+it('suppresses a revision confirmed during the source await while retaining other revisions', async () => {
+  let beginRead = () => {};
+  let releaseRead = () => {};
+  const started = new Promise<void>(resolve => { beginRead = resolve; });
+  const released = new Promise<void>(resolve => { releaseRead = resolve; });
+  const env: SourceEnv = { ...sourceEnv({}), TASKS: { async fetch() {
+    beginRead();
+    await released;
+    return Response.json({ next_page_token: '5', changes: [
+      change('new-own-task', '1', '3'), change('own-task-edited-later', '2', '4'), change('external-task', '1', '5'),
+    ] });
+  } } as unknown as Fetcher };
+  let confirmed = new Map<string, string>();
+  const polling = pollSource('task.changed', { name: 'task.changed', cursor: '2' }, env, () => new Map(confirmed));
+  await started;
+  confirmed = new Map([['new-own-task', '1'], ['own-task-edited-later', '1']]);
+  releaseRead();
+  expect(await polling).toEqual({ state: { name: 'task.changed', cursor: '5' }, events: [
+    { id: 'task_changed_5', name: 'task.changed', data: { changes: [
+      { id: 'own-task-edited-later', etag: '2', deleted: false }, { id: 'external-task', etag: '1', deleted: false },
+    ] } },
+  ] });
 });
 
 it('uses native must_start transitions even when etags stay the same, including leave and reentry', async () => {
@@ -83,20 +107,20 @@ it('uses native must_start transitions even when etags stay the same, including 
   const ownChanges = new Map([['entering', '1']]);
   const baseline = await baselineSource('task.must_start', env);
   expect(baseline).toEqual({ name: 'task.must_start', ids: ['existing'], revision: 0 });
-  expect((await pollSource('task.must_start', baseline, env, ownChanges)).events).toEqual([]);
+  expect((await pollSource('task.must_start', baseline, env, () => ownChanges)).events).toEqual([]);
   entering = true;
-  const entered = await pollSource('task.must_start', baseline, env, ownChanges);
+  const entered = await pollSource('task.must_start', baseline, env, () => ownChanges);
   expect(entered.events).toEqual([{ id: 'must_start_1', name: 'task.must_start', data: { task_ids: ['entering'] } }]);
   entering = false;
-  const left = await pollSource('task.must_start', entered.state, env, ownChanges);
+  const left = await pollSource('task.must_start', entered.state, env, () => ownChanges);
   expect(left).toEqual({ state: { name: 'task.must_start', ids: ['existing'], revision: 1 }, events: [] });
   entering = true;
-  const reentered = await pollSource('task.must_start', left.state, env, ownChanges);
+  const reentered = await pollSource('task.must_start', left.state, env, () => ownChanges);
   expect(reentered.events[0]?.id).toBe('must_start_2');
   const rebased = await baselineSource('task.must_start', env, reentered.state);
   expect(rebased).toEqual({ name: 'task.must_start', ids: ['entering', 'existing'], revision: 2 });
   another = true;
-  expect((await pollSource('task.must_start', rebased, env, ownChanges)).events)
+  expect((await pollSource('task.must_start', rebased, env, () => ownChanges)).events)
     .toEqual([{ id: 'must_start_3', name: 'task.must_start', data: { task_ids: ['another'] } }]);
 });
 

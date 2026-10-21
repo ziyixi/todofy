@@ -181,6 +181,16 @@ export function registerTaskTools(server: McpServer, env: TaskToolEnv, writes: T
   }, input => answer(async () => saved(await tasks.completeTask({ name: `tasks/${input.task_id}`, etag: input.etag,
     requestId: input.request_id, focusDay: input.focus_day ?? '' }))));
 
+  server.registerTool('tasks_delete', {
+    title: 'Soft-delete task',
+    description: 'Soft-delete a task and its descendants only on explicit owner instruction. Use the current etag. Reuse request_id and identical input for an exact retry.',
+    inputSchema: z.strictObject({ request_id: requestId, task_id: id, etag }),
+    annotations: { ...write, destructiveHint: true },
+  }, input => answer(async () => {
+    await tasks.deleteTask({ name: `tasks/${input.task_id}`, etag: input.etag, requestId: input.request_id });
+    return { deleted_task_id: input.task_id };
+  }));
+
   server.registerTool('plan_get', {
     title: 'Read Plan',
     description: 'Read weekly goals, saved lane orders, next-week commitment IDs, one page of active task planning facts and daily queues. Native stage/board_stage/must_start are Tasks’ facts. Follow task_page.next_page_token for more tasks. This answer does not derive the complete UI candidate lanes. Omitting both day fields reads the current week.',

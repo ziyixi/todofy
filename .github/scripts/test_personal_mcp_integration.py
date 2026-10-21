@@ -20,7 +20,7 @@ class PersonalMcpIntegration(unittest.TestCase):
                          {"personal_mcp_deploy"})
         self.assertIn("personal-mcp", ci_changes.HOME_BOUND)
 
-    def test_worker_uses_one_sqlite_object_and_the_existing_tasks_api(self):
+    def test_worker_uses_one_sqlite_object_and_the_private_application_apis(self):
         config = tomllib.loads((ROOT / "personal-mcp/wrangler.toml").read_text())
         self.assertFalse(config["workers_dev"])
         self.assertFalse(config["preview_urls"])
@@ -30,7 +30,12 @@ class PersonalMcpIntegration(unittest.TestCase):
         self.assertEqual(config["migrations"], [
             {"tag": "v1", "new_sqlite_classes": ["SubscriptionStore"]},
         ])
-        self.assertEqual(config["services"], [{"binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"access": "read-write"}}])
+        self.assertEqual(config["services"], [
+            {"binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"access": "read-write"}},
+            {"binding": "TODOFY_MAIL", "service": "todofy", "entrypoint": "MailApi"},
+            {"binding": "RECALL", "service": "recall", "entrypoint": "RecallApi"},
+            {"binding": "HOME", "service": "home", "entrypoint": "HomeApi"},
+        ])
         for key in ("d1_databases", "r2_buckets", "assets", "triggers"):
             self.assertNotIn(key, config)
 

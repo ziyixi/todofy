@@ -638,8 +638,18 @@
           "source": "config"
         },
         {
+          "name": "HOME",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "PUBLIC_HOST",
           "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "RECALL",
+          "type": "service",
           "source": "config"
         },
         {
@@ -649,6 +659,11 @@
         },
         {
           "name": "TASKS",
+          "type": "service",
+          "source": "config"
+        },
+        {
+          "name": "TODOFY_MAIL",
           "type": "service",
           "source": "config"
         }

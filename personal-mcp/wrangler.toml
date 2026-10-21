@@ -1,4 +1,4 @@
-# Production config. The first gate has no business-service bindings.
+# Production config. Each business service retains its own data and private API.
 name = "personal-mcp"
 account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
 main = "worker/src/index.ts"
@@ -34,3 +34,18 @@ binding = "TASKS"
 service = "tasks"
 entrypoint = "TasksApi"
 props = { access = "read-write" }
+
+[[services]]
+binding = "TODOFY_MAIL"
+service = "todofy"
+entrypoint = "MailApi"
+
+[[services]]
+binding = "RECALL"
+service = "recall"
+entrypoint = "RecallApi"
+
+[[services]]
+binding = "HOME"
+service = "home"
+entrypoint = "HomeApi"

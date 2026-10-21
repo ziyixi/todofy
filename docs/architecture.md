@@ -34,6 +34,12 @@ flowchart LR
   Runtime -->|bounded release reconciliation| News
   Runtime -->|same Platform image| Observer
   Notion[Notion] -->|GitHub build and relay| Site[Static website]
+  Dots[ChatGPT Dots] <-->|OAuth MCP tools and signed events| MCP[Personal MCP]
+  MCP -->|private TasksApi| Tasks
+  MCP -->|private MailApi| Todo
+  MCP -->|private RecallApi| Recall
+  MCP -->|private cached HomeApi| Home
+  Home -->|private Ops| MCP
 ```
 
 No application imports another application's code, configuration or test tools. Shared code follows these boundaries:
@@ -94,6 +100,14 @@ image digests and request identity; it cannot send commands, YAML, paths or arbi
 deployment requests pass Cloudflare Access and an independent Bearer check before body decoding.
 Namespace, image repository and resource allowlists come from the daemon's mounted configuration.
 See the [runtime contract](../contracts/platform-runtime-v1/README.md).
+
+Personal MCP's `/mcp` is the external MCP 2.0 protocol, handled by the official SDK after Access's managed OAuth
+and owner verification. Its private bindings reuse generated Tasks/Mail/Recall HTTP clients and the typed
+`dashboard.mcp.v1.HomeService`; they do not pass through browser login or introduce public source routes.
+The existing SQLite subscription DO checks only subscribed event sources each minute and stores metadata,
+cursor progress and frozen deliveries. It does not own business content or call a model. Home observes its
+private Ops status, while MCP's cached Home event reader excludes its own issues to avoid a notification loop.
+Tools, GTD rules and event payloads are in [Personal MCP](../personal-mcp/README.md).
 
 Schemas generated from IDL are consumer artifacts, not competing handwritten sources. Golden payloads pin
 published bytes, while legacy fixtures/schemas prove compatibility with persisted older events. `task-intent-v1`

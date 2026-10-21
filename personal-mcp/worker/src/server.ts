@@ -1,9 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { registerTaskTools, type TaskToolEnv, type TaskWriteState } from './tasks.ts';
+import { registerContentTools, type ContentToolEnv } from './content.ts';
+import { SOURCE_NAMES } from './events.ts';
 
 export const TEST_EVENT_NAME = 'personal_cloud.test';
 export const TEST_EVENT_MESSAGE = 'Personal MCP connection test';
+export const EVENT_NAMES = [TEST_EVENT_NAME, ...SOURCE_NAMES] as const;
+export type EventName = typeof EVENT_NAMES[number];
 
 const noArguments = z.strictObject({});
 const callbackUrl = z.url({ protocol: /^https$/ });
@@ -17,7 +21,7 @@ const signingSecret = z.string().max(94).regex(/^whsec_[A-Za-z0-9+/]+={0,2}$/).r
 }, 'Signing secret must contain a base64-encoded key of 24 to 64 bytes.');
 
 const subscribeParamsSchema = z.object({
-  name: z.literal(TEST_EVENT_NAME),
+  name: z.enum(EVENT_NAMES),
   arguments: noArguments.default({}),
   delivery: z.object({
     mode: z.literal('webhook'),
@@ -36,7 +40,7 @@ const subscribeResultSchema = z.object({
 });
 
 const unsubscribeParamsSchema = z.object({
-  name: z.literal(TEST_EVENT_NAME),
+  name: z.enum(EVENT_NAMES),
   arguments: noArguments.default({}),
   delivery: z.object({
     mode: z.literal('webhook'),
@@ -55,7 +59,7 @@ export interface GateApi extends TaskWriteState {
   emitTest(requestId: string): Promise<unknown>;
 }
 
-export function createServer(api: GateApi, buildSha: string, env: TaskToolEnv): McpServer {
+export function createServer(api: GateApi, buildSha: string, env: TaskToolEnv & ContentToolEnv): McpServer {
   const capabilities = { tools: {}, events: {} };
   const server = new McpServer({ name: 'personal-cloud', version: '0.1.0' }, { capabilities });
 
@@ -74,7 +78,20 @@ export function createServer(api: GateApi, buildSha: string, env: TaskToolEnv): 
         required: ['message', 'build_sha'],
         additionalProperties: false,
       },
-    }],
+    }, ...SOURCE_NAMES.map(name => ({ name, delivery: ['webhook'], inputSchema: z.toJSONSchema(noArguments),
+      description: {
+        'task.changed': 'A bounded batch of new task revisions; confirmed MCP writes of the same revision are omitted.',
+        'task.must_start': 'Tasks entering the native Must start window, including date-driven transitions.',
+        'mail.ready': 'A new Mail summary is ready. This event does not create an Inbox task.',
+        'service.attention': 'A new undismissed Home issue; MCP’s own issues are omitted to prevent notification loops.',
+      }[name],
+      payloadSchema: z.toJSONSchema({
+        'task.changed': z.strictObject({ changes: z.array(z.strictObject({ id: z.string(), etag: z.string(), deleted: z.boolean() })).max(100) }),
+        'task.must_start': z.strictObject({ task_ids: z.array(z.string()).max(2000) }),
+        'mail.ready': z.strictObject({ event_id: z.string(), ready_time: z.string() }),
+        'service.attention': z.strictObject({ occurrence_seq: z.number().int(), source: z.string(), code: z.string() }),
+      }[name]),
+    }))],
   }));
   server.server.setRequestHandler('events/subscribe', {
     params: subscribeParamsSchema,
@@ -87,7 +104,7 @@ export function createServer(api: GateApi, buildSha: string, env: TaskToolEnv): 
 
   server.registerTool('connection_status', {
     title: 'Connection status',
-    description: 'Read the build and synthetic event delivery status for this personal MCP connection.',
+    description: 'Read the build, subscription source checks and event delivery status for this personal MCP connection.',
     inputSchema: noArguments,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => {
@@ -105,5 +122,6 @@ export function createServer(api: GateApi, buildSha: string, env: TaskToolEnv): 
   });
 
   registerTaskTools(server, env, api);
+  registerContentTools(server, env);
   return server;
 }
