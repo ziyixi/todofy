@@ -538,8 +538,7 @@ todofy.mail.v1 on the shared transcoder, its binding's `access` prop, one `mail`
 transcoder: CSRF and `MAINTENANCE_MODE` on writes in its `authorize` hook, one `owner_ui` call per rpc with
 the page tokens and `request_id` handled here, `GetIntegration` from the gateway's facts and the object's
 `setup()`), `warm.ts` (runs the codec once at global scope, outside every request's CPU), `hooks.ts` (webhook, newsletter, health), `metrics.ts`
-(one Analytics Engine point per request and cron, §6), `retired.ts` (the `Intents`, `Planning` and `MailApi`
-entrypoints retired on 2026-10-21, refusals for that one release). The rules are in gateway-contract.md §2; the gateway's unit tests check its error messages
+(one Analytics Engine point per request and cron, §6). The rules are in gateway-contract.md §2; the gateway's unit tests check its error messages
 against `core.api_errors`.
 
 ### owner_ui.py (`core/owner_ui.py` maps to the generated messages of `proto/todofy/ui/v1`)

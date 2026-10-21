@@ -439,8 +439,7 @@ class Files(unittest.TestCase):
                 if expected == "NewsletterOps":
                     self.assertEqual(service["service"], "fleet")
         # The watch app parses untrusted pages: it reaches Tasks only through the create-only TaskInbox, bound to its
-        # own source, never through TasksApi or Ops. (Todofy's Intents, which it bound until 2026-10-21, is a refusal
-        # until the next Todofy release.)
+        # own source, never through TasksApi or Ops (until 2026-10-21 it bound Todofy's Intents, now deleted).
         self.assertEqual(
             load(PRODUCTION["watch"])["services"],
             [{"binding": "TASKS", "service": "tasks", "entrypoint": "TaskInbox", "props": {"source": "watch"}}],

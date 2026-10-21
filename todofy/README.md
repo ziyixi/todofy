@@ -149,9 +149,8 @@ daily reminder in Tasks itself. A `mail.received.v1` event with `canary` is summ
 then ends: it never appears in reports, lists or counts; its event page is marked 金丝雀.
 
 Task intents (task-intent-v1, retired with its contract) left Todofy on 2026-10-21: the watch app creates its tasks
-through Tasks' `TaskInbox`. For that one release the gateway still exports `Intents`,
-`Planning` and `MailApi` as refusals (`gateway/src/retired.ts`), so a Worker that still binds one fails closed and
-writes nothing until its own deploy; the next Todofy release deletes them.
+through Tasks' `TaskInbox`. The gateway exports only `Ops` and `Mail`; the refusals it kept for one release in place
+of `Intents`, `Planning` and `MailApi` are gone.
 
 ## Local development
 

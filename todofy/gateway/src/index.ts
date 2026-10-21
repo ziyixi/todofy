@@ -14,10 +14,9 @@ import { handleOwner } from './owner.ts';
 
 // The named entrypoints other Workers of the account bind; no public route serves any. Ops: ops-v1, for the
 // dashboard (contracts/ops-v1). Mail: todofy.mail.v1, for the access its binding's props grant (Tasks, the Personal
-// MCP). Planning, MailApi and Intents: retired, refusals for this release only (retired.ts).
+// MCP).
 export { Ops } from './ops.ts';
 export { Mail } from './mail.ts';
-export { Intents, MailApi, Planning } from './retired.ts';
 
 /** The public host is matched before the hooks hosts. */
 function hostKind(ctx: Context): HostKind {

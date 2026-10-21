@@ -374,9 +374,8 @@ whose `ok` the gateway sends as it is. The binding's `access` prop gates the wri
 methods, the writes' compare-and-sets and the errors are in [mail-api.md](mail-api.md).
 
 `Ops` implements no `reportOps()` and the gateway no task intents since 2026-10-21: Home creates the daily reminder
-in Tasks, and the watch app proposes its tasks to Tasks' `TaskInbox`. For that one release `gateway/src/retired.ts`
-still exports `Intents` (every call rejects `unavailable`), `Planning` and `MailApi` (every request 404), so a Worker
-still bound to one fails closed and writes nothing until its own deploy; the next Todofy release deletes them.
+in Tasks, and the watch app proposes its tasks to Tasks' `TaskInbox`. The gateway exports only `Ops` and `Mail`; the
+refusals it kept for that one release in place of `Intents`, `Planning` and `MailApi` are deleted.
 
 ## 4. Trust and request IDs
 

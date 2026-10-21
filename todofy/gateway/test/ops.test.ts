@@ -88,23 +88,10 @@ describe('the Ops entrypoint (contracts/ops-v1)', () => {
 });
 
 describe('the entrypoints other Workers bind', () => {
-  it('are Ops and Mail, and the retired ones for one release: no ops digest on Ops', () => {
+  it('are Ops and Mail: no ops digest on Ops, and none of the entrypoints retired on 2026-10-21', () => {
     const methods = Object.getOwnPropertyNames(Ops.prototype).filter((name) => name !== 'constructor' && name !== 'call');
     expect(methods.sort()).toEqual(['canaryResult', 'setGuard', 'status']);
     const named = Object.keys(entrypoints).filter((name) => name !== 'default');
-    expect(named.sort()).toEqual(['Intents', 'Mail', 'MailApi', 'Ops', 'Planning']);
-  });
-
-  it('refuses every call of a retired entrypoint without waking the core', async () => {
-    const { env, core } = fakes({}, () => ({ ok: shed }));
-    for (const Retired of [entrypoints.Planning, entrypoints.MailApi]) {
-      const entry = new Retired({ props: { source: 'tasks' } } as ExecutionContext<never>, env);
-      expect(entry.fetch().status).toBe(404);
-    }
-    // unavailable keeps the old Watch sink's proposals open for its successor, which sends them to Tasks.
-    const intents = new entrypoints.Intents({ props: { source: 'watch' } } as ExecutionContext<never>, env);
-    expect(await rejection(intents.proposeTasks())).toBe('unavailable');
-    expect(await rejection(intents.taskIntentStatus())).toBe('unavailable');
-    expect(core).toEqual([]);
+    expect(named.sort()).toEqual(['Mail', 'Ops']);
   });
 });
