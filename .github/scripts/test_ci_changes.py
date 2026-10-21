@@ -1355,6 +1355,7 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "tasks-deploy"),
         ("dashboard-deploy", "personal-mcp-deploy"),
         ("dashboard-deploy", "website-relay-deploy"),
+        ("watch-deploy", "todofy-deploy"),
         ("watch-deploy", "tasks-deploy"),
         ("tasks-deploy", "todofy-deploy"),
         ("personal-mcp-deploy", "tasks-deploy"),
@@ -1463,8 +1464,8 @@ class DeployConditions(unittest.TestCase):
         self.assertIn('--source-sha "$RELEASE_SOURCE_SHA" --evidence-file "$RUNNER_TEMP/vps-release-evidence.json" "${args[@]}"', release)
 
     def test_the_dashboard_deploys_after_the_apps_and_watch_after_tasks(self):
-        self.assertLessEqual({"tasks-deploy"}, set(self.needs(self.jobs()["watch-deploy"])))
-        self.assertNotIn("todofy-deploy", self.needs(self.jobs()["watch-deploy"]))
+        # Todofy too: a failed Todofy deploy leaves Tasks deploy skipped, which alone would let Watch ship.
+        self.assertLessEqual({"todofy-deploy", "tasks-deploy"}, set(self.needs(self.jobs()["watch-deploy"])))
         block = self.jobs()["dashboard-deploy"]
         self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy"},
                              set(self.needs(block)))

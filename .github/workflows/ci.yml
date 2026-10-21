@@ -927,14 +927,16 @@ jobs:
 
   watch-deploy:
     name: Watch deploy
-    # After Tasks: the watch app's TASKS binding names Tasks' TaskInbox entry.
-    needs: [changes, watch-checks, gate, tasks-deploy]
+    # After Tasks: the watch app's TASKS binding names Tasks' TaskInbox entry. Todofy is listed too, because a failed
+    # Todofy deploy leaves Tasks deploy skipped (not failed), and Watch must not ship ahead of either.
+    needs: [changes, watch-checks, gate, todofy-deploy, tasks-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.watch-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.watch-checks.result == 'skipped'))
       && needs.gate.result == 'success'
+      && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
       && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')

@@ -65,7 +65,8 @@ its next version. Local state is in `watch/.wrangler/` (delete it after a schema
 ## Deploy
 
 Only from GitHub Actions: `Watch deploy` (`.github/workflows/ci.yml`) runs on `main` after `CI gate` and `Tasks deploy`
-(its `TASKS` binding names Tasks' `TaskInbox` entrypoint, which must exist) when `watch/`, `packages/edge-auth/`,
+(its `TASKS` binding names Tasks' `TaskInbox` entrypoint, which must exist) and `Todofy deploy` (a failed Todofy deploy
+leaves Tasks deploy skipped, not failed) when `watch/`, `packages/edge-auth/`,
 `contracts/ops-v1/ops-v1.ts` or a `proto/` path the app bundles changed,
 or on a dispatch with `watch` or `all`, in the `production` environment and the group `watch-production`. It builds the
 UI, writes the secrets file, dry-runs (the bundle held to its budget), runs the hostname guard (`tools/cf-guard`, no
