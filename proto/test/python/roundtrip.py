@@ -1,9 +1,9 @@
 """The Python side of test/cross-language.test.ts: reads wire JSON the TypeScript codec wrote, writes it back,
 and writes messages built in Python for TypeScript to read.
 
-stdin: {"read": [{"message": "TaskIntentResult", "strict": false, "text": "<wire JSON>"}, ...]}
+stdin: {"read": [{"message": "prototest.v1.TaskIntentResult", "strict": false, "text": "<wire JSON>"}, ...]}
 stdout: {"read": [{"text": "<wire JSON>", "unrecognized": [...]} | {"error": "<message>"}, ...],
-         "built": [{"message": "TaskIntentResult", "text": "<wire JSON>"}, ...]}
+         "built": [{"message": "prototest.v1.TaskIntentResult", "text": "<wire JSON>"}, ...]}
 
 Every text is compact JSON (``proto_test_support.compact``), the bytes the v1 contracts send and hash.
 """
@@ -16,13 +16,13 @@ from proto_test_support import compact
 from ziyixi_proto.mailhero.webhook.v1 import mail_received_pb
 from ziyixi_proto.ops.v1 import ops_pb
 from ziyixi_proto.prototest.v1 import prototest_pb, rules_pb
-from ziyixi_proto.todofy.taskintent.v1 import task_intent_pb as pb
+from ziyixi_proto.prototest.v1 import intent_pb as pb
 from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
 
 MESSAGES = {
-    "TaskIntent": pb.TaskIntent,
-    "TaskIntentRef": pb.TaskIntentRef,
-    "TaskIntentResult": pb.TaskIntentResult,
+    "prototest.v1.TaskIntent": pb.TaskIntent,
+    "prototest.v1.TaskIntentRef": pb.TaskIntentRef,
+    "prototest.v1.TaskIntentResult": pb.TaskIntentResult,
     "prototest.v1.Book": prototest_pb.Book,
     "prototest.v1.BookCard": prototest_pb.BookCard,
     "prototest.v1.Parcel": rules_pb.Parcel,
@@ -73,7 +73,7 @@ def built() -> list[dict]:
             retry_after_seconds=None if code == pb.ErrorCode.UNSPECIFIED else 86400 - int(code),
             updated_at="2026-09-30T14:03:07.250Z" if int(code) % 2 else "2026-09-30T14:03:07Z",
         )
-        out.append({"message": "TaskIntentResult", "text": compact(to_wire(message))})
+        out.append({"message": "prototest.v1.TaskIntentResult", "text": compact(to_wire(message))})
     for mode in list(pb.Mode)[1:]:
         message = pb.TaskIntent(
             version="task-intent-v1",
@@ -86,10 +86,10 @@ def built() -> list[dict]:
                 pb.TaskIntentItem(title="合成标题\u2003全角", description="第一行\n第二行 \\ 反斜杠"),
             ),
         )
-        out.append({"message": "TaskIntent", "text": compact(to_wire(message))})
+        out.append({"message": "prototest.v1.TaskIntent", "text": compact(to_wire(message))})
     out.append(
         {
-            "message": "TaskIntentRef",
+            "message": "prototest.v1.TaskIntentRef",
             "text": compact(to_wire(pb.TaskIntentRef(version="task-intent-v1", source=pb.Source.WATCH, intent_id="x"))),
         }
     )

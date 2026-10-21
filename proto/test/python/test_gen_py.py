@@ -35,11 +35,9 @@ class PackagesTest(unittest.TestCase):
             "watch.ui.v1",
             {"name": "Choice", "field": [{**STRING, "oneofIndex": 0}], "oneofDecl": [{"name": "kind"}]},
         )
-        intents = file(
-            "todofy/taskintent/v1/task_intent.proto", "todofy.taskintent.v1", {"name": "Ref", "field": [STRING]}
-        )
-        out = gen_py.generate({"file": [ui, intents]})
-        self.assertIn("todofy/taskintent/v1/task_intent_pb.py", out)
+        mail = file("todofy/mail/v1/mail_service.proto", "todofy.mail.v1", {"name": "Ref", "field": [STRING]})
+        out = gen_py.generate({"file": [ui, mail]})
+        self.assertIn("todofy/mail/v1/mail_service_pb.py", out)
         self.assertFalse([path for path in out if path.startswith("watch/")])
 
     def test_a_python_package_cannot_name_a_typescript_only_type(self) -> None:
@@ -51,11 +49,9 @@ class PackagesTest(unittest.TestCase):
             "type": "TYPE_MESSAGE",
             "typeName": ".watch.ui.v1.Watch",
         }
-        intents = file(
-            "todofy/taskintent/v1/task_intent.proto", "todofy.taskintent.v1", {"name": "Item", "field": [ref]}
-        )
+        mail = file("todofy/mail/v1/mail_service.proto", "todofy.mail.v1", {"name": "Item", "field": [ref]})
         with self.assertRaises(gen_py.GenerateError):
-            gen_py.generate({"file": [ui, intents]})
+            gen_py.generate({"file": [ui, mail]})
 
     def test_the_wheel_leaves_the_test_only_packages_out(self) -> None:
         self.assertEqual(
@@ -67,7 +63,7 @@ class PackagesTest(unittest.TestCase):
             for path in (
                 "__init__.py",
                 "wire_json.py",
-                "todofy/taskintent/v1/task_intent_pb.py",
+                "todofy/mail/v1/mail_service_pb.py",
                 "prototest/v1/prototest_pb.py",
             ):
                 (package / path).parent.mkdir(parents=True, exist_ok=True)
@@ -77,7 +73,7 @@ class PackagesTest(unittest.TestCase):
             shipped,
             [
                 "ziyixi_proto/__init__.py",
-                "ziyixi_proto/todofy/taskintent/v1/task_intent_pb.py",
+                "ziyixi_proto/todofy/mail/v1/mail_service_pb.py",
                 "ziyixi_proto/wire_json.py",
             ],
         )

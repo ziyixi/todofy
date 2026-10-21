@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "result as Todofy writes it",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -33,7 +33,7 @@
     },
     {
       "name": "one fraction digit is written as three",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -63,7 +63,7 @@
     },
     {
       "name": "three fraction digits are kept",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -93,7 +93,7 @@
     },
     {
       "name": "a zero fraction is dropped",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -123,7 +123,7 @@
     },
     {
       "name": "29 February of a leap year",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -153,7 +153,7 @@
     },
     {
       "name": "timestamp: more than three fraction digits",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -171,7 +171,7 @@
     },
     {
       "name": "timestamp: 30 February",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -189,7 +189,7 @@
     },
     {
       "name": "timestamp: 29 February of a common year",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -207,7 +207,7 @@
     },
     {
       "name": "timestamp: hour 24",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -225,7 +225,7 @@
     },
     {
       "name": "timestamp: leap second",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -243,7 +243,7 @@
     },
     {
       "name": "timestamp: month 13",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -261,7 +261,7 @@
     },
     {
       "name": "timestamp: year 0",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -279,7 +279,7 @@
     },
     {
       "name": "timestamp: lower-case t and z",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -297,7 +297,7 @@
     },
     {
       "name": "timestamp: an offset instead of Z",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -315,7 +315,7 @@
     },
     {
       "name": "timestamp: no seconds",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -333,7 +333,7 @@
     },
     {
       "name": "dotless i in a state reads as unknown",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -365,7 +365,7 @@
     },
     {
       "name": "upper-case state reads as unknown",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -397,7 +397,7 @@
     },
     {
       "name": "prefixed error code reads as unknown",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -429,7 +429,7 @@
     },
     {
       "name": "dotless i in an error code reads as unknown",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -461,7 +461,7 @@
     },
     {
       "name": "unknown field is skipped",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -494,7 +494,7 @@
     },
     {
       "name": "null error code and retry",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -524,7 +524,7 @@
     },
     {
       "name": "missing REQUIRED field (lenient)",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -541,7 +541,7 @@
     },
     {
       "name": "missing REQUIRED field (strict)",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": true,
       "input": {
         "version": "task-intent-v1",
@@ -558,7 +558,7 @@
     },
     {
       "name": "count as a string",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -576,7 +576,7 @@
     },
     {
       "name": "count as a boolean",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -594,7 +594,7 @@
     },
     {
       "name": "count with a fraction",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -612,7 +612,7 @@
     },
     {
       "name": "count beyond int32",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -630,7 +630,7 @@
     },
     {
       "name": "integral numbers in other spellings",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -660,7 +660,7 @@
     },
     {
       "name": "unknown field (strict)",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": true,
       "input": {
         "version": "task-intent-v1",
@@ -679,7 +679,7 @@
     },
     {
       "name": "null (strict)",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": true,
       "input": {
         "version": "task-intent-v1",
@@ -697,7 +697,7 @@
     },
     {
       "name": "intent as a proposer freezes it",
-      "message": "TaskIntent",
+      "message": "prototest.v1.TaskIntent",
       "strict": true,
       "input": {
         "version": "task-intent-v1",
@@ -733,7 +733,7 @@
     },
     {
       "name": "long s in a mode (strict)",
-      "message": "TaskIntent",
+      "message": "prototest.v1.TaskIntent",
       "strict": true,
       "input": {
         "version": "task-intent-v1",
@@ -754,7 +754,7 @@
     },
     {
       "name": "long s in another mode (strict)",
-      "message": "TaskIntent",
+      "message": "prototest.v1.TaskIntent",
       "strict": true,
       "input": {
         "version": "task-intent-v1",
@@ -775,7 +775,7 @@
     },
     {
       "name": "upper-case mode (strict)",
-      "message": "TaskIntent",
+      "message": "prototest.v1.TaskIntent",
       "strict": true,
       "input": {
         "version": "task-intent-v1",
@@ -796,7 +796,7 @@
     },
     {
       "name": "null for a plain boolean (lenient)",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -814,7 +814,7 @@
     },
     {
       "name": "null for a count (lenient)",
-      "message": "TaskIntentResult",
+      "message": "prototest.v1.TaskIntentResult",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -832,7 +832,7 @@
     },
     {
       "name": "null for a list (lenient)",
-      "message": "TaskIntent",
+      "message": "prototest.v1.TaskIntent",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -848,7 +848,7 @@
     },
     {
       "name": "null for a field omitted when unset (lenient)",
-      "message": "TaskIntent",
+      "message": "prototest.v1.TaskIntent",
       "strict": false,
       "input": {
         "version": "task-intent-v1",
@@ -870,7 +870,7 @@
     },
     {
       "name": "null for a REQUIRED message reads as unset (lenient)",
-      "message": "TaskIntent",
+      "message": "prototest.v1.TaskIntent",
       "strict": false,
       "input": {
         "version": "task-intent-v1",

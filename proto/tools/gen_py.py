@@ -5,8 +5,8 @@ Usage (tools/ensure.mjs runs it; never by hand)::
     buf build --exclude-imports --exclude-source-info -o -#format=json \
         | python3 tools/gen_py.py OUT_DIR
 
-For every file of the module, ``todofy/taskintent/v1/task_intent.proto`` say, it writes
-``OUT_DIR/todofy/taskintent/v1/task_intent_pb.py`` (plus an empty ``__init__.py`` in every directory):
+For every file of the module, ``todofy/mail/v1/mail_service.proto`` say, it writes
+``OUT_DIR/todofy/mail/v1/mail_service_pb.py`` (plus an empty ``__init__.py`` in every directory):
 one ``IntEnum`` per enum, one frozen dataclass per message and a ``FIELDS`` table that the hand-written
 runtime ``ziyixi_proto.wire_json`` reads and writes. OUT_DIR is the ``ziyixi_proto`` package directory.
 An enum nested in a message is a top-level ``IntEnum`` named ``<Message>_<Enum>``, as protobuf-es names
@@ -47,13 +47,11 @@ SCALARS = {
 TIMESTAMP = ".google.protobuf.Timestamp"
 FIELD_MASK = ".google.protobuf.FieldMask"
 # The proto packages generated for Python: True when the package ships in the wheel (todofy-core imports
-# todofy.report.v1, ops.v1, mailhero.webhook.v1, todofy.ui.v1 and todofy.mail.v1, and pywrangler vendors the wheel;
-# todofy.taskintent.v1 stays for proto/'s own tests of the contract until the package is retired), False
-# when only proto/'s own Python tests use it (python/build_backend.py leaves it out of the wheel: TEST_ONLY_PACKAGES).
+# todofy.report.v1, ops.v1, mailhero.webhook.v1, todofy.ui.v1 and todofy.mail.v1, and pywrangler vendors the wheel),
+# False when only proto/'s own Python tests use it (python/build_backend.py leaves it out of the wheel: TEST_ONLY_PACKAGES).
 # Every other package is TypeScript only. .github/scripts/test_proto.py keeps this, the wheel and the apps' imports in
 # step.
 PYTHON_PACKAGES = {
-    "todofy.taskintent.v1": True,
     "todofy.report.v1": True,
     "ops.v1": True,
     "website.sync.v1": True,
@@ -159,7 +157,7 @@ def enum_prefix(name: str) -> str:
 
 
 def module_of(proto_path: str) -> str:
-    """todofy/taskintent/v1/task_intent.proto -> todofy.taskintent.v1.task_intent_pb."""
+    """todofy/mail/v1/mail_service.proto -> todofy.mail.v1.mail_service_pb."""
     if not proto_path.endswith(".proto"):
         raise GenerateError(f"{proto_path}: not a .proto file")
     return proto_path[: -len(".proto")].replace("/", ".") + "_pb"

@@ -423,7 +423,7 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **LINKS))
 
     def test_watch_checks_and_deploys_only_itself_plus_contracts(self):
-        """The watch app proposes task-intent-v1 and answers ops-v1 (Contracts runs both tests): its changes run its
+        """The watch app answers ops-v1 (Contracts runs that test): its changes run its
         checks and Contracts and, on main, its deploy (W2); Todofy and the dashboard are neither checked nor deployed."""
         for path in (
             "watch/worker/src/pipeline.ts",
@@ -438,21 +438,6 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **WATCH))
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, T, F, F, **WATCH))
 
-    def test_task_intent_code_deploys_nothing(self):
-        """No Worker bundles task-intent-v1 since 2026-10-21 (the watch app creates its tasks in Tasks). proto/'s tests
-        read the contract, so Proto checks runs too (PROTO_READS)."""
-        self.assertEqual(
-            push(["contracts/task-intent-v1/task-intent-v1.ts"]),
-            expect(T, T, T, F, F, **ALL_CHECKED, proto=T),
-        )
-        self.assertEqual(
-            push(["contracts/task-intent-v1/task-intent-v1.schema.json"]),
-            expect(T, T, T, F, F, **ALL_CHECKED, proto=T),
-        )
-        self.assertEqual(
-            push(["contracts/task-intent-v1/fixtures/TaskIntent/minimal.json"]), expect(T, T, T, F, F, **ALL_CHECKED, proto=T)
-        )
-
     def test_contracts_recheck_every_app_but_deploy_none(self):
         paths = ["contracts/mail-received-v1/fixtures/plain_text.json"]
         self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED, proto=T))
@@ -464,14 +449,13 @@ class Classify(unittest.TestCase):
 
     def test_a_contract_proto_tests_read_runs_proto_checks(self):
         """proto/'s tests round-trip every ops-v1 fixture and mail-received-v1 event byte for byte through both codecs
-        (and check task-intent-v1's against its schema): a change to those contracts alone runs Proto checks too; a
+        and every other contract listed in PROTO_READS: a change to those contracts alone runs Proto checks too; a
         document about the contracts does not."""
         for path in (
             "contracts/ops-v1/fixtures/invalid/SetGuardInput/new-case.json",
             "contracts/ops-v1/fixtures/OpsStatus/watch-ok.json",
             "contracts/ops-v1/ops-v1.schema.json",
             "contracts/ops-v1/legacy/ops-v1.schema.json",
-            "contracts/task-intent-v1/fixtures/invalid/TaskIntent/new-case.json",
             "contracts/mail-received-v1/fixtures/plain_text.json",
             "contracts/mail-received-v1/mail-received-v1.schema.json",
             "contracts/mail-received-v1/legacy/mail-received-v1.schema.json",
@@ -596,8 +580,6 @@ class Classify(unittest.TestCase):
         ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"}, {"todofy", "platform"}
         every, none = ts | python, set()
         cases = {
-            # task-intent-v1, bundled by the watch app's TypeScript.
-            "proto/todofy/taskintent/v1/task_intent.proto": none,
             # recommendation-v1 and summary-v1: todofy-core builds the reports, Todofy's gateway and UI read them in
             # todofy.ui.v1's answers.
             "proto/todofy/report/v1/report.proto": {"todofy"},
@@ -663,7 +645,7 @@ class Classify(unittest.TestCase):
             "proto/newapp/ui/v1/newapp_ui_service.proto": every,
             # Checks, tests, test data, types-only output and documents: nothing.
             "proto/README.md": none,
-            "proto/test/task-intent.test.ts": none,
+            "proto/test/wire-enum.test.ts": none,
             "proto/test/python/test_gen_py.py": none,
             "proto/testdata/wire-profile-cases.json": none,
             "proto/scripts/breaking.sh": none,

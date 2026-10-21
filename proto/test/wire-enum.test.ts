@@ -4,18 +4,27 @@
  * test/python/test_wire_enum.py (wire_name, wire_member).
  */
 import { describe, expect, expectTypeOf, test } from 'vitest';
-import { ErrorCode, ErrorCodeSchema, Mode, ModeSchema, State, StateSchema } from '../ts/todofy/taskintent/v1/task_intent_pb.ts';
+import { ErrorCode, ErrorCodeSchema, Mode, ModeSchema, State, StateSchema } from '../ts/prototest/v1/intent_pb.ts';
 import { wireEnum, WireJsonError, type WireName } from '../ts/wire-json.ts';
-import { SCHEMA } from './fixtures.ts';
+
+/** The wire names of prototest/v1/intent.proto's enums, in value order (the retired task-intent-v1's JSON Schema). */
+const NAMES = {
+  Mode: ['subtasks', 'separate'],
+  State: ['pending', 'created', 'duplicate', 'paused', 'failed', 'rejected', 'not_found'],
+  ErrorCode: [
+    'maintenance', 'processing_paused', 'todoist_paused', 'todoist_blocked', 'backup_active', 'rate_limited', 'retry_wait',
+    'todoist_rejected', 'todoist_result_unknown', 'intent_conflict', 'daily_limit', 'url_not_allowed', 'source_not_allowed',
+  ],
+};
 
 describe('wireEnum', () => {
   const modes = wireEnum(ModeSchema, Mode);
   const states = wireEnum(StateSchema, State);
 
-  test('names are the JSON Schema enum, in value order', () => {
-    expect(modes.names).toEqual(SCHEMA.$defs['Mode']?.enum);
-    expect(states.names).toEqual(SCHEMA.$defs['State']?.enum);
-    expect(wireEnum(ErrorCodeSchema, ErrorCode).names).toEqual(SCHEMA.$defs['ErrorCode']?.enum);
+  test('names are the lower-case values without the prefix, in value order', () => {
+    expect(modes.names).toEqual(NAMES.Mode);
+    expect(states.names).toEqual(NAMES.State);
+    expect(wireEnum(ErrorCodeSchema, ErrorCode).names).toEqual(NAMES.ErrorCode);
   });
 
   test('name and value are inverse; the zero value and unknown numbers have no name', () => {

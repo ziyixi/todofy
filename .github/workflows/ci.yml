@@ -2,11 +2,11 @@
 # Newsletter, Platform, mailsort, recall, the brief and Tasks).
 # "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run
 # from its own directory, "Shared packages" checks packages/* (compiled into the apps), "Contracts" runs both
-# sides of mail.received.v1, ops-v1 and task-intent-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
+# sides of mail.received.v1 and ops-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
 # gates the protobuf IDL in proto/, and "CI gate" is the single status check to require.
 # Deploys run only on main, only for the app that changed (itself, a shared package it compiles in, a contract
-# file it bundles, or was dispatched), after the gate passes; the watch app deploys after Todofy (its TODOFY
-# binding) and the dashboard after every app whose Ops entrypoint it binds. A push to main whose commit already passed every
+# file it bundles, or was dispatched), after the gate passes; Tasks deploys after Todofy (its MAIL binding), the watch
+# app after Tasks (its TASKS binding) and the dashboard after every app whose Ops entrypoint it binds. A push to main whose commit already passed every
 # needed check in a branch push run reuses that run: the checks are skipped, the gate and the deploys still run
 # (ci_changes.py find_reusable). Every deploy that applies routes runs tools/cf-guard first. recall's Chrome extension
 # is never deployed: each new version is kept as a GitHub Release (Recall extension release).

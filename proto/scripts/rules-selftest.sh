@@ -1,6 +1,6 @@
 #!/bin/sh
 # Proves that the lint and breaking rules catch what they are meant to (README.md, Rules): each case
-# copies the module to a temporary directory, applies one edit to one .proto file (task_intent.proto unless
+# copies the module to a temporary directory, applies one edit to one .proto file (task_inbox.proto unless
 # the case names another; the edit DELETE removes that file or directory instead), optionally replaces the copy's
 # retired.json, and expects a verdict. "breaking" is what scripts/breaking.sh runs against its base:
 # tools/retired.py (the copy keeps its retired elements deleted; the base without them), then buf breaking (FILE)
@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 BUF=$(cd node_modules/.bin && pwd)/buf
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/proto-selftest.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
-INTENT=todofy/taskintent/v1/task_intent.proto
+INBOX=tasks/inbox/v1/task_inbox.proto
 WATCH=watch/ui/v1/watch_ui_service.proto
 OPS=ops/v1/ops.proto
 REPORT=todofy/report/v1/report.proto
@@ -22,7 +22,7 @@ failures=0
 
 # case <name> <lint|breaking> <pass|fail> <perl substitution applied to the proto, or DELETE> [<file>] [<retired.json>]
 case_() {
-  name=$1 kind=$2 want=$3 edit=$4 FILE=${5:-$INTENT}
+  name=$1 kind=$2 want=$3 edit=$4 FILE=${5:-$INBOX}
   rm -rf "$WORK/m" && mkdir -p "$WORK/m" && cp buf.yaml buf.lock "$WORK/m/"
   if [ "$#" -ge 6 ]; then printf '%s\n' "$6" >"$WORK/m/retired.json"; else cp retired.json "$WORK/m/"; fi
   # Every package directory of the module (buf.yaml `excludes` are tooling, not module files).
@@ -53,20 +53,20 @@ case_() {
   fi
 }
 
-case_ "renumber a field (tasks_created 7 -> 11)" breaking fail 's/int32 tasks_created = 7/int32 tasks_created = 11/'
-case_ "remove a field (TaskIntentItem.url)" breaking fail 's/  \/\/ https, host on[^\n]*\n  optional string url = 2;\n//'
-case_ "remove a field but reserve its number and name" breaking fail 's/  \/\/ https, host on[^\n]*\n  optional string url = 2;\n/  reserved 2;\n  reserved "url";\n/'
-case_ "rename a field (TaskIntentRef.intent_id -> idempotency_key)" breaking fail 's/(The intent to look up.\n  string) intent_id/$1 idempotency_key/'
-case_ "rename an enum value (DAILY_LIMIT -> DAILY_QUOTA)" breaking fail 's/ERROR_CODE_DAILY_LIMIT = 11/ERROR_CODE_DAILY_QUOTA = 11/'
-case_ "change a field type (tasks_total int32 -> int64)" breaking fail 's/int32 tasks_total = 6/int64 tasks_total = 6/'
-case_ "add an enum value (ERROR_CODE_QUOTA_EXHAUSTED = 14)" breaking pass 's/(  ERROR_CODE_SOURCE_NOT_ALLOWED = 13;\n)/$1  \/\/ The Todoist quota is exhausted.\n  ERROR_CODE_QUOTA_EXHAUSTED = 14;\n/'
-case_ "add an optional field (TaskIntentResult.hint_code = 11)" breaking pass 's/(updated_at = 10 \[\(google.api.field_behavior\) = REQUIRED\];\n)/$1  \/\/ An optional hint code.\n  optional string hint_code = 11;\n/'
+case_ "renumber a field (replayed 3 -> 11)" breaking fail 's/bool replayed = 3/bool replayed = 11/'
+case_ "remove a field (InboxSubtask.description)" breaking fail 's/  \/\/ At most 16,000 UTF-16 code units.\n  string description = 2 \[\(google.api.field_behavior\) = OPTIONAL\];\n//'
+case_ "remove a field but reserve its number and name" breaking fail 's/  \/\/ At most 16,000 UTF-16 code units.\n  string description = 2 \[\(google.api.field_behavior\) = OPTIONAL\];\n/  reserved 2;\n  reserved "description";\n/'
+case_ "rename a field (CreateInboxTaskResponse.task_id -> id)" breaking fail 's/(The task.s ID.\n  string) task_id/$1 id/'
+case_ "rename an enum value (DAILY_LIMIT -> DAILY_QUOTA)" breaking fail 's/ERROR_CODE_DAILY_LIMIT = 2/ERROR_CODE_DAILY_QUOTA = 2/'
+case_ "change a field type (replayed bool -> int32)" breaking fail 's/bool replayed = 3/int32 replayed = 3/'
+case_ "add an enum value (ERROR_CODE_QUOTA_EXHAUSTED = 4)" breaking pass 's/(  ERROR_CODE_UNAVAILABLE = 3;\n)/$1  \/\/ A quota ran out.\n  ERROR_CODE_QUOTA_EXHAUSTED = 4;\n/'
+case_ "add an optional field (CreateInboxTaskResponse.hint_code = 4)" breaking pass 's/(bool replayed = 3 \[\(google.api.field_behavior\) = REQUIRED\];\n)/$1  \/\/ An optional hint code.\n  optional string hint_code = 4;\n/'
 # The wire profile's own rules (tools/profile_breaking.py): buf alone passes the first four.
-case_ "drop REQUIRED from retry_after_seconds (null would be omitted)" breaking fail 's/(optional int32 retry_after_seconds = 9) \[\(google.api.field_behavior\) = REQUIRED\]/$1/'
-case_ "drop REQUIRED from error_code" breaking fail 's/(ErrorCode error_code = 8) \[\(google.api.field_behavior\) = REQUIRED\]/$1/'
-case_ "add REQUIRED to TaskIntentItem.url (older payloads omit it)" breaking fail 's/optional string url = 2;/optional string url = 2 [(google.api.field_behavior) = REQUIRED];/'
-case_ "add a REQUIRED field to an existing message" breaking fail 's/(updated_at = 10 \[\(google.api.field_behavior\) = REQUIRED\];\n)/$1  \/\/ A required hint code.\n  string hint_code = 11 [(google.api.field_behavior) = REQUIRED];\n/'
-case_ "drop optional from retry_after_seconds (0 instead of null)" breaking fail 's/optional int32 retry_after_seconds = 9/int32 retry_after_seconds = 9/'
+case_ "drop REQUIRED from GuardState.until (null would be omitted)" breaking fail 's/(optional string until = 3 \[\n    )\(google.api.field_behavior\) = REQUIRED,\n    /$1/' "$OPS"
+case_ "drop REQUIRED from GuardState.level" breaking fail 's/(GuardLevel level = 1 \[\n    )\(google.api.field_behavior\) = REQUIRED,\n    /$1/' "$OPS"
+case_ "add REQUIRED to InboxSubtask.description (older requests omit it)" breaking fail 's/(At most 16,000 UTF-16 code units.\n  string description = 2 \[\(google.api.field_behavior\) = )OPTIONAL/$1REQUIRED/'
+case_ "add a REQUIRED field to an existing message" breaking fail 's/(bool replayed = 3 \[\(google.api.field_behavior\) = REQUIRED\];\n)/$1  \/\/ A required hint code.\n  string hint_code = 4 [(google.api.field_behavior) = REQUIRED];\n/'
+case_ "drop optional from GuardState.set_at (empty instead of null)" breaking fail 's/optional string set_at = 4 \[/string set_at = 4 [/' "$OPS"
 # The HTTP APIs (tools/profile_breaking.py): buf alone passes every one of these, though old clients break.
 case_ "move GetWatch to another path (/api/v1 -> /api/v2)" breaking fail 's{get: "/api/v1/\{name=watches/\*\}"\}}{get: "/api/v2/{name=watches/*}"\}}' "$WATCH"
 case_ "rename a custom verb (:pause -> :hold)" breaking fail 's/\}:pause"/}:hold"/' "$WATCH"
@@ -119,17 +119,17 @@ case_ "change a binding of the test fixtures (prototest is ignored, as by buf)" 
 # the listed element must stay deleted (an enum value with its number and name reserved; a message with every rpc and
 # field that uses it). Nothing else is excused.
 RETIRE_WATCH_UI='{"packages": [{"path": "watch/ui/v1/", "package": "watch.ui.v1"}]}'
-RETIRE_WATCH_SOURCE='{"enum_values": [{"enum": "todofy.taskintent.v1.Source", "name": "SOURCE_WATCH", "number": 2}]}'
+RETIRE_INBOX_UNAVAILABLE='{"enum_values": [{"enum": "tasks.inbox.v1.ErrorCode", "name": "ERROR_CODE_UNAVAILABLE", "number": 3}]}'
 RETIRE_WATCH_GUARD='{"allowed_values": [{"field": "dashboard.ui.v1.OverrideGuardRequest.app", "value": "watch"}]}'
 GUARD=dashboard/ui/v1/dashboard_ui_service.proto
 case_ "delete a whole package (watch/ui/v1)" breaking fail DELETE watch/ui/v1
 case_ "delete a whole package that retired.json lists" breaking pass DELETE watch/ui/v1 "$RETIRE_WATCH_UI"
 case_ "list a package as retired but keep it" breaking fail 's/(\/\/ Input of GetWatch\.)/$1 Kept./' "$WATCH" "$RETIRE_WATCH_UI"
 case_ "delete a package that retired.json does not list (links/ui/v1)" breaking fail DELETE links/ui/v1 '{"packages": [{"path": "gone/ui/v1/", "package": "gone.ui.v1"}]}'
-case_ "remove a listed enum value (SOURCE_WATCH) and reserve its number and name" breaking pass 's/(enum Source \{\n)/$1  reserved 2;\n  reserved "SOURCE_WATCH";\n/; s/  \/\/ The watch app[^\n]*\n[^\n]*\n  SOURCE_WATCH = 2;\n//' "$INTENT" "$RETIRE_WATCH_SOURCE"
-case_ "remove a listed enum value without reserving it" breaking fail 's/  \/\/ The watch app[^\n]*\n[^\n]*\n  SOURCE_WATCH = 2;\n//' "$INTENT" "$RETIRE_WATCH_SOURCE"
-case_ "reuse a listed enum value's number (SOURCE_WATCH = 2 -> SOURCE_NEXT = 2)" breaking fail 's/SOURCE_WATCH = 2;/SOURCE_NEXT = 2;/' "$INTENT" "$RETIRE_WATCH_SOURCE"
-case_ "remove an unlisted enum value (ERROR_CODE_DAILY_LIMIT) and reserve it" breaking fail 's/(enum ErrorCode \{\n)/$1  reserved 11;\n  reserved "ERROR_CODE_DAILY_LIMIT";\n/; s/  \/\/ [^\n]*\n  ERROR_CODE_DAILY_LIMIT = 11;\n//'
+case_ "remove a listed enum value (ERROR_CODE_UNAVAILABLE) and reserve its number and name" breaking pass 's/(enum ErrorCode \{\n)/$1  reserved 3;\n  reserved "ERROR_CODE_UNAVAILABLE";\n/; s/  \/\/ Tasks[^\n]*\n  ERROR_CODE_UNAVAILABLE = 3;\n//' "$INBOX" "$RETIRE_INBOX_UNAVAILABLE"
+case_ "remove a listed enum value without reserving it" breaking fail 's/  \/\/ Tasks[^\n]*\n  ERROR_CODE_UNAVAILABLE = 3;\n//' "$INBOX" "$RETIRE_INBOX_UNAVAILABLE"
+case_ "reuse a listed enum value's number (ERROR_CODE_UNAVAILABLE = 3 -> ERROR_CODE_NEXT = 3)" breaking fail 's/ERROR_CODE_UNAVAILABLE = 3;/ERROR_CODE_NEXT = 3;/' "$INBOX" "$RETIRE_INBOX_UNAVAILABLE"
+case_ "remove an unlisted enum value (ERROR_CODE_DAILY_LIMIT) and reserve it" breaking fail 's/(enum ErrorCode \{\n)/$1  reserved 2;\n  reserved "ERROR_CODE_DAILY_LIMIT";\n/; s/  \/\/ The source created[^\n]*\n  ERROR_CODE_DAILY_LIMIT = 2;\n//'
 case_ "remove a listed allowed value of an input (OverrideGuardRequest.app watch)" breaking pass 's/^      "watch",\n//m' "$GUARD" "$RETIRE_WATCH_GUARD"
 case_ "remove an unlisted allowed value of an input (OverrideGuardRequest.app watch)" breaking fail 's/^      "watch",\n//m' "$GUARD"
 RETIRE_WATCH_ACK='{"methods": [{"service": "watch.ui.v1.WatchUiService", "name": "AcknowledgeChange"}], "messages": [{"message": "watch.ui.v1.AcknowledgeChangeRequest"}]}'
@@ -143,10 +143,10 @@ case_ "delete a whole file (watch_ui_service.proto)" breaking fail DELETE "$WATC
 case_ "delete a whole file that retired.json lists" breaking pass DELETE "$WATCH" "$RETIRE_WATCH_SERVICE"
 case_ "list a file as retired but keep it" breaking fail 's/(\/\/ Input of GetWatch\.)/$1 Kept./' "$WATCH" "$RETIRE_WATCH_SERVICE"
 case_ "list a file that a kept file imports (change.proto)" breaking fail 's/(\/\/ A change of a watch)/$1, kept/' watch/ui/v1/change.proto '{"files": [{"path": "watch/ui/v1/change.proto"}]}'
-case_ "zero value without _UNSPECIFIED (MODE_UNSPECIFIED -> MODE_NONE)" lint fail 's/MODE_UNSPECIFIED = 0/MODE_NONE = 0/'
-case_ "enum value without its prefix (SOURCE_WATCH -> WATCH)" lint fail 's/SOURCE_WATCH = 2/WATCH = 2/'
-case_ "lowerCamelCase field (intent_id -> intentId)" lint fail 's/string intent_id = 3;/string intentId = 3;/; s/string intent_id = 3 /string intentId = 3 /'
-case_ "undocumented field" lint fail 's/  \/\/ Tasks created so far.\n//'
+case_ "zero value without _UNSPECIFIED (ERROR_CODE_UNSPECIFIED -> ERROR_CODE_NONE)" lint fail 's/ERROR_CODE_UNSPECIFIED = 0/ERROR_CODE_NONE = 0/'
+case_ "enum value without its prefix (ERROR_CODE_DAILY_LIMIT -> DAILY_LIMIT)" lint fail 's/ERROR_CODE_DAILY_LIMIT = 2/DAILY_LIMIT = 2/'
+case_ "lowerCamelCase field (request_id -> requestId)" lint fail 's/string request_id = 1 \[/string requestId = 1 [/'
+case_ "undocumented field" lint fail 's/  \/\/ The task.s ID.\n//'
 
 echo "$failures unexpected verdict(s)"
 [ "$failures" -eq 0 ]

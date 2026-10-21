@@ -1,15 +1,10 @@
 // A dependency-free validator for the subset of JSON Schema 2020-12 that the contracts' hand-written schemas use.
 //
-// Its users now: task-intent-v1 (contracts/task-intent-v1/task-intent-v1.schema.json, whose value rules are not in
-// the IDL yet: the tests check the fixtures with it), and
-// the rollout checks of ops-v1, whose answers each app's golden test still runs through the hand-written schema the
-// dashboards deployed before ops-v1 moved onto proto/ validate with (legacy/ops-v1.schema.json). ops-v1 itself is read
-// and written with the generated code of proto/ops/v1 (the wire codec checks its rules); ops-v1.schema.json is
-// generated from the IDL and stays inside this subset. Retire this file with task-intent-v1's move onto proto/.
-//
-// Until 2026-10-21 Todofy's tests validated the same task-intent-v1 fixtures with the reference implementation
-// (Python jsonschema, Draft202012Validator) and asserted the same verdict for every fixture; Todofy no longer takes
-// intents, so only this subset checks them now.
+// Its users now: the rollout checks of ops-v1, whose answers each app's golden test still runs through the hand-written
+// schema the dashboards deployed before ops-v1 moved onto proto/ validate with (legacy/ops-v1.schema.json). ops-v1
+// itself is read and written with the generated code of proto/ops/v1 (the wire codec checks its rules);
+// ops-v1.schema.json is generated from the IDL and stays inside this subset. task-intent-v1, its other user, was
+// retired on 2026-10-21.
 //
 // Supported: $ref (local "#/$defs/<name>" only), type, enum, const, required, properties, additionalProperties,
 // propertyNames, minProperties, maxProperties, items, minItems, maxItems, uniqueItems, pattern, minLength, maxLength,

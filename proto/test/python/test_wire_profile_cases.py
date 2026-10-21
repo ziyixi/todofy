@@ -9,16 +9,15 @@ import json
 import unittest
 
 from proto_test_support import CASES_FILE, compact
-from ziyixi_proto.prototest.v1 import prototest_pb, rules_pb
-from ziyixi_proto.todofy.taskintent.v1 import task_intent_pb as pb
+from ziyixi_proto.prototest.v1 import intent_pb, prototest_pb, rules_pb
 from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
 
 CASES = json.loads(CASES_FILE.read_text(encoding="utf-8"))["cases"]
-# task-intent-v1 messages by short name, the fixtures of prototest/v1 by full name.
+# The fixtures of prototest/v1 by full name.
 MESSAGES = {
-    "TaskIntent": pb.TaskIntent,
-    "TaskIntentRef": pb.TaskIntentRef,
-    "TaskIntentResult": pb.TaskIntentResult,
+    "prototest.v1.TaskIntent": intent_pb.TaskIntent,
+    "prototest.v1.TaskIntentRef": intent_pb.TaskIntentRef,
+    "prototest.v1.TaskIntentResult": intent_pb.TaskIntentResult,
     "prototest.v1.Book": prototest_pb.Book,
     "prototest.v1.BookCard": prototest_pb.BookCard,
     "prototest.v1.Parcel": rules_pb.Parcel,

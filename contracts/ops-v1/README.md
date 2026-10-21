@@ -20,7 +20,7 @@ contract this replaced (each app's golden test, below).
 | `ops-v1.schema.json` | JSON Schema 2020-12 **generated** from the IDL (`proto/tools/gen_schema.py`), one `$defs` entry per input and output (table below), per format and per enum; never edited by hand, `npm run check:schema` in `proto/` fails when stale. Kept for readers outside the monorepo and as the oracle the tests check the codec against. The names the hand-written schema had (`App`, `Counters`, `Metrics`, `Modes`, `OpsErrorCode`) still resolve, as aliases of what the IDL generates (`ALIASES` in `gen_schema.py`) |
 | `ops-v1.ts` | `OPS_LIMITS`: the rules no codec can check (relative to a clock or to a whole message); the TS Workers import it by relative path, `todofy-core` keeps the same numbers |
 | `legacy/ops-v1.schema.json` | The hand-written schema the dashboards deployed before the move validate answers with, frozen: the golden tests prove every answer still passes it (rollout) |
-| `validate.mjs` | Dependency-free validator for the JSON Schema keywords the contracts use; the proposer's tests check `task-intent-v1` with it, the golden tests check answers against the legacy schema with it |
+| `validate.mjs` | Dependency-free validator for the JSON Schema keywords the contracts use; the golden tests check answers against the legacy schema with it |
 | `fixtures/<Def>/*.json` | Valid examples of each input/output; `fixtures/invalid/<Def>/*.json` must fail |
 | `IMPLEMENTATION.md` | Per app: files, migrations, guard keep/defer table, canary state machine, digest, query budgets, tests |
 

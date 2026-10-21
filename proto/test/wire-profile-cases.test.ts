@@ -9,13 +9,13 @@ import { describe, expect, test } from 'vitest';
 import type { DescMessage } from '@bufbuild/protobuf';
 import { BookCardSchema, BookSchema } from '../ts/prototest/v1/prototest_pb.ts';
 import { LabelSchema, NoteSchema, ParcelSchema } from '../ts/prototest/v1/rules_pb.ts';
-import { TaskIntentRefSchema, TaskIntentResultSchema, TaskIntentSchema } from '../ts/todofy/taskintent/v1/task_intent_pb.ts';
+import { TaskIntentRefSchema, TaskIntentResultSchema, TaskIntentSchema } from '../ts/prototest/v1/intent_pb.ts';
 import { fromWire, toWire, WireJsonError } from '../ts/wire-json.ts';
 import { CASES_FILE } from './fixtures.ts';
 
 interface Case {
   readonly name: string;
-  /** A task-intent-v1 message by its short name, or a fixture of prototest/v1 by its full name. */
+  /** A fixture of prototest/v1 by its full name. */
   readonly message: keyof typeof SCHEMAS;
   readonly strict: boolean;
   readonly input: unknown;
@@ -25,9 +25,9 @@ interface Case {
 }
 
 const SCHEMAS = {
-  TaskIntent: TaskIntentSchema,
-  TaskIntentRef: TaskIntentRefSchema,
-  TaskIntentResult: TaskIntentResultSchema,
+  'prototest.v1.TaskIntent': TaskIntentSchema,
+  'prototest.v1.TaskIntentRef': TaskIntentRefSchema,
+  'prototest.v1.TaskIntentResult': TaskIntentResultSchema,
   'prototest.v1.Book': BookSchema,
   'prototest.v1.BookCard': BookCardSchema,
   'prototest.v1.Parcel': ParcelSchema,

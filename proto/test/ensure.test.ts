@@ -25,7 +25,7 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, test } from 'vitest';
 
 const PROTO = dirname(import.meta.dirname);
-const PROTO_FILE = 'todofy/taskintent/v1/task_intent.proto';
+const PROTO_FILE = 'tasks/inbox/v1/task_inbox.proto';
 /** Installed, generated or left by a run (every directory inside the two package roots is generated). */
 function copied(source: string): boolean {
   const path = relative(PROTO, source).split(sep).join('/');

@@ -5,9 +5,9 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   todofy_check, mail_hero_check, dashboard_check, website_check, links_check, watch_check, newsletter_check,
   fleet_check, platform_check, mailsort_check, recall_check, brief_check, tasks_check
                     run that app's full checks
-  contracts         run the contract tests: both sides of mail.received.v1, ops-v1 and
-                    task-intent-v1, and the dashboard's ops-v1 caller tests (also on a proto/ change: the
-                    task-intent-v1 tests check the generated types and the codecs against the schema)
+  contracts         run the contract tests: both sides of mail.received.v1 and ops-v1, and the dashboard's
+                    ops-v1 caller tests (also on a proto/ change: they read every contract with the generated
+                    codecs)
   packages          run every shared package's own checks (packages/*)
   infra             run "Infra checks" (OpenTofu fmt/validate of infra/, its guards and the plan-summary
                     tests): infra/, tools/infra-plan-summary/ or .github/ changed. Never deploys anything;
@@ -65,7 +65,7 @@ Markdown (PROTO_NOT_BUNDLED), and the files of a package proto/retired.json list
 other proto/ path (buf.yaml, buf.lock, the toolchain lockfile,
 ensure.mjs, a package not listed yet) deploys every user (fail safe). test_proto.py derives PROTO_USERS and the
 packages' importers from the sources. It also runs Contracts. A change to a contract proto/'s tests read (PROTO_READS:
-ops-v1's, task-intent-v1's and mail-received-v1's fixtures and schemas) runs Proto checks as well.
+ops-v1's and mail-received-v1's fixtures and schemas, among others) runs Proto checks as well.
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
@@ -79,8 +79,7 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
   runs everything. An app's own directory checks it and deploys it unless the changed paths are in the
   explicitly reviewed APP_TEST_DIRECTORIES (checks still run); contracts/ and .github/ re-check
   every app but deploy none, except the contract files the TypeScript Workers bundle (BUNDLED_BY,
-  e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts, or TASK_INTENT_LIMITS in
-  contracts/task-intent-v1/task-intent-v1.ts), which also deploy every app listed for them. A
+  e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts), which also deploy every app listed for them. A
   shared package packages/<name>/ is compiled into the apps listed in PACKAGE_USERS, so any change
   inside it runs the package checks and checks AND deploys each of those apps. Its Markdown documents
   (packages/<name>/**/*.md: README, SPEC) are compiled into nothing: they run the package checks and
@@ -265,8 +264,6 @@ PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
 # value imports, Python imports; test_proto.py checks this against the sources). A package missing here
 # reaches every user (fail safe; test_proto.py fails until it is listed).
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
-    # task-intent-v1: no app imports it since 2026-10-21 (the watch app creates its tasks in Tasks); proto/'s own tests.
-    "proto/todofy/taskintent/": (),
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
@@ -311,13 +308,11 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
 }
 # The contracts whose fixtures and schemas proto/'s own tests read (proto/test/ops.test.ts and test_ops.py round-trip
 # every ops-v1 fixture byte for byte through both codecs, mail-received.test.ts and test_mail_received.py every
-# mail-received-v1 event, recall-archive.test.ts every recall-archive-v1 fixture; the task-intent-v1 tests check both
-# codecs against its schema; Proto checks also compares the contracts' JSON Schemas with the ones the IDL generates): a
+# mail-received-v1 event, recall-archive.test.ts every recall-archive-v1 fixture; Proto checks also compares the contracts' JSON Schemas with the ones the IDL generates): a
 # change there runs Proto checks too, so a fixture neither codec writes byte for byte, or one a strict read wrongly
 # accepts, fails its push.
 PROTO_READS = (
     "contracts/ops-v1/",
-    "contracts/task-intent-v1/",
     "contracts/mail-received-v1/",
     "contracts/fleet-report-v1/",
     "contracts/platform-runtime-v1/",

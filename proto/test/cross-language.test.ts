@@ -1,10 +1,10 @@
 /**
  * Cross-language round trips of the wire JSON profile: bytes the TypeScript codec writes, read and written
  * again by the Python codec (test/python/roundtrip.py, in a child process), must come back identical, and
- * so must messages built in Python and read here. The corpus is every valid task-intent-v1 and ops-v1 fixture, every
- * mail-received-v1 event (current and legacy), every shared edge case that reads (doubles and maps among them), and
- * messages built in each language (every
- * state with every error code, both modes). This is what lets the watch app (TypeScript) and Todofy (Python) hash, freeze and compare each other's bytes.
+ * so must messages built in Python and read here. The corpus is every valid ops-v1 fixture, every mail-received-v1
+ * event (current and legacy), every shared edge case that reads (doubles and maps among them), and messages built in
+ * each language (prototest/v1/intent.proto's result in every state with every error code, both modes). This is what
+ * lets a TypeScript app and Todofy (Python) hash, freeze and compare each other's bytes.
  */
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -21,13 +21,13 @@ import {
   TaskIntentRefSchema,
   TaskIntentResultSchema,
   TaskIntentSchema,
-} from '../ts/todofy/taskintent/v1/task_intent_pb.ts';
+} from '../ts/prototest/v1/intent_pb.ts';
 import { MailReceivedEventSchema } from '../ts/mailhero/webhook/v1/mail_received_pb.ts';
 import * as ops from '../ts/ops/v1/ops_pb.ts';
 import { fromWire, toWire, WireJsonError } from '../ts/wire-json.ts';
 import { CASES_FILE, fixtures, mailFixtures, OPS_CONTRACT } from './fixtures.ts';
 
-/** A task-intent-v1 message by its short name, or a fixture of prototest/v1 (doubles, maps) by its full name. */
+/** A message by its full name: the fixtures of prototest/v1 and the contracts' messages. */
 type Name = keyof typeof SCHEMAS;
 
 interface ReadRequest {
@@ -42,9 +42,9 @@ interface PythonAnswer {
 }
 
 const SCHEMAS = {
-  TaskIntent: TaskIntentSchema,
-  TaskIntentRef: TaskIntentRefSchema,
-  TaskIntentResult: TaskIntentResultSchema,
+  'prototest.v1.TaskIntent': TaskIntentSchema,
+  'prototest.v1.TaskIntentRef': TaskIntentRefSchema,
+  'prototest.v1.TaskIntentResult': TaskIntentResultSchema,
   'prototest.v1.Book': BookSchema,
   'prototest.v1.BookCard': BookCardSchema,
   'prototest.v1.Parcel': ParcelSchema,
@@ -95,7 +95,7 @@ function builtInTypeScript(): ReadRequest[] {
         updatedAt: { seconds: 1_790_776_987n, nanos: code % 2 === 1 ? 250_000_000 : 0 },
         ...(code === ErrorCode.UNSPECIFIED ? {} : { retryAfterSeconds: 86_400 - code }),
       });
-      out.push({ message: 'TaskIntentResult', strict: false, text: JSON.stringify(toWire(TaskIntentResultSchema, result)) });
+      out.push({ message: 'prototest.v1.TaskIntentResult', strict: false, text: JSON.stringify(toWire(TaskIntentResultSchema, result)) });
     }
   }
   for (const mode of [Mode.SUBTASKS, Mode.SEPARATE]) {
@@ -110,10 +110,10 @@ function builtInTypeScript(): ReadRequest[] {
         { title: '合成标题\u2003全角', description: '第一行\n第二行 \\ 反斜杠' },
       ],
     });
-    out.push({ message: 'TaskIntent', strict: true, text: JSON.stringify(toWire(TaskIntentSchema, intent)) });
+    out.push({ message: 'prototest.v1.TaskIntent', strict: true, text: JSON.stringify(toWire(TaskIntentSchema, intent)) });
   }
   out.push({
-    message: 'TaskIntentRef',
+    message: 'prototest.v1.TaskIntentRef',
     strict: true,
     text: JSON.stringify(toWire(TaskIntentRefSchema, create(TaskIntentRefSchema, { version: 'task-intent-v1', source: Source.WATCH, intentId: 'x' }))),
   });
@@ -136,17 +136,6 @@ function builtInTypeScript(): ReadRequest[] {
 /** Everything TypeScript writes: the fixtures and the shared cases after a TypeScript read, then its own messages. */
 function corpus(): ReadRequest[] {
   const out: ReadRequest[] = [];
-  for (const [message, strict] of [
-    ['TaskIntent', true],
-    ['TaskIntentRef', true],
-    ['TaskIntentResult', false],
-  ] as const) {
-    for (const { text } of fixtures(message)) {
-      const written = viaTypeScript(message, text, strict);
-      if (written === null) throw new Error(`a valid ${message} fixture does not read`);
-      out.push({ message, strict, text: written });
-    }
-  }
   for (const def of ['OpsStatus', 'GuardState', 'SetGuardInput', 'StartCanaryInput', 'StartCanaryResult', 'CanaryDelivery', 'CanaryResult', 'OpsReport', 'OpsReportReceipt'] as const) {
     const message = `ops.v1.${def}` as const;
     const strict = OPS_INPUTS.has(def);
@@ -190,22 +179,12 @@ beforeAll(() => {
 
 describe('TypeScript writes, Python reads and writes the same bytes', () => {
   test('every corpus entry', () => {
-    // 18 task-intent fixtures, 37 ops-v1 fixtures, the reading shared cases, 7 x 14 results, 2 intents, 1 ref, 1 status.
-    expect(requests.length).toBeGreaterThan(18 + 37 + 98 + 4);
+    // 37 ops-v1 fixtures, the reading shared cases, 7 x 14 results, 2 intents, 1 ref, 1 status.
+    expect(requests.length).toBeGreaterThan(37 + 98 + 4);
     expect(python.read).toHaveLength(requests.length);
     requests.forEach((request, i) => {
       expect(python.read[i], `${request.message} ${request.text}`).toEqual({ text: request.text, unrecognized: [] });
     });
-  });
-
-  test('every valid fixture keeps its compact bytes in both languages', () => {
-    for (const message of ['TaskIntent', 'TaskIntentRef', 'TaskIntentResult'] as const) {
-      for (const { name, value } of fixtures(message)) {
-        const text = JSON.stringify(value);
-        const i = requests.findIndex((r) => r.message === message && r.text === text);
-        expect(i, `${message}/${name}`).toBeGreaterThanOrEqual(0);
-      }
-    }
   });
 });
 
@@ -214,7 +193,7 @@ describe('Python writes, TypeScript reads and writes the same bytes', () => {
     // 7 states x 14 codes, 2 intents, 1 ref, 1 ops status.
     expect(python.built).toHaveLength(7 * 14 + 2 + 1 + 1);
     for (const { message, text } of python.built) {
-      const strict = message !== 'TaskIntentResult' && message !== 'ops.v1.OpsStatus';
+      const strict = message !== 'prototest.v1.TaskIntentResult' && message !== 'ops.v1.OpsStatus';
       const read = fromWire(SCHEMAS[message], JSON.parse(text), { strict });
       expect(read.unrecognized).toEqual([]);
       expect(JSON.stringify(toWire(SCHEMAS[message], read.message)), text).toBe(text);

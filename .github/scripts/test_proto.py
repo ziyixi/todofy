@@ -611,8 +611,8 @@ class Generated(unittest.TestCase):
 
     def test_generated_paths_are_ignored(self):
         for path in (
-            "proto/ts/todofy/taskintent/v1/task_intent_pb.ts",
-            "proto/python/src/ziyixi_proto/todofy/taskintent/v1/task_intent_pb.py",
+            "proto/ts/tasks/inbox/v1/task_inbox_pb.ts",
+            "proto/python/src/ziyixi_proto/todofy/mail/v1/mail_service_pb.py",
             "proto/.generated.json",
         ):
             with self.subTest(path=path):

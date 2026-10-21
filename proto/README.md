@@ -13,13 +13,10 @@ generated types and enum tables, `buf lint`, `buf breaking`, the profile's own b
 api-linter make "renamed, renumbered, retyped, removed, re-routed or not AIP-shaped" a CI failure, and a
 shared transcoder and client route and call the HTTP APIs from the same descriptors.
 
-Status: `task_intent.proto` is the IDL of `contracts/task-intent-v1`, and both sides run on the generated
-code (2026-10-01): the watch app (TypeScript) builds its intents as generated messages and reads Todofy's results
-with the codec; todofy-core (Python) reads every input strictly with the codec and writes every result as a
-generated message. Todofy's gateway takes its method signatures from the generated service (types only).
-The wire bytes did not change (each side's tests pin them). `contracts/task-intent-v1` keeps the JSON
-Schema and fixtures as the published wire description, and `task-intent-v1.ts` only the value rules the IDL
-cannot express (bounds, URL hosts). Each app's owner API is served by its Worker through `ts/http-transcoder.ts`
+Status: every contract and API of the monorepo is IDL here, and both sides of each run on the generated code. The
+first was task-intent-v1 (`todofy/taskintent/v1`, 2026-10-01 to 2026-10-21, retired when Todofy stopped writing
+tasks; `prototest/v1/intent.proto` keeps its messages as the plain-proto fixtures of the wire profile's cases).
+Each app's owner API is served by its Worker through `ts/http-transcoder.ts`
 and called by its UI through `ts/http-client.ts` ([HTTP APIs](#http-apis)). `links/ui/v1` is the
 links app's owner API (2026-10-01, deployed since the app's step L2), under the path
 prefix `/_/api/v1/` (its host's other paths are short links). `watch/ui/v1` is the watch app's owner API (2026-10-01,
@@ -79,8 +76,8 @@ entrypoint, through the shared transcoder over a service binding whose props gra
 host routes it. `tasks/inbox/v1/task_inbox.proto` (2026-10-21) is Tasks' create-only machine entry,
 `tasks.inbox.v1.TaskInboxService`: one JS RPC method, `createInboxTask`, on the `TaskInbox` entrypoint, whose binding
 props name the caller (`home` or `watch`); it creates one task with its subtasks and nothing else, and its errors are
-the wire names of `ErrorCode`. Together they replace the paths on which Todofy wrote Tasks for another app
-(`PlusService`, below, and `task_intent.proto`), which are retired once nothing calls them.
+the wire names of `ErrorCode`. Together they replaced the paths on which Todofy wrote Tasks for another app
+(`PlusService`, below, and `todofy.taskintent.v1`), both retired on 2026-10-21 (`retired.json`).
 
 `ops/v1/ops.proto` is the IDL of `contracts/ops-v1` (2026-10-01) and its single source of validation: the
 value rules are options in the IDL ([Value rules](#value-rules)), the contract's JSON Schema is generated from
@@ -143,8 +140,9 @@ bundle is unchanged (its types come from the OpenAPI document).
 The mail Todofy keeps is its own package, `todofy.mail.v1` (`todofy/mail/v1/mail_service.proto`): the gateway's
 `Mail` entrypoint serves it to the Workers whose binding grants `read` or `read-write`, and no public host routes it.
 See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusService`
-(`todofy/ui/v1/plus_service.proto`, named after the retired Todoist Plus extension), which Tasks and the Personal MCP
-still call until they move to `MailService`; Todofy no longer serves it.
+(`todofy/ui/v1/plus_service.proto`, named after the retired Todoist Plus extension) and `MailReadinessService`
+(`todofy/ui/v1/mail_ready.proto`), both retired as whole files on 2026-10-21: Tasks and the Personal MCP call
+`MailService`, and Tasks converts the mail.
 
 ## Rules
 
@@ -196,7 +194,7 @@ still call until they move to `MailService`; Todofy no longer serves it.
    gain one: `PROFILE_RULE_SAME_MATCH`), and a closed enum may not gain a value or change its `closed` (rule 5). Formats
    compare by pattern, length and JSON Schema `format`, so renaming a format is compatible. Like buf, it skips the
    directories `buf.yaml` lists under `breaking.ignore` (the runtimes' fixtures). `scripts/rules-selftest.sh`
-   proves the rules bite (72 cases, on `task_intent.proto`, `watch/ui/v1`, `ops/v1`, `dashboard/ui/v1`, `todofy/report/v1`,
+   proves the rules bite (72 cases, on `tasks/inbox/v1`, `watch/ui/v1`, `ops/v1`, `dashboard/ui/v1`, `todofy/report/v1`,
    `mailhero/webhook/v1` and `prototest`, the retirement of a package, a file, an enum value, an allowed value and an rpc
    with its request among them), and `test/python/test_profile_breaking.py` checks the directions on synthetic images.
 5. **Adding a value to an open enum is compatible by design**, so neither buf nor the profile check flags it.
@@ -230,12 +228,12 @@ still call until they move to `MailService`; Todofy no longer serves it.
 | `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
 | `retired.json` | The published elements deleted on purpose (rule 6), which `tools/retired.py` keeps deleted and leaves out of the breaking checks' base |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `todofy/taskintent/v1/task_intent.proto` is `todofy.taskintent.v1`; `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `mailsort/ui/v2/*.proto` is `mailsort.ui.v2`, mailsort's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `mailhero/ui/v2/*.proto` is `mailhero.ui.v2`, Mail Hero's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1); `todofy/ui/v1/*.proto` is `todofy.ui.v1`, Todofy's owner API; `recall/ui/v1/*.proto` is `recall.ui.v1`, recall's owner API, `recall/ingest/v1/ingest.proto` is `recall.ingest.v1`, the upload of recall's browser extension, and `recall/archive/v1/archive.proto` is `recall.archive.v1`, recall's change feed and archive records (`contracts/recall-archive-v1`, whose fixtures `test/recall-archive.test.ts` round-trips); recall's Worker serves all three; `brief/ui/v1/*.proto` is `brief.ui.v1`, the brief's owner API; `tasks/ui/v1/*.proto` is `tasks.ui.v1`, Tasks' owner API and its generic `TasksApi` binding, and `tasks/inbox/v1/task_inbox.proto` is `tasks.inbox.v1`, Tasks' create-only `TaskInbox` binding; `todofy/mail/v1/mail_service.proto` is `todofy.mail.v1`, Todofy's private Mail entry |
+| `<package path>/*.proto` | One directory per proto package: `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `mailsort/ui/v2/*.proto` is `mailsort.ui.v2`, mailsort's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `mailhero/ui/v2/*.proto` is `mailhero.ui.v2`, Mail Hero's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1); `todofy/ui/v1/*.proto` is `todofy.ui.v1`, Todofy's owner API; `recall/ui/v1/*.proto` is `recall.ui.v1`, recall's owner API, `recall/ingest/v1/ingest.proto` is `recall.ingest.v1`, the upload of recall's browser extension, and `recall/archive/v1/archive.proto` is `recall.archive.v1`, recall's change feed and archive records (`contracts/recall-archive-v1`, whose fixtures `test/recall-archive.test.ts` round-trips); recall's Worker serves all three; `brief/ui/v1/*.proto` is `brief.ui.v1`, the brief's owner API; `tasks/ui/v1/*.proto` is `tasks.ui.v1`, Tasks' owner API and its generic `TasksApi` binding, and `tasks/inbox/v1/task_inbox.proto` is `tasks.inbox.v1`, Tasks' create-only `TaskInbox` binding; `todofy/mail/v1/mail_service.proto` is `todofy.mail.v1`, Todofy's private Mail entry |
 | `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/watch/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the packages of `WIRE_PACKAGES` the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
 | `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
-| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables; a field named like a Python keyword is the attribute `<name>_`, `from_`), for `PYTHON_PACKAGES` only: `todofy.taskintent.v1` (proto/'s own contract tests), `todofy.report.v1`, `ops.v1`, `website.sync.v1`, `mailhero.webhook.v1`, `todofy.ui.v1` and `todofy.mail.v1` (todofy-core's); `platform.runtime.v1`, `fleet.telemetry.v1` and `common.errors.v1` (the VPS package); and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (another app's UI API) is not generated, so it may use what the Python profile lacks |
+| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables; a field named like a Python keyword is the attribute `<name>_`, `from_`), for `PYTHON_PACKAGES` only: `todofy.report.v1`, `ops.v1`, `website.sync.v1`, `mailhero.webhook.v1`, `todofy.ui.v1` and `todofy.mail.v1` (todofy-core's); `platform.runtime.v1`, `fleet.telemetry.v1` and `common.errors.v1` (the VPS package); and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (another app's UI API) is not generated, so it may use what the Python profile lacks |
 | `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`, `todofy.report.v1` and `todofy.ui.v1` for Todofy's UI and the fixtures of its tests, `dashboard.ui.v1`, whose views the dashboard's Worker builds and its UI renders as wire JSON, `tasks.inbox.v1`, the `TaskInbox` binding Home and Watch call, and `recall.ingest.v1`, the uploads recall's browser extension builds as plain objects without a runtime dependency): each message's JSON as a producer writes it, a union narrowed by its discriminator, a type of another file of these packages as a type-only import of that file's module, each service as a binding's methods (none for a service with `google.api.http` bindings: an HTTP API is called through the client), and the `WireTypes` entries that type `toWire`'s answer |
 | `tools/gen_schema.py`, `tools/schema.mjs` | A contract's JSON Schema from its IDL (`SCHEMAS`: `ops.v1` writes the `$defs` document `contracts/ops-v1/ops-v1.schema.json`, with `ALIASES` keeping the `$defs` names it had before; `todofy.report.v1` writes `todofy/api/summary-v1.schema.json` and `recommendation-v1.schema.json`, each the self-contained schema of one message, `Target.root`, described by the IDL's comments; a target marked
 `Target.open` is a consumer's schema (mail.received.v1's, and recall.archive.v1's `$defs` document `contracts/recall-archive-v1/recall-archive-v1.schema.json`), every object open to unknown properties as a lenient read is, a union whose discriminator is an open enum given one more branch for a value it does not know (the fields' own rules, no case), and the relations
@@ -297,19 +295,20 @@ types only: +0.1 KiB (a new bound).
 
 ```ts
 import { create } from '@ziyixi/proto/protobuf';
-import { TaskIntentResultSchema, State } from '@ziyixi/proto/todofy/taskintent/v1/task_intent_pb';
+import { CanaryResultSchema, CanaryResult_State } from '@ziyixi/proto/ops/v1/ops_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 
-const { message, unrecognized } = fromWire(TaskIntentResultSchema, JSON.parse(text)); // an output: lenient
-if (message.state === State.CREATED) { /* ... */ }
+const { message, unrecognized } = fromWire(CanaryResultSchema, JSON.parse(text)); // an output: lenient
+if (message.state === CanaryResult_State.OK) { /* ... */ }
 ```
 
-Across a Workers service binding (not gRPC), `WireService<typeof TaskIntentService>` turns a generated service
-into the entrypoint's methods (`proposeTasks(input: WireObject): Promise<WireObject>`): the caller declares its
-binding with it, the implementation `implements` it, and both sides keep plain JSON objects on the wire.
-`wireEnum(ModeSchema, Mode)` gives one enum's wire names and back for code that stores or shows them outside a
-message (a D1 column, an owner API), and `WireName<typeof Mode>` is the union of those names as a type
-(`'subtasks' | 'separate'`): an app's internal records can derive from it, so a new enum value fails its typecheck
+Across a Workers service binding (not gRPC), `WireService<typeof OpsService>` turns a generated service
+into the entrypoint's methods (`setGuard(input: WireObject): Promise<WireObject>`): the caller declares its
+binding with it, the implementation `implements` it, and both sides keep plain JSON objects on the wire (a package
+in `WIRE_PACKAGES`, `tasks.inbox.v1` say, also gets a typed interface, `TaskInboxService`).
+`wireEnum(GuardLevelSchema, GuardLevel)` gives one enum's wire names and back for code that stores or shows them
+outside a message (a D1 column, an owner API), and `WireName<typeof GuardLevel>` is the union of those names as a type
+(`'normal' | 'shed'`): an app's internal records can derive from it, so a new enum value fails its typecheck
 until it maps it. Python has `wire_name(member)` and `wire_member(cls, name)`.
 
 **Python.** Todofy declares `ziyixi-proto` in its `[project] dependencies` (todofy-core imports it) with
@@ -328,10 +327,10 @@ that `npm ci` for wrangler, and a clean removes `node_modules/` too), and its ru
 `ensure.mjs` before `pywrangler sync`.
 
 ```python
-from ziyixi_proto.todofy.taskintent.v1 import task_intent_pb as pb
+from ziyixi_proto.ops.v1 import ops_pb as pb
 from ziyixi_proto.wire_json import from_wire, to_wire
 
-read = from_wire(pb.TaskIntent, json.loads(text), strict=True)  # an input: strict
+read = from_wire(pb.SetGuardInput, json.loads(text), strict=True)  # an input: strict
 ```
 
 The source is not editable on purpose: todofy-core imports the package, so it is in Todofy's
@@ -375,7 +374,7 @@ typecheck|test|dev` regenerates first (its pre-scripts); Todofy's next `uv run` 
 **Adding a contract.**
 
 1. Create `<app>/<service>/v1/<name>.proto` with `package <app>.<service>.v1;` for a contract one app owns
-   (`todofy.taskintent.v1`, `watch.ui.v1`), or `<contract>/v1/<name>.proto` with `package <contract>.v1;` for a
+   (`todofy.mail.v1`, `watch.ui.v1`), or `<contract>/v1/<name>.proto` with `package <contract>.v1;` for a
    contract several apps implement (`ops.v1`: every app's `Ops`), top-level and never under `common/` (which holds
    what contracts share, not contracts). One directory per package; the directory must match the package. Mirror the JSON contract field for field: field numbers in the
    JSON Schema's property order (so field-number order reproduces today's key order), the v1 field names,
@@ -489,8 +488,7 @@ What a rule cannot say stays with the contract's code: rules relative to a clock
 36 h ahead), sizes of a whole message (an 8 KiB report) or in UTF-8 bytes (a 4 KiB subject), allow-lists that depend on
 another service (a URL host) and relations between fields other than a union's, `present_when` and `any_match` (a
 recommendation's ranks unique and at most its `top_n`, a size before truncation larger than the text's).
-A contract without rules in the IDL yet (task-intent-v1) keeps them in its JSON Schema and each app's checks, and a
-consumer applies the value rules its control flow depends on even on a lenient read.
+A consumer applies the value rules its control flow depends on even on a lenient read.
 
 Why not ProtoJSON: it renames fields to lowerCamelCase, writes enums as `"STATE_PENDING"`, omits
 `null`s, and its "ignore unknown" mode silently turns every v1 enum value into 0. Why not the official
@@ -766,8 +764,8 @@ Python twin already supports every kind these APIs use.
 ## CI
 
 The **Proto checks** job (`.github/workflows/ci.yml`) runs when `proto/`, `.github/` or `tools/` changed, when a
-contract this folder's tests read changed (`PROTO_READS`: `contracts/ops-v1/`, `contracts/task-intent-v1/` and
-`contracts/mail-received-v1/`, whose fixtures both codecs round-trip and check), or on a dispatch: `npm ci`, `npm run lint`, `npm run api-lint` (Go from `tools/api-linter/go.mod` via
+contract this folder's tests read changed (`PROTO_READS`: `contracts/ops-v1/` and `contracts/mail-received-v1/`, among
+others, whose fixtures both codecs round-trip and check), or on a dispatch: `npm ci`, `npm run lint`, `npm run api-lint` (Go from `tools/api-linter/go.mod` via
 `actions/setup-go`; the googleapis check of rule 3 first), `scripts/breaking.sh` against the **Changes** job's `base`
 output (the commit of the last successful `main` run on `main`, the merge base with `origin/main` on a
 branch; the checkout has `fetch-depth: 0`), the rules self-test, the determinism check, the generated JSON Schemas
@@ -786,7 +784,7 @@ Mail Hero's and the dashboard's UIs), the links, watch, mailsort and recall apps
 todofy-core vendors the wheel). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
 TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
 options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
-`todofy/taskintent/` Todofy and the watch app, `todofy/report/` Todofy, `todofy/ui/` Todofy, `todofy/mail/` and `tasks/inbox/` the apps that serve or call them, `mailhero/webhook/` Mail Hero and Todofy, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `mailsort/ui/` mailsort, `recall/ui/`, `recall/ingest/` and `recall/archive/` recall, `brief/ui/` the brief, `dashboard/ui/` the dashboard, `ops/` the apps with an `Ops` entrypoint or caller (Mail Hero, the dashboard, Todofy, the watch app, mailsort, recall, the brief and the website relay), `common/errors/` and `prototest/` none);
+`todofy/report/` Todofy, `todofy/ui/` Todofy, `todofy/mail/` and `tasks/inbox/` the apps that serve or call them, `mailhero/webhook/` Mail Hero and Todofy, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `mailsort/ui/` mailsort, `recall/ui/`, `recall/ingest/` and `recall/archive/` recall, `brief/ui/` the brief, `dashboard/ui/` the dashboard, `ops/` the apps with an `Ops` entrypoint or caller (Mail Hero, the dashboard, Todofy, the watch app, mailsort, recall, the brief and the website relay), `common/errors/` and `prototest/` none);
 the module and toolchain files (`buf.yaml`, `buf.lock`, `package-lock.json`, `tools/ensure.mjs`) and any path
 not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
 generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,
@@ -799,11 +797,10 @@ Every app's UI API is on the [HTTP APIs](#http-apis) pattern (the dashboard's, M
 `ops/v1`, because its four services share every message, recommendation-v1 and summary-v1 as `todofy/report/v1`
 (messages only; Todofy's owner API, which lists them, moved on 2026-10-02 as `todofy/ui/v1`), and mail-received-v1 as
 `mailhero/webhook/v1` (messages only: the webhook's path, authentication and Idempotency-Key header stay the HTTP
-transport's). Planned: task-intent-v1's value
-rules can move into its IDL the same way, generating its schema too. Shared types come from the same googleapis dependency (`google.rpc.Status`) or a
-`common/<name>/v1` package. Each contract moves the way task-intent-v1 did: the IDL and tests first, then
+transport's). Shared types come from the same googleapis dependency (`google.rpc.Status`) or a
+`common/<name>/v1` package. A new contract moves the way task-intent-v1 did: the IDL and tests first, then
 both sides on the generated code with every frozen v1 byte pinned by tests (Mail Hero's legacy fixtures are
-pinned by SHA-256; Todofy pins the canonical hashes of the task-intent fixtures, which D1 keeps for 400 days).
+pinned by SHA-256).
 
 ## Personal-cloud Python runtime
 
