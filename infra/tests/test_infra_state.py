@@ -229,6 +229,10 @@ class Inputs(unittest.TestCase):
         lines = "".join(f"{name} = {json.dumps(value)}\n" for name, value in VALUES.items())
         self.assertEqual(infra_state.parse_values("# written by local_tfvars.py\n" + lines), VALUES)
 
+    def test_values_of_retired_apps_are_dropped_not_refused(self):
+        retired = dict(VALUES, flowday_policy_names={"flowday": "x", "flowday-bypass": "y"}, flowday_policy_options={})
+        self.assertEqual(infra_state.parse_values(json.dumps(retired)), VALUES)
+
     def test_values_refusals_never_quote_a_value(self):
         cases = {
             "extra variable": dict(VALUES, state_passphrase=PASSPHRASE),

@@ -79,11 +79,10 @@ instance of a resource no block declares).
      secret is deleted, so the release does not depend on that deletion. Nothing reads it. Afterwards: from `todofy/`,
      `npx wrangler secret delete TODOIST_API_KEY --config wrangler.toml`, then remove the declaration and regenerate
      (`tools/cloud-config/generate.py`, `.github/scripts/drift_desired.py`).
-  4. Remove the FlowDay values from the infrastructure inputs: after this release `infra_state.py` refuses
-     unexpected variables. `grep -c flowday_policy ~/.config/todofy-infra/local.tfvars` prints a count; if it is not
-     0, delete the `flowday_policy_names` and `flowday_policy_options` entries (and in the private bootstrap input's
-     `infra_values`, if kept), then, from this branch's checkout:
-     `python3 infra/scripts/infra_state.py values-json --var-file ~/.config/todofy-infra/local.tfvars | gh secret set INFRA_TFVARS --env production -R ziyixi/todofy`
+  4. The production `INFRA_TFVARS` secret still holds `flowday_policy_names` and `flowday_policy_options`.
+     `infra_state.py` drops them (`RETIRED_VALUES`) instead of refusing the values, because the secret also holds
+     values the local `~/.config/todofy-infra/local.tfvars` lacks, so it must not be regenerated from that file. When
+     the secret is next set from the complete private input without the two names, remove them from `RETIRED_VALUES`.
   5. Release outside Sunday 09:30-11:00 UTC: Todofy's weekly backup starts at 10:00, and a job planned before
      `0013` fails on a dropped table (after 3 errors `storage_error`, retried 6 hours later).
 - **Release.** Push, wait for the complete gate, then fast-forward `main` to the same green SHA. CI deploys Tasks

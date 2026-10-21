@@ -88,6 +88,9 @@ REQUIRED_VALUES = (
 )
 OPTIONAL_VALUES = frozenset({"access_github_oauth", "access_email_idp_name", "legacy_mail_hero_backup", "mail_route_ready",
                              "mail_receive_address", "mail_route_name"})
+# Variables of retired apps that the production INFRA_TFVARS secret may still hold: dropped before the check, never
+# passed to OpenTofu. Remove an entry once the secret is set again without it.
+RETIRED_VALUES = frozenset({"flowday_policy_names", "flowday_policy_options"})
 # Environment that could print values (TF_LOG*), change the configuration behind the committed files
 # (TF_ENCRYPTION could add an unencrypted fallback, TF_CLI_ARGS* any flag, TF_VAR_* any variable), point the
 # backend elsewhere (AWS_*) or pick another workspace. The child environment never inherits them.
@@ -200,6 +203,8 @@ def parse_values(text: str) -> dict[str, Any]:
                 raise Refused(f"values line {number} has a value that is not JSON") from None
     if not isinstance(values, dict):
         raise Refused("the values are not an object of variables")
+    for name in RETIRED_VALUES:
+        values.pop(name, None)
     if values.get("access_github_oauth") is not None:
         values.setdefault("access_allowed_idp_ids", [])
         values.setdefault("access_github_idp_id", "")
