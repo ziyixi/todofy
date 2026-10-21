@@ -73,15 +73,17 @@ Environment secrets:
 | `CF_API_TOKEN` | Cloudflare API token: Workers Scripts edit (covers both Workers), D1 edit, zone Workers Routes / Custom Domains and DNS edit for the zone, account settings read. No billing permissions. |
 | `TODOFY_ACCESS_OWNER` | the owner's primary Access email |
 | `TODOFY_ACCESS_OWNER_ALIASES` | comma-separated other logins of the owner (may be empty) |
-| `TODOFY_TODOIST_DEFAULT_PROJECT_ID` | the Tasks project for the tasks Todofy creates (required; the name stays from the Todoist era). Deployed to the core as the Worker secret `TODOIST_DEFAULT_PROJECT_ID` |
-| `TODOFY_TODOIST_OPS_PROJECT_ID` | optional: the Tasks project of the daily `[Todofy System]` reminder (with the ops digest). Unset or empty: the default project, as before. Deployed as the core secret `TODOIST_OPS_PROJECT_ID`, uploaded as one space when unset (read as unset; removing the GitHub secret therefore also unsets it on the Worker at the next deploy); a day's project is frozen with its claim, so changing it affects the next day ([gtd-features.md](gtd-features.md) §3) |
-| `TODOFY_TODOIST_REVIEW_PROJECT_ID` | optional: the project of the Sunday review task, the core secret `TODOIST_REVIEW_PROJECT_ID`; unset or empty: the default project (uploaded as one space, like the Ops project) |
+
+The secrets `TODOFY_TODOIST_DEFAULT_PROJECT_ID`, `TODOFY_TODOIST_OPS_PROJECT_ID` and
+`TODOFY_TODOIST_REVIEW_PROJECT_ID` (Tasks projects of the mail tasks, the reminder and the Sunday review) are
+retired since 2026-10-21: nothing reads them. Once that release is live, delete them, and the core's Worker secrets of
+the same names, which `app.toml` declares optional until then.
 
 These are secrets rather than variables because the repository is public and wrangler prints every plain
 var with its value in the deploy log (pywrangler also echoes its command line). The deploy's "Write the
 Worker secrets files" step writes each Worker's own owner-only file, and the deploy passes it as Worker
 secrets (`--secrets-file`, hidden in the Cloudflare dashboard and API): the owner emails to the gateway
-`todofy` only, the Tasks projects to `todofy-core` only.
+`todofy` only (the core has no personal value).
 
 Environment variables: only the operational switches, stated at every deploy so a release never overwrites
 the operational state ([ci-cd.md](ci-cd.md) "Changing a switch"). `deploy/deploy_vars.py` validates them
@@ -90,11 +92,11 @@ vars, as is `BUILD_SHA`):
 
 | Variable | Value |
 |---|---|
-| `TODOFY_REMINDER_ENABLED` | `true` / `false` (required); core |
 | `TODOFY_MAINTENANCE_MODE` | `true` / `false` (required); set on both Workers |
 | `TODOFY_PROCESSING_PAUSED` | `true` / `false` (required); core |
-| `TODOFY_FORCE_PAUSE_TODOIST` | `true` / `false` (required); core |
-| `TODOFY_GTD_REVIEW_ENABLED` | `true` / `false` (required); core. The Sunday review task ([gtd-features.md](gtd-features.md) §7); `false` stops it without a code change. The daily snapshot itself is committed (`GTD_COLLECT_UTC`) |
+
+The variables `TODOFY_REMINDER_ENABLED`, `TODOFY_FORCE_PAUSE_TODOIST` and `TODOFY_GTD_REVIEW_ENABLED` are retired
+since 2026-10-21; no deploy reads them, so delete them once that release is live.
 
 Every other setting is committed in the two production configs (top level = production; the repository
 is public, so nothing personal or secret goes there), and changing one is a commit:
@@ -103,13 +105,13 @@ is public, so nothing personal or secret goes there), and changing one is a comm
 |---|---|
 | account ID | `account_id` in both |
 | D1 name and ID (step 1) | `wrangler.toml` `[[d1_databases]]` |
-| UI host, hooks hosts (at most 4; `daily.ziyixi.science` since cutover) | `gateway/wrangler.toml` `routes` (the UI host first, then each hooks host) and `[vars]` `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`; the core's `TODOFY_PUBLIC_HOST` (the reminder links to the UI) must be the same |
+| UI host, hooks hosts (at most 4; `daily.ziyixi.science` since cutover) | `gateway/wrangler.toml` `routes` (the UI host first, then each hooks host) and `[vars]` `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`; the core's `TODOFY_PUBLIC_HOST` (Home's tile links to the UI) must be the same |
 | Access issuer and AUD (step 2) | `gateway/wrangler.toml` `ACCESS_ISSUER`, `ACCESS_AUDIENCE` |
 | mail source ID | `wrangler.toml` `MAIL_SOURCE_ID` (`mail-hero-personal`; must equal the source ID of the imported ledger) |
 | Gemini models, daily token budget | `wrangler.toml` `GEMINI_EMAIL_MODELS` (single email and Canary), `GEMINI_MODELS` (daily summaries and recommendations), `GEMINI_DAILY_TOKEN_BUDGET`; first model is preferred |
 | report top and precompute time | `wrangler.toml` `REPORT_DEFAULT_TOP` (must equal the newsletter's `?top=`, 10, so its report is precomputed), `REPORT_PRECOMPUTE_UTC` |
-| lookup delay, legacy text retention | `wrangler.toml` `LOOKUP_DELAY_MS`, `LEGACY_TEXT_RETENTION_DAYS` (`0` keeps imported mail text forever) |
-| GTD snapshot time, carryover | `wrangler.toml` `GTD_COLLECT_UTC` (`13:00`, before the 13:30 precompute; `off` stops the snapshot and with it the carryover and the GTD counters), `REPORT_CARRYOVER_DAYS` (`14`, at most 14; `0` turns the carryover off) |
+| legacy text retention | `wrangler.toml` `LEGACY_TEXT_RETENTION_DAYS` (`0` keeps imported mail text forever) |
+| carryover | `wrangler.toml` `REPORT_CARRYOVER_DAYS` (`14`, at most 14; `0` turns the carryover off) |
 
 The Gemini base URL is fixed in `wrangler.toml` and pinned by tests. `BUILD_SHA` (the commit)
 is added at deploy on both Workers. Each Worker gets only the vars it reads: hosts and `ACCESS_*` go to the
@@ -143,7 +145,7 @@ Core `todofy-core`:
 |---|---|
 | `GEMINI_API_KEY` | a Gemini API key for Todofy |
 
-The core reaches Tasks through its `TASKS` service binding and needs no Tasks credential.
+The core reads Tasks' backup export through its `TASKS` service binding and needs no Tasks credential.
 
 Until a gateway secret is set, the endpoint that needs it answers 503 `not_configured` (the webhook, the
 newsletter endpoints, or owner writes). A missing core key shows as not configured on the UI's setup
@@ -232,23 +234,12 @@ in [gateway-contract.md](gateway-contract.md):
   no route or Access policy for it and nothing to configure here; `status().ui_url` is built from
   `TODOFY_PUBLIC_HOST`. A `shed` guard it sets defers only the weekly backup (never past 7.5 days since
   the last complete one, 12 h before `backup_stale` at 8 days), retention and the metrics rollup (never
-  past 72 h since their last complete run; once due they run until caught up) and the GTD ledger's daily
-  Tasks snapshot (never past 48 h since the last one); mail, canaries, the reminder, the Sunday review and
-  report precompute keep running. Guard and latest report live in the
-  object's storage, not in D1 or the backups.
+  past 72 h since their last complete run; once due they run until caught up); mail, canaries and report
+  precompute keep running. The guard lives in the object's storage, not in D1 or the backups.
 
-- Task intents (contracts/task-intent-v1): the watch app binds the least-privilege `Intents` entrypoint to propose
-  tasks (`props = { source = "watch" }`: only its own source's intents, none of the ops-v1 methods;
-  `docs/gateway-contract.md` §3.8), so Todofy deploys before watch (CI's `Watch deploy` waits for `Todofy deploy`);
-  a watch call to an older Todofy is retried as `unavailable`. Nothing to configure: intents use the
-  `TASKS` binding and the existing `TODOIST_DEFAULT_PROJECT_ID`. `MAINTENANCE_MODE`, `PROCESSING_PAUSED`
-  and `FORCE_PAUSE_TODOIST` hold intents as they hold mail (new proposals answer `paused`, nothing is
-  recorded). To turn the intake off without holding mail, add `TASK_INTENT_SOURCES = ""` to the `[vars]`
-  of `wrangler.toml` (and to `CORE_VARS` in `deploy/test_wrangler_configs.py`) and deploy (every proposal then answers `rejected`/`source_not_allowed`; recorded
-  intents still finish); unset, it accepts every source the contract lists. A source the contract no longer lists
-  (its enum value reserved) is refused like an unknown one; a still-pending ledger row of it fails at its next step
-  without a Tasks write, and retention removes its rows like any others. After a D1 restore, pending intents
-  resume creating their unfinished tasks: keep `FORCE_PAUSE_TODOIST` on until they are reconciled.
+- Task intents (contracts/task-intent-v1) left Todofy on 2026-10-21: the watch app proposes its tasks to Tasks'
+  `TaskInbox`. For that one release the gateway still exports `Intents`, which answers every call `unavailable`;
+  the next release deletes it.
 
 ## 6. Local checks before the first deploy
 
@@ -258,9 +249,7 @@ locally too. Build the UI first (`npm run build --prefix web`).
 
 ```sh
 export GITHUB_SHA=$(git rev-parse HEAD) TODOFY_MAINTENANCE_MODE=false TODOFY_PROCESSING_PAUSED=false \
-  TODOFY_FORCE_PAUSE_TODOIST=false TODOFY_REMINDER_ENABLED=false TODOFY_TODOIST_DEFAULT_PROJECT_ID=placeholder \
-  TODOFY_GTD_REVIEW_ENABLED=false TODOFY_ACCESS_OWNER=owner@example.com \
-  TODOFY_ACCESS_OWNER_ALIASES=
+  TODOFY_ACCESS_OWNER=owner@example.com TODOFY_ACCESS_OWNER_ALIASES=
 secrets=$(mktemp -d)
 uv run python deploy/deploy_vars.py secrets core "$secrets/core.json"
 uv run python deploy/deploy_vars.py secrets gateway "$secrets/gateway.json"
@@ -370,41 +359,10 @@ coordinator may use a database at a time):
    restored database, and Mail Hero does not send an acknowledged event again: compare with Mail Hero's
    deliveries (or the old database, while it exists) before deciding whether any matter. Check the
    attention page: a row that was mid-step in the backup, if any, is recovered as after a crash
-   (`summarizing` → `pending`, `todo_sending` → `todo_unknown` with a footer lookup, never a blind
-   resend).
+   (`summarizing` → `pending`).
 5. Keep the old database until the restored one has run for a while, then delete it
    (`npx wrangler d1 delete <old name>`) on purpose; it holds mail content too.
 
 The object keeps its own state across the switch: budgets and tick times stay; the metrics cursor
 notices the other database and restarts, so the switch day and the days back to the last written one
 show "未记录" in the trends. The same happens after a D1 Time Travel restore in place.
-
-## 8. GTD ledger and the morning-brief carryover (first rollout)
-
-The release that adds [gtd-features.md](gtd-features.md) needs these owner steps; the rest is automatic.
-
-1. Before merging: set the GitHub environment variable `TODOFY_GTD_REVIEW_ENABLED` to `false` (Settings →
-   Environments → `production`). The deploy refuses to run without it, like every switch.
-2. Optional, any time: create the Tasks projects "Ops" and "Review" by hand and store their IDs as the
-   environment secrets `TODOFY_TODOIST_OPS_PROJECT_ID` and `TODOFY_TODOIST_REVIEW_PROJECT_ID`. Unset, both tasks go to the default project, as before.
-3. Before merging, in the newsletter (separate repository): change its recommendation captions, which
-   say "近 24 小时" (`source_label` and `_LIMITATIONS` in `src/newsletter/todofy.py`), to cover older
-   still-open tasks, e.g. "近 24 小时 + 仍未完成的旧任务". Carried picks start their reason with
-   "（N 天前）". Its `_decode_recommendation` already ignores the new `new_count` and `carryover_count`
-   (checked at newsletter commit `28882c2`; the v1 schema itself has `additionalProperties: false`, so a
-   strict schema validator would not).
-4. Merge. The deploy applies migration `0004_gtd.sql` (additive: the previous release keeps working on it)
-   and ships the code. The first snapshot is taken at the next 13:00 UTC; until then the recommendation is
-   the plain 24 h report and the ops status has no GTD counters.
-5. After a day: the owner UI's GTD page shows the first snapshot; `status()` carries `inbox_open`,
-   `inbox_oldest_days`, `overdue`, `carryover_open` and `completed_7d`; the day's recommendation has
-   `carryover_count` > 0 when older mail tasks are still open. Then set
-   `TODOFY_GTD_REVIEW_ENABLED=true` and run the workflow on `main` (app `todofy`): the next Sunday at 17:00
-   UTC creates the first review task.
-
-Rollback: `REPORT_CARRYOVER_DAYS = "0"` (a commit) turns the carryover off; `GTD_COLLECT_UTC = "off"` (a
-commit) stops the snapshot, and with it the carryover, the GTD counters, `review_age_days` and
-`review_overdue` (a review's completion is only seen by the snapshot); `TODOFY_GTD_REVIEW_ENABLED=false`
-(a variable) stops the review. A code
-rollback keeps working on the migrated database; the four `gtd_*` tables then stop growing and are removed
-by nothing (drop them by hand with `wrangler d1 execute --remote` only if the feature is abandoned).

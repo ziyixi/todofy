@@ -1,5 +1,9 @@
 # `task-intent-v1`: another app proposes tasks to Todofy
 
+> **Todofy stopped taking intents on 2026-10-21.** Its `Intents` entrypoint answers every call `unavailable` for one
+> release and then goes; the watch app proposes its tasks to Tasks. The text below describes the contract and
+> Todofy's side as it was until then (its code is at `b9d18aba`).
+
 When another app in the account wants tasks created (today the watch app: its daily digest and urgent changes),
 it sends Todofy a **task intent**: a parent title and up to 30 items, under an idempotency key the proposer
 chooses. Todofy records it in its own D1 ledger, creates the tasks in Tasks through its `TASKS` binding and

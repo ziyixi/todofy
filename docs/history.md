@@ -18,6 +18,24 @@ waiting lists from `414925e`. Later observations in that snapshot supersede many
 remaining acceptance are in [HANDOFF](../HANDOFF.md); current rebuild steps and verified limits are in
 [Rebuild](rebuild.md) and [rebuild verification](rebuild-verification.md).
 
+## Todofy's task writes leave, decided October 21
+
+By the owner's decisions of 2026-10-21, Todofy writes no task: it summarises mail, keeps the summaries and the
+ledger, and serves the newsletter's reports. Tasks converts a mail itself through Todofy's new private `Mail`
+entrypoint (`todofy.mail.v1`, [Mail API](../todofy/docs/mail-api.md)), which replaced `PlusService` and
+`MailReadinessService`; Home sends the daily reminder; Tasks keeps GTD and takes the watch app's task proposals.
+The morning brief's carryover now lists the mail still awaiting a decision instead of open mail tasks.
+
+The same release removed Todofy's reminder, its GTD ledger (the daily Tasks snapshot, the Sunday review and the
+GTD page), its task intents (task-intent-v1) and the task writes of mail summarised before mail stopped creating
+tasks, with the switches `TODOFY_REMINDER_ENABLED`, `TODOFY_FORCE_PAUSE_TODOIST` and `TODOFY_GTD_REVIEW_ENABLED`, the
+three `TODOFY_TODOIST_*_PROJECT_ID` secrets and the owner API's `ListDailyReminders`, `ListGtdDays` and
+`ListGtdReviews` (`proto/retired.json`). Migration `0014_retire_task_writes.sql` refuses to run while a row still
+needs those writes, then drops `task_intents`, `task_intent_tasks`, `gtd_snapshots` and `gtd_snapshot_tasks`;
+`gtd_daily` and `gtd_reviews` stay until Tasks' one-time import has copied them. For that one release the gateway
+still exports `Intents`, `Planning` and `MailApi` as refusals. The design of the GTD ledger
+(`todofy/docs/gtd-features.md`) and the removed code are at `b9d18aba`.
+
 ## FlowDay retirement and the planning store drop, decided October 20
 
 By the owner's decision of 2026-10-20, the release that merged `claude/retire-flowday` removed FlowDay completely,

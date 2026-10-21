@@ -16,7 +16,7 @@ hand-written, checked against the codec on every fixture.
 | `ops-v1/` | Mail Hero, Todofy, Watch, Fleet and the website relay ↔ the ops dashboard `home` in [`dashboard/`](../dashboard/) (`Ops` entrypoints, canary, guard, digest) | Each service owns its answers; Watch exposes `status()`/`setGuard()` only; see [`ops-v1/README.md`](ops-v1/README.md) |
 | `platform-runtime-v1/` | Independent platform daemon → deployment verifier/host observer; shared bounded runtime metadata | Platform; [contract](platform-runtime-v1/README.md) |
 | `fleet-report-v1/` | Platform host observer → Fleet; signed metadata with the shared runtime snapshot | Fleet; [contract](fleet-report-v1/README.md) |
-| `task-intent-v1/` | a proposing app (the watch app) → Todofy's `Intents` entrypoint: "create these tasks" (in Tasks), idempotent per intent | Todofy; see [`task-intent-v1/README.md`](task-intent-v1/README.md) |
+| `task-intent-v1/` | a proposing app (the watch app) → "create these tasks" (in Tasks), idempotent per intent; Todofy's `Intents` entrypoint refuses every call since 2026-10-21, and Tasks' `TaskInbox` takes the proposals | Todofy until 2026-10-21; see [`task-intent-v1/README.md`](task-intent-v1/README.md) |
 | `recall-archive-v1/` | recall → a file store (today the owner's Dropbox app folder, which the NAS syncs) and any program reading its change feed: the plain-file archive layout and the feed | recall; see [`recall-archive-v1/README.md`](recall-archive-v1/README.md) |
 
 ## `mail-received-v1/`
@@ -85,13 +85,12 @@ dashboard's own runtime suite (`dashboard/worker/test/runtime/`, in `Dashboard c
 ## `task-intent-v1/`
 
 Schema, the value rules the IDL cannot express (`task-intent-v1.ts`) and fixtures for
-`proposeTasks`/`taskIntentStatus` on Todofy's `Intents` entrypoint (the types are generated from
-`proto/todofy/taskintent/v1/task_intent.proto`):
-another app (today the watch app) proposes up to 30 tasks under its own idempotency key and Todofy creates them
-in Tasks from its ledger (the `todoist_*` result codes keep their names). Fixtures are checked with `ops-v1/validate.mjs` by
-`watch/worker/test/task-intent-contract.test.ts` and by Todofy's `tests/unit/test_task_intent_contract.py`
-(Python `jsonschema`), both in the `Contracts` job, which also check that each language's generated types and
-wire JSON codec agree with the schema on every fixture.
+`proposeTasks`/`taskIntentStatus` (the types are generated from `proto/todofy/taskintent/v1/task_intent.proto`):
+another app (today the watch app) proposes up to 30 tasks under its own idempotency key (the `todoist_*` result
+codes keep their names). Todofy created them in Tasks from its ledger until 2026-10-21; its `Intents` entrypoint
+now refuses every call, and the proposals go to Tasks. Fixtures are checked with `ops-v1/validate.mjs` by
+`watch/worker/test/task-intent-contract.test.ts` in the `Contracts` job, which also checks that the generated
+types and wire JSON codec agree with the schema on every fixture.
 Watch's `watch/worker/test/todofy.test.ts` pins the digest and urgent intents against the watch fixtures,
 and `ops-golden.test.ts` pins its status/guard answers. These checks also run in `Contracts`; the app's
 runtime suite checks its binding and durable notification state with synthetic sites and a stub consumer.

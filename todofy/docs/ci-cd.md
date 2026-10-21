@@ -7,12 +7,9 @@ tests), a `Contracts` job for the shared contracts (`mail.received.v1` and
 `ops-v1`), and `CI gate`. For Todofy, `Contracts` runs `tests/unit/test_mail_hero_compat.py` (every
 fixture, the canary one included), `test_contract.py`, `test_machine_api.py` (the machine routes' OpenAPI document `api/machine-api-v1.openapi.yaml` against core and the shared schemas), `test_ops_contract.py`
 (ops-v1 fixtures with `jsonschema`), `test_ops_core.py` (the core's ops values against the schema) and the
-gateway's `test/ops.test.ts` (which also covers the task-intent-v1 methods); the workerd suites
-`tests/runtime/test_ops.py` and `tests/runtime/test_task_intents.py` run in the `Todofy runtime` shards.
-task-intent-v1's Python side (`tests/unit/test_task_intent_contract.py`: fixtures with `jsonschema`, the
-generated types and the wire JSON codec against the schema on every fixture, the core's input checks
-against the schema's verdicts, the generated enums and the `task-intent-v1.ts` constants, every result) runs
-with the host tests in `Todofy static checks` and again in `Contracts`, next to the watch app's proposer checks.
+gateway's `test/ops.test.ts` (which also checks that the entrypoints retired on 2026-10-21 refuse); the workerd
+suite `tests/runtime/test_ops.py` runs in the `Todofy runtime` shards. Todofy no longer implements task-intent-v1;
+`Contracts` runs only the watch app's proposer checks for it.
 The Todofy check jobs and `Todofy deploy` below run with `working-directory: todofy`. They check and deploy
 both Todofy Workers from the same commit: the TypeScript gateway `todofy` (`gateway/`) and the Python
 `todofy-core` (`worker/`, root `wrangler.toml`); see [gateway-contract.md](gateway-contract.md). Both
@@ -27,7 +24,7 @@ secrets, and GitHub masks them.
 
 | Event | Todofy checks (all three jobs) | `Todofy deploy` |
 |---|---|---|
-| push to any branch where `todofy/`, `packages/edge-auth/`, `contracts/` or `.github/` changed since the base | runs | only on `main`, and only when `todofy/`, `packages/edge-auth/`, a contract file the gateway bundles (`contracts/ops-v1/ops-v1.ts`, `contracts/task-intent-v1/task-intent-v1.ts`) or a `proto/` path todofy-core bundles (the Python runtime and generators, `common/wire/`, `ops/`, `todofy/taskintent/`, the module and toolchain files) changed since the base |
+| push to any branch where `todofy/`, `packages/edge-auth/`, `contracts/` or `.github/` changed since the base | runs | only on `main`, and only when `todofy/`, `packages/edge-auth/` or a `proto/` path todofy-core bundles (the Python runtime and generators, `common/wire/`, `ops/`, `todofy/report/`, `todofy/ui/`, `todofy/mail/`, the module and toolchain files) changed since the base |
 | push where none of those changed since the base | skipped | no |
 | `workflow_dispatch` with app `both` or `todofy` | runs | only when dispatched on `main` |
 
@@ -186,8 +183,8 @@ the laptop now (102 s before), and about 150 s on the runner before these change
 1.4–1.6× slower than the laptop, which puts the slowest shard at roughly 2.5 minutes of tests plus
 about a minute of setup. Confirm this on real runners before relying on it.
 
-The fixed sleeps stay. Each one either proves that nothing more happens within a timer (no second
-reminder, no resend) or waits for a real-clock boundary. No event marks the end of such a wait without
+The fixed sleeps stay. Each one either proves that nothing more happens within a timer or waits for a
+real-clock boundary. No event marks the end of such a wait without
 a new production-code seam, so none of them can become event-driven.
 
 ## `Todofy deploy`
@@ -198,24 +195,22 @@ that passed is what ships:
 1. install locked dependencies (root, `gateway/`, `web/`) and build the UI from the verified revision
 2. read the hosts from the committed `gateway/wrangler.toml` (the environment URL and the probes below)
 3. "Write the Worker secrets files", the only step that reads the personal environment secrets:
-   `deploy/deploy_vars.py secrets core` writes the core's owner-only secrets file (the Tasks projects) and
-   `secrets gateway` the gateway's (the owner's Access emails), both in `$RUNNER_TEMP`, removed at the end
-   even on failure; then dry-run both bundles before changing anything
+   `deploy/deploy_vars.py secrets core` writes the core's owner-only secrets file (its
+   `TODOFY_CORE_WORKER_SECRETS` map, empty without one) and `secrets gateway` the gateway's (the owner's Access
+   emails), both in `$RUNNER_TEMP`, removed at the end even on failure; then dry-run both bundles before changing
+   anything
 4. `wrangler d1 migrations apply DB --remote --config wrangler.toml`, then
    `deploy_vars.py exec core -- pywrangler deploy --config wrangler.toml --secrets-file ...` of `todofy-core`
-   (the projects become core secrets, shown as hidden)
 5. `deploy_vars.py exec gateway -- wrangler deploy --config gateway/wrangler.toml --secrets-file ...` of the
    gateway `todofy` (the owner emails become gateway secrets, shown as hidden)
 
    `deploy/deploy_vars.py` adds what is never committed and refuses a missing or invalid value, because a
    deploy without a var deletes it. With `--var`: `BUILD_SHA` (the commit) and `MAINTENANCE_MODE` on both
-   Workers; `REMINDER_ENABLED`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST` and `GTD_REVIEW_ENABLED` on the
-   core. With `--secrets-file`, as Worker secrets (wrangler and the Cloudflare dashboard show a plain var's
-   value, and pywrangler echoes its command line): `TODOIST_DEFAULT_PROJECT_ID` (required),
-   `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional) on the core; `ACCESS_OWNER` and
-   `ACCESS_OWNER_ALIASES` on the gateway. A deploy keeps every secret it does not upload, so an unset
-   optional project (or an empty alias list) is uploaded as one space, which the Worker reads as unset;
-   leaving it out would keep the previous project. `exec` refuses a deploy without exactly one valid
+   Workers; `PROCESSING_PAUSED` on the core. With `--secrets-file`, as Worker secrets (wrangler and the
+   Cloudflare dashboard show a plain var's value, and pywrangler echoes its command line): `ACCESS_OWNER` and
+   `ACCESS_OWNER_ALIASES` on the gateway; the core has no personal value since 2026-10-21. A deploy keeps every
+   secret it does not upload, so an empty alias list is uploaded as one space, which the gateway reads as unset;
+   leaving it out would keep the previous aliases. `exec` refuses a deploy without exactly one valid
    secrets file of that Worker, `--env`, `--keep-vars`, its caller's own `--var` and any other config file.
    The static checks the retired generator made are unit tests on the committed files
    (`deploy/test_wrangler_configs.py`); the checks across apps and ci.yml are in the root
@@ -274,8 +269,7 @@ The first deploy of the split replaces the old single Python Worker `todofy`; it
 
 ## Changing a switch
 
-Operational switches (`TODOFY_MAINTENANCE_MODE`, `TODOFY_PROCESSING_PAUSED`, `TODOFY_FORCE_PAUSE_TODOIST`,
-`TODOFY_REMINDER_ENABLED`, `TODOFY_GTD_REVIEW_ENABLED`) are the only GitHub
+Operational switches (`TODOFY_MAINTENANCE_MODE`, `TODOFY_PROCESSING_PAUSED`) are the only GitHub
 environment variables the deploy reads, so a deploy never overwrites the operational state:
 
 1. Settings → Environments → `production` → edit the variable.
@@ -284,7 +278,7 @@ environment variables the deploy reads, so a deploy never overwrites the operati
    minutes, then the deploy).
 
 `TODOFY_MAINTENANCE_MODE` reaches both Workers in the same run: the gateway refuses webhook and owner
-writes first, and the core stops its own work. The other three switches are core-only.
+writes first, and the core stops its own work. `TODOFY_PROCESSING_PAUSED` is core-only.
 
 Every other setting (account, D1, hosts, Access, models, limits, schedules) is committed in `wrangler.toml`
 or `gateway/wrangler.toml`: change it with a commit, which is checked and deployed like code.

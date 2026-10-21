@@ -95,7 +95,7 @@ Pending: the release; afterwards compare both Workers' bindings and var hashes w
 
 ## GTD ledger and the morning-brief carryover (2026-09-30, macOS, local only, not released)
 
-Branch `gtd-features` (a clone of `main` at `dec8ac7` plus the feature commits; [gtd-features.md](gtd-features.md)),
+Branch `gtd-features` (a clone of `main` at `dec8ac7` plus the feature commits; `gtd-features.md`, deleted after `b9d18aba`),
 synthetic tasks and placeholder values only, no GitHub, Cloudflare or Todoist call:
 
 | Step | Result |

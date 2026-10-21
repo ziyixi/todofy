@@ -7,7 +7,7 @@ Mail Hero 的 Todofy 目标为 `https://daily.ziyixi.science/hooks/mail`，Beare
 2026-09-29 起 Todofy 全部运行在 Cloudflare Workers Free 上（旧 Go 服务、gRPC 容器与 CloudMailin 接口已退役）：
 
 - Worker `todofy`：TypeScript 网关，负责主机、认证、静态资源和 cron。收到 webhook 时只做认证与头部检查，把未读的请求体通过 JS RPC 交给 core。
-- Worker `todofy-core`：Python，承载唯一的 SQLite Durable Object `TodofyCore`（实例 `inbox-v1`），它是账本唯一写入者和调度者，负责 D1、Gemini 摘要与 Todoist 任务。
+- Worker `todofy-core`：Python，承载唯一的 SQLite Durable Object `TodofyCore`（实例 `inbox-v1`），它是账本唯一写入者和调度者，负责 D1 与 Gemini 摘要。2026-10-21 起 Todofy 不再写任何任务：Tasks 通过 Todofy 的私有 `Mail` 入口读取摘要并自己建任务。
 - D1 数据库 `todofy`，以及保存每周 D1 备份的私有 R2 桶 `todofy-backups`。
 
 架构与状态说明见 [Todofy README](../../todofy/README.md)。Mail Hero 调用的机器接口以 [`machine-api-v1.openapi.yaml`](../../todofy/api/machine-api-v1.openapi.yaml) 和 [`gateway/src/hooks.ts`](../../todofy/gateway/src/hooks.ts) 为准；Todofy 的 owner UI 接口由 [`proto/todofy/ui/v1`](../../proto/todofy/ui/v1/) 定义，使用共享 HTTP 转码器与类型化客户端。
@@ -38,7 +38,7 @@ Mail Hero 的 Todofy 目标为 `https://daily.ziyixi.science/hooks/mail`，Beare
 网络错误、超时和响应丢失同样按暂时失败重试。400、409、413、415 不应出现在正常流量中：Mail Hero 总是发送 `application/json`、`Idempotency-Key` 等于 `event_id`，且 `Contracts` CI 证明 Todofy 接受每个 golden fixture。若出现：
 
 - 400：重试复用冻结 bytes，因此应修 Todofy 使其接受这些 bytes（`fixtures/legacy/` 就是为此保留的旧字节），再在 Mail Hero 手动重试。
-- 409：Mail Hero 不会改写已冻结的 bytes，冲突说明 Todofy 账本里有同 ID 的不同内容（例如恢复或导入的问题）。先核对，不要反复重试；确需任务时用“重新发送为新事件”，它生成新 `event_id`，可能再次创建任务。
+- 409：Mail Hero 不会改写已冻结的 bytes，冲突说明 Todofy 账本里有同 ID 的不同内容（例如恢复或导入的问题）。先核对，不要反复重试；确需重新处理时用“重新发送为新事件”，它生成新 `event_id`，会作为一封新邮件再次摘要。
 
 ## 幂等与去重
 
@@ -59,18 +59,18 @@ Mail Hero 的 Todofy 目标为 `https://daily.ziyixi.science/hooks/mail`，Beare
 
 ## 金丝雀事件（ops-v1）
 
-`Ops.startCanary` 发出的事件带顶层 `canary: {"run_id"}`（golden 字节见 `contracts/mail-received-v1/fixtures/canary_event.json`），走与真实邮件相同的冻结字节、认证、退避重试与去重。合同要求消费者不对它产生外部副作用。Todofy（`status().capabilities` 含 `canary_consumer` 的版本）正常接管并调用 Gemini、校验结果，只记录金丝雀结果；不创建 Todoist 任务，不进入摘要、newsletter 报告、关注列表、提醒或真实邮件指标。结果由面板经 Todofy 的 `Ops.canaryResult` 读取。在 Todofy 的支持版本上线前不要发起金丝雀。
+`Ops.startCanary` 发出的事件带顶层 `canary: {"run_id"}`（golden 字节见 `contracts/mail-received-v1/fixtures/canary_event.json`），走与真实邮件相同的冻结字节、认证、退避重试与去重。合同要求消费者不对它产生外部副作用。Todofy（`status().capabilities` 含 `canary_consumer` 的版本）正常接管并调用 Gemini、校验结果，只记录金丝雀结果；不进入 Tasks 的邮件列表、newsletter 报告、关注列表或真实邮件指标。结果由面板经 Todofy 的 `Ops.canaryResult` 读取。在 Todofy 的支持版本上线前不要发起金丝雀。
 
 ## 接管之后：在 Todofy 对账
 
-Mail Hero 的“已交付”只表示 Todofy 已把事件提交到 D1。之后的摘要、Todoist 失败不回写 Mail Hero，也不出现在 Mail Hero 的提醒里。
+Mail Hero 的“已交付”只表示 Todofy 已把事件提交到 D1。之后的摘要失败不回写 Mail Hero，也不出现在 Mail Hero 的提醒里。
 
-- owner 在 Todofy UI `https://todofy.ziyixi.science` 处理（Cloudflare Access 保护整个主机，网关另行验证 JWT；写操作按 `todofy.ui.v1` 使用 CSRF、`request_id` 与资源 etag）。`/attention` 列出需要处理的事件：`failed_summary`、`todo_unknown` 立即列入，其他进行中状态超过 6 小时列入。
-- 事件详情只显示该事件允许的动作：`task_created`（填入 Todoist 任务 ID）、`task_not_created`（先查找页脚，找不到才重发冻结请求，可能重复建任务）、`retry_summary`（`failed_summary`，`mail_needs_review` 除外）、`dismiss`（事件变为 `ignored`，不检查 Todoist）。每个动作对所见 version 做比较交换。
-- Mail Hero 标记 `needs_review` 的邮件被接管后停在 `failed_summary / mail_needs_review`，不调用 Gemini、不建任务。
-- `TODOFY_REMINDER_ENABLED=true` 时，有 attention 事件的每个 UTC 日最多创建一条 Todoist 提醒任务，标题 `[Todofy System] Mail Hero：N 封邮件需要处理`，正文只列事件 ID、状态、错误码和收到时间（最多 20 条），并指向上面的 `/attention` 页面。
+- owner 在 Todofy UI `https://todofy.ziyixi.science` 处理（Cloudflare Access 保护整个主机，网关另行验证 JWT；写操作按 `todofy.ui.v1` 使用 CSRF、`request_id` 与资源 etag）。`/attention` 列出需要处理的事件：`failed_summary` 立即列入，其他进行中状态超过 6 小时列入。
+- 事件详情只显示该事件允许的动作：`retry_summary`（`failed_summary`，`mail_needs_review` 除外）、`dismiss`（事件变为 `ignored`）。每个动作对所见 version 做比较交换。
+- Mail Hero 标记 `needs_review` 的邮件被接管后停在 `failed_summary / mail_needs_review`，不调用 Gemini。
+- 每日提醒由 Home 在 Tasks 中创建（2026-10-21 起），Todofy 不再发送。
 - 旧的 BasicAuth `/api/v1/mail_inbox` 接口和 `X-Todofy-Admin-Action` header 已不存在。
-- Mail Hero 目标页的“发送测试事件”会真实 POST 到 Todofy。Todofy 不区分测试事件，会像普通邮件一样摘要并创建 Todoist 任务。
+- Mail Hero 目标页的“发送测试事件”会真实 POST 到 Todofy。Todofy 不区分测试事件，会像普通邮件一样摘要，并出现在 Tasks 的邮件列表里。
 
 ## 暂停投递
 
@@ -81,9 +81,8 @@ Mail Hero 的“已交付”只表示 Todofy 已把事件提交到 D1。之后�
 | 目标暂停 | Mail Hero 目标页 | 只停止发往该目标；收件、解析、归档继续，事件在 Mail Hero 等待 |
 | 暂停投递（`send_paused`） | Mail Hero 设置页 | 停止所有消费者投递，其他同上 |
 | `FORCE_SEND_PAUSED=true` | GitHub variable `MAIL_HERO_FORCE_SEND_PAUSED` + Mail Hero 发布 | 部署级强制暂停，UI 无法解除；同步 GitHub variable，否则下次发布会覆盖 |
-| `TODOFY_PROCESSING_PAUSED=true` | Todofy GitHub variable + Todofy 发布 | 仍回 204（Mail Hero 显示已交付）；不做摘要、任务和每日提醒 |
-| `TODOFY_FORCE_PAUSE_TODOIST=true` | 同上 | 仍回 204；摘要继续，事件停在 `summarized`，不建任务、不发提醒 |
-| `TODOFY_MAINTENANCE_MODE=true` | 同上 | webhook 回 503 + `Retry-After: 600`，Mail Hero 持久退避重试；owner 写入被拒，alarm 停止 |
+| `TODOFY_PROCESSING_PAUSED=true` | Todofy GitHub variable + Todofy 发布 | 仍回 204（Mail Hero 显示已交付）；不做摘要 |
+| `TODOFY_MAINTENANCE_MODE=true` | Todofy GitHub variable + Todofy 发布 | webhook 回 503 + `Retry-After: 600`，Mail Hero 持久退避重试；owner 写入被拒，alarm 停止 |
 
 - 暂停和阻断都不延长 Mail Hero 的重试窗口（自动 7 天、手动 30 天，见合同）；超过窗口的事件转为失败，需在窗口内手动重试。Todofy 维护会消耗重试次数，预计较长时先在 Mail Hero 暂停目标。
 - 不要用 Mail Hero 的 `MAINTENANCE_MODE` 暂停投递：它同时停止入站、管理写入和 Alarm。

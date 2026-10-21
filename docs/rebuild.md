@@ -159,12 +159,11 @@ gh workflow run ci.yml --ref main -R "$cloud_repo" -f app=platform
 真实收信、配置的任务来源写入（当前为 Tasks）、Newsletter 发送和网站内容分别验收。
 Tasks 的服务与数据边界见 [设计](../tasks/docs/design.md)；已有任务迁移按 [导入与切换](../tasks/docs/import.md)核对后再启用写入。
 
-新环境的邮件链路准备好后，关闭 bootstrap 创建的三个暂停变量，并发布使其生效：
+新环境的邮件链路准备好后，关闭 bootstrap 创建的两个暂停变量，并发布使其生效：
 
 ```sh
 gh variable set MAIL_HERO_FORCE_SEND_PAUSED --body false -R "$cloud_repo"
 gh variable set TODOFY_PROCESSING_PAUSED --body false -R "$cloud_repo"
-gh variable set TODOFY_FORCE_PAUSE_TODOIST --body false -R "$cloud_repo"
 gh workflow run ci.yml --ref main -R "$cloud_repo" -f app=both
 ```
 

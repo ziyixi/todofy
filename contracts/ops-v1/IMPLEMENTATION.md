@@ -280,6 +280,16 @@ forever (owner connection tests keep today's behaviour).
 
 ## 3. Todofy
 
+> **Since 2026-10-21 Todofy writes no task** (Home sends the daily reminder, Tasks keeps GTD and takes the watch
+> app's proposals). Its `status()` is one batch of five reads (`views.ACTIVE_COUNTS`, `ATTENTION_COUNT`,
+> `RECEIVED_SINCE`, `OLDEST_DUE` and `mailbox.PENDING_BETWEEN`); its counters are `active_events`,
+> `attention_events`, `received_24h`, `oldest_due_age_seconds`, the four `gemini_*`, `carryover_open` (mail of the
+> brief's 1 to 14 day window still awaiting a decision) and `backup_age_seconds`; its signals drop
+> `todoist_paused`, `reminder_disabled`, `reminder_failed`, `gtd_snapshot_stale` and `review_overdue`; its
+> capabilities are `canary_consumer` and `guard`, its modes `maintenance`, `processing_paused` and `backup_active`.
+> `reportOps` and the digest (§3.8), the intent counters and the GTD counters are gone, and a canary ends after its
+> summary call with no task request built. The rest of this section records how the surface was first built.
+
 ### 3.1 Files and functions
 
 | File | Change |
@@ -356,7 +366,7 @@ reserved_tokens, budget_tokens`; `backup_stale` (critical: backups bound and no 
 last one older than 8 days; `age_seconds, has_backup`), `backup_failed` (warning, last job failed),
 `backup_disabled` / `backup_active` (info); `reminder_failed` (warning: today's row `failed` with no
 attempts left, or `unknown`; `attempts`); `guard_shed` (info); from the GTD ledger
-(todofy/docs/gtd-features.md, object storage only): `gtd_snapshot_stale` (warning, `age_hours`: the daily
+(`todofy/docs/gtd-features.md` at `b9d18aba`, object storage only): `gtd_snapshot_stale` (warning, `age_hours`: the daily
 Tasks snapshot is allowed and its last ok run, or the first attempt, is over 48 h old) and
 `review_overdue` (info, `days`: the weekly review and the daily snapshot that sees it done are both on,
 and its last completion is over 10 days old;

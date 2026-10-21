@@ -3,15 +3,15 @@
 Todofy summarises the owner's mail for [Tasks](../tasks/README.md). [Mail Hero](../mail-hero/) (in the same
 monorepo, an independent app) receives the mail and POSTs a `mail.received.v1` webhook; Todofy stores it, asks Gemini
 for a short summary, and keeps the summary for the Mail page in Tasks, where the owner turns it into a task or
-deletes it. It also serves a daily summary and ranked recommendations to the owner's newsletter, sends at most one
-attention reminder task a day, keeps Tasks' planning facts, and has a small owner UI for anything that needs a
-human.
+deletes it. It also serves a daily summary and ranked recommendations to the owner's newsletter and has a small owner
+UI for anything that needs a human. It writes no task since 2026-10-21: Tasks makes a mail's task itself, Home sends
+the daily reminder, and Tasks keeps GTD.
 
 It runs entirely on Cloudflare's Workers Free plan: a thin TypeScript gateway Worker (`todofy`: hosts,
 credentials, static assets, cron), a Python Worker (`todofy-core`) hosting one SQLite-backed Durable
 Object (`TodofyCore`, instance `inbox-v1`) as the single ledger writer and scheduler, one D1
-database, and a private R2 bucket (`todofy-backups`) for weekly D1 backups. All D1, Gemini and Tasks
-work runs in the Durable Object, which gets 30 s of CPU per call;
+database, and a private R2 bucket (`todofy-backups`) for weekly D1 backups. All D1 and Gemini work, and the
+backup's read of Tasks, runs in the Durable Object, which gets 30 s of CPU per call;
 a plain Worker request gets 10 ms on the Free plan, too little for Python. The UI is React/TypeScript,
 built into static assets the gateway serves.
 [architecture-diagram.md](architecture-diagram.md) has the diagrams.
@@ -21,8 +21,8 @@ built into static assets the gateway serves.
 Mail Hero --Bearer--> hooks host POST /hooks/mail      --+
 newsletter --Basic--> hooks host GET /api/summary, ... --+--> Durable Object inbox-v1 --> D1
 owner --Access------> UI host: JWT, CSRF, assets,       |     |--> Gemini (summary, reports)
-                      /api/v1/* with the owner  --------+     |--> Tasks (TASKS binding: tasks, reminder, review)
-                                                              '--> R2 todofy-backups (weekly D1 backups)
+                      /api/v1/* with the owner  --------+     |--> Tasks (TASKS binding: the backup's export)
+Tasks, MCP --RPC----> entrypoint Mail (todofy.mail.v1) -+     '--> R2 todofy-backups (weekly D1 backups)
 cron */10 ----------> scheduled() -------------------------> wake() (RPC)
 ```
 
@@ -33,8 +33,8 @@ cron */10 ----------> scheduled() -------------------------> wake() (RPC)
 | `TODOFY_PUBLIC_HOST` (`todofy.ziyixi.science`) | owner UI and its API todofy.ui.v1 under `/api/v1/*` ([`proto/todofy/ui/v1`](../proto/todofy/ui/v1), served by the shared transcoder) | Cloudflare Access app on the whole host, and the gateway verifies the Access JWT itself (RS256 signature, issuer, audience, expiry, not-before, subject, owner or alias); writes also need Origin, the CSRF token and a `request_id` |
 | each of `TODOFY_HOOKS_HOSTS` (`todofy-hooks.ziyixi.science`; `daily.ziyixi.science` is added at cutover so Mail Hero's and the newsletter's existing URLs keep working) | `POST /hooks/mail`, newsletter reports and `/health` | webhook: Bearer; newsletter: Basic; `/health` returns the build SHA without the Durable Object |
 
-Any other host or path is a 404. `workers.dev` and preview URLs are off. Tasks reaches the Mail API only
-through the private Planning service binding ([Mail in Tasks](#mail-in-tasks)).
+Any other host or path is a 404. `workers.dev` and preview URLs are off. Tasks and the Personal MCP reach the Mail
+API only through the private `Mail` entrypoint ([Mail in Tasks](#mail-in-tasks)).
 
 ## Gemini model order
 
@@ -59,18 +59,16 @@ To restore Flash as the preferred email model, set `GEMINI_EMAIL_MODELS` to the 
 |---|---|
 | `pending` | stored, waiting for a summary (also after a retryable Gemini failure) |
 | `summarizing` | Gemini call in flight |
-| `summarized` | summary and task request frozen by an earlier release, waiting to create the task in Tasks (also after a retryable failure) |
-| `todo_sending` | Tasks create in flight |
-| `todo_unknown` | the create may or may not have happened; never resent automatically, a read-only footer lookup runs instead |
-| `todo_created` | the task exists (found by the lookup or confirmed by the owner); completes on the next step |
 | `complete` | done; the mail body is dropped, the summary row feeds the reports and the Mail page in Tasks (no time-based deletion) |
 | `ignored` | dismissed by the owner; the ledger row stays as the dedupe record |
 | `failed_summary` | automatic summary attempts stopped (or Mail Hero flagged the mail for review) |
 
-New mail goes `pending` → `summarizing` → `complete`; only rows frozen before mail stopped creating tasks pass
-through `summarized`, `todo_sending`, `todo_unknown` and `todo_created`, and their create runs against Tasks.
-`failed_summary` and `todo_unknown` need the owner at once; any other active row counts as "attention"
-once it is older than 6 hours. The UI explains every error code (`web/src/lib/labels.ts`).
+Mail goes `pending` → `summarizing` → `complete`. `failed_summary` needs the owner at once; any other active row
+counts as "attention" once it is older than 6 hours. The UI explains every error code (`web/src/lib/labels.ts`).
+
+The states `summarized`, `todo_sending`, `todo_unknown` and `todo_created` belonged to the task writes that ended on
+2026-10-21. Migration `0014_retire_task_writes.sql` stops the deploy while a row is in one of them, so none is left
+after it; older events show them only in their transitions, labelled as legacy.
 
 ## Owner reconcile runbook
 
@@ -78,10 +76,8 @@ Open the event in the UI (Attention page). The buttons shown are exactly the act
 
 | Row | Action | Effect |
 |---|---|---|
-| `todo_unknown` | **task_created** (paste the Tasks task ID) | the event completes with that task |
-| `todo_unknown` | **task_not_created** (type the short event ID) | a footer lookup runs first; if it finds nothing, the frozen request is sent again, which can duplicate a task |
 | `failed_summary` (not `mail_needs_review`) | **retry_summary** | Gemini is called again (counts against the day's token budget) |
-| `todo_unknown`, `failed_summary`, or `summarized` with `todoist_rejected` | **dismiss** | the event becomes `ignored`; Tasks is not checked |
+| `failed_summary` | **dismiss** | the event becomes `ignored`; the ledger row stays as the dedupe record |
 
 Every action is a compare-and-set on the version you saw; if the event moved on you get a conflict and a
 refresh button. Resending the same request replays the stored outcome.
@@ -94,41 +90,32 @@ Set as GitHub variables on the `production` environment and applied by a deploy 
 | Variable | `true` means |
 |---|---|
 | `TODOFY_MAINTENANCE_MODE` | webhook gets 503 with `Retry-After` (Mail Hero retries), owner writes are refused, the alarm loop stops |
-| `TODOFY_PROCESSING_PAUSED` | mail is accepted and stored but no summary, task or daily reminder is made; report precompute and the newsletter endpoints keep working |
-| `TODOFY_FORCE_PAUSE_TODOIST` | the alarm's writes to Tasks pause (frozen rows wait in `summarized`; no reminder, GTD snapshot or review, task intent or Monday reset); summaries, the Mail page and the owner's planning continue |
-| `TODOFY_REMINDER_ENABLED` | the daily attention reminder task is on |
-| `TODOFY_GTD_REVIEW_ENABLED` | the Sunday review task is on (one task in Tasks per ISO week, [docs/gtd-features.md](docs/gtd-features.md)) |
+| `TODOFY_PROCESSING_PAUSED` | mail is accepted and stored but no summary is made; report precompute, the newsletter endpoints and the Mail entry keep working |
 
-Optional environment secrets `TODOFY_TODOIST_OPS_PROJECT_ID` and `TODOFY_TODOIST_REVIEW_PROJECT_ID` send the
-`[Todofy System]` reminder and the Sunday review to their own Tasks projects; unset, both go to the
-default project. Like `TODOFY_TODOIST_DEFAULT_PROJECT_ID`, they reach `todofy-core` as Worker secrets
-(`--secrets-file`), never as plain vars; the three keep their Todoist-era names and hold Tasks project IDs.
+The switches `TODOFY_FORCE_PAUSE_TODOIST`, `TODOFY_REMINDER_ENABLED` and `TODOFY_GTD_REVIEW_ENABLED` and the Tasks
+project secrets `TODOFY_TODOIST_*_PROJECT_ID` left with the task writes on 2026-10-21; nothing reads them.
 
-## GTD ledger and the morning brief
+## The morning brief's carryover
 
-Once a day (13:00 UTC) the Durable Object reads Tasks' active tasks and the last 7 days of completions,
-read-only, and keeps metadata and counts only, never a task title or description: open, age buckets,
-overdue, undated, created and completed, per inbox and for all projects. The 13:30 recommendation then
-also sees mail tasks of the last 14 days that are still open (up to 30, marked `[N 天前]`); without a
-usable snapshot it is exactly the 24 h report. Every Sunday from 17:00 UTC one review task per ISO week
-carries the week's counts, trends and links. The owner UI's GTD page shows the trends; ops-v1 status
-carries the counters and the dashboard shows them as the "GTD 循环" flow
-([docs/gtd-features.md](docs/gtd-features.md)).
+The 13:30 UTC recommendation also sees the mail that arrived 1 to `REPORT_CARRYOVER_DAYS` (14) days ago and still
+awaits a decision in Mail: at most 30, newest first, each marked `[N 天前]` (`core/carryover.py`). With none, or
+with `REPORT_CARRYOVER_DAYS = 0`, it is exactly the 24 h report. Until 2026-10-21 the carryover was the open mail
+tasks of a daily Tasks snapshot; that snapshot, the Sunday review and the GTD page moved to Tasks, and their design
+is at `b9d18aba` (`todofy/docs/gtd-features.md`).
 
 ## Mail in Tasks
 
-[Tasks](../tasks/README.md) owns Plan and Focus: planning facts, dependencies, the weekly Bets, the Review lanes'
-order, the day queues and the timer are in its own D1. Its Mail page and Plan's weekly review use Todofy's
-`PlusService`, which Tasks reaches only through Todofy's private Planning service binding: the Mail methods, and
-`ReadWeeklyReview` for the newest review task and the pending mail count. Todofy keeps the mail summaries and the
-mail categories in D1.
+[Tasks](../tasks/README.md) owns Plan, Focus, GTD and the Mail categories in its own D1. Its Mail page reads and
+changes the mail through Todofy's private `Mail` entrypoint (`todofy.mail.v1`); the Personal MCP binds the same
+entrypoint read-only. Todofy keeps the mail summaries and the ledger.
 
 Mail lists the summarised mail still awaiting a decision, each with its one-sentence brief. Converting one makes
-an Inbox task in Tasks, with its category's tag and priority when one is chosen; deleting one deletes its summary
-and keeps the ledger row. Nothing else deletes a summary.
+an Inbox task in Tasks, with its category's tag and priority when one is chosen; Tasks makes the task itself and
+then marks the mail converted. Deleting one deletes its summary and keeps the ledger row. Nothing else deletes a
+summary.
 
-The [Mail API](docs/mail-api.md) covers the binding and its access, the writes and their retries, and what is left
-of the old planning tables (the Mail categories); the retired Todoist Plus extension is in
+The [Mail API](docs/mail-api.md) covers the binding and its access, the writes and their retries, and the Mail
+categories' rows Todofy still holds until Tasks' import; the retired Todoist Plus extension is in
 [its history](../docs/history/todoist-plus.md).
 
 ## Backups
@@ -145,7 +132,8 @@ with [tasks/docs/backup.md](../tasks/docs/backup.md). The bucket holds mail and 
 
 The budget page shows the last 30 finished UTC days (mail received, completed and failed, arrival-to-
 completion time, Gemini tokens by model, Gemini calls and Tasks writes) from the D1 table `daily_metrics`,
-which the Durable Object writes a few minutes after each UTC midnight. Both Workers also write one
+which the Durable Object writes a few minutes after each UTC midnight (Tasks writes count only days before
+2026-10-21). Both Workers also write one
 Workers Analytics Engine point per request or upstream step to the dataset `todofy_metrics`, for ad-hoc
 SQL queries from the owner's machine ([docs/dev-notes.md](docs/dev-notes.md) §6). Metrics are best
 effort: a failed write never fails the request or step it describes. After a database restore the
@@ -154,19 +142,16 @@ trends restart counting; the days in between show as not recorded.
 ## Ops surface and canaries
 
 The gateway exports a named entrypoint `Ops` ([contracts/ops-v1](../contracts/ops-v1/README.md)) for a
-future dashboard Worker in the same account: `status()` (health, switches, signals and counters; codes and
+dashboard Worker in the same account: `status()` (health, switches, signals and counters; codes and
 numbers only), `setGuard()` (a `shed` guard defers only the weekly backup, retention and the metrics
-rollup, each within a bound), `canaryResult()` and `reportOps()`, whose warning and critical items join
-the next daily reminder (still one task per UTC day). A `mail.received.v1` event with `canary` is
-summarised by Gemini like mail and then ends: it never creates a task and never appears in
-reports, lists, counts or the reminder; its event page is marked 金丝雀.
+rollup, each within a bound) and `canaryResult()`. It has no `reportOps()` since 2026-10-21: Home creates the
+daily reminder in Tasks itself. A `mail.received.v1` event with `canary` is summarised by Gemini like mail and
+then ends: it never appears in reports, lists or counts; its event page is marked 金丝雀.
 
-The same gateway takes task intents ([contracts/task-intent-v1](../contracts/task-intent-v1/README.md)):
-another app in the account (the watch app, for its daily digest and urgent changes) proposes a parent task with
-subtasks, or separate tasks, under its own idempotency key. Todofy records it once in D1, creates the
-tasks in Tasks in its alarm with frozen request IDs, looks a task up by its footer instead of resending it
-after an unknown result, and answers with codes and counts only. A repeated proposal never creates a task
-twice; pauses and backups hold intents. No Gemini call, no public route.
+Task intents ([contracts/task-intent-v1](../contracts/task-intent-v1/README.md)) left Todofy on 2026-10-21: the
+watch app proposes its tasks to Tasks' `TaskInbox`. For that one release the gateway still exports `Intents`,
+`Planning` and `MailApi` as refusals (`gateway/src/retired.ts`), so a Worker that still binds one fails closed and
+writes nothing until its own deploy; the next Todofy release deletes them.
 
 ## Local development
 
@@ -211,9 +196,9 @@ retired class `TodofyCoordinator` is recorded in [docs/gateway-contract.md](docs
 
 ```
 worker/todofy/core/     pure Python rules (vocabulary, contract, prompts, classification, SQL)
-worker/todofy/runtime/  todofy-core: Durable Object, D1 ledger, Gemini client, Tasks writes, owner API
+worker/todofy/runtime/  todofy-core: Durable Object, D1 ledger, Gemini client, Mail entry, owner API
 gateway/                the gateway Worker todofy (TypeScript): routing, Access, CSRF, webhook, assets,
-                        the owner API's transcoder (todofy.ui.v1 from ../proto/todofy/ui/v1)
+                        the transcoders of the owner API (todofy.ui.v1) and the Mail entry (todofy.mail.v1)
                         (Access, CSRF and private headers from ../packages/edge-auth, compiled in)
 migrations/             D1 schema
 api/                    the machine routes' OpenAPI document (webhook, newsletter, health), newsletter

@@ -25,8 +25,8 @@ DO's bytes.
 |---|---|---|
 | Language | TypeScript (strict, ES modules), `gateway/` | Python (Pyodide), `worker/`, pywrangler |
 | Public entry | custom domains: owner host + every `TODOFY_HOOKS_HOSTS` name; cron `*/10 * * * *` | none (`workers_dev = false`, `preview_urls = false`, no routes); the object's RPC methods (§3) for the gateway's binding; every `fetch` answers 404 `not_found` (for the RPC release only, the previous gateway's calls get 503, §6.4) |
-| Bindings | `ASSETS` (`uiassets/dist`), `COORDINATOR` → class `TodofyCore` in script `todofy-core`, `METRICS` (Analytics Engine `todofy_metrics`, one point per request and cron; dev-notes.md §6) | `DB` (D1 `todofy`), `BACKUPS` (private R2 bucket `todofy-backups`, weekly D1 backups; it holds mail content), `METRICS` (the same dataset, one point per upstream step), `TASKS` (Tasks' `TasksApi`, read-write: the tasks Todofy writes and reads, and the backup export). No DO binding: nothing in core calls the DO through a stub any more |
-| Vars | `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`, `BUILD_SHA`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `MAINTENANCE_MODE`, `TASKS_PUBLIC_URL` (`/task/<id>`); dev/test only: `DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`, `JWKS_REFRESH_COOLDOWN_MS` | `BUILD_SHA`, `MAINTENANCE_MODE`, `TODOFY_PUBLIC_HOST` (the reminder's link), `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST`, `REMINDER_ENABLED`, `GTD_REVIEW_ENABLED`, `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_TIMEOUT_MS`, `GEMINI_DAILY_TOKEN_BUDGET`, `TASKS_PUBLIC_URL`, `TODOIST_DEFAULT_PROJECT_ID`, `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID` (optional; Tasks project IDs under their Todoist-era names), `LOOKUP_DELAY_MS`, `BACKOFF_BASE_MS`, `WATCHDOG_MS`, `REPORT_DEFAULT_TOP`, `REPORT_PRECOMPUTE_UTC`, `REPORT_CARRYOVER_DAYS`, `GTD_COLLECT_UTC`, `GTD_PAGE_TIMEOUT_MS` (tests), `LEGACY_TEXT_RETENTION_DAYS`; optional, unset in production: `TASK_INTENT_SOURCES` (§3.8) |
+| Bindings | `ASSETS` (`uiassets/dist`), `COORDINATOR` → class `TodofyCore` in script `todofy-core`, `METRICS` (Analytics Engine `todofy_metrics`, one point per request and cron; dev-notes.md §6) | `DB` (D1 `todofy`), `BACKUPS` (private R2 bucket `todofy-backups`, weekly D1 backups; it holds mail content), `METRICS` (the same dataset, one point per upstream step), `TASKS` (Tasks' `TasksApi`, read-write: only the weekly backup's export since 2026-10-21). No DO binding: nothing in core calls the DO through a stub any more |
+| Vars | `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`, `BUILD_SHA`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `MAINTENANCE_MODE`, `TASKS_PUBLIC_URL` (`/task/<id>`); dev/test only: `DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`, `JWKS_REFRESH_COOLDOWN_MS` | `BUILD_SHA`, `MAINTENANCE_MODE`, `TODOFY_PUBLIC_HOST` (the ops status's UI link), `PROCESSING_PAUSED`, `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_EMAIL_MODELS`, `GEMINI_TIMEOUT_MS`, `GEMINI_DAILY_TOKEN_BUDGET`, `BACKOFF_BASE_MS`, `WATCHDOG_MS`, `REPORT_DEFAULT_TOP`, `REPORT_PRECOMPUTE_UTC`, `REPORT_CARRYOVER_DAYS`, `LEGACY_TEXT_RETENTION_DAYS` |
 | Secrets | `MAIL_WEBHOOK_TOKEN_SHA256`, `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the last two from `--secrets-file` on every deploy) | `GEMINI_API_KEY` |
 | DO class | none: migration `v2` deleted the Python-era `TodofyCoordinator` in a gateway-only release (§6.6) | `TodofyCore` (renamed from `TodofyCoordinator` by core migration `v2`), instance name `inbox-v1`, SQLite-backed |
 
@@ -241,12 +241,13 @@ bug) is the gateway's 503 `unavailable`. A D1/storage `JsException` inside a met
 
 Python exposes every method of the class over RPC, including `_`-prefixed helpers and the budget
 helpers; only the gateway binds the class and it calls only the methods below (`owner_api` only the gateway
-before todofy.ui.v1) and the four `ops_*` methods of §3.7. `alarm` is reserved and
+before todofy.ui.v1), `mail` (§3.8) and the three `ops_*` methods of §3.7. `alarm` is reserved and
 cannot be called.
 
 `MAINTENANCE_MODE` in the DO (defence in depth; the gateway refuses first with a `retry-after`):
 `ingest`, every `owner_api` call with method `POST` → 503 `maintenance` without `retry_after`, and every
-`owner_ui` write (`ReconcileMailEvent`, `RecomputeReport`) → `MAINTENANCE`; a
+`owner_ui` write (`ReconcileMailEvent`, `RecomputeReport`) and every `mail` write (`MarkMailConverted`,
+`DeleteMailSummaries`) → `MAINTENANCE`; a
 newsletter request that needs an on-demand computation → 503 `maintenance` (today's DO `/report`
 guard). The alarm loop's maintenance check is unchanged.
 
@@ -330,13 +331,12 @@ unread stream of a write, null for `GET`/`HEAD`. The DO serves exactly today's `
 | `GET /api/v1/events?view&state&limit&cursor` | EventPage; 400 `invalid_request` |
 | `GET /api/v1/events/{id}` | EventDetail; 404 |
 | `POST /api/v1/events/{id}/reconcile` | EventDetail; 400/404/409 (`version_conflict`, `action_not_allowed`, `action_request_conflict`) |
-| `GET /api/v1/reminders?limit&cursor` | ReminderPage; 400 |
 | `GET /api/v1/reports/latest` | ReportsLatest |
 | `POST /api/v1/reports/recompute` | report; 400/409/429 (`retry_after`)/503; replays via `owner_actions` |
 | `GET /api/v1/legacy_text/{id}` | LegacyText; 404 |
 | anything else, incl. `/api/v1/csrf`, `/api/v1/setup`, `HEAD` | 404 `not_found` |
 
-### 3.6 `setup() -> {"mail_source_id": str, "configured": {"gemini_api_key": bool, "todoist_project": bool}}`
+### 3.6 `setup() -> {"mail_source_id": str, "configured": {"gemini_api_key": bool}}`
 Core-side facts, never values; a plain object, not a `CoreResult`. Not blocked by maintenance. The
 gateway answers `GetIntegration` (`GET /api/v1/integration`) with the `Integration` message (fields named the same): `build` (gateway `BUILD_SHA` or
 `unknown`), `public_host` (lowercased), `hooks_hosts` (csv lowercased), `webhook_path: "/hooks/mail"`,
@@ -358,7 +358,6 @@ rejects as `new Error(code)`. A thrown call (object down, Python exception) reje
 | `status()` | `ops_status()` | – |
 | `setGuard(input)` | `ops_set_guard(json)` | input JSON-serialisable |
 | `canaryResult(eventId)` | `ops_canary_result(event_id)` | a string |
-| `reportOps(report)` | `ops_report(json)` | compact JSON ≤ 8 KiB |
 
 The object validates everything against the contract's rules (`core/ops.py`) and serves these in
 maintenance mode too. Vitest runs `Ops` in Node through a stand-in for `cloudflare:workers`
@@ -367,31 +366,17 @@ calls the real entrypoint over a service binding (`tests/runtime/ops_support.py`
 `Contracts` job runs `test/ops.test.ts` next to both apps' ops-v1 schema checks, so a change under
 `contracts/` re-checks this forwarding; the runtime test runs in the `Todofy runtime` shards.
 
-### 3.8 task-intent-v1 on the `Intents` entrypoint (contracts/task-intent-v1)
-A second named entrypoint, `Intents` (`gateway/src/ops.ts`, exported next to `Ops`), implements
-`WireService<typeof TaskIntentService>`, the generated service of `proto/todofy/taskintent/v1/task_intent.proto` as
-Workers RPC methods (types only: the gateway bundles none of the generated code and passes the wire JSON through):
-another app in the account proposes tasks, and Todofy writes them to Tasks. Same forwarding, same
-error codes, same trust boundary as §3.7.
+### 3.8 `mail(method, request)`: the `Mail` entrypoint (todofy.mail.v1)
+The named entrypoint `Mail` (`gateway/src/mail.ts`) serves `todofy.mail.v1` to the Workers that bind it (Tasks
+read-write, the Personal MCP read) through the shared transcoder; every method is one call of `mail(method,
+request)`, which answers `{"ok": <wire JSON text>}` or `{"error": <reason>, "retry_after": <seconds or null>}` and
+whose `ok` the gateway sends as it is. The binding's `access` prop gates the writes before the body is read. The
+methods, the writes' compare-and-sets and the errors are in [mail-api.md](mail-api.md).
 
-| `Intents` method | Object method | Gateway checks first |
-|---|---|---|
-| `proposeTasks(intent)` | `task_intent_propose(json)` | the binding's source, input JSON-serialisable, compact JSON ≤ 64 KiB |
-| `taskIntentStatus(ref)` | `task_intent_status(json)` | the binding's source, input JSON-serialisable, compact JSON ≤ 64 KiB |
-
-A binding names its one source in `props` (`entrypoint = "Intents"`, `props = { source = "watch" }`, the watch
-app's), and `Intents` rejects `invalid_input` before the object wakes when the input's `source` differs or the
-binding has no such prop. So a proposer can use only its own source's URL allow-list and daily quota and cannot
-reach `status()`, `setGuard()`, `canaryResult()` or `reportOps()`. `Ops` has no task-intent methods. The runtime
-suite's probe binds both (`tests/runtime/ops_support.py`).
-
-The object (`runtime/intents.py`, rules in `core/intents.py`) reads the input strictly with the wire JSON
-codec and checks the schema's value rules (`invalid_input` otherwise), records a new intent in D1 (`task_intents`, `task_intent_tasks`,
-migration `0005_task_intents.sql`) and answers `pending`; its alarm creates the tasks through the
-`TASKS` binding with frozen request IDs, held by the same pauses as mail. Every expected outcome is a `TaskIntentResult`
-value (`created`, `duplicate`, `paused`, `failed`, `rejected`, `not_found`), never an exception.
-`test/ops.test.ts` covers the forwarding, the source check and the 64 KiB bound; `tests/runtime/test_task_intents.py`
-calls the real entrypoint over a service binding with a real Tasks Worker.
+`Ops` implements no `reportOps()` and the gateway no task intents since 2026-10-21: Home creates the daily reminder
+in Tasks, and the watch app proposes its tasks to Tasks' `TaskInbox`. For that one release `gateway/src/retired.ts`
+still exports `Intents` (every call rejects `unavailable`), `Planning` and `MailApi` (every request 404), so a Worker
+still bound to one fails closed and writes nothing until its own deploy; the next Todofy release deletes them.
 
 ## 4. Trust and request IDs
 
@@ -442,17 +427,15 @@ Domain for the public host and then one per hooks host, the `COORDINATOR` bindin
 
 The core has one test config: the two gateway test configs differ only in gateway vars (Access
 bypass vs. loopback issuer), so both pair with root `wrangler.test.toml` (short timings, fake
-upstream placeholders, `REMINDER_ENABLED = "false"`, `REPORT_PRECOMPUTE_UTC = "off"`, `GTD_COLLECT_UTC =
-"off"`, `GTD_REVIEW_ENABLED = "false"`). The old root
+upstream placeholders, `REPORT_PRECOMPUTE_UTC = "off"`). The old root
 `wrangler.test-auth.toml` is gone.
 
 `main = "worker/todofy/runtime/entry.py"`, `base_dir = "worker"`, `compatibility_flags =
 ["python_workers"]`, D1 `DB` (`migrations_dir = "migrations"`), the `BACKUPS` bucket, both of its
 migrations (`v1` new `TodofyCoordinator`, `v2` renamed to `TodofyCore`), the `METRICS` dataset and its
-vars: the fixed upstream `GEMINI_API_BASE`, `TASKS_PUBLIC_URL`, `TODOFY_PUBLIC_HOST` (`reminder.py`
-puts `https://<TODOFY_PUBLIC_HOST>/attention` into the daily reminder, so the core needs the public host
-too), `MAIL_SOURCE_ID`, `GEMINI_MODELS`, `GEMINI_DAILY_TOKEN_BUDGET`, `LOOKUP_DELAY_MS`, `REPORT_*`,
-`GTD_COLLECT_UTC`, `LEGACY_TEXT_RETENTION_DAYS`. Test-only timing knobs (`GEMINI_TIMEOUT_MS`, ...) keep their code defaults.
+vars: the fixed upstream `GEMINI_API_BASE`, `TODOFY_PUBLIC_HOST` (the ops status's `ui_url`, so the core needs
+the public host too), `MAIL_SOURCE_ID`, `GEMINI_MODELS`, `GEMINI_EMAIL_MODELS`, `GEMINI_DAILY_TOKEN_BUDGET`,
+`REPORT_*`, `LEGACY_TEXT_RETENTION_DAYS`, and the `TASKS` binding of the backup's export. Test-only timing knobs (`GEMINI_TIMEOUT_MS`, ...) keep their code defaults.
 It keeps its name and place: pywrangler reads the Python version only from the root `wrangler.toml`, and
 a Python config must sit next to `python_modules/` (a core config elsewhere fails with
 `ModuleNotFoundError: No module named 'workers'`, verified). No assets, cron, routes or DO binding.
@@ -461,12 +444,11 @@ a Python config must sit next to `python_modules/` (a core config elsewhere fail
 ### 6.3 What the deploy adds (`deploy/deploy_vars.py`)
 `exec core|gateway -- <deploy command>` appends `--var` flags (plain_text vars, exactly like `[vars]`;
 wrangler prints them as `(hidden)`): `BUILD_SHA` (the commit) and `MAINTENANCE_MODE` on both Workers;
-`REMINDER_ENABLED`, `PROCESSING_PAUSED`, `FORCE_PAUSE_TODOIST` and `GTD_REVIEW_ENABLED` on the core.
-`secrets core <path>` and `secrets gateway <path>` write each Worker's owner-only secrets file for
-`--secrets-file` (Worker secrets, hidden in the Cloudflare dashboard and API): the core's
-`TODOIST_DEFAULT_PROJECT_ID`, `TODOIST_OPS_PROJECT_ID` and `TODOIST_REVIEW_PROJECT_ID`, the gateway's
-`ACCESS_OWNER` and `ACCESS_OWNER_ALIASES`. An unset optional project and an emptied alias list are uploaded
-as one space, which the Workers read as unset (a deploy keeps every secret it does not upload). The core's
+`PROCESSING_PAUSED` on the core. `secrets core <path>` and `secrets gateway <path>` write each Worker's
+owner-only secrets file for `--secrets-file` (Worker secrets, hidden in the Cloudflare dashboard and API): the
+gateway's `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES`, and each Worker's `<APP>_WORKER_SECRETS` map when the release
+has one; the core has no personal value since 2026-10-21. An emptied alias list is uploaded as one space, which
+the gateway reads as unset (a deploy keeps every secret it does not upload). The core's
 `GEMINI_API_KEY` is set by the owner. A missing or invalid value fails the deploy by
 name, because a deploy without a var deletes it; a deploy without exactly one valid secrets file of that
 Worker, `--env`, `--keep-vars`, the caller's own `--var` and any other config are refused. `deploy/test_wrangler_configs.py` checks the committed values the retired generator validated
@@ -726,8 +708,8 @@ lenient read of the DO's answer with the generated code and the transcoder's wri
 | The next page (its token) | → 2.0 | → 2.0 | 6 / 4 |
 | An event's detail | 0.7 → 2.0 | 0.7 → 1.7 | 6 / 4 |
 | 90 metric days | 0.4-0.5 → 2.8 | 0.4-0.6 → 1.6 | 6 / 4 |
-| 120 GTD days | 0.3-0.4 → 3.2 | 0.4-0.5 → 2.9 | 6 / 4 |
-| 100 reminders | 0.4 → 2.0 | 0.4 → 1.4 | 6 / 4 |
+| 120 GTD days (retired 2026-10-21) | 0.3-0.4 → 3.2 | 0.4-0.5 → 2.9 | 6 / 4 |
+| 100 reminders (retired 2026-10-21) | 0.4 → 2.0 | 0.4 → 1.4 | 6 / 4 |
 | A reconcile (CSRF verify included) | 1.0 → 2.1 | 0.7 → 1.6 | 6 / 4 |
 | A 1.9 MB legacy text: 1.9 million ASCII characters heavy in escapes (the fixture: D1's largest row, costliest form) | → 6.0-6.4 | → 5.3-5.7 | 8 |
 | The same 1.9 MB as 633,333 Chinese characters (the fixture until review CS3) | 2.0-2.1 → 4.4 | 2.4 → 3.8 | 8 |
