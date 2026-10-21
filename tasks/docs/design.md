@@ -156,6 +156,31 @@ Bulk order updates use one Tasks request, one receipt and a bounded D1 transacti
 They avoid one service call per task. Cloudflare documents a finite invocation chain for
 [service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/#limits).
 
+## Installed app
+
+The manifest (`web/public/manifest.webmanifest`) keeps `display: standalone` and adds two members:
+
+- `shortcuts`, on the Dock icon's menu in this order: Quick add (`/?add=1`), Today, Plan and Focus. macOS shows no
+  shortcut icons. Quick add opens the Add task dialog with no project and no date: the Dock has no page context, so
+  it captures to Inbox over whatever page the window shows (a new window shows Today); the in-app `Q` keeps its
+  contextual defaults. The parameter is removed at once, so a reload does not reopen the dialog. An installed app
+  takes a manifest change at Chrome's next update check, at most daily, without reinstalling.
+- `launch_handler.client_mode: ["focus-existing", "auto"]`. Chrome (139+) opens an in-scope link from a browser tab
+  in the installed app; with `focus-existing` an open app window is focused, not navigated, and the URL is queued
+  in `window.launchQueue`. `navigate-existing` would reload the page, dropping open dialogs, Plan's in-memory state
+  and anything tied to the page. `web/src/launch.ts` reads the URL (`readLaunch`) and `App` routes it in place: the
+  hash route at once; `?review=1` (with no route: Plan) opens the weekly review checklist, as a counter so a second
+  link reopens it; `?mail=<event>` opens Mail's summary, since a long mail task's description links there; a
+  `?task=<id>` or Quick add opens once no task dialog is open, so a launch never discards a draft (only the newest
+  waits; the task already open is left alone). A task launch puts `?task=` into the URL, so the load path's rules
+  hold: a reload reopens it, closing removes it. Chrome also queues the launch that created a window, whose URL the
+  load path has handled, so a first launch equal to the document's URL is skipped. Home's `/` only focuses the
+  window. In a plain tab the consumer is never called and links load as pages, as before.
+
+Headless Chromium cannot install an app: `pwa.spec.ts` checks the parsed manifest, and `pwa-launch.spec.ts` stubs
+`launchQueue` and calls its consumer as Chrome would. The Dock menu, and links from Gmail and Todofy's `/task/<id>`
+redirect landing in the open window, are checked by hand in the installed app.
+
 ## Performance and Cloudflare
 
 Task pages are limited to 100 rows. Lists return a short description preview; full descriptions load when

@@ -29,7 +29,10 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
   Completed checkbox shows the day's completed steps.
 - A Step's planning panel shows only its time estimate; Plan's Add steps gives each new Step a time (30 min unless
   another is chosen). In Week a click selects a commitment and a double-click opens it; elsewhere in Plan a click opens.
-- Installable desktop PWA; an explicit offline page, with task data available online.
+- Installable desktop PWA; an explicit offline page, with task data available online. The Dock icon's menu offers
+  Quick add (Inbox, no date, over the current page), Today, Plan and Focus. Links into Tasks (Home, mail reminders,
+  `?task=` links, the weekly review) open in the already-open app window without reloading it; a linked task waits
+  for an open task dialog to close.
 - Owner-only Cloudflare Worker and D1, using the repository's proto API and authentication conventions.
 - A verified Todoist import and coordinated native source for Todofy.
 

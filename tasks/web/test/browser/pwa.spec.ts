@@ -22,6 +22,19 @@ test("desktop PWA meets Chrome install checks and shows an honest offline page",
     const manifest = JSON.parse(result.data || "{}");
     expect(manifest.display).toBe("standalone");
     expect(manifest.start_url).toBe("/#/today");
+    // The Dock icon's menu, in the owner's order, each a route of this app.
+    expect(manifest.shortcuts).toEqual([
+      { name: "Quick add", url: "/?add=1" },
+      { name: "Today", url: "/#/today" },
+      { name: "Plan", url: "/#/plan" },
+      { name: "Focus", url: "/#/focus" },
+    ]);
+    for (const shortcut of manifest.shortcuts)
+      expect(new URL(shortcut.url, page.url()).origin).toBe(
+        new URL(page.url()).origin,
+      );
+    // Links focus the open window, which routes them itself (launch.ts), instead of reloading it.
+    expect(manifest.launch_handler.client_mode[0]).toBe("focus-existing");
     expect(
       manifest.icons.map((icon: { sizes: string }) => icon.sizes),
     ).toContain("512x512");

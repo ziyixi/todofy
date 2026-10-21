@@ -6,6 +6,7 @@
   "start_url": "/#/today",
   "scope": "/",
   "display": "standalone",
+  "launch_handler": { "client_mode": ["focus-existing", "auto"] },
   "background_color": "#ffffff",
   "theme_color": "#f7f7f3",
   "categories": ["productivity"],
@@ -14,5 +15,11 @@
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
     { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "shortcuts": [
+    { "name": "Quick add", "url": "/?add=1" },
+    { "name": "Today", "url": "/#/today" },
+    { "name": "Plan", "url": "/#/plan" },
+    { "name": "Focus", "url": "/#/focus" }
   ]
 }

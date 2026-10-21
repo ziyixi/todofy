@@ -23,6 +23,7 @@ import {
   isPlanning,
   readRoute,
   removeQueryParameter,
+  setQueryParameter,
   type Route,
 } from "./routes";
 import { useTaskView } from "./useTaskView";
@@ -35,6 +36,7 @@ import { ErrorBoundary, ReloadPrompt } from "./components/ErrorBoundary";
 import { TaskDragProvider } from "./components/TaskDrag";
 import { useReturnRefresh } from "./useReturnRefresh";
 import { useOutdated } from "./outdated";
+import { useLaunchQueue, type Launch } from "./launch";
 // The app's own styles come before the task dialog's and Plan's, as when those two loaded on demand.
 import "./styles.css";
 // The dialog and Plan load with the app: a part loaded on demand shows only after React's 300ms Suspense
@@ -68,10 +70,22 @@ export function App() {
     item?: CatalogItem;
   }>();
   const [showSidebar, setShowSidebar] = useState(false);
-  // Each new positive value opens Plan's weekly review checklist: the review link on load.
+  // Each new positive value opens Plan's weekly review checklist: the review link on load, then each review
+  // launch into this window.
   const [reviewRequest, setReviewRequest] = useState(() =>
     new URL(window.location.href).searchParams.get("review") === "1" ? 1 : 0,
   );
+  // A launched task or Quick add waits while a task dialog is open, so a launch never discards a draft; only the
+  // newest waits. A Quick add link (`?add=1`, the Dock's shortcut) waits here on load for the catalog.
+  const [launchToOpen, setLaunchToOpen] = useState<
+    Pick<Launch, "taskId" | "quickAdd"> | undefined
+  >(() =>
+    new URL(window.location.href).searchParams.get("add") === "1"
+      ? { taskId: "", quickAdd: true }
+      : undefined,
+  );
+  // Mail reads its summary link (`?mail=`) when it mounts; a mail launch remounts it.
+  const [mailLaunches, setMailLaunches] = useState(0);
   // A newer build serves Tasks, so this tab's bundle may call routes it no longer has: the page and its
   // errors give way to the reload prompt.
   const outdated = useOutdated();
@@ -166,12 +180,50 @@ export function App() {
     const id = new URL(window.location.href).searchParams.get("task");
     if (id) void openTask(id, true);
   }, [openTask]);
-  // The review link acts once: a reload does not open the checklist again.
-  useEffect(() => removeQueryParameter("review"), []);
+  // The review and Quick add parameters act once: a reload does not act on them again.
+  useEffect(() => {
+    removeQueryParameter("review");
+    removeQueryParameter("add");
+  }, []);
   // A review request belongs to the Plan it opens: a later visit to Plan does not reopen the checklist.
   useEffect(() => {
     if (route.page !== "plan") setReviewRequest(0);
   }, [route.page]);
+  // A launch into this open window (launch.ts): its route, the review checklist and a mail summary apply at
+  // once; a task or Quick add opens through launchToOpen.
+  useLaunchQueue((launch) => {
+    if (launch.review) setReviewRequest((count) => count + 1);
+    if (launch.mailId) {
+      setQueryParameter("mail", launch.mailId);
+      setMailLaunches((count) => count + 1);
+    }
+    // A task or Quick add, unless the open dialog shows it already.
+    const opens = launch.taskId
+      ? launch.taskId !== editor?.task?.id
+      : launch.quickAdd && !(editor && !editor.task);
+    const open = () => {
+      if (opens) setLaunchToOpen(launch);
+    };
+    if (launch.hash && launch.hash !== window.location.hash) {
+      // A route change drops a task that is still opening, so the launch's task opens after it.
+      window.addEventListener("hashchange", open, { once: true });
+      window.location.hash = launch.hash;
+    } else open();
+  });
+  useEffect(() => {
+    if (!launchToOpen || editor) return;
+    if (launchToOpen.taskId) {
+      setLaunchToOpen(undefined);
+      // As a link loaded in this window: a reload reopens the task until its dialog closes.
+      setQueryParameter("task", launchToOpen.taskId);
+      void openTask(launchToOpen.taskId, true);
+    } else if (catalog.timeZone) {
+      setLaunchToOpen(undefined);
+      taskOpenSequence.current++;
+      // The Dock has no page context, so Quick add captures to Inbox with no date wherever the window is.
+      setEditor({});
+    }
+  }, [launchToOpen, editor, catalog.timeZone, openTask]);
   useEffect(() => {
     function keyboard(event: KeyboardEvent) {
       if (
@@ -300,6 +352,7 @@ export function App() {
                 }
               >
                 <MailPage
+                  key={mailLaunches}
                   catalog={catalog}
                   onTaskCreated={actions.taskChanged}
                 />
