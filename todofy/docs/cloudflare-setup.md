@@ -11,8 +11,8 @@ Todofy is two Workers ([gateway-contract.md](gateway-contract.md)):
 
 - `todofy`, the TypeScript gateway: the custom domains, Access and CSRF checks, webhook and newsletter
   credential checks, the UI assets and the cron. It holds the credential digests and the owner emails.
-- `todofy-core`, the Python Worker that hosts the Durable Object. It has no public route; it holds D1, the
-  Gemini API key and the `TASKS` binding to Tasks, and does all the work inside the object (30 s CPU per call instead of
+- `todofy-core`, the Python Worker that hosts the Durable Object. It has no public route; it holds D1 and the
+  Gemini API key, binds no other app, and does all the work inside the object (30 s CPU per call instead of
   a plain Worker's 10 ms on Workers Free).
 
 ## 1. D1 database
@@ -115,7 +115,7 @@ is public, so nothing personal or secret goes there), and changing one is a comm
 
 The Gemini base URL is fixed in `wrangler.toml` and pinned by tests. `BUILD_SHA` (the commit)
 is added at deploy on both Workers. Each Worker gets only the vars it reads: hosts and `ACCESS_*` go to the
-gateway; the mail source, Gemini, Tasks, report, retention and switch settings go to the core;
+gateway; the mail source, Gemini, report, retention and switch settings go to the core;
 `BUILD_SHA`, `MAINTENANCE_MODE` and `TODOFY_PUBLIC_HOST` go to both. `deploy/test_wrangler_configs.py`
 checks the committed values (formats, bounds, host order, the core/gateway pairing).
 
@@ -144,8 +144,6 @@ Core `todofy-core`:
 | Secret | How to derive it |
 |---|---|
 | `GEMINI_API_KEY` | a Gemini API key for Todofy |
-
-The core reads Tasks' backup export through its `TASKS` service binding and needs no Tasks credential.
 
 Until a gateway secret is set, the endpoint that needs it answers 503 `not_configured` (the webhook, the
 newsletter endpoints, or owner writes). A missing core key shows as not configured on the UI's setup
@@ -278,13 +276,10 @@ ones are kept and older complete ones and every older incomplete prefix are dele
 finished early on a Sunday is not repeated at 10:00 the same day. While a backup runs (a few minutes,
 30 at most) mail processing waits and owner writes answer 503; webhooks are still accepted.
 
-Each backup also holds the Tasks app's D1, read through the `TASKS` binding (Tasks' machine-only
-`exportBackup`; one call counts as one statement of the query budget):
-`backups/<job start>/tasks/<table>/<n>.ndjson.gz` and the manifest's `tasks` section (Tasks' migration, its
-change sequence when the job planned and ended, and its tables). Without the binding a job fails with
-`tasks_unavailable`. The first job after the release that added Tasks starts at the object's next alarm, not on
-Sunday. `download` below fetches and checks the Tasks parts too; `sql` and `verify` are Todofy's alone, and
-Tasks restores with its own tool: [tasks/docs/backup.md](../../tasks/docs/backup.md).
+Before Tasks backed itself up, each backup also held the Tasks app's D1 (`backups/<job start>/tasks/` and the
+manifest's `tasks` section). Tasks now keeps its own weekly backups in its own bucket
+([tasks/docs/backup.md](../../tasks/docs/backup.md)), and its restore tool also reads those older backups until they
+rotate out; `download` below fetches Todofy's parts only.
 
 Rows that D1 retention deletes (legacy text by `expires_at` or `TODOFY_LEGACY_TEXT_RETENTION_DAYS`,
 reports after 90 days, owner actions after 180; since 2026-10 no summary, which only the owner deletes) stay in the backups made before the deletion until those

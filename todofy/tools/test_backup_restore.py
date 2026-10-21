@@ -459,41 +459,33 @@ class BucketWrangler:
         path.write_bytes(self.objects[key])
 
 
-def with_tasks(source: sqlite3.Connection, root: Path) -> dict[str, bytes]:
-    """A backup of ``source`` with a Tasks section (two synthetic Tasks tables), as the bucket holds it."""
-    backup_of(source, root)
-    objects = {part.relative_to(root / PARTS).as_posix(): part.read_bytes() for part in (root / PARTS).rglob("*.gz")}
-    tables = []
-    for name, rows in (("projects", [["p1", "Inbox"]]), ("tasks", [["t1", "Synthetic 任务", 1.5], ["t2", "x", 2]])):
-        part = layout.Part()
-        for row in rows:
-            part.add(row)
-        data, digest = part.finish()
-        key = layout.part_key(PREFIX + layout.TASKS_DIR, name, 1)
-        objects[key] = data
-        columns = ["id", "title"] if name == "projects" else ["id", "title", "sort_order"]
-        parts = [{"key": key, "rows": len(rows), "bytes": len(data), "sha256": digest}]
-        tables.append(layout.table_entry(name, columns, ["id"], len(rows), parts))
-    manifest = json.loads((root / MANIFEST).read_text())
-    tasks = layout.tasks_section("0004_read_paths.sql", 3, 3, tables)
-    objects[PREFIX + MANIFEST] = layout.manifest(
-        started_at=0, finished_at=60, schema_version=LATEST, tables=manifest["tables"], tasks=tasks
-    )
-    return objects
-
-
-def test_download_fetches_and_checks_the_tasks_parts(source, tmp_path):
-    objects = with_tasks(source, tmp_path / "made")
+def test_download_leaves_an_older_backups_tasks_section_to_tasks(source, tmp_path):
+    """A backup made while Todofy still copied Tasks has a ``tasks`` section; tasks/tools/backup-restore.ts
+    downloads and restores it, so Todofy's download fetches none of its parts."""
+    made = tmp_path / "made"
+    backup_of(source, made)
+    objects = {part.relative_to(made / PARTS).as_posix(): part.read_bytes() for part in (made / PARTS).rglob("*.gz")}
+    manifest = json.loads((made / MANIFEST).read_text())
+    tasks_part = {"key": PREFIX + "tasks/tasks/00001.ndjson.gz", "rows": 1, "bytes": 1, "sha256": "0" * 64}
+    manifest["tasks"] = {
+        "schema_version": "0004_read_paths.sql",
+        "change_sequence": {"start": 3, "end": 3},
+        "tables": [
+            {
+                "name": "tasks",
+                "columns": ["id"],
+                "key": ["id"],
+                "max_rowid": 1,
+                "rows": 1,
+                "bytes": 1,
+                "parts": [tasks_part],
+            }
+        ],
+    }
+    objects[PREFIX + MANIFEST] = json.dumps(manifest).encode()
     out = tmp_path / "restore"
     lines = backup_restore.download(BucketWrangler(objects), "bucket", PREFIX, out, legacy_text=True)
-    assert lines[-2:] == ["PASS tasks/projects rows=1 parts=1", "PASS tasks/tasks rows=2 parts=1"]
-    assert (out / PARTS / PREFIX / "tasks" / "tasks" / "00001.ndjson.gz").is_file()
-    # sql stays Todofy's: the Tasks rows are tasks/tools/backup-restore.ts's to restore.
+    assert lines and not [line for line in lines if "tasks/" in line]
+    assert not (out / PARTS / PREFIX / "tasks").exists()
     write_sql(out, out / "restore.sql", legacy_text=True)
-    assert "INSERT INTO projects" not in (out / "restore.sql").read_text()
-
-    damaged = tmp_path / "damaged"
-    key = PREFIX + "tasks/tasks/00001.ndjson.gz"
-    objects[key] = objects[key][:-1] + bytes([objects[key][-1] ^ 1])
-    with pytest.raises(RestoreError, match=r"tasks/tasks/00001\.ndjson\.gz: missing or SHA-256 differs"):
-        backup_restore.download(BucketWrangler(objects), "bucket", PREFIX, damaged, legacy_text=True)
+    assert "INSERT INTO tasks" not in (out / "restore.sql").read_text()

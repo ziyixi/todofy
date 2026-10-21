@@ -147,7 +147,8 @@ message BackupStatus {
     ERROR_CODE_STORAGE_ERROR = 1;
     // The job outlived its lease.
     ERROR_CODE_LEASE_EXPIRED = 2;
-    // The Worker has no TASKS binding, so the Tasks app's D1 could not be read.
+    // Retired: the Worker had no TASKS binding, so the Tasks app's D1 could not be read. Only the releases that
+    // copied Tasks' D1 into each backup (until Tasks backed itself up) gave it.
     ERROR_CODE_TASKS_UNAVAILABLE = 3;
   }
 

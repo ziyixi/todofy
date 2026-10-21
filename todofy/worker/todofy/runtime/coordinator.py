@@ -20,8 +20,8 @@ COORDINATOR binding, which calls these methods over JS RPC after its own checks
 
 Everything that reads D1, parses mail or calls Gemini runs here: a Durable Object
 invocation has 30 s of CPU, a Worker request 10 ms on Workers Free. Todofy creates,
-reads and changes no task: Tasks converts a mail itself through the Mail entry. The
-weekly backup is the only Tasks call (its export, through the TASKS binding).
+reads and changes no task and makes no Tasks call: Tasks converts a mail itself
+through the Mail entry and backs itself up.
 
 Each alarm runs at most one ledger step (a summary), then any due report and
 retention ticks (v2 plan §5.3).

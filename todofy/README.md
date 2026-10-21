@@ -10,8 +10,8 @@ the daily reminder, and Tasks keeps GTD.
 It runs entirely on Cloudflare's Workers Free plan: a thin TypeScript gateway Worker (`todofy`: hosts,
 credentials, static assets, cron), a Python Worker (`todofy-core`) hosting one SQLite-backed Durable
 Object (`TodofyCore`, instance `inbox-v1`) as the single ledger writer and scheduler, one D1
-database, and a private R2 bucket (`todofy-backups`) for weekly D1 backups. All D1 and Gemini work, and the
-backup's read of Tasks, runs in the Durable Object, which gets 30 s of CPU per call;
+database, and a private R2 bucket (`todofy-backups`) for weekly D1 backups. All D1 and Gemini work runs in the
+Durable Object, which gets 30 s of CPU per call;
 a plain Worker request gets 10 ms on the Free plan, too little for Python. The UI is React/TypeScript,
 built into static assets the gateway serves.
 [architecture-diagram.md](architecture-diagram.md) has the diagrams.
@@ -21,8 +21,8 @@ built into static assets the gateway serves.
 Mail Hero --Bearer--> hooks host POST /hooks/mail      --+
 newsletter --Basic--> hooks host GET /api/summary, ... --+--> Durable Object inbox-v1 --> D1
 owner --Access------> UI host: JWT, CSRF, assets,       |     |--> Gemini (summary, reports)
-                      /api/v1/* with the owner  --------+     |--> Tasks (TASKS binding: the backup's export)
-Tasks, MCP --RPC----> entrypoint Mail (todofy.mail.v1) -+     '--> R2 todofy-backups (weekly D1 backups)
+                      /api/v1/* with the owner  --------+     '--> R2 todofy-backups (weekly D1 backups)
+Tasks, MCP --RPC----> entrypoint Mail (todofy.mail.v1) -+
 cron */10 ----------> scheduled() -------------------------> wake() (RPC)
 ```
 
@@ -122,11 +122,11 @@ categories' rows Todofy still holds until Tasks' import; the retired Todoist Plu
 
 Every Sunday at 10:00 UTC (and once right after the first deploy) the Durable Object copies every D1
 table into its own prefix in the private bucket `todofy-backups` (`backups/<job start>/`) and keeps the
-newest 6 complete backups; the UI's health page shows the last one. Each backup also copies the Tasks app's
-D1 through the `TASKS` binding (`backups/<job start>/tasks/`). While a backup runs (a few minutes)
+newest 6 complete backups; the UI's health page shows the last one. While a backup runs (a few minutes)
 processing and owner writes wait; webhooks are still accepted. `tools/backup_restore.py` restores one into
-a new, empty D1 database ([docs/cloudflare-setup.md](docs/cloudflare-setup.md) §7); Tasks' section restores
-with [tasks/docs/backup.md](../tasks/docs/backup.md). The bucket holds mail and task content: keep it private.
+a new, empty D1 database ([docs/cloudflare-setup.md](docs/cloudflare-setup.md) §7). Tasks backs itself up into
+its own bucket ([tasks/docs/backup.md](../tasks/docs/backup.md)); the older backups here that still hold a copy of
+Tasks (`backups/<job start>/tasks/`) rotate out within six weeks. The bucket holds mail content: keep it private.
 
 ## Metrics
 

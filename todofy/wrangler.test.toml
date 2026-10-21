@@ -27,14 +27,6 @@ renamed_classes = [{ from = "TodofyCoordinator", to = "TodofyCore" }]
 binding = "METRICS"
 dataset = "todofy_metrics"
 
-# The real Tasks Worker (tasks/worker), which the harness starts in the same process on its own local D1: the
-# weekly backup's Tasks export is the only call.
-[[services]]
-binding = "TASKS"
-service = "todofy-tasks-test"
-entrypoint = "TasksApi"
-props = { access = "read-write" }
-
 [vars]
 TODOFY_PUBLIC_HOST = "todofy.localhost"
 BUILD_SHA = "test"

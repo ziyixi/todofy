@@ -450,14 +450,12 @@ class Files(unittest.TestCase):
         tasks = load(PRODUCTION["tasks"])
         core = load(PRODUCTION["todofy-core"])
         gateway = load(PRODUCTION["todofy"])
-        # Tasks converts mail through Todofy's Mail entry; Todofy writes no task.
+        # Tasks converts mail through Todofy's Mail entry; Todofy writes and reads no task, and Tasks backs itself up.
         self.assertEqual(tasks["services"], [{
             "binding": "MAIL", "service": "todofy", "entrypoint": "Mail", "props": {"access": "read-write"},
         }])
-        self.assertEqual(core["services"], [{
-            "binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"access": "read-write"},
-        }])
-        # The gateway binds no other app: Focus and planning live in Tasks.
+        # Neither Todofy Worker binds another app: Focus, planning, GTD and the backup of tasks live in Tasks.
+        self.assertNotIn("services", core)
         self.assertNotIn("services", gateway)
         for config in (core, gateway):
             # Tasks is the only task store: no source switch remains.

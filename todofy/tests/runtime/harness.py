@@ -1,10 +1,9 @@
 """Runtime-test harness: real workerd (D1, Durable Object, alarms, cron, assets)
-started with `wrangler dev` against loopback fakes and the real Tasks Worker.
+started with `wrangler dev` against loopback fakes.
 
-A test server is one process running three Workers (docs/gateway-contract.md §7): the
-TypeScript gateway (primary: port, cron, assets, `--var`), todofy-core, whose vars
-go into a generated config because `--var` reaches only the primary, and Tasks
-(tasks/worker, on its own local D1 with tasks/migrations), bound to the core as TASKS.
+A test server is one process running two Workers (docs/gateway-contract.md §7): the
+TypeScript gateway (primary: port, cron, assets, `--var`) and todofy-core, whose vars
+go into a generated config because `--var` reaches only the primary.
 
 Safe to run in several pytest processes at once (pytest-xdist, or concurrent shards):
 each process takes its ports from its own range, persist directories come from
@@ -53,10 +52,6 @@ STARTUP_TIMEOUT_S = 120
 GATEWAY_CONFIG = "gateway/wrangler.test.toml"
 GATEWAY_AUTH_CONFIG = "gateway/wrangler.test-auth.toml"
 CORE_CONFIG = ROOT / "wrangler.test.toml"
-TASKS = ROOT.parent / "tasks"
-# The core test config's TASKS service (wrangler.test.toml) and the Tasks Worker's own local D1.
-TASKS_SERVICE = "todofy-tasks-test"
-TASKS_DATABASE_ID = "00000000-0000-4000-8000-0000000000aa"
 # Vars only the gateway reads; SHARED_VARS go to both Workers, everything else to the core.
 GATEWAY_VARS = re.compile(
     r"TODOFY_HOOKS_HOSTS|ACCESS_\w+|CSRF_SIGNING_KEY|MAIL_WEBHOOK_TOKEN_SHA256\w*|REPORT_BASIC_AUTH_SHA256"
@@ -265,11 +260,9 @@ class Worker:
         d1_config: str,
         persist_to: Path,
         variables: dict[str, str],
-        tasks_config: str | None = None,
     ) -> None:
         self.configs = configs
         self.d1_config = d1_config
-        self.tasks_config = tasks_config
         self.persist_to = persist_to
         self.variables = variables
         self.base_url = ""
@@ -380,11 +373,10 @@ class Worker:
     def trigger_cron(self, cron: str = "*/10 * * * *") -> httpx.Response:
         return httpx.get(f"{self.base_url}/cdn-cgi/local/scheduled", params={"cron": cron}, timeout=30)
 
-    def d1(self, sql: str, config: str | None = None) -> list[dict[str, Any]]:
+    def d1(self, sql: str) -> list[dict[str, Any]]:
         # A second process reads the SQLite file workerd is writing (the alarm may be mid-step), and
         # wrangler sets no busy timeout, so a read can hit a transient lock; retry only that case.
-        config = config or self.d1_config
-        args = ("d1", "execute", "DB", "--local", "--persist-to", str(self.persist_to), "--config", config)
+        args = ("d1", "execute", "DB", "--local", "--persist-to", str(self.persist_to), "--config", self.d1_config)
         for attempt in range(5):
             try:
                 result = _wrangler(*args, "--json", "--command", sql)
@@ -396,11 +388,6 @@ class Worker:
                 raise AssertionError(f"wrangler d1 execute failed: {output.strip()[-2000:]}") from error
             return json.loads(result.stdout)[-1]["results"]
         raise AssertionError("unreachable")
-
-    def tasks_d1(self, sql: str) -> list[dict[str, Any]]:
-        """``sql`` on the Tasks Worker's D1 (the last statement's rows), for assertions on what Tasks holds."""
-        assert self.tasks_config is not None, "this server runs no Tasks Worker"
-        return self.d1(sql, self.tasks_config)
 
     # Mail Hero side.
 
@@ -519,15 +506,12 @@ def _migrated_template(config: str, parent: Path) -> Path:
 
 def _run(worker: Worker) -> Iterator[Worker]:
     _ensure_assets()
-    databases = [worker.d1_config] if any((ROOT / "migrations").glob("*.sql")) else []
-    if worker.tasks_config is not None:
-        databases.append(worker.tasks_config)
     # Migrating an empty directory gives the same files every time, so copy them from a template migrated
     # once instead of running wrangler (~1.4 s) per server. A directory that already has state is migrated in
     # place, as before.
-    fresh = not (worker.persist_to / "v3").exists()
-    for config in databases:
-        if fresh:
+    if any((ROOT / "migrations").glob("*.sql")):
+        config = worker.d1_config
+        if not (worker.persist_to / "v3").exists():
             shutil.copytree(_migrated_template(config, worker.persist_to.parent), worker.persist_to, dirs_exist_ok=True)
         else:
             state = str(worker.persist_to)
@@ -537,31 +521,6 @@ def _run(worker: Worker) -> Iterator[Worker]:
         yield worker
     finally:
         worker.stop()
-
-
-def tasks_config(path: Path, name: str = TASKS_SERVICE, database_id: str = TASKS_DATABASE_ID) -> Path:
-    """The Tasks Worker on its own local D1, as a Worker config at ``path`` (``d1 execute`` reads it too)."""
-    path.write_text(
-        json.dumps(
-            {
-                "name": name,
-                "main": str(TASKS / "worker/src/index.ts"),
-                "compatibility_date": "2026-09-08",
-                "workers_dev": False,
-                "preview_urls": False,
-                "d1_databases": [
-                    {
-                        "binding": "DB",
-                        "database_name": name,
-                        "database_id": database_id,
-                        "migrations_dir": str(TASKS / "migrations"),
-                    }
-                ],
-                "vars": {"TIME_ZONE": "America/Los_Angeles", "PUBLIC_HOST": "tasks.localhost"},
-            }
-        )
-    )
-    return path
 
 
 def start_worker(config: str, state: Path, variables: dict[str, str]) -> Iterator[Worker]:
@@ -574,18 +533,16 @@ def start_gateway(
     variables: dict[str, str],
     config: str = GATEWAY_CONFIG,
     core: bool = True,
-    tasks: bool = True,
     front: str | None = None,
 ) -> Iterator[Worker]:
-    """The gateway (``config``, the primary) with todofy-core and Tasks in one process; ``core=False``
-    starts the gateway alone, so every Durable Object call fails, and ``tasks=False`` leaves the core
-    without its TASKS binding, so every Tasks call fails. ``front`` is a test-only Worker config started as
-    the primary before the gateway (it binds the gateway's entrypoints by the gateway config's name); then
-    ``--var`` reaches only it, and the gateway runs on its config's own vars.
+    """The gateway (``config``, the primary) with todofy-core in one process; ``core=False`` starts the gateway
+    alone, so every Durable Object call fails. ``front`` is a test-only Worker config started as the primary
+    before the gateway (it binds the gateway's entrypoints by the gateway config's name); then ``--var`` reaches
+    only it, and the gateway runs on its config's own vars.
 
     Gateway vars stay ``--var``; core vars are written with the core test config into a
     ``wrangler.test-run-<uuid>.json`` at the repo root (a Python config must sit next to
-    ``python_modules/``), removed when the Worker stops for good. Tasks' config is written into ``state``.
+    ``python_modules/``), removed when the Worker stops for good.
     """
     shared = {name: value for name, value in variables.items() if name in SHARED_VARS}
     gateway = {name: value for name, value in variables.items() if GATEWAY_VARS.fullmatch(name)} | shared
@@ -594,14 +551,11 @@ def start_gateway(
         return
     core_config = tomllib.loads(CORE_CONFIG.read_text())
     core_config["vars"] |= {name: value for name, value in variables.items() if name not in gateway} | shared
-    if not tasks:
-        del core_config["services"]
     generated = ROOT / f"wrangler.test-run-{uuid.uuid4().hex}.json"
     generated.write_text(json.dumps(core_config))
-    store = str(tasks_config(state / "tasks.json")) if tasks else None
     try:
-        configs = [*([front] if front else []), config, generated.name, *([store] if store else [])]
-        yield from _run(Worker(configs, generated.name, state, gateway, store))
+        configs = [*([front] if front else []), config, generated.name]
+        yield from _run(Worker(configs, generated.name, state, gateway))
     finally:
         generated.unlink(missing_ok=True)
 

@@ -19,8 +19,6 @@ runs:
           todofy/gateway/package-lock.json
           todofy/web/package-lock.json
           proto/package-lock.json
-          packages/task-dates/package-lock.json
-          tasks/worker/package-lock.json
     - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
         version: '0.12.10'
@@ -41,8 +39,6 @@ runs:
         uv sync --locked
         npm ci --prefix gateway --no-audit --no-fund
         npm ci --prefix web --no-audit --no-fund
-        npm ci --prefix ../packages/task-dates --no-audit --no-fund
-        npm ci --prefix ../tasks/worker --no-audit --no-fund
         npm run build --prefix web
     # The Pyodide bundle workerd downloads (~14 MB) into the harness's disk cache. Exact key, no
     # restore-keys: a hit is a directory saved by a passing shard of the same workerd (package-lock), the

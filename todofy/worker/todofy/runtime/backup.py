@@ -22,18 +22,13 @@ KEEP_WEEKLY complete backups are deleted, with every incomplete prefix older tha
 the new one: a row that D1 retention deleted leaves R2 with the last backup that
 still holds it.
 
-Each job also copies the Tasks app's D1 under ``tasks/`` of the same prefix, read
-through the TASKS binding (Tasks' exportBackup, which owns the column lists): one
-call is one unit of the query budget, and an invocation that read Todofy's D1 does
-not start on Tasks. The lease does not hold Tasks' owner writes, so the manifest
-records Tasks' change sequence at the plan and at the end; tasks/tools/backup-restore.ts
-warns when they differ. Without the binding the job fails (``tasks_unavailable``).
-The first job after the release that added Tasks starts at the next alarm, not on
-Sunday (``tasks_included``).
+Before Tasks backed itself up into its own bucket (tasks/docs/backup.md), each job
+also copied Tasks' D1 under ``tasks/`` of its prefix; the backups that hold such a
+``tasks`` section rotate out of this bucket by themselves.
 """
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 from todofy.core import backup as layout
@@ -57,12 +52,6 @@ WALL_BUDGET_MS = 15_000
 MAX_LIST_PAGES = 10
 STORAGE_ERROR = "storage_error"
 LEASE_EXPIRED = "lease_expired"
-TASKS_UNAVAILABLE = "tasks_unavailable"
-TASKS = "tasks"
-
-
-class TasksUnavailable(Exception):
-    """The Worker has no TASKS binding: the job fails at once, not after three tries."""
 
 
 @dataclass
@@ -77,8 +66,6 @@ class Cursor:
     last_rid: int = 0
     done: bool = False
     parts: list[dict[str, Any]] = field(default_factory=list)
-    source: str = "todofy"  # or TASKS: read through the TASKS binding, with Tasks' own key
-    key: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -89,9 +76,6 @@ class Job:
     schema_version: str = ""
     errors: int = 0
     cursors: list[Cursor] = field(default_factory=list)
-    tasks_schema: str = ""
-    tasks_change_start: int = 0
-    tasks_change_end: int = 0
 
 
 @dataclass
@@ -105,7 +89,6 @@ class State:
     last_rows: int = 0
     failed_at: int = 0
     error_code: str = ""
-    tasks_included: bool = False  # the last complete backup holds Tasks
     job: Job | None = None
 
 
@@ -119,6 +102,9 @@ class Budget:
         return self.queries > 0 and self.raw_bytes > 0 and now_ms() < self.deadline_ms
 
 
+STATE_FIELDS = frozenset(item.name for item in fields(State)) - {"job"}
+
+
 def _load(store: Any) -> State:
     rows = store.exec("SELECT doc FROM backup_state WHERE id = 1").toArray()
     if not rows:
@@ -126,12 +112,18 @@ def _load(store: Any) -> State:
     try:
         doc = json.loads(rows[0].doc)
         job = doc.pop("job")
-        if job is not None:
-            job = Job(**{**job, "cursors": [Cursor(**cursor) for cursor in job["cursors"]]})
-        return State(**doc, job=job)
+        # A field another release saved and this one lacks is left out (tasks_included, of the releases that copied
+        # Tasks), so the last backup and the next slot survive the release.
+        state = State(**{name: value for name, value in doc.items() if name in STATE_FIELDS})
     except (ValueError, TypeError, KeyError):
         # Written by another version: start over (the next job is then due now).
         return State()
+    try:
+        state.job = None if job is None else Job(**{**job, "cursors": [Cursor(**cursor) for cursor in job["cursors"]]})
+    except (TypeError, KeyError):
+        # A job another release planned with other cursors (Tasks' tables, before) starts over when due.
+        state.job = None
+    return state
 
 
 def _save(store: Any, state: State) -> None:
@@ -154,12 +146,6 @@ def _holding(state: State, now: int) -> bool:
     return state.job is not None and now - state.job.started_at <= LEASE
 
 
-def _due(state: State) -> int:
-    """When the next job may start: at once while no complete backup holds Tasks yet (unless a job failed since
-    the last success: then the usual retry), else ``next_run``."""
-    return 0 if not state.tasks_included and state.failed_jobs == 0 else state.next_run
-
-
 def holds_ledger(env: Any, store: Any, now: int) -> bool:
     """Whether a backup job keeps the ledger still (owner writes then get 503)."""
     return _bucket(env) is not None and _holding(_load(store), now)
@@ -167,7 +153,7 @@ def holds_ledger(env: Any, store: Any, now: int) -> bool:
 
 def next_run(env: Any, store: Any) -> int | None:
     """When the next job is due (Unix seconds); None without the BACKUPS binding."""
-    return None if _bucket(env) is None else _due(_load(store))
+    return None if _bucket(env) is None else _load(store).next_run
 
 
 def last_backup_at(store: Any) -> int | None:
@@ -210,7 +196,7 @@ def overview(env: Any, store: Any, now: int) -> dict[str, Any]:
         "last_backup_rows": state.last_rows,
         "last_failure_at": at(state.failed_at),
         "last_error_code": state.error_code or None,
-        "next_backup_at": None if status in ("disabled", "running") else at(max(_due(state), now)),
+        "next_backup_at": None if status in ("disabled", "running") else at(max(state.next_run, now)),
     }
 
 
@@ -224,7 +210,7 @@ async def run(env: Any, store: Any, now: int, *, may_start: bool = True) -> int 
         return None
     state = _load(store)
     if state.job is None:
-        if _due(state) > now or not may_start:
+        if state.next_run > now or not may_start:
             return None
         state.job = Job(layout.weekly_prefix(now), now)
     job, retry_ms = state.job, CONTINUE_MS
@@ -235,23 +221,12 @@ async def run(env: Any, store: Any, now: int, *, may_start: bool = True) -> int 
                 await _plan(env, job)
             case "export":
                 budget = Budget(integer(env, "BACKUP_QUERY_BUDGET", DEFAULT_QUERY_BUDGET), now_ms() + WALL_BUDGET_MS)
-                read_todofy = False
                 for cursor in job.cursors:
-                    if cursor.done or not budget.left():
-                        continue
-                    if cursor.source != TASKS:
-                        read_todofy = True
+                    if not cursor.done and budget.left():
                         await _export_part(env.DB, bucket, job.prefix, cursor, budget)
-                    elif read_todofy:
-                        break  # Tasks starts in an invocation of its own
-                    else:
-                        await _export_tasks_part(env, bucket, job, cursor, budget)
             case _:
                 await _finish(bucket, state, job, now)
         job.errors = 0
-    except TasksUnavailable:
-        _log(error="TasksUnavailable", step=step)
-        _fail(state, now, TASKS_UNAVAILABLE)
     except Exception as exc:
         # D1 or R2 failed (or a bug): the step runs again later from the cursors of the parts stored so far.
         job.errors += 1
@@ -279,33 +254,16 @@ def _fail(state: State, now: int, code: str) -> None:
 
 
 async def _plan(env: Any, job: Job) -> None:
-    """Fix the snapshot: the schema version and the max rowid of every table (one batch), then Tasks' plan. The
-    job changes only once both answered, so a failed step plans again from nothing."""
+    """Fix the snapshot: the schema version and the max rowid of every table, in one batch. The job changes only
+    once it answered, so a failed step plans again from nothing."""
     db = env.DB
     tables = list(sql.TABLES.values())
     results = await db.batch([db.prepare(sql.SCHEMA_VERSION), *(db.prepare(sql.max_rowid(t)) for t in tables)])
-    plan = await _tasks_export(env, {"table": ""})
     job.schema_version = results[0].results[0]["name"]
     for table, result in zip(tables, results[1:], strict=True):
         job.cursors.append(Cursor(table.name, int(result.results[0]["n"] or 0), list(table.columns)))
-    job.tasks_schema = str(plan["schema_version"])
-    job.tasks_change_start = job.tasks_change_end = int(plan["change_sequence"])
-    for table in plan["tables"]:
-        columns, key = list(table["columns"]), list(table["key"])
-        job.cursors.append(Cursor(str(table["name"]), int(table["max_rowid"]), columns, source=TASKS, key=key))
     job.planned = True
     _log(planned=job.prefix, tables=len(job.cursors))
-
-
-async def _tasks_export(env: Any, request: dict[str, Any]) -> dict[str, Any]:
-    """One TasksApi.exportBackup call: Tasks' plan, or a page of one of its tables."""
-    service = getattr(env, "TASKS", None)
-    if service is None:
-        raise TasksUnavailable
-    result = await service.exportBackup(json.dumps(request, separators=(",", ":")))
-    if result.status != 200:
-        raise RuntimeError(f"Tasks backup export answered {result.status}")
-    return json.loads(str(result.body))
 
 
 def _planned(cursor: Cursor) -> sql.Table:
@@ -349,29 +307,6 @@ async def _export_part(db: Any, bucket: Any, prefix: str, cursor: Cursor, budget
     cursor.last_rid, cursor.done = last, done
 
 
-async def _export_tasks_part(env: Any, bucket: Any, job: Job, cursor: Cursor, budget: Budget) -> None:
-    """Pages of one Tasks table into one part, under ``tasks/`` of the job's prefix (one call per page)."""
-    part = layout.Part()
-    last, done = cursor.last_rid, False
-    while not done and budget.left():
-        budget.queries -= 1
-        page = await _tasks_export(env, {"table": cursor.table, "after": last, "through": cursor.max_rid})
-        before = part.raw_bytes
-        for row in page["rows"]:
-            part.add(row)
-        budget.raw_bytes -= part.raw_bytes - before
-        last, done = int(page["last"]), bool(page["done"])
-        job.tasks_change_end = max(job.tasks_change_end, int(page["change_sequence"]))
-    if part.rows:
-        data, digest = part.finish()
-        key = layout.part_key(job.prefix + layout.TASKS_DIR, cursor.table, len(cursor.parts) + 1)
-        await bucket.put(
-            key, data, {"httpMetadata": {"contentType": "application/gzip"}, "customMetadata": {"sha256": digest}}
-        )
-        cursor.parts.append({"key": key, "rows": part.rows, "bytes": len(data), "sha256": digest})
-    cursor.last_rid, cursor.done = last, done
-
-
 async def _deferred_values(db: Any, table: sql.Table, rows: Any, budget: Budget) -> dict[int, Any]:
     """The deferred column of the flagged rows (at most DEFERRED_ROWS), by rowid."""
     if table.deferred is None:
@@ -387,29 +322,18 @@ async def _deferred_values(db: Any, table: sql.Table, rows: Any, budget: Budget)
 async def _finish(bucket: Any, state: State, job: Job, now: int) -> None:
     """Write the manifest (it marks the backup complete), then apply retention."""
     finished = now_ms() // 1000
-    tables, tasks_tables = [], []
+    tables = []
     for cursor in job.cursors:
-        if cursor.source == TASKS:
-            entry = layout.table_entry(cursor.table, cursor.columns, cursor.key, cursor.max_rid, cursor.parts)
-            tasks_tables.append(entry)
-            continue
         table = _planned(cursor)
         tables.append(layout.table_entry(table.name, table.columns, table.key, cursor.max_rid, cursor.parts))
-    # A job the release before planned holds no Tasks: the manifest then has no tasks section.
-    tasks = (
-        layout.tasks_section(job.tasks_schema, job.tasks_change_start, job.tasks_change_end, tasks_tables)
-        if tasks_tables
-        else None
-    )
     data = layout.manifest(
-        started_at=job.started_at, finished_at=finished, schema_version=job.schema_version, tables=tables, tasks=tasks
+        started_at=job.started_at, finished_at=finished, schema_version=job.schema_version, tables=tables
     )
     await bucket.put(job.prefix + layout.MANIFEST, data, {"httpMetadata": {"contentType": "application/json"}})
     state.job, state.failed_jobs, state.last_status, state.error_code = None, 0, "ok", ""
     state.last_backup_at, state.last_key = finished, job.prefix
-    state.last_bytes = sum(table["bytes"] for table in tables + tasks_tables) + len(data)
-    state.last_rows = sum(table["rows"] for table in tables + tasks_tables)
-    state.tasks_included = tasks is not None
+    state.last_bytes = sum(table["bytes"] for table in tables) + len(data)
+    state.last_rows = sum(table["rows"] for table in tables)
     state.next_run = layout.next_run(now, skip_today=True)
     _log(done=job.prefix, rows=state.last_rows, bytes=state.last_bytes)
     try:

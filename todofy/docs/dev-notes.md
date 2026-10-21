@@ -5,7 +5,7 @@ the contracts between modules. Todofy is two Workers: the TypeScript gateway `to
 routing, Access, CSRF, webhook and Basic credentials, assets, cron) and the Python `todofy-core`
 (`worker/`), which hosts the `TodofyCore` Durable Object where all D1 and Gemini work runs. Todofy writes no
 task since 2026-10-21 (Tasks converts mail through the `Mail` entrypoint); the column names that still say
-`todoist` are frozen identities, and the core's `TASKS` binding only reads Tasks' backup export. `gateway-contract.md` is the contract between them. Plans and decisions live in `cloudflare-migration-plan.md` (v2, §0.1
+`todoist` are frozen identities, and neither Worker binds Tasks (Tasks backs itself up). `gateway-contract.md` is the contract between them. Plans and decisions live in `cloudflare-migration-plan.md` (v2, §0.1
 overrides) and `implementation-order.md`; where they disagree with this file on a name or interface,
 this file reflects what is in the tree. The retired Go service is gone from the tree (S11); it stays in
 the git history at `6c46ed4`.
@@ -595,16 +595,13 @@ the columns the job was planned with, and its parts and manifest entry hold exac
 adds a column while a job runs cannot mix two row widths; a state another version wrote (a job saved without
 its columns, say) does not load, and the next backup is due now. Only
 `tests/runtime/test_backup.py` binds the bucket (the shared test config has none, so no other scenario
-pauses for a backup), with a real Tasks Worker as `TASKS`. `tools/backup_restore.py` downloads, checks, and turns a backup into SQL
+pauses for a backup). `tools/backup_restore.py` downloads, checks, and turns a backup into SQL
 (docs/cloudflare-setup.md §7).
 
-After Todofy's tables the job copies the Tasks app's D1: the plan step also asks `TASKS.exportBackup` for
-Tasks' plan (its migration, change sequence and tables with their columns, key and max rowid), and those
-cursors (`source = "tasks"`) page through the same method, one call per unit of `BACKUP_QUERY_BUDGET`, into
-`backups/<job start>/tasks/<table>/`. An invocation that read a Todofy page does not start on Tasks. The
-lease does not hold Tasks' owner writes, so the manifest's `tasks` section records the change sequence at the
-plan and at the end. A missing binding fails the job at once (`tasks_unavailable`). `State.tasks_included`
-makes the next job due at once until a complete backup holds Tasks (unless a job failed since the last success).
+Until Tasks backed itself up ([tasks/docs/backup.md](../../tasks/docs/backup.md)), the job also copied Tasks' D1
+through a `TASKS` binding into `backups/<job start>/tasks/` and the manifest's `tasks` section. A state that
+release saved still loads: its extra field (`tasks_included`) is left out, so the last backup and the next slot
+survive, and a job it planned with Tasks' cursors starts over when due.
 
 ### ops-v1 (lead; `core/ops.py`, `runtime/ops.py`, `gateway/src/ops.ts`)
 The operations surface a dashboard Worker in the same account reaches through a service binding to the

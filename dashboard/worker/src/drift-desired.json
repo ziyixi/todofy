@@ -1016,11 +1016,6 @@
           "source": "config"
         },
         {
-          "name": "TASKS",
-          "type": "service",
-          "source": "config"
-        },
-        {
           "name": "TODOFY_PUBLIC_HOST",
           "type": "plain_text",
           "source": "config"

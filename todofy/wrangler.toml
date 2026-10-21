@@ -51,13 +51,6 @@ renamed_classes = [{ from = "TodofyCoordinator", to = "TodofyCore" }]
 binding = "METRICS"
 dataset = "todofy_metrics"
 
-# Tasks' backup export (runtime/backup.py), Todofy's last call to Tasks.
-[[services]]
-binding = "TASKS"
-service = "tasks"
-entrypoint = "TasksApi"
-props = { access = "read-write" }
-
 [vars]
 # A fixed upstream, never a variable, so a bad setting cannot send the API key elsewhere (tests pin it).
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com"
