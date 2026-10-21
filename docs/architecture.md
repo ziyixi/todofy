@@ -198,8 +198,9 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   summary work and reconciliation use distinct durable states; it writes no task since 2026-10-21. See the
   [development invariants](../todofy/docs/dev-notes.md) and [gateway contract](../todofy/docs/gateway-contract.md).
 - **Tasks:** primary task content and completion history in D1, with the owner-only desktop PWA and private
-  consumer bindings. Planning and date code are shared packages, not additional services. See the
-  [design](../tasks/docs/design.md) and [migration runbook](../tasks/docs/import.md).
+  consumer bindings. Its `TaskJobs` object keeps the GTD days, the weekly review and a weekly backup in its own
+  private bucket. Planning and date code are shared packages, not additional services. See the
+  [design](../tasks/docs/design.md), [backup](../tasks/docs/backup.md) and [migration runbook](../tasks/docs/import.md).
 - **Links:** public short links and an owner launcher under `/_/`. A redirect does one primary-key D1 read,
   zero writes/logs, and uses 302 only. A private key and a nonexistent key give anonymous callers the same
   response. Only `/_` and `/_/*` are behind Access. See [AGENTS](../links/AGENTS.md).

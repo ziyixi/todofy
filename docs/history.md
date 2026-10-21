@@ -36,6 +36,14 @@ needs those writes, then drops `task_intents`, `task_intent_tasks`, `gtd_snapsho
 still exports `Intents`, `Planning` and `MailApi` as refusals. The design of the GTD ledger
 (`todofy/docs/gtd-features.md`) and the removed code are at `b9d18aba`.
 
+The release after it (Boundary B's release 2) made Tasks self-sufficient: Tasks backs itself up weekly into its own
+bucket `tasks-backups` from its `TaskJobs` Alarm, and Todofy's weekly job backs up only Todofy's D1, so todofy-core
+binds no other app and `TasksApi.exportBackup` is gone. Once the one-time Tasks Todofy import had copied the GTD days,
+the weekly reviews, the Mail categories and the routes, its workflow and generator were deleted and Todofy's
+`0015_drop_copied_stores.sql` dropped `gtd_daily`, `gtd_reviews`, `plan_categories` and `plan_settings`
+(`mail_reminders` stays while `tools/legacy_migration` loads into it). The gateway's refusals went, and Mail Hero's
+`0011_drop_alert_outbox.sql` dropped the alert outbox its Worker had stopped using in the release before.
+
 ## FlowDay retirement and the planning store drop, decided October 20
 
 By the owner's decision of 2026-10-20, the release that merged `claude/retire-flowday` removed FlowDay completely,
