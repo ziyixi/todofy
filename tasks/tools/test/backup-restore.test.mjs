@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import {
   FOCUS_TABLES,
+  MAIL_GTD_TABLES,
   PLANNING_TABLES,
   RESTORE_ORDER,
   RestoreError,
@@ -74,6 +75,15 @@ function seed(db) {
     INSERT INTO weekly_bets(week_start,area,text,revision,created_at,updated_at) VALUES
       ('2026-10-19','work','Synthetic “goal” it''s',2,1,3);
     UPDATE plan_board SET lanes='{"committed":["t-parent"]}',revision=4,created_at=1,updated_at=6 WHERE id='board';
+    UPDATE mail_settings SET categories='[{"id":3,"label_id":"l1","priority":2}]',next_category_id=4,revision=2,
+      created_at=1,updated_at=6 WHERE id='mail';
+    INSERT INTO gtd_days(day,scope,open,age_0_7,age_8_14,age_15_30,age_31_plus,oldest_days,overdue,undated,created_7d,
+      completed_7d,closed_1d,mail_open,complete,computed_at) VALUES
+      ('2026-10-19','all',4,2,1,1,0,20,1,2,3,1,1,5,1,8),('2026-10-19','inbox',1,1,0,0,0,2,0,1,1,0,NULL,NULL,1,8);
+    INSERT INTO weekly_reviews(week,state,task_id,created_at,completed_at) VALUES
+      ('2026-W42','created','t-done',5,7),('2026-W41','unknown','',4,NULL);
+    INSERT INTO task_inbox_routes(source,project_id,updated_at) VALUES('home','work',6);
+    INSERT INTO task_inbox_days(source,day,requests) VALUES('home','2026-10-19',2),('watch','2026-10-19',1);
   `);
   db.prepare("INSERT INTO tasks(id,title,description,created_at,updated_at) VALUES('t-nul','NUL',?,1,1)").run(
     "a\0b “quoted” it's\n第二行",
@@ -137,6 +147,10 @@ function dump(db) {
     day_steps: 'day,task_id',
     task_dependencies: 'task_id,prerequisite_id',
     weekly_bets: 'week_start,area',
+    gtd_days: 'day,scope',
+    weekly_reviews: 'week',
+    task_inbox_routes: 'source',
+    task_inbox_days: 'source,day',
   };
   return Object.fromEntries(
     [...RESTORE_ORDER, 'task_labels'].map((name) => [
@@ -172,8 +186,9 @@ test('every table but the derived ones is restored, in an order its references a
 test('a backup round-trips with its ids, revisions, sequences and labels, and a re-run changes nothing', () =>
   withBackup((root, source) => {
     const { sql, statements } = restoreSql(readBackup(root));
-    // Every row, and one DELETE of the migration's idle timer and of its empty board before the backed-up ones.
-    assert.equal(statements, 4 + 1 + 2 + 1 + 5 + 2 + 1 + 2 + 2 + 1 + 1 + 2 + 1 + 1 + 1);
+    // Every row, and one DELETE of the migration's idle timer, its empty board and its empty mail categories before
+    // the backed-up ones.
+    assert.equal(statements, 4 + 1 + 2 + 1 + 5 + 2 + 1 + 2 + 2 + 1 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 2 + 2 + 1 + 2);
     const lines = sql.split('\n');
     const at = (id) => lines.findIndex((line) => line.startsWith('INSERT INTO tasks(') && line.includes(`'${id}'`));
     assert.ok(at('t-parent') < at('t-child'), 'the parent, stored after its child, is inserted first');
@@ -192,8 +207,9 @@ test('a backup round-trips with its ids, revisions, sequences and labels, and a 
     assert.equal(target.prepare("SELECT sequence FROM completions WHERE id='c-new'").get().sequence, 10);
   }));
 
-const BEFORE_FOCUS = RESTORE_ORDER.filter((name) => !FOCUS_TABLES.includes(name) && !PLANNING_TABLES.includes(name));
-const BEFORE_PLANNING = RESTORE_ORDER.filter((name) => !PLANNING_TABLES.includes(name));
+const BEFORE_MAIL_GTD = RESTORE_ORDER.filter((name) => !MAIL_GTD_TABLES.includes(name));
+const BEFORE_PLANNING = BEFORE_MAIL_GTD.filter((name) => !PLANNING_TABLES.includes(name));
+const BEFORE_FOCUS = BEFORE_PLANNING.filter((name) => !FOCUS_TABLES.includes(name));
 
 test('a backup made before the Focus tables restores them empty, with the idle timer', () =>
   withBackup(
@@ -252,6 +268,35 @@ test('a backup made before planning moved into Tasks restores no planning facts,
       );
     },
     { tables: BEFORE_PLANNING, beforePlanning: true },
+  ));
+
+test('a backup made before the mail categories and GTD tables restores them as migrated', () =>
+  withBackup(
+    (root, source) => {
+      const backup = readBackup(root);
+      assert.deepEqual(
+        backup.section.tables.map((table) => table.name),
+        BEFORE_MAIL_GTD,
+      );
+      const target = migrated();
+      target.exec(restoreSql(backup).sql);
+      const restored = dump(target);
+      const before = dump(source);
+      for (const name of BEFORE_MAIL_GTD) assert.deepEqual(restored[name], before[name], name);
+      for (const name of ['gtd_days', 'weekly_reviews', 'task_inbox_routes', 'task_inbox_days'])
+        assert.deepEqual(restored[name], [], name);
+      assert.deepEqual(
+        restored.mail_settings.map(({ id, categories, next_category_id, revision, created_at }) => ({
+          id,
+          categories,
+          next_category_id,
+          revision,
+          created_at,
+        })),
+        [{ id: 'mail', categories: '[]', next_category_id: 1, revision: 1, created_at: 0 }],
+      );
+    },
+    { tables: BEFORE_MAIL_GTD },
   ));
 
 test('a backup made before the timer kept its pause time restores the paused timer without one', () =>
@@ -371,11 +416,15 @@ test('the CLI restores and verifies a backup made before the Focus tables', () =
         written,
         /\nNOTE task_dependencies, weekly_bets, plan_board: not in this backup \(made before 0006/,
       );
+      assert.match(
+        written,
+        /\nNOTE mail_settings, gtd_days, weekly_reviews, task_inbox_routes, task_inbox_days: not in this backup \(made before 0008/,
+      );
       const passed = loaded(root, out).verify();
       assert.equal(passed.status, 0, passed.stderr);
       assert.match(
         passed.stdout,
-        /PASS requests rows=1\/1\nPASS day_steps rows=0\/0\nPASS focus_entries rows=0\/0\nPASS focus_timer rows=1\/1\nPASS task_dependencies rows=0\/0\nPASS weekly_bets rows=0\/0\nPASS plan_board rows=1\/1\nverify PASS\n$/,
+        /PASS requests rows=1\/1\nPASS day_steps rows=0\/0\nPASS focus_entries rows=0\/0\nPASS focus_timer rows=1\/1\nPASS task_dependencies rows=0\/0\nPASS weekly_bets rows=0\/0\nPASS plan_board rows=1\/1\nPASS mail_settings rows=1\/1\nPASS gtd_days rows=0\/0\nPASS weekly_reviews rows=0\/0\nPASS task_inbox_routes rows=0\/0\nPASS task_inbox_days rows=0\/0\nverify PASS\n$/,
       );
     },
     { tables: BEFORE_FOCUS, beforePlanning: true },
@@ -396,7 +445,7 @@ test('the CLI writes the SQL owner-only, warns about a moving snapshot and verif
       assert.match(passed.stdout, new RegExp(`PASS schema_version ${FILES.at(-1)}\n`));
       assert.match(
         passed.stdout,
-        /PASS requests rows=1\/1\nPASS day_steps rows=2\/2\nPASS focus_entries rows=2\/2\nPASS focus_timer rows=1\/1\nPASS task_dependencies rows=2\/2\nPASS weekly_bets rows=1\/1\nPASS plan_board rows=1\/1\nverify PASS\n$/,
+        /PASS requests rows=1\/1\nPASS day_steps rows=2\/2\nPASS focus_entries rows=2\/2\nPASS focus_timer rows=1\/1\nPASS task_dependencies rows=2\/2\nPASS weekly_bets rows=1\/1\nPASS plan_board rows=1\/1\nPASS mail_settings rows=1\/1\nPASS gtd_days rows=2\/2\nPASS weekly_reviews rows=2\/2\nPASS task_inbox_routes rows=1\/1\nPASS task_inbox_days rows=2\/2\nverify PASS\n$/,
       );
       new DatabaseSync(file).exec('DELETE FROM requests');
       const failed = verify();

@@ -18,8 +18,10 @@ own:
 - Every table a restore needs is included: projects, sections, labels, filters, tasks, completions, request
   receipts; since `0005_focus.sql`, Focus's day queues (`day_steps`), time records (`focus_entries`) and the one
   timer (`focus_timer`); and since `0006_planning.sql`, each task's planning columns, its dependencies
-  (`task_dependencies`), the weekly goals (`weekly_bets`) and Plan's lane orders (`plan_board`). `task_labels` and
-  the change feed are left out, because inserts rebuild them.
+  (`task_dependencies`), the weekly goals (`weekly_bets`) and Plan's lane orders (`plan_board`); and since
+  `0008_mail_gtd_inbox.sql`, the mail categories (`mail_settings`), the GTD days (`gtd_days`), the weekly reviews
+  (`weekly_reviews`), TaskInbox's routes (`task_inbox_routes`) and its daily counts (`task_inbox_days`).
+  `task_labels` and the change feed are left out, because inserts rebuild them.
 - The newest six complete backups are kept. Todofy's health page and Home show the last backup, and a failed
   or stale one (`backup_failed`, `backup_stale`). Without the `TASKS` binding a job fails with
   `tasks_unavailable`.
@@ -67,8 +69,8 @@ afterwards.
    path inside the repository and an existing file. Never copy `tasks/wrangler.toml` for this: its
    `database_id` is the live database. `sql` checks every part again and writes one
    `INSERT ... ON CONFLICT DO NOTHING` per row, parents first, so a re-run after a partial load is safe. Triggers
-   rebuild `task_labels`, `project_archived` and the change feed. The backed-up timer and lane orders replace the
-   idle timer and empty board the migrations seed. A backup made before `0005_focus.sql` has no Focus tables: `sql`
+   rebuild `task_labels`, `project_archived` and the change feed. The backed-up timer, lane orders and mail
+   categories replace the idle timer, empty board and empty categories the migrations seed. A backup made before `0005_focus.sql` has no Focus tables: `sql`
    says so in a `NOTE` line, they restore empty with the idle timer, and `verify` expects 0, 0 and 1 rows in them. A
    backup made before `0006_planning.sql` has no planning: its tasks take the columns' defaults (no stage,
    unassigned, no flags), and the three planning tables restore as migrated (0, 0 and 1 rows), named in a `NOTE`
@@ -76,7 +78,9 @@ afterwards.
    `0013_drop_plan_store.sql` dropped; Todofy's backups made before it still hold them as files, and its restore
    tool leaves those tables out.
    A backup made before `0007_timer_pause.sql` has no `focus_timer.paused_at`: the timer restores without it, so a
-   paused session resumes now.
+   paused session resumes now. A backup made before `0008_mail_gtd_inbox.sql` has none of its five tables: they
+   restore as migrated (no mail categories, 1 row in `mail_settings` and none in the others), named in a `NOTE`
+   line.
    `verify` ends with `verify PASS`.
 5. Switch the Tasks Worker to the new database. This step is not rehearsed, and a push alone does not do it:
    the release's preflight finds the live `DB` binding on the old id and stops (`STATEFUL_BINDING_CHANGED`

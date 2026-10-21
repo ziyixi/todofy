@@ -102,6 +102,34 @@ export const BACKUP_TABLES: readonly BackupTable[] = [
     columns: ['id', 'lanes', 'revision', 'created_at', 'updated_at'],
     key: ['id'],
   },
+  {
+    name: 'mail_settings',
+    columns: ['id', 'categories', 'next_category_id', 'revision', 'created_at', 'updated_at'],
+    key: ['id'],
+  },
+  {
+    name: 'gtd_days',
+    columns: [
+      'day', 'scope', 'open', 'age_0_7', 'age_8_14', 'age_15_30', 'age_31_plus', 'oldest_days', 'overdue', 'undated',
+      'created_7d', 'completed_7d', 'closed_1d', 'mail_open', 'complete', 'computed_at',
+    ],
+    key: ['day', 'scope'],
+  },
+  {
+    name: 'weekly_reviews',
+    columns: ['week', 'state', 'task_id', 'created_at', 'completed_at'],
+    key: ['week'],
+  },
+  {
+    name: 'task_inbox_routes',
+    columns: ['source', 'project_id', 'updated_at'],
+    key: ['source'],
+  },
+  {
+    name: 'task_inbox_days',
+    columns: ['source', 'day', 'requests'],
+    key: ['source', 'day'],
+  },
 ];
 /**
  * Rows per page, and the bytes they may hold. The Worker's CPU grows with the bytes D1 hands it: about 6.5 reference ms

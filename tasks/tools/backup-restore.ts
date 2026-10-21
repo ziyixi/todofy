@@ -14,7 +14,8 @@
  * One made before 0006_planning.sql has no planning columns or tables: its tasks take the columns' defaults (no
  * planning facts) and the tables restore empty, but for the migration's empty Review board. One made before
  * 0007_timer_pause.sql has no focus_timer.paused_at: the INSERT names the backup's columns, so a paused timer restores
- * with it NULL and resumes now, as a pause made before that release does.
+ * with it NULL and resumes now, as a pause made before that release does. One made before 0008_mail_gtd_inbox.sql has
+ * no mail categories, GTD days, weekly reviews or TaskInbox tables: they restore as migrated (no categories).
  *
  *   node tools/backup-restore.ts config --database-name tasks-restore --database-id <uuid> --out <outside>/restore.toml
  *   node tools/backup-restore.ts sql --in <download dir> --out <outside>/tasks-restore.sql
@@ -53,18 +54,26 @@ export const RESTORE_ORDER = [
   'task_dependencies',
   'weekly_bets',
   'plan_board',
+  'mail_settings',
+  'gtd_days',
+  'weekly_reviews',
+  'task_inbox_routes',
+  'task_inbox_days',
 ];
 /** The tables 0005_focus.sql added. Older backups lack all three; the migration seeds the one timer row. */
 export const FOCUS_TABLES = ['day_steps', 'focus_entries', 'focus_timer'];
 /** The tables 0006_planning.sql added. Older backups lack all three; the migration seeds the one board row. */
 export const PLANNING_TABLES = ['task_dependencies', 'weekly_bets', 'plan_board'];
+/** The tables 0008_mail_gtd_inbox.sql added. Older backups lack all five; the migration seeds the one settings row. */
+export const MAIL_GTD_TABLES = ['mail_settings', 'gtd_days', 'weekly_reviews', 'task_inbox_routes', 'task_inbox_days'];
 /** The tables later migrations added, oldest first: a backup lacks every table added after it was made. */
 const ADDED = [
   { migration: '0005_focus.sql', tables: FOCUS_TABLES },
   { migration: '0006_planning.sql', tables: PLANNING_TABLES },
+  { migration: '0008_mail_gtd_inbox.sql', tables: MAIL_GTD_TABLES },
 ];
 /** The one row a migration seeds, which a backed-up row of that table replaces. */
-const SEEDED = ['focus_timer', 'plan_board'];
+const SEEDED = ['focus_timer', 'plan_board', 'mail_settings'];
 
 export class RestoreError extends Error {}
 
@@ -233,7 +242,7 @@ export function restoreSql({ section, rows }: Backup): { sql: string; statements
     const values = rows.get(table.name) ?? [];
     const ordered = table.name === 'projects' || table.name === 'tasks' ? parentsFirst(table.name, values) : values;
     const insert = `INSERT INTO ${table.name}(${table.columns.join(',')}) VALUES`;
-    // The migration seeded an idle timer and an empty board; the backed-up ones take their place.
+    // The migration seeded an idle timer, an empty board and no mail categories; the backed-up ones take their place.
     if (SEEDED.includes(table.name) && ordered.length) lines.push(`DELETE FROM ${table.name};`);
     for (const row of ordered) {
       const statement = `${insert}(${table.columns.map((column) => literal(row[column])).join(',')}) ON CONFLICT DO NOTHING;`;
