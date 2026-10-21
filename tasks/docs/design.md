@@ -217,12 +217,40 @@ over a minute old. The cost is one `GetFocusTimer` a minute while a session exis
 session nothing stays mounted. A failure in the background shows nothing on the other page and resets when Plan or
 Focus opens.
 
+### Pause when away
+
+Focus › Day has one quiet checkbox, Pause when away, where Chrome has the Idle Detection API (94+). It is a setting
+of this device that PlanningPage keeps in localStorage (`tasks.idle-pause` = `on`), like Plan's view, not timer
+state. Its click asks for the `idle-detection` permission (`IdleDetector.requestPermission()` needs that click's
+activation); refused, it stays off with a muted note. It shows checked only while the permission is granted.
+
+Only a count-up pauses. While one runs and the setting is on, one `IdleDetector` (threshold 10 minutes, the API's
+minimum is one) and a 15-second heartbeat watch the main window. The owner left at the moment the screen locked,
+ten minutes before Chrome reported no input, or at the last heartbeat when the next event comes ten minutes later
+(the machine slept or the page was frozen); the earliest wins. The state seen when watching begins is only a
+baseline, so a session started from the phone while the Mac sits idle is not paused. The timer is paused in Tasks
+at once, at that moment (`effective_time`, above), so other windows and devices see it paused, and time away is
+not counted if the owner never returns to this window. On return, the question "Away for N min — count it?" takes
+Pause/Resume's place in the timer bar (shown on other pages too) and fills the mini timer: Keep resumes at
+`pause_time`, Discard resumes now; Stop and Complete end the paused session without the time away. Any other change
+of the timer drops the question, and so does a reload: the timer stays paused. A failed pause shows the usual error
+once, then each heartbeat sends it again, quietly and with the same request ID, while the session still counts up.
+With two Tasks windows, a Web Lock (`tasks.idle-pause`) lets one watch; the other takes over when it closes.
+
+Records stay exact to what Tasks is sent, to the second. What remains: Chrome reports idle and lock on its own
+schedule, so the moment can trail the true one by that delay (counted as work); a sleep is bounded by one
+heartbeat (up to a minute in a hidden window); and pausing and resuming floor to whole seconds, as every pause
+does. Nothing is added while no session exists or the setting is off; with it on, a running count-up adds no
+request until the owner leaves.
+
 Headless Chromium cannot install an app: `pwa.spec.ts` checks the parsed manifest, `pwa-launch.spec.ts` stubs
 `launchQueue` and calls its consumer as Chrome would, and `titlebar.spec.ts` stubs the display mode (its
 `env(titlebar-area-*)` fallbacks apply). `mini-timer.spec.ts` uses the real Document Picture-in-Picture API (only
-the window's size is set by the test: headless Chrome opens it at the page's viewport). The Dock menu, links from
-Gmail and Todofy's `/task/<id>` redirect landing in the open window, the title bar's toggle and clearances, and the
-mini timer's first size, resizing and remembered place are checked by hand in the installed app.
+the window's size is set by the test: headless Chrome opens it at the page's viewport). `idle-pause.spec.ts` uses
+the real Idle Detection API; CDP grants its permission (`Browser.grantPermissions`) and sets the OS's idle and lock
+state (`Emulation.setIdleOverride`). The Dock menu, links from Gmail and Todofy's `/task/<id>` redirect landing in
+the open window, the title bar's toggle and clearances, the mini timer's first size, resizing and remembered place,
+and a real screen lock and lid close with a count-up running are checked by hand in the installed app.
 
 ## Performance and Cloudflare
 

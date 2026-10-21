@@ -29,7 +29,10 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
   Completed checkbox shows the day's completed steps. The timer bar's Mini timer button floats the session in a
   small always-on-top window (Document Picture-in-Picture): the step, the time and a hairline of its time against
   the estimate, with Pause/Resume, Stop and Complete on hover. It stays open on other pages and closes when the
-  session ends.
+  session ends. With Focus' Pause when away on (a per-device setting; Chrome asks for its permission on that click),
+  a count-up pauses in Tasks at the moment the screen locked, input stopped for 10 minutes or the machine slept, and
+  on return asks "Away for N min — count it?": Keep counts the time away, as if it never paused; Discard resumes
+  from now. A pomodoro is never paused.
 - A Step's planning panel shows only its time estimate; Plan's Add steps gives each new Step a time (30 min unless
   another is chosen). In Week a click selects a commitment and a double-click opens it; elsewhere in Plan a click opens.
 - Installable desktop PWA; an explicit offline page, with task data available online. The Dock icon's menu offers

@@ -10,6 +10,16 @@ import { api, send } from "./api";
 import type { CompletedTask } from "./useTaskActions";
 import { usePlanView } from "./usePlanView";
 
+/** Focus' Pause when away, a setting of this device like Plan's view: "on", or absent for off. */
+const IDLE_PAUSE_KEY = "tasks.idle-pause";
+function readIdlePause(): boolean {
+  try {
+    return window.localStorage.getItem(IDLE_PAUSE_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
 export default function PlanningPage({
   page,
   background = false,
@@ -70,6 +80,16 @@ export default function PlanningPage({
   }, [onCompleteTask]);
   const [snapshot, setSnapshot] = useState<PlusSnapshot>();
   const [planView, updatePlanView] = usePlanView();
+  const [idlePause, setIdlePause] = useState(readIdlePause);
+  function changeIdlePause(on: boolean) {
+    setIdlePause(on);
+    try {
+      if (on) window.localStorage.setItem(IDLE_PAUSE_KEY, "on");
+      else window.localStorage.removeItem(IDLE_PAUSE_KEY);
+    } catch {
+      // A blocked browser store keeps the setting for this visit only.
+    }
+  }
   return (
     <div className="planning-ui">
       <PlanningApp
@@ -92,6 +112,8 @@ export default function PlanningPage({
         onSnapshot={setSnapshot}
         planView={planView}
         onPlanView={updatePlanView}
+        idlePause={idlePause}
+        onIdlePause={changeIdlePause}
       />
     </div>
   );
