@@ -12,6 +12,8 @@ import { usePlanView } from "./usePlanView";
 
 export default function PlanningPage({
   page,
+  background = false,
+  onSession,
   review,
   refreshRevision,
   onOpenTask,
@@ -19,6 +21,10 @@ export default function PlanningPage({
   onCompleteTask,
 }: {
   page: "plan" | "focus";
+  /** Another page shows: only the Focus mini timer, if open, stays, with what keeps it current. */
+  background?: boolean;
+  /** Whether a Focus session exists; while one does, App keeps this page mounted behind other pages. */
+  onSession?: (active: boolean) => void;
   /** Each new positive value opens Plan's weekly review checklist (the review link, App's reviewRequest). */
   review: number;
   /** Changes after each task write Plan did not issue (useTaskActions' planRevision). */
@@ -71,6 +77,8 @@ export default function PlanningPage({
         refreshRevision={refreshRevision}
         review={review}
         view={page}
+        background={background}
+        onSession={onSession}
         language="en"
         onOpenTask={onOpenTask}
         onSettings={onSettings}

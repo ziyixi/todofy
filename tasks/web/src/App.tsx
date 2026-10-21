@@ -20,7 +20,6 @@ import {
 } from "./api";
 import { todayDate } from "./dates";
 import {
-  isPlanning,
   readRoute,
   removeQueryParameter,
   setQueryParameter,
@@ -87,6 +86,16 @@ export function App() {
   );
   // Mail reads its summary link (`?mail=`) when it mounts; a mail launch remounts it.
   const [mailLaunches, setMailLaunches] = useState(0);
+  // While a Focus session exists, Plan/Focus stays mounted behind the other pages, so the Focus mini timer keeps
+  // its window and its controls keep working there.
+  const planningPage =
+    route.page === "plan" || route.page === "focus" ? route.page : undefined;
+  const [focusSession, setFocusSession] = useState(false);
+  const [lastPlanningPage, setLastPlanningPage] = useState<"plan" | "focus">(
+    planningPage ?? "focus",
+  );
+  if (planningPage && planningPage !== lastPlanningPage)
+    setLastPlanningPage(planningPage);
   const titlebar = useTitlebarOverlay();
   // A newer build serves Tasks, so this tab's bundle may call routes it no longer has: the page and its
   // errors give way to the reload prompt.
@@ -323,9 +332,7 @@ export function App() {
         )}
         <main
           className={
-            route.page !== "mail" && isPlanning(route.page)
-              ? "main-content planning-content"
-              : "main-content"
+            planningPage ? "main-content planning-content" : "main-content"
           }
         >
           <div className="mobile-bar">
@@ -375,21 +382,7 @@ export function App() {
                 />
               </Suspense>
             </ErrorBoundary>
-          ) : isPlanning(route.page) ? (
-            // Plan and Focus share one PlanningPage, so the route resets a failure instead of a remount.
-            <ErrorBoundary key="planning" resetKey={route.page}>
-              <PlanningPage
-                onCompleteTask={actions.finishTask}
-                page={route.page}
-                review={reviewRequest}
-                refreshRevision={actions.planRevision}
-                onOpenTask={(id) => void openTask(id)}
-                onSettings={() => {
-                  window.location.hash = "/plan";
-                }}
-              />
-            </ErrorBoundary>
-          ) : route.page === "catalog" ? (
+          ) : planningPage ? null : route.page === "catalog" ? (
             <CatalogView
               catalog={catalog}
               onEdit={editCatalog}
@@ -418,6 +411,28 @@ export function App() {
               openTask={openTask}
               editCatalog={editCatalog}
             />
+          )}
+          {!outdated && (planningPage || focusSession) && (
+            // Plan and Focus share one PlanningPage, so the route resets a failure instead of a remount. Behind
+            // another page a failure shows nothing there; opening Plan or Focus resets it.
+            <ErrorBoundary
+              key="planning"
+              resetKey={planningPage ?? "background"}
+              quiet={!planningPage}
+            >
+              <PlanningPage
+                onCompleteTask={actions.finishTask}
+                page={planningPage ?? lastPlanningPage}
+                background={!planningPage}
+                onSession={setFocusSession}
+                review={reviewRequest}
+                refreshRevision={actions.planRevision}
+                onOpenTask={(id) => void openTask(id)}
+                onSettings={() => {
+                  window.location.hash = "/plan";
+                }}
+              />
+            </ErrorBoundary>
           )}
         </main>
         {editor && catalog.timeZone && (

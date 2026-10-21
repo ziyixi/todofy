@@ -21,10 +21,11 @@ export function ReloadPrompt({ updated }: { updated: boolean }) {
 /**
  * Lazily loaded parts fail to load once a newer deploy has replaced their chunk. Instead of blanking the
  * whole app, this one place asks for a reload, which fetches the current build. A changed `resetKey`, such
- * as the next route, clears the failure so one page's error does not stay on the pages after it.
+ * as the next route, clears the failure so one page's error does not stay on the pages after it. A `quiet`
+ * boundary, around a part running behind another page, shows nothing for a failure.
  */
 export class ErrorBoundary extends Component<
-  { children: ReactNode; resetKey?: string },
+  { children: ReactNode; resetKey?: string; quiet?: boolean },
   { failed: boolean; updated: boolean; resetKey?: string }
 > {
   override state = {
@@ -47,6 +48,7 @@ export class ErrorBoundary extends Component<
   }
   override render() {
     if (!this.state.failed) return this.props.children;
+    if (this.props.quiet) return null;
     return <ReloadPrompt updated={this.state.updated} />;
   }
 }

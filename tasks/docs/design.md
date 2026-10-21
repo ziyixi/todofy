@@ -186,10 +186,34 @@ The manifest (`web/public/manifest.webmanifest`) keeps `display: standalone` and
   `change` event fires both ways, and puts `titlebar-overlay` on `<html>`; every overlay rule hangs off that class,
   so the normal layout is unchanged.
 
+### Focus mini timer
+
+The timer bar's last button, Mini timer (`aria-pressed` while open), opens the session in a Document
+Picture-in-Picture window (Chrome 116+; no button without the API): a window that floats above other apps, cannot
+be navigated and closes with the page. planning-ui renders `MiniTimer` into it through a React portal, so its
+Pause/Resume, Stop and Complete call the timer bar's own functions through App's one write queue, disabled while a
+write waits; there is no second timer state and nothing is stored in the browser. The window asks for 320 × 120
+(Chrome then reuses the size and place the owner leaves it at) and holds its layout from 240 × 72 up. It gets one
+`<style>` (`mini-timer.css`, imported as text) and the opener's computed `--plus-*` tokens and font, so Tasks'
+overrides carry over without copying the app's stylesheets. It ticks on its own window's timers, to the session's
+next whole second: the opener's run late while it is hidden or minimised, which is when the mini timer is looked
+at. The 60-second timer read also runs while only the mini timer is visible, and when its window gets focus.
+
+It closes when the session ends (Stop, Finish, a confirmed completion, or a read with no timer), when the owner
+closes it, and when Plan/Focus unmounts. To keep it on other pages, `App` keeps PlanningPage mounted while a
+session exists (`onSession`), with `background` set: it renders only the mini timer and keeps its data, write
+queue, timer read and pomodoro Finish. Full reads (after a task write elsewhere, or on returning to the window) wait
+until Plan or Focus shows again; then one runs if any was missed, with writes held until it lands, or if the data is
+over a minute old. The cost is one `GetFocusTimer` a minute while a session exists and a window is visible; with no
+session nothing stays mounted. A failure in the background shows nothing on the other page and resets when Plan or
+Focus opens.
+
 Headless Chromium cannot install an app: `pwa.spec.ts` checks the parsed manifest, `pwa-launch.spec.ts` stubs
 `launchQueue` and calls its consumer as Chrome would, and `titlebar.spec.ts` stubs the display mode (its
-`env(titlebar-area-*)` fallbacks apply). The Dock menu, links from Gmail and Todofy's `/task/<id>` redirect landing
-in the open window, and the title bar's toggle and clearances are checked by hand in the installed app.
+`env(titlebar-area-*)` fallbacks apply). `mini-timer.spec.ts` uses the real Document Picture-in-Picture API (only
+the window's size is set by the test: headless Chrome opens it at the page's viewport). The Dock menu, links from
+Gmail and Todofy's `/task/<id>` redirect landing in the open window, the title bar's toggle and clearances, and the
+mini timer's first size, resizing and remembered place are checked by hand in the installed app.
 
 ## Performance and Cloudflare
 

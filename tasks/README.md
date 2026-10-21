@@ -26,7 +26,10 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
   commitments reorder like Review's Committed row, and Focus reorders today's steps.
 - Focus counts up by default: Start, work, then complete the step, which saves its time. Each step shows its logged
   time, which opens its records to change or add; Day, Week and Month views show where the time went, and a
-  Completed checkbox shows the day's completed steps.
+  Completed checkbox shows the day's completed steps. The timer bar's Mini timer button floats the session in a
+  small always-on-top window (Document Picture-in-Picture): the step, the time and a hairline of its time against
+  the estimate, with Pause/Resume, Stop and Complete on hover. It stays open on other pages and closes when the
+  session ends.
 - A Step's planning panel shows only its time estimate; Plan's Add steps gives each new Step a time (30 min unless
   another is chosen). In Week a click selects a commitment and a double-click opens it; elsewhere in Plan a click opens.
 - Installable desktop PWA; an explicit offline page, with task data available online. The Dock icon's menu offers
