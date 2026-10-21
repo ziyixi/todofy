@@ -1,0 +1,84 @@
+// Tasks' create-only machine entry: the TaskInbox Workers entrypoint, through a service binding whose props.source
+// names the caller (home for Home's daily digest, watch for Watch's notifications). It creates; it never reads,
+// updates or deletes, and it has no HTTP route. Each source creates at most 20 tasks per UTC day. A refused call
+// throws an Error whose message is an ErrorCode's wire name.
+//
+// (-- api-linter: core::0127::http-annotation=disabled
+//     aip.dev/not-precedent: a private Workers service binding with no HTTP route. --)
+// (-- api-linter: core::0133=disabled
+//     aip.dev/not-precedent: a create-only command for a binding's caller: the task it creates is Tasks' own
+//     resource (tasks.ui.v1.Task), whose parent is chosen by the binding's source, not by the request. --)
+// (-- api-linter: core::0155::request-id-format=disabled
+//     aip.dev/not-precedent: it takes UUIDv4 and UUIDv5, checked by the RequestId wire format. --)
+syntax = "proto3";
+
+package tasks.inbox.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "TaskInboxProto";
+option java_package = "science.ziyixi.tasks.inbox.v1";
+option (common.wire.v1.formats) = {
+  name: "RequestId"
+  pattern: "[0-9a-f]{8}-[0-9a-f]{4}-[45][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+  description: "A UUIDv4 or UUIDv5 in lower case, the same for every retry of one task."
+};
+
+// Creates a caller's tasks in Tasks.
+service TaskInboxService {
+  // Creates one task with its subtasks in one write, in the project Tasks routes the source to (the Inbox when it
+  // routes it nowhere, or to a project that is gone). Repeating the request_id with the same input answers the first
+  // answer, replayed; with other input it is invalid_input.
+  rpc CreateInboxTask(CreateInboxTaskRequest) returns (CreateInboxTaskResponse);
+}
+
+// One task and its subtasks.
+message CreateInboxTaskRequest {
+  // The same for every retry of this task.
+  string request_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "RequestId"
+  ];
+  // 1 to 500 UTF-16 code units.
+  string title = 2 [(google.api.field_behavior) = REQUIRED];
+  // Plain text or Markdown, at most 16,000 UTF-16 code units.
+  string description = 3 [(google.api.field_behavior) = OPTIONAL];
+  // At most 30, created in this order under the task.
+  repeated InboxSubtask subtasks = 4 [
+    (google.api.field_behavior) = OPTIONAL,
+    (common.wire.v1.field).max_items = 30
+  ];
+}
+
+// A subtask of the created task.
+message InboxSubtask {
+  // 1 to 500 UTF-16 code units.
+  string title = 1 [(google.api.field_behavior) = REQUIRED];
+  // At most 16,000 UTF-16 code units.
+  string description = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// The created task.
+message CreateInboxTaskResponse {
+  // The task's ID.
+  string task_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // The subtasks' IDs, in the request's order.
+  repeated string subtask_ids = 2 [(google.api.field_behavior) = REQUIRED];
+  // The answer of an earlier call with the same request_id: nothing new was created.
+  bool replayed = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Why CreateInboxTask refused a call: the thrown Error's message is the value's wire name (`daily_limit`).
+enum ErrorCode {
+  // Never thrown.
+  ERROR_CODE_UNSPECIFIED = 0;
+  // The source is not home or watch, the input breaks a rule, or the request_id was used for other input. A retry
+  // fails the same way.
+  ERROR_CODE_INVALID_INPUT = 1;
+  // The source created 20 tasks this UTC day. Retry the same request on the next one.
+  ERROR_CODE_DAILY_LIMIT = 2;
+  // Tasks' storage failed. Retry with the same request_id.
+  ERROR_CODE_UNAVAILABLE = 3;
+}

@@ -3,15 +3,18 @@
 // (-- api-linter: core::0155::request-id-format=disabled
 //     aip.dev/not-precedent: existing planning commands use UUIDv5; runtime accepts UUIDv4 and UUIDv5,
 //     preserving frozen retry identities instead of replacing them with random IDs. --)
-// Native Tasks owner API. Tasks owns task content, planning facts and dependencies (task.proto), Plan (plan.proto)
-// and Focus: each day's queue of steps, the one timer and the time records (focus.proto). Access is verified before reading a body; mutations also require same-origin
-// Origin and the signed tasks_csrf token. The TasksApi service binding uses the same protobuf messages
-// without exposing a machine-auth route: a `read` binding may only read, and a `read-write`
-// binding (Todofy) may also write and call the machine-only exportBackup method that Todofy's weekly backup
-// pages every table through. Bodies are bounded to 64 KiB.
-// Every mutation but UpdateWeeklyBet requires a UUIDv4 or UUIDv5 request_id. Exact replays return the original
-// response; reusing it for different input is rejected. Updates require the current etag and an explicit update_mask.
-// UpdateWeeklyBet is a value write: sending the saved text again answers it as saved.
+// Native Tasks owner API. Tasks owns task content, planning facts and dependencies (task.proto), Plan (plan.proto),
+// Focus: each day's queue of steps, the one timer and the time records (focus.proto), turning a mail into a task with
+// the owner's mail categories (mail.proto), and the GTD statistics and weekly reviews (gtd.proto). Access is verified
+// before reading a body; mutations also require same-origin Origin and the signed tasks_csrf token. The TasksApi
+// service binding gives generic access with the same protobuf messages, without exposing a machine-auth route: a
+// `read` binding may only read, and a `read-write` binding may also write and call the machine-only exportBackup
+// method that Todofy's weekly backup pages every table through. A caller that only creates tasks binds the
+// create-only TaskInbox instead (tasks.inbox.v1). Bodies are bounded to 64 KiB.
+// Every mutation but UpdateWeeklyBet and UpdateMailCategories requires a UUIDv4 or UUIDv5 request_id. Exact replays
+// return the original response; reusing it for different input is rejected. Updates require the current etag and an
+// explicit update_mask. UpdateWeeklyBet and UpdateMailCategories are value writes: sending the saved value again
+// answers it as saved.
 syntax = "proto3";
 
 package tasks.ui.v1;
@@ -24,6 +27,8 @@ import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 import "tasks/ui/v1/focus.proto";
+import "tasks/ui/v1/gtd.proto";
+import "tasks/ui/v1/mail.proto";
 import "tasks/ui/v1/plan.proto";
 import "tasks/ui/v1/task.proto";
 
@@ -320,6 +325,55 @@ service TasksUiService {
       body: "weekly_bet"
     };
     option (google.api.method_signature) = "weekly_bet,update_mask";
+  }
+  // Turns a mail still awaiting a decision into an Inbox task, on the owner's explicit action: the mail's subject,
+  // summary and a link back, and a category's label and priority. The task's ID is derived from the mail, so any
+  // retry, with any request_id, finishes the same conversion. A task an older Todofy linked to the mail moves to the
+  // Inbox instead.
+  // (-- api-linter: core::0136::response-message-name=disabled
+  //     aip.dev/not-precedent: it answers the task it created; the mail is Todofy's resource, not one of Tasks'. --)
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: the verb acts on one mail of Todofy's mailItems collection, so `mailItems:convert`
+  //     names both without repeating the collection. --)
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc ConvertMailItem(ConvertMailItemRequest) returns (Task) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/mailItems:convert"
+      body: "*"
+    };
+  }
+  // The owner's mail categories.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetMailCategories(GetMailCategoriesRequest) returns (MailCategories) {
+    option (google.api.http) = {get: "/api/tasks/v1/{name=mailCategories}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Replaces the mail categories over the etag shown. Each label must exist.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateMailCategories(UpdateMailCategoriesRequest) returns (MailCategories) {
+    option (google.api.http) = {
+      patch: "/api/tasks/v1/{mail_categories.name=mailCategories}"
+      body: "mail_categories"
+    };
+    option (google.api.method_signature) = "mail_categories,update_mask";
+  }
+  // One week's review, with the mail still awaiting a decision.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetWeeklyReview(GetWeeklyReviewRequest) returns (WeeklyReview) {
+    option (google.api.http) = {get: "/api/tasks/v1/{name=weeklyReviews/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // The weeks that have a review, newest first.
+  rpc ListWeeklyReviews(ListWeeklyReviewsRequest) returns (ListWeeklyReviewsResponse) {
+    option (google.api.http) = {get: "/api/tasks/v1/weeklyReviews"};
+  }
+  // The account days up to today, newest first, counted or not.
+  rpc ListGtdDays(ListGtdDaysRequest) returns (ListGtdDaysResponse) {
+    option (google.api.http) = {get: "/api/tasks/v1/gtdDays"};
   }
 }
 
@@ -939,4 +993,74 @@ message UpdateWeeklyBetRequest {
   // (-- api-linter: core::0154::no-duplicate-etag=disabled
   //     aip.dev/not-precedent: the shared HTTP client masks resource bodies; this token must survive an update_mask. --)
   string etag = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+// Input to ConvertMailItem.
+message ConvertMailItemRequest {
+  // The mail's ID (todofy.mail.v1 MailItem.id).
+  string event_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // The mail's etag shown to the owner.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // UUIDv4 or UUIDv5 reused for an exact retry.
+  string request_id = 3 [(google.api.field_behavior) = REQUIRED];
+  // A MailCategory.id whose label and priority the task takes; empty for none.
+  string category_id = 4 [(google.api.field_behavior) = OPTIONAL];
+  // The MailCategories.etag shown; required with category_id.
+  string categories_etag = 5 [(google.api.field_behavior) = OPTIONAL];
+}
+// Read the mail categories.
+message GetMailCategoriesRequest {
+  // Always mailCategories.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/MailCategories"
+  ];
+}
+// Input to UpdateMailCategories.
+message UpdateMailCategoriesRequest {
+  // The new categories.
+  MailCategories mail_categories = 1 [(google.api.field_behavior) = REQUIRED];
+  // categories, the only field that changes; empty means categories.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The etag shown, separate from the fields being updated; required.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this concurrency token stays outside the masked resource body. --)
+  // (-- api-linter: core::0154::no-duplicate-etag=disabled
+  //     aip.dev/not-precedent: the shared HTTP client masks resource bodies; this token must survive an update_mask. --)
+  string etag = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+// Read one week's review.
+message GetWeeklyReviewRequest {
+  // weeklyReviews/{weekly_review}: a Monday, YYYY-MM-DD.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/WeeklyReview"
+  ];
+}
+// List the reviews.
+message ListWeeklyReviewsRequest {
+  // At most this many reviews: 0 means 13, and a larger value is read as 13.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's next_page_token.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+// A page of reviews.
+message ListWeeklyReviewsResponse {
+  // Newest week first.
+  repeated WeeklyReview weekly_reviews = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// List the GTD days.
+message ListGtdDaysRequest {
+  // At most this many days: 0 means 30, and a larger value is read as 120.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous page's next_page_token.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+// A page of days.
+message ListGtdDaysResponse {
+  // Every account day of the page, newest first (today first on the first page), counted or not.
+  repeated GtdDay gtd_days = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Older days, back to the oldest counted one; empty on the last page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

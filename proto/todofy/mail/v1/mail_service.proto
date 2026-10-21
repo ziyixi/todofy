@@ -1,0 +1,227 @@
+// Todofy's private Mail entry: the mail Todofy summarised and keeps, for Tasks and the Personal MCP. No public host
+// routes it; only the gateway's Mail entrypoint serves it, and its binding's props grant `read` (the GET methods) or
+// `read-write`. Todofy creates, reads and changes no task: Tasks turns a mail into a task itself (tasks.ui.v1
+// ConvertMailItem) and then marks the mail converted here. The two writes carry no request_id and are safe to repeat:
+// MarkMailConverted is a compare-and-set on the pending mail that answers a repeat for the same task as done, and
+// DeleteMailSummaries counts a summary already gone as deleted.
+syntax = "proto3";
+
+package todofy.mail.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "MailServiceProto";
+option java_package = "science.ziyixi.todofy.mail.v1";
+
+// The mail Todofy keeps, its inbox counts and its readiness feed.
+service MailService {
+  option (google.api.default_host) = "todofy.ziyixi.science";
+  // A page of the mail still awaiting a decision, newest first, without the summaries.
+  rpc ListMailItems(ListMailItemsRequest) returns (ListMailItemsResponse) {
+    option (google.api.http) = {get: "/api/mail/v1/mailItems"};
+  }
+  // One mail with its summary, pending or not.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetMailItem(GetMailItemRequest) returns (MailItem) {
+    option (google.api.http) = {get: "/api/mail/v1/{name=mailItems/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Records the task Tasks made from a pending mail: the mail links the task and leaves the inbox. Marking it again
+  // with the same task answers the mail as it is.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc MarkMailConverted(MarkMailConvertedRequest) returns (MailItem) {
+    option (google.api.http) = {
+      post: "/api/mail/v1/{name=mailItems/*}:markConverted"
+      body: "*"
+    };
+  }
+  // Permanently deletes pending mail summaries; the ledger keeps each mail's event, so it is never summarised again.
+  // (-- api-linter: core::0135=disabled
+  //     aip.dev/not-precedent: a bounded batch action on summaries, not the Delete of one resource. --)
+  rpc DeleteMailSummaries(DeleteMailSummariesRequest) returns (DeleteMailSummariesResponse) {
+    option (google.api.http) = {
+      post: "/api/mail/v1/mailItems:deleteSummaries"
+      body: "*"
+    };
+  }
+  // How much mail awaits a decision.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetMailInbox(GetMailInboxRequest) returns (MailInbox) {
+    option (google.api.http) = {get: "/api/mail/v1/{name=mailInbox}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Reads at most 50 ledger transitions after a cursor, and answers the mail among them whose summary is ready and
+  // that still awaits a decision.
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: the readiness action uses pollReady beside the other actions on mailItems. --)
+  rpc PollMailReady(PollMailReadyRequest) returns (PollMailReadyResponse) {
+    option (google.api.http) = {get: "/api/mail/v1/mailItems:pollReady"};
+  }
+}
+
+// One mail Todofy summarised.
+message MailItem {
+  option (google.api.resource) = {
+    type: "todofy.ziyixi.science/MailItem"
+    pattern: "mailItems/{mail_item}"
+    singular: "mailItem"
+    plural: "mailItems"
+  };
+
+  // mailItems/{id}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The Mail Hero event ID, Todofy's own ID of the mail.
+  // (-- api-linter: core::0148::use-uid=disabled
+  //     aip.dev/not-precedent: the event ID callers keep and send back as event_id, not a new service-generated
+  //     UID; the resource name holds it too. --)
+  string id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The mail's subject.
+  string title = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // One plain sentence about the mail, at most 60 characters; empty when it has none.
+  string brief = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When Todofy received the mail.
+  google.protobuf.Timestamp receive_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether the full summary is kept (GetMailItem's summary).
+  bool has_summary = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The entry's version, which MarkMailConverted checks.
+  string etag = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The task linked to the mail: the converted task, or the task an older Todofy created for the mail before the
+  // native cutover (it still awaits a decision until it is converted); empty for other pending mail.
+  string task_id = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The full summary as plain text, at most 64 KiB, which a reader shows and never interprets; empty when it is no
+  // longer kept. Only GetMailItem sets it.
+  string summary = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether the mail still awaits a decision: neither converted, deleted, nor decided on Todofy's event page. Every
+  // listed mail does.
+  bool pending = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Reads a page of the inbox.
+message ListMailItemsRequest {
+  // Default 25, maximum 50.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Opaque cursor from the preceding page.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A page of the inbox.
+message ListMailItemsResponse {
+  // Pending mail, newest first, without summaries.
+  repeated MailItem mail_items = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Empty when the whole inbox has been read.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Reads one mail.
+message GetMailItemRequest {
+  // mailItems/{id}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "todofy.ziyixi.science/MailItem"
+  ];
+}
+
+// Records the task made from a pending mail.
+message MarkMailConvertedRequest {
+  // mailItems/{id}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "todofy.ziyixi.science/MailItem"
+  ];
+  // The MailItem.etag the task was made from.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // The task made from the mail.
+  string task_id = 3 [(google.api.field_behavior) = REQUIRED];
+  // The Tasks mail category the task took, by its ID; empty for none.
+  string category_id = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Deletes a bounded set of pending summaries only.
+// (-- api-linter: core::0135=disabled
+//     aip.dev/not-precedent: a batch action on summaries, not the Delete of one resource. --)
+message DeleteMailSummariesRequest {
+  // 1 to 200 MailItem IDs; a converted mail and its task are kept.
+  repeated string event_ids = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// The outcome for each requested summary.
+message DeleteMailSummariesResponse {
+  // Deleted, or already gone.
+  repeated string deleted_event_ids = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Kept because the mail no longer awaits a decision.
+  repeated string kept_event_ids = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Reads the inbox counts.
+message GetMailInboxRequest {
+  // Always mailInbox.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "todofy.ziyixi.science/MailInbox"
+  ];
+}
+
+// How much mail awaits a decision, for Tasks' weekly review and GTD statistics.
+message MailInbox {
+  option (google.api.resource) = {
+    type: "todofy.ziyixi.science/MailInbox"
+    pattern: "mailInbox"
+    singular: "mailInbox"
+    plural: "mailInboxes"
+  };
+
+  // Always mailInbox.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Mail awaiting a decision.
+  int32 pending_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, the mail that arrived 1 to 14 days ago: the morning brief's carryover.
+  int32 carryover_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Starts at the ledger's head, or continues after the last transition read.
+message PollMailReadyRequest {
+  // True only when starting a subscription: answer the current cursor and no mail. The cursor must be empty.
+  bool baseline = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The previous answer's cursor, required unless baseline is true. Opaque to the caller.
+  string cursor = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A mail whose summary is ready. Its content is read with GetMailItem.
+message MailReadyItem {
+  // The Mail Hero event ID; repeating a poll does not change it.
+  string event_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When Todofy committed the summary.
+  google.protobuf.Timestamp ready_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The last transition read and the ready mail among the ones read.
+message PollMailReadyResponse {
+  // Moves past every transition read, other mail and canaries included. Keep it even when mail_items is empty.
+  string cursor = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most 50 pending mail; no subject, brief, summary or other content.
+  repeated MailReadyItem mail_items = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The reasons of this API besides common.errors.v1.CommonReason: ErrorInfo.reason is the value's name without
+// `ERROR_REASON_`. A write answers UNAVAILABLE while Todofy's backup holds the ledger; repeat it later.
+enum ErrorReason {
+  // Never sent.
+  ERROR_REASON_UNSPECIFIED = 0;
+  // ABORTED (409): the mail changed since its etag was read; read it again.
+  ERROR_REASON_ETAG_MISMATCH = 1;
+  // FAILED_PRECONDITION (400): the mail no longer awaits a decision, so it cannot be marked converted to another
+  // task.
+  ERROR_REASON_NOT_PENDING = 2;
+  // UNAVAILABLE (503): MAINTENANCE_MODE is on, so the writes wait; Retry-After 300.
+  ERROR_REASON_MAINTENANCE = 3;
+  // FAILED_PRECONDITION (400): the ledger is behind the poll's cursor; start again with baseline.
+  ERROR_REASON_CURSOR_RESET_REQUIRED = 4;
+}

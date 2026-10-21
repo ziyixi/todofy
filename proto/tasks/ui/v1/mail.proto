@@ -1,0 +1,41 @@
+// Mail in Tasks: the owner's category shortcuts for turning a mail into a task (ConvertMailItem). The mail itself is
+// Todofy's, read on its private Mail entry (todofy.mail.v1); Tasks creates the task with an ID derived from the mail,
+// so every retry finishes one conversion without a second task.
+syntax = "proto3";
+
+package tasks.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "MailProto";
+option java_package = "science.ziyixi.tasks.ui.v1";
+
+// The owner's mail categories: at most four label and priority shortcuts a conversion may apply.
+message MailCategories {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/MailCategories"
+    pattern: "mailCategories"
+    singular: "mailCategories"
+    plural: "mailCategories"
+  };
+
+  // Always mailCategories.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // In their order, at most four distinct label and priority pairs; empty means none.
+  repeated MailCategory categories = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The saved set's version, which UpdateMailCategories and a conversion with a category check.
+  string etag = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// One mail category: a label and a priority. Its name is made from them ("quick · P4"), so none is stored.
+message MailCategory {
+  // A decimal number Tasks assigns and never reuses. UpdateMailCategories ignores it: a category with the label and
+  // priority of a saved one keeps that one's ID, and a new one gets the next.
+  string id = 1 [(google.api.field_behavior) = OPTIONAL];
+  // The label's ID.
+  string label_id = 2 [(google.api.field_behavior) = REQUIRED];
+  // 1 is highest, 4 is normal, as Task.priority.
+  int32 priority = 3 [(google.api.field_behavior) = REQUIRED];
+}

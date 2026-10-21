@@ -1,0 +1,106 @@
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: days and weeks are account-local calendar date text, YYYY-MM-DD, like Task.due_date, and
+//     ages are whole days; the wire JSON profile has no google.protobuf.Duration. --)
+// GTD statistics and the weekly review, which Tasks keeps: one row of counts per account day, written after 06:00
+// local time, and the review task Tasks creates on Sunday from 10:00 local time. Counts, states and times only,
+// never task text. Days and reviews copied from Todofy keep their values.
+syntax = "proto3";
+
+package tasks.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "GtdProto";
+option java_package = "science.ziyixi.tasks.ui.v1";
+
+// One account day's counts, for every project and for the Inbox.
+message GtdDay {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/GtdDay"
+    pattern: "gtdDays/{gtd_day}"
+    singular: "gtdDay"
+    plural: "gtdDays"
+  };
+
+  // gtdDays/{gtd_day}: the account day, YYYY-MM-DD.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Whether the day was counted; a day that was not has neither scope.
+  bool recorded = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every project.
+  GtdScope all_projects = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Inbox.
+  GtdScope inbox = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A day's counts for one scope: every project, or the Inbox.
+message GtdScope {
+  // Open tasks, subtasks and steps included.
+  int32 open_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Open tasks created 0 to 7 days ago.
+  int32 fresh_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Open tasks created 8 to 14 days ago.
+  int32 recent_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Open tasks created 15 to 30 days ago.
+  int32 stale_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Open tasks created 31 or more days ago.
+  int32 old_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The oldest open task's age in days.
+  int32 oldest_age_days = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Open tasks scheduled before the day, or at a time before the count.
+  int32 overdue_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Open tasks without a scheduled date (a deadline alone does not date a task).
+  int32 undated_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Tasks created in the last 7 days, open or not; absent when the day did not count them.
+  optional int32 created_last_week_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Completions in the last 7 days; absent when the day did not count them.
+  optional int32 completed_last_week_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Tasks completed or deleted in the last day; only for every project, absent when the day did not count them.
+  optional int32 closed_last_day_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Mail still awaiting a decision that arrived 1 to 14 days before the day (Todofy's carryover); only for every
+  // project, absent when Todofy did not answer. Days copied from Todofy counted its open mail tasks instead.
+  optional int32 open_mail_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // False only for a day copied from Todofy whose snapshot stopped at its page cap; Tasks counts every task.
+  bool complete = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One ISO week's review: the task Tasks created on its Sunday, or a review Todofy created before Tasks kept them.
+message WeeklyReview {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/WeeklyReview"
+    pattern: "weeklyReviews/{weekly_review}"
+    singular: "weeklyReview"
+    plural: "weeklyReviews"
+  };
+
+  // The review task's creation.
+  enum State {
+    // The week has no review (yet).
+    STATE_UNSPECIFIED = 0;
+    // The task exists.
+    STATE_CREATED = 1;
+    // Todofy's create call lost its answer (copied reviews only).
+    STATE_UNKNOWN = 2;
+    // Todofy's create call failed (copied reviews only).
+    STATE_FAILED = 3;
+  }
+
+  // weeklyReviews/{weekly_review}: the Monday of the ISO week, YYYY-MM-DD, as Plan.week_start.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The review's state.
+  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The week's review task; empty without one. GetWeeklyReview answers the previous week's task while this week has
+  // none, so the review links to last Sunday's task until the next one exists. It may be completed already: only the
+  // task says whether it is open.
+  string review_task_id = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the review was created.
+  google.protobuf.Timestamp create_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the review task was completed (for a review Todofy created, when Todofy first saw it completed); unset
+  // while it is open.
+  google.protobuf.Timestamp complete_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Mail still awaiting a decision, read from Todofy for GetWeeklyReview; absent in a list and when Todofy did not
+  // answer.
+  optional int32 mail_pending_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

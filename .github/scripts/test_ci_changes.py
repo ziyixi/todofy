@@ -602,6 +602,11 @@ class Classify(unittest.TestCase):
             # Todofy's owner API: its core answers it, its gateway serves it and its UI calls it.
             "proto/todofy/ui/v1/todofy_ui_service.proto": {"todofy", "tasks", "personal-mcp"},
             "proto/todofy/ui/v1/mail_event.proto": {"todofy", "tasks", "personal-mcp"},
+            # Tasks' owner API: its Worker serves it, its UI and the Personal MCP call it, todofy-core reads tasks.
+            "proto/tasks/ui/v1/gtd.proto": {"tasks", "todofy", "personal-mcp"},
+            # Todofy's private Mail entry and Tasks' create-only TaskInbox: only the bundles that import them.
+            "proto/todofy/mail/v1/mail_service.proto": none,
+            "proto/tasks/inbox/v1/task_inbox.proto": none,
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes its types only, its
             # core reads ops.v1 in Python).
             "proto/ops/v1/ops.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"},
