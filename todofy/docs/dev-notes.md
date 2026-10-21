@@ -235,8 +235,8 @@ Outbound calls (`runtime/interop.py`)
   covers the body read and really closes the socket (runtime-tested against a hanging fake).
 - Pyodide raises AbortError (an OSError) for every fetch failure. Only `signal.aborted` separates a
   timeout (`Failure.TIMEOUT`) from anything else, and nothing proves a failed request was never sent, so
-  every other failure is `Failure.LOST`. `Failure.NOT_SENT` is never produced by a fetch (only by a missing
-  `TASKS` binding); a reliable pre-send signal could add one, with a runtime test using a refused port.
+  every other failure is `Failure.LOST`. `Failure.NOT_SENT` is never produced by a fetch; a reliable
+  pre-send signal could add one, with a runtime test using a refused port.
 - `upstream.outcome()` → `core.classify.HttpOutcome` (parses Retry-After) — feed it to `classify_*`.
 - `to_js(value)` makes plain JS objects (default conversion builds a Map); `ArrayBuffer.to_bytes()`;
   `sha256_hex(bytes)` uses WebCrypto.
@@ -352,7 +352,7 @@ module seams. Signatures are the contract between modules — change one togethe
 | **O – owner API and Mail** | `runtime/api.py`, `runtime/owner_ui.py`, `runtime/mail.py`, `core/sql/views.py`, `core/sql/mailbox.py` |
 | **G – gateway** | `gateway/` (TypeScript: routing, Access, CSRF, webhook and Basic credentials, assets, cron) |
 | **R – reports & retention** | `runtime/reports.py`, `runtime/retention.py`, `core/sql/{reports,retention}.py`, `core/carryover.py` |
-| **T – runtime tests** | `tests/fakes/gemini_fake.py`, `tests/runtime/tasks_support.py`, `tests/runtime/test_*.py` scenarios (v2 §6.2 + impl-order §1.5), `wrangler.test.toml` and `gateway/wrangler.test*.toml` vars |
+| **T – runtime tests** | `tests/fakes/gemini_fake.py`, `tests/runtime/test_*.py` scenarios (v2 §6.2 + impl-order §1.5), `wrangler.test.toml` and `gateway/wrangler.test*.toml` vars |
 
 `entry.py`, `http.py`, `core/*` and the migration stay with the lead; a new `ApiError` or a schema change
 goes through the lead. The signatures below are as built (S5/S6 done); the spike code is gone.
@@ -376,7 +376,7 @@ Vars (plain, with defaults): `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS
 `WATCHDOG_MS` (120000), `REPORT_DEFAULT_TOP` (10), `REPORT_PRECOMPUTE_UTC` ("13:30"), `REPORT_CARRYOVER_DAYS`
 (14; 0 turns the carryover off), `LEGACY_TEXT_RETENTION_DAYS`, `MAINTENANCE_MODE`, `PROCESSING_PAUSED`,
 `BUILD_SHA` and `TODOFY_PUBLIC_HOST` (the ops status's UI link). The core's one secret set by the owner:
-`GEMINI_API_KEY`; Tasks' backup export is reached through the `TASKS` binding. The gateway's vars and secrets (`ACCESS_*`, `TODOFY_HOOKS_HOSTS`,
+`GEMINI_API_KEY`. The gateway's vars and secrets (`ACCESS_*`, `TODOFY_HOOKS_HOSTS`,
 `MAIL_WEBHOOK_TOKEN_SHA256(_PREVIOUS)`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`) are listed in
 gateway-contract.md §1. Test configs shorten `*_MS` values (including the gateway's
 `JWKS_REFRESH_COOLDOWN_MS`); production never sets them.
@@ -654,9 +654,9 @@ canaries, recovery, the watchdog, report precompute and the cron wake.
 ### Fakes (T)
 Extend `tests/fakes/server.py` rather than forking it: `gemini_fake.py` (x-goog-api-key check,
 `generateContent` queue, `usageMetadata`, records `systemInstruction`/`responseSchema`; seeds 429 with
-`Retry-After` in seconds and HTTP-date forms, `delay_ms`, and `hang`). Tasks is never faked: the runtime
-harness starts the real Tasks Worker on its own local D1 and binds it as `TASKS` (the backup's export);
-`tests/runtime/tasks_support.py` seeds and reads its tables.
+`Retry-After` in seconds and HTTP-date forms, `delay_ms`, and `hang`). Todofy binds no other app; its runtime
+harness starts only todofy-core and the gateway (with a test-only probe Worker in front where a test needs one)
+against the Gemini fake.
 
 ## 6. Metrics and ops queries
 
