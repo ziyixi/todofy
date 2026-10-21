@@ -118,7 +118,6 @@ class CompletedSummary:
     subject: str
     summary: str
     model: str
-    task_id: str
 
     @property
     def brief(self) -> str:
@@ -219,7 +218,6 @@ async def transition(
                 completed.subject,
                 completed.summary,
                 completed.model,
-                completed.task_id,
                 completed.brief,
                 *key,
                 version,

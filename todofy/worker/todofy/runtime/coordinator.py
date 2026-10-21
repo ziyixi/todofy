@@ -696,7 +696,7 @@ class TodofyCore(DurableObject):
                 EventState.COMPLETE,
                 actor=WORKER,
                 now=done,
-                completed=CompletedSummary(event.subject, summary, result.model, ""),
+                completed=CompletedSummary(event.subject, summary, result.model),
                 summary_model=result.model,
                 attempt_count=0,
                 next_attempt_at=0,
