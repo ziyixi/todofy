@@ -36,7 +36,10 @@
     {"service": "todofy.ui.v1.PlusService", "name": "VerifyPlanStore", "since": "2026-10-20", "reason": "planning moved into Tasks (tasks.ui.v1); Todofy no longer serves it and Tasks no longer calls it"},
     {"service": "todofy.ui.v1.PlusService", "name": "SetWeeklyBet", "since": "2026-10-20", "reason": "planning moved into Tasks (tasks.ui.v1); Todofy no longer serves it and Tasks no longer calls it"},
     {"service": "todofy.ui.v1.PlusService", "name": "ReorderTasks", "since": "2026-10-20", "reason": "planning moved into Tasks (tasks.ui.v1); Todofy no longer serves it and Tasks no longer calls it"},
-    {"service": "todofy.ui.v1.PlusService", "name": "CompleteTask", "since": "2026-10-20", "reason": "Tasks completes a task and settles its Focus day itself; the FlowDay settlement Todofy added is gone"}
+    {"service": "todofy.ui.v1.PlusService", "name": "CompleteTask", "since": "2026-10-20", "reason": "Tasks completes a task and settles its Focus day itself; the FlowDay settlement Todofy added is gone"},
+    {"service": "todofy.ui.v1.TodofyUiService", "name": "ListDailyReminders", "since": "2026-10-21", "reason": "Home sends the daily reminder; Todofy no longer creates it, and its owner page is gone"},
+    {"service": "todofy.ui.v1.TodofyUiService", "name": "ListGtdDays", "since": "2026-10-21", "reason": "Tasks keeps GTD (tasks.ui.v1 ListGtdDays); Todofy no longer takes the snapshot, and its owner page is gone"},
+    {"service": "todofy.ui.v1.TodofyUiService", "name": "ListGtdReviews", "since": "2026-10-21", "reason": "Tasks keeps GTD; Todofy no longer creates the weekly review, and its owner page is gone"}
   ],
   "messages": [
     {"message": "todofy.ui.v1.IssueExtensionConnectionRequest", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
@@ -87,6 +90,15 @@
     {"message": "todofy.ui.v1.TaskDependency", "since": "2026-10-20", "reason": "used only by retired PlusService methods' messages"},
     {"message": "todofy.ui.v1.WeeklyBet", "since": "2026-10-20", "reason": "used only by retired PlusService methods' messages"},
     {"message": "todofy.ui.v1.LaneOrder", "since": "2026-10-20", "reason": "used only by retired PlusService methods' messages"},
-    {"message": "todofy.ui.v1.TaskStep", "since": "2026-10-20", "reason": "used only by retired PlusService methods' messages"}
+    {"message": "todofy.ui.v1.TaskStep", "since": "2026-10-20", "reason": "used only by retired PlusService methods' messages"},
+    {"message": "todofy.ui.v1.ListDailyRemindersRequest", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
+    {"message": "todofy.ui.v1.ListDailyRemindersResponse", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
+    {"message": "todofy.ui.v1.ListGtdDaysRequest", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
+    {"message": "todofy.ui.v1.ListGtdDaysResponse", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
+    {"message": "todofy.ui.v1.ListGtdReviewsRequest", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
+    {"message": "todofy.ui.v1.ListGtdReviewsResponse", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
+    {"message": "todofy.ui.v1.GtdDay", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
+    {"message": "todofy.ui.v1.GtdScope", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
+    {"message": "todofy.ui.v1.GtdReview", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"}
   ]
 }

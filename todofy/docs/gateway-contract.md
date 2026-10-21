@@ -308,13 +308,13 @@ reaches the gateway as an exception, answered 503 `UNAVAILABLE`.
 | `ListMailEvents` `GET /api/v1/mailEvents?page_size&page_token&filter` | 50 by default, at most 100; `filter` is one AIP-160 restriction, `state = TODO_UNKNOWN` (newest first) or `attention = true` (oldest first), parsed by `core/owner_ui.event_filter`; the `BASIC` view only (AIP-157: `view=FULL` → `BAD_REQUEST`, a page in full would read every event's detail) |
 | `GetMailEvent` `GET /api/v1/mailEvents/{id}?view` | the event, its transitions and allowed actions (`FULL`, the default; `BASIC` answers the list fields); a name that is not a UUID → `NOT_FOUND` |
 | `ReconcileMailEvent` `POST /api/v1/mailEvents/{id}:reconcile` | `etag` is the event's version; replays and conflicts via `owner_actions` keyed by `request_id` (a reuse for another request is `BAD_REQUEST`) |
-| `ListDailyReminders` `GET /api/v1/dailyReminders` | 50 by default, at most 100 |
 | `GetLatestReports` `GET /api/v1/latestReports` | the stored reports, read leniently (one the codec cannot read is left out and logged) |
 | `RecomputeReport` `POST /api/v1/latestReports:recompute` | `RATE_LIMITED` with `retry_after`; a computed report replays via `owner_actions`, a failure releases the claim so the same `request_id` computes again |
 | `ListMetricDays` `GET /api/v1/metricDays` | newest first, 30 by default, at most 90 |
-| `ListGtdDays` `GET /api/v1/gtdDays` | newest first, 30 by default, at most 120 |
-| `ListGtdReviews` `GET /api/v1/gtdReviews` | the last 12 weeks, newest first; IDs are the ISO week in lower case (`2026-w40`) |
 | `GetLegacyText` `GET /api/v1/legacyTexts/{id}` | an event's imported text (up to about 1.9 MB); `{id}` is the event's UUID, an imported `legacy:` row without an event is not served |
+
+The daily reminders and the GTD history (`ListDailyReminders`, `ListGtdDays`, `ListGtdReviews`) left on 2026-10-21
+(`proto/retired.json`): Home sends the reminder and Tasks keeps GTD. Their paths are 404 like any other unknown path.
 
 ### 3.5.1 `owner_api(owner, method, path, query, content_length, body) -> CoreResult` (previous gateway only)
 The owner API before todofy.ui.v1, kept for one release so that the previous gateway keeps working while CI

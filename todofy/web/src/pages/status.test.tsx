@@ -1,8 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { utcDay } from '../lib/format'
-import { overview, recommendationReport, reminder, setup, summaryReport } from '../test/fixtures'
+import { overview, recommendationReport, setup, summaryReport } from '../test/fixtures'
 import { apiError, mockApi, renderApp } from '../test/harness'
 
 describe('digest page', () => {
@@ -88,26 +87,6 @@ describe('digest page', () => {
   })
 })
 
-describe('reminders page', () => {
-  it("highlights today's UTC reminder and lists older ones", async () => {
-    mockApi({
-      'GET /api/v1/dailyReminders': {
-        daily_reminders: [
-          reminder({ name: `dailyReminders/${utcDay()}`, state: 'unknown', error_code: 'reminder_result_unknown', task_id: undefined }),
-          reminder(),
-        ],
-      },
-    })
-    renderApp('/reminders')
-    const today = await screen.findByRole('region', { name: `今日（UTC ${utcDay()}）` })
-    expect(today).toHaveTextContent('结果不明')
-    const rows = within(screen.getByRole('list', { name: '提醒记录' })).getAllByRole('listitem')
-    expect(rows).toHaveLength(2)
-    expect(rows[0]).toHaveTextContent('当天不再重发')
-    expect(within(rows[1]!).getByRole('link')).toHaveAttribute('href', '/task/6X7rM8997g3RQmvh')
-  })
-})
-
 describe('budget and health pages', () => {
   it('shows Gemini usage and no Todoist window', async () => {
     mockApi({})
@@ -170,7 +149,7 @@ describe('setup page', () => {
     expect(await screen.findByText('https://todofy-hooks.example.test/hooks/mail')).toBeInTheDocument()
     const secrets = screen.getByRole('region', { name: '密钥与配置' })
     expect(within(secrets).queryByText('TODOIST_API_KEY')).not.toBeInTheDocument()
-    expect(within(secrets).getByText('TODOIST_DEFAULT_PROJECT_ID').closest('li')).toHaveTextContent('未配置')
+    expect(within(secrets).queryByText('TODOIST_DEFAULT_PROJECT_ID')).not.toBeInTheDocument()
     expect(within(secrets).getByText('GEMINI_API_KEY').closest('li')).toHaveTextContent('已配置')
   })
 })
@@ -180,6 +159,6 @@ describe('more page', () => {
     mockApi({})
     renderApp('/more')
     const main = await screen.findByRole('main')
-    expect(within(main).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/reminders', '/gtd', '/budget', '/health', '/setup'])
+    expect(within(main).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/budget', '/health', '/setup'])
   })
 })

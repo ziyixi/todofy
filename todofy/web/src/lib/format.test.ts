@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCompact, formatDuration, formatRelative, shortDay, shortId, taskUrl, utcDay } from './format'
+import { formatCompact, formatDuration, formatRelative, shortDay, shortId, taskUrl } from './format'
 
 describe('format', () => {
   it('shortens event IDs to the lowercase first group', () => {
@@ -15,7 +15,6 @@ describe('format', () => {
 
   it('builds task links and UTC days', () => {
     expect(taskUrl('6X7rM8997g3RQmvh')).toBe('/task/6X7rM8997g3RQmvh')
-    expect(utcDay(new Date('2026-09-28T23:59:59-07:00'))).toBe('2026-09-29')
   })
 
   it('formats chart values: durations, compact counts and short days', () => {

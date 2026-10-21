@@ -4,13 +4,12 @@ import { useSetup } from '../api/queries'
 import type { Integration } from '../api/types'
 import { CopyButton, ErrorPanel, Facts, Loading, PageHeader, Section } from '../components/ui'
 
-type Secret = 'mailWebhookToken' | 'reportBasicAuth' | 'geminiApiKey' | 'todoistProject'
+type Secret = 'mailWebhookToken' | 'reportBasicAuth' | 'geminiApiKey'
 
 const SECRETS: [Secret, string, string][] = [
   ['mailWebhookToken', 'MAIL_WEBHOOK_TOKEN_SHA256', 'Mail Hero webhook 的 Bearer token 摘要'],
   ['reportBasicAuth', 'REPORT_BASIC_AUTH_SHA256', 'newsletter Basic 认证的摘要'],
   ['geminiApiKey', 'GEMINI_API_KEY', '生成摘要与日报'],
-  ['todoistProject', 'TODOIST_DEFAULT_PROJECT_ID', '邮件任务所在的 Tasks 项目'],
 ]
 
 function configured(integration: Integration, secret: Secret): boolean {

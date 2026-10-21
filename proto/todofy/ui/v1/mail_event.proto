@@ -165,15 +165,16 @@ enum MailEventView {
 enum ReconcileAction {
   // Never sent.
   RECONCILE_ACTION_UNSPECIFIED = 0;
-  // The owner found the task in Tasks (`task_id` required); the event completes with it.
+  // Legacy, never offered since 2026-10-21 (Todofy writes no task): the owner found the task in Tasks (`task_id`
+  // required); the event completed with it. Kept for stored owner actions.
   RECONCILE_ACTION_TASK_CREATED = 1;
-  // The owner found no task. A footer lookup runs first, then the frozen request is sent again, which can
-  // duplicate a task.
+  // Legacy, never offered since 2026-10-21: the owner found no task, and the frozen request was sent again. Kept
+  // for stored owner actions.
   RECONCILE_ACTION_TASK_NOT_CREATED = 2;
   // Summarize again; not offered for mail_needs_review.
   RECONCILE_ACTION_RETRY_SUMMARY = 3;
-  // Give up without checking Tasks; the event becomes ignored. Offered for failed_summary, todo_unknown, and
-  // summarized events whose last task request was refused (todoist_rejected).
+  // Give up; the event becomes ignored. Offered for failed_summary (and todo_unknown, which no event reaches since
+  // 2026-10-21).
   RECONCILE_ACTION_DISMISS = 4;
 }
 

@@ -12,9 +12,9 @@ function event(patch: Partial<MailEvent>) {
 describe('eventPollInterval', () => {
   const now = Date.parse('2026-09-28T12:00:00Z')
 
-  it('polls while a call is in flight or the next step is due within a minute', () => {
-    expect(eventPollInterval(event({ state: 'todo_sending' }), now)).toBe(EVENT_POLL_MS)
-    expect(eventPollInterval(event({ state: 'todo_unknown', next_attempt_time: '2026-09-28T12:00:30Z' }), now)).toBe(EVENT_POLL_MS)
+  it('polls while a summary is in flight or the next step is due within a minute', () => {
+    expect(eventPollInterval(event({ state: 'summarizing' }), now)).toBe(EVENT_POLL_MS)
+    expect(eventPollInterval(event({ state: 'pending', next_attempt_time: '2026-09-28T12:00:30Z' }), now)).toBe(EVENT_POLL_MS)
   })
 
   it('stays quiet for settled events and distant retries', () => {

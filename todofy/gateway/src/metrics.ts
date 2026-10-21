@@ -28,12 +28,9 @@ const OWNER_API_ROUTES: ReadonlySet<string> = new Set([
   '/api/csrf',
   '/api/v1/serviceStatus',
   '/api/v1/mailEvents',
-  '/api/v1/dailyReminders',
   '/api/v1/latestReports',
   '/api/v1/latestReports:recompute',
   '/api/v1/metricDays',
-  '/api/v1/gtdDays',
-  '/api/v1/gtdReviews',
   '/api/v1/integration',
   // The owner API before todofy.ui.v1: 410 reload_required for one release (owner.ts).
   '/api/v1/csrf',

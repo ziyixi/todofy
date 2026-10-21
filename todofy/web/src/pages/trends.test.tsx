@@ -16,7 +16,7 @@ describe('budget page trends', () => {
       '邮件（封）',
       '从收到到完成',
       'Gemini token（按模型）',
-      '外部请求（次）',
+      'Gemini 请求（次）',
     ])
     const mail = within(trends).getByRole('figure', { name: '邮件（封）' })
     expect(within(mail).getByRole('img')).toHaveAccessibleName(/收到：最高 70，最近一天 70/)

@@ -9,8 +9,6 @@ import {
   eventErrors,
   eventStates,
   reconcileActions,
-  reminderErrors,
-  reminderStates,
   reportStatuses,
 } from '../api/types'
 import {
@@ -21,8 +19,6 @@ import {
   EVENT_STATES,
   RECOMMENDATION_STATUS,
   RECONCILE_ACTIONS,
-  REMINDER_ERRORS,
-  REMINDER_STATES,
   SUMMARY_STATUS,
 } from './labels'
 
@@ -41,8 +37,6 @@ describe('every value of the IDL has exactly one Chinese label', () => {
   it.each([
     ['MailEvent.State', EVENT_STATES, eventStates.names],
     ['EventErrorCode', EVENT_ERRORS, eventErrors.names],
-    ['DailyReminder.State', REMINDER_STATES, reminderStates.names],
-    ['ReminderErrorCode', REMINDER_ERRORS, reminderErrors.names],
     ['ReconcileAction', RECONCILE_ACTIONS, reconcileActions.names],
     ['BackupStatus.State', BACKUP_STATUS, backupStates.names],
     ['BackupStatus.ErrorCode', BACKUP_ERRORS, backupErrors.names],
@@ -57,11 +51,15 @@ describe('every value of the IDL has exactly one Chinese label', () => {
     expect(sorted(reportStatuses.names)).toEqual(sorted(statuses('recommendation-v1.schema.json')))
   })
 
-  it.each([
-    ['event', EVENT_ERRORS, ['invalid_saved_event', 'llm_client_unavailable', 'summary_render_failed', 'todo_client_unavailable', 'database_client_unavailable', 'cache_write_failed', 'checkpoint_failed']],
-    ['reminder', REMINDER_ERRORS, ['empty_task_id', 'todo_client_unavailable']],
-  ])('%s codes only the Go service wrote are marked legacy, and only those', (_name, table, legacy) => {
-    for (const [code, { title, detail }] of Object.entries(table)) {
+  it('codes only a retired writer wrote (the Go service, or the task writes until 2026-10-21) are marked legacy, and only those', () => {
+    // worker/todofy/core/vocab.py: EVENT_ERROR_CODES' legacy entries.
+    const legacy = [
+      'invalid_saved_event', 'llm_client_unavailable', 'summary_render_failed', 'todo_client_unavailable',
+      'database_client_unavailable', 'cache_write_failed', 'checkpoint_failed', 'todoist_rejected', 'todoist_auth_blocked',
+      'todoist_rate_limited', 'todoist_unavailable', 'todo_result_unknown', 'interrupted_todo_call', 'lookup_not_found',
+      'lookup_failed', 'lookup_ambiguous', 'canary_side_effect_blocked',
+    ]
+    for (const [code, { title, detail }] of Object.entries(EVENT_ERRORS)) {
       const isLegacy = legacy.includes(code)
       expect([title.startsWith('（旧版）'), detail.startsWith('（旧版）')], code).toEqual([isLegacy, isLegacy])
     }
@@ -73,12 +71,15 @@ describe('every value of the IDL has exactly one Chinese label', () => {
 })
 
 describe('reconcile copy states the consequences', () => {
-  it('task_not_created warns about a second create in Tasks', () => {
-    expect(RECONCILE_ACTIONS.task_not_created.consequence).toContain('再次在 Tasks 建任务，可能重复建任务')
+  it('the task actions say they are no longer offered', () => {
+    for (const action of ['task_created', 'task_not_created'] as const) {
+      expect(RECONCILE_ACTIONS[action].title).toMatch(/^（旧版）/)
+      expect(RECONCILE_ACTIONS[action].consequence).toContain('不再提供')
+    }
   })
 
-  it('dismiss says Tasks is not checked', () => {
-    expect(RECONCILE_ACTIONS.dismiss.consequence).toContain('不会检查 Tasks')
+  it('dismiss says the ledger keeps the event', () => {
+    expect(RECONCILE_ACTIONS.dismiss.consequence).toContain('账本保留去重记录')
   })
 })
 

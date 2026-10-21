@@ -2,7 +2,7 @@ import { CirclePause, Coins, Wrench } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { ServiceStatus } from '../api/types'
 
-export type NoticeKind = 'maintenance' | 'processing_paused' | 'todoist_paused' | 'gemini_budget'
+export type NoticeKind = 'maintenance' | 'processing_paused' | 'gemini_budget'
 
 export interface Notice {
   kind: NoticeKind
@@ -10,7 +10,7 @@ export interface Notice {
   consequence: string
 }
 
-/** The four abnormal states, each with one sentence on what it means for incoming mail. */
+/** The three abnormal states, each with one sentence on what it means for incoming mail. */
 export function bannerNotices(overview: ServiceStatus): Notice[] {
   const notices: Notice[] = []
   const { switches, gemini } = overview
@@ -25,14 +25,7 @@ export function bannerNotices(overview: ServiceStatus): Notice[] {
     notices.push({
       kind: 'processing_paused',
       title: '处理已暂停',
-      consequence: '新邮件照常入账，但不会生成摘要、建任务或发每日提醒；日报仍按时计算。恢复后按到达顺序继续。',
-    })
-  }
-  if (switches?.forcePauseTodoist) {
-    notices.push({
-      kind: 'todoist_paused',
-      title: '任务写入已暂停',
-      consequence: '摘要照常生成；提醒、回顾、快照和任务意图暂停写入 Tasks，解除后恢复。',
+      consequence: '新邮件照常入账，但不会生成摘要；日报仍按时计算。恢复后按到达顺序继续。',
     })
   }
   if (gemini && gemini.tokenBudget > 0 && gemini.usedTokens + gemini.reservedTokens >= gemini.tokenBudget) {
@@ -48,7 +41,6 @@ export function bannerNotices(overview: ServiceStatus): Notice[] {
 const ICONS: Record<NoticeKind, ReactNode> = {
   maintenance: <Wrench size={18} aria-hidden="true" />,
   processing_paused: <CirclePause size={18} aria-hidden="true" />,
-  todoist_paused: <CirclePause size={18} aria-hidden="true" />,
   gemini_budget: <Coins size={18} aria-hidden="true" />,
 }
 

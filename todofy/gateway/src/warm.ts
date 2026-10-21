@@ -12,13 +12,11 @@
  * samples are synthetic and never leave the isolate.
  */
 import type { DescMessage } from '@ziyixi/proto/protobuf';
-import { GtdDaySchema, MetricDaySchema } from '@ziyixi/proto/todofy/ui/v1/history_pb';
+import { MetricDaySchema } from '@ziyixi/proto/todofy/ui/v1/history_pb';
 import { MailEventSchema } from '@ziyixi/proto/todofy/ui/v1/mail_event_pb';
-import { DailyReminderSchema } from '@ziyixi/proto/todofy/ui/v1/status_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 
 const AT = '2026-01-01T00:00:00Z';
-const SCOPE = { open_count: 1, fresh_count: 1, oldest_age_days: 1, created_last_week_count: 1, completed_source: 'api', complete: true };
 
 const SAMPLES: readonly (readonly [DescMessage, Record<string, unknown>])[] = [
   [
@@ -34,9 +32,7 @@ const SAMPLES: readonly (readonly [DescMessage, Record<string, unknown>])[] = [
       legacy_text: 'legacyTexts/00000000-0000-4000-8000-000000000000',
     },
   ],
-  [DailyReminderSchema, { name: 'dailyReminders/2026-01-01', state: 'created', error_code: 'reminder_create_failed', create_time: AT }],
   [MetricDaySchema, { name: 'metricDays/2026-01-01', recorded: true, latency_p50_seconds: 1, gemini_tokens: { m: 1 } }],
-  [GtdDaySchema, { name: 'gtdDays/2026-01-01', recorded: true, all_projects: { ...SCOPE, closed_last_day_count: 1 }, inbox: SCOPE }],
 ];
 
 /** Reads and writes each sample once (owner.ts calls it at global scope). */

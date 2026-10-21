@@ -230,7 +230,9 @@ describe('todofy.ui.v1 through the transcoder', () => {
 
   it('answers other API paths NOT_FOUND and a known path another method 405, without calling the core', async () => {
     const { env, core: calls } = fakes({}, core);
-    for (const path of ['/api/summary', '/api/v1', '/api/v1/nope', '/api/v2/serviceStatus', '/api']) {
+    // The reminder and GTD lists retired on 2026-10-21 (proto/retired.json) are unknown paths too.
+    const retired = ['/api/v1/dailyReminders', '/api/v1/gtdDays', '/api/v1/gtdReviews'];
+    for (const path of ['/api/summary', '/api/v1', '/api/v1/nope', '/api/v2/serviceStatus', '/api', ...retired]) {
       const response = await owner(env, path);
       expect(response.status, path).toBe(404);
       expect(await statusReason(response)).toBe('NOT_FOUND');

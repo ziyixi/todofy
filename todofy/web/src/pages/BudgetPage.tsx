@@ -130,14 +130,10 @@ function DailyTrends() {
         ) : null}
         <TrendChart
           {...chart}
-          title="外部请求（次）"
+          title="Gemini 请求（次）"
           variant="line"
           format={formatNumber}
-          series={[
-            { label: 'Gemini', color: 1, values: counts(days, (day) => day.geminiCallCount) },
-            { label: 'Tasks 创建', color: 2, values: counts(days, (day) => day.todoistCreateCount) },
-            { label: 'Tasks 查找', color: 3, values: counts(days, (day) => day.todoistLookupCount) },
-          ]}
+          series={[{ label: 'Gemini', color: 1, values: counts(days, (day) => day.geminiCallCount) }]}
         />
       </div>
     </Section>

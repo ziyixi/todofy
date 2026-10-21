@@ -68,11 +68,6 @@ export function taskUrl(taskId: string): string {
   return `/task/${encodeURIComponent(taskId)}`
 }
 
-/** Today's UTC day as YYYY-MM-DD, the key of reminder rows. */
-export function utcDay(now: Date = new Date()): string {
-  return now.toISOString().slice(0, 10)
-}
-
 const compact = new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 })
 /** Axis labels: "40万" rather than "400,000". */
 export function formatCompact(value: number): string {

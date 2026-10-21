@@ -67,14 +67,15 @@ option java_multiple_files = true;
 option java_outer_classname = "TodofyUiServiceProto";
 option java_package = "science.ziyixi.todofy.ui.v1";
 
-// The owner's Todofy: the ledger of mail events and its reconcile actions, the daily reminders, the newsletter's
-// reports, the daily history and the setup facts.
+// The owner's Todofy: the ledger of mail events and its reconcile actions, the newsletter's reports, the daily history
+// and the setup facts. The daily reminders and the GTD history left on 2026-10-21 (retired.json): Home sends the
+// reminder and Tasks keeps GTD.
 // (-- api-linter: core::0121::resource-must-support-list=disabled
 //     aip.dev/not-precedent: a legacy text is reached only from its event (MailEvent.legacy_text); a list of
-//     them would have no caller. --)
+//     them would have no caller. A daily reminder is only the status's retired latest_reminder. --)
 // (-- api-linter: core::0121::resource-must-support-get=disabled
-//     aip.dev/not-precedent: daily reminders, metric days, GTD days and reviews are only ever shown as their
-//     lists (a day's row is one line of a table or a chart); a Get of one would have no caller. --)
+//     aip.dev/not-precedent: metric days are only ever shown as their list (a day's row is one line of a chart); a
+//     Get of one would have no caller. --)
 service TodofyUiService {
   option (google.api.default_host) = "todofy.ziyixi.science";
 
@@ -113,12 +114,6 @@ service TodofyUiService {
     };
   }
 
-  // The daily reminders, newest day first. Replaces GET /api/v1/reminders.
-  rpc ListDailyReminders(ListDailyRemindersRequest) returns (ListDailyRemindersResponse) {
-    option (google.api.http) = {get: "/api/v1/dailyReminders"};
-    option (google.api.method_signature) = "";
-  }
-
   // The stored reports exactly as the newsletter endpoints return them. Replaces GET /api/v1/reports/latest.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
@@ -140,18 +135,6 @@ service TodofyUiService {
   // The mail pipeline's finished UTC days, newest first. Replaces GET /api/v1/metrics/daily.
   rpc ListMetricDays(ListMetricDaysRequest) returns (ListMetricDaysResponse) {
     option (google.api.http) = {get: "/api/v1/metricDays"};
-    option (google.api.method_signature) = "";
-  }
-
-  // The GTD ledger's UTC days up to today, newest first. Replaces the days of GET /api/v1/gtd/daily.
-  rpc ListGtdDays(ListGtdDaysRequest) returns (ListGtdDaysResponse) {
-    option (google.api.http) = {get: "/api/v1/gtdDays"};
-    option (google.api.method_signature) = "";
-  }
-
-  // The weekly reviews of the last 12 weeks, newest first. Replaces the latest_review of GET /api/v1/gtd/daily.
-  rpc ListGtdReviews(ListGtdReviewsRequest) returns (ListGtdReviewsResponse) {
-    option (google.api.http) = {get: "/api/v1/gtdReviews"};
     option (google.api.method_signature) = "";
   }
 
@@ -237,22 +220,6 @@ message ReconcileMailEventRequest {
   ];
 }
 
-// Input of ListDailyReminders.
-message ListDailyRemindersRequest {
-  // At most this many reminders (AIP-158): 0 means 50, and a larger value is read as 100.
-  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  // The previous page's `next_page_token`.
-  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
-}
-
-// Output of ListDailyReminders.
-message ListDailyRemindersResponse {
-  // The page, newest day first.
-  repeated DailyReminder daily_reminders = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The next page's token; empty on the last page.
-  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
 // Input of GetLatestReports.
 message GetLatestReportsRequest {
   // Always `latestReports`.
@@ -308,38 +275,6 @@ message ListMetricDaysResponse {
   // Every finished UTC day of the page, newest first (yesterday first on the first page), counted or not.
   repeated MetricDay metric_days = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The next page's token (older days, back to the 400 days kept); empty on the last page.
-  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// Input of ListGtdDays.
-message ListGtdDaysRequest {
-  // At most this many days (AIP-158): 0 means 30, and a larger value is read as 120.
-  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  // The previous page's `next_page_token`.
-  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
-}
-
-// Output of ListGtdDays.
-message ListGtdDaysResponse {
-  // Every UTC day of the page, newest first (today first on the first page), recorded or not.
-  repeated GtdDay gtd_days = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The next page's token (older days, back to the 120 days kept); empty on the last page.
-  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// Input of ListGtdReviews.
-message ListGtdReviewsRequest {
-  // At most this many reviews (AIP-158): 0 means 12, and a larger value is read as 12.
-  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  // The previous page's `next_page_token`.
-  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
-}
-
-// Output of ListGtdReviews.
-message ListGtdReviewsResponse {
-  // The page, newest week first; only weeks of the last 12.
-  repeated GtdReview gtd_reviews = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The next page's token; empty on the last page.
   string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 

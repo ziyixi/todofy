@@ -29,8 +29,6 @@ function Flags({ switches }: { switches: Switches | undefined }) {
     <div className="badge-row">
       <Flag on={switches?.maintenanceMode ?? false} label="维护模式" />
       <Flag on={switches?.processingPaused ?? false} label="暂停处理" />
-      <Flag on={switches?.forcePauseTodoist ?? false} label="暂停写入任务" />
-      <Badge tone={switches?.reminderEnabled ? 'ok' : 'neutral'}>{switches?.reminderEnabled ? '每日提醒：开' : '每日提醒：关'}</Badge>
     </div>
   )
 }
@@ -58,16 +56,13 @@ function Backup({ backup }: { backup: BackupStatus }) {
   )
 }
 
-/** Events per active state, in ActiveCounts' order (every state that is not finished). */
+/** Events per active state, in ActiveCounts' order: the states a row can still be in (the task states ended with
+ * migration 0014). */
 function activeCounts(status: ServiceStatus): [EventState, number][] {
   const counts = status.activeCounts
   return [
     ['pending', counts?.pendingCount ?? 0],
     ['summarizing', counts?.summarizingCount ?? 0],
-    ['summarized', counts?.summarizedCount ?? 0],
-    ['todo_sending', counts?.todoSendingCount ?? 0],
-    ['todo_unknown', counts?.todoUnknownCount ?? 0],
-    ['todo_created', counts?.todoCreatedCount ?? 0],
     ['failed_summary', counts?.failedSummaryCount ?? 0],
   ]
 }

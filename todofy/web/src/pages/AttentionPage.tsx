@@ -11,7 +11,7 @@ export function AttentionPage() {
     <>
       <PageHeader
         title="需要关注"
-        description="摘要失败、建任务结果不明，或收到 6 小时后仍未完成的事件；最早的在前。"
+        description="摘要失败，或收到 6 小时后仍未完成的事件；最早的在前。"
         actions={
           <Button variant="ghost" onClick={() => list.refetch()} disabled={list.isFetching} aria-label="刷新">
             <RefreshCw size={16} aria-hidden="true" className={list.isFetching ? 'spin' : undefined} />

@@ -18,12 +18,11 @@ describe('event detail', () => {
     renderApp(`/events/${EVENT_ID}`)
     expect(await screen.findByRole('heading', { name: 'Quarterly tax reminder' })).toBeInTheDocument()
     const status = screen.getByRole('region', { name: '状态' })
-    expect(status).toHaveTextContent('建任务结果不明')
-    expect(status).toHaveTextContent('任务可能已创建；不会自动重发')
+    expect(status).toHaveTextContent('Gemini 暂时不可用')
+    expect(status).toHaveTextContent('会按退避自动重试最多 7 天')
     expect(screen.getByText('<b>not html</b>')).toBeInTheDocument()
     const timeline = screen.getByRole('region', { name: '时间线' })
     expect(within(timeline).getAllByRole('listitem')).toHaveLength(2)
-    expect(screen.getByText(`Mail Hero event: ${EVENT_ID}`, { selector: 'code' })).toBeInTheDocument()
   })
 
   it('links a known task through the Tasks redirect without leaking the referrer', async () => {
@@ -69,49 +68,27 @@ describe('event detail', () => {
 })
 
 describe('reconcile dialogs', () => {
-  it('task_not_created needs the typed short ID and warns about a duplicate task', async () => {
+  it('retry_summary sends the action with the etag and no task ID', async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({
       [DETAIL]: eventDetail(),
-      [RECONCILE]: eventDetail({ state: 'summarized', error_code: undefined, allowed_actions: [], version: 6, etag: '6' }),
+      [RECONCILE]: eventDetail({ state: 'pending', error_code: undefined, allowed_actions: [], version: 6, etag: '6' }),
     })
     renderApp(`/events/${EVENT_ID}`)
-    await user.click(await screen.findByRole('button', { name: '任务没有建成' }))
+    await user.click(await screen.findByRole('button', { name: '重试摘要' }))
 
-    const dialog = screen.getByRole('dialog', { name: '确认没有建任务' })
-    expect(dialog).toHaveTextContent('再次在 Tasks 建任务，可能重复建任务')
-    const confirm = within(dialog).getByRole('button', { name: '重新建任务' })
-    expect(confirm).toBeDisabled()
-    const input = within(dialog).getByRole('textbox')
-    expect(input).toHaveFocus()
-    await user.type(input, 'f8c1e9a1')
-    expect(confirm).toBeDisabled()
-    await user.clear(input)
-    await user.type(input, 'F8C1E9A0{Enter}')
+    const dialog = screen.getByRole('dialog', { name: '重新生成摘要' })
+    expect(dialog).toHaveTextContent('计入当日 token 预算')
+    expect(within(dialog).queryByRole('textbox')).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: '重新生成摘要' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(await screen.findByText(/已提交：确认没有建任务/)).toBeInTheDocument()
+    expect(await screen.findByText(/已提交：重新生成摘要/)).toBeInTheDocument()
     const [body] = posts(calls)
-    expect(body).toMatchObject({ action: 'task_not_created', etag: '5' })
+    expect(body).toMatchObject({ action: 'retry_summary', etag: '5' })
     expect(body?.request_id).toMatch(UUID)
     expect(body).not.toHaveProperty('task_id')
     expect(body).not.toHaveProperty('name')
-  })
-
-  it('task_created sends the typed task ID', async () => {
-    const user = userEvent.setup()
-    const { calls } = mockApi({ [DETAIL]: eventDetail(), [RECONCILE]: eventDetail({ state: 'todo_created', task_id: 'abc_123' }) })
-    renderApp(`/events/${EVENT_ID}`)
-    await user.click(await screen.findByRole('button', { name: '我找到了任务' }))
-    const dialog = screen.getByRole('dialog', { name: '标记为已建任务' })
-    const confirm = within(dialog).getByRole('button', { name: '确认已建任务' })
-    await user.type(within(dialog).getByRole('textbox'), 'not valid!')
-    expect(confirm).toBeDisabled()
-    await user.clear(within(dialog).getByRole('textbox'))
-    await user.type(within(dialog).getByRole('textbox'), ' abc_123 ')
-    await user.click(confirm)
-    await waitFor(() => expect(posts(calls)).toHaveLength(1))
-    expect(posts(calls)[0]).toMatchObject({ action: 'task_created', etag: '5', task_id: 'abc_123' })
   })
 
   it('reuses the action ID when resending the same request and renews it for a different one', async () => {
@@ -119,21 +96,18 @@ describe('reconcile dialogs', () => {
     let attempt = 0
     const { calls } = mockApi({
       [DETAIL]: eventDetail(),
-      [RECONCILE]: () => (++attempt < 3 ? new TypeError('Failed to fetch') : eventDetail({ state: 'todo_created' })),
+      [RECONCILE]: () => (++attempt < 3 ? new TypeError('Failed to fetch') : eventDetail({ state: 'pending' })),
     })
     renderApp(`/events/${EVENT_ID}`)
-    await user.click(await screen.findByRole('button', { name: '我找到了任务' }))
-    const dialog = screen.getByRole('dialog')
-    const input = within(dialog).getByRole('textbox')
-    const confirm = within(dialog).getByRole('button', { name: '确认已建任务' })
-
-    await user.type(input, 'task1')
-    await user.click(confirm)
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('NETWORK_ERROR')
-    await user.click(confirm)
+    await user.click(await screen.findByRole('button', { name: '重试摘要' }))
+    const retry = within(screen.getByRole('dialog')).getByRole('button', { name: '重新生成摘要' })
+    await user.click(retry)
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('NETWORK_ERROR')
+    await user.click(retry)
     await waitFor(() => expect(posts(calls)).toHaveLength(2))
-    await user.type(input, 'b')
-    await user.click(confirm)
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消' }))
+    await user.click(screen.getByRole('button', { name: '放弃' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '放弃事件' }))
     await waitFor(() => expect(posts(calls)).toHaveLength(3))
 
     const ids = posts(calls).map((body) => body.request_id)
@@ -141,13 +115,13 @@ describe('reconcile dialogs', () => {
     expect(ids[2]).not.toBe(ids[1])
   })
 
-  it('dismiss says Tasks is not checked, and Escape closes without sending', async () => {
+  it('dismiss says the ledger keeps the event, and Escape closes without sending', async () => {
     const user = userEvent.setup()
     const { calls } = mockApi({ [DETAIL]: eventDetail() })
     renderApp(`/events/${EVENT_ID}`)
     const trigger = await screen.findByRole('button', { name: '放弃' })
     await user.click(trigger)
-    expect(screen.getByRole('dialog', { name: '放弃此事件' })).toHaveTextContent('不会检查 Tasks')
+    expect(screen.getByRole('dialog', { name: '放弃此事件' })).toHaveTextContent('账本保留去重记录')
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()

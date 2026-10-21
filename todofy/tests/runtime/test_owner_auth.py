@@ -30,11 +30,8 @@ READS = [
     "/api/v1/serviceStatus",
     "/api/v1/mailEvents",
     f"/api/v1/mailEvents/{EVENT_ID}",
-    "/api/v1/dailyReminders",
     "/api/v1/latestReports",
     "/api/v1/metricDays",
-    "/api/v1/gtdDays",
-    "/api/v1/gtdReviews",
     f"/api/v1/legacyTexts/{EVENT_ID}",
     "/api/v1/integration",
 ]

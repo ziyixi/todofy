@@ -14,23 +14,18 @@ import {
   Transition_Actor,
   Transition_ActorSchema,
 } from '@ziyixi/proto/todofy/ui/v1/mail_event_pb'
-import { GtdReview_State, GtdReview_StateSchema } from '@ziyixi/proto/todofy/ui/v1/history_pb'
 import {
   BackupStatus_ErrorCode,
   BackupStatus_ErrorCodeSchema,
   BackupStatus_State,
   BackupStatus_StateSchema,
-  DailyReminder_State,
-  DailyReminder_StateSchema,
-  ReminderErrorCode,
-  ReminderErrorCodeSchema,
 } from '@ziyixi/proto/todofy/ui/v1/status_pb'
 import { ReportStatus, ReportStatusSchema } from '@ziyixi/proto/todofy/report/v1/report_pb'
 import { wireEnum, type WireName } from '@ziyixi/proto/wire-json'
 
 export type { LegacyText, MailEvent, Transition } from '@ziyixi/proto/todofy/ui/v1/mail_event_pb'
-export type { GtdDay, GtdReview, GtdScope, MetricDay } from '@ziyixi/proto/todofy/ui/v1/history_pb'
-export type { BackupStatus, DailyReminder, Integration, ServiceStatus, Switches } from '@ziyixi/proto/todofy/ui/v1/status_pb'
+export type { MetricDay } from '@ziyixi/proto/todofy/ui/v1/history_pb'
+export type { BackupStatus, Integration, ServiceStatus, Switches } from '@ziyixi/proto/todofy/ui/v1/status_pb'
 export type { LatestReports } from '@ziyixi/proto/todofy/ui/v1/reports_pb'
 export type { RecommendationReport, SummaryReport } from '@ziyixi/proto/todofy/report/v1/report_pb'
 export { ReconcileAction, ReportStatus }
@@ -41,18 +36,13 @@ export const eventStates = wireEnum(MailEvent_StateSchema, MailEvent_State)
 export const eventErrors = wireEnum(EventErrorCodeSchema, EventErrorCode)
 export const reconcileActions = wireEnum(ReconcileActionSchema, ReconcileAction)
 export const actors = wireEnum(Transition_ActorSchema, Transition_Actor)
-export const reminderStates = wireEnum(DailyReminder_StateSchema, DailyReminder_State)
-export const reminderErrors = wireEnum(ReminderErrorCodeSchema, ReminderErrorCode)
 export const backupStates = wireEnum(BackupStatus_StateSchema, BackupStatus_State)
 export const backupErrors = wireEnum(BackupStatus_ErrorCodeSchema, BackupStatus_ErrorCode)
-export const reviewStates = wireEnum(GtdReview_StateSchema, GtdReview_State)
 export const reportStatuses = wireEnum(ReportStatusSchema, ReportStatus)
 
 export type EventState = WireName<typeof MailEvent_State>
 export type EventErrorName = WireName<typeof EventErrorCode>
 export type ReconcileActionName = WireName<typeof ReconcileAction>
-export type ReminderStateName = WireName<typeof DailyReminder_State>
-export type ReminderErrorName = WireName<typeof ReminderErrorCode>
 export type BackupStateName = WireName<typeof BackupStatus_State>
 export type BackupErrorName = WireName<typeof BackupStatus_ErrorCode>
 export type ReportStatusName = WireName<typeof ReportStatus>
@@ -68,7 +58,7 @@ export function mailEventName(eventId: string): string {
   return `mailEvents/${eventId}`
 }
 
-/** The last segment of a resource name (`mailEvents/<id>` → `<id>`, `dailyReminders/2026-09-30` → the day). */
+/** The last segment of a resource name (`mailEvents/<id>` → `<id>`). */
 export function idOf(name: string): string {
   return name.slice(name.lastIndexOf('/') + 1)
 }

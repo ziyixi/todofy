@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 import pytest
-from ziyixi_proto.todofy.ui.v1 import history_pb, mail_event_pb, reports_pb, status_pb
+from ziyixi_proto.todofy.ui.v1 import mail_event_pb, reports_pb, status_pb
 from ziyixi_proto.wire_json import from_wire, wire_name
 
 from todofy.core import owner_ui as ui
@@ -47,9 +47,6 @@ class TestVocabulary:
     def test_reminder_states_and_codes(self):
         assert names(status_pb.DailyReminder_State) == set(ReminderState)
         assert names(status_pb.ReminderErrorCode) == set(REMINDER_ERROR_CODES)
-
-    def test_review_states_are_the_reminder_states(self):
-        assert names(history_pb.GtdReview_State) == set(ReminderState)
 
     def test_transition_actors_match_the_migration_check(self):
         migration = (Path(__file__).parents[2] / "migrations" / "0001_init.sql").read_text()

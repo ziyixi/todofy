@@ -13,7 +13,6 @@ describe('StatusBanner', () => {
   it.each([
     ['maintenance', overview({ switches: { ...overview().switches, maintenance_mode: true } }), '维护模式'],
     ['processing_paused', overview({ switches: { ...overview().switches, processing_paused: true } }), '处理已暂停'],
-    ['todoist_paused', overview({ switches: { ...overview().switches, force_pause_todoist: true } }), '任务写入已暂停'],
     ['gemini_budget', overview({ gemini: { ...overview().gemini, used_tokens: 2_999_000, reserved_tokens: 1000 } }), '今日 Gemini 预算已用完'],
   ] as const)('explains %s', (kind, wire, title) => {
     const data = message(ServiceStatusSchema, wire)
@@ -22,8 +21,10 @@ describe('StatusBanner', () => {
     expect(screen.getByRole('status')).toHaveTextContent(title)
   })
 
-  it('ignores a Todoist block an older core still reports', () => {
+  it('ignores a Todoist block and the task-write switches an older core still reports', () => {
     const wire = overview({ todoist: { ...overview().todoist, block_expire_time: '2026-09-28T18:00:00Z' } })
     expect(bannerNotices(message(ServiceStatusSchema, wire))).toEqual([])
+    const paused = overview({ switches: { ...overview().switches, force_pause_todoist: true, reminder_enabled: true } })
+    expect(bannerNotices(message(ServiceStatusSchema, paused))).toEqual([])
   })
 })

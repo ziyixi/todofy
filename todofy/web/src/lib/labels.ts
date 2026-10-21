@@ -5,8 +5,6 @@ import type {
   EventErrorName,
   EventState,
   ReconcileActionName,
-  ReminderErrorName,
-  ReminderStateName,
   ReportStatusName,
 } from '../api/types'
 
@@ -25,13 +23,14 @@ export interface CodeLabel {
   detail: string
 }
 
+// The four task states are older rows' (Todofy wrote tasks until 2026-10-21); no row reaches them any more.
 export const EVENT_STATES: Record<EventState, Label> = {
   pending: { label: '待摘要', tone: 'progress' },
   summarizing: { label: '摘要中', tone: 'progress' },
-  summarized: { label: '待建任务', tone: 'progress' },
-  todo_sending: { label: '建任务中', tone: 'progress' },
-  todo_unknown: { label: '结果不明', tone: 'warn' },
-  todo_created: { label: '任务已建', tone: 'ok' },
+  summarized: { label: '（旧版）待建任务', tone: 'neutral' },
+  todo_sending: { label: '（旧版）建任务中', tone: 'neutral' },
+  todo_unknown: { label: '（旧版）结果不明', tone: 'warn' },
+  todo_created: { label: '（旧版）任务已建', tone: 'neutral' },
   complete: { label: '已完成', tone: 'ok' },
   ignored: { label: '已忽略', tone: 'neutral' },
   failed_summary: { label: '摘要失败', tone: 'danger' },
@@ -42,7 +41,7 @@ export const EVENT_STATE_ORDER = Object.keys(EVENT_STATES) as EventState[]
 export const EVENT_ERRORS: Record<EventErrorName, CodeLabel> = {
   mail_needs_review: {
     title: '邮件需人工检查',
-    detail: 'Mail Hero 标记该邮件需要人工检查（或 HTML 被省略且没有正文）；不会调用 Gemini，也不会建任务',
+    detail: 'Mail Hero 标记该邮件需要人工检查（或 HTML 被省略且没有正文）；不会调用 Gemini',
   },
   summary_failed: {
     title: 'Gemini 暂时不可用',
@@ -61,34 +60,20 @@ export const EVENT_ERRORS: Record<EventErrorName, CodeLabel> = {
     title: '摘要多次中断',
     detail: '摘要连续 3 次在运行中被中断，已停止自动重试',
   },
-  todoist_rejected: {
-    title: 'Todoist 拒绝创建',
-    detail: 'Todoist 拒绝创建任务（400/404 等），会按退避自动重试；若一直被拒绝，可以放弃此事件',
-  },
-  todoist_auth_blocked: {
-    title: 'Todoist 认证失败',
-    detail: 'Todoist 认证失败（401/403），当时建任务阶段暂停了 6 小时',
-  },
-  todoist_rate_limited: { title: 'Todoist 限流', detail: 'Todoist 限流（429），会按 Retry-After 与退避自动重试' },
-  todoist_unavailable: {
-    title: 'Todoist 暂时不可用',
-    detail: 'Todoist 暂时不可用（502/503/504 或连接失败），会按退避自动重试',
-  },
-  todo_result_unknown: {
-    title: '建任务结果不明',
-    detail: 'Todoist 建任务的结果不明（500、超时、断连或响应没有任务 ID），任务可能已创建；不会自动重发',
-  },
-  interrupted_todo_call: {
-    title: '建任务时被中断',
-    detail: '调用 Todoist 时运行被中断，任务可能已创建；不会自动重发',
-  },
-  lookup_not_found: { title: '查找未找到任务', detail: '在默认项目的未完成任务里没有找到带本事件页脚的任务' },
-  lookup_failed: { title: '查找失败', detail: '只读查找 Todoist 任务失败，稍后会再查' },
-  lookup_ambiguous: { title: '找到多个任务', detail: '找到多个带本事件页脚的任务，需要人工确认' },
+  // The codes of the task writes (until 2026-10-21): older rows keep them.
+  todoist_rejected: { title: '（旧版）建任务被拒绝', detail: '（旧版）建任务被拒绝（400/404 等）' },
+  todoist_auth_blocked: { title: '（旧版）Todoist 认证失败', detail: '（旧版）Todoist 认证失败（401/403）' },
+  todoist_rate_limited: { title: '（旧版）建任务被限流', detail: '（旧版）建任务被限流（429）' },
+  todoist_unavailable: { title: '（旧版）任务服务不可用', detail: '（旧版）建任务时服务暂时不可用（502/503/504 或连接失败）' },
+  todo_result_unknown: { title: '（旧版）建任务结果不明', detail: '（旧版）建任务的结果不明，任务可能已创建' },
+  interrupted_todo_call: { title: '（旧版）建任务时被中断', detail: '（旧版）建任务时运行被中断，任务可能已创建' },
+  lookup_not_found: { title: '（旧版）查找未找到任务', detail: '（旧版）没有找到带本事件页脚的任务' },
+  lookup_failed: { title: '（旧版）查找失败', detail: '（旧版）只读查找任务失败' },
+  lookup_ambiguous: { title: '（旧版）找到多个任务', detail: '（旧版）找到多个带本事件页脚的任务' },
   dismissed_by_owner: { title: '已由你放弃', detail: 'owner 已放弃此事件，账本仍保留去重记录' },
   canary_side_effect_blocked: {
-    title: '金丝雀已拦截',
-    detail: '金丝雀（合成端到端检查）事件到达了会调用 Todoist 的步骤，已直接结束，不会创建任务',
+    title: '（旧版）金丝雀已拦截',
+    detail: '（旧版）金丝雀（合成端到端检查）事件到达了会建任务的步骤，已直接结束',
   },
   invalid_saved_event: { title: '（旧版）事件无法解析', detail: '（旧版）已保存的事件无法解析' },
   llm_client_unavailable: { title: '（旧版）LLM 服务不可用', detail: '（旧版）无法连接旧 LLM 服务' },
@@ -100,27 +85,6 @@ export const EVENT_ERRORS: Record<EventErrorName, CodeLabel> = {
     title: '（旧版）账本写入失败',
     detail: '（旧版）Todoist 调用后写入账本失败，任务可能已创建',
   },
-}
-
-export const REMINDER_STATES: Record<ReminderStateName, Label> = {
-  sending: { label: '创建中', tone: 'progress' },
-  created: { label: '已创建', tone: 'ok' },
-  unknown: { label: '结果不明', tone: 'warn' },
-  failed: { label: '失败', tone: 'danger' },
-}
-
-export const REMINDER_ERRORS: Record<ReminderErrorName, CodeLabel> = {
-  reminder_create_failed: {
-    title: '提醒未能创建',
-    detail: '提醒任务未能创建（请求没有发出或被 Todoist 拒绝），每小时重试，最多 5 次',
-  },
-  reminder_result_unknown: { title: '提醒结果不明', detail: '提醒任务的结果不明，可能已创建；当天不再重发' },
-  interrupted_reminder_call: {
-    title: '创建提醒时被中断',
-    detail: '创建提醒时运行被中断，可能已创建；当天不再重发',
-  },
-  empty_task_id: { title: '（旧版）空任务 ID', detail: '（旧版）旧 todo 服务返回了空任务 ID' },
-  todo_client_unavailable: { title: '（旧版）todo 服务不可用', detail: '（旧版）无法连接旧 todo 服务，提醒未创建' },
 }
 
 /**
@@ -162,20 +126,19 @@ export interface ActionCopy {
 }
 
 export const RECONCILE_ACTIONS: Record<ReconcileActionName, ActionCopy> = {
+  // Offered until 2026-10-21, for a task create whose outcome was lost; no row can offer them any more.
   task_created: {
-    title: '标记为已建任务',
+    title: '（旧版）标记为已建任务',
     trigger: '我找到了任务',
     confirm: '确认已建任务',
-    consequence:
-      '事件会记为已建任务并使用你填写的 Tasks 任务 ID，之后不再为它建任务。请确认该任务的描述里带有本事件的页脚。',
+    consequence: 'Todofy 已不再建任务，此操作不再提供。',
     destructive: false,
   },
   task_not_created: {
-    title: '确认没有建任务',
+    title: '（旧版）确认没有建任务',
     trigger: '任务没有建成',
     confirm: '重新建任务',
-    consequence:
-      '会先在 Tasks 里只读查找带本事件页脚的任务；没有找到时，用冻结的任务内容再次在 Tasks 建任务，可能重复建任务。',
+    consequence: 'Todofy 已不再建任务，此操作不再提供。',
     destructive: true,
   },
   retry_summary: {
@@ -189,8 +152,7 @@ export const RECONCILE_ACTIONS: Record<ReconcileActionName, ActionCopy> = {
     title: '放弃此事件',
     trigger: '放弃',
     confirm: '放弃事件',
-    consequence:
-      '事件会变为已忽略，不再自动处理。不会检查 Tasks：如果任务其实已经创建，它会留在 Tasks 里。账本保留去重记录，同一事件再次投递也不会重新处理。',
+    consequence: '事件会变为已忽略，不再自动处理。账本保留去重记录，同一事件再次投递也不会重新处理。',
     destructive: true,
   },
 }

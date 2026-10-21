@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useId, useState, type FormEvent } from 'react'
+import { useId, type FormEvent } from 'react'
 import { ApiError, todofy } from '../api/client'
 import { keys } from '../api/queries'
 import { idOf, mailEventName, reconcileActions, ReconcileAction, type MailEvent, type ReconcileActionName } from '../api/types'
@@ -8,8 +8,6 @@ import { Modal } from '../components/Modal'
 import { Button, ErrorPanel } from '../components/ui'
 import { shortId } from '../lib/format'
 import { RECONCILE_ACTIONS } from '../lib/labels'
-
-const TASK_ID = /^[0-9A-Za-z_-]{1,64}$/
 
 interface Props {
   event: MailEvent
@@ -20,9 +18,7 @@ interface Props {
 
 export function ReconcileDialog({ event, action, onClose, onDone }: Props) {
   const copy = RECONCILE_ACTIONS[action]
-  const inputId = useId()
-  const [taskId, setTaskId] = useState('')
-  const [typed, setTyped] = useState('')
+  const formId = useId()
   const { idFor } = useRequestId()
   const client = useQueryClient()
   const eventId = idOf(event.name)
@@ -47,17 +43,11 @@ export function ReconcileDialog({ event, action, onClose, onDone }: Props) {
     },
   })
 
-  const ready =
-    action === 'task_created'
-      ? TASK_ID.test(taskId.trim())
-      : action === 'task_not_created'
-        ? typed.trim().toLowerCase() === short
-        : true
-
   function submit(form: FormEvent) {
     form.preventDefault()
-    if (!ready || mutation.isPending) return
-    const request = { etag: event.etag, taskId: action === 'task_created' ? taskId.trim() : '' }
+    if (mutation.isPending) return
+    // Retry and dismiss take no task ID: the task actions are no longer offered (Todofy writes no task).
+    const request = { etag: event.etag, taskId: '' }
     mutation.mutate({ ...request, requestId: idFor({ action, ...request }) })
   }
 
@@ -67,7 +57,6 @@ export function ReconcileDialog({ event, action, onClose, onDone }: Props) {
   }
 
   const stale = mutation.error instanceof ApiError && ['ETAG_MISMATCH', 'ACTION_NOT_ALLOWED'].includes(mutation.error.reason)
-  const formId = `${inputId}-form`
 
   return (
     <Modal
@@ -83,7 +72,7 @@ export function ReconcileDialog({ event, action, onClose, onDone }: Props) {
             type="submit"
             form={formId}
             variant={copy.destructive ? 'danger' : 'primary'}
-            disabled={!ready || mutation.isPending}
+            disabled={mutation.isPending}
           >
             {mutation.isPending ? '正在提交…' : copy.confirm}
           </Button>
@@ -95,41 +84,6 @@ export function ReconcileDialog({ event, action, onClose, onDone }: Props) {
         <p className="muted">
           事件 <code>{short}</code> · 版本 {event.version}
         </p>
-        {action === 'task_created' ? (
-          <div className="field">
-            <label htmlFor={inputId}>Tasks 任务 ID</label>
-            <input
-              id={inputId}
-              data-autofocus
-              value={taskId}
-              onChange={(e) => setTaskId(e.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-              inputMode="text"
-              placeholder="例如 6X7rM8997g3RQmvh"
-              aria-describedby={`${inputId}-hint`}
-            />
-            <p id={`${inputId}-hint`} className="field-hint">
-              在 Tasks 任务链接 ?task= 之后；只含字母、数字、- 和 _。
-            </p>
-          </div>
-        ) : null}
-        {action === 'task_not_created' ? (
-          <div className="field">
-            <label htmlFor={inputId}>
-              输入事件短 ID <code>{short}</code> 以确认
-            </label>
-            <input
-              id={inputId}
-              data-autofocus
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-              autoCapitalize="off"
-            />
-          </div>
-        ) : null}
       </form>
       {mutation.isError ? (
         <div className="stack">

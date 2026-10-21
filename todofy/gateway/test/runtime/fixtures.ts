@@ -86,35 +86,6 @@ export function metricDays(count: number): Record<string, unknown> {
   };
 }
 
-function scope(full: boolean): Record<string, unknown> {
-  return {
-    open_count: 412,
-    fresh_count: 40,
-    recent_count: 31,
-    stale_count: 60,
-    old_count: 281,
-    oldest_age_days: 900,
-    overdue_count: 12,
-    undated_count: 300,
-    created_last_week_count: 44,
-    completed_last_week_count: 51,
-    completed_source: 'api',
-    ...(full ? { closed_last_day_count: 7, open_mail_count: 30 } : {}),
-    complete: true,
-  };
-}
-
-export function gtdDays(count: number): Record<string, unknown> {
-  return {
-    gtd_days: Array.from({ length: count }, (_, n) => ({
-      name: `gtdDays/2026-${String(9 - Math.floor(n / 28)).padStart(2, '0')}-${String(28 - (n % 28)).padStart(2, '0')}`,
-      recorded: true,
-      all_projects: scope(true),
-      inbox: scope(false),
-    })),
-  };
-}
-
 const WINDOW = { computed_at: AT, window_start: '2026-09-27T08:00:00Z', window_end: AT };
 
 export function latestReports(): Record<string, unknown> {
@@ -139,36 +110,17 @@ export function serviceStatus(): Record<string, unknown> {
     name: 'serviceStatus',
     build: 'test',
     read_time: AT,
-    switches: { reminder_enabled: true },
+    switches: { processing_paused: true },
     active_counts: { pending_count: 1, todo_unknown_count: 1 },
     attention_count: 1,
     received_last_day_count: 42,
-    latest_reminder: { name: 'dailyReminders/2026-09-28', state: 'created', task_id: '123', attention_count: 2, attempt_count: 1, create_time: AT, update_time: AT },
     next_alarm_time: AT,
     oldest_due_time: AT,
     gemini: { day: '2026-09-28', token_budget: 3_000_000, reserved_tokens: 4096, used_tokens: 181_233, call_count: 41, models: ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite'] },
-    todoist: { window_seconds: 900, window_call_count: 3, window_call_limit: 1000 },
     backup: { state: 'ok', last_backup_time: AT, last_backup_key: 'backups/2026-09-27T100002Z/', last_backup_size_bytes: 1_843_200, last_backup_row_count: 52_311, next_backup_time: AT },
   };
 }
 
-export function reminderPage(size: number): Record<string, unknown> {
-  return {
-    daily_reminders: Array.from({ length: size }, (_, n) => ({
-      name: `dailyReminders/2026-${String(9 - Math.floor(n / 28)).padStart(2, '0')}-${String(28 - (n % 28)).padStart(2, '0')}`,
-      state: 'created',
-      task_id: `98765${String(n)}`,
-      attention_count: n % 5,
-      attempt_count: 1,
-      create_time: AT,
-      update_time: AT,
-    })),
-  };
-}
-
-/** The Mailbox's largest answers to the extension: a lookup of 200 mail tasks (briefs at their 60 characters and four
- * categories) and one mail's whole summary (MAX_SUMMARY_BYTES). */
-/** A full ListMailItems page: pending mail, newest first, and the category shortcuts. */
 /** A MailItem (todofy.mail.v1) at its limits: a 120-character title, a 60-character brief, a linked task. */
 function mailItem(n: number): Record<string, unknown> {
   return {
@@ -184,6 +136,7 @@ function mailItem(n: number): Record<string, unknown> {
   };
 }
 
+/** A full ListMailItems page of pending mail, newest first. */
 export function mailItems(count: number): Record<string, unknown> {
   return { mail_items: Array.from({ length: count }, (_, n) => mailItem(n)), next_page_token: 'W1sxNzU5MDQ2NDAwXV0' };
 }

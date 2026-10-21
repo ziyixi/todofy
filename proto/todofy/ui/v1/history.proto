@@ -1,10 +1,10 @@
-// Daily history for the budget and GTD pages: the mail pipeline's counters per finished UTC day, the GTD ledger's
-// task aggregates per day, and the weekly reviews. Numbers, states and times only, never task or mail text. See
-// todofy_ui_service.proto for the API.
+// Daily history for the budget page: the mail pipeline's counters per finished UTC day. Numbers only, never task or
+// mail text. See todofy_ui_service.proto for the API. The GTD ledger's days and reviews left on 2026-10-21
+// (retired.json): Tasks keeps GTD.
 //
 // (-- api-linter: core::0142::time-field-type=disabled
-//     aip.dev/not-precedent: durations and ages in whole seconds or days (`latency_p50_seconds`,
-//     `oldest_age_days`); the wire JSON profile has no google.protobuf.Duration. --)
+//     aip.dev/not-precedent: durations in whole seconds (`latency_p50_seconds`); the wire JSON profile has no
+//     google.protobuf.Duration. --)
 
 syntax = "proto3";
 
@@ -12,7 +12,6 @@ package todofy.ui.v1;
 
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
-import "google/protobuf/timestamp.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "HistoryProto";
@@ -47,106 +46,9 @@ message MetricDay {
   int32 gemini_call_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Tokens by the model that answered (or was tried last).
   map<string, int32> gemini_tokens = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Task-creation requests (mail tasks, reminders and weekly reviews; retries count).
+  // Task-creation requests (mail tasks, reminders and weekly reviews; retries count). Days since 2026-10-21 count
+  // none: Todofy writes no task.
   int32 todoist_create_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Footer lookups (each may read several pages).
+  // Footer lookups (each may read several pages); none since 2026-10-21.
   int32 todoist_lookup_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// One UTC day of the GTD ledger: counts from the daily read-only snapshot of Tasks (13:00 UTC), for every project
-// and for the Inbox. Days before the 2026-10-17 cutover counted Todoist. Kept 120 days.
-message GtdDay {
-  option (google.api.resource) = {
-    type: "todofy.ziyixi.science/GtdDay"
-    pattern: "gtdDays/{gtd_day}"
-    singular: "gtdDay"
-    plural: "gtdDays"
-  };
-
-  // gtdDays/{gtd_day}: the UTC day, YYYY-MM-DD.
-  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
-  // Whether the day has a snapshot aggregate.
-  bool recorded = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Every project; unset when the day is not recorded.
-  GtdScope all_projects = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The inbox project; unset when the day is not recorded or no inbox project is configured.
-  GtdScope inbox = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// The snapshot's counts for one scope (every project, or the inbox).
-message GtdScope {
-  // Where `completed_last_week_count` comes from.
-  enum CompletedSource {
-    // Never sent.
-    COMPLETED_SOURCE_UNSPECIFIED = 0;
-    // The completions Tasks lists (Todoist's completed list before the cutover).
-    COMPLETED_SOURCE_API = 1;
-    // The completed list was not read (the call failed).
-    COMPLETED_SOURCE_NONE = 2;
-  }
-
-  // Active tasks, sub-tasks included.
-  int32 open_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Open tasks added 0 to 7 days ago.
-  int32 fresh_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Open tasks added 8 to 14 days ago.
-  int32 recent_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Open tasks added 15 to 30 days ago.
-  int32 stale_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Open tasks added 31 or more days ago. Tasks with an unknown creation time are in no age bucket.
-  int32 old_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The oldest open task's age in days.
-  int32 oldest_age_days = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Overdue: a fixed-time due before the snapshot, or a date before its UTC date.
-  int32 overdue_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Without a due date (a deadline alone does not date a task).
-  int32 undated_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Added in the last 7 days (open or completed); absent without the completed list.
-  optional int32 created_last_week_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Completed in the last 7 days per the completed list; absent when that call failed.
-  optional int32 completed_last_week_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Where the completed count comes from.
-  CompletedSource completed_source = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Tasks in the previous day's snapshot missing from this one (completions and deletions); only for every
-  // project.
-  optional int32 closed_last_day_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Mail tasks that arrived 1 to 14 days before the snapshot (the morning brief's carryover pool, before its
-  // cap of 30) still open; only for every project.
-  optional int32 open_mail_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // False when the snapshot hit its page cap (over 2,000 tasks).
-  bool complete = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// One weekly review task (GTD_REVIEW_ENABLED). Kept 12 weeks in this list.
-message GtdReview {
-  option (google.api.resource) = {
-    type: "todofy.ziyixi.science/GtdReview"
-    pattern: "gtdReviews/{gtd_review}"
-    singular: "gtdReview"
-    plural: "gtdReviews"
-  };
-
-  // The review task's create call to Tasks.
-  enum State {
-    // Never sent.
-    STATE_UNSPECIFIED = 0;
-    // The create call is in flight.
-    STATE_SENDING = 1;
-    // The task exists.
-    STATE_CREATED = 2;
-    // The call's answer was lost.
-    STATE_UNKNOWN = 3;
-    // The call failed.
-    STATE_FAILED = 4;
-  }
-
-  // gtdReviews/{gtd_review}: the ISO week in lower case (AIP-122), `2026-w40` for the ISO week 2026-W40; show it
-  // in upper case.
-  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
-  // The state.
-  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // When the week was claimed.
-  google.protobuf.Timestamp create_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // When the daily snapshot first saw the task completed; unset before.
-  google.protobuf.Timestamp complete_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

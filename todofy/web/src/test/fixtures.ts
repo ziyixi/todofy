@@ -5,9 +5,9 @@
  */
 import type { DescMessage, MessageShape } from '@ziyixi/proto/protobuf'
 import type { RecommendationReport, SummaryReport } from '@ziyixi/proto/todofy/report/v1/report_wire'
-import type { GtdDay, GtdReview, GtdScope, MetricDay } from '@ziyixi/proto/todofy/ui/v1/history_wire'
+import type { MetricDay } from '@ziyixi/proto/todofy/ui/v1/history_wire'
 import type { MailEvent } from '@ziyixi/proto/todofy/ui/v1/mail_event_wire'
-import type { BackupStatus, DailyReminder, Integration, ServiceStatus } from '@ziyixi/proto/todofy/ui/v1/status_wire'
+import type { BackupStatus, Integration, ServiceStatus } from '@ziyixi/proto/todofy/ui/v1/status_wire'
 import type { ListMetricDaysResponse } from '@ziyixi/proto/todofy/ui/v1/todofy_ui_service_wire'
 import { fromWire } from '@ziyixi/proto/wire-json'
 
@@ -24,8 +24,8 @@ export function overview(patch: Partial<ServiceStatus> = {}): ServiceStatus {
     name: 'serviceStatus',
     build: '0123456789abcdef0123456789abcdef01234567',
     read_time: '2026-09-28T12:00:00Z',
-    switches: { reminder_enabled: true },
-    active_counts: { pending_count: 1, todo_unknown_count: 1 },
+    switches: {},
+    active_counts: { pending_count: 1, failed_summary_count: 1 },
     attention_count: 2,
     received_last_day_count: 42,
     next_alarm_time: '2026-09-28T12:00:01Z',
@@ -59,9 +59,9 @@ export function backup(patch: Partial<BackupStatus> = {}): BackupStatus {
 export function eventSummary(patch: Partial<MailEvent> = {}): MailEvent {
   return {
     name: `mailEvents/${EVENT_ID}`,
-    state: 'todo_unknown',
-    error_code: 'todo_result_unknown',
-    attempt_count: 1,
+    state: 'failed_summary',
+    error_code: 'summary_failed',
+    attempt_count: 12,
     receive_time: '2026-09-28T08:00:00Z',
     update_time: '2026-09-28T08:02:10Z',
     attention: true,
@@ -79,32 +79,17 @@ export function eventDetail(patch: Partial<MailEvent> = {}): MailEvent {
     sender: 'billing@example.com',
     summary: '季度预缴税截止日期为 10 月 15 日。',
     summary_model: 'gemini-3.8-flash',
-    todo_body: `**FROM: billing@example.com**\n...\n\nMail Hero event: ${EVENT_ID}`,
-    todoist_request_id: 'todofy-0123456789abcdef0123456789ab',
-    allowed_actions: ['task_created', 'task_not_created', 'dismiss'],
+    allowed_actions: ['retry_summary', 'dismiss'],
     transitions: [
       { transition_time: '2026-09-28T08:00:00Z', state: 'pending', actor: 'worker' },
       {
         transition_time: '2026-09-28T08:00:20Z',
-        prior_state: 'summarized',
-        state: 'todo_unknown',
-        error_code: 'todo_result_unknown',
+        prior_state: 'summarizing',
+        state: 'failed_summary',
+        error_code: 'summary_failed',
         actor: 'worker',
       },
     ],
-    ...patch,
-  }
-}
-
-export function reminder(patch: Partial<DailyReminder> = {}): DailyReminder {
-  return {
-    name: 'dailyReminders/2026-09-27',
-    state: 'created',
-    task_id: '6X7rM8997g3RQmvh',
-    attention_count: 2,
-    attempt_count: 1,
-    create_time: '2026-09-27T09:00:00Z',
-    update_time: '2026-09-27T09:00:02Z',
     ...patch,
   }
 }
@@ -175,32 +160,4 @@ export function dailyMetrics(): ListMetricDaysResponse {
     index < 27 ? notRecorded(day) : metricsDay(day, index === 29 ? { received_count: 70, latency_p90_seconds: 240 } : {}),
   )
   return { metric_days: oldestFirst.toReversed(), next_page_token: 'older' }
-}
-
-export function gtdScope(patch: Partial<GtdScope> = {}): GtdScope {
-  return {
-    open_count: 9,
-    fresh_count: 2,
-    recent_count: 3,
-    stale_count: 1,
-    old_count: 3,
-    oldest_age_days: 40,
-    overdue_count: 1,
-    undated_count: 5,
-    created_last_week_count: 6,
-    completed_last_week_count: 4,
-    completed_source: 'api',
-    closed_last_day_count: 2,
-    open_mail_count: 3,
-    complete: true,
-    ...patch,
-  }
-}
-
-export function gtdDay(day: string, patch: Partial<GtdDay> = {}): GtdDay {
-  return { name: `gtdDays/${day}`, recorded: true, all_projects: gtdScope(), inbox: gtdScope({ open_count: 4 }), ...patch }
-}
-
-export function gtdReview(patch: Partial<GtdReview> = {}): GtdReview {
-  return { name: 'gtdReviews/2026-w39', state: 'created', create_time: '2026-09-27T17:00:00Z', ...patch }
 }

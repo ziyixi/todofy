@@ -10,10 +10,6 @@ import { shortId, taskUrl } from '../lib/format'
 import { EVENT_ERRORS, EVENT_STATES, RECONCILE_ACTIONS, type Label } from '../lib/labels'
 import { ReconcileDialog } from './ReconcileDialog'
 
-function footerText(eventId: string): string {
-  return `Mail Hero event: ${eventId}`
-}
-
 /** The actions an event allows now, as wire names (an action this build does not know is left out). */
 export function allowedActions(event: MailEvent): ReconcileActionName[] {
   return event.allowedActions.map((action) => reconcileActions.name(action)).filter((name) => name !== null)
@@ -82,19 +78,8 @@ function StatusSection({ event }: { event: MailEvent }) {
 function ActionsSection({ event, onPick }: { event: MailEvent; onPick: (action: ReconcileActionName) => void }) {
   const actions = allowedActions(event)
   if (actions.length === 0) return null
-  const lookup = actions.includes('task_created')
-  const footer = footerText(idOf(event.name))
   return (
     <Section title="需要你处理">
-      {lookup ? (
-        <div className="hint-box">
-          <p>先在 Tasks 里搜索这段页脚，确认任务是否已经建成：</p>
-          <p className="inline-copy">
-            <code className="wrap">{footer}</code>
-            <CopyButton value={footer} label="页脚" />
-          </p>
-        </div>
-      ) : null}
       <div className="action-row">
         {/* Only the first (most likely) action is filled; the dialogs carry the warnings. */}
         {actions.map((action, index) => (
@@ -278,7 +263,7 @@ export function EventDetailPage() {
           <CircleCheck size={18} aria-hidden="true" />
           <span>
             <strong>已提交：{RECONCILE_ACTIONS[done].title}</strong>
-            后续的查找、摘要或建任务由后台稍后完成，本页会显示最新状态。
+            后续的摘要由后台稍后完成，本页会显示最新状态。
           </span>
         </p>
       ) : null}

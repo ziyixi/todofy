@@ -62,9 +62,7 @@ const ANSWERS = {
     ReconcileMailEvent: fixtures.ok(fixtures.eventDetail()),
     GetLegacyText: fixtures.ok(fixtures.legacyText()),
     ListMetricDays: fixtures.ok(fixtures.metricDays(90), { day: '2026-06-30' }),
-    ListGtdDays: fixtures.ok(fixtures.gtdDays(120)),
     GetLatestReports: fixtures.ok(fixtures.latestReports()),
-    ListDailyReminders: fixtures.ok(fixtures.reminderPage(100), { day: '2026-06-01' }),
   },
 };
 
@@ -127,9 +125,7 @@ async function session({ h, meter }: GatewayIsolate): Promise<Measurement[]> {
     ['GET /api/v1/mailEvents/{id} (100 transitions, 64 KiB summary)', `/api/v1/${event}`],
     [LEGACY, `/api/v1/legacyTexts/${fixtures.UUID(0)}`],
     ['GET /api/v1/metricDays (90 days)', '/api/v1/metricDays?page_size=90'],
-    ['GET /api/v1/gtdDays (120 days)', '/api/v1/gtdDays?page_size=120'],
     [REPORTS, '/api/v1/latestReports'],
-    ['GET /api/v1/dailyReminders (a full page of 100)', '/api/v1/dailyReminders?page_size=100'],
     [
       'POST /api/v1/mailEvents/{id}:reconcile (CSRF checked)',
       `/api/v1/${event}:reconcile`,
@@ -174,6 +170,6 @@ describe('CPU per owner API request (Workers Free: 10 ms)', () => {
         expect(median, `${label}: warm median`).toBeLessThan(API_BOUND_MS);
       }
     }
-    expect(reference.size).toBe(13);
+    expect(reference.size).toBe(11);
   });
 });

@@ -41,7 +41,7 @@ message ServiceStatus {
   int32 attention_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Events stored in the last 24 hours.
   int32 received_last_day_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The newest daily reminder; unset before the first.
+  // Retired on 2026-10-21, when Home took the daily reminder over: always unset.
   // (-- api-linter: core::0122::embedded-resource=disabled
   //     aip.dev/not-precedent: the banner shows the newest reminder's state as read in the same request; a name
   //     would cost the UI a second request every five minutes for one line. --)
@@ -64,11 +64,10 @@ message Switches {
   bool maintenance_mode = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // PROCESSING_PAUSED: mail is stored but not processed.
   bool processing_paused = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // FORCE_PAUSE_TODOIST (the name is kept from Todoist): the alarm's writes to Tasks wait (mail tasks,
-  // reminders, the GTD snapshot and review, task intents, the Monday reset); summaries and the owner's
-  // planning continue.
+  // Retired on 2026-10-21 (FORCE_PAUSE_TODOIST paused the alarm's writes to Tasks; Todofy writes none now): always
+  // false.
   bool force_pause_todoist = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // REMINDER_ENABLED: the daily reminder task.
+  // Retired on 2026-10-21 (REMINDER_ENABLED switched the daily reminder task, which Home sends now): always false.
   bool reminder_enabled = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
@@ -254,7 +253,7 @@ message ConfiguredSecrets {
   bool gemini_api_key = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Retired: TODOIST_API_KEY is no longer read, so this is always false.
   bool todoist_api_key = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // TODOIST_DEFAULT_PROJECT_ID (todofy-core): the Tasks project of Todofy's mail tasks.
+  // Retired on 2026-10-21 (TODOIST_DEFAULT_PROJECT_ID, the Tasks project of Todofy's mail tasks): always false.
   bool todoist_project = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 

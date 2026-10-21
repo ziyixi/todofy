@@ -27,7 +27,6 @@ describe('route labels', () => {
     ['owner', '/api/v1/legacyTexts/legacy%3Aabc', '/api/v1/legacyTexts/{id}'],
     ['owner', '/api/v1/latestReports:recompute', '/api/v1/latestReports:recompute'],
     ['owner', '/api/v1/metricDays', '/api/v1/metricDays'],
-    ['owner', '/api/v1/gtdReviews', '/api/v1/gtdReviews'],
     // The owner API before todofy.ui.v1 (410 for one release).
     ['owner', '/api/v1/events', '/api/v1/events'],
     ['owner', `/api/v1/events/${EVENT_ID}/reconcile`, '/api/v1/events/{id}/reconcile'],
