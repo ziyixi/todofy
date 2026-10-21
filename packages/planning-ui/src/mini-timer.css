@@ -76,12 +76,26 @@ body {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   text-box: trim-both cap alphabetic;
-  /* Digits sit inside their tabular cells: pull the first one's ink onto the text edge. */
+  /* Digits sit inside their tabular cells: pull the first one's ink onto the text edge, by that digit's own side
+     bearing (SF at this weight, measured in Chrome), so the edge holds as 19:59 turns 20:00. This one fits 3; a
+     session counts at most 4 hours, so 6 to 9 never lead. */
   margin-left: -0.05em;
   transition: color 400ms ease;
 }
+.mini-time[data-lead="0"] {
+  margin-left: -0.042em;
+}
 .mini-time[data-lead="1"] {
   margin-left: -0.13em;
+}
+.mini-time[data-lead="2"] {
+  margin-left: -0.079em;
+}
+.mini-time[data-lead="4"] {
+  margin-left: -0.036em;
+}
+.mini-time[data-lead="5"] {
+  margin-left: -0.069em;
 }
 /* SF centres a colon between digits; its tabular side bearings read loose at this size. */
 .mini-colon {
