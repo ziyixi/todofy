@@ -115,12 +115,15 @@ export interface MiniTimerProps {
   onTimer: (action: "pause" | "resume" | "stop") => void;
   /** Completes the step; absent when Plan does not list it. */
   onComplete?: () => void;
+  /** Pause when away's question, while it waits: it fills the window, with Keep and Discard in the controls' place. */
+  away?: { minutes: number; keep: () => void; discard: () => void };
 }
 
 /**
  * The Focus mini timer (Document Picture-in-Picture): the time as the one large thing, the step over it, its
  * controls beside it on hover or keyboard focus, and a hairline rule of the step's time against its estimate.
- * mini-timer.css styles exactly this DOM. It re-renders only itself, once a second while the session runs.
+ * Away, the question takes the step's line and its answers the controls' place. mini-timer.css styles exactly this
+ * DOM. It re-renders only itself, once a second while the session runs.
  */
 export function MiniTimer({
   clock,
@@ -134,6 +137,7 @@ export function MiniTimer({
   failed,
   onTimer,
   onComplete,
+  away,
 }: MiniTimerProps) {
   const [, tick] = useState(0);
   const timer = focus.timer;
@@ -171,6 +175,7 @@ export function MiniTimer({
       lang={language}
       data-status={timer.status}
       data-progress={rule.band}
+      data-away={away ? "" : undefined}
       aria-busy={busy}
       style={
         {
@@ -186,6 +191,11 @@ export function MiniTimer({
       <p className={`mini-title${title ? "" : " is-fallback"}`} title={title}>
         {name}
       </p>
+      {away && (
+        <p className="mini-message mini-question" role="status">
+          {text.away(away.minutes)}
+        </p>
+      )}
       <div className="mini-time" role="timer" data-lead={time[0]}>
         {time.split(":").map((part, index) => (
           <Fragment key={index}>
@@ -194,35 +204,48 @@ export function MiniTimer({
           </Fragment>
         ))}
       </div>
-      <span className="mini-status">{running ? "" : text.paused}</span>
-      <div className="mini-controls">
-        <Control
-          label={running ? text.pause : text.resume}
-          title={name}
-          busy={busy}
-          onClick={() => onTimer(running ? "pause" : "resume")}
-        >
-          {running ? PAUSE : PLAY}
-        </Control>
-        <Control
-          label={text.stop}
-          title={name}
-          busy={busy}
-          onClick={() => onTimer("stop")}
-        >
-          {STOP}
-        </Control>
-        {onComplete && (
-          <Control
-            label={text.complete}
-            title={name}
-            busy={busy}
-            onClick={onComplete}
-          >
-            {CHECK}
-          </Control>
-        )}
-      </div>
+      {away ? (
+        <div className="mini-answers">
+          <button type="button" disabled={busy} onClick={away.keep}>
+            {text.keep}
+          </button>
+          <button type="button" disabled={busy} onClick={away.discard}>
+            {text.discard}
+          </button>
+        </div>
+      ) : (
+        <>
+          <span className="mini-status">{running ? "" : text.paused}</span>
+          <div className="mini-controls">
+            <Control
+              label={running ? text.pause : text.resume}
+              title={name}
+              busy={busy}
+              onClick={() => onTimer(running ? "pause" : "resume")}
+            >
+              {running ? PAUSE : PLAY}
+            </Control>
+            <Control
+              label={text.stop}
+              title={name}
+              busy={busy}
+              onClick={() => onTimer("stop")}
+            >
+              {STOP}
+            </Control>
+            {onComplete && (
+              <Control
+                label={text.complete}
+                title={name}
+                busy={busy}
+                onClick={onComplete}
+              >
+                {CHECK}
+              </Control>
+            )}
+          </div>
+        </>
+      )}
       {failed ? (
         <p className="mini-message mini-error">{text.notSaved}</p>
       ) : (

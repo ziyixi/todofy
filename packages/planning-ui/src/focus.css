@@ -18,6 +18,10 @@
   padding: 0;
   accent-color: var(--plus-accent);
 }
+/* Pause when away's toggle uses the same look in Focus › Day; the browser's refusal follows it, as quiet. */
+.plus-idle-refused {
+  font-size: 11px;
+}
 /* Day, Week and Month on the left; the previous and next day, week or month and Today on the
    right, in the week calendar's style. */
 .plus-focus-toolbar {

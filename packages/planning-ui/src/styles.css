@@ -516,6 +516,32 @@
   font-size: 18px;
   letter-spacing: 0.5px;
 }
+/* Pause when away: the question takes the status line in the body colour; Keep and Discard are quiet text
+   actions in Pause/Resume's place, as in the mini timer. */
+.plus-timer-bar small.plus-away-question {
+  color: var(--plus-text);
+}
+.plus-away-answers {
+  display: inline-flex;
+  gap: 14px;
+}
+.plus-root .plus-away-answers button {
+  padding: 4px 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--plus-accent);
+  text-decoration: underline transparent;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  transition: text-decoration-color 160ms ease;
+}
+.plus-root .plus-away-answers button:hover:not(:disabled) {
+  text-decoration-color: currentColor;
+}
+/* Behind another page only the question's timer bar shows: the root itself takes no room. */
+.plus-root.plus-root-background {
+  display: contents;
+}
 .plus-spin {
   animation: plus-spin 1s linear infinite;
 }

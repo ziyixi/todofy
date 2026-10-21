@@ -37,6 +37,9 @@ import { TaskEditor } from "./TaskEditor";
 import { WeeklyGoals } from "./WeeklyGoals";
 import { localDate } from "./mail";
 import { MiniTimer } from "./MiniTimer";
+import { useAnnouncement } from "./announce";
+import type { IdleCommand } from "./idle-pause";
+import { useIdlePause } from "./useIdlePause";
 import {
   canOpenMiniWindow,
   openMiniWindow,
@@ -46,6 +49,7 @@ import { outcomeForTask } from "./planning-outcomes";
 import type { PlanViewPatch, PlanViewState } from "./plan-view-state";
 import type {
   Area,
+  Confirmed,
   Language,
   PendingChange,
   PlanState,
@@ -53,7 +57,7 @@ import type {
   PlusActions,
   PlusData,
   PlusSnapshot,
-  RunOperation,
+  TimerSnapshot,
   View,
 } from "./model";
 
@@ -89,6 +93,12 @@ export interface PlanningAppProps {
   background?: boolean;
   /** Whether a Focus session exists, each time that changes in the confirmed data. */
   onSession?: (active: boolean) => void;
+  /**
+   * Pause when away, the owner's setting for this device, which the host keeps; with `onIdlePause`, Focus › Day
+   * shows its toggle where the browser has the Idle Detection API.
+   */
+  idlePause?: boolean;
+  onIdlePause?: (on: boolean) => void;
 }
 export function App({
   actions,
@@ -108,6 +118,8 @@ export function App({
   onPlanView,
   background = false,
   onSession,
+  idlePause,
+  onIdlePause,
 }: PlanningAppProps) {
   // What the server confirmed, from reads and writes. Pending drags are drawn on top of it.
   const [confirmed, setConfirmed] = useState<PlusData | undefined>(
@@ -262,14 +274,23 @@ export function App({
       setReading((count) => count - 1);
     }
   }, [load, text.lastError]);
-  const run: RunOperation = useCallback(
-    (operation, change) => {
+  /** The RunOperation every view gets; `quiet` (a retry of a failed away pause) shows no error of its own. */
+  const run = useCallback(
+    (
+      operation: () => Promise<Confirmed>,
+      change?: PendingChange,
+      quiet = false,
+    ) => {
       const epoch = writes.current.epoch;
       writes.current.queued++;
       if (change) setPending((list) => [...list, change]);
       else setWaiting((count) => count + 1);
-      setError("");
-      setWriteFailed(false);
+      const clearError = () => {
+        setError("");
+        setWriteFailed(false);
+      };
+      // A quiet retry leaves the error it retries until it succeeds.
+      if (!quiet) clearError();
       const write = queue.current.then(async () => {
         let reread = false;
         try {
@@ -278,23 +299,26 @@ export function App({
           const result = await operation();
           setConfirmed((current) => current && applyConfirmed(current, result));
           setWritten((count) => count + 1);
+          if (quiet) clearError();
           reread = rereadsAfter(result);
           return true;
         } catch (failure) {
           writes.current.epoch++;
           setPending([]);
-          setWriteFailed(true);
           // Every write queued behind this one is dropped by the epoch check.
           const dropped = writes.current.queued - 1;
-          setError(
-            [
-              change && text.restored,
-              failure instanceof Error ? failure.message : text.lastError,
-              dropped > 0 && `${text.notSent} ${dropped}`,
-            ]
-              .filter(Boolean)
-              .join(" "),
-          );
+          if (!quiet) {
+            setWriteFailed(true);
+            setError(
+              [
+                change && text.restored,
+                failure instanceof Error ? failure.message : text.lastError,
+                dropped > 0 && `${text.notSent} ${dropped}`,
+              ]
+                .filter(Boolean)
+                .join(" "),
+            );
+          }
           // Another window may have changed the timer, queue or task. Show its current state.
           reread = true;
           return false;
@@ -435,6 +459,53 @@ export function App({
   useEffect(() => {
     onSnapshot?.(confirmed && { data: confirmed, readAt: loadedAt.current });
   }, [confirmed, onSnapshot]);
+  // Pause when away: its commands run in the one write queue against the latest confirmed timer, read when they
+  // run rather than when they were queued.
+  const latestFocus = useRef(confirmed?.focus);
+  useEffect(() => {
+    latestFocus.current = confirmed?.focus;
+  }, [confirmed]);
+  const sendIdle = useCallback(
+    async (command: IdleCommand, quiet: boolean) => {
+      let saved: TimerSnapshot | undefined;
+      const sent = await run(
+        async () => {
+          const focus = latestFocus.current;
+          // The session ended meanwhile: nothing to send; the read that follows shows what changed.
+          if (!focus?.timer) return undefined;
+          saved = await actions.timer(
+            command.action,
+            focus.timer.taskId,
+            focus,
+            undefined,
+            undefined,
+            command.at === undefined
+              ? undefined
+              : new Date(command.at).toISOString(),
+          );
+          return saved;
+        },
+        undefined,
+        quiet,
+      );
+      return sent ? saved : undefined;
+    },
+    [actions, run],
+  );
+  const [spoken, announce] = useAnnouncement();
+  const away = useIdlePause({
+    enabled: idlePause,
+    onEnabled: onIdlePause,
+    timer: confirmed?.focus.timer,
+    send: sendIdle,
+    onAnswered: (kept) =>
+      announce(kept ? text.awayCounted : text.resumedFromNow),
+  });
+  const question = away.question;
+  const askedMinutes = question?.minutes;
+  useEffect(() => {
+    if (askedMinutes) announce(text.away(askedMinutes));
+  }, [announce, askedMinutes, text]);
   const session = confirmed && Boolean(confirmed.focus.timer);
   useEffect(() => {
     if (session !== undefined) onSession?.(session);
@@ -579,11 +650,16 @@ export function App({
       <button onClick={onSettings}>{text.manage}</button>
     </div>
   );
+  // While the away question waits it takes the status line, and its answers take Pause/Resume's place.
   const timerBar = data?.focus.timer && (
     <aside className="plus-timer-bar" aria-label={text.focus}>
       <div>
-        <small>
-          {data.focus.timer.status === "running" ? text.focus : text.paused}
+        <small className={question ? "plus-away-question" : undefined}>
+          {question
+            ? text.away(question.minutes)
+            : data.focus.timer.status === "running"
+              ? text.focus
+              : text.paused}
         </small>
         <strong>
           {timerTask
@@ -594,25 +670,36 @@ export function App({
       <output>
         <Elapsed focus={data.focus} />
       </output>
-      <button
-        className="plus-icon"
-        disabled={busy || timerSettling}
-        aria-label={
-          data.focus.timer.status === "running" ? text.pause : text.resume
-        }
-        onClick={() =>
-          commandTimer(
-            data.focus.timer?.status === "running" ? "pause" : "resume",
-            data.focus.timer!.taskId,
-          )
-        }
-      >
-        {data.focus.timer.status === "running" ? (
-          <Pause size={17} />
-        ) : (
-          <Play size={17} />
-        )}
-      </button>
+      {question ? (
+        <span className="plus-away-answers">
+          <button disabled={busy || timerSettling} onClick={question.keep}>
+            {text.keep}
+          </button>
+          <button disabled={busy || timerSettling} onClick={question.discard}>
+            {text.discard}
+          </button>
+        </span>
+      ) : (
+        <button
+          className="plus-icon"
+          disabled={busy || timerSettling}
+          aria-label={
+            data.focus.timer.status === "running" ? text.pause : text.resume
+          }
+          onClick={() =>
+            commandTimer(
+              data.focus.timer?.status === "running" ? "pause" : "resume",
+              data.focus.timer!.taskId,
+            )
+          }
+        >
+          {data.focus.timer.status === "running" ? (
+            <Pause size={17} />
+          ) : (
+            <Play size={17} />
+          )}
+        </button>
+      )}
       <button
         className="plus-icon"
         disabled={busy || timerSettling}
@@ -683,6 +770,7 @@ export function App({
         failed={writeFailed && Boolean(error)}
         onTimer={(action) => commandTimer(action, timer.taskId)}
         onComplete={timerTask && (() => void complete(timerTask))}
+        away={question}
       />,
       mini.container,
     );
@@ -690,6 +778,15 @@ export function App({
   return (
     // The mini timer keeps its place in the tree, so moving to the background does not remount it.
     <>
+      <p className="plus-sr-only" role="status">
+        {spoken}
+      </p>
+      {/* Behind another page, only the away question's timer bar shows. */}
+      {background && question && (
+        <div className="plus-root plus-root-background" ref={root}>
+          {timerBar}
+        </div>
+      )}
       {!background && (
         <div className={`plus-root plus-root-${view}`} ref={root}>
           <header className="plus-page-header">
@@ -809,6 +906,7 @@ export function App({
                   complete={(task) => void complete(task)}
                   onOpenPlan={() => onViewChange?.("plan")}
                   onTimer={commandTimer}
+                  idlePause={away.toggle}
                 />
               )}
             </fieldset>

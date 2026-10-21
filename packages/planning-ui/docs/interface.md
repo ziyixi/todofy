@@ -226,7 +226,15 @@ Focus 显示 Tasks 的今天（`ListFocusDaysResponse.today`，即账户时区�
 
 三个按钮调用计时条自己的函数（`commandTimer`、`complete`），经过同一个写入队列，没有第二套计时状态，也不在浏览器里保存任何东西。时钟用小窗自己的定时器，在会话的下一个整秒刷新：主窗口隐藏或最小化时它的定时器会变慢，而那正是看小窗的时候。60 秒一次的计时读取在只有小窗可见时也照常进行，小窗获得焦点时也读取一次。会话结束（结束、番茄钟到时、完成被确认，或读取显示没有计时）、owner 关掉它、Plan／Focus 卸载时，窗口立即关闭，按钮回到未按下。
 
-**后台模式**：会话存在时，宿主让 Plan／Focus 在其他页面后面保持挂载（`onSession` 报告会话的有无，`background` 表示宿主在显示别的页面），所以去 Today、Mail 或项目时小窗留着、按钮照常工作。后台时 App 只渲染小窗（React 树中位置不变，不会重新挂载），保留数据、写入队列、计时读取和番茄钟的结束；完整读取（别处的任务写入、回到窗口）等到 Plan／Focus 再显示：若有错过的读取就读一次，并在读完前停用写入，否则数据超过一分钟才读。没有会话时什么都不挂载；有会话时代价是窗口可见时每分钟一次 GetFocusTimer。后台的失败在别的页面上什么也不显示，打开 Plan 或 Focus 时重置。
+**后台模式**：会话存在时，宿主让 Plan／Focus 在其他页面后面保持挂载（`onSession` 报告会话的有无，`background` 表示宿主在显示别的页面），所以去 Today、Mail 或项目时小窗留着、按钮照常工作。后台时 App 只渲染小窗（React 树中位置不变，不会重新挂载），以及离开的问题等待回答时的计时条；保留数据、写入队列、计时读取、番茄钟的结束和离开时暂停；完整读取（别处的任务写入、回到窗口）等到 Plan／Focus 再显示：若有错过的读取就读一次，并在读完前停用写入，否则数据超过一分钟才读。没有会话时什么都不挂载；有会话时代价是窗口可见时每分钟一次 GetFocusTimer。后台的失败在别的页面上什么也不显示，打开 Plan 或 Focus 时重置。
+
+**离开时暂停**（2026-10-20 owner 决定）：Focus › 日（今天）的计时方式后面一个安静的勾选框“离开时暂停”／`Pause when away`，样式同页头的“已完成”，悬停说明“正计时在锁屏或 10 分钟无操作时暂停，回来时问你是否计入。”。只在浏览器有 Idle Detection API（Chrome 94+）且宿主保存这个设置（`idlePause`、`onIdlePause`）时出现。设置属于这台设备，Tasks 存在 localStorage 的 `tasks.idle-pause`（`on`，没有即关），不是计时状态。权限只在勾选的点击里请求（`IdleDetector.requestPermission()`）；被拒时保持未勾选，后面跟一行 muted 的“浏览器没有允许检测离开。”，直到下一次点击；取消勾选不需要权限。只有设置打开且权限为 granted 时显示勾选：权限被收回就显示未勾选，再点会重新请求。
+
+只管正计时，番茄钟不变。离开的起点：锁屏时为锁屏那一刻；`t` 时报告 10 分钟无操作为 `t − 10 分钟`；主窗口每 15 秒一次心跳，任何事件距上次心跳满 10 分钟（机器睡眠或页面被冻结）为上次心跳；几种同时出现取最早的。开始观察时（以及回答后继续时）看到的状态只是基线：若是无操作或锁屏，要先看到一次有操作且未锁屏才会暂停（无头 Chromium 启动时报告无操作；从手机开始的会话不能因为 Mac 正闲着就被丢弃）。发现离开时立即在 Tasks 里暂停在离开的起点（CommandFocusTimer PAUSE 带 `effective_time`），别的窗口和设备都看到已暂停；若 owner 不再回到这个窗口，离开的时间就不计。
+
+回来（有操作且未锁屏）时，计时条的状态行换成问题“离开了 N 分钟，要计入吗？”／`Away for N min — count it?`（正文色；N 为回来时刻减 Tasks 的 `pause_time`，四舍五入到分钟，至少 1），暂停／继续的位置换成“计入”／`Keep` 与“不计入”／`Discard` 两个文字按钮（13px、500、强调色，悬停出现下划线）；结束和完成仍可用，它们结束这段已暂停的会话，离开的时间不计。小窗里问题占步骤标题那一行，两个回答占控件的位置（见小窗的设计定稿）。计入：RESUME 带 `effective_time = pause_time`，就像从没暂停过；不计入：RESUME 不带时间，从现在继续。问题出现时以及回答确认后（“已计入离开的时间。”／`Away time counted.` 或“已从现在继续。”／`Resumed from now.`），App 一直存在的 `role="status"` 区域朗读一次。问题属于那一次暂停：计时在别处有任何改变（新的 etag）就收起；刷新或关闭窗口也收起（不在浏览器保存），计时保持暂停，继续即从现在算。问题等待时再次离开不发送任何东西，只把回来时刻移到最后一次回来。关掉设置时已做的暂停保留，问题立即出现。
+
+判断是纯函数 `src/idle-pause.ts`（off、arming、watching、pausing、away、asking 六个阶段，每个事件带时间，测试用假时钟）；`src/useIdlePause.ts` 接到浏览器上：设置打开、权限 granted、这个窗口持有观察，且有正计时在跑或被它暂停时，运行一个 `IdleDetector`（`threshold: 600000` 和 `signal`），否则中止；心跳；Web Lock `tasks.idle-pause` 让两个 Tasks 窗口只有一个观察（排队等待，前一个窗口关闭后接手；没有 `navigator.locks` 时照常观察）。命令经过 App 的同一个写入队列，执行时才读最新确认的计时。暂停失败时第一次照常显示错误；之后每次心跳用同一个起点安静重试（同一个 request ID，丢失的回答会被重放），直到会话不再是正计时；读到计时恰好暂停在这个起点，就是自己那次暂停。精确度：Chrome 何时报告无操作和锁屏由它决定，起点可能晚一点（算作工作）；睡眠的误差在一次心跳之内（隐藏窗口最多一分钟）；暂停与继续按整秒，与其他暂停一样；服务端把时间限制在合法范围内。
 
 ## 写入与读取
 
@@ -281,7 +289,7 @@ Plan、规划事实、依赖、Focus 的队列、计时和用时记录都是 Tas
 | Focus 的其他日期、周和月 | `readFocus`：ListFocusDays，每次最多七天，同时发出（一个月最多 6 次）；写入确认后重读显示的范围 | 每天的队列与记录、它们提到的任务、Tasks 的今天        |
 | 用时记录             | CreateFocusEntry、UpdateFocusEntry（只改 `seconds`，带 etag）、DeleteFocusEntry                  | 保存或删除的记录，直接合并                            |
 | 估时                 | 宿主的 `updateEstimate`：Tasks UpdateTask 的 `duration_minutes`，带 Plan 持有的 etag             | 保存的时长和新的 etag（`{ estimate, etag }`），直接合并；零表示清空 |
-| 计时                 | CommandFocusTimer，etag 与稳定 request ID；Start 带番茄钟时长和领域                              | FocusTimer 映射为 TimerSnapshot，保存的记录一并合并；idle 清除显示状态 |
+| 计时                 | CommandFocusTimer，etag 与稳定 request ID；Start 带番茄钟时长和领域；离开时暂停的 PAUSE／RESUME 带 `effective_time`（Tasks 把它限制在本段开始或 `pause_time` 到现在之间） | FocusTimer 映射为 TimerSnapshot（`pause_time` 映射为精确到毫秒的 `pausedAt`），保存的记录一并合并；idle 清除显示状态 |
 | 真正完成（Focus 与 Plan 的勾选框） | 宿主的 `completeTask`：Tasks CompleteTask（Plan 持有的 etag）带 `focus_day`，日历卡片带所在日期，其余带 Focus 的日期 | Tasks 确认后后台重新读取，不靠本地删除                |
 | 提前开始             | UpdateTask，mask `deadline,lead_days`；没有截止日期时 Tasks 存 0                                 | 保存的任务（Deadline、leadDays），Due 保留            |
 | 周回顾数据           | 加载的任务、队列和 GetPlan（下周选择 ID、上周至下周的目标）；清单打开时 Todofy 的 ReadWeeklyReview（待理清的邮件数、回顾任务） | 回顾的两项到达前显示“—” |
@@ -295,7 +303,7 @@ Plan、规划事实、依赖、Focus 的队列、计时和用时记录都是 Tas
 
 ## 实现文件
 
-宿主（Tasks 的 [PlanningPage](../../../tasks/web/src/PlanningPage.tsx)）提供传输、估时与完成的写入、导航和视图记忆；其余都在本包。
+宿主（Tasks 的 [PlanningPage](../../../tasks/web/src/PlanningPage.tsx)）提供传输、估时与完成的写入、导航、视图记忆和离开时暂停的设置；其余都在本包。
 
 | 责任                  | 文件                                                                            |
 | --------------------- | ------------------------------------------------------------------------------- |
@@ -314,6 +322,7 @@ Plan、规划事实、依赖、Focus 的队列、计时和用时记录都是 Tas
 | Focus 的视图与计时按钮 | `src/FocusView.tsx`、`src/FocusBlock.tsx`、`src/focus.css`                     |
 | 用时记录浮层          | `src/FocusEntries.tsx`                                                          |
 | 小窗计时              | `src/MiniTimer.tsx`、`src/picture-in-picture.ts`、`src/mini-timer.css`           |
+| 离开时暂停            | `src/idle-pause.ts`、`src/useIdlePause.ts`                                      |
 | Focus 的周与月        | `src/FocusWeek.tsx`、`src/FocusMonth.tsx`、`src/focus-stats.ts`                 |
 | 用户调用及服务端协议  | `src/api.ts`                                                                    |
 | 颜色桥接              | `src/styles.css` 开头                                                           |

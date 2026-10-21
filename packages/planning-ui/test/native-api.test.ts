@@ -157,6 +157,68 @@ it("counts up when Start has no target, and an unassigned task starts with no ar
   });
 });
 
+it("sends when a Pause or Resume takes effect, keeps the pause time to the millisecond, and retries under one request ID", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  let down = true;
+  const send: HttpSend = async (call) => {
+    bodies.push(JSON.parse(call.body!));
+    if (down) {
+      down = false;
+      throw new TypeError("Synthetic network failure");
+    }
+    return Response.json({
+      timer: {
+        name: "focusTimer",
+        state: "paused",
+        etag: "3",
+        task_id: "step",
+        day: "2026-10-17",
+        saved_seconds: 300,
+        pause_time: "2026-10-17T12:05:00.123Z",
+      },
+    });
+  };
+  const api = createPlanningActions({ plus: send, tasks: send });
+  const focus: FocusState = {
+    date: "2026-10-17",
+    taskIds: ["step"],
+    completedTaskIds: [],
+    entries: [],
+    timerEtag: "2",
+    estimates: {},
+    tasks: {},
+  };
+  const at = "2026-10-17T12:05:00.123Z";
+  await expect(
+    api.timer("pause", "step", focus, undefined, undefined, at),
+  ).rejects.toThrow("Synthetic network failure");
+  const paused = await api.timer("pause", "step", focus, undefined, undefined, at);
+  expect(bodies[0]).toEqual({
+    request_id: expect.any(String),
+    etag: "2",
+    action: "pause",
+    task_id: "step",
+    effective_time: at,
+  });
+  // The same moment is the same request, so Tasks replays it if the first one landed.
+  expect(bodies[1]).toEqual(bodies[0]);
+  expect(paused.timer).toMatchObject({
+    status: "paused",
+    elapsedSeconds: 300,
+    pausedAt: at,
+  });
+  // Another moment is another request; without one, Tasks' now.
+  await api.timer("pause", "step", focus, undefined, undefined, "2026-10-17T12:06:00.000Z");
+  expect(bodies[2]!.request_id).not.toBe(bodies[0]!.request_id);
+  await api.timer("resume", "step", { ...focus, timerEtag: "3" });
+  expect(bodies[3]).toEqual({
+    request_id: expect.any(String),
+    etag: "3",
+    action: "resume",
+    task_id: "step",
+  });
+});
+
 it("takes every estimate from the task list; Tasks' Focus read only names tasks the list leaves out", async () => {
   const send: HttpSend = async ({ url }) => {
     const path = url.split("?")[0]!;

@@ -30,7 +30,10 @@ Mail categories go to `/api/plus/v1/*` with CSRF, which Todofy's private Plannin
 open the full task editor and Tasks' Mail page. `snapshot`/`onSnapshot` keep confirmed content in page memory; `planView`/`onPlanView`
 optionally remember IDs and view choices, never task text. `onSession` reports whether a Focus session exists, and
 `background` lets the host keep the app mounted behind its other pages, where it renders only the Focus mini timer
-(a Document Picture-in-Picture window) and keeps it working.
+(a Document Picture-in-Picture window) and keeps it working. `idlePause`/`onIdlePause` are the host's per-device
+Pause when away setting: where the browser has the Idle Detection API, a running count-up pauses in Tasks at the
+moment the owner left, and on return Focus asks whether to count that time (`src/idle-pause.ts`,
+`src/useIdlePause.ts`).
 
 The package keeps the write ordering, confirmed timer state and pending-card rendering. It does not
 synchronize task stores or own server state. CSS is compiled into Tasks and scoped to planning classes and

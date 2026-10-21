@@ -17,6 +17,11 @@ import type {
   WeeklyBet as ApiWeeklyBet,
 } from "@ziyixi/proto/tasks/ui/v1/plan_pb";
 import type { MessageInitShape } from "@ziyixi/proto/protobuf";
+import {
+  timestampDate,
+  timestampFromDate,
+  type Timestamp,
+} from "@ziyixi/proto/protobuf/wkt";
 import type { Task, TaskSchema } from "@ziyixi/proto/tasks/ui/v1/task_pb";
 import {
   CommandFocusTimerRequest_Action,
@@ -180,6 +185,10 @@ function wireArea(value: Area | undefined): string {
 function isoTime(time: { seconds: bigint } | undefined): string | undefined {
   return time && new Date(Number(time.seconds) * 1000).toISOString();
 }
+/** To the millisecond: a Resume that keeps the away time sends the pause time back as it was. */
+function exactTime(time: Timestamp): string {
+  return timestampDate(time).toISOString();
+}
 function focusEntry(entry: ApiFocusEntry): FocusEntry {
   const startedAt = isoTime(entry.startTime);
   return {
@@ -235,6 +244,7 @@ function timerSnapshot(
         ? { mode: "pomodoro" as const, targetSeconds: timer.targetSeconds }
         : {}),
       startedAt: isoTime(timer.segmentStartTime) ?? new Date().toISOString(),
+      ...(timer.pauseTime ? { pausedAt: exactTime(timer.pauseTime) } : {}),
       etag: timerEtag,
     },
     ...saved,
@@ -539,7 +549,7 @@ export function createPlanningActions(transports: {
     async readTimer() {
       return timerSnapshot(await tasks.getFocusTimer({ name: "focusTimer" }));
     },
-    async timer(action, taskId, state, targetSeconds, taskArea) {
+    async timer(action, taskId, state, targetSeconds, taskArea, at) {
       const actions = {
         start: CommandFocusTimerRequest_Action.START,
         pause: CommandFocusTimerRequest_Action.PAUSE,
@@ -549,7 +559,7 @@ export function createPlanningActions(transports: {
       };
       const start = action === "start";
       const confirmed = await once(
-        `timer:${action}:${taskId}:${state.timerEtag}:${start ? `${targetSeconds ?? 0}:${wireArea(taskArea)}` : ""}`,
+        `timer:${action}:${taskId}:${state.timerEtag}:${start ? `${targetSeconds ?? 0}:${wireArea(taskArea)}` : ""}:${at ?? ""}`,
         (requestId) =>
           tasks.commandFocusTimer({
             name: "focusTimer",
@@ -563,6 +573,7 @@ export function createPlanningActions(transports: {
                   area: wireArea(taskArea),
                 }
               : {}),
+            ...(at ? { effectiveTime: timestampFromDate(new Date(at)) } : {}),
           }),
       );
       if (!confirmed.timer) throw new Error("The timer could not be read.");

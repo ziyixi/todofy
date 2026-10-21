@@ -46,6 +46,7 @@ import { planningSensors } from "./row-drag";
 import { monthLabel, readableDate, weekLabel } from "./PlanningCalendar";
 import { LoggedTime } from "./StatusMarks";
 import { words } from "./i18n";
+import type { IdlePause } from "./useIdlePause";
 import type {
   Area,
   DayPlan,
@@ -135,6 +136,8 @@ interface Props {
     targetSeconds?: number,
     area?: Area,
   ) => void;
+  /** Pause when away's toggle, shown after the Timer select; absent without the API or a host setting. */
+  idlePause?: IdlePause["toggle"];
 }
 
 /**
@@ -396,6 +399,7 @@ function FocusDay({
   complete,
   onOpenPlan,
   onTimer,
+  idlePause,
 }: Props & {
   day: DayPlan;
   tasks: FocusRange["tasks"];
@@ -573,6 +577,22 @@ function FocusDay({
                   </option>
                 </select>
               </label>
+            )}
+            {isToday && idlePause && (
+              <label
+                className="plus-completed-toggle"
+                title={text.pauseWhenAwayHint}
+              >
+                <input
+                  type="checkbox"
+                  checked={idlePause.checked}
+                  onChange={(event) => idlePause.onChange(event.target.checked)}
+                />
+                {text.pauseWhenAway}
+              </label>
+            )}
+            {isToday && idlePause?.refused && (
+              <span className="plus-idle-refused">{text.awayRefused}</span>
             )}
             {openPlan}
           </div>

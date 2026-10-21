@@ -216,6 +216,8 @@ export interface FocusState extends DayPlan {
     mode?: "countup" | "pomodoro";
     targetSeconds?: number;
     startedAt: string;
+    /** When a paused session paused (ISO); absent unless paused, and for a pause made before Tasks kept it. */
+    pausedAt?: string;
     etag: string;
   };
 }
@@ -333,13 +335,18 @@ export interface PlusActions {
   updateEstimate(task: PlanningTask, minutes: number): Promise<EstimateResult>;
   /** Tasks' timer, without rereading task lists. */
   readTimer?(): Promise<TimerSnapshot>;
-  /** One timer command; Start counts on Tasks' today, and `area` stays on the session's record. */
+  /**
+   * One timer command; Start counts on Tasks' today, and `area` stays on the session's record. `at` (ISO) is when
+   * a Pause or Resume takes effect, which Tasks moves into its range: a Pause between its running segment's start
+   * and now, a Resume between `pausedAt` and now. Without it, now.
+   */
   timer(
     action: "start" | "pause" | "resume" | "stop" | "finish",
     taskId: string,
     focus: FocusState,
     targetSeconds?: number,
     area?: Area,
+    at?: string,
   ): Promise<TimerSnapshot>;
   /** Focus days from `start` to `end`, both included, with their records and the tasks they name. */
   readFocus(start: string, end: string): Promise<FocusRange>;
