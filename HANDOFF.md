@@ -59,8 +59,9 @@ tests, build and 107 Playwright tests, the tools' 29 tests), Home (268 unit and 
 Mail Hero, Links, Watch, Mailsort, Recall, Brief, Fleet, Website (its export and Worker dry runs on another free
 port), Newsletter (its engine steps with an empty `HOME`) and Platform's contract steps. CI alone runs the
 Newsletter image, Platform's Linux steps, Mail Hero's GPG backup test and Changes' decide step. Not verified here:
-the plan of the five `moved` blocks against the real state (step 1 below reads it; Lab's identical pattern applied
-cleanly on 2026-10-07, but this is the first time a `from` names an instance of a resource no block declares).
+the plan against the real state of the three `moved` blocks and of the two policies that leave with their block
+(step 1 below reads it; Lab's moves applied cleanly on 2026-10-07, but this is the first time a `from` names an
+instance of a resource no block declares).
 
 
 - **Before pushing**, in this order:
