@@ -19,8 +19,9 @@ instructions.
 **In flight, not pushed.** A branch from `origin/main` `b9d18aba`, built in slices (plan: owner decisions of
 2026-10-21: no waiting window, flag, shadow phase or rollback machinery; Home sends the daily digest task; the
 morning brief carries only mail still awaiting a decision; the GTD history is copied once by a dispatched generator).
-Release 1 is slices 1 to 5, up to the commit `docs: describe Mail Hero without its alert webhook` (`6e8d781f`);
-release 2 is slice 6, this branch's tip. Push them as two releases, in that order, with the steps below between them.
+Release 1 is slices 1 to 5 and their two fixes (`39c29e52`, `44acc47b`), up to the commit `feat(todofy)!: keep the
+mail category a conversion takes in Tasks alone` (`44acc47b`); release 2 is slice 6, this branch's tip. Push them as
+two releases, in that order, with the steps below between them.
 
 - **Slice 1** (`851823d2`..`24b7836c`): the IDL (`todofy.mail.v1`, `tasks.inbox.v1`, Tasks' Mail and GTD methods),
   `retired.json`'s `files` kind and the preflight fix for a new D1/R2 binding.
@@ -31,24 +32,33 @@ release 2 is slice 6, this branch's tip. Push them as two releases, in that orde
   review (`TaskJobs`), serves `TaskInbox`, and carries the one-time Todofy import (`tasks-todofy-import.yml`). Tasks
   deploys after Todofy; `tasks-backups` is declared ahead of its binding.
 - **Slice 4** (`439b51b0`..`c2c62759`): Home creates the digest's one task a UTC day through `TaskInbox`
-  (`dashboard/docs/design.md` §5.5); Watch creates its notifications through `TaskInbox` and deploys after Tasks; the
-  Personal MCP reads Todofy's read-only `Mail` entry and converts in Tasks; `PlusService`, `MailReadinessService`
+  (`dashboard/docs/design.md` §5.5); Watch creates its notifications through `TaskInbox` and deploys after Todofy and
+  Tasks (`39c29e52`: a failed Todofy deploy leaves Tasks deploy skipped, not failed); the Personal MCP reads Todofy's
+  read-only `Mail` entry and converts in Tasks; `PlusService`, `MailReadinessService`
   and `todofy.taskintent.v1` are retired (`contracts/task-intent-v1/` deleted); `RETIRED_SERVICE_BINDINGS` lists what
   release 1 removes from the live Workers.
 - **Slice 5** (`7af15157`..`6e8d781f`): Mail Hero has no alert webhook or outbox (`ALERT_WEBHOOK_*` gone; its active
   alerts reach the owner through Home's digest task); its shed guard defers three jobs (`alert_history_purge` gone).
   `alert_notifications` stays, unused, until release 2: Mail Hero applies migrations while the old Worker serves.
+  `44acc47b` then drops `category_id` from `MarkMailConvertedRequest` before it ships: the mail category a conversion
+  takes stays in Tasks, and `summaries.category_id` is frozen.
 - **Slice 6, release 2** (from `feat(todofy)!: back up only Todofy's own D1 and unbind Tasks` to this commit): Tasks
   backs itself up weekly into `tasks-backups` from its `TaskJobs` Alarm ([backup](tasks/docs/backup.md)) and its
   restore tool downloads from either bucket; `TasksApi.exportBackup` is gone and todofy-core binds no other app; the
   one-time import is deleted; Todofy's `0015_drop_copied_stores.sql` drops `gtd_daily`, `gtd_reviews`,
   `plan_categories` and `plan_settings` (`mail_reminders` stays for `tools/legacy_migration`); the gateway's refusals
   are deleted; Mail Hero's `0011_drop_alert_outbox.sql` drops the outbox; `RETIRED_SERVICE_BINDINGS` is
-  `{"todofy": {"TASKS"}}`.
+  `{"todofy": {"TASKS"}}`. Watch no longer settles the rows the Todofy sink left (release 1's Watch did that on its
+  first alarm), so release 2 rebuilds Watch as well.
 
-**Release 1 deploys** Todofy (migration `0014` first), then Tasks (migration `0008`), then Watch, the Personal MCP and
-Home, and Mail Hero (no migration). It also reaches every proto user's checks. Do not push it on Sunday from 09:30 UTC until Monday 00:00 UTC
-(Todofy's backup and Tasks' first Sunday review).
+**Release 1 deploys** Todofy (migration `0014` first), then Tasks (migration `0008`), then Watch (after both), the
+Personal MCP and Home, and Mail Hero (no migration). It also reaches every proto user's checks, and because it changes
+`proto/tools/gen_py.py` (a path every Python proto user builds from), it also runs the Platform side: `Newsletter image
+publish` and `Platform image` publish both GHCR images, `VPS bootstrap bundle` builds, and while the repository
+variable `VPS_DEPLOY_ENABLED` is `true`, `VPS deploy` rolls both out on the VPS. Do not push it on Sunday from 09:30 UTC
+until Monday 08:00 UTC, the end of Sunday in Tasks' `TIME_ZONE` (US/Pacific): Todofy's backup, and Tasks' first
+Sunday review, which Tasks creates at any time on local Sunday from 10:00 when that ISO week has no `weekly_reviews`
+row (Todofy's review of the same week lives only in Todofy, so a release then makes a second review task).
 
 Before pushing release 1 (read-only):
 
@@ -64,13 +74,23 @@ Before pushing release 1 (read-only):
 4. From `mail-hero/cloudflare`: `npx wrangler secret list --config ../wrangler.toml` lists no `ALERT_WEBHOOK_TOKEN`. If
    it does, the owner deletes it before the push (`wrangler secret delete ALERT_WEBHOOK_TOKEN --config
    ../wrangler.toml`); a live secret the config no longer declares stops Mail Hero's release (`BINDING_UNDECLARED`).
-5. Push release 1's commit, not the tip (`git push origin 6e8d781f:refs/heads/claude/boundary-b`, or that commit after
-   a rebase), wait for the complete gate, fast-forward `main` to the same green SHA.
+   In that case (or if the owner ever set it), the owner also re-saves the GitHub production secret
+   `MAIL_HERO_WORKER_SECRETS` without the `ALERT_WEBHOOK_TOKEN` key: the release uploads that map on every deploy, and
+   `tools/cloud-config/worker-secrets.mjs` refuses a name Mail Hero no longer declares
+   (`SettingError(MAIL_HERO_WORKER_SECRETS)`), or the map would upload the secret again. The map cannot be read back.
+5. `gh variable list --repo ziyixi/todofy | grep VPS_DEPLOY_ENABLED`: if it is `true`, the owner either OKs the VPS
+   rollout of the Newsletter and Platform images built from this push, or sets it to `false` for this push and back
+   afterwards.
+6. Push release 1's commit, not the tip (`git push origin 44acc47b:refs/heads/claude/boundary-b`, or that commit after
+   a rebase), wait for the complete gate, including the branch run's `Newsletter checks`, `Newsletter image checks` and
+   `Platform checks` (CI alone runs the Newsletter image and Platform's Linux steps), and fast-forward `main` to the same
+   green SHA.
 
 After release 1:
 
 1. Todofy, Tasks, Watch, the Personal MCP and Home deployed; Home's 配置漂移 shows nothing extra on `todofy-core`,
-   `tasks` or `watch`.
+   `tasks` or `watch`. `Newsletter image publish`, `Platform image` and `VPS bootstrap bundle` passed; if `VPS deploy`
+   ran, it passed, and Home's Newsletter tile is still healthy.
 2. "Infra drift" shows exactly `create: 1` for `cloudflare_r2_bucket.app["tasks-backups"]`: dispatch "Infra apply"
    with that expect line, then a no-change verify plan. Until release 2 binds the bucket, the daily account
    inventory reports it as unregistered.
@@ -91,15 +111,18 @@ After release 1:
    `TODOFY_TODOIST_REVIEW_PROJECT_ID`; nothing reads them.
 
 **Release 2 deploys** Todofy (migration `0015` first, then todofy-core without `TASKS`), then Tasks (`BACKUPS`; its first
-backup starts at the next status call of Home's tick), then Mail Hero (migration `0011`), the Personal MCP (rebuilt
-only: `tasks_ui_service.proto` changed in a comment) and Home (registry, resources, drift). It also reaches every
-app's checks (the ops-v1 contract changed). Do not push it on Sunday from 09:30 to 11:00 UTC (Todofy's and Tasks'
+backup starts at the next status call of Home's tick), then Watch (without the Todofy sink's one-time settling), Mail
+Hero (migration `0011`), the Personal MCP (rebuilt only: `tasks_ui_service.proto` changed in a comment) and Home
+(registry, resources, drift). It also reaches every app's checks (the ops-v1 contract changed), but no Newsletter,
+Platform or VPS job. Do not push it on Sunday from 09:30 to 11:00 UTC (Todofy's and Tasks'
 backups).
 
 Before pushing release 2:
 
 1. Release 1 is live: its deploys passed and Home's 配置漂移 shows nothing extra. Without it, release 2's emptier
-   `RETIRED_SERVICE_BINDINGS` stops on release 1's leftovers (`REPAIR_MANUAL_REQUIRED`), a safe stop.
+   `RETIRED_SERVICE_BINDINGS` stops on release 1's leftovers (`REPAIR_MANUAL_REQUIRED`), a safe stop. Home → Watch
+   shows a check after release 1's Watch deploy: that alarm settled the rows the Todofy sink left, which release 2's
+   Watch no longer does.
 2. The import's apply run (after-release-1 step 3) passed `--expect-none`, and "Infra apply" created `tasks-backups`
    (read-only: `npx wrangler r2 bucket info tasks-backups`); Tasks' release stops on a missing bucket.
 3. Optional, in the same push or the next: the `TaskJobs` namespace line (after-release-1 step 7). With the ID, set
@@ -112,8 +135,8 @@ Before pushing release 2:
 
 After release 2:
 
-1. Todofy (migration `0015` applied), Tasks, Mail Hero (migration `0011` applied), the Personal MCP and Home deployed;
-   Home's 配置漂移 shows nothing extra on `todofy-core` or `tasks`.
+1. Todofy (migration `0015` applied), Tasks, Watch, Mail Hero (migration `0011` applied), the Personal MCP and Home
+   deployed; Home's 配置漂移 shows nothing extra on `todofy-core` or `tasks`.
 2. Within about 30 minutes Home's tick brings Tasks' jobs Alarm forward and the first backup runs: the Tasks tile shows
    `backup_age_seconds`, no `backup_stale` or `backup_failed`; `latest.json` exists in `tasks-backups`.
 3. Rehearse a restore locally ([Rehearse locally](tasks/docs/backup.md#rehearse-locally)) with `PRIV=$(mktemp -d)`:
@@ -122,6 +145,9 @@ After release 2:
 4. After the next Sunday backup, Todofy's health page shows it complete with no `tasks` section; the older Todofy
    backups that hold Tasks rotate out over six Sundays.
 5. In the next natural Todofy release, empty `RETIRED_SERVICE_BINDINGS`.
+6. In the next push that reaches every app anyway, reword `proto/buf.yaml`'s header comment: it still names the
+   retired `todofy/taskintent/v1` among the cross-app contracts (now `ops/v1`, `tasks/inbox/v1` and `todofy/mail/v1`).
+   It was left as is, because a change to that file alone deploys every app and runs the VPS deploy.
 
 Owner item, a blocked secret operation: delete todofy-core's Worker secrets `TODOIST_DEFAULT_PROJECT_ID`,
 `TODOIST_OPS_PROJECT_ID`, `TODOIST_REVIEW_PROJECT_ID` with `TODOIST_API_KEY`, then their optional declarations in
