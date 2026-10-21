@@ -14,7 +14,7 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 
 在 GitHub 仓库 Settings → Environments 创建 `production`，将可部署分支限制为 `main`。个人使用可以直接自动部署；若希望每次人工确认，可添加 required reviewer。给 `main` 开启分支保护时，将 `CI gate` 设为 required check（它汇总共享包、两个应用及合同检查，未改动而跳过的 job 视为通过）。
 
-生产配置提交在 [`mail-hero/wrangler.toml`](../wrangler.toml)，顶层即生产（不用 `[env.*]`，不设 `keep_vars`）：account ID、D1（名称与 ID）、R2 桶 `MAIL_STORE` 与备份桶 `BACKUP_STORE`、自定义域名与 `PUBLIC_HOST`、Access issuer/AUD、`WEBHOOK_ALLOWED_HOSTS`、每日接收上限、兼容日期、Durable Object 绑定与迁移。改这些值就是改这个文件（公开提交，走同样的检查与发布）；CI 不再读取同名的旧 GitHub variables（`MAIL_HERO_D1_DATABASE_ID` 等仍保留在 production 环境，只作为回滚本次配置布局变更时旧生成器的输入，改它们没有效果；保留与删除时机见根目录 README“Rolling back the committed-config layout”）。值必须与现有资源一致，不要新建重复资源。换 D1 或桶（例如恢复到新资源）同样是在维护模式下提交这个文件。可选的 metadata 告警按 ops-v1 计划不配置；若将来启用，只把不含凭据的 `ALERT_WEBHOOK_URL` 与 `ALERT_WEBHOOK_ALLOWED_HOSTS` 提交进该文件，`ALERT_WEBHOOK_TOKEN` 仍是 Worker secret。
+生产配置提交在 [`mail-hero/wrangler.toml`](../wrangler.toml)，顶层即生产（不用 `[env.*]`，不设 `keep_vars`）：account ID、D1（名称与 ID）、R2 桶 `MAIL_STORE` 与备份桶 `BACKUP_STORE`、自定义域名与 `PUBLIC_HOST`、Access issuer/AUD、`WEBHOOK_ALLOWED_HOSTS`、每日接收上限、兼容日期、Durable Object 绑定与迁移。改这些值就是改这个文件（公开提交，走同样的检查与发布）；CI 不再读取同名的旧 GitHub variables（`MAIL_HERO_D1_DATABASE_ID` 等仍保留在 production 环境，只作为回滚本次配置布局变更时旧生成器的输入，改它们没有效果；保留与删除时机见根目录 README“Rolling back the committed-config layout”）。值必须与现有资源一致，不要新建重复资源。换 D1 或桶（例如恢复到新资源）同样是在维护模式下提交这个文件。
 
 部署包装器分别注入三个运维开关/BUILD_SHA和秘密文件。秘密文件只含固定收件地址、owner和aliases，为0600，发布后删除；不打印值。原生备份不增加秘密，不需要公钥或密文封装。缺必选值时拒绝发布，不能绕过包装器。
 
@@ -43,7 +43,7 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 
 1. 在分支上提交并 push，`CI gate` 通过后 fast-forward 到 `main`。
 2. Actions 的 `Mail Hero deploy` 成功后，记录提交 SHA 和 Wrangler 输出的 Worker version ID。
-3. 查看 Mail Hero 登录、收件与新测试事件的交付状态。部署成功仅证明发布步骤成功，不等于真实邮箱到 Todofy/Todoist 的业务链路通过。
+3. 查看 Mail Hero 登录、收件与新测试事件的交付状态。部署成功仅证明发布步骤成功，不等于真实邮箱到 Todofy/Tasks 的业务链路通过。
 
 不再生成配置文件：部署的就是提交的 `mail-hero/wrangler.toml`，外加 `deploy/deploy-vars.mjs exec` 追加的四个 `--var` 和 `secrets` 写出的 secrets 文件。包装器只输出字段名，从不打印值；它拒绝 `--env`、`--keep-vars`、自带的 `--var`、其他配置文件以及缺少或内容不对的 `--secrets-file`。不得手动 `wrangler deploy`（会删除注入的 var，暂停解除）；应急手动发布在 `cloudflare/` 先运行 `node ../deploy/deploy-vars.mjs secrets <仓库外的临时文件>`，再运行 `node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml --secrets-file <同一文件>`，环境里给出与 CI 相同的值（`GITHUB_SHA` 为所发布的提交），完成后删除该文件。`deploy/cloudflare-admin.py wrangler` 拒绝 `deploy`。静态值的校验在 `deploy/test/wrangler-config.test.mjs`，跨应用的一致性（唯一配置文件、主机名、ci.yml 注入名）在根目录 `.github/scripts/test_wrangler_configs.py`。
 

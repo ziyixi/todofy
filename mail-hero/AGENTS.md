@@ -132,14 +132,14 @@ D1 Time Travel Free7天只恢复D1，不恢复R2、DO或secrets。完整备份�
 - Todofy在同一仓库的 `todofy/`，由根工作流的 `Todofy checks`/`Todofy deploy` 独立检查和发布。Mail Hero不构建、不部署Todofy，也不因Todofy改动而发布。
 - 应用之间互不导入；共享代码只在根目录 `contracts/` 与 `packages/`。`cloudflare/package.json` 以 `file:../../packages/edge-auth` 依赖共享鉴权包并由打包器编译进Worker；`packages/edge-auth/` 改动会重新检查并发布Mail Hero（及其他使用它的应用）。`jose` 仅作为测试签发合成JWT的devDependency。
 - 原生备份随 Mail Hero Worker 的同一 green SHA 检查与发布；离线恢复测试只用合成数据。旧备份镜像和 retained ciphertext 不自动删除、不再作为运行依赖。
-- 仓库清理不删除任何生产数据库、桶、邮件、源邮箱转发设置或其他项目资源；不自动导入真实邮件。部署成功、HTTP接管和完整Todofy/Todoist业务验收分别记录。
+- 仓库清理不删除任何生产数据库、桶、邮件、源邮箱转发设置或其他项目资源；不自动导入真实邮件。部署成功、HTTP接管和完整Todofy/Tasks业务验收分别记录。
 
 ## 9. ops-v1 运维入口
 
 - `src/native/index.ts` 另外导出命名 `WorkerEntrypoint` `Ops`（实现在 `ops.ts`/`ops-core.ts`/`ops-guard.ts`），只经同账户 service binding 调用；不新增公开路由，不改默认 `fetch`/`email` 行为。合同是 `../contracts/ops-v1`，输出须通过其 Schema。
 - `status()` 只做一次 DO 请求和最多6条只读、走索引的 D1 语句，不写入、不做全表聚合，输出不含主题、地址、正文、目标 URL 或远端响应。
-- `shed` guard 存在协调器 SQLite、最多36小时后自动失效，只推迟 `raw_reconcile`、`lifecycle_retention`、`canary_cleanup`、`alert_history_purge`（各距上次完整运行满48小时仍运行，并按正常节奏运行到追上积压；进行中的盘点不推迟）；收件、解析、投递与重试、修复、容量对账、中断删除续做、提醒及备份永不推迟。新增可推迟工作须同时更新 `docs/cloudflare-setup.md` §2.3 的保持/推迟表。
+- `shed` guard 存在协调器 SQLite、最多36小时后自动失效，只推迟 `raw_reconcile`、`lifecycle_retention`、`canary_cleanup`（各距上次完整运行满48小时仍运行，并按正常节奏运行到追上积压；进行中的盘点不推迟）；收件、解析、投递与重试、修复、容量对账、中断删除续做、提醒及备份永不推迟。新增可推迟工作须同时更新 `docs/cloudflare-setup.md` §2.3 的保持/推迟表。
 - 金丝雀沿用连接测试路径，带 `mail.received.v1` 顶层 `canary` 标记，按 `run_id` 幂等；强制暂停、维护、阻断等状态报告 `paused`/`unavailable`，不静默排队。owner 连接测试的字节保持不变。
-- `ALERT_WEBHOOK_URL` 保持可选且不配置，统一运维摘要（面板 → Todofy 每日提醒）取代它。
+- 没有外部提醒 webhook（2026-10-21 删除）：活跃提醒是 `Ops.status()` 的 signals，统一运维摘要（Home → Tasks 每日摘要任务）取代它。
 
 部署、预算与恢复以 `docs/cloudflare-setup.md` 为准，发布流程见 `docs/ci-cd.md`。

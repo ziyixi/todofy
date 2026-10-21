@@ -194,7 +194,7 @@ browser. [`verification.md`](verification.md) §1d records such a run.
 - **Digest.** The first tick of a UTC day with warning or critical items creates one task in Tasks
   through the `TASK_INBOX` binding (Tasks' create-only `TaskInbox`, `props.source = "home"`), with the same
   request on each retry, at most 6 tries; then `digest_task_failed`. The dashboard creates tasks in no other
-  way. Mail Hero's own `ALERT_WEBHOOK_URL` stays unconfigured.
+  way. Mail Hero has no alert webhook of its own (removed 2026-10-21).
 
 ## 7. Rollback and removal
 

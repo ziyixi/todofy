@@ -174,7 +174,7 @@ Bounded work remains mandatory:
 - Usage at 80% of a daily allowance or monthly R2 operation allowance applies shed; below 70% or a new UTC day
   clears it. Shed expires and delays only explicitly deferrable work, never real-mail handling.
 - Reminders go only through the digest's own task (`TASK_INBOX.createInboxTask`), at most one per UTC day; Mail
-  Hero's `ALERT_WEBHOOK_URL` stays unconfigured.
+  Hero has no alert webhook of its own (removed 2026-10-21).
   Quota numbers cite Cloudflare and match [limits](../dashboard/docs/limits.md).
 
 The synthetic mail canary covers Mail Hero intake/delivery and Todofy model processing. It does not create

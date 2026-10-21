@@ -29,15 +29,18 @@ Release 1 is this branch's tip; release 2 follows it.
 - **Slice 3** (`fce5201b`..`02f848b4`): Tasks converts mail, keeps the Mail categories, the GTD counts and the Sunday
   review (`TaskJobs`), serves `TaskInbox`, and carries the one-time Todofy import (`tasks-todofy-import.yml`). Tasks
   deploys after Todofy; `tasks-backups` is declared ahead of its binding.
-- **Slice 4** (`439b51b0`..this commit): Home creates the digest's one task a UTC day through `TaskInbox`
+- **Slice 4** (`439b51b0`..`c2c62759`): Home creates the digest's one task a UTC day through `TaskInbox`
   (`dashboard/docs/design.md` §5.5); Watch creates its notifications through `TaskInbox` and deploys after Tasks; the
   Personal MCP reads Todofy's read-only `Mail` entry and converts in Tasks; `PlusService`, `MailReadinessService`
   and `todofy.taskintent.v1` are retired (`contracts/task-intent-v1/` deleted); `RETIRED_SERVICE_BINDINGS` lists what
   release 1 removes from the live Workers.
-- **Not done:** the optional Mail Hero alert-outbox slice (it would deploy Mail Hero; kept separate) and release 2.
+- **Slice 5** (`7af15157`..this commit): Mail Hero has no alert webhook or outbox (`ALERT_WEBHOOK_*` gone; its active
+  alerts reach the owner through Home's digest task); its shed guard defers three jobs (`alert_history_purge` gone).
+  `alert_notifications` stays, unused, until release 2: Mail Hero applies migrations while the old Worker serves.
+- **Not done:** release 2.
 
 **Release 1 deploys** Todofy (migration `0014` first), then Tasks (migration `0008`), then Watch, the Personal MCP and
-Home. It also reaches every proto user's checks. Do not push it on Sunday from 09:30 UTC until Monday 00:00 UTC
+Home, and Mail Hero (no migration). It also reaches every proto user's checks. Do not push it on Sunday from 09:30 UTC until Monday 00:00 UTC
 (Todofy's backup and Tasks' first Sunday review).
 
 Before pushing release 1 (read-only):
@@ -51,7 +54,10 @@ Before pushing release 1 (read-only):
    still held by Todofy ends as `sink_retired` and raises `notify_unsettled`).
 3. `gh variable list --env production --repo ziyixi/todofy | grep -E 'TODOFY_(REMINDER|GTD_REVIEW)_ENABLED'`: if either
    is `false`, ask the owner (after release 1 Home's task and Tasks' review have no switch).
-4. Push, wait for the complete gate, fast-forward `main` to the same green SHA.
+4. From `mail-hero/cloudflare`: `npx wrangler secret list --config ../wrangler.toml` lists no `ALERT_WEBHOOK_TOKEN`. If
+   it does, the owner deletes it before the push (`wrangler secret delete ALERT_WEBHOOK_TOKEN --config
+   ../wrangler.toml`); a live secret the config no longer declares stops Mail Hero's release (`BINDING_UNDECLARED`).
+5. Push, wait for the complete gate, fast-forward `main` to the same green SHA.
 
 After release 1:
 
@@ -68,17 +74,19 @@ After release 1:
    alarm and no `gtd_stale`; Home's Todofy tile has no `todoist_paused` or `reminder_*`; Home's digest card says
    enabled; Watch has no `notify_unsettled`; the MCP's `mail_list` and `mail_read` answer (never `mail_collect` on
    real mail).
-5. The next UTC day: exactly one 运维摘要 task if that day had warning or critical items (the release day gets none).
-6. Read the `TaskJobs` namespace ID (read-only; the namespace list row with script `tasks`, class `TaskJobs`) for
+5. Mail Hero deployed; its settings page's 提醒 card names Home's digest task and shows no notification counts.
+6. The next UTC day: exactly one 运维摘要 task if that day had warning or critical items (the release day gets none).
+7. Read the `TaskJobs` namespace ID (read-only; the namespace list row with script `tasks`, class `TaskJobs`) for
    release 2's `config/resources.toml` line.
-7. Delete the GitHub production variables `TODOFY_REMINDER_ENABLED`, `TODOFY_FORCE_PAUSE_TODOIST`,
+8. Delete the GitHub production variables `TODOFY_REMINDER_ENABLED`, `TODOFY_FORCE_PAUSE_TODOIST`,
    `TODOFY_GTD_REVIEW_ENABLED` and the secrets `TODOFY_TODOIST_DEFAULT_PROJECT_ID`, `TODOFY_TODOIST_OPS_PROJECT_ID`,
    `TODOFY_TODOIST_REVIEW_PROJECT_ID`; nothing reads them.
 
 **Release 2** (to build): Tasks backs itself up into `tasks-backups` (its own Alarm, the restore tool reads both
 formats), Todofy unbinds `TASKS` and drops the copied tables (`0015`), the one-time import and `TasksApi.exportBackup`
-are deleted, the gateway's refusal stubs go, `RETIRED_SERVICE_BINDINGS` becomes `{"todofy": {"TASKS"}}`, and the
-lead's `TaskJobs` namespace line lands. Owner item, a blocked secret operation: delete todofy-core's Worker secrets
+are deleted, the gateway's refusal stubs go, `RETIRED_SERVICE_BINDINGS` becomes `{"todofy": {"TASKS"}}`, the
+lead's `TaskJobs` namespace line lands, and a new Mail Hero migration (the next number after `0010`) drops
+`alert_notifications` (its two indexes go with it; `alerts.last_event_day` stays, since release 1's Worker writes it). Owner item, a blocked secret operation: delete todofy-core's Worker secrets
 `TODOIST_DEFAULT_PROJECT_ID`, `TODOIST_OPS_PROJECT_ID`, `TODOIST_REVIEW_PROJECT_ID` with `TODOIST_API_KEY`, then their
 optional declarations in `todofy/app.toml`.
 

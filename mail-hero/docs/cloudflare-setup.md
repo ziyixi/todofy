@@ -58,13 +58,9 @@ API 为 `mailhero.ui.v2` 的 `PreviewRetentionPolicy`（`GET /api/v2/settings:pr
 
 ## 2.2 持久提醒
 
-D1 保存容量 70% / 85% / 95%、备份超过 36 小时、处理积压超过 1 小时、解析失败等状态；容量取 D1 逻辑字节与 DO 容量计账的较大值，覆盖尚未登记的原件及预留空间，仅激活当前最高档。DO 暂不可用时载荷明确标出计账不可用，暂用 D1 数据；两者都不等于实际账户账单。状态变化在下一次评估登记，每项每天至多一条活跃提醒和一条恢复通知。设置页可查看状态及通知失败数；没有外部 webhook 时只在界面显示。
+D1 保存容量 70% / 85% / 95%、备份超过 36 小时、处理积压超过 1 小时、解析失败等状态；容量取 D1 逻辑字节与 DO 容量计账的较大值，覆盖尚未登记的原件及预留空间，仅激活当前最高档。DO 暂不可用时指标明确标出计账不可用，暂用 D1 数据；两者都不等于实际账户账单。状态变化在下一次评估（约每 10 分钟）登记，每个提醒代码在 `alerts` 表中一行。活跃提醒显示在工作台顶部和设置页，并作为 `Ops.status()` 的 signals 由 Home 读取，汇入 Home 在 Tasks 中每天至多一条的运维摘要任务。提醒只含代码、计数和时间，不含收件地址、发件人、主题、正文、附件或远端响应。提醒不是扣费硬上限，也不是完整备份成功的替代证据。
 
-可选部署变量 `ALERT_WEBHOOK_URL` 指向精确允许的公网 HTTPS URL；`ALERT_WEBHOOK_ALLOWED_HOSTS` 配置精确 hostname，省略时沿用 `WEBHOOK_ALLOWED_HOSTS`。CI 对应 `MAIL_HERO_ALERT_WEBHOOK_URL`、`MAIL_HERO_ALERT_WEBHOOK_ALLOWED_HOSTS` 仓库变量。`ALERT_WEBHOOK_TOKEN` 是至少 32 字符的独立 Worker secret，通过正规 Wrangler secret 流程设置，不写入仓库或公开 vars；CI 发布保留现有 secret。收件地址、发件人、主题、正文、附件及远端响应均不进入提醒；载荷仅含随机 ID、状态码、时间、计数和管理页路径。
-
-外部通知使用 Bearer、稳定 `Idempotency-Key` 和冻结 JSON 字节；单次超时 5 秒，不跟随跳转。网络错误、408、429、5xx 持久退避，尊重不超过一天的 Retry-After，最多 8 次；认证错误及其他不可重试响应停止并在设置页显示失败。已结束通知记录保留 180 天后分批清理。提醒不是扣费硬上限，也不是完整备份成功的替代证据。
-
-按 ops-v1 计划，`ALERT_WEBHOOK_URL`（及 `ALERT_WEBHOOK_TOKEN`、CI 变量 `MAIL_HERO_ALERT_WEBHOOK_URL`）保持可选且不配置：活跃提醒作为 `Ops.status()` 的 signals 由运维面板读取，再经 Todofy 的 `reportOps` 进入每天至多一条的统一运维摘要，不需要第二个通知通道。代码与上面的行为保持不变，以后确有需要仍可配置。面板尚未建成，在此之前提醒只在设置页显示，owner 需要自己查看。
+Mail Hero 没有自己的外部提醒通道。按 ops-v1 计划保持未配置的可选 `ALERT_WEBHOOK_URL` 及其发件箱于 2026-10-21 删除；`alert_notifications` 表不再读写，由之后的一次 Mail Hero 发布用迁移删除（迁移在旧 Worker 仍运行时执行，必须向后兼容）。
 
 ## 2.3 运维入口（ops-v1）
 
@@ -72,7 +68,7 @@ Worker 导出命名入口 `Ops`（`src/native/ops.ts`，`index.ts` 只加一行�
 
 - 变量 `PUBLIC_HOST`：UI 自定义域名，`status()` 以 `https://<PUBLIC_HOST>/` 返回 `ui_url`。与 `mail-hero/wrangler.toml` 的自定义域名同在该文件中提交（配置测试核对两者一致）。
 - `status()`：一次 DO 请求加最多 6 条 D1 只读查询（与每10分钟的提醒阶段读取相同的部分索引范围），不写入。调用方至少间隔10分钟。
-- 降载 guard（`setGuard`）：保存在协调器自身 SQLite，到 `until`（最多36小时后）自动失效，不需要 Alarm，不进入备份。`shed` 只推迟以下清理与安全网，且每项距上次完整运行满48小时仍会执行，并按正常节奏一直执行到追上积压为止：已开始的 R2 盘点继续逐页扫描，扫完整个桶才算一次运行；保留期清理、提醒历史清理和金丝雀清理只有在没有剩余到期项时才算一次运行。所以上限覆盖整个任务，而不是其中一页或一批：
+- 降载 guard（`setGuard`）：保存在协调器自身 SQLite，到 `until`（最多36小时后）自动失效，不需要 Alarm，不进入备份。`shed` 只推迟以下清理与安全网，且每项距上次完整运行满48小时仍会执行，并按正常节奏一直执行到追上积压为止：已开始的 R2 盘点继续逐页扫描，扫完整个桶才算一次运行；保留期清理和金丝雀清理只有在没有剩余到期项时才算一次运行。所以上限覆盖整个任务，而不是其中一页或一批：
 
 | 工作 | shed | 原因 |
 | --- | --- | --- |
@@ -80,11 +76,10 @@ Worker 导出命名入口 `Ops`（`src/native/ops.ts`，`index.ts` 只加一行�
 | 解析任务、投递与重试、路由阻断复查 | 保持 | 已接管邮件的处理 |
 | 修复阶段重新登记待解析/未投递、到期投递、过期窗口标记、冷却修复 | 保持 | 完整性，不能让已接管邮件搁浅 |
 | 容量对账、中断的内容删除续做 | 保持 | 释放入站额度；已开始的删除不能复活 |
-| 提醒评估与发送、备份租约及回执、金丝雀本身 | 保持 | 监控、原生备份与运维检查 |
+| 提醒评估、备份租约及回执、金丝雀本身 | 保持 | 监控、原生备份与运维检查 |
 | `raw_reconcile`：R2 `raw/` 盘点与孤儿回收 | 推迟（48小时） | 任务在写 R2 前登记，盘点只是安全网；节省 R2 Class A |
 | `lifecycle_retention`：保留期清理、已处理异常清理、计时扫描 | 推迟（48小时） | 纯清理，稍后执行不丢数据；容量提醒仍可见 |
 | `canary_cleanup`：7天前金丝雀内容 | 推迟（48小时） | 合成内容清理 |
-| `alert_history_purge`：180天前提醒记录 | 推迟（48小时） | 清理 |
 
 - 金丝雀（`startCanary`）：沿用 owner 连接测试路径，固定合成文本并带 `mail.received.v1` 顶层 `canary` 标记，发往当前默认目标，按正常自动重试。同一 `run_id` 幂等。`FORCE_SEND_PAUSED`、设置暂停、目标暂停/归档或阻断时返回 `paused`；维护模式、备份快照、仅归档/无目标或容量不足时返回 `unavailable`；这些情况都不创建任何记录。只有目标消费者声明支持 `canary`（Todofy 的 `canary_consumer`）时仪表盘才应调用。金丝雀不进入收件箱、搜索、保留计时或提醒；投递列表以“金丝雀”标记显示；7天后按 owner 删除路径清理内容，交付记录保留。与连接测试一样计入概览的投递计数。
 
@@ -190,7 +185,7 @@ Cloudflare未明确承诺 `email()` 在R2写入前失败时的完整持久重投
 
 若消费者由Access保护，单独创建Service Auth及Service Token，配置 `ACCESS_SERVICE_ORIGIN` 和秘密 `ACCESS_CLIENT_ID`、`ACCESS_CLIENT_SECRET`。它与消费者自身Bearer/Basic是两层认证，不能使用owner登录凭据。[Service Tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/)
 
-消费者必须先持久接管再回2xx，并按稳定来源+event_id去重。“已交付”不等于Todoist业务完成。先测合成事件，再解除 `FORCE_SEND_PAUSED` 并选择forward。CloudMailin与Mail Hero不能同时触发同一业务。
+消费者必须先持久接管再回2xx，并按稳定来源+event_id去重。“已交付”不等于Todofy/Tasks业务完成。先测合成事件，再解除 `FORCE_SEND_PAUSED` 并选择forward。CloudMailin与Mail Hero不能同时触发同一业务。
 
 ## 8. Cloudflare 原生备份
 

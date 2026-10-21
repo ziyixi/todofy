@@ -365,8 +365,8 @@ answered `request_id`, so a lost answer makes no second task. `invalid_input`, o
 TaskInbox's `daily_limit` reads as `busy`. A day without items gets no task. A document from before the task
 (no `day`) records its first tick's day as handled, so the release day gets no task next to Todofy's last
 reminder. Tasks puts the task in the project it routes `home` to (`task_inbox_routes`, copied once from the
-reminder's project), else the Inbox. This is the only way the dashboard creates tasks; Mail Hero's
-`ALERT_WEBHOOK_URL` stays unconfigured.
+reminder's project), else the Inbox. This is the only way the dashboard creates tasks; Mail Hero has no alert
+webhook of its own (removed 2026-10-21).
 
 The overview banner (`overall`) is `critical` if any item is critical, else `warning` if any is
 warning, else `ok`; `unknown` before anything ran. While `CANARY_ENABLED` is `false` the banner's items
