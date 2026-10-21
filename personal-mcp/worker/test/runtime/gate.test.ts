@@ -69,7 +69,7 @@ async function call<T>(mf: Miniflare, method: string, params: Record<string, unk
 
 type ToolReply = { structuredContent: { result?: { event_id: string; repeated?: boolean; queued?: number }; status?: {
   subscriptions: number; deliveries: Record<string, number>;
-  last_event_request: { method: string; phase: string; event_name?: string; ttl_ms?: number | null; delivery_mode?: string;
+  last_subscription_request: { method: string; phase: string; event_name?: string; ttl_ms?: number | null; delivery_mode?: string;
     callback_hostname?: string; http_status?: number; rpc_code?: number; reason?: string } | null;
 } } };
 
@@ -83,7 +83,7 @@ it('discovers tools/events and preserves the subscription across a restart, then
   const catalog = await call<{ events: { name: string }[] }>(first, 'events/list');
   expect(catalog.events.map(event => event.name)).toEqual(['personal_cloud.test']);
   const catalogStatus = await call<ToolReply>(first, 'tools/call', { name: 'connection_status', arguments: {} });
-  expect(catalogStatus.structuredContent.status?.last_event_request).toEqual({ method: 'events/list', phase: 'accepted', http_status: 200 });
+  expect(catalogStatus.structuredContent.status?.last_subscription_request).toBeNull();
   const params = { name: 'personal_cloud.test', arguments: {}, delivery: callback, ttlMs: null, cursor: null };
   const subscription = await call<{ id: string; refreshBefore: null }>(first, 'events/subscribe', params);
   const again = await call<{ id: string }>(first, 'events/subscribe', params);
@@ -94,7 +94,7 @@ it('discovers tools/events and preserves the subscription across a restart, then
   let second = await start(persist, received);
   const before = await call<ToolReply>(second, 'tools/call', { name: 'connection_status', arguments: {} });
   expect(before.structuredContent.status?.subscriptions).toBe(1);
-  expect(before.structuredContent.status?.last_event_request).toEqual({ method: 'events/subscribe', phase: 'accepted',
+  expect(before.structuredContent.status?.last_subscription_request).toEqual({ method: 'events/subscribe', phase: 'accepted',
     event_name: 'personal_cloud.test', ttl_ms: null, delivery_mode: 'webhook', callback_hostname: 'receiver.example.org', http_status: 200 });
   const request = { name: 'send_test_event', arguments: { request_id: '00000000-0000-4000-8000-000000000001' } };
   const queued = await call<ToolReply>(second, 'tools/call', request);
@@ -114,7 +114,7 @@ it('discovers tools/events and preserves the subscription across a restart, then
   await call(second, 'events/unsubscribe', params);
   const stopped = await call<ToolReply>(second, 'tools/call', { name: 'connection_status', arguments: {} });
   expect(stopped.structuredContent.status?.subscriptions).toBe(0);
-  expect(stopped.structuredContent.status?.last_event_request).toEqual({ method: 'events/unsubscribe', phase: 'accepted', http_status: 200 });
+  expect(stopped.structuredContent.status?.last_subscription_request).toEqual(before.structuredContent.status?.last_subscription_request);
 });
 
 it('reports only safe subscription fields for host, signed challenge and pre-schema failures', async () => {
@@ -123,12 +123,12 @@ it('reports only safe subscription fields for host, signed challenge and pre-sch
   const received: unknown[] = [];
   const mf = await start(persist, received, false);
   const before = await call<ToolReply>(mf, 'tools/call', { name: 'connection_status', arguments: {} });
-  expect(before.structuredContent.status?.last_event_request).toBeNull();
+  expect(before.structuredContent.status?.last_subscription_request).toBeNull();
   const unauthorized = await mf.dispatchFetch('https://mcp.example.org/mcp', { method: 'POST',
     headers: { 'Mcp-Method': 'events/subscribe' }, body: secret });
   expect(unauthorized.status).toBe(401);
   const unauthenticatedStatus = await call<ToolReply>(mf, 'tools/call', { name: 'connection_status', arguments: {} });
-  expect(unauthenticatedStatus.structuredContent.status?.last_event_request).toBeNull();
+  expect(unauthenticatedStatus.structuredContent.status?.last_subscription_request).toBeNull();
   const unapprovedUrl = 'https://unapproved.example.org/private-callback?token=synthetic-private-token';
   for (const [delivery, ttlMs, code, reason] of [
     [{ ...callback, url: unapprovedUrl }, null, -32015, 'callback_host_unapproved'],
@@ -139,18 +139,18 @@ it('reports only safe subscription fields for host, signed challenge and pre-sch
     expect(await response.json()).toMatchObject({ error: { code } });
     const status = await call<ToolReply>(mf, 'tools/call', { name: 'connection_status', arguments: {} });
     expect(status.structuredContent.status?.subscriptions).toBe(0);
-    expect(status.structuredContent.status?.last_event_request).toEqual({ method: 'events/subscribe', phase: 'rejected',
+    expect(status.structuredContent.status?.last_subscription_request).toEqual({ method: 'events/subscribe', phase: 'rejected',
       event_name: 'personal_cloud.test', ttl_ms: ttlMs, delivery_mode: 'webhook',
       callback_hostname: new URL(delivery.url).hostname, http_status: response.status, rpc_code: code, reason });
     const serialized = JSON.stringify(status);
     for (const privateValue of [callback.url, unapprovedUrl, secret, 'synthetic-private-token']) {
       expect(serialized).not.toContain(privateValue);
     }
+    await call(mf, 'events/list');
+    await call(mf, 'events/unsubscribe', { name: 'personal_cloud.test', arguments: {},
+      delivery: { mode: delivery.mode, url: delivery.url } });
+    const afterCleanup = await call<ToolReply>(mf, 'tools/call', { name: 'connection_status', arguments: {} });
+    expect(afterCleanup.structuredContent.status?.last_subscription_request).toEqual(status.structuredContent.status?.last_subscription_request);
   }
-  const catalogResponse = await request(mf, 'events/list', { cursor: null });
-  expect(await catalogResponse.json()).toMatchObject({ error: { code: -32602 } });
-  const catalogStatus = await call<ToolReply>(mf, 'tools/call', { name: 'connection_status', arguments: {} });
-  expect(catalogStatus.structuredContent.status?.last_event_request).toEqual({ method: 'events/list', phase: 'rejected',
-    http_status: catalogResponse.status, rpc_code: -32602, reason: 'invalid_params' });
   expect(received).toHaveLength(0);
 });

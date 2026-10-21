@@ -10,8 +10,8 @@ type Subscription = {
   id: string; owner: string; url: string; secret: string; expires_at: number | null; verified_at: number;
 };
 type Delivery = { subscription_id: string; event_id: string; body: string; attempts: number };
-type EventRequest = {
-  method: 'events/list' | 'events/subscribe' | 'events/unsubscribe';
+type SubscriptionRequest = {
+  method: 'events/subscribe';
   phase: 'received' | 'accepted' | 'rejected';
   event_name?: typeof TEST_EVENT_NAME;
   ttl_ms?: number | null;
@@ -41,6 +41,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
       );
       CREATE INDEX IF NOT EXISTS pending_deliveries ON deliveries(state, next_at);
     `);
+    void ctx.blockConcurrencyWhile(async () => { await ctx.storage.delete('last_event_request'); });
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -52,27 +53,26 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     if (!auth.ok) return withPrivateHeaders(Response.json({ error: auth.failure }, {
       status: ['not_configured', 'keys_unavailable'].includes(auth.failure) ? 503 : 401,
     }));
-    const method = request.headers.get('Mcp-Method');
-    const attempt = method === 'events/list' || method === 'events/subscribe' || method === 'events/unsubscribe'
-      ? await this.recordEventRequest(request, method) : undefined;
+    const attempt = request.headers.get('Mcp-Method') === 'events/subscribe'
+      ? await this.recordSubscriptionRequest(request) : undefined;
     const handler = createMcpHandler(() => createServer(this, this.env.BUILD_SHA ?? 'development'), {
       legacy: 'reject', responseMode: 'auto',
     });
     try {
       const response = await handler.fetch(request);
-      if (attempt) await this.recordEventResponse(attempt, response);
+      if (attempt) await this.recordSubscriptionResponse(attempt, response);
       return withPrivateHeaders(response);
     } catch (error) {
-      if (attempt) await this.ctx.storage.put('last_event_request', { ...attempt, phase: 'rejected', reason: 'handler_failed' });
+      if (attempt) await this.ctx.storage.put('last_subscription_request', { ...attempt, phase: 'rejected', reason: 'handler_failed' });
       throw error;
     }
     finally { await handler.close(); }
   }
 
-  private async recordEventRequest(request: Request, method: EventRequest['method']): Promise<EventRequest> {
-    let attempt: EventRequest = { method, phase: 'received' };
+  private async recordSubscriptionRequest(request: Request): Promise<SubscriptionRequest> {
+    let attempt: SubscriptionRequest = { method: 'events/subscribe', phase: 'received' };
     try {
-      const body: unknown = method === 'events/subscribe' ? await request.clone().json() : null;
+      const body: unknown = await request.clone().json();
       if (typeof body === 'object' && body !== null && 'params' in body
         && typeof body.params === 'object' && body.params !== null) {
         const params = body.params as Record<string, unknown>;
@@ -91,12 +91,12 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     } catch {
       // Malformed input still reaches the SDK; diagnostics retain only the safe fields already extracted.
     }
-    await this.ctx.storage.put('last_event_request', attempt);
+    await this.ctx.storage.put('last_subscription_request', attempt);
     return attempt;
   }
 
-  private async recordEventResponse(attempt: EventRequest, response: Response): Promise<void> {
-    let result: EventRequest = { ...attempt, phase: 'rejected', http_status: response.status, reason: 'invalid_response' };
+  private async recordSubscriptionResponse(attempt: SubscriptionRequest, response: Response): Promise<void> {
+    let result: SubscriptionRequest = { ...attempt, phase: 'rejected', http_status: response.status, reason: 'invalid_response' };
     try {
       const reply: unknown = await response.clone().json();
       if (typeof reply === 'object' && reply !== null) {
@@ -111,7 +111,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     } catch {
       // Do not retain response text or exception details, which may contain callback credentials.
     }
-    await this.ctx.storage.put('last_event_request', result);
+    await this.ctx.storage.put('last_subscription_request', result);
   }
 
   private owner(): string {
@@ -163,7 +163,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     ).toArray()[0] ?? null;
     return { stage: 'connection_test', build_sha: this.env.BUILD_SHA ?? 'development', subscriptions: active,
       deliveries: Object.fromEntries(counts.map(row => [row.state, row.count])), last_delivery: last,
-      last_event_request: await this.ctx.storage.get<EventRequest>('last_event_request') ?? null,
+      last_subscription_request: await this.ctx.storage.get<SubscriptionRequest>('last_subscription_request') ?? null,
       meaning: 'accepted means ChatGPT received the webhook; it does not prove the Dot finished its work.' };
   }
 

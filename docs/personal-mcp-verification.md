@@ -54,11 +54,16 @@ The existing Dot successfully called `connection_status`, but its native subscri
 visible. A direct call through the connected plugin confirmed build `ef76b57d`, zero subscriptions and no
 deliveries. The Dot did not call `send_test_event`, so no event receipt is claimed.
 
-The next diagnostic release adds one `last_event_request` slot to the existing status tool. It records only
-authenticated event method, phase, known event name, TTL, delivery mode, callback hostname and safe HTTP/RPC
-error codes. It excludes full callback URLs, signing secrets, raw requests and raw errors. Local workerd tests
-cover accepted requests, schema rejection, unapproved hostname, failed signed challenge and unchanged status
-after an unauthenticated request. This does not change subscription validation.
+The first diagnostic release, `ddf7820d`, passed [branch CI 39553772393](https://github.com/ziyixi/todofy/actions/runs/39553772393)
+and [main publication 39553955084](https://github.com/ziyixi/todofy/actions/runs/39553955084). A native retry again
+failed. Its last authenticated event request was a successful `events/unsubscribe`, although the Dot had not
+requested cancellation; the client cleanup had overwritten the subscription diagnostic.
+
+The next diagnostic release narrows the single slot to `last_subscription_request`. It records only authenticated
+subscription phase, known event name, TTL, delivery mode, callback hostname and safe HTTP/RPC error codes.
+Catalog reads and cleanup unsubscribe cannot overwrite it. It excludes full callback URLs, signing secrets,
+raw requests and raw errors. Local workerd tests cover accepted requests, schema rejection, unapproved hostname,
+failed signed challenge and unchanged status after an unauthenticated request. Subscription validation is unchanged.
 
 Remaining checks:
 
