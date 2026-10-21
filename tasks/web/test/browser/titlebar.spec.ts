@@ -112,6 +112,29 @@ test("the strip drags the window and holds one search field and the page's refre
   await expect(titlebarSearch(page)).toBeFocused();
 });
 
+test("beside the sidebar the search field centres over the page's column, never across the seam", async ({
+  page,
+}) => {
+  await page.goto("/#/today");
+  await expect(
+    page.getByRole("heading", { name: "Today", exact: true }),
+  ).toBeVisible();
+  const field = page.locator(".titlebar-search");
+  for (const width of [1440, 960, 800]) {
+    await page.setViewportSize({ width, height: 700 });
+    const sidebar = (await page.locator(".sidebar").boundingBox())!;
+    const box = (await field.boundingBox())!;
+    const seam = sidebar.x + sidebar.width;
+    expect(box.x).toBeGreaterThan(seam);
+    expect(box.x + box.width / 2).toBeCloseTo((seam + width) / 2, 0);
+    await inStrip(page, field);
+  }
+  // Without the sidebar, the whole strip.
+  await page.setViewportSize({ width: 700, height: 700 });
+  const box = (await field.boundingBox())!;
+  expect(box.x + box.width / 2).toBeCloseTo(350, 0);
+});
+
 test("Plan's refresh moves into the strip too", async ({ page }) => {
   const state = await stubPlanning(page, {
     tasks: [

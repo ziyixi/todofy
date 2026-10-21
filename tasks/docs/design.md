@@ -188,7 +188,8 @@ The manifest (`web/public/manifest.webmanifest`) keeps `display: standalone` and
 - `display_override: ["window-controls-overlay", "standalone"]`. When the owner hides Chrome's title bar, a strip
   in its place drags the window (`app-region: drag`) and continues the sidebar's and the page's colours to the
   window's top edge (white below 760px). Inside the titlebar area, clear of the traffic lights and Chrome's own
-  controls, sit one search field and the page's refresh button. Typing in the field on another page goes to
+  controls, sit one search field and the page's refresh button; beside the sidebar the field centres over the part
+  of the area above the page's column, so it never crosses the columns' seam. Typing in the field on another page goes to
   Search; `/` and Cmd/Ctrl-K open Search with the caret in it; Search shows no field of its own, and leaving it
   clears the field. The refresh button keeps its component; CSS moves it there (`.view-refresh`, `.plus-refresh`).
   The theme colour turns white meanwhile. `web/src/titlebar.tsx` follows the display mode's media query, whose

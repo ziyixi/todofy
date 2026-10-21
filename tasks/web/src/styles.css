@@ -1312,6 +1312,18 @@ h1 {
   align-items: center;
   justify-content: center;
 }
+/* Beside the sidebar, the field centres over the page's column: the part of the titlebar area right of the
+   sidebar, so it never crosses the columns' seam. */
+@media (min-width: 761px) {
+  .titlebar-area {
+    --area-left: max(env(titlebar-area-x, 0px), var(--sidebar-width));
+    left: var(--area-left);
+    width: calc(
+      env(titlebar-area-x, 0px) + env(titlebar-area-width, 100vw) -
+        var(--area-left)
+    );
+  }
+}
 .titlebar-search {
   display: flex;
   gap: 7px;
