@@ -16,23 +16,22 @@ instructions.
 
 ### Private MCP connection gate (`codex/personal-mcp`)
 
-Owner authorized implementation starting with real Dots OAuth and one synthetic event. Work is isolated in
-`/private/tmp/todofy-personal-mcp`; the shared checkout and Claude's work remain untouched. `personal-mcp/` has only
-connection status, a test-event tool and persistent subscriptions; no business-service bindings or data access.
+Implementation is isolated in `/private/tmp/todofy-personal-mcp`; the shared checkout and Claude's work are
+untouched. Published main SHA `ef76b57d` passed full branch CI `39545449859`; production release `39546367619`
+passed on attempt 2 after its initial anonymous network probe failed. The unchanged live probe also passed.
+IaC creates/updates `39545088566` / `39546470218` touched only the MCP Access application and ended with no drift.
 
-Full branch CI `39544158967` passed at `9e1681a1`, promoted unchanged to main; its production run `39544986444`
-succeeded. IaC apply `39545088566` created only the new MCP Access application, kept 36 existing resources
-unchanged and verified no remaining drift. Its actual app ID/AUD are now recorded. The next branch change enables
-MCP publication and adds the exact OAuth redirect observed in the live ChatGPT form. The namespace's
-FIRST_DEPLOY_PENDING marker stays until the first deploy supplies its real ID.
+The real Access identity and SubscriptionStore namespace are recorded in config/resources.toml. This follow-up
+removes the namespace's first-deploy marker and completes Home's resource mapping. It has passed all local
+registration checks and the full Home recipe; its branch CI/main publication still need completion.
+The MCP has only connection status, synthetic test delivery and persistent subscriptions, with no business bindings.
 
-Local MCP workerd verification covers discovery, signed callback, subscription and pending-event persistence over
-restart, duplicate request IDs and unsubscribe. Complete local Home checks passed: 268 unit tests, 97 runtime tests,
-158 web tests, build and bundle budget. Resource registration adds no launcher tile or business Ops binding.
-
-Real Dots login, subscription and receipt remain pending; follow [the gate](personal-mcp/docs/connection.md).
-The existing Dot is available in Chrome. Only after real acceptance, add the agreed business tools/events.
-Keep this personal integration small; no generic event bus, replay platform or extra model calls.
+**Blocked on owner consent:** Chrome created the private Personal Cloud connector and is at Connect Personal Cloud.
+Automatic approval review requires explicit confirmation of the page's newly disclosed potential chat/memory
+sharing scope. The approval question is pending. Do not bypass it, create another connector, or extract browser
+credentials. Continue the retained page after confirmation, then use the existing Dot for real subscription/receipt.
+No real Dots receipt or business-content access is claimed. Evidence and next steps:
+[Personal MCP verification](docs/personal-mcp-verification.md). Only after this gate passes, add business tools/events.
 
 ### Done steps stay in Plan's Week calendar (`claude/plan-done-steps`)
 

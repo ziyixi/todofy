@@ -312,6 +312,7 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'mailsort-state', kind: 'do', name: 'MailsortState', entry: 'mailsort', script: 'mailsort', match: RESOURCE_IDENTITIES['mailsort-state'] ?? null, todo: '首次 mailsort 发布后，记录 DO namespace 到 config/resources.toml' },
   { id: 'recall-state', kind: 'do', name: 'RecallState', entry: 'recall', script: 'recall', match: RESOURCE_IDENTITIES['recall-state'] ?? null, todo: '首次 recall 发布后，记录 DO namespace 到 config/resources.toml' },
   { id: 'brief-state', kind: 'do', name: 'BriefState', entry: 'brief', script: 'brief', match: RESOURCE_IDENTITIES['brief-state'] ?? null, todo: '首次简报发布后，记录 DO namespace 到 config/resources.toml' },
+  { id: 'personal-mcp-subscriptions', kind: 'do', name: 'SubscriptionStore', entry: 'personal-mcp', script: 'personal-mcp', match: RESOURCE_IDENTITIES['personal-mcp-subscriptions'] ?? null },
   { id: 'mail-hero-db', kind: 'd1', name: 'mail-hero 主库', entry: 'mail-hero', match: RESOURCE_IDENTITIES['mail-hero-db'] ?? null },
   { id: 'todofy-db', kind: 'd1', name: 'todofy 主库', entry: 'todofy', match: RESOURCE_IDENTITIES['todofy-db'] ?? null },
   { id: 'mail-coordinator', kind: 'do', name: 'MailCoordinator', entry: 'mail-hero', script: 'mail-hero', match: RESOURCE_IDENTITIES['mail-coordinator'] ?? null },

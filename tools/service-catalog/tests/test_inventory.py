@@ -42,6 +42,11 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(sum(item["change"] == "missing" for item in changes), len(wanted[kind]))
             self.assertEqual(changes[-1]["change"], "unregistered")
 
+    def test_private_mcp_namespace_is_registered_after_first_deployment(self):
+        namespace = inventory.load_resources(inventory.REPO)["durable_objects"]["personal-mcp-subscriptions"]
+        self.assertIn(namespace, expected()["do"])
+        self.assertNotIn("personal-mcp", pending()["workers"])
+
     def test_a_worker_before_its_first_deploy_may_be_absent_but_nothing_else_may(self):
         """FIRST_DEPLOY_PENDING: the Worker and its buckets stay registered, absent or present; its namespaces have no
         id yet (recall/docs/design.md section 11, which the example follows)."""

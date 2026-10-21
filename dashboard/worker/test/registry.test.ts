@@ -155,6 +155,9 @@ describe('the registry', () => {
       kind: 'do', entry: 'fleet', script: 'fleet',
     });
     expect(resourceByMatch('do', 'd58e1bdabacb4d14bbba1887f169c8b4')).toMatchObject({ id: 'watch-state', entry: 'watch' });
+    expect(resourceByMatch('do', 'aa1c7803e2a846c191102824560a9fac')).toMatchObject({
+      id: 'personal-mcp-subscriptions', kind: 'do', entry: 'personal-mcp', script: 'personal-mcp',
+    });
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {

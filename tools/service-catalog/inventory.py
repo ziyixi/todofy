@@ -15,13 +15,10 @@ DO_KEYS = {
     "MailsortState": "mailsort-state", "RecallState": "recall-state", "BriefState": "brief-state",
     "SubscriptionStore": "personal-mcp-subscriptions",
 }
-# Workers (script names) before their first deploy, one entry per app. Such a Worker and the buckets it binds stay
-# registered (Home's registry names them) but may be absent: "Infra apply" creates the bucket, the first deploy the Worker. Its Durable Object
-# namespaces get their ids only from that deploy, so they are neither expected nor registered, and an existing one is
-# not reported. The commit after the first deploy records those ids in config/resources.toml and removes the entry
-# (expected() refuses a recorded id while the entry remains). CHECK_ONLY separately controls whether the app can release
-# and enter "Personal cloud reconcile"; enabling the first release leaves this namespace marker in place.
-FIRST_DEPLOY_PENDING: set[str] = {"personal-mcp"}
+# Workers awaiting namespace capture. Their Worker and buckets stay registered but may be absent;
+# namespaces are ignored until their first deployment assigns IDs. Record those IDs in config/resources.toml
+# and clear the corresponding names here. CHECK_ONLY controls release readiness independently.
+FIRST_DEPLOY_PENDING: set[str] = set()
 OUTPUT = "dashboard/worker/src/account-inventory.json"
 BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
 PAGE_LIMIT = 100
