@@ -45,7 +45,7 @@ real task completion, a Recall body or a new actual Home fault. Do not restart t
 
 ### Done steps stay in Plan's Week calendar (`claude/plan-done-steps`)
 
-**Local only, not pushed**, rebased on `origin/main` `8d8ce547`. A calendar step ticked in Plan › Week stays in its day,
+**Released** at `bf41ce60` (2026-10-21). A calendar step ticked in Plan › Week stays in its day,
 done, after the open steps and outside the day's total; its title opens Tasks' dialog to reopen it; Focus is
 unchanged ([interface](packages/planning-ui/docs/interface.md#week)). Reviewed: a repeating step dropped back on its
 done day now shows open at once; a browser journey reopens a done step from Tasks' dialog. Deploys Tasks only. After
@@ -54,7 +54,7 @@ tests; the Worker's 65 unit and 97 runtime tests, the web's 55 unit tests, build
 
 ### Tasks desktop PWA features (`claude/pwa-features`)
 
-**Local only, not pushed**, rebased on `origin/main` `9a4f4b15`. Five owner-chosen features for the installed app in
+**Released** with this branch's merge (rebased on `origin/main` `9a4f4b15`). Five owner-chosen features for the installed app in
 Chrome on macOS ([README](tasks/README.md#interface), [design](tasks/docs/design.md),
 [interface](packages/planning-ui/docs/interface.md)); no badge, notifications, offline writes or share target:
 
@@ -77,7 +77,7 @@ Discard checked in Focus' records.
 
 ### Retire FlowDay and drop Todofy's planning store (`claude/retire-flowday`)
 
-**Ready to release; local only, not pushed.** A branch from `origin/main` `777d5f01`, which holds the Tasks
+**Released** at `468dceb8` (2026-10-21; its infra follow-ups `66341f98` and `8d8ce547`). A branch from `origin/main` `777d5f01`, which holds the Tasks
 performance release, the one-time planning import (verified on 2026-10-20 with 0 pending) and the Plan and Focus
 release. By the owner's decisions of 2026-10-20 it removes FlowDay completely, with no data migration, and drops
 Todofy's planning tables at once: no waiting window, flag or rollback machinery. The commits, in order:
