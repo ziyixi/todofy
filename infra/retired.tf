@@ -11,31 +11,5 @@
 # application that still uses it, which Cloudflare refuses. A policy only the retired app used leaves with its whole
 # resource block, keeps its old address, and is deleted after the application.
 #
-# FlowDay (retired 2026-10-20; README.md "Retiring an app"): its two Access applications and its D1 database move
-# below, to addresses without an instance key. Its two reusable policies stay at
-# cloudflare_zero_trust_access_policy.flowday["flowday"] and ["flowday-bypass"]; the map below only spells those two
-# keys (as access.tf's flowday_policies did), so the redacted drift summary (tools/infra-plan-summary) prints them
-# rather than numbered placeholders.
-# Remove the moved blocks, their RETIRED pairs in .github/scripts/infra_guard.py and this map in the commit after the
-# apply that deleted the objects.
-locals {
-  retired_flowday_policies = {
-    "flowday"        = "allow"
-    "flowday-bypass" = "bypass"
-  }
-}
-
-moved {
-  from = cloudflare_zero_trust_access_application.flowday["flowday"]
-  to   = cloudflare_zero_trust_access_application.retired_flowday
-}
-
-moved {
-  from = cloudflare_zero_trust_access_application.flowday["flowday-bypass"]
-  to   = cloudflare_zero_trust_access_application.retired_flowday_bypass
-}
-
-moved {
-  from = cloudflare_d1_database.app["flowday"]
-  to   = cloudflare_d1_database.retired_flowday
-}
+# No app is being retired now: FlowDay's Access applications, their two policies and its D1 database were deleted
+# by the apply of 2026-10-21.

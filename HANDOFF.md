@@ -93,46 +93,18 @@ instance of a resource no block declares).
   If Todofy's deploy stops (a live `TODOIST_API_KEY` or retired binding), fix it and run
   `gh workflow run ci.yml --repo ziyixi/todofy --ref main -f app=todofy`, then the same with `-f app=dashboard`
   (and `-f app=watch` with commit 7).
-- **Red or noisy by design until step 5 below:** "Infra drift" exits 3; Home's 配置漂移 shows the `flowday` script
-  and its custom domain as `extra`; "Personal cloud reconcile" fails "Verify complete account resource
-  registration" (the Worker and the D1 database `flowday` unregistered) and applies nothing.
+FlowDay's retirement is complete (2026-10-21): main `468dceb8` released without it; the drift plan of `66341f98`
+showed exactly the five retired objects; "Infra apply" run 39530077928 deleted both Access applications, their two
+policies and D1 `flowday` (state backed up first; the verify plan said "No changes"). The Worker `flowday` and its
+custom domain were already absent from the account. The GitHub secrets `FLOWDAY_CSRF_SIGNING_KEY` and
+`FLOWDAY_CREDENTIAL_KEY` are deleted. This commit removes the applied `moved` blocks and `RETIRED` pairs.
 
-The lead's steps after the release, in this order:
-
-1. Read the merge commit's "Infra drift" run (it runs because `infra/` changed); do not apply yet. It must show
-   `delete: 5` in exactly the rows `cloudflare_d1_database.retired_flowday`,
-   `cloudflare_zero_trust_access_application.retired_flowday`, `cloudflare_zero_trust_access_application.retired_flowday_bypass`,
-   `cloudflare_zero_trust_access_policy.flowday["flowday"]` and `cloudflare_zero_trust_access_policy.flowday["flowday-bypass"]`;
-   every other row `no-op` (the previous green run's count minus 5); `output changes: 2`, both `update`
-   (`access_aud`, `d1_database_ids`); no outputs problem; and the expect line `delete=5,outputs=2@<fingerprint>`.
-   If it failed with "unexpected" values, step 4 above was missed: do it, then `gh workflow run infra.yml --repo ziyixi/todofy --ref main`.
-2. Confirm that Home deployed, so no live Home still probes FlowDay's manifest.
-3. *(Owner's choice; by decision, none.)* A cold copy of FlowDay's D1 before it goes, from `todofy/`:
-   `npx wrangler d1 export flowday --remote --output <private 0700 dir>/flowday.sql`.
-4. Delete the Worker by hand (Wrangler owns it, not `infra/`): Cloudflare dashboard → Workers & Pages → `flowday` →
-   Settings → Domains & Routes → remove `flowday.ziyixi.science` (this removes its DNS record), then delete the
-   Worker (its secrets, versions and assets go with it). Check that DNS has no `flowday` record and the account no
-   Worker `flowday` (it never had a Durable Object namespace). Home's 非 CI 改动 may show these deletions once.
-5. Dispatch "Infra apply" with the line from step 1 (if `main` moved with an `infra/` change since, read the new
-   drift run instead): `gh workflow run infra-apply.yml --repo ziyixi/todofy --ref main -f expect='delete=5,outputs=2@<fingerprint>' -f confirm_destructive=delete-replace-forget`.
-   It backs up the encrypted state, deletes the two Access applications, then the two policies, and D1 `flowday`
-   with its rows and Time Travel, and ends with a verify plan of "No changes".
-6. Delete the GitHub leftovers. List them, then delete each name printed:
-   `gh secret list --env production --repo ziyixi/todofy | grep -E '^FLOWDAY_'`,
-   `gh secret list --repo ziyixi/todofy | grep -E '^FLOWDAY_'` and
-   `gh variable list --env production --repo ziyixi/todofy | grep -E '^FLOWDAY_'`; for example
-   `gh secret delete FLOWDAY_CSRF_SIGNING_KEY --env production --repo ziyixi/todofy` (and `FLOWDAY_WORKER_SECRETS`,
-   `FLOWDAY_CREDENTIAL_KEY` if listed). Leave the `deploy:flowday` deployment records as history.
-7. Verify: `gh workflow run infra.yml --repo ziyixi/todofy --ref main` is green with `no-op` rows only;
-   `gh workflow run personal-cloud-reconcile.yml --repo ziyixi/todofy --ref main -f operation=check` passes "Verify
-   complete account resource registration"; Home's 配置漂移 shows nothing `extra`.
-8. The follow-up commit, as Lab's `6f5f93e4`: delete the three `moved` blocks and the `retired_flowday_policies`
-   map (`infra/retired.tf` again says no app is being retired, with the apply's date) and the three `RETIRED` pairs,
-   and update this file. Its drift run must be green with no change.
-9. After the first Sunday backup after the release (2026-10-25 10:00 UTC), confirm on Todofy's health page that it
-   completed. Optional read-only check from `todofy/` (names only):
-   `npx wrangler d1 execute DB --remote --config wrangler.toml --command "SELECT key FROM plan_settings"` prints only
-   `todoist.mail`.
+Still open:
+- `TODOIST_API_KEY` on todofy-core: delete the live secret, then its optional declaration in `todofy/app.toml`.
+- `INFRA_TFVARS`: set it again from the complete private input without the FlowDay names, then empty `RETIRED_VALUES`
+  in `infra/scripts/infra_state.py`.
+- After the first Sunday backup after the release (2026-10-25 10:00 UTC), confirm on Todofy's health page that it
+  completed.
 10. Owner: remove the installed FlowDay PWA from each device. Optionally, in `self-host-on-vultr`, delete the stopped
     FlowDay container's Compose service and data and any leftover tunnel ingress rule for `flowday.ziyixi.science`;
     that repository is outside this one and needs the owner's OK.
