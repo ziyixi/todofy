@@ -18,7 +18,7 @@ Read the root rules, [README](README.md), [design](docs/design.md) and [verifica
   adds a table or column updates `worker/src/backup.ts` (its runtime test compares the schema) and
   `tools/backup-restore.ts`. Restore only as [docs/backup.md](docs/backup.md) describes.
 - Production data changes go only through the Tasks API (etag and request_id) or a committed, tested generator
-  with a dry run (as the one-time planning and Todofy imports are; see [docs/backup.md](docs/backup.md#one-time-todofy-import)),
+  with a dry run (as the one-time planning and Todofy imports were; see [docs/backup.md](docs/backup.md#one-time-todofy-import)),
   whose SQL is applied with `wrangler d1 execute --remote --file`.
   Never run ad-hoc SQL against production. Note a Time Travel bookmark or take a backup first.
 - Delete a generated secrets file right after the deploy that needed it. Private operator material (snapshots,

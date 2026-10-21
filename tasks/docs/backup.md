@@ -25,8 +25,8 @@ bucket (`infra/storage.tf`).
   `task_labels` and the change feed are left out, because inserts rebuild them.
 - A job runs in steps a second apart, each bounded for Workers Free: the plan (one batch), then at most 30 D1
   statements of pages (15 pages of at most 100 rows and half a MiB) stored as one part per table, then the manifest.
-  A failed step runs again from the parts stored so far; three failed steps in a row fail the job, which is tried
-  again 6 hours later (three times, then on the next Sunday).
+  A failed step runs again from the parts stored so far; three failed steps in a row fail the job, which starts again
+  6 hours later, or on the next Sunday after the third failed job in a row.
 - After each new backup the newest six complete ones are kept, and older ones and every incomplete prefix older than
   the new one are deleted. A job never rewrites a complete backup.
 - Home's Tasks tile shows the last backup's age (`backup_age_seconds`), and raises `backup_stale` (critical: no

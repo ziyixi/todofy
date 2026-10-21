@@ -17,7 +17,8 @@
  * repeats its pages and overwrites the same keys. Owner edits continue while a job runs (a minute or so): the restore
  * tool warns when the two change sequences differ. A job never touches another backup; after its manifest, all but the
  * newest KEEP complete backups are deleted with every incomplete prefix older than it. MAX_ERRORS failed steps in a
- * row fail the job, which is tried again FAILED_RETRY_MS later, up to MAX_FAILED_JOBS times, then on the next Sunday.
+ * row fail the job, which starts again FAILED_RETRY_MS later, or on the next Sunday after MAX_FAILED_JOBS failed jobs
+ * in a row.
  *
  * The object's storage holds the state (`backup`), which it can lose: the next job is then due at once.
  */
