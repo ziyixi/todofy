@@ -12,6 +12,7 @@ import { validate } from '../../../contracts/ops-v1/validate.mjs';
 import type { Env } from '../src/env.ts';
 import { briefStatus, iso, setGuard } from '../src/ops-status.ts';
 import { loadRegistry } from '../src/registry.ts';
+import { addDays } from '../src/schedule.ts';
 import { writeSettings } from '../src/settings.ts';
 import { Store } from '../src/store.ts';
 import { SYNTHETIC_REGISTRY } from './fakes/upstream.ts';
@@ -156,6 +157,23 @@ test('the refused key and the unknown send are critical; a fallback pick and a r
   const ok = cases()['status/ok'] as { health: string; signals: unknown[]; counters: Record<string, number>; modes: Record<string, boolean> };
   expect(ok).toMatchObject({ health: 'ok', signals: [], modes: { maintenance: false, paused: false, mode_limited: false } });
   expect(ok.counters).toMatchObject({ issues_sent_7d: 5, items_today: 212, candidates_today: 118, cost_today_cents: 76, budget_month_cents: 4000 });
+});
+
+test('switched off, the brief says so as information and warns of nothing an issue would hold; a refused key stays critical', () => {
+  // A stale source, and yesterday's geo and world candidates far below the two weeks before.
+  const quiet = store();
+  quiet.insert('sources', { id: 'seis-journal', state: 'ok', last_attempt_ms: NOW, last_success_ms: NOW, first_ms: NOW - 60 * 24 * HOUR, last_item_ms: NOW - 40 * 24 * HOUR });
+  for (let back = 14; back >= 2; back--) quiet.insert('usage', { day: addDays('2026-10-13', -back), items: 100, world_items: 80, geo_items: 20 });
+  quiet.insert('usage', { day: '2026-10-12', items: 10, world_items: 5, geo_items: 1 });
+  const codes = (status: { readonly signals: readonly { code: string; severity: string }[] }): string[][] => status.signals.map((s) => [s.code, s.severity]);
+  expect(codes(briefStatus(quiet, registry, env, NOW))).toEqual([['issue_late', 'warning'], ['section_thin', 'warning'], ['sources_stale', 'warning']]);
+  const off = briefStatus(quiet, registry, { ...env, MODE: 'off' }, NOW);
+  expect(off).toMatchObject({ health: 'ok', modes: { mode_limited: true }, counters: { sources_stale: 1 } });
+  expect(codes(off)).toEqual([['brief_off', 'info']]);
+  quiet.setJson('anthropic_rejected', { status: 401, type: 'authentication_error', key: 'abcdef012345', build: 'b'.repeat(40), ms: NOW - HOUR });
+  const rejected = briefStatus(quiet, registry, { ...env, MODE: 'off' }, NOW);
+  expect(rejected.health).toBe('degraded');
+  expect(codes(rejected)).toEqual([['anthropic_rejected', 'critical'], ['brief_off', 'info']]);
 });
 
 test('a status holds counts and codes only: never a title, a key, an address or a source name', () => {

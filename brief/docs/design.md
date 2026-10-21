@@ -749,6 +749,7 @@ an issue.
 | A write dies otherwise (an invalid answer, a mid-stream error) | its attempt counts; at most 3 | `issue_failed` when they run out |
 | A deploy kills a write | runs again at once, no attempt used, never past 12:00 | — |
 | 设置 → 暂停, or `BRIEF_MODE=off` deployed, while an issue runs | no model call starts and no attempt is used; the step resumes when the stop lifts, or the day ends at 12:00, archived | — (the archive says why) |
+| `BRIEF_MODE=off` deployed | no issue is made; `anthropic_not_configured`, `issue_late`, `issue_missed`, `sources_stale` and `section_thin` are not raised (a refused key or a send's outcome still is) | `brief_off` (info) |
 | Haiku refuses candidates | the fallback score (§5.1) | `gate_refused_high` (warning) above 5% of a day |
 | The pick fails or is refused | the gate order | `pick_fallback` (info) |
 | Opus refuses after the fallback | bisection by packet; the refused packet dropped | `packet_refused` (info) |

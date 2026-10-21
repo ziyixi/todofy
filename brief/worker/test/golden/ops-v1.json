@@ -262,7 +262,13 @@
       "set_at": null,
       "deferred": []
     },
-    "signals": [],
+    "signals": [
+      {
+        "code": "brief_off",
+        "severity": "info",
+        "metrics": {}
+      }
+    ],
     "counters": {
       "items_today": 0,
       "candidates_today": 0,

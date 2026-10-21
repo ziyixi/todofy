@@ -9,8 +9,9 @@
  * Signals (design §15): anthropic_rejected (critical, the status and the error type as metrics), budget_spent (critical
  * when it blocked an issue, else info), issue_failed, send_unknown, send_rejected (critical); anthropic_not_configured,
  * mail_not_configured, issue_late, issue_missed, gate_refused_high, ground_drop_high, sources_stale, section_thin,
- * scheduler_stale (warning); pick_fallback, packet_refused, issue_empty, entail_skipped, sources_degraded, guard_shed
- * (info).
+ * scheduler_stale (warning); pick_fallback, packet_refused, issue_empty, entail_skipped, sources_degraded, guard_shed,
+ * brief_off (info: BRIEF_MODE=off, no issue is made; sources_stale and section_thin, about what one would hold, are
+ * then not raised).
  *
  * The guard (Home's 80 % rule) defers embedding, the weekly learning and the daily probe of paused sources, never an
  * issue.
@@ -117,6 +118,8 @@ export function briefStatus(store: Store, registry: Registry, env: Env, now: num
     const today = localDate(now);
     const signals: Signal[] = [];
     const making = deployment !== 'off';
+    // Switched off: no issue is made. Said as information; a refused key or a send's outcome still counts.
+    if (!making) signals.push(signal('brief_off', Severity.INFO));
     if (numbers.keyState === 'rejected') {
       const metrics: Record<string, number> = { status: numbers.rejectedStatus };
       if (/^[a-z][a-z0-9_]{0,47}$/.test(numbers.rejectedType)) metrics[numbers.rejectedType] = 1;
@@ -147,10 +150,10 @@ export function briefStatus(store: Store, registry: Registry, env: Env, now: num
     if (errors.includes('packet_refused')) signals.push(signal('packet_refused', Severity.INFO));
     if (errors.includes('entail_skipped')) signals.push(signal('entail_skipped', Severity.INFO));
     if (numbers.todayScreened >= 20 && numbers.todayRefused / numbers.todayScreened > GATE_REFUSED_WARN) signals.push(signal('gate_refused_high', Severity.WARNING, { refused: numbers.todayRefused, screened: numbers.todayScreened }));
-    if (numbers.health.stale > 0) signals.push(signal('sources_stale', Severity.WARNING, { count: numbers.health.stale }));
+    if (making && numbers.health.stale > 0) signals.push(signal('sources_stale', Severity.WARNING, { count: numbers.health.stale }));
     if (numbers.health.paused >= 5) signals.push(signal('sources_degraded', Severity.INFO, { count: numbers.health.paused }));
     // Geo research or world candidates below 30% of their 14-day median: a blocked publisher or a broken query.
-    const days = store.all<{ day: string; geo_items: number; world_items: number }>(`SELECT day, geo_items, world_items FROM usage WHERE day >= ? AND day < ?`, addDays(today, -14), today);
+    const days = making ? store.all<{ day: string; geo_items: number; world_items: number }>(`SELECT day, geo_items, world_items FROM usage WHERE day >= ? AND day < ?`, addDays(today, -14), today) : [];
     if (days.length >= 7) {
       const yesterday = store.usage(addDays(today, -1));
       const geo = median(days.map((day) => day.geo_items));

@@ -191,6 +191,7 @@ const SIGNALS: Readonly<Record<string, string>> = {
   issue_empty: '本期简报没有可用条目',
   entail_skipped: '简报补充核验未完成',
   sources_degraded: '多个来源已暂停',
+  brief_off: '简报已关闭',
   // dashboard digest items
   usage_unavailable: '用量数据获取失败',
   usage_not_configured: '未配置用量查询令牌',
