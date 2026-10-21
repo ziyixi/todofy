@@ -1,5 +1,6 @@
 import type { Message } from '@ziyixi/proto/protobuf';
 import { RpcError, Code } from '@ziyixi/proto/rpc-status';
+import { TaskInboxService } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_pb';
 import { TasksUiService } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { toWire } from '@ziyixi/proto/wire-json';
 import { conflict, invalid, missing, storage } from './errors.ts';
@@ -14,7 +15,9 @@ export interface RequestHash {
   wire: string;
   legacy: string;
 }
-const requestSchemas = new Map(TasksUiService.methods.map((method) => [method.input.typeName, method.input]));
+const requestSchemas = new Map(
+  [...TasksUiService.methods, ...TaskInboxService.methods].map((method) => [method.input.typeName, method.input]),
+);
 
 async function sha256(value: unknown): Promise<string> {
   // A decoded Timestamp (CommandFocusTimer's effective_time) holds a bigint, which JSON cannot; no request older than
@@ -127,6 +130,9 @@ export async function commit(
       );
     if (String(error).includes('UNIQUE constraint'))
       throw new RpcError(Code.ALREADY_EXISTS, 'ALREADY_EXISTS', 'Resource name already exists');
+    // TaskInbox's per-source count for the UTC day (task_inbox_days).
+    if (String(error).includes('task_inbox_daily_limit'))
+      throw new RpcError(Code.RESOURCE_EXHAUSTED, 'DAILY_LIMIT', 'The source created its tasks for today');
     throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', 'Task storage is temporarily unavailable');
   }
 }

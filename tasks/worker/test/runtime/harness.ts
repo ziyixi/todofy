@@ -114,6 +114,14 @@ export async function startHarness(
           script: `export default {async fetch(request,env){const path=new URL(request.url).pathname;if(path==='/backup')return Response.json(await env.TASKS.exportBackup(await request.text()));return env.TASKS.fetch(request);}}`,
           serviceBindings: { TASKS: { name: 'tasks', entrypoint: 'TasksApi', props: { access } } },
         })),
+        // TaskInbox's callers: POST a CreateInboxTaskRequest, get its answer or {error: <ErrorCode>}.
+        ...['home', 'watch', 'unknown'].map((source) => ({
+          name: `tasks-inbox-${source}`,
+          modules: true,
+          compatibilityDate: '2026-09-08',
+          script: `export default {async fetch(request,env){try{return Response.json(await env.INBOX.createInboxTask(await request.json()));}catch(error){return Response.json({error:error.message},{status:400});}}}`,
+          serviceBindings: { INBOX: { name: 'tasks', entrypoint: 'TaskInbox', props: { source } } },
+        })),
       ],
     }),
   );

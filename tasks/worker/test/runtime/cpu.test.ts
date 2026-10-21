@@ -512,7 +512,8 @@ test(
  * What other Workers call: Home's Ops.status() as an isolate's very first request, and reads through a TasksApi
  * binding: a search of 20 tasks with full 16,000-character descriptions (the Personal MCP's), a page of 100 and the
  * backup's plan. And a mail conversion, which reads a 64 KiB summary from Todofy's Mail entry, cuts it to 16,000 UTF-16
- * units, creates the task and marks the mail.
+ * units, creates the task and marks the mail; and TaskInbox's largest create, a task of 16,000 units with 30 subtasks
+ * of as many.
  */
 const FIRST_OPS_STATUS = "Home's Ops.status() as an isolate's first request";
 test(
@@ -556,6 +557,8 @@ test(
       },
       async ({ harness, todofy, meter }) => {
         const ops = await harness.mf.getWorker('tasks-ops');
+        const inbox = await harness.mf.getWorker('tasks-inbox-home');
+        const long = 'Synthetic digest line 汉字\n'.repeat(800).slice(0, 16000);
         const binding = await harness.mf.getWorker('tasks-read-write');
         const status = async () => {
           const answer = (await (await ops.fetch('https://tasks.internal/status')).json()) as { health: string };
@@ -603,6 +606,24 @@ test(
               });
               expect(response.status, (await response.clone().text()).slice(0, 200)).toBe(200);
               expect(mail.pending).toBe(false);
+            },
+            7,
+          ),
+          await meter.measure(
+            "TaskInbox: a task with 30 subtasks, each 16,000 units long",
+            async () => {
+              const response = await inbox.fetch('https://inbox.internal/', {
+                method: 'POST',
+                body: JSON.stringify({
+                  request_id: crypto.randomUUID(),
+                  title: 'Synthetic CPU digest',
+                  description: long,
+                  subtasks: Array.from({ length: 30 }, (_, index) => ({ title: `Item ${String(index)}`, description: long })),
+                }),
+              });
+              const answer = (await response.json()) as { subtask_ids?: string[]; error?: string };
+              expect(answer.error).toBeUndefined();
+              expect(answer.subtask_ids).toHaveLength(30);
             },
             7,
           ),
