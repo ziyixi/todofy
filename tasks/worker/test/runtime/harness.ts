@@ -84,6 +84,7 @@ export async function startHarness(
           script: await bundle(),
           compatibilityDate: '2026-09-08',
           d1Databases: { DB: 'tasks-test' },
+          durableObjects: { JOBS: { className: 'TaskJobs', useSQLite: true } },
           serviceBindings: { ASSETS: asset, ...(options.mail ? { MAIL: options.mail } : {}) },
           bindings: {
             PUBLIC_HOST: 'tasks.example.test',
@@ -114,6 +115,14 @@ export async function startHarness(
           script: `export default {async fetch(request,env){const path=new URL(request.url).pathname;if(path==='/backup')return Response.json(await env.TASKS.exportBackup(await request.text()));return env.TASKS.fetch(request);}}`,
           serviceBindings: { TASKS: { name: 'tasks', entrypoint: 'TasksApi', props: { access } } },
         })),
+        // The jobs object's status(), as Home's tick reaches it through Ops.
+        {
+          name: 'tasks-jobs',
+          modules: true,
+          compatibilityDate: '2026-09-08',
+          script: `export default {async fetch(request,env){return Response.json(await env.JOBS.get(env.JOBS.idFromName('jobs-v1')).status());}}`,
+          durableObjects: { JOBS: { className: 'TaskJobs', scriptName: 'tasks', useSQLite: true } },
+        },
         // TaskInbox's callers: POST a CreateInboxTaskRequest, get its answer or {error: <ErrorCode>}.
         ...['home', 'watch', 'unknown'].map((source) => ({
           name: `tasks-inbox-${source}`,
@@ -192,7 +201,7 @@ export async function objectReceiptHash(method: string, input: unknown): Promise
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-/** D1's own row metrics, including first() and each statement executed by batch(). */
+/** D1's own row metrics, including first(), run() and each statement executed by batch(). */
 export function measuredReads(binding: D1Database) {
   const metrics = { statements: 0, rowsRead: 0, rowsWritten: 0 };
   const originals = new WeakMap<D1PreparedStatement, D1PreparedStatement>();
@@ -206,6 +215,7 @@ export function measuredReads(binding: D1Database) {
     const counted = {
       bind: (...values: unknown[]) => wrap(statement.bind(...values)),
       all: async <T>() => record(await statement.all<T>()),
+      run: async <T>() => record(await statement.run<T>()),
       first: async <T>(column?: string) => {
         const result = record(await statement.all());
         const row = result.results[0];

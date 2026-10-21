@@ -808,6 +808,11 @@
           "source": "config"
         },
         {
+          "name": "JOBS",
+          "type": "durable_object_namespace",
+          "source": "config"
+        },
+        {
           "name": "MAIL",
           "type": "service",
           "source": "config"

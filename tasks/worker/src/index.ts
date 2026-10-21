@@ -41,3 +41,4 @@ export default { fetch: ownerRequest } satisfies ExportedHandler<Env>;
 
 export { Ops } from './ops.ts';
 export { TaskInbox } from './inbox.ts';
+export { TaskJobs } from './jobs.ts';

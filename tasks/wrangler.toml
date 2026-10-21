@@ -26,6 +26,14 @@ database_name = "tasks"
 database_id = "79a1f345-1183-46c3-bc6a-651be106f90c"
 migrations_dir = "migrations"
 
+[[durable_objects.bindings]]
+name = "JOBS"
+class_name = "TaskJobs"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TaskJobs"]
+
 [[services]]
 binding = "MAIL"
 service = "todofy"

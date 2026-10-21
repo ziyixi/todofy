@@ -1,6 +1,5 @@
 import { create } from '@ziyixi/proto/protobuf';
 import type { ServiceHandlers, ShapeOf } from '@ziyixi/proto/http-transcoder';
-import { Code, RpcError } from '@ziyixi/proto/rpc-status';
 import { ProjectSchema, SectionSchema, LabelSchema, SavedFilterSchema } from '@ziyixi/proto/tasks/ui/v1/task_pb';
 import { PreviewDateResponseSchema, type TasksUiService } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { previewDate, localDate } from '@ziyixi/task-dates';
@@ -18,7 +17,8 @@ import { commandFocusTimer, getFocusTimer } from './focus-timer.ts';
 import { getPlan, updateWeeklyBet } from './plan.ts';
 import { createFocusEntry, deleteFocusEntry, updateFocusEntry } from './focus-entries.ts';
 import { convertMailItem, getMailCategories, updateMailCategories } from './mail.ts';
-import { UNKNOWN_ROUTE } from '../../shared/build.ts';
+import { listGtdDays } from './gtd.ts';
+import { getWeeklyReview, listWeeklyReviews } from './review.ts';
 
 export interface ApiContext {
   env: Env;
@@ -26,13 +26,6 @@ export interface ApiContext {
   owner: string;
   bypassed: boolean;
   internal: boolean;
-}
-/**
- * GTD and the weekly review (gtd.proto) are in the IDL ahead of the code that serves them; until then each answers as
- * a route the Worker does not have.
- */
-function unserved(): Promise<never> {
-  return Promise.reject(new RpcError(Code.NOT_FOUND, 'NOT_FOUND', UNKNOWN_ROUTE));
 }
 export const handlers: ServiceHandlers<ShapeOf<typeof TasksUiService>, ApiContext> = {
   getCatalog: (input, { env, now }) => getCatalog(env.DB, accountZone(env), now, input.includeTaskCounts !== false),
@@ -58,9 +51,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof TasksUiService>, ApiContex
   convertMailItem: (input, { env, now }) => convertMailItem(env, input, now, accountZone(env)),
   getMailCategories: (input, { env }) => getMailCategories(env.DB, input),
   updateMailCategories: (input, { env, now }) => updateMailCategories(env.DB, input, now),
-  getWeeklyReview: unserved,
-  listWeeklyReviews: unserved,
-  listGtdDays: unserved,
+  getWeeklyReview: (input, { env }) => getWeeklyReview(env, input),
+  listWeeklyReviews: (input, { env }) => listWeeklyReviews(env.DB, input),
+  listGtdDays: (input, { env, now }) => listGtdDays(env, input, now),
   listChanges: (input, { env, now }) => listChanges(env.DB, input, localDate(now, accountZone(env))),
   listCompletions: (input, { env }) => listCompletions(env.DB, input),
   previewDate(input, { env, now }) {
