@@ -26,12 +26,11 @@ const SECRETS = ['Alice', 'alice', 'Secretive', 'merger', '机密', 'zebra', 'co
 const secretMail = ['From: Alice Secretive <alice.secretive@example.org>', `To: ${INBOX}`, 'Cc: bob.hidden@example.org',
   'Subject: Quarterly merger plan 机密', 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8', '',
   'The vault code is 4242-zebra.', ''].join('\r\n')
-// Distinctive statements of the four deferrable jobs (IMPLEMENTATION.md 2.5).
+// Distinctive statements of the three deferrable jobs (IMPLEMENTATION.md 2.5).
 const JOB_SQL = {
   raw_reconcile: "VALUES('raw_reconcile_cursor'",
   lifecycle_retention: 'messages_due_missing_idx',
   canary_cleanup: 'messages_canary_idx',
-  alert_history_purge: 'DELETE FROM alert_notifications',
 }
 // Statements of work that shed must never stop.
 const KEPT_SQL = {
@@ -379,12 +378,12 @@ test('workerd Ops: maintenance mode reports down and refuses canaries without wr
   assert.equal((await db.prepare('SELECT count(*) n FROM deliveries').first()).n, 0)
 })
 
-test('workerd Ops: shed defers exactly the four cleanup jobs within their bound and never ingest, parsing or delivery', { timeout: 180000 }, async t => {
+test('workerd Ops: shed defers exactly the three cleanup jobs within their bound and never ingest, parsing or delivery', { timeout: 180000 }, async t => {
   const { db, calls, ops, request, receive, forwardTarget, unthrottle, cycle, ranJobs } = await runtime(t)
   await forwardTarget()
   const kept = groups => Object.keys(KEPT_SQL).filter(name => groups.some(group => group.some(sql => sql.includes(KEPT_SQL[name]))))
   const all = Object.keys(JOB_SQL)
-  // Normal: every job runs (the alert history purge and canary cleanup statements run even with nothing to do).
+  // Normal: every job runs (the canary cleanup statement runs even with nothing to do).
   let groups = await cycle()
   assert.deepEqual(ranJobs(groups), all)
   const until = new Date(Date.now() + 30 * 3600_000).toISOString()
@@ -392,7 +391,7 @@ test('workerd Ops: shed defers exactly the four cleanup jobs within their bound 
   // The raw inventory is due again (it normally waits a day between idle scans).
   await db.prepare("DELETE FROM maintenance WHERE id='raw_reconcile_after'").run()
   groups = await cycle()
-  assert.deepEqual(ranJobs(groups), [], 'shed defers the four jobs that ran within 48 h')
+  assert.deepEqual(ranJobs(groups), [], 'shed defers the three jobs that ran within 48 h')
   assert.deepEqual(kept(groups), Object.keys(KEPT_SQL), 'repair, purge resumption and alert evaluation keep running')
 
   // Ingest, parsing and delivery (with retries) of real mail and the canary are unaffected.
@@ -410,9 +409,9 @@ test('workerd Ops: shed defers exactly the four cleanup jobs within their bound 
   assert.equal(status.value.guard.level, 'shed'); assert.deepEqual(status.value.guard.deferred, all)
 
   // Each job's own bound: once its last run is 48 h old it runs, even while the guard is renewed.
-  await request('/__probe/sql', { method: 'POST', body: JSON.stringify({ sql: 'UPDATE ops_job_runs SET at=? WHERE job IN (?,?)', values: [Date.now() - 48 * 3600_000, 'lifecycle_retention', 'alert_history_purge'] }) })
+  await request('/__probe/sql', { method: 'POST', body: JSON.stringify({ sql: 'UPDATE ops_job_runs SET at=? WHERE job IN (?,?)', values: [Date.now() - 48 * 3600_000, 'lifecycle_retention', 'canary_cleanup'] }) })
   groups = await cycle()
-  assert.deepEqual(ranJobs(groups), ['lifecycle_retention', 'alert_history_purge'])
+  assert.deepEqual(ranJobs(groups), ['lifecycle_retention', 'canary_cleanup'])
   groups = await cycle()
   assert.deepEqual(ranJobs(groups), [], 'and is deferred again after that run')
   // Normal again: everything runs on the next cycle, nothing was rescheduled.
@@ -422,7 +421,7 @@ test('workerd Ops: shed defers exactly the four cleanup jobs within their bound 
   assert.deepEqual(ranJobs(groups), all)
 })
 
-test('workerd Ops: under a renewed shed guard a whole raw scan and the retention and history backlogs still finish once their bound is reached', { timeout: 180000 }, async t => {
+test('workerd Ops: under a renewed shed guard a whole raw scan and the retention backlog still finish once their bound is reached', { timeout: 180000 }, async t => {
   const { db, bucket, ops, request, cycle, ranJobs } = await runtime(t)
   const probe = (sql, values) => request('/__probe/sql', { method: 'POST', body: JSON.stringify({ sql, values }) })
   const lastRun = async job => (await probe('SELECT at FROM ops_job_runs WHERE job=?', [job]))[0]?.at ?? null
@@ -433,13 +432,7 @@ test('workerd Ops: under a renewed shed guard a whole raw scan and the retention
   const received = new Date(Date.now() - 3600_000).toISOString()
   await db.batch(Array.from({ length: 45 }, (_, i) => db.prepare(`INSERT INTO messages(id,received_at,last_received_at,envelope_from,envelope_recipient,size_bytes,receive_mode,parse_state)
     VALUES(?,?,?,'a@example.org','b@example.org',1,'archive','failed')`).bind(`00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, received, received)))
-  // 45 alert notifications past their 180 days: the history purge deletes 20 a pass.
-  const expired = new Date(Date.now() - 200 * 86400_000).toISOString()
-  await db.prepare(`INSERT OR IGNORE INTO alerts(code,active,severity,metrics_json,first_seen_at,last_seen_at,last_event_day)
-    VALUES('parse_failed',0,'warning','{}',?,?,'2026-01-01')`).bind(expired, expired).run()
-  await db.batch(Array.from({ length: 45 }, (_, i) => db.prepare(`INSERT INTO alert_notifications(id,code,transition,day,payload_json,state,next_attempt_at,created_at)
-    VALUES(?,'parse_failed','active',?,'{}','sent',?,?)`).bind(`history-${i}`, new Date(Date.parse(expired) - i * 86400_000).toISOString().slice(0, 10), expired, expired)))
-  const jobs = ['raw_reconcile', 'lifecycle_retention', 'alert_history_purge']
+  const jobs = ['raw_reconcile', 'lifecycle_retention']
   // Each last completed 48 h ago: the bound is reached although the guard stays on.
   const old = Date.now() - 48 * 3600_000
   for (const job of jobs) await setRun(job, old)
@@ -460,6 +453,5 @@ test('workerd Ops: under a renewed shed guard a whole raw scan and the retention
   assert.equal((await db.prepare("SELECT value FROM maintenance WHERE id='raw_reconcile_cursor'").first()).value, '', 'the scan reached the end of the bucket')
   assert.equal((await db.prepare('SELECT count(*) n FROM messages WHERE retention_started_at IS NULL AND resolved_at IS NULL').first()).n, 45)
   assert.equal((await db.prepare("SELECT value FROM maintenance WHERE id='retention_sweep_cursor'").first()).value, '', 'the sweep caught up')
-  assert.equal((await db.prepare('SELECT count(*) n FROM alert_notifications WHERE created_at=?').bind(expired).first()).n, 0, 'the history purge caught up')
   for (const job of jobs) assert.ok(await lastRun(job) > Date.now() - 600_000, `${job} recorded its complete run`)
 })

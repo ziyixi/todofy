@@ -42,7 +42,7 @@ test('entry, migrations and assets resolve from the app root', () => {
 test('personal values, operational switches and the build are never committed', () => {
   const injected = [...INJECTED, ...SECRETS].map(({ name }) => name)
   assert.deepEqual(Object.keys(config.vars).filter((name) => injected.includes(name)), [])
-  for (const name of ['RECEIVE_ADDRESS', 'ACCESS_OWNER', 'ACCESS_OWNER_ALIASES', 'CREDENTIAL_KEY', 'ALERT_WEBHOOK_TOKEN', 'BACKUP_TOKEN']) {
+  for (const name of ['RECEIVE_ADDRESS', 'ACCESS_OWNER', 'ACCESS_OWNER_ALIASES', 'CREDENTIAL_KEY', 'BACKUP_TOKEN']) {
     assert.equal(name in config.vars, false, name)
   }
   // No address of any kind in the public file.
@@ -72,20 +72,6 @@ test('Access, the owner host and the webhook hosts', () => {
   assert.deepEqual(config.routes, [{ pattern: vars.PUBLIC_HOST, custom_domain: true }])
   assert.ok(hosts(vars.WEBHOOK_ALLOWED_HOSTS).length >= 1)
   for (const host of hosts(vars.WEBHOOK_ALLOWED_HOSTS)) assert.match(host, DOMAIN)
-})
-
-test('the optional alert webhook, when configured, is an exact credential-free HTTPS URL on an allowed host', () => {
-  const { vars } = config
-  if (!('ALERT_WEBHOOK_URL' in vars)) {
-    assert.equal('ALERT_WEBHOOK_ALLOWED_HOSTS' in vars, false)
-    return
-  }
-  const url = new URL(vars.ALERT_WEBHOOK_URL)
-  assert.equal(url.protocol, 'https:')
-  assert.equal(url.username + url.password + url.hash, '')
-  assert.ok(url.port === '' || url.port === '443')
-  for (const host of hosts(vars.ALERT_WEBHOOK_ALLOWED_HOSTS)) assert.match(host, DOMAIN)
-  assert.ok(hosts(vars.ALERT_WEBHOOK_ALLOWED_HOSTS).includes(url.hostname))
 })
 
 test('the daily ingest limits are bounded positive integers', () => {

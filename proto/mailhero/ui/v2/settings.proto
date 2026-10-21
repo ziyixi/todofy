@@ -167,13 +167,14 @@ message Overview {
   SchedulerStatus scheduler = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The active alerts, most severe first (at most 8).
   repeated ActiveAlert active_alerts = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // An external alert webhook is configured (ALERT_WEBHOOK_URL; normally not).
+  // Always false since 2026-10-21: Mail Hero has no alert webhook (Home's daily digest task in Tasks carries the
+  // active alerts).
   bool alert_webhook_configured = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The alert webhook's configuration is invalid.
+  // Always false since 2026-10-21 (no alert webhook).
   bool alert_webhook_misconfigured = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Alert notifications waiting to be sent.
+  // Always 0 since 2026-10-21 (no alert notifications are sent).
   int32 pending_notification_count = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Alert notifications that failed.
+  // Always 0 since 2026-10-21 (no alert notifications are sent).
   int32 failed_notification_count = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Warnings for the owner, in Chinese, one sentence each (capacity, D1 size, parse failures, pauses, maintenance,
   // the coordinator, backups).

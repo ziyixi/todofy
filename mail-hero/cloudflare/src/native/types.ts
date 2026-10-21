@@ -13,9 +13,6 @@ export interface Env {
   ACCESS_OWNER_ALIASES?: string;
   CREDENTIAL_KEY: string;
   WEBHOOK_ALLOWED_HOSTS: string;
-  ALERT_WEBHOOK_URL?: string;
-  ALERT_WEBHOOK_ALLOWED_HOSTS?: string;
-  ALERT_WEBHOOK_TOKEN?: string;
   FORCE_SEND_PAUSED?: string;
   MAINTENANCE_MODE?: string;
   INGEST_DAILY_MESSAGE_LIMIT?: string;

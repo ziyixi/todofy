@@ -63,8 +63,7 @@
       "deferred": [
         "raw_reconcile",
         "lifecycle_retention",
-        "canary_cleanup",
-        "alert_history_purge"
+        "canary_cleanup"
       ]
     },
     "signals": [
@@ -412,8 +411,7 @@
       "deferred": [
         "raw_reconcile",
         "lifecycle_retention",
-        "canary_cleanup",
-        "alert_history_purge"
+        "canary_cleanup"
       ]
     },
     "signals": [
@@ -487,8 +485,7 @@
     "deferred": [
       "raw_reconcile",
       "lifecycle_retention",
-      "canary_cleanup",
-      "alert_history_purge"
+      "canary_cleanup"
     ]
   },
   "guard/shed-again": {
@@ -499,8 +496,7 @@
     "deferred": [
       "raw_reconcile",
       "lifecycle_retention",
-      "canary_cleanup",
-      "alert_history_purge"
+      "canary_cleanup"
     ]
   },
   "guard/renewed": {
@@ -511,8 +507,7 @@
     "deferred": [
       "raw_reconcile",
       "lifecycle_retention",
-      "canary_cleanup",
-      "alert_history_purge"
+      "canary_cleanup"
     ]
   },
   "guard/cleared": {

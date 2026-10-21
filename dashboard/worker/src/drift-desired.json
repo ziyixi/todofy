@@ -413,12 +413,6 @@
           "source": "deploy"
         },
         {
-          "name": "ALERT_WEBHOOK_TOKEN",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
-        },
-        {
           "name": "ASSETS",
           "type": "assets",
           "source": "config"

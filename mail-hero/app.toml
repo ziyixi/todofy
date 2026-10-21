@@ -6,8 +6,8 @@ target = "cloudflare"
 [[workers]]
 config = "mail-hero/wrangler.toml"
 personal_secrets = ["RECEIVE_ADDRESS", "ACCESS_OWNER", "ACCESS_OWNER_ALIASES"]
-manual_secrets = ["CREDENTIAL_KEY", "BACKUP_TOKEN", "BACKUP_RECEIPT_KEY", "ALERT_WEBHOOK_TOKEN", "ACCESS_CLIENT_ID", "ACCESS_CLIENT_SECRET"]
-optional_secrets = ["ACCESS_OWNER_ALIASES", "ALERT_WEBHOOK_TOKEN", "ACCESS_CLIENT_ID", "ACCESS_CLIENT_SECRET"]
+manual_secrets = ["CREDENTIAL_KEY", "BACKUP_TOKEN", "BACKUP_RECEIPT_KEY", "ACCESS_CLIENT_ID", "ACCESS_CLIENT_SECRET"]
+optional_secrets = ["ACCESS_OWNER_ALIASES", "ACCESS_CLIENT_ID", "ACCESS_CLIENT_SECRET"]
 hosts = ["mail-hero"]
 entry = "mail-hero"
 role = "收件、投递与 UI"

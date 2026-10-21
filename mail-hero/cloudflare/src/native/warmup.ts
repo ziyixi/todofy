@@ -100,10 +100,7 @@ const OVERVIEW: Row = {
   receive_address: 'inbox@example.org', counts: { messages: 60, pending: 2, failed: 1, delivered: 57, parse_failed: 0 },
   storage: { logical_bytes: 1024, limit_bytes: 5 * 1024 ** 3, database_bytes: 4096, pending_physical_delete_bytes: 0 }, backup: { last_at: TIME },
   send_paused: false, scheduler: SCHEDULER,
-  alerts: {
-    active: [{ code: 'delivery_failures', severity: 'warning', metrics: { failed: 1 }, first_seen_at: TIME, last_seen_at: TIME }],
-    configured: true, configuration_error: false, pending_notifications: 0, failed_notifications: 0,
-  },
+  alerts: { active: [{ code: 'delivery_failures', severity: 'warning', metrics: { failed: 1 }, first_seen_at: TIME, last_seen_at: TIME }] },
   warnings: ['warm-up'],
 }
 

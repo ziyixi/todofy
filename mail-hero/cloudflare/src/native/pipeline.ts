@@ -7,7 +7,7 @@ import { parseMail, ParseError, type ParsedMail } from './parser.ts';
 import { MAX_RAW_BYTES, RAW_KEY } from './ingest.ts';
 import { webhookContent } from './content-policy.ts';
 import { resolvedDueSQL, resolvedTerminalSQL, runLifecycle, safeTerminalSQL } from './lifecycle.ts';
-import { runAlerts } from './alerts.ts';
+import { evaluateAlerts } from './alerts.ts';
 import { recordDeletion } from './backup-artifacts.ts';
 import type { OpsDeferral } from './ops-guard.ts';
 import { coordinatorRequest, reserveObjectCapacity, settleObjectCapacity, releaseObjectCapacity, capacitySnapshot, reconcileCapacity, MAX_PARSED_JSON_BYTES, MAX_PARSE_EXTRA_BYTES } from './capacity.ts';
@@ -648,17 +648,15 @@ export async function runJob(env:Env,job:Job,attempts=0):Promise<number|null> {
 }
 
 /** Three separate Alarm invocations keep each pass within Free D1's query
- * budget. The short phase handoff is durable; alerts complete every 10 minutes. */
+ * budget. The short phase handoff is durable; alerts are evaluated every 10 minutes. */
 export async function runMaintenance(env:Env,deferral?:OpsDeferral):Promise<{jobs:Job[];continueSoon:boolean;nextDelayMS?:number}> {
   if(env.MAINTENANCE_MODE==='true') return {jobs:[],continueSoon:false};
   const phase=(await first(env,"SELECT value FROM maintenance WHERE id='maintenance_phase'"))?.value ?? 'repair';
   if(phase==='alerts') {
-    // A shed guard (contracts/ops-v1) defers only cleanup; alert evaluation and delivery always run.
-    // Each job records its run only once it has caught up, so the 48 h bound covers the whole backlog,
+    // A shed guard (contracts/ops-v1) defers only cleanup; alert evaluation always runs.
+    // A job records its run only once it has caught up, so the 48 h bound covers the whole backlog,
     // not one bounded batch of it: once due, a job keeps its normal cadence until nothing is left.
-    const purgeHistory=!deferral?.defers('alert_history_purge');
-    const alerts=await runAlerts(env,{purgeHistory});
-    if(purgeHistory && !alerts.historyBacklog) deferral?.ran('alert_history_purge');
+    await evaluateAlerts(env);
     if(!deferral?.defers('canary_cleanup')) {
       // A failure is retried next cycle; it must not hold the phase cycle (repair) on this phase.
       try { if(!await cleanupCanaryContent(env)) deferral?.ran('canary_cleanup'); } catch { /* next cycle */ }

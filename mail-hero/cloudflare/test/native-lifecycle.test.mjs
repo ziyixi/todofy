@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { readFileSync, readdirSync } from 'node:fs'
 import { NEVER_DUE, captureLifecyclePolicy, expireRawContent, lifecycleStorage, resolvedFloorSQL, resolvedTerminalSQL, runLifecycle, safeTerminalSQL, terminalAnchorSQL } from '../src/native/lifecycle.ts'
-import { alertConfiguration, alertSignals, alertSnapshot, deliverAlert, evaluateAlerts } from '../src/native/alerts.ts'
+import { alertSignals, alertSnapshot, evaluateAlerts } from '../src/native/alerts.ts'
 import { currentSettings, patchSettings, previewRetention } from '../src/native/api-settings.ts'
 import { deleteMessageContent, runMaintenance } from '../src/native/pipeline.ts'
 
@@ -79,7 +79,6 @@ test('periodic maintenance queries are index ranges over due, unsettled or in-fl
     WHERE origin='cloudflare' AND content_deleted_at IS NULL AND parse_state IN('pending','parsing','failed')`),'messages_live_lifecycle_idx')
   uses(await plan(`SELECT raw_key FROM messages INDEXED BY messages_live_lifecycle_idx WHERE parse_state='parsing' AND lease_until<=? AND origin='cloudflare' AND content_deleted_at IS NULL`,'2026-01-01'),'messages_live_lifecycle_idx')
   uses(await plan(`SELECT min(d.created_at) FROM deliveries d INDEXED BY deliveries_due_idx JOIN messages m ON m.id=d.message_id WHERE d.state IN('pending','retry_wait','sending') AND m.content_deleted_at IS NULL`),'deliveries_due_idx')
-  uses(await plan(`SELECT id FROM alert_notifications INDEXED BY alert_notifications_created_idx WHERE created_at<? AND state IN('sent','failed','disabled') ORDER BY created_at LIMIT 20`,'2026-01-01'),'alert_notifications_created_idx')
   // Repair: legacy route blocks and events held past their window are found by partial indexes.
   uses(await plan(`SELECT id FROM endpoint_revisions INDEXED BY endpoint_revisions_uncooled_idx
     WHERE blocked_reason IS NOT NULL AND blocked_until IS NULL AND (blocked_reason IN('http_404','http_405') OR blocked_reason GLOB 'http_3[0-9][0-9]') AND blocked_rechecks<8`),'endpoint_revisions_uncooled_idx',false)
@@ -183,44 +182,19 @@ test('future settings changes never adopt history implicitly', async () => {
   assert.equal((await read(env, historical)).retention_policy_version, null); assert.equal((await captureLifecyclePolicy(env)).content_retention_days, 40)
 })
 
-test('alerts deduplicate daily, resolve and include only status metrics', async () => {
-  const env = environment(), time = Date.now()
-  await env.DB.prepare('UPDATE app_settings SET logical_bytes=4000000000,logical_limit_bytes=5000000000,created_at=?').bind(new Date(time - 40 * 3600000).toISOString()).run()
+test('alerts keep one row per code, resolve and store only status metrics', async () => {
+  const env = environment(), time = Date.now(), stamp = offset => new Date(time + offset).toISOString()
+  await env.DB.prepare('UPDATE app_settings SET logical_bytes=4000000000,logical_limit_bytes=5000000000,created_at=?').bind(stamp(-40 * 3600000)).run()
   await evaluateAlerts(env, time); await evaluateAlerts(env, time + 1000)
-  const rows = (await env.DB.prepare('SELECT * FROM alert_notifications').all()).results
-  assert.equal(rows.length, 2)
-  for (const row of rows) { assert.equal(row.state, 'disabled'); assert.deepEqual(Object.keys(JSON.parse(row.payload_json)).sort(), ['type', 'id', 'code', 'state', 'severity', 'observed_at', 'metrics', 'management_path'].sort()) }
-  await env.DB.prepare('UPDATE app_settings SET logical_bytes=0,last_backup_at=?').bind(new Date(time).toISOString()).run(); await evaluateAlerts(env, time + 2000)
-  assert.equal((await env.DB.prepare("SELECT count(*) n FROM alert_notifications WHERE transition='resolved'").first()).n, 2)
-  assert.equal((await env.DB.prepare('SELECT count(*) n FROM alerts WHERE active=1').first()).n, 0)
+  const rows = (await env.DB.prepare('SELECT code,active,active_since,last_seen_at,metrics_json FROM alerts ORDER BY code').all()).results
+  assert.deepEqual(rows.map(row => [row.code, row.active, row.active_since, row.last_seen_at]), [['backup_stale', 1, stamp(0), stamp(1000)], ['capacity_70', 1, stamp(0), stamp(1000)]])
+  for (const row of rows) assert.ok(Object.values(JSON.parse(row.metrics_json)).every(Number.isFinite), 'metrics are numbers only')
+  await env.DB.prepare('UPDATE app_settings SET logical_bytes=0,last_backup_at=?').bind(stamp(0)).run(); await evaluateAlerts(env, time + 2000)
+  assert.deepEqual((await env.DB.prepare('SELECT code,active,resolved_at,active_since FROM alerts ORDER BY code').all()).results.map(row => [row.code, row.active, row.resolved_at, row.active_since]),
+    [['backup_stale', 0, stamp(2000), null], ['capacity_70', 0, stamp(2000), null]])
   assert.deepEqual(alertSignals({ logical_bytes: 96, logical_limit_bytes: 100, created_at: new Date(time).toISOString(), parse_failed: 0 }, time).filter(signal => signal.active).map(signal => signal.code), ['capacity_95'])
   const reserved=alertSignals({logical_bytes:20,logical_limit_bytes:100,capacity_used_bytes:96,capacity_limit_bytes:100,created_at:new Date(time).toISOString(),parse_failed:0},time).find(signal=>signal.active)
   assert.equal(reserved.code,'capacity_95');assert.equal(reserved.metrics.logical_bytes,20);assert.equal(reserved.metrics.used_bytes,96);assert.equal(reserved.metrics.capacity_accounting_available,1)
-})
-
-test('alert webhook enforces HTTPS host and retries exact bytes; authentication failure stops', async t => {
-  const env = environment(), time = Date.now()
-  Object.assign(env, { ALERT_WEBHOOK_URL: 'https://alerts.example.org/notify', ALERT_WEBHOOK_TOKEN: 's'.repeat(32) })
-  assert.equal(alertConfiguration(env).configured, true)
-  assert.equal(alertConfiguration({ ...env, ALERT_WEBHOOK_URL: 'https://other.example.org/notify' }).configuration_error, true)
-  assert.equal(alertConfiguration({ ...env, ALERT_WEBHOOK_URL: 'http://alerts.example.org/notify' }).configuration_error, true)
-  await env.DB.prepare('UPDATE app_settings SET logical_bytes=logical_limit_bytes').run(); await evaluateAlerts(env, time)
-  const calls = []
-  t.mock.method(globalThis, 'fetch', async (_url, options) => { calls.push(options); return new Response(null, { status: calls.length === 1 ? 429 : 401, headers: { 'Retry-After': '120' } }) })
-  await deliverAlert(env, time); assert.equal(await deliverAlert(env, time + 61000), false); await deliverAlert(env, time + 121000)
-  assert.equal(calls.length, 2); assert.equal(calls[0].body, calls[1].body); assert.equal(calls[0].headers['Idempotency-Key'], calls[1].headers['Idempotency-Key'])
-  const row = await env.DB.prepare('SELECT * FROM alert_notifications').first()
-  assert.equal(row.state, 'failed'); assert.equal(row.last_error, 'http_401'); assert.equal(row.attempts, 2)
-  assert.equal(row.payload_json.includes(env.ALERT_WEBHOOK_TOKEN), false)
-})
-
-test('crashed final alert attempt cannot exceed durable retry limit', async t => {
-  const env = environment(), time = Date.now()
-  Object.assign(env, { ALERT_WEBHOOK_URL: 'https://alerts.example.org/notify', ALERT_WEBHOOK_TOKEN: 's'.repeat(32) })
-  await env.DB.prepare('UPDATE app_settings SET logical_bytes=logical_limit_bytes').run(); await evaluateAlerts(env, time)
-  await env.DB.prepare("UPDATE alert_notifications SET state='sending',attempts=8,lease_until=?").bind(new Date(time - 1000).toISOString()).run()
-  t.mock.method(globalThis, 'fetch', async () => assert.fail('ninth network attempt'))
-  await deliverAlert(env, time); assert.equal((await env.DB.prepare('SELECT state FROM alert_notifications').first()).state, 'failed')
 })
 
 const DAY = 86400000

@@ -11,7 +11,7 @@ import { OPS_LIMITS } from '../../../../contracts/ops-v1/ops-v1.ts';
 
 /** Background jobs that a shed guard defers (contracts/ops-v1/IMPLEMENTATION.md 2.5). Everything else
  * (intake, parsing, delivery and retries, repair, alerts, backup, the canary itself) always runs. */
-export const DEFERRABLE_JOBS = ['raw_reconcile', 'lifecycle_retention', 'canary_cleanup', 'alert_history_purge'] as const;
+export const DEFERRABLE_JOBS = ['raw_reconcile', 'lifecycle_retention', 'canary_cleanup'] as const;
 export type DeferrableJob = (typeof DEFERRABLE_JOBS)[number];
 /** A deferred job still runs once its last run is this old, so a guard renewed forever cannot starve it. */
 export const DEFER_BOUND_MS = 48 * 3600_000;

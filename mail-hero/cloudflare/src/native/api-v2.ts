@@ -361,8 +361,6 @@ export function toOverview(value: Row): Overview {
       metrics: Object.fromEntries(Object.entries((alert.metrics ?? {}) as Row).filter(([, number]) => typeof number === 'number' && Number.isFinite(number))),
       firstSeenTime: ts(alert.first_seen_at), lastSeenTime: ts(alert.last_seen_at),
     })),
-    alertWebhookConfigured: !!alerts.configured, alertWebhookMisconfigured: !!alerts.configuration_error,
-    pendingNotificationCount: int(alerts.pending_notifications), failedNotificationCount: int(alerts.failed_notifications),
     warnings: (value.warnings as string[]).map(text),
   })
 }

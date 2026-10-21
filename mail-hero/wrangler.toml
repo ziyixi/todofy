@@ -12,8 +12,8 @@
 # deploy without the secrets file. An emergency manual deploy uses the same wrapper, from cloudflare/:
 #   node ../deploy/deploy-vars.mjs secrets <file> && node ../deploy/deploy-vars.mjs exec -- \
 #     npx --no-install wrangler deploy --config ../wrangler.toml --secrets-file <file>
-# The other Worker secrets (CREDENTIAL_KEY, BACKUP_TOKEN, BACKUP_RECEIPT_KEY, ALERT_WEBHOOK_TOKEN, ACCESS_CLIENT_ID,
-# ACCESS_CLIENT_SECRET) are set with `wrangler secret put --config ../wrangler.toml` and survive every deploy.
+# The other Worker secrets (CREDENTIAL_KEY, BACKUP_TOKEN, BACKUP_RECEIPT_KEY, ACCESS_CLIENT_ID, ACCESS_CLIENT_SECRET)
+# are set with `wrangler secret put --config ../wrangler.toml` and survive every deploy.
 #
 # Run wrangler from cloudflare/ (the pinned wrangler lives in cloudflare/node_modules) with
 # --config ../wrangler.toml. Local dev: `npm --prefix cloudflare run dev` with local bindings only and the
@@ -40,9 +40,6 @@ ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
 ACCESS_AUDIENCE = "688d6408f95a046a74f94a7fbbbc0241f22553436fcae394bfabb92657614849"
 # Exact public HTTPS hosts a webhook target may use (comma-separated).
 WEBHOOK_ALLOWED_HOSTS = "daily.ziyixi.science"
-# Optional metadata-only alerts stay unconfigured (root AGENTS.md). If ever enabled, commit
-# ALERT_WEBHOOK_URL (only a URL without any credential in it) and ALERT_WEBHOOK_ALLOWED_HOSTS here and keep
-# ALERT_WEBHOOK_TOKEN a Worker secret.
 INGEST_DAILY_MESSAGE_LIMIT = "300"
 INGEST_DAILY_BYTE_LIMIT = "268435456"
 # contracts/ops-v1 status() returns https://<PUBLIC_HOST>/ as ui_url; the same host as the route.

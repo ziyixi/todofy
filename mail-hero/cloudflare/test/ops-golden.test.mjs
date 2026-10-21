@@ -28,7 +28,7 @@ function sqlStorage() {
 
 const env = { MAINTENANCE_MODE: 'false', FORCE_SEND_PAUSED: 'false', INGEST_DAILY_MESSAGE_LIMIT: '300', INGEST_DAILY_BYTE_LIMIT: '268435456', PUBLIC_HOST: 'mail.example.org' }
 const normalGuard = { level: 'normal', reason: null, until: null, set_at: null, deferred: [] }
-const shedGuard = { level: 'shed', reason: 'd1_reads_high', until: iso(HOUR), set_at: iso(0), deferred: ['raw_reconcile', 'lifecycle_retention', 'canary_cleanup', 'alert_history_purge'] }
+const shedGuard = { level: 'shed', reason: 'd1_reads_high', until: iso(HOUR), set_at: iso(0), deferred: ['raw_reconcile', 'lifecycle_retention', 'canary_cleanup'] }
 const coordinator = { jobs_pending: 2, jobs_failed: 0, backup_active: false, capacity: { used_bytes: 1000, limit_bytes: 5 * 1024 ** 3 },
   ingest_today: { messages: 4, bytes: 4096 }, guard: normalGuard }
 const snapshot = { logical_bytes: 900, logical_limit_bytes: 5 * 1024 ** 3, last_backup_at: iso(-HOUR), created_at: iso(-100 * HOUR),
