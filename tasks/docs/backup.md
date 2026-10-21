@@ -129,3 +129,44 @@ weekly goals and Plan's lane orders. Right after that release, on 2026-10-20, th
 planning import, which copied them into Tasks; its last dry run counted 0 pending. Its workflow, generator and tests
 were then deleted; they are at `777d5f01` (`git show 777d5f01:tasks/tools/planning-import.ts`). Todofy's migration
 `0013_drop_plan_store.sql` dropped the store it read.
+
+## One-time Todofy import
+
+Until the release that added `0008_mail_gtd_inbox.sql`, Todofy kept the GTD days and weekly reviews, the Mail
+categories and, as frozen rows, the projects its daily reminder and review went to. Since then Tasks keeps them and
+nothing writes Todofy's copies, so right after that release `tools/prepare-todofy-import.ts` (logic in
+`tools/todofy-import.ts`) copies them into Tasks:
+
+- Every GTD day and weekly review Tasks lacks, with Todofy's values; times become milliseconds, and a review Todofy
+  left `sending` reads as `unknown`, as Todofy read it. A day or week Tasks has already is left as it is.
+- The Mail categories whose labels are live in Tasks, in their order with their IDs, and the next ID. They are
+  copied once: the statement needs `mail_settings.created_at` 0 and records when it ran, so a set the owner saved in
+  Tasks first is never replaced. A category whose label is gone is counted as `skipped`.
+- The project of the newest reminder and of the newest review Todofy created, as the routes `home` (Home's daily
+  task) and `review`, while that project is live and the source has no route. A gone project is `skipped`, and those
+  tasks go to the Inbox.
+
+Every statement repeats its guard, so running the import again changes nothing. No secret or private value is
+needed: the projects come from Todofy's rows, not from the retired project secrets.
+
+The owner runs [Tasks Todofy import](../../.github/workflows/tasks-todofy-import.yml) from GitHub Actions on
+`main`. It runs in the `production` environment with the releases' Cloudflare token and in the Tasks release's
+concurrency group. It answers the generator's read-only SELECTs from both databases into a private directory on
+the runner, deletes the directory at the end, and prints counts only: `days`, `reviews`, `categories` and `routes`,
+each with `all`, `pending`, `present` and `skipped`, and `pending` in all. No task, label, project, mail or ID
+reaches the log.
+
+1. Run it with `apply` unchecked and read the counts. Avoid Sunday from 09:30 UTC to Monday, when the review runs.
+2. Run it with `apply` checked. It counts, prints Tasks' Time Travel bookmark, applies the SQL with
+   `wrangler d1 execute --file`, then counts again and fails unless nothing is left pending. A failed apply prints
+   only `TODOFY_IMPORT_APPLY_FAILED`; D1 then returns to its state before the file, and the run can be repeated.
+3. In the browser, check Mail's category shortcuts, Plan's weekly review and the GTD page's trend.
+
+To undo the import, restore the printed bookmark from `tasks/worker`:
+`npx wrangler d1 time-travel restore DB --bookmark=<bookmark> --config ../wrangler.toml`. That also undoes every edit
+made in Tasks since.
+
+`node --test tasks/tools/test/todofy-import.test.mjs` covers the generator on synthetic rows: both apps' schemas from
+their migrations, the exports on read-only connections, and the copied rows read back through the Tasks API on real
+D1. `.github/scripts/test_tasks_todofy_import_workflow.py` pins the workflow. The workflow, the tool and their tests
+are deleted together with Todofy's copies.
