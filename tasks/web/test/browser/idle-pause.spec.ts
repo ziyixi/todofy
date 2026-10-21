@@ -4,6 +4,7 @@ import {
   startTimer,
   stubPlanning,
   tasksToday,
+  type PlanningState,
   type SeedTask,
 } from "./planning-stub";
 
@@ -93,13 +94,19 @@ const detectorReads = (page: Page) =>
     return detector && `${detector.userState}/${detector.screenState}`;
   });
 const ms = (time: unknown) => Date.parse(String(time));
+/** The bodies of the page's timer commands so far, first to last. */
+const timerCommands = (state: PlanningState) =>
+  state.tasksRequests
+    .filter((sent) => sent.path === "/api/tasks/v1/focusTimer:command")
+    .map((sent) => sent.body);
 /**
  * Once the page holds the watch (its Web Lock) and its detector reported its first reading, the owner is seen active
- * and unlocked, so the page watches. That first reading is a baseline, whatever it is: with no emulation in the
- * document it is the host's own input state (idle on a Mac nobody touched for ten minutes, active on a CI runner),
- * which arms or watches; active and unlocked then watches either way, and nothing here reads as leaving.
+ * and unlocked, so the page watches. That first reading is a baseline, whatever it is (`first`, when the test set it
+ * in this document): with no emulation in the document it is the host's own input state (idle on a Mac nobody
+ * touched for ten minutes, active on a CI runner), which arms or watches; active and unlocked then watches either
+ * way, and nothing here reads as leaving.
  */
-async function seenActive(page: Page, cdp: CDPSession) {
+async function seenActive(page: Page, cdp: CDPSession, first?: string) {
   await expect
     .poll(() =>
       page.evaluate(async () =>
@@ -108,6 +115,7 @@ async function seenActive(page: Page, cdp: CDPSession) {
     )
     .toEqual(["tasks.idle-pause"]);
   await expect.poll(() => detectorReads(page)).toBeDefined();
+  if (first) expect(await detectorReads(page)).toBe(first);
   await setIdle(cdp, true, true);
   await expect.poll(() => detectorReads(page)).toBe("active/unlocked");
 }
@@ -128,12 +136,14 @@ test("a count-up pauses when the screen locks and asks on return; Keep counts th
 }) => {
   test.setTimeout(90_000);
   const today = await tasksToday();
-  await stubPlanning(page, { tasks, queues: { [today]: [STEP] } });
+  const state = await stubPlanning(page, { tasks, queues: { [today]: [STEP] } });
   await page.setViewportSize({ width: 1440, height: 900 });
   const cdp = await idleControls(page);
   await page.goto("/#/focus");
-  // Emulated in this document, so the detector's first reading is active and unlocked.
-  await setIdle(cdp, true, true);
+  // Emulated in this document before the detector starts, so its first reading is a locked screen (an idle override
+  // would read active: it is below Tasks' ten-minute threshold). A session started then, from the phone say, only
+  // arms, and is watched once the owner is seen active and unlocked.
+  await setIdle(cdp, true, false);
   const toggle = page.getByRole("checkbox", { name: "Pause when away" });
   await expect(toggle).not.toBeChecked();
   await toggle.click();
@@ -150,8 +160,9 @@ test("a count-up pauses when the screen locks and asks on return; Keep counts th
     bar(page).getByRole("button", { name: "Mini timer" }).click(),
   ]);
   await pip.setViewportSize({ width: 320, height: 120 });
-  await seenActive(page, cdp);
+  await seenActive(page, cdp, "active/locked");
   const started = await readTimer();
+  expect(started.state).toBe("running");
 
   // Locked: paused in Tasks at exactly that moment, and while away the bar says Paused.
   const locked = Date.now();
@@ -161,6 +172,12 @@ test("a count-up pauses when the screen locks and asks on return; Keep counts th
   expect(paused.state).toBe("paused");
   expect(ms(paused.pause_time)).toBe(locked);
   expect(locked).toBeGreaterThan(ms(started.segment_start_time));
+  // The locked baseline sent nothing: this lock's Pause is the first command after Start.
+  expect(timerCommands(state).map((body) => body.action)).toEqual([
+    "start",
+    "pause",
+  ]);
+  expect(ms(timerCommands(state)[1]!.effective_time)).toBe(locked);
 
   // Back three minutes later: one question in the bar and in the mini timer, counted from the pause.
   await setIdleAt(page, cdp, locked + 3 * MIN, true, true);
@@ -179,6 +196,7 @@ test("a count-up pauses when the screen locks and asks on return; Keep counts th
   await expect(bar(page).locator("small")).toHaveText("Paused");
   await expect(pip.locator(".mini")).not.toHaveAttribute("data-away");
   expect((await readTimer()).etag).toBe(paused.etag);
+  expect(timerCommands(state)).toHaveLength(2);
   await setIdleAt(page, cdp, locked + 6 * MIN, true, true);
   await expect(bar(page).locator("small")).toHaveText(
     "Away for 6 min — count it?",
@@ -215,6 +233,9 @@ test("a count-up pauses when the screen locks and asks on return; Keep counts th
   const kept = await readTimer();
   expect(kept.state).toBe("running");
   // Resumed at the pause: the session counts the time away, as if it never paused.
+  const keep = timerCommands(state).at(-1)!;
+  expect(keep.action).toBe("resume");
+  expect(ms(keep.effective_time)).toBe(locked);
   expect(kept.segment_start_time).toBe(paused.pause_time);
   expect(kept.saved_seconds).toBe(paused.saved_seconds);
   expect(kept.pause_time).toBeUndefined();
@@ -233,16 +254,22 @@ test("a count-up pauses when the screen locks and asks on return; Keep counts th
   await bar(page).getByRole("button", { name: "Discard" }).click();
   await expect(bar(page).locator("small")).toHaveText("Focus");
   const discarded = await readTimer();
+  const discard = timerCommands(state).at(-1)!;
+  expect(discard.action).toBe("resume");
+  expect(discard.effective_time).toBeUndefined();
   expect(ms(discarded.segment_start_time)).toBeGreaterThanOrEqual(answered);
   expect(answered).toBeGreaterThan(relocked);
   expect(discarded.saved_seconds).toBe(second.saved_seconds);
 
-  // No input for the threshold: idleness began ten minutes before the report, before this segment began, so
-  // Tasks moves the pause to the segment's start and the segment counts nothing.
+  // No input for the threshold: idleness began at the last input, ten minutes before the report, which is before
+  // this segment began, so Tasks moves the pause to the segment's start and the segment counts nothing.
   const reported = Date.now();
   await setIdleAt(page, cdp, reported, false, true);
   await expect(bar(page).locator("small")).toHaveText("Paused");
   const idle = await readTimer();
+  const idlePause = timerCommands(state).at(-1)!;
+  expect(idlePause.action).toBe("pause");
+  expect(ms(idlePause.effective_time)).toBe(reported - AWAY);
   expect(reported - AWAY).toBeLessThan(ms(discarded.segment_start_time));
   expect(idle.pause_time).toBe(discarded.segment_start_time);
   expect(idle.saved_seconds).toBe(discarded.saved_seconds);

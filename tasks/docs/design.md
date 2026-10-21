@@ -258,10 +258,12 @@ Headless Chromium cannot install an app: `pwa.spec.ts` checks the parsed manifes
 the window's size is set by the test: headless Chrome opens it at the page's viewport). `idle-pause.spec.ts` uses
 the real Idle Detection API; CDP grants its permission (`Browser.grantPermissions`) and sets the OS's idle and lock
 state (`Emulation.setIdleOverride`, which lasts for one document: a detector's first reading after a load is the
-host's real input state, idle on a Mac left alone and active on a CI runner, so the test waits for that reading and
-then sets active and unlocked rather than assuming either). Playwright's clock holds the page at each moment the
-owner leaves or returns, so the pause and the minutes asked are checked exactly. The Dock menu, links from Gmail
-and Todofy's `/task/<id>` redirect landing in the open window, the title bar's toggle and clearances, the mini
+host's real input state, idle on a Mac left alone and active on a CI runner; set before a detector starts, a locked
+screen reads locked but an idle override reads active, below Tasks' ten-minute threshold). So the tests start from a
+locked screen or the host's state, wait for the first reading and then set active and unlocked, and never send an
+idle reading while the page watches. Playwright's clock holds the page at each moment the owner leaves or returns,
+so the moment each Pause and Resume is sent and the minutes asked are checked exactly. The Dock menu, links from
+Gmail and Todofy's `/task/<id>` redirect landing in the open window, the title bar's toggle and clearances, the mini
 timer's first size, resizing and remembered place, and a real screen lock and lid close with a count-up running are
 checked by hand in the installed app.
 
