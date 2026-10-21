@@ -1,8 +1,14 @@
 /**
  * Tasks' weekly backup (src/backup-runner.ts) on real D1 and R2 at fixed clocks, with the object's storage as a Map,
- * then the jobs object running it from its Alarm and Ops reporting it. Synthetic rows only.
+ * then the jobs object running it from its Alarm, Ops reporting it and tools/backup-restore.ts restoring it with
+ * wrangler into a new local D1, as docs/backup.md rehearses. Synthetic rows only.
  */
-import { createHash } from 'node:crypto';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { Severity } from '@ziyixi/proto/ops/v1/ops_pb';
 import { afterAll, beforeAll, expect, test } from 'vitest';
@@ -27,6 +33,9 @@ import {
 import type { Env } from '../../src/env.ts';
 import { measuredReads, startHarness, type Harness } from './harness.ts';
 
+const HERE = dirname(fileURLToPath(import.meta.url));
+const TOOL = join(HERE, '../../../tools/backup-restore.ts');
+const WRANGLER = join(HERE, '../../node_modules/.bin/wrangler');
 const DAY = 86_400_000;
 /** A Sunday at 10:00 UTC, the weekly slot. */
 const SUNDAY = Date.parse('2026-10-25T10:00:00Z');
@@ -237,7 +246,7 @@ test('Ops reports the age of the last backup, a stale one and a failed job', () 
   ]);
 });
 
-test("the jobs object runs the first backup from Home's status, and Ops reports it", async () => {
+test("the jobs object runs the first backup from Home's status, Ops reports it, and it restores", async () => {
   const jobs = await harness.mf.getWorker('tasks-jobs');
   const before = (await (await jobs.fetch('https://jobs.internal/')).json()) as { backup: unknown };
   expect(before.backup).toEqual({ status: 'never', last_backup_at: null, since: null });
@@ -257,4 +266,32 @@ test("the jobs object runs the first backup from Home's status, and Ops reports 
   expect(manifest.tasks.tables.find((table) => table.name === 'tasks')?.rows).toBe(TASK_ROWS);
   const after = (await (await jobs.fetch('https://jobs.internal/')).json()) as { backup: { status: string } };
   expect(after.backup.status).toBe('ok');
+
+  // The rehearsal of docs/backup.md: download the newest backup from the local bucket, load it into a new local D1
+  // with the migrations applied, and verify the row counts.
+  const work = await mkdtemp(join(tmpdir(), 'tasks-restore-'));
+  try {
+    const tool = (...args: string[]) => spawnSync('node', [TOOL, ...args], { encoding: 'utf8' });
+    const wrangler = (...args: string[]) =>
+      execFileSync(WRANGLER, args, { env: { ...process.env, CI: 'true', WRANGLER_SEND_METRICS: 'false' }, stdio: 'pipe' });
+    const restore = join(work, 'restore');
+    const downloaded = tool('download', '--out', restore, '--local', '--persist-to', harness.persistTo);
+    expect(downloaded.status, downloaded.stderr).toBe(0);
+    expect(downloaded.stdout).toContain(`backup ${latest.key}\n`);
+    expect(downloaded.stdout).toMatch(new RegExp(`\\nPASS tasks rows=${String(TASK_ROWS)} parts=\\d+\\n`));
+    const config = join(work, 'restore.toml');
+    const configured = tool('config', '--database-name', 'tasks-restore', '--database-id', randomUUID(), '--out', config);
+    expect(configured.status, configured.stderr).toBe(0);
+    const target = ['--local', '--persist-to', join(work, 'd1'), '--config', config];
+    wrangler('d1', 'migrations', 'apply', 'DB', ...target);
+    const written = tool('sql', '--in', restore, '--out', join(work, 'restore.sql'));
+    expect(written.status, written.stderr).toBe(0);
+    wrangler('d1', 'execute', 'DB', ...target, '--file', join(work, 'restore.sql'));
+    const verified = tool('verify', '--in', restore, ...target);
+    expect(verified.status, verified.stdout + verified.stderr).toBe(0);
+    expect(verified.stdout).toContain(`PASS tasks rows=${String(TASK_ROWS)}/${String(TASK_ROWS)}\n`);
+    expect(verified.stdout.trim().split('\n').at(-1)).toBe('verify PASS');
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
 });

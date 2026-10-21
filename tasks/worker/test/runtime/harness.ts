@@ -77,7 +77,8 @@ export async function startHarness(
     convertV4MiniflareOptions({
       host: '127.0.0.1',
       port: options.port ?? 0,
-      resourcePersistencePath: temp,
+      // wrangler's own layout, so `--local --persist-to <persistTo>` reads the same D1 and R2 (tools/backup-restore.ts).
+      resourcePersistencePath: join(temp, 'v3'),
       ...(options.inspectorPort === undefined ? {} : { inspectorPort: options.inspectorPort }),
       workers: [
         {
@@ -186,6 +187,7 @@ export async function startHarness(
     mf,
     db,
     url,
+    persistTo: temp,
     fetch,
     mutate,
     async dispose() {

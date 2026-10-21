@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 /**
- * Restore the Tasks section of a weekly backup (Todofy's job copies Tasks' D1; docs/backup.md) into a new, empty D1.
+ * Restore a weekly backup of Tasks (worker/src/backup-runner.ts; docs/backup.md) into a new, empty D1.
  *
+ *   download  fetch a backup's manifest and parts from R2 with `wrangler r2 object get` into a private directory
+ *           outside the repository, and check every part. By default the newest backup of `tasks-backups` (its
+ *           latest.json); `--backup backups/<job start>` names one, and `--bucket todofy-backups` reads one of the
+ *           older backups Todofy made of Tasks (its `tasks` section) until they rotate out.
  *   config  write the restore target's wrangler config: its DB binding, the committed account and the absolute
  *           tasks/migrations. It refuses the production database's id or name, a path inside the repository and an
  *           existing file. It has no Worker, so nothing can be deployed with it.
@@ -17,17 +21,18 @@
  * with it NULL and resumes now, as a pause made before that release does. One made before 0008_mail_gtd_inbox.sql has
  * no mail categories, GTD days, weekly reviews or TaskInbox tables: they restore as migrated (no categories).
  *
+ *   node tools/backup-restore.ts download --out <outside>/restore --remote
  *   node tools/backup-restore.ts config --database-name tasks-restore --database-id <uuid> --out <outside>/restore.toml
- *   node tools/backup-restore.ts sql --in <download dir> --out <outside>/tasks-restore.sql
- *   node tools/backup-restore.ts verify --in <download dir> --config <outside>/restore.toml --remote
+ *   node tools/backup-restore.ts sql --in <outside>/restore --out <outside>/tasks-restore.sql
+ *   node tools/backup-restore.ts verify --in <outside>/restore --config <outside>/restore.toml --remote
  *
- * The download directory is todofy/tools/backup_restore.py download's (manifest.json and parts/). Files are written
- * owner-only and row contents are never printed. Node only, no dependencies.
+ * A download directory holds manifest.json and parts/<key>. `--local --persist-to <dir>` in place of `--remote`
+ * works on a local copy. Files are written owner-only and row contents are never printed. Node only, no dependencies.
  */
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { chmodSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { ExportError, privateText } from './todoist-export.mjs';
@@ -36,7 +41,10 @@ const APP = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PRODUCTION_CONFIG = resolve(APP, 'wrangler.toml');
 const MIGRATIONS = resolve(APP, 'migrations');
 const WRANGLER = resolve(APP, 'worker/node_modules/.bin/wrangler');
-const FORMAT = 'todofy-d1-backup-v1';
+/** Tasks' own backups, and the ones Todofy made of Tasks before (their `tasks` section). */
+const FORMATS = ['tasks-d1-backup-v1', 'todofy-d1-backup-v1'];
+const BUCKET = 'tasks-backups';
+const PREFIX = /^backups\/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z\/$/;
 /** D1 refuses a statement over 100 KB. A task row holds at most about 50 KB. */
 export const MAX_STATEMENT_BYTES = 90_000;
 /** Each table after the tables its rows reference. */
@@ -107,10 +115,11 @@ export function readBackup(root: string): Backup {
   } catch {
     throw new RestoreError('manifest.json: missing or not JSON');
   }
-  if (manifest.format !== FORMAT) throw new RestoreError(`manifest.json: format is not ${FORMAT}`);
+  if (!FORMATS.includes(manifest.format as string))
+    throw new RestoreError(`manifest.json: format is not ${FORMATS.join(' or ')}`);
   const section = manifest.tasks;
   if (!section)
-    throw new RestoreError('manifest.json has no tasks section: the backup was made before Tasks was in it');
+    throw new RestoreError('manifest.json has no tasks section: Todofy made the backup before Tasks was in it');
   const names = section.tables.map((table) => table.name);
   const given = [...names].sort().join();
   const generations = ADDED.map((_, index) => ADDED.slice(index).flatMap((added) => added.tables));
@@ -312,12 +321,9 @@ function verify(root: string, args: string[]): { ok: boolean; lines: string[] } 
     (table) => `(SELECT count(*) FROM ${table.name}) AS ${table.name}`,
   );
   const query = `SELECT (SELECT json_group_array(name) FROM d1_migrations) AS migrations, ${counts.join(', ')}`;
-  const [command = WRANGLER, ...prefix] = (option(args, '--wrangler') ?? WRANGLER).split(/\s+/);
+  const { command, prefix, target } = wranglerCommand(args);
   const config = option(args, '--config');
   if (!config) throw new RestoreError('verify needs --config (the restore target)');
-  const target = args.includes('--remote') ? ['--remote'] : ['--local'];
-  const persist = option(args, '--persist-to');
-  if (persist) target.push('--persist-to', persist);
   let output: string;
   try {
     const execute = ['d1', 'execute', 'DB', '--json', '--config', config, ...target, '--command', query];
@@ -334,6 +340,70 @@ function verify(root: string, args: string[]): { ok: boolean; lines: string[] } 
   return verifyLines(section, found);
 }
 
+/** `wrangler` from `--wrangler` (a command line) or the Worker's own, and the target flags of `args`. */
+function wranglerCommand(args: string[]) {
+  const [command = WRANGLER, ...prefix] = (option(args, '--wrangler') ?? WRANGLER).split(/\s+/);
+  const target = args.includes('--remote') ? ['--remote'] : ['--local'];
+  const persist = option(args, '--persist-to');
+  if (persist) target.push('--persist-to', persist);
+  return { command, prefix, target };
+}
+
+/** The download directory: created owner-only, never inside the repository (it holds task content). */
+function privateDirectory(path: string): string {
+  const root = resolve(realpathSync(dirname(resolve(path))), basename(resolve(path)));
+  const rel = relative(realpathSync(resolve(APP, '..')), root);
+  if (!rel || (!rel.startsWith('..') && !isAbsolute(rel)))
+    throw new RestoreError('the download directory is inside the repository');
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  return root;
+}
+
+/**
+ * The backup's manifest and parts from R2 into `root` (manifest.json and parts/<key>), each object owner-only: the
+ * newest one (latest.json) unless `--backup` names a prefix. Every part is then checked against the manifest.
+ */
+function download(root: string, args: string[]): string[] {
+  const { command, prefix, target } = wranglerCommand(args);
+  const bucket = option(args, '--bucket') ?? BUCKET;
+  if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket)) throw new RestoreError('--bucket is not a bucket name');
+  const get = (key: string, path: string) => {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    try {
+      execFileSync(command, [...prefix, 'r2', 'object', 'get', `${bucket}/${key}`, '--file', path, ...target], {
+        cwd: APP,
+        env: { ...process.env, CI: 'true', WRANGLER_SEND_METRICS: 'false' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch {
+      throw new RestoreError(`wrangler r2 object get failed: ${key}`);
+    }
+    chmodSync(path, 0o600);
+  };
+  let backup = option(args, '--backup');
+  if (backup === undefined) {
+    get('latest.json', resolve(root, 'latest.json'));
+    backup = (JSON.parse(readFileSync(resolve(root, 'latest.json'), 'utf8')) as { key?: unknown }).key as string;
+  }
+  backup = `${String(backup).replace(/\/+$/, '')}/`;
+  if (!PREFIX.test(backup)) throw new RestoreError('the backup is not a prefix like backups/2026-10-25T100000Z/');
+  get(`${backup}manifest.json`, resolve(root, 'manifest.json'));
+  const manifest = JSON.parse(readFileSync(resolve(root, 'manifest.json'), 'utf8')) as { tasks?: TasksSection };
+  for (const table of manifest.tasks?.tables ?? [])
+    for (const part of table.parts) {
+      if (!part.key.startsWith(backup) || part.key.split('/').includes('..'))
+        throw new RestoreError('a part key leaves the backup');
+      get(part.key, resolve(root, 'parts', part.key));
+    }
+  const { section } = readBackup(root);
+  return [
+    `backup ${backup}`,
+    ...section.tables.map(
+      (table) => `PASS ${table.name} rows=${String(table.rows)} parts=${String(table.parts.length)}`,
+    ),
+  ];
+}
+
 function option(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
   return index < 0 ? undefined : args[index + 1];
@@ -348,7 +418,9 @@ async function main(): Promise<boolean> {
   };
   let lines: string[];
   let ok = true;
-  if (command === 'config') {
+  if (command === 'download') {
+    lines = download(privateDirectory(required('--out')), args);
+  } else if (command === 'config') {
     const out = required('--out');
     await privateText(out, restoreConfig(required('--database-name'), required('--database-id')));
     lines = [`wrote ${out}`];
@@ -373,7 +445,7 @@ async function main(): Promise<boolean> {
   } else if (command === 'verify') {
     ({ ok, lines } = verify(required('--in'), args));
   } else {
-    throw new RestoreError('use config, sql or verify');
+    throw new RestoreError('use download, config, sql or verify');
   }
   for (const line of lines) console.log(line);
   console.log(`${command} ${ok ? 'PASS' : 'FAIL'}`);

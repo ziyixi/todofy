@@ -1,6 +1,7 @@
 // tools/backup-restore.ts on node:sqlite: synthetic Tasks rows exported the way the backup stores them (gzip NDJSON
-// parts and a manifest), turned into SQL and loaded into a database with only the migrations applied. The real
-// export, download and wrangler commands run in todofy/tests/runtime/test_backup.py.
+// parts and a manifest, in Tasks' own format or the one Todofy's copies of Tasks had), downloaded through a stand-in
+// for `wrangler r2 object get`, turned into SQL and loaded into a database with only the migrations applied. The real
+// backup, download and wrangler commands run in tasks/worker/test/runtime/backup-runner.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -27,7 +28,7 @@ const MIGRATIONS = fileURLToPath(new URL('../../migrations/', import.meta.url));
 const FILES = readdirSync(MIGRATIONS)
   .filter((name) => name.endsWith('.sql'))
   .sort();
-const PREFIX = 'backups/2026-10-18T100000Z/tasks/';
+const BACKUP = 'backups/2026-10-18T100000Z/';
 const PRODUCTION = readFileSync(fileURLToPath(new URL('../../wrangler.toml', import.meta.url)), 'utf8');
 const PRODUCTION_ID = /database_id = "([^"]+)"/.exec(PRODUCTION)[1];
 
@@ -100,7 +101,8 @@ function columns(db, table) {
 /** The tasks columns 0006_planning.sql added, which an older backup's tasks lack. */
 const PLANNING_COLUMNS = ['stage', 'committed_week', 'area', 'lead_days', 'planning_flags'];
 /**
- * What Todofy's job stores for the Tasks section: two parts per table, skipping the rows `skip` names. A backup made
+ * What the backup stores: two parts per table, skipping the rows `skip` names, as Tasks' own backup lays them out, or
+ * with `todofy` as Todofy's copies of Tasks did (under tasks/ of its prefix, beside Todofy's own tables). A backup made
  * before 0006_planning.sql has neither its tables nor its tasks columns (`beforePlanning`); one made before
  * 0007_timer_pause.sql has no focus_timer.paused_at (`beforeTimerPause`).
  */
@@ -113,8 +115,10 @@ function backupOf(
     tables: names = RESTORE_ORDER,
     beforePlanning = false,
     beforeTimerPause = false,
+    todofy = false,
   } = {},
 ) {
+  const prefix = todofy ? `${BACKUP}tasks/` : BACKUP;
   const tables = names.map((name) => {
     const names = columns(db, name).filter(
       (column) =>
@@ -130,7 +134,7 @@ function backupOf(
       .filter((part) => part.length)
       .map((lines, index) => {
         const data = gzipSync(lines.join('\n') + '\n');
-        const key = `${PREFIX}${name}/${String(index + 1).padStart(5, '0')}.ndjson.gz`;
+        const key = `${prefix}${name}/${String(index + 1).padStart(5, '0')}.ndjson.gz`;
         mkdirSync(dirname(join(root, 'parts', key)), { recursive: true });
         writeFileSync(join(root, 'parts', key), data);
         return { key, rows: lines.length, bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') };
@@ -138,7 +142,8 @@ function backupOf(
     return { name, columns: names, key: ['id'], max_rowid: 0, rows: rows.length, bytes: 0, parts };
   });
   const tasks = { schema_version: FILES.at(-1), change_sequence: change, tables };
-  writeFileSync(join(root, 'manifest.json'), JSON.stringify({ format: 'todofy-d1-backup-v1', tables: [], tasks }));
+  const manifest = todofy ? { format: 'todofy-d1-backup-v1', tables: [], tasks } : { format: 'tasks-d1-backup-v1', tasks };
+  writeFileSync(join(root, 'manifest.json'), JSON.stringify(manifest));
 }
 
 function dump(db) {
@@ -231,7 +236,7 @@ test('a backup made before the Focus tables restores them empty, with the idle t
         [{ id: 'timer', state: 'idle', task_id: '', revision: 1 }],
       );
     },
-    { tables: BEFORE_FOCUS },
+    { tables: BEFORE_FOCUS, todofy: true },
   ));
 
 test('a backup made before planning moved into Tasks restores no planning facts, and the empty board', () =>
@@ -267,7 +272,7 @@ test('a backup made before planning moved into Tasks restores no planning facts,
         [{ id: 'board', lanes: '{}', revision: 1 }],
       );
     },
-    { tables: BEFORE_PLANNING, beforePlanning: true },
+    { tables: BEFORE_PLANNING, beforePlanning: true, todofy: true },
   ));
 
 test('a backup made before the mail categories and GTD tables restores them as migrated', () =>
@@ -296,7 +301,7 @@ test('a backup made before the mail categories and GTD tables restores them as m
         [{ id: 'mail', categories: '[]', next_category_id: 1, revision: 1, created_at: 0 }],
       );
     },
-    { tables: BEFORE_MAIL_GTD },
+    { tables: BEFORE_MAIL_GTD, todofy: true },
   ));
 
 test('a backup made before the timer kept its pause time restores the paused timer without one', () =>
@@ -316,7 +321,7 @@ test('a backup made before the timer kept its pause time restores the paused tim
         before.focus_timer.map((row) => ({ ...row, paused_at: null })),
       );
     },
-    { beforeTimerPause: true },
+    { beforeTimerPause: true, todofy: true },
   ));
 
 test('a backup with only some of the Focus tables is refused', () =>
@@ -427,7 +432,7 @@ test('the CLI restores and verifies a backup made before the Focus tables', () =
         /PASS requests rows=1\/1\nPASS day_steps rows=0\/0\nPASS focus_entries rows=0\/0\nPASS focus_timer rows=1\/1\nPASS task_dependencies rows=0\/0\nPASS weekly_bets rows=0\/0\nPASS plan_board rows=1\/1\nPASS mail_settings rows=1\/1\nPASS gtd_days rows=0\/0\nPASS weekly_reviews rows=0\/0\nPASS task_inbox_routes rows=0\/0\nPASS task_inbox_days rows=0\/0\nverify PASS\n$/,
       );
     },
-    { tables: BEFORE_FOCUS, beforePlanning: true },
+    { tables: BEFORE_FOCUS, beforePlanning: true, todofy: true },
   ));
 
 test('the CLI writes the SQL owner-only, warns about a moving snapshot and verifies the loaded database', () =>
@@ -454,3 +459,127 @@ test('the CLI writes the SQL owner-only, warns about a moving snapshot and verif
     },
     { change: { start: 3, end: 4 } },
   ));
+
+test('a manifest of neither format, or a Todofy backup made before Tasks was in it, is refused', () =>
+  withBackup((root) => {
+    const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
+    writeFileSync(join(root, 'manifest.json'), JSON.stringify({ ...manifest, format: 'other-backup-v1' }));
+    assert.throws(() => readBackup(root), /format is not tasks-d1-backup-v1 or todofy-d1-backup-v1/);
+    writeFileSync(join(root, 'manifest.json'), JSON.stringify({ format: 'todofy-d1-backup-v1', tables: [] }));
+    assert.throws(() => readBackup(root), /no tasks section/);
+  }));
+
+/**
+ * `download` against a stand-in for `wrangler r2 object get`: the bucket is a directory of objects by key, and the
+ * stand-in records each call. `objects` maps keys to the files of a backup made in `made`.
+ */
+function bucketOf(made, bucket = 'tasks-backups', latest = true) {
+  const store = mkdtempSync(join(tmpdir(), 'tasks-restore-bucket-'));
+  const put = (key, data) => {
+    mkdirSync(dirname(join(store, bucket, key)), { recursive: true });
+    writeFileSync(join(store, bucket, key), data);
+  };
+  const manifest = readFileSync(join(made, 'manifest.json'));
+  put(`${BACKUP}manifest.json`, manifest);
+  for (const table of JSON.parse(manifest.toString()).tasks.tables)
+    for (const part of table.parts) put(part.key, readFileSync(join(made, 'parts', part.key)));
+  if (latest) put('latest.json', JSON.stringify({ key: BACKUP }));
+  const stub = join(store, 'wrangler.mjs');
+  writeFileSync(
+    stub,
+    `import { appendFileSync, copyFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+appendFileSync(process.env.TASKS_CALLS, JSON.stringify(args) + '\\n');
+try { copyFileSync(process.env.TASKS_BUCKET + '/' + args[3], args[args.indexOf('--file') + 1]); }
+catch { process.exit(1); }`,
+  );
+  return {
+    store,
+    download: (out, ...extra) =>
+      spawnSync('node', [TOOL, 'download', '--out', out, '--local', '--persist-to', '/unused', '--wrangler', `node ${stub}`, ...extra], {
+        encoding: 'utf8',
+        env: { ...process.env, TASKS_BUCKET: store, TASKS_CALLS: join(store, 'calls.jsonl') },
+      }),
+    calls: () =>
+      readFileSync(join(store, 'calls.jsonl'), 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line)),
+  };
+}
+
+test("download fetches the newest backup's manifest and parts, checks them, and restores like a local copy", () =>
+  withBackup((made, source) => {
+    const bucket = bucketOf(made);
+    try {
+      const out = join(bucket.store, 'restore');
+      const downloaded = bucket.download(out);
+      assert.equal(downloaded.status, 0, downloaded.stderr);
+      assert.match(downloaded.stdout, new RegExp(`^backup ${BACKUP}\\nPASS projects rows=4 parts=2\\n`));
+      assert.match(downloaded.stdout, /\nPASS tasks rows=5 parts=2\n[^]*download PASS\n$/);
+      assert.equal(statSync(out).mode & 0o777, 0o700);
+      assert.equal(statSync(join(out, 'manifest.json')).mode & 0o777, 0o600);
+      const calls = bucket.calls();
+      assert.deepEqual(calls[0].slice(0, 4), ['r2', 'object', 'get', 'tasks-backups/latest.json']);
+      assert.deepEqual(calls[1].slice(3, 4), [`tasks-backups/${BACKUP}manifest.json`]);
+      assert.ok(calls.every((call) => call.slice(-3).join(' ') === '--local --persist-to /unused'));
+      const target = migrated();
+      target.exec(restoreSql(readBackup(out)).sql);
+      assert.deepEqual(dump(target), dump(source));
+    } finally {
+      rmSync(bucket.store, { recursive: true, force: true });
+    }
+  }));
+
+test("download reads an older backup Todofy made of Tasks by its prefix, and refuses a damaged one", () =>
+  withBackup(
+    (made) => {
+      const bucket = bucketOf(made, 'todofy-backups', false);
+      try {
+        const out = join(bucket.store, 'restore');
+        const downloaded = bucket.download(out, '--bucket', 'todofy-backups', '--backup', BACKUP.slice(0, -1));
+        assert.equal(downloaded.status, 0, downloaded.stderr);
+        assert.match(downloaded.stdout, /\nPASS tasks rows=5 parts=2\n/);
+        assert.ok(bucket.calls().every((call) => call[3].startsWith(`todofy-backups/${BACKUP}`)));
+        assert.equal(readBackup(out).section.tables.length, RESTORE_ORDER.length);
+
+        const key = JSON.parse(readFileSync(join(made, 'manifest.json'), 'utf8')).tasks.tables[4].parts[0].key;
+        const stored = join(bucket.store, 'todofy-backups', key);
+        const data = readFileSync(stored);
+        data[data.length >> 1] ^= 1;
+        writeFileSync(stored, data);
+        const damaged = bucket.download(join(bucket.store, 'damaged'), '--bucket', 'todofy-backups', '--backup', BACKUP);
+        assert.equal(damaged.status, 1);
+        assert.match(damaged.stderr, /tasks\/00001\.ndjson\.gz: SHA-256 differs/);
+        const missing = bucket.download(join(bucket.store, 'missing'), '--bucket', 'todofy-backups');
+        assert.equal(missing.status, 1);
+        assert.match(missing.stderr, /wrangler r2 object get failed: latest\.json/);
+      } finally {
+        rmSync(bucket.store, { recursive: true, force: true });
+      }
+    },
+    { todofy: true },
+  ));
+
+test('download stays outside the repository and inside the backup it names', () =>
+  withBackup((made) => {
+    const bucket = bucketOf(made);
+    try {
+      const inside = bucket.download(fileURLToPath(new URL('../do-not-create', import.meta.url)));
+      assert.equal(inside.status, 1);
+      assert.match(inside.stderr, /inside the repository/);
+      assert.throws(() => statSync(fileURLToPath(new URL('../do-not-create', import.meta.url))));
+      const odd = bucket.download(join(bucket.store, 'odd'), '--backup', '../escape');
+      assert.equal(odd.status, 1);
+      assert.match(odd.stderr, /not a prefix like backups\//);
+      // A manifest whose part lies outside its own prefix.
+      const manifest = JSON.parse(readFileSync(join(made, 'manifest.json'), 'utf8'));
+      manifest.tasks.tables[0].parts[0].key = 'backups/2020-01-05T100000Z/projects/00001.ndjson.gz';
+      writeFileSync(join(bucket.store, 'tasks-backups', BACKUP, 'manifest.json'), JSON.stringify(manifest));
+      const outside = bucket.download(join(bucket.store, 'outside'));
+      assert.equal(outside.status, 1);
+      assert.match(outside.stderr, /a part key leaves the backup/);
+    } finally {
+      rmSync(bucket.store, { recursive: true, force: true });
+    }
+  }));

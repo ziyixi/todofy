@@ -1,20 +1,21 @@
 # Backup and restore
 
 Tasks' D1 holds the only copy of every task, project and completion. Two copies protect it: D1 Time Travel
-(7 days on Workers Free) for a recent mistake, and a weekly backup in Todofy's private R2 bucket for older
-points and a lost database.
+(7 days on Workers Free) for a recent mistake, and Tasks' own weekly backup in its private R2 bucket `tasks-backups`
+for older points and a lost database.
 
 ## What the weekly backup holds
 
-Todofy's weekly backup job (`todofy/worker/todofy/runtime/backup.py`) runs every Sunday at 10:00 UTC and
-copies Tasks' D1 together with Todofy's own. It reads Tasks through the existing read-write `TASKS`
-binding and its machine-only `TasksApi.exportBackup` method (`worker/src/backup.ts`), which has no HTTP route
-and refuses a `read` binding. The backup adds no binding, bucket, cron, secret or retention of its
-own:
+The `TaskJobs` object (`worker/src/jobs.ts`) runs the backup (`worker/src/backup-runner.ts`) every Sunday at 10:00
+UTC, and at once when the object has no backup state yet: right after the release that bound the bucket, or after the
+object lost its storage. It needs no cron, secret, credential or binding to another app; "Infra apply" created the
+bucket (`infra/storage.tf`).
 
-- The rows go to `todofy-backups` under `backups/<job start>/tasks/<table>/<n>.ndjson.gz`, next to Todofy's
-  tables. The manifest's `tasks` section lists Tasks' applied migration, each table's columns, key, row count
-  and the SHA-256 of every part.
+- Each job writes under its own prefix, named after the second it started:
+  `backups/<job start>/<table>/<n>.ndjson.gz` (one JSON array per row, in the manifest's column order) and
+  `backups/<job start>/manifest.json`, written after every part. The manifest (format `tasks-d1-backup-v1`) has a
+  `tasks` section: the applied migration, Tasks' change sequence when the job planned and when it ended, and each
+  table with its columns, key, row count and the SHA-256 of every part. Then `latest.json` names the new backup.
 - Every table a restore needs is included: projects, sections, labels, filters, tasks, completions, request
   receipts; since `0005_focus.sql`, Focus's day queues (`day_steps`), time records (`focus_entries`) and the one
   timer (`focus_timer`); and since `0006_planning.sql`, each task's planning columns, its dependencies
@@ -22,15 +23,23 @@ own:
   `0008_mail_gtd_inbox.sql`, the mail categories (`mail_settings`), the GTD days (`gtd_days`), the weekly reviews
   (`weekly_reviews`), TaskInbox's routes (`task_inbox_routes`) and its daily counts (`task_inbox_days`).
   `task_labels` and the change feed are left out, because inserts rebuild them.
-- The newest six complete backups are kept. Todofy's health page and Home show the last backup, and a failed
-  or stale one (`backup_failed`, `backup_stale`). Without the `TASKS` binding a job fails with
-  `tasks_unavailable`.
-- The first job after the release that added Tasks runs at Todofy's next alarm instead of the next Sunday.
+- A job runs in steps a second apart, each bounded for Workers Free: the plan (one batch), then at most 30 D1
+  statements of pages (15 pages of at most 100 rows and half a MiB) stored as one part per table, then the manifest.
+  A failed step runs again from the parts stored so far; three failed steps in a row fail the job, which is tried
+  again 6 hours later (three times, then on the next Sunday).
+- After each new backup the newest six complete ones are kept, and older ones and every incomplete prefix older than
+  the new one are deleted. A job never rewrites a complete backup.
+- Home's Tasks tile shows the last backup's age (`backup_age_seconds`), and raises `backup_stale` (critical: no
+  complete backup for 8 days) and `backup_failed` (warning: the last job failed).
 
-Todofy's ledger hold does not stop owner edits in Tasks, so the copy is a fuzzy snapshot: an edit made during
-the minute or so the job runs may or may not be in it. The manifest records Tasks' change sequence when the job
-planned and when it ended. The restore tool warns when they differ, and it refuses a backup whose live rows
-reference rows it lacks.
+Owner edits continue while a job runs (about a minute), so the copy is a fuzzy snapshot: an edit made meanwhile may
+or may not be in it. The restore tool warns when the manifest's two change sequences differ, and it refuses a backup
+whose live rows reference rows it lacks. The bucket holds task content: keep it private.
+
+Until Tasks backed itself up, Todofy's weekly job copied Tasks' D1 into `todofy-backups`
+(`backups/<job start>/tasks/` and its manifest's `tasks` section). Those backups rotate out of Todofy's bucket
+within six weeks; until then `download --bucket todofy-backups --backup backups/<job start>` restores one the same
+way.
 
 ## Recent mistake: Time Travel (within 7 days)
 
@@ -51,10 +60,11 @@ afterwards.
    notifications retry their frozen requests, and the GTD day and the weekly review are idempotent. A task a machine
    writer creates before the switch is in the old database only.
 2. From `tasks/worker`, create the new database: `npx wrangler d1 create tasks-restore`. It prints the new id.
-3. From `todofy/`, download the backup whose key the health page shows. `download` checks every part,
-   including the Tasks parts:
+3. From `tasks/`, download the newest backup. `download` reads `latest.json`, fetches the manifest and every part with
+   `wrangler r2 object get` and checks each against the manifest; `--backup backups/<job start>` picks an older
+   one (the R2 dashboard lists the prefixes):
    ```sh
-   python3 tools/backup_restore.py download --backup backups/<job start> --out "$PRIV/restore" --remote
+   node tools/backup-restore.ts download --out "$PRIV/restore" --remote
    ```
 4. From `tasks/`, write the restore config, apply the migrations, load the rows and verify the counts:
    ```sh
@@ -119,9 +129,10 @@ A Todoist re-import ([import.md](import.md)) is not a recovery path. It only reb
 ## Rehearse locally
 
 The same commands work on a local copy: pass `--local --persist-to "$PRIV/d1"` in place of `--remote` to
-`migrations apply`, `execute` and `verify`, and any new UUID as the database id. `node --test
-tasks/tools/test/backup-restore.test.mjs` and `todofy/tests/runtime/test_backup.py` (a real backup of a real
-Tasks Worker, restored into a new local D1 and compared table by table) cover the tools with synthetic data.
+`migrations apply`, `execute` and `verify`, and any new UUID as the database id; `download --local --persist-to <dir>`
+reads a local bucket. `tasks/worker/test/runtime/backup-runner.test.ts` runs a real backup from the jobs object,
+downloads it with wrangler, restores it into a new local D1 and verifies it; `node --test
+tasks/tools/test/backup-restore.test.mjs` covers the tool on synthetic data, in both manifest formats.
 
 ## One-time planning import
 
