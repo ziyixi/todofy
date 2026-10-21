@@ -167,6 +167,15 @@ it("a heartbeat gap of ten minutes pauses at the last beat; a shorter one does n
   ).toEqual([{ action: "pause", at: T0, retry: false }]);
 });
 
+it("a detector that stops sends nothing, even long after the last beat", () => {
+  expect(
+    play(
+      [{ type: "reading", reading: undefined, at: T0 + 30 * MIN }],
+      watching(),
+    ).commands,
+  ).toEqual([]);
+});
+
 it("idle or locked when watching begins arms: nothing pauses until the owner is seen active and unlocked", () => {
   const armed = play([
     { type: "timer", timer: running, at: T0 },

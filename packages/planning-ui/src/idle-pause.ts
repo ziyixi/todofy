@@ -195,7 +195,9 @@ export function idleStep(
     }
     case "reading": {
       const next = { ...state, reading: event.reading };
-      if (phase.name === "watching") return detect(next, event.at);
+      // A detector that stopped reports nothing; the next one's first reading is a new baseline.
+      if (phase.name === "watching" && event.reading)
+        return detect(next, event.at);
       if (!back(event.reading)) return [settle(next, event.at)];
       // Back: the latest return is the one the question counts to.
       if (phase.name === "pausing" || phase.name === "asking")
