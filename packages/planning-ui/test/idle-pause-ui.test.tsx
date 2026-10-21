@@ -325,10 +325,13 @@ it("pauses at the moment the screen locked; back, the bar and the mini timer ask
 
   vi.setSystemTime(NOW + 17 * MIN);
   await report("active", "unlocked");
-  // The question takes Pause/Resume's place; Stop and Complete stay.
-  expect(
-    within(bar()).getByText("Away for 12 min — count it?").className,
-  ).toBe("plus-away-question");
+  // The question takes a line of its own above the bar's row, in place of the status; its answers take
+  // Pause/Resume's place, and Stop and Complete stay.
+  const question = within(bar()).getByText("Away for 12 min — count it?");
+  expect(question.className).toBe("plus-away-question");
+  expect(question.parentElement).toBe(bar());
+  expect(bar().className).toBe("plus-timer-bar is-asking");
+  expect(bar().querySelectorAll("small")).toHaveLength(1);
   expect(within(bar()).queryByRole("button", { name: "Resume" })).toBeNull();
   expect(
     within(bar()).getByRole("button", { name: "Stop session" }),
@@ -430,6 +433,48 @@ it("a failed pause shows its error once and tries again quietly on the next beat
   expect(spoken()).toContain("Resumed from now.");
   expect(within(bar()).getByRole("button", { name: "Pause" })).toBeTruthy();
   page.unmount();
+});
+
+it("the session's Focus card answers the question in Resume's place, and keeps Stop", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+  stubIdleDetection();
+  const page = mount(data());
+  await settled();
+  vi.setSystemTime(NOW + 5 * MIN);
+  await report("active", "locked");
+  expect(
+    screen.getByRole("button", { name: "Resume: Synthetic step" }),
+  ).toBeTruthy();
+  vi.setSystemTime(NOW + 9 * MIN);
+  await report("active", "unlocked");
+  expect(
+    screen.queryByRole("button", { name: "Resume: Synthetic step" }),
+  ).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Keep: Synthetic step" }).textContent,
+  ).toBe("Keep");
+  expect(
+    screen.getByRole("button", { name: "Stop session: Synthetic step" }),
+  ).toBeTruthy();
+  await act(async () =>
+    fireEvent.click(
+      screen.getByRole("button", { name: "Discard: Synthetic step" }),
+    ),
+  );
+  expect(page.timer).toHaveBeenLastCalledWith(
+    "resume",
+    "step",
+    expect.objectContaining({ timerEtag: "e2" }),
+    undefined,
+    undefined,
+    undefined,
+  );
+  expect(spoken()).toContain("Resumed from now.");
+  expect(
+    screen.getByRole("button", { name: "Pause: Synthetic step" }),
+  ).toBeTruthy();
+  expect(within(bar()).queryByText(/Away for/)).toBeNull();
 });
 
 it("an away pause queued behind a timer write is sent with the etag that write returned", async () => {

@@ -138,6 +138,8 @@ interface Props {
   ) => void;
   /** Pause when away's toggle, shown after the Timer select; absent without the API or a host setting. */
   idlePause?: IdlePause["toggle"];
+  /** The away question while it waits: the session's card answers it in Resume's place, as the timer bar does. */
+  away?: IdlePause["question"];
 }
 
 /**
@@ -400,6 +402,7 @@ function FocusDay({
   onOpenPlan,
   onTimer,
   idlePause,
+  away,
 }: Props & {
   day: DayPlan;
   tasks: FocusRange["tasks"];
@@ -498,6 +501,7 @@ function FocusDay({
           effectiveArea(task, plan.tasks),
         );
     },
+    away,
     editTask,
     complete,
     onOpenTask,

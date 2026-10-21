@@ -678,17 +678,24 @@ export function App({
       <button onClick={onSettings}>{text.manage}</button>
     </div>
   );
-  // While the away question waits it takes the status line, and its answers take Pause/Resume's place.
+  // While the away question waits it takes a line of its own above the bar's row, in place of the status, and its
+  // answers take Pause/Resume's place.
   const timerBar = data?.focus.timer && (
-    <aside className="plus-timer-bar" aria-label={text.focus}>
-      <div>
-        <small className={question ? "plus-away-question" : undefined}>
-          {question
-            ? text.away(question.minutes)
-            : data.focus.timer.status === "running"
-              ? text.focus
-              : text.paused}
+    <aside
+      className={question ? "plus-timer-bar is-asking" : "plus-timer-bar"}
+      aria-label={text.focus}
+    >
+      {question && (
+        <small className="plus-away-question">
+          {text.away(question.minutes)}
         </small>
+      )}
+      <div>
+        {!question && (
+          <small>
+            {data.focus.timer.status === "running" ? text.focus : text.paused}
+          </small>
+        )}
         <strong>
           {timerTask
             ? displayedTitle(timerTask.title)
@@ -935,6 +942,7 @@ export function App({
                   onOpenPlan={() => onViewChange?.("plan")}
                   onTimer={commandTimer}
                   idlePause={away.toggle}
+                  away={question}
                 />
               )}
             </fieldset>

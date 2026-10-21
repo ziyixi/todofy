@@ -122,6 +122,29 @@ test("a count-up pauses when the screen locks and asks on return; Keep counts th
     "Away for 1 min — count it?",
   );
   await expect(pip.locator(".mini")).toHaveAttribute("data-away", "");
+  // The question keeps one line of its own above the bar's row, in a narrow window too, where only the title
+  // gives way; the card offers the same answers in Resume's place.
+  for (const width of [790, 500]) {
+    await page.setViewportSize({ width, height: 900 });
+    const question = (await bar(page)
+      .locator(".plus-away-question")
+      .boundingBox())!;
+    const title = (await bar(page).locator("strong").boundingBox())!;
+    const keep = (await bar(page)
+      .getByRole("button", { name: "Keep" })
+      .boundingBox())!;
+    const box = (await bar(page).boundingBox())!;
+    expect(question.height).toBeLessThan(20);
+    expect(question.y + question.height).toBeLessThanOrEqual(title.y);
+    expect(keep.x + keep.width).toBeLessThanOrEqual(box.x + box.width);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(
+    page.getByRole("button", { name: "Keep: Synthetic away step" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Resume: Synthetic away step" }),
+  ).toHaveCount(0);
   await pip.getByRole("button", { name: "Keep" }).click();
   await expect(bar(page).locator("small")).toHaveText("Focus");
   await expect(pip.locator(".mini")).not.toHaveAttribute("data-away");

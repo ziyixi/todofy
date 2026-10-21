@@ -19,6 +19,7 @@ import type {
 } from "./model";
 import { areaColor, outcomeForTask } from "./planning-outcomes";
 import { PendingMark } from "./StatusMarks";
+import type { IdlePause } from "./useIdlePause";
 
 /** A Focus card's title: Plan's, else Tasks' Focus read's, else that it is unavailable. */
 export function focusTitle(
@@ -61,6 +62,8 @@ export interface FocusBlockProps {
     action: "start" | "pause" | "resume" | "stop",
     taskId: string,
   ) => void;
+  /** The away question while it waits: on the session's card, Keep and Discard take Resume's place. */
+  away?: IdlePause["question"];
   editTask: (task: PlanningTask) => void;
   complete: (task: PlanningTask) => void;
   onOpenTask?: (id: string) => void;
@@ -89,6 +92,7 @@ export function FocusBlock({
   actions,
   writeRecord,
   onTimer,
+  away,
   editTask,
   complete,
   onOpenTask,
@@ -241,19 +245,40 @@ export function FocusBlock({
         </div>
         {task && running && (
           <div className="plus-focus-timer-controls">
-            <button
-              className="plus-focus-timer-action is-primary"
-              aria-label={`${text[timerAction]}: ${title}`}
-              disabled={busy || settling || Boolean(focus.timer && !timer)}
-              onClick={() => onTimer(timerAction, taskId)}
-            >
-              {timer?.status === "running" ? (
-                <Pause size={17} />
-              ) : (
-                <Play size={17} />
-              )}
-              {text[timerAction]}
-            </button>
+            {timer && away ? (
+              <>
+                <button
+                  className="plus-focus-timer-action is-primary"
+                  aria-label={`${text.keep}: ${title}`}
+                  disabled={busy || settling}
+                  onClick={away.keep}
+                >
+                  {text.keep}
+                </button>
+                <button
+                  className="plus-focus-timer-action"
+                  aria-label={`${text.discard}: ${title}`}
+                  disabled={busy || settling}
+                  onClick={away.discard}
+                >
+                  {text.discard}
+                </button>
+              </>
+            ) : (
+              <button
+                className="plus-focus-timer-action is-primary"
+                aria-label={`${text[timerAction]}: ${title}`}
+                disabled={busy || settling || Boolean(focus.timer && !timer)}
+                onClick={() => onTimer(timerAction, taskId)}
+              >
+                {timer?.status === "running" ? (
+                  <Pause size={17} />
+                ) : (
+                  <Play size={17} />
+                )}
+                {text[timerAction]}
+              </button>
+            )}
             {timer && (
               <button
                 className="plus-focus-timer-action"

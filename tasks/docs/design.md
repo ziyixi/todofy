@@ -236,9 +236,10 @@ ten minutes before Chrome reported no input, or at the last heartbeat when the n
 (the machine slept or the page was frozen); the earliest wins. The state seen when watching begins is only a
 baseline, so a session started from the phone while the Mac sits idle is not paused. The timer is paused in Tasks
 at once, at that moment (`effective_time`, above), so other windows and devices see it paused, and time away is
-not counted if the owner never returns to this window. On return, the question "Away for N min — count it?" takes
-Pause/Resume's place in the timer bar (shown on other pages too) and fills the mini timer: Keep resumes at
-`pause_time`, Discard resumes now; Stop and Complete end the paused session without the time away. Any other change
+not counted if the owner never returns to this window. On return, the question "Away for N min — count it?" takes a
+line of its own above the timer bar's row (shown on other pages too; only the title gives way in a narrow window),
+its answers take Pause/Resume's place there and on the step's Focus card, and it fills the mini timer: Keep resumes
+at `pause_time`, Discard resumes now; Stop and Complete end the paused session without the time away. Any other change
 of the timer drops the question, and so does a reload: the timer stays paused. A failed pause shows the usual error
 once, then each heartbeat sends it again, quietly and with the same request ID, while the session still counts up.
 With two Tasks windows, a Web Lock (`tasks.idle-pause`) lets one watch; the other takes over when it closes.
