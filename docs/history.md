@@ -5,6 +5,9 @@ current production state; [HANDOFF](../HANDOFF.md) names the current rollout and
 
 ## Archived handoffs
 
+[Handoff of October 21, 2026](history/handoff-2026-10-21.md) keeps the completed notes of the Private MCP release and
+its acceptance, the done steps in Plan's Week calendar, the Tasks desktop PWA features and the FlowDay retirement
+with Todofy's planning-store drop.
 [Handoff of October 20, 2026](history/handoff-2026-10-20.md) keeps the completed notes of the Tasks performance
 release (planning in Tasks, the one-time planning import and Todofy's cleanup), the Tasks cleanup with the Todoist
 Plus removal, and the Plan and Focus owner changes.
