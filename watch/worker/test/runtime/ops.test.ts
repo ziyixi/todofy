@@ -116,18 +116,17 @@ describe('the Ops entrypoint (manual alarms)', () => {
       at - HOUR,
       at - HOUR,
     );
-    // 300 intents: 70 unsettled (a week of carried-over ones), 70 ended badly this week, 10 recorded today, the rest
+    // 300 sink rows: 70 open (a week of carried-over ones), 70 ended badly this week, 10 created today, the rest
     // settled before.
     await h.sql(
       `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 300)
        INSERT INTO intents (intent_id, kind, day, payload, events, state, attempts, next_at, last_code, recorded_at, created_at, updated_at)
        SELECT 'urgent-bound' || i, 'urgent', '2026-10-21', '', 1,
-              CASE WHEN i <= 35 THEN 'open' WHEN i <= 70 THEN 'held' WHEN i <= 140 THEN 'expired' ELSE 'recorded' END,
-              1, ?, CASE WHEN i <= 70 AND i % 2 = 0 THEN 'failed' ELSE 'pending' END,
-              CASE WHEN i > 35 AND i <= 70 THEN ? - 2 * 86400000 WHEN i > 140 AND i <= 150 THEN ? - 3600000 WHEN i > 150 THEN ? - 10 * 86400000 END,
+              CASE WHEN i <= 70 THEN 'open' WHEN i <= 140 THEN 'expired' ELSE 'recorded' END,
+              1, ?, CASE WHEN i <= 70 THEN 'unavailable' ELSE 'created' END,
+              CASE WHEN i > 140 AND i <= 150 THEN ? - 3600000 WHEN i > 150 THEN ? - 10 * 86400000 END,
               ? - (i % 30) * 86400000, CASE WHEN i > 70 AND i <= 140 THEN ? - 86400000 ELSE ? - 20 * 86400000 END FROM n`,
       at + HOUR,
-      at,
       at,
       at,
       at,

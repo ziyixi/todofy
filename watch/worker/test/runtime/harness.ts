@@ -7,8 +7,8 @@
  *     synthetic websites, through ./fake-net.ts, which streams each body to the reader as it reads (never ahead of it);
  *     nothing leaves the process tree;
  *   - a fake ASSETS binding (the UI's page) and, when asked, a fake BROWSER binding (Browser Run's `content` action),
- *     through fake-net too, and the TODOFY binding to "todofy", a stub of Todofy's `Intents` entrypoint
- *     (../stubs/todofy-stub.ts).
+ *     through fake-net too, and the TASKS binding to "tasks", a stub of Tasks' `TaskInbox` entrypoint
+ *     (../stubs/tasks-stub.ts).
  * DEV_MANUAL_ALARMS=true: no alarm is ever armed and the tests drive the scheduler with explicit clocks; the owner is
  * signed in over loopback http by the dev bypass. All data is synthetic.
  */
@@ -93,8 +93,8 @@ export interface HarnessOptions {
   readonly bindings?: Record<string, string>;
   /** Bind a fake BROWSER (Browser Run's content action). */
   readonly browser?: boolean;
-  /** Bind TODOFY to the stub of Todofy's Intents entrypoint (the notification sink is then on). */
-  readonly todofy?: boolean;
+  /** Bind TASKS to the stub of Tasks' TaskInbox entrypoint (the notification sink is then on). */
+  readonly tasks?: boolean;
   /** Extra outbound routes by URL (the Access certs endpoint), before FakeSites. */
   readonly routes?: Map<string, () => Response>;
   /** Opens workerd's DevTools inspector on this port (./cpu.test.ts). */
@@ -112,17 +112,13 @@ export interface Harness {
   readonly browser: FakeBrowser;
   /** The Worker's log lines (console output). */
   readonly logs: string[];
-  /** What the Todofy stub answers next (`todofy: true`; ../stubs/todofy-stub.ts Scenario). */
-  todofy(scenario: { propose?: 'accept' | 'throw' | 'paused' | 'daily_limit' | 'garbled'; status?: 'pending' | 'failed' | 'throw'; day?: string }): Promise<void>;
-  /**
-   * The intent IDs proposed and polled since the last call, the intents recorded and the inputs refused
-   * (`todofy: true`).
-   */
-  todofyState(): Promise<{
+  /** What the TaskInbox stub answers next (`tasks: true`; ../stubs/tasks-stub.ts Scenario). */
+  tasks(scenario: { create?: 'create' | 'throw' | 'lose' | 'daily_limit'; day?: string }): Promise<void>;
+  /** The request IDs sent since the last call, every task created (its request) and the inputs refused (`tasks: true`). */
+  tasksState(): Promise<{
     invalid: number;
     calls: string[];
-    statusCalls: string[];
-    intents: { intent_id: string; mode: string; parent: { title: string; description?: string }; items: { title: string; url?: string }[] }[];
+    tasks: { request_id: string; title: string; description?: string; subtasks?: { title: string; description?: string }[] }[];
   }>;
   /** ops-v1 over the Ops entrypoint, as the dashboard calls it (a rejection's message is its error code). */
   opsStatus(): Promise<unknown>;
@@ -149,7 +145,7 @@ export interface Harness {
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const temp = await mkdtemp(join(tmpdir(), 'watch-runtime-'));
   const script = await workerBundle();
-  const todofyScript = options.todofy === true ? await workerBundle('test/stubs/todofy-stub.ts') : '';
+  const tasksScript = options.tasks === true ? await workerBundle('test/stubs/tasks-stub.ts') : '';
   const sites = new FakeSites();
   const browser: FakeBrowser = { pages: new Map(), finalUrls: new Map(), msUsed: 20_000, quota: false, calls: [] };
   const logs: string[] = [];
@@ -186,13 +182,13 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           serviceBindings: {
             ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
             ...(options.browser === true ? { BROWSER: FAKE_BROWSER_WORKER } : {}),
-            // As watch/wrangler.toml binds it: Todofy's Intents entrypoint, for source watch only.
-            ...(options.todofy === true ? { TODOFY: { name: 'todofy', entrypoint: 'Intents', props: { source: 'watch' } } } : {}),
+            // As watch/wrangler.toml binds it: Tasks' TaskInbox entrypoint, for source watch only.
+            ...(options.tasks === true ? { TASKS: { name: 'tasks', entrypoint: 'TaskInbox', props: { source: 'watch' } } } : {}),
           },
           bindings,
           outboundService: FAKE_NET_WORKER,
         },
-        ...(options.todofy === true ? [{ name: 'todofy', modules: true, script: todofyScript, compatibilityDate: '2026-09-08' }] : []),
+        ...(options.tasks === true ? [{ name: 'tasks', modules: true, script: tasksScript, compatibilityDate: '2026-09-08' }] : []),
         ...(options.splitObject === true
           ? [
               {
@@ -269,13 +265,13 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     fetch: fetchWatch,
     opsStatus: () => probe('ops_status', []),
     opsSetGuard: (input) => probe('ops_guard', [input]),
-    async todofy(scenario) {
-      const response = await (await mf.getWorker('todofy')).fetch('http://stub/__scenario', { method: 'POST', body: JSON.stringify(scenario) });
-      if (response.status !== 204) throw new Error('todofy scenario');
+    async tasks(scenario) {
+      const response = await (await mf.getWorker('tasks')).fetch('http://stub/__scenario', { method: 'POST', body: JSON.stringify(scenario) });
+      if (response.status !== 204) throw new Error('tasks scenario');
     },
-    async todofyState() {
-      const response = await (await mf.getWorker('todofy')).fetch('http://stub/__state');
-      return (await response.json()) as Awaited<ReturnType<Harness['todofyState']>>;
+    async tasksState() {
+      const response = await (await mf.getWorker('tasks')).fetch('http://stub/__state');
+      return (await response.json()) as Awaited<ReturnType<Harness['tasksState']>>;
     },
     api: createHttpClient(WatchUiService, send),
     async mutate(method, path, body) {

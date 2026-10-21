@@ -1,8 +1,8 @@
 /**
- * The notification outbox (../../docs/design.md §7) and the seam its sink plugs into. Since W3 the sink is Todofy
- * (todofy.ts: task intents of source SOURCE_WATCH over the TODOFY service binding); without that binding (local
- * development, most workerd tests) there is no sink, the outbox only fills, and the change inbox is how the owner learns
- * of a change.
+ * The notification outbox (../../docs/design.md §7) and the seam its sink plugs into. The sink is Tasks (tasks.ts: its
+ * create-only TaskInbox over the TASKS service binding; Todofy's task intents until 2026-10-21); without that binding
+ * (local development, most workerd tests) there is no sink, the outbox only fills, and the change inbox is how the
+ * owner learns of a change.
  *
  * What goes into the outbox, in the same transaction as the state it reports (store.ts `notifications`):
  * - `change_confirmed`: a change became CONFIRMED (its watch's notify policy: `digest` or `urgent`);
@@ -36,7 +36,7 @@ export interface SinkWants {
   readonly digest: boolean;
 }
 
-/** Where the outbox goes (todofy.ts). */
+/** Where the outbox goes (tasks.ts). */
 export interface NotificationSink {
   /** What to offer now: urgent events while the sink may send them, and every event when its digest is due. */
   wants(now: number): SinkWants;

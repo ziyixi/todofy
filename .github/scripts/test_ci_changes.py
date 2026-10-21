@@ -438,12 +438,12 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **WATCH))
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, T, F, F, **WATCH))
 
-    def test_task_intent_code_deploys_watch(self):
-        """TASK_INTENT_LIMITS ship in the watch app; no Worker bundles the schema (the types are generated). proto/'s
-        tests read the contract, so Proto checks runs too (PROTO_READS)."""
+    def test_task_intent_code_deploys_nothing(self):
+        """No Worker bundles task-intent-v1 since 2026-10-21 (the watch app creates its tasks in Tasks). proto/'s tests
+        read the contract, so Proto checks runs too (PROTO_READS)."""
         self.assertEqual(
             push(["contracts/task-intent-v1/task-intent-v1.ts"]),
-            expect(T, T, T, F, F, **ALL_CHECKED, watch_deploy=T, proto=T),
+            expect(T, T, T, F, F, **ALL_CHECKED, proto=T),
         )
         self.assertEqual(
             push(["contracts/task-intent-v1/task-intent-v1.schema.json"]),
@@ -597,7 +597,7 @@ class Classify(unittest.TestCase):
         every, none = ts | python, set()
         cases = {
             # task-intent-v1, bundled by the watch app's TypeScript.
-            "proto/todofy/taskintent/v1/task_intent.proto": {"watch"},
+            "proto/todofy/taskintent/v1/task_intent.proto": none,
             # recommendation-v1 and summary-v1: todofy-core builds the reports, Todofy's gateway and UI read them in
             # todofy.ui.v1's answers.
             "proto/todofy/report/v1/report.proto": {"todofy"},
@@ -609,7 +609,7 @@ class Classify(unittest.TestCase):
             # Todofy's private Mail entry: its core answers it, its gateway serves it, Tasks calls it. Tasks'
             # create-only TaskInbox: Tasks serves it, Home calls it.
             "proto/todofy/mail/v1/mail_service.proto": {"todofy", "tasks"},
-            "proto/tasks/inbox/v1/task_inbox.proto": {"tasks", "dashboard"},
+            "proto/tasks/inbox/v1/task_inbox.proto": {"tasks", "dashboard", "watch"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes its types only, its
             # core reads ops.v1 in Python).
             "proto/ops/v1/ops.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"},
@@ -775,7 +775,7 @@ class Classify(unittest.TestCase):
         saved = ci_changes.PROTO_USERS
         try:
             ci_changes.PROTO_USERS = {"watch": ("ts",), "todofy": ()}
-            for path in ("proto/todofy/taskintent/v1/task_intent.proto", "proto/ts/wire-json.ts", "proto/buf.lock"):
+            for path in ("proto/watch/ui/v1/watch.proto", "proto/ts/wire-json.ts", "proto/buf.lock"):
                 with self.subTest(path=path):
                     self.assertEqual(push([path]), expect(T, F, T, F, F, proto=T, **WATCH))
             self.assertEqual(push(["proto/python/build_backend.py"]), expect(T, F, T, F, F, proto=T, watch_check=T))
@@ -1342,11 +1342,7 @@ class ContractsJob(unittest.TestCase):
                 # bytes it read and sent before the move onto proto/.
                 "dashboard/worker/test/ops-client.test.ts",
                 "dashboard/worker/test/ops-golden.test.ts",
-                # task-intent-v1: the proposer's dependency-free validator gives every fixture the standard verdict.
-                "watch/worker/test/task-intent-contract.test.ts",
-                # The watch app's digest and urgent intents (the contract's watch fixtures, byte for byte) and its
-                # ops-v1 answers.
-                "watch/worker/test/todofy.test.ts",
+                # The watch app's ops-v1 answers.
                 "watch/worker/test/ops-golden.test.ts",
             },
             self.named_tests(),
@@ -1362,8 +1358,8 @@ class DeployConditions(unittest.TestCase):
     """
 
     # (job, need) pairs where "skipped" is as good as "success": the dashboard deploys after the app
-    # deploys (its service bindings need their Ops entrypoints), the watch app after Todofy's (its TODOFY
-    # binding names Todofy's Intents) and Tasks after Todofy's (its MAIL binding names Todofy's Mail entry),
+    # deploys (its service bindings need their Ops entrypoints), the watch app after Tasks' (its TASKS
+    # binding names Tasks' TaskInbox) and Tasks after Todofy's (its MAIL binding names Todofy's Mail entry),
     # which do not run when nothing of that app changed.
     SKIPPED_OK = {
         ("vps-deploy", "fleet-deploy"),
@@ -1377,7 +1373,7 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "tasks-deploy"),
         ("dashboard-deploy", "personal-mcp-deploy"),
         ("dashboard-deploy", "website-relay-deploy"),
-        ("watch-deploy", "todofy-deploy"),
+        ("watch-deploy", "tasks-deploy"),
         ("tasks-deploy", "todofy-deploy"),
         ("personal-mcp-deploy", "tasks-deploy"),
         ("personal-mcp-deploy", "todofy-deploy"),
@@ -1484,8 +1480,9 @@ class DeployConditions(unittest.TestCase):
         self.assertIn("RELEASE_SOURCE_SHA: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}", release)
         self.assertIn('--source-sha "$RELEASE_SOURCE_SHA" --evidence-file "$RUNNER_TEMP/vps-release-evidence.json" "${args[@]}"', release)
 
-    def test_the_dashboard_deploys_after_the_apps_and_watch_after_todofy(self):
-        self.assertLessEqual({"todofy-deploy"}, set(self.needs(self.jobs()["watch-deploy"])))
+    def test_the_dashboard_deploys_after_the_apps_and_watch_after_tasks(self):
+        self.assertLessEqual({"tasks-deploy"}, set(self.needs(self.jobs()["watch-deploy"])))
+        self.assertNotIn("todofy-deploy", self.needs(self.jobs()["watch-deploy"]))
         block = self.jobs()["dashboard-deploy"]
         self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy"},
                              set(self.needs(block)))

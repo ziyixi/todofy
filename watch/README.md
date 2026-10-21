@@ -30,10 +30,11 @@ change inbox. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md).
 - **Health**: 健康 groups the watches that are not well: 失效 (3 failed checks in a row; 14 days of it pauses the
   watch), 被拦截 (a bot challenge, never worked around), robots.txt, 网站要求放慢, 今日 JS 配额已用完. A failure is never
   reported as "no change".
-- **Todoist**: one task a day (from 14:00 UTC) lists every watch with something new: its name, the trigger type and a
-  count, or 检查失效 / 已自动暂停, each linking to the watch here. A watch set to 紧急 (URGENT) sends its confirmed
-  changes at once, as long as Todofy's 10 task intents a day leave room for that day's digest (nine on a normal day). Tasks never carry page text or a watched URL: open the link to see the change.
-  Todofy creates them (task-intent-v1, `docs/design.md` §7).
+- **Tasks**: one task a day (from 14:00 UTC) lists every watch with something new as subtasks: its name, the trigger
+  type and a count, or 检查失效 / 已自动暂停, each linking to the watch here. A watch set to 紧急 (URGENT) sends its
+  confirmed changes at once as its own task, as long as this app's 10 tasks a day leave room for that day's digest
+  (nine on a normal day). Tasks never carry page text or a watched URL: open the link to see the change. They are
+  created through Tasks' create-only `TaskInbox` (`docs/design.md` §7).
 
 ## Develop
 
@@ -63,9 +64,9 @@ its next version. Local state is in `watch/.wrangler/` (delete it after a schema
 
 ## Deploy
 
-Only from GitHub Actions: `Watch deploy` (`.github/workflows/ci.yml`) runs on `main` after `CI gate` and `Todofy deploy`
-(its `TODOFY` binding names Todofy's `Intents` entrypoint, which must exist and accept `SOURCE_WATCH`) when `watch/`, `packages/edge-auth/`,
-`contracts/ops-v1/ops-v1.ts`, `contracts/task-intent-v1/task-intent-v1.ts` or a `proto/` path the app bundles changed,
+Only from GitHub Actions: `Watch deploy` (`.github/workflows/ci.yml`) runs on `main` after `CI gate` and `Tasks deploy`
+(its `TASKS` binding names Tasks' `TaskInbox` entrypoint, which must exist) when `watch/`, `packages/edge-auth/`,
+`contracts/ops-v1/ops-v1.ts` or a `proto/` path the app bundles changed,
 or on a dispatch with `watch` or `all`, in the `production` environment and the group `watch-production`. It builds the
 UI, writes the secrets file, dry-runs (the bundle held to its budget), runs the hostname guard (`tools/cf-guard`, no
 allowance: `watch.ziyixi.science` had no DNS record before W2), deploys through `deploy/deploy-vars.mjs` (no D1), and
@@ -110,9 +111,8 @@ The dashboard's daily drift check compares the live Worker with `dashboard/worke
 secrets, `BUILD_SHA`, the bindings and the Custom Domain); its registry shows the 网页监视 tile (ops-v1 through the
 `WATCH` binding) and the Worker. The Access application "watch" is managed by `infra/` (`infra/README.md` "Adding an
 app"): change it there, not by hand, and "Infra drift" checks every day that `ACCESS_AUDIENCE` here equals its AUD.
-Notifications go to Todoist through Todofy (`docs/design.md` §7). The switch that stops only this app's tasks is
-Todofy's `TASK_INTENT_SOURCES` (below); Todofy's pause switches (`MAINTENANCE_MODE`, `PROCESSING_PAUSED`,
-`FORCE_PAUSE_TODOIST`) would hold Mail Hero's mail tasks too.
+Notifications go to Tasks through its `TaskInbox` (`docs/design.md` §7). To stop only this app's tasks, ship a watch
+commit without the `TASKS` binding (below): the outbox then only fills.
 
 ### Rollback
 
@@ -120,15 +120,12 @@ Todofy's `TASK_INTENT_SOURCES` (below); Todofy's pause switches (`MAINTENANCE_MO
 revert and keeps the host, the dashboard's view and the object's data. Never run a plain `wrangler deploy`.
 
 **Taking the app out of production is a separate decision**, in this order. A Worker without a route keeps running:
-its Durable Object keeps its alarm, so WatchState keeps checking the watched sites and proposing tasks until step 1
+its Durable Object keeps its alarm, so WatchState keeps checking the watched sites and creating tasks until step 1
 stops it, whatever happens to the host.
 
 1. Stop the side effects first.
-   - Tasks: set `TASK_INTENT_SOURCES = ""` in the `[vars]` of `todofy/wrangler.toml` (and add it to `CORE_VARS` in
-     `todofy/deploy/test_wrangler_configs.py`) and let `Todofy deploy` ship it (`todofy/docs/cloudflare-setup.md`
-     "Task intents"). Every watch proposal then answers `source_not_allowed` and nothing reaches Todoist; mail is not
-     affected. Or, while the app is still in production, ship a watch commit without the `TODOFY` binding through
-     `Watch deploy`: the outbox then only fills.
+   - Tasks: while the app is still in production, ship a watch commit without the `TASKS` binding through
+     `Watch deploy`: the outbox then only fills and nothing reaches Tasks.
    - Fetches: pause every watch in the UI (暂停, or the owner API's `pauseWatch`). A paused watch is never checked; the
      alarm then only wakes every six hours to find nothing due.
 2. Detach the Custom Domain by hand: Cloudflare dashboard → Workers & Pages → watch → Settings → Domains & Routes →

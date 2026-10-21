@@ -7,8 +7,8 @@
  * selector to the include list ("只看这些") or the exclude list ("排除这些"), and the preview runs again from the Worker's
  * stored fetch, so the owner sees the normalized lines that will be compared before saving. A landmark block (a nav,
  * the page's header or footer) says that it does not count unless picked. "保存" creates the watch once the owner has
- * typed its name: the name goes into the owner's Todoist tasks, so it is never derived from the URL (a shared link's
- * host is text the owner did not write, and a name copied from the URL would put the watched site into Todoist).
+ * typed its name: the name goes into the owner's tasks in Tasks, so it is never derived from the URL (a shared link's
+ * host is text the owner did not write, and a name copied from the URL would put the watched site into a task).
  *
  * The preview area is not a live region (it is rebuilt on every tap); a short status line says what changed.
  */
@@ -151,7 +151,7 @@ export function renderAdd(ctx: ViewContext): Promise<void> {
   const requestId = newRequestId()
   const doSave = async () => {
     if (draft.displayName.trim() === '') {
-      toast('先填写名称（会出现在 Todoist 任务里，不要填网址）')
+      toast('先填写名称（会出现在 Tasks 任务里，不要填网址）')
       form.element.querySelector<HTMLInputElement>('input[name="displayName"]')?.focus()
       return
     }

@@ -28,8 +28,8 @@ const NOW = Date.parse('2026-10-01T14:00:00.000Z');
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
-const TODOFY = {} as Service;
-const env = { PUBLIC_HOST: 'watch.example.com', TODOFY };
+const TASKS = {} as Service;
+const env = { PUBLIC_HOST: 'watch.example.com', TASKS };
 
 /** The SqlStorage surface Store uses (exec(...).toArray() and the cursor's row counts), on real SQLite. */
 function sqlStorage(): SqlStorage {
@@ -77,7 +77,7 @@ function change(target: Store, id: string, watchId: string, state: 'confirmed' |
   );
 }
 
-function intent(target: Store, id: string, state: 'open' | 'held' | 'recorded' | 'refused' | 'expired', createdAt: number, day = '2026-10-01'): void {
+function intent(target: Store, id: string, state: 'open' | 'recorded' | 'refused' | 'expired', createdAt: number, day = '2026-10-01'): void {
   target.run(
     `INSERT INTO intents (intent_id, kind, day, payload, events, state, attempts, next_at, recorded_at, created_at, updated_at)
      VALUES (?, 'urgent', ?, '', 1, ?, 1, ?, ?, ?, ?)`,
@@ -85,8 +85,8 @@ function intent(target: Store, id: string, state: 'open' | 'held' | 'recorded' |
     day,
     state,
     NOW + 5 * MINUTE,
-    // Todofy recorded it at once (held or settled).
-    state === 'held' || state === 'recorded' ? createdAt : null,
+    // Tasks created it at once.
+    state === 'recorded' ? createdAt : null,
     createdAt,
     createdAt,
   );

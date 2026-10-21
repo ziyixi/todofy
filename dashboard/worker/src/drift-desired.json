@@ -1109,7 +1109,7 @@
           "source": "config"
         },
         {
-          "name": "TODOFY",
+          "name": "TASKS",
           "type": "service",
           "source": "config"
         },

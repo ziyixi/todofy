@@ -438,14 +438,12 @@ class Files(unittest.TestCase):
                 self.assertEqual(service["entrypoint"], expected)
                 if expected == "NewsletterOps":
                     self.assertEqual(service["service"], "fleet")
-        # The watch app parses untrusted pages: it reached Todofy only through the least-privilege Intents entrypoint,
-        # bound to its own source, never through Ops. Todofy retired Intents on 2026-10-21 and keeps it as a refusal
-        # until the watch app binds Tasks' TaskInbox.
-        gateway_exports = (REPO / "todofy/gateway/src/index.ts").read_text()
-        self.assertRegex(gateway_exports, r"export \{[^}]*\bIntents\b[^}]*\} from './retired\.ts'")
+        # The watch app parses untrusted pages: it reaches Tasks only through the create-only TaskInbox, bound to its
+        # own source, never through TasksApi or Ops. (Todofy's Intents, which it bound until 2026-10-21, is a refusal
+        # until the next Todofy release.)
         self.assertEqual(
             load(PRODUCTION["watch"])["services"],
-            [{"binding": "TODOFY", "service": "todofy", "entrypoint": "Intents", "props": {"source": "watch"}}],
+            [{"binding": "TASKS", "service": "tasks", "entrypoint": "TaskInbox", "props": {"source": "watch"}}],
         )
 
     def test_native_task_bindings_select_the_matching_source_and_access(self):

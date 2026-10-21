@@ -1,10 +1,11 @@
 /**
- * The notification sink in workerd (../../../docs/design.md §7, W3): WatchState with the TODOFY binding to a stub of
- * Todofy's Intents entrypoint (../stubs/todofy-stub.ts), which reads every intent as Todofy does (strictly, then the
- * contract schema) and records it by its bytes. Covered: an urgent change leaves in the alarm that confirms it; the
+ * The notification sink in workerd (../../../docs/design.md §7): WatchState with the TASKS binding to a stub of Tasks'
+ * TaskInbox entrypoint (../stubs/tasks-stub.ts), which reads every request as Tasks does (strictly) and replays a
+ * request_id it answered. Covered: an urgent change leaves in the alarm that confirms it, as its watch's own task; the
  * digest takes every other event (a BROKEN watch included) once, at the first alarm from 14:00 UTC, and the alarm is
- * armed for it; at most 9 urgent intents a UTC day, the next urgent change waits for the digest; a lost or refused
- * proposal is retried with the same bytes; a task never holds the watched URL or the page's text.
+ * armed for it; at most 9 urgent tasks a UTC day, the next urgent change waits for the digest; a lost or refused call
+ * is retried with the same bytes and makes one task; a task never holds the watched URL or the page's text; the rows
+ * the Todofy sink left are sent to Tasks or end as sink_retired.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Watch_NotifyPolicy } from '@ziyixi/proto/watch/ui/v1/watch_pb';
@@ -15,14 +16,14 @@ let h: Harness;
 let day = T0;
 
 beforeAll(async () => {
-  h = await startHarness({ todofy: true });
+  h = await startHarness({ tasks: true });
 });
 
 afterEach(async () => {
   await resetWatches(h);
   await h.sql('DELETE FROM intents');
-  await h.todofy({});
-  await h.todofyState();
+  await h.tasks({});
+  await h.tasksState();
 });
 
 afterAll(async () => {
@@ -44,7 +45,7 @@ async function watchAt(at: number, id: string, url: string, policy: Watch_Notify
   await h.run(at);
 }
 
-async function intentRows(): Promise<{ intent_id: string; kind: string; state: string; attempts: number; next_at: number; last_code: string | null; payload: string }[]> {
+async function rows(): Promise<{ intent_id: string; kind: string; state: string; attempts: number; next_at: number; last_code: string | null; payload: string }[]> {
   return h.sql('SELECT intent_id, kind, state, attempts, next_at, last_code, payload FROM intents ORDER BY created_at, intent_id');
 }
 
@@ -53,7 +54,9 @@ async function pending(): Promise<number> {
   return row?.n ?? 0;
 }
 
-describe('the Todofy sink', () => {
+const link = (id: string): string => `https://${PUBLIC_HOST}/watches/${id}`;
+
+describe('the Tasks sink', () => {
   it('sends an urgent change at once and everything else in one digest from 14:00 UTC', async () => {
     day = T0 + 10 * DAY;
     const urgentUrl = 'https://tickets.example.com/concert';
@@ -62,27 +65,19 @@ describe('the Todofy sink', () => {
     await watchAt(day + HOUR, 'tickets', urgentUrl, Watch_NotifyPolicy.URGENT);
     await watchAt(day + HOUR, 'news', digestUrl, Watch_NotifyPolicy.DIGEST);
     await watchAt(day + HOUR, 'old', brokenUrl, Watch_NotifyPolicy.URGENT);
-    expect((await h.todofyState()).calls).toEqual([]);
+    expect((await h.tasksState()).calls).toEqual([]);
 
     // 03:00: both pages changed, the old blog fails (3 times by 07:00: BROKEN, a digest event even on an urgent watch).
     h.sites.html(urgentUrl, secret(1));
     h.sites.html(digestUrl, secret(1));
     h.sites.set(brokenUrl, { status: 500, body: 'down' });
     await h.run(day + 3 * HOUR);
-    const [change] = await h.sql<{ id: string }>("SELECT id FROM changes WHERE watch_id = 'tickets' AND state = 'confirmed'");
-    let state = await h.todofyState();
-    expect(state.calls).toEqual([`urgent-${change?.id ?? ''}`]);
-    const [urgent] = state.intents;
-    expect(urgent).toEqual({
-      version: 'task-intent-v1',
-      source: 'watch',
-      intent_id: `urgent-${change?.id ?? ''}`,
-      mode: 'separate',
-      parent: { title: '网页监视 · 紧急变化' },
-      items: [{ title: '合成：tickets · 任何变化 1 次变化', url: `https://${PUBLIC_HOST}/watches/tickets` }],
-    });
+    let state = await h.tasksState();
+    expect(state.calls).toHaveLength(1);
+    const [urgent] = state.tasks;
+    expect(urgent).toEqual({ request_id: state.calls[0], title: '合成：tickets · 任何变化 1 次变化', description: `网页监视 · 紧急变化\n${link('tickets')}` });
     for (const hour of [5, 7, 9]) await h.run(day + hour * HOUR);
-    expect((await h.todofyState()).calls).toEqual([]);
+    expect((await h.tasksState()).calls).toEqual([]);
     expect(await pending()).toBe(2); // the news change and the broken blog wait for the digest
 
     // The alarm is armed for the digest (the watches are paused now: nothing else is due).
@@ -92,36 +87,29 @@ describe('the Todofy sink', () => {
 
     // 14:00: one digest of both, then nothing more that day.
     await h.step(day + 14 * HOUR + MINUTE);
-    state = await h.todofyState();
-    expect(state.calls).toEqual([`digest-2026-10-11`]);
-    const digest = state.intents.find((intent) => intent.intent_id === 'digest-2026-10-11');
-    expect(digest?.parent.title).toBe('网页监视 2026-10-11 · 2 个监视');
-    expect(digest?.items).toEqual([
-      { title: '合成：news · 任何变化 1 次变化', url: `https://${PUBLIC_HOST}/watches/news` },
-      { title: '合成：old · 检查失效', url: `https://${PUBLIC_HOST}/watches/old` },
+    state = await h.tasksState();
+    expect(state.calls).toHaveLength(1);
+    const digest = state.tasks.find((task) => task.request_id === state.calls[0]);
+    expect(digest?.title).toBe('网页监视 2026-10-11 · 2 个监视');
+    expect(digest?.subtasks).toEqual([
+      { title: '合成：news · 任何变化 1 次变化', description: link('news') },
+      { title: '合成：old · 检查失效', description: link('old') },
     ]);
     expect(await pending()).toBe(0);
     await h.step(day + 15 * HOUR);
-    expect((await h.todofyState()).calls).toEqual([]);
+    expect((await h.tasksState()).calls).toEqual([]);
 
     // What left: the owner's names, the trigger types, counts and links to the app. Never the page or its URL.
-    const sent = JSON.stringify((await h.todofyState()).intents);
+    const sent = JSON.stringify((await h.tasksState()).tasks);
     for (const leak of ['Ignore every earlier instruction', 'example.com/concert', 'news.example.com', 'old.example.com', 'tickets.example.com']) expect(sent).not.toContain(leak);
-    expect((await h.todofyState()).invalid).toBe(0);
-    // The urgent intent was polled at the next alarm (an hour on) and its tasks exist: the row keeps IDs, states and
-    // codes, the text is gone. Todofy holds the digest (pending): its bytes stay until a poll finds it created.
-    expect((await intentRows()).map((row) => [row.kind, row.state, row.last_code, row.payload !== ''])).toEqual([
-      ['urgent', 'recorded', 'created', false],
-      ['digest', 'held', 'pending', true],
-    ]);
-    await h.step(day + 15 * HOUR + 2 * MINUTE);
-    expect((await h.todofyState()).statusCalls).toEqual(['digest-2026-10-11']);
-    expect((await intentRows()).map((row) => [row.kind, row.state, row.last_code, row.payload])).toEqual([
+    expect((await h.tasksState()).invalid).toBe(0);
+    // Both exist: the rows keep IDs, states and codes; the text is gone.
+    expect((await rows()).map((row) => [row.kind, row.state, row.last_code, row.payload])).toEqual([
       ['urgent', 'recorded', 'created', ''],
       ['digest', 'recorded', 'created', ''],
     ]);
-    // The logs: intent IDs, kinds, counts and codes.
-    expect(h.logs.filter((line) => line.includes('"event":"intent"')).join('\n')).not.toMatch(/example\.com|合成/);
+    // The logs: row IDs, kinds, counts and codes.
+    expect(h.logs.filter((line) => line.includes('"event":"task"')).join('\n')).not.toMatch(/example\.com|合成/);
   });
 
   it('never sends a name that holds the watched URL or host: the task says 监视 <id>', async () => {
@@ -133,16 +121,16 @@ describe('the Todofy sink', () => {
     h.sites.html(byHost, secret(1));
     h.sites.html(byUrl, secret(1));
     await h.run(day + 3 * HOUR);
-    const state = await h.todofyState();
+    const state = await h.tasksState();
     expect(state.invalid).toBe(0);
-    // This test's intents (the stub keeps every intent it recorded).
-    const intents = state.intents.filter((intent) => state.calls.includes(intent.intent_id));
-    expect(intents.flatMap((intent) => intent.items.map((item) => item.title)).sort()).toEqual(['监视 by-host · 任何变化 1 次变化', '监视 by-url · 任何变化 1 次变化']);
-    const sent = JSON.stringify(intents);
+    // This test's tasks (the stub keeps every task it created).
+    const tasks = state.tasks.filter((task) => state.calls.includes(task.request_id));
+    expect(tasks.map((task) => task.title).sort()).toEqual(['监视 by-host · 任何变化 1 次变化', '监视 by-url · 任何变化 1 次变化']);
+    const sent = JSON.stringify(tasks);
     for (const leak of ['shop.example.com', 'example.net', 'synthetic-query']) expect(sent).not.toContain(leak);
   });
 
-  it('sends at most 9 urgent intents a UTC day; the next urgent change waits for the digest', async () => {
+  it('sends at most 9 urgent tasks a UTC day; the next urgent change waits for the digest', async () => {
     day = T0 + 20 * DAY;
     // Daily watches, so only the owner's checks below run before the digest.
     for (let n = 0; n < 10; n++) await watchAt(day + HOUR, `u${String(n)}`, `https://u${String(n)}.example.com/p`, Watch_NotifyPolicy.URGENT, 24 * 60);
@@ -155,107 +143,51 @@ describe('the Todofy sink', () => {
       await h.run(at);
     }
     expect(await h.sql("SELECT id FROM changes WHERE state = 'confirmed'")).toHaveLength(10);
-    const urgent = (await intentRows()).filter((row) => row.kind === 'urgent');
-    expect(urgent).toHaveLength(9);
-    expect((await h.todofyState()).calls).toHaveLength(9);
+    expect((await rows()).filter((row) => row.kind === 'urgent')).toHaveLength(9);
+    expect((await h.tasksState()).calls).toHaveLength(9);
     expect(await pending()).toBe(1);
     await h.step(day + 14 * HOUR);
-    const { intents } = await h.todofyState();
-    expect(intents.find((intent) => intent.intent_id === 'digest-2026-10-21')?.items.map((item) => item.title)).toEqual(['合成：u9 · 任何变化 1 次变化']);
+    const { tasks } = await h.tasksState();
+    expect(tasks.find((task) => task.title === '网页监视 2026-10-21 · 1 个监视')?.subtasks?.map((subtask) => subtask.title)).toEqual(['合成：u9 · 任何变化 1 次变化']);
     expect(await pending()).toBe(0);
   });
 
-  it('retries a lost, paused or limited proposal with the same bytes until Todofy records it', async () => {
+  it('retries a failed, lost or limited call with the same bytes, and Tasks makes one task', async () => {
     day = T0 + 30 * DAY;
     const url = 'https://retry.example.com/p';
     await watchAt(day + HOUR, 'retry', url, Watch_NotifyPolicy.URGENT);
-    await h.todofy({ propose: 'throw' });
+    await h.tasks({ create: 'throw' });
     h.sites.html(url, secret(1));
     const at = day + 3 * HOUR;
     await h.run(at);
-    let [row] = await intentRows();
+    let [row] = await rows();
     expect(row).toMatchObject({ kind: 'urgent', state: 'open', attempts: 1, last_code: 'unavailable' });
     const frozen = row?.payload ?? '';
     expect(row?.next_at).toBe(at + 5 * MINUTE);
 
-    // Paused at Todofy (nothing recorded): its hint, an hour.
-    await h.todofy({ propose: 'paused' });
+    // The day's limit (nothing created): the next UTC day.
+    await h.tasks({ create: 'daily_limit' });
     await h.step(at + 5 * MINUTE);
-    [row] = await intentRows();
-    expect(row).toMatchObject({ state: 'open', attempts: 2, last_code: 'maintenance', next_at: at + 5 * MINUTE + HOUR, payload: frozen });
-    // An unreadable answer is not an answer.
-    await h.todofy({ propose: 'garbled' });
-    await h.step(at + 5 * MINUTE + HOUR);
-    [row] = await intentRows();
-    expect(row).toMatchObject({ state: 'open', attempts: 3, last_code: 'unreadable', payload: frozen });
-    // The day's limit: its hint, two hours.
-    await h.todofy({ propose: 'daily_limit' });
+    [row] = await rows();
+    expect(row).toMatchObject({ state: 'open', attempts: 2, last_code: 'daily_limit', next_at: day + DAY, payload: frozen });
+    // Created, but the answer is lost: sent again.
+    await h.tasks({ create: 'lose' });
+    await h.step(day + DAY);
+    [row] = await rows();
+    expect(row).toMatchObject({ state: 'open', attempts: 3, last_code: 'unavailable', payload: frozen });
+    // The same request again: Tasks answers its first answer, replayed.
+    await h.tasks({});
     await h.step(row?.next_at ?? 0);
-    [row] = await intentRows();
-    expect(row).toMatchObject({ state: 'open', attempts: 4, last_code: 'daily_limit', payload: frozen });
-    await h.todofy({ propose: 'accept' });
-    await h.step(row?.next_at ?? 0);
-    [row] = await intentRows();
-    // Recorded and pending: Todofy holds it, the bytes stay until its tasks exist.
-    expect(row).toMatchObject({ state: 'held', attempts: 5, last_code: 'pending', payload: frozen });
-    const { intents, calls } = await h.todofyState();
-    expect(calls).toHaveLength(5);
-    expect(JSON.stringify(intents[intents.length - 1])).toBe(frozen);
-    await h.step(row?.next_at ?? 0);
-    [row] = await intentRows();
-    expect(row).toMatchObject({ state: 'recorded', attempts: 5, last_code: 'created', payload: '' });
+    [row] = await rows();
+    expect(row).toMatchObject({ state: 'recorded', attempts: 4, last_code: 'replayed', payload: '' });
+    const { tasks, calls, invalid } = await h.tasksState();
+    expect(new Set(calls)).toEqual(new Set([(JSON.parse(frozen) as { request_id: string }).request_id]));
+    expect(calls).toHaveLength(4);
+    expect(tasks.map((task) => JSON.stringify(task))).toContain(frozen);
+    expect(invalid).toBe(0);
   });
 
-  it('polls an intent Todofy holds, and proposes a failed one again with the same bytes until its tasks exist', async () => {
-    day = T0 + 45 * DAY;
-    const url = 'https://held.example.com/p';
-    await watchAt(day + HOUR, 'held', url, Watch_NotifyPolicy.URGENT);
-    h.sites.html(url, secret(1));
-    let at = day + 3 * HOUR;
-    await h.run(at);
-    let [row] = await intentRows();
-    const frozen = row?.payload ?? '';
-    expect(row).toMatchObject({ kind: 'urgent', state: 'held', attempts: 1, last_code: 'pending', next_at: at + HOUR });
-    expect((await h.todofyState()).calls).toEqual([row?.intent_id]);
-    await h.api.pauseWatch({ name: 'watches/held', requestId: op() });
-
-    // Still pending an hour on: polled, not proposed; polled again an hour later.
-    await h.todofy({ status: 'pending' });
-    at += HOUR;
-    await h.step(at);
-    [row] = await intentRows();
-    expect(row).toMatchObject({ state: 'held', attempts: 1, last_code: 'pending', next_at: at + HOUR, payload: frozen });
-    expect(await h.todofyState()).toMatchObject({ calls: [], statusCalls: [row?.intent_id] });
-
-    // Todoist refused a task: failed. The bytes stay, notify_unsettled says so, and it is proposed again after 5 minutes.
-    await h.todofy({ status: 'failed' });
-    at += HOUR;
-    await h.step(at);
-    [row] = await intentRows();
-    expect(row).toMatchObject({ state: 'held', attempts: 1, last_code: 'failed', next_at: at + 5 * MINUTE, payload: frozen });
-    const status = (await h.opsStatus()) as { health: string; signals: { code: string; metrics: Record<string, number> }[] };
-    expect(status.health).toBe('degraded');
-    expect(status.signals.find((signal) => signal.code === 'notify_unsettled')?.metrics).toMatchObject({ failed: 1 });
-
-    // The same bytes re-queue the unfinished tasks (other bytes would be a conflict): pending again, then created.
-    await h.todofy({});
-    at += 5 * MINUTE;
-    await h.step(at);
-    [row] = await intentRows();
-    expect(row).toMatchObject({ state: 'held', attempts: 2, last_code: 'pending', payload: frozen });
-    const resent = await h.todofyState();
-    expect(resent.calls).toEqual([row?.intent_id]);
-    expect(JSON.stringify(resent.intents.find((intent) => intent.intent_id === row?.intent_id))).toBe(frozen);
-    expect(resent.invalid).toBe(0);
-    at += HOUR;
-    await h.step(at);
-    [row] = await intentRows();
-    expect(row).toMatchObject({ state: 'recorded', attempts: 2, last_code: 'created', payload: '' });
-    const settled = (await h.opsStatus()) as { signals: { code: string }[] };
-    expect(settled.signals.map((signal) => signal.code)).not.toContain('notify_unsettled');
-  });
-
-  it('a pause across midnight: the open urgent intents fold into the digest, and the next day still has room for its own', async () => {
+  it('a day of refusals: the open urgent tasks fold into the digest, and the next day still has room for its own', async () => {
     day = T0 + 60 * DAY;
     const url = (n: number) => `https://p${String(n)}.example.com/p`;
     for (let n = 0; n < 10; n++) await watchAt(day + HOUR, `p${String(n)}`, url(n), Watch_NotifyPolicy.URGENT, 24 * 60);
@@ -265,48 +197,46 @@ describe('the Todofy sink', () => {
       await h.api.checkWatch({ name: `watches/p${String(n)}`, requestId: op() });
       await h.run(at);
     };
-    // Todofy is paused all day (nothing recorded): nine urgent intents wait open, and the tenth change waits for the
-    // digest, the slot it keeps.
-    await h.todofy({ propose: 'paused' });
+    // Tasks refuses every call with daily_limit all day (nothing created): nine urgent tasks wait open, and the tenth
+    // change waits for the digest, the slot it keeps.
+    await h.tasks({ create: 'daily_limit' });
     for (let n = 0; n < 10; n++) await change(n, 1, day + (2 + n) * HOUR);
-    let rows = await h.sql<{ kind: string; state: string }>('SELECT kind, state FROM intents ORDER BY created_at, intent_id');
-    expect(rows).toEqual(Array.from({ length: 9 }, () => ({ kind: 'urgent', state: 'open' })));
+    let all = await h.sql<{ kind: string; state: string }>('SELECT kind, state FROM intents ORDER BY created_at, intent_id');
+    expect(all).toEqual(Array.from({ length: 9 }, () => ({ kind: 'urgent', state: 'open' })));
     expect(await pending()).toBe(1);
 
-    // 14:00: one digest of all ten; the nine urgent intents end superseded (Todofy never recorded them).
+    // 14:00: one digest of all ten; the nine urgent tasks end superseded (Tasks never created them).
     await h.step(day + 14 * HOUR + MINUTE);
-    rows = await h.sql('SELECT kind, state FROM intents ORDER BY created_at, intent_id');
-    expect(rows.filter((row) => row.state === 'superseded')).toHaveLength(9);
-    expect(rows.filter((row) => row.state === 'open')).toEqual([{ kind: 'digest', state: 'open' }]);
+    all = await h.sql('SELECT kind, state FROM intents ORDER BY created_at, intent_id');
+    expect(all.filter((row) => row.state === 'superseded')).toHaveLength(9);
+    expect(all.filter((row) => row.state === 'open')).toEqual([{ kind: 'digest', state: 'open' }]);
     expect(await pending()).toBe(0);
-    await h.todofyState();
+    await h.tasksState();
 
-    // The pause ends after midnight: the digest of the day before is recorded first (a slot of this day).
+    // The next UTC day: the digest of the day before is created first (a slot of this day).
     const next = day + DAY;
-    await h.todofy({ propose: 'accept', day: 'next' });
+    await h.tasks({ day: 'next' });
     await h.step(next + HOUR);
-    const first = await h.todofyState();
-    expect(first.calls).toEqual([`digest-2026-11-30`]);
-    expect(first.intents.find((intent) => intent.intent_id === 'digest-2026-11-30')?.items).toHaveLength(10);
+    const first = await h.tasksState();
+    expect(first.calls).toHaveLength(1);
+    expect(first.tasks.find((task) => task.title === '网页监视 2026-11-30 · 10 个监视')?.subtasks).toHaveLength(10);
 
     // Nine more urgent changes: eight fit (with the carried digest and today's digest, ten), the ninth waits for it.
     for (let n = 0; n < 9; n++) await change(n, 2, next + (2 + n) * HOUR);
-    const urgentToday = await h.sql("SELECT intent_id FROM intents WHERE kind = 'urgent' AND day = '2026-12-01'");
-    expect(urgentToday).toHaveLength(8);
+    expect(await h.sql("SELECT intent_id FROM intents WHERE kind = 'urgent' AND day = '2026-12-01'")).toHaveLength(8);
     expect(await pending()).toBe(1);
     await h.step(next + 14 * HOUR + MINUTE);
     const [digest] = await h.sql<{ state: string; last_code: string }>("SELECT state, last_code FROM intents WHERE intent_id = 'digest-2026-12-01'");
-    // Recorded within Todofy's ten for the day (the stub refuses an eleventh with daily_limit).
-    expect(digest).toEqual({ state: 'held', last_code: 'pending' });
-    const { intents, invalid } = await h.todofyState();
+    expect(digest).toEqual({ state: 'recorded', last_code: 'created' });
+    const { tasks, invalid } = await h.tasksState();
     expect(invalid).toBe(0);
-    expect(intents.find((intent) => intent.intent_id === 'digest-2026-12-01')?.items.map((item) => item.title)).toEqual(['合成：p8 · 任何变化 1 次变化']);
+    expect(tasks.find((task) => task.title === '网页监视 2026-12-01 · 1 个监视')?.subtasks?.map((subtask) => subtask.title)).toEqual(['合成：p8 · 任何变化 1 次变化']);
   });
 
   it('keeps an idle pass to a few rows with the sink on (SQLite rows are a budget, docs/design.md §8)', async () => {
     day = T0 + 35 * DAY;
     await watchAt(day + HOUR, 'idle', 'https://idle.example.com/p', Watch_NotifyPolicy.URGENT, 24 * 60);
-    // The day's digest is done (nothing waited); then a pass with nothing due, no urgent event and no open intent.
+    // The day's digest is done (nothing waited); then a pass with nothing due, no urgent event and no open row.
     await h.step(day + 14 * HOUR);
     await h.rows();
     // Within the hour (the hourly prune of the global tables is rows.test.ts's).
@@ -319,23 +249,56 @@ describe('the Todofy sink', () => {
     expect(next).toBeGreaterThan(day + 14 * HOUR + 11 * MINUTE);
   });
 
-  it('gives an intent up after 7 days and counts nothing twice', async () => {
+  it('gives a task up after 7 days and counts nothing twice', async () => {
     day = T0 + 40 * DAY;
     const url = 'https://gone.example.com/p';
     await watchAt(day + HOUR, 'gone', url, Watch_NotifyPolicy.URGENT);
-    await h.todofy({ propose: 'throw' });
+    await h.tasks({ create: 'throw' });
     h.sites.html(url, secret(1));
     await h.run(day + 3 * HOUR);
     await h.api.pauseWatch({ name: 'watches/gone', requestId: op() });
     let at = day + 3 * HOUR;
     while (at < day + 8 * DAY) {
-      const [row] = await intentRows();
+      const [row] = await rows();
       at = Math.max(at + HOUR, row?.next_at ?? at);
       await h.step(at);
     }
-    const [row] = await intentRows();
+    const [row] = await rows();
     expect(row).toMatchObject({ state: 'expired', last_code: 'gave_up', payload: '' });
-    const calls = (await h.todofyState()).calls;
+    const calls = (await h.tasksState()).calls;
     expect(new Set(calls).size).toBe(1);
+  });
+
+  it("sends the Todofy sink's open rows to Tasks once, and ends its held ones as sink_retired", async () => {
+    day = T0 + 70 * DAY;
+    await h.clock(day);
+    const intent = {
+      version: 'task-intent-v1', source: 'watch', intent_id: 'urgent-c0', mode: 'separate',
+      parent: { title: '网页监视 · 紧急变化' },
+      items: [{ title: '合成：old-sink · 任何变化 1 次变化', url: link('old-sink') }],
+    };
+    for (const [id, state] of [['urgent-c0', 'open'], ['urgent-c1', 'held']] as const) {
+      await h.sql(
+        `INSERT INTO intents (intent_id, kind, day, payload, events, state, attempts, next_at, last_code, created_at, updated_at)
+         VALUES (?, 'urgent', '2026-12-10', ?, 1, ?, 1, ?, 'maintenance', ?, ?)`,
+        id, JSON.stringify(intent), state, day, day - HOUR, day - HOUR,
+      );
+    }
+    await h.sql("DELETE FROM meta WHERE key = 'sink'");
+    await h.step(day + MINUTE);
+    const { tasks, calls } = await h.tasksState();
+    expect(calls).toHaveLength(1);
+    expect(tasks.filter((task) => calls.includes(task.request_id))).toEqual([{
+      request_id: calls[0], title: '网页监视 · 紧急变化', description: '',
+      subtasks: [{ title: '合成：old-sink · 任何变化 1 次变化', description: link('old-sink') }],
+    }]);
+    expect((await rows()).map((row) => [row.intent_id, row.state, row.last_code])).toEqual([
+      ['urgent-c0', 'recorded', 'created'],
+      ['urgent-c1', 'expired', 'sink_retired'],
+    ]);
+    const status = (await h.opsStatus()) as { signals: { code: string; metrics: Record<string, number> }[] };
+    expect(status.signals.find((signal) => signal.code === 'notify_unsettled')?.metrics).toEqual({ open: 0, failed: 1 });
+    // Once: a later pass leaves the rows alone.
+    expect((await h.sql<{ value: string }>("SELECT value FROM meta WHERE key = 'sink'"))[0]?.value).toBe('tasks');
   });
 });

@@ -563,8 +563,8 @@ list), then gained `watch`; fixtures `OpsStatus/watch-ok.json`, `OpsStatus/watch
 - Files: `watch/worker/src/ops.ts` (the entrypoint, forwards to `WatchState`), `watch/worker/src/ops-status.ts` (status
   and guard over the object's SQLite). No D1. Rows read per `status()`: the watches (at most 50), the new changes
   through the `changes_state` index (counted up to 1,000), the undelivered events through the partial index
-  `notifications_pending` (at most 500), the Todofy sink's unsettled intents, those ended badly in a week and those
-  recorded today (three indexed counts) and a few meta rows: 1,709 at those bounds, held to 1,750
+  `notifications_pending` (at most 500), the sink's open rows, those ended badly in a week and those created today
+  (three indexed counts; the sink is Tasks' TaskInbox since 2026-10-21, Todofy's task intents before) and a few meta rows: 1,709 at those bounds, held to 1,750
   (`STATUS_ROWS_MAX`, `watch/worker/test/runtime/ops.test.ts`), so 48 calls a day read at most 84,000. Its one write:
   when WatchState has no alarm set it arms one, so the dashboard's tick restarts a lost scheduler.
 - Counters: `watches_active`, `watches_paused`, `watches_broken`, `watches_failing`, `changes_new`, `fetches_today`,
@@ -572,7 +572,7 @@ list), then gained `watch`; fixtures `OpsStatus/watch-ok.json`, `OpsStatus/watch
   `notify_unsettled` (warning), `guard_shed` (info). Never a watch's name, URL, page text or a diff.
 - Guard: a shed defers `scheduled_checks` (a scheduled check waits until the watch's last check is a day old, so
   every watch is still checked daily) and `daily_sweep` (the sweep of every watch's bounds waits for the shed's end).
-  An owner's check, a pending change's confirmation, previews, the owner API and the notifications to Todofy are never
+  An owner's check, a pending change's confirmation, previews, the owner API and the notifications to Tasks are never
   deferred.
 
 ## 3d. mailsort (added 2026-10-06, additive)

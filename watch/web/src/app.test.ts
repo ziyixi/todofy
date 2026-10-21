@@ -87,7 +87,7 @@ describe('adding a watch', () => {
     await until(() => text(root).includes('gbk（来自 meta）'))
     // The fragment never reached the server: the preview carries the URL in its body.
     expect(server.calls.every((call) => !call.path.includes('shop.example.com'))).toBe(true)
-    // The name is never taken from the URL (it goes into Todoist): the preview sends a neutral one and the box stays empty.
+    // The name is never taken from the URL (it goes into Tasks): the preview sends a neutral one and the box stays empty.
     expect(server.mutations(':preview')[0]?.body).toMatchObject({ watch: { uri: 'https://shop.example.com/item?x=1', display_name: '新监视' } })
     const nameBox = () => root.querySelector<HTMLInputElement>('input[name="displayName"]')
     expect(nameBox()?.value).toBe('')

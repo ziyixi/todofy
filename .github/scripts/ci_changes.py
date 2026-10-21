@@ -35,10 +35,10 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   The links app (links/, the short links on s.ziyixi.science) is checked and deployed since L2 (links/docs/design.md
   section 11). It uses no contract (NO_CONTRACTS) and compiles in packages/edge-auth and the TypeScript proto runtime
   with proto/links/ui/, so a change to those checks and deploys it too. The watch app (watch/, the web watches on watch.ziyixi.science) is
-  checked and deployed since W2 (watch/docs/design.md section 11). It proposes task-intent-v1 (its notification sink)
-  and answers ops-v1 (its Ops entrypoint; Contracts runs both tests) and compiles in packages/edge-auth and the
-  TypeScript proto runtime with proto/watch/ui/, proto/todofy/taskintent/ and proto/ops/, so a change to those checks
-  and deploys it too. CHECK_ONLY keeps a new app's deploy output false until its resources are ready. Fleet's
+  checked and deployed since W2 (watch/docs/design.md section 11). It creates its tasks through Tasks' TaskInbox (its
+  notification sink) and answers ops-v1 (its Ops entrypoint; Contracts runs that test) and compiles in
+  packages/edge-auth and the TypeScript proto runtime with proto/watch/ui/, proto/tasks/inbox/ and proto/ops/, so a
+  change to those checks and deploys it too. CHECK_ONLY keeps a new app's deploy output false until its resources are ready. Fleet's
   Access resources are registered; its deployment and Home's binding can now be published after the gate. Mailsort
   (mailsort/, the Gmail sorting on sort.ziyixi.science, mailsort/docs/design.md) is checked and deployed since its
   Access application was created (2026-10-07): it answers ops-v1 (Contracts runs its tests) and compiles in
@@ -265,7 +265,8 @@ PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
 # value imports, Python imports; test_proto.py checks this against the sources). A package missing here
 # reaches every user (fail safe; test_proto.py fails until it is listed).
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
-    "proto/todofy/taskintent/": ("watch",),
+    # task-intent-v1: no app imports it since 2026-10-21 (the watch app creates its tasks in Tasks); proto/'s own tests.
+    "proto/todofy/taskintent/": (),
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
@@ -275,9 +276,9 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # the other apps that call it join as each imports it.
     "proto/todofy/mail/": ("todofy", "tasks"),
     "proto/tasks/ui/": ("tasks", "personal-mcp"),
-    # Tasks' create-only TaskInbox (tasks.inbox.v1): Tasks serves it, Home creates the digest's daily task with it; the
-    # watch app joins as it imports it.
-    "proto/tasks/inbox/": ("tasks", "dashboard"),
+    # Tasks' create-only TaskInbox (tasks.inbox.v1): Tasks serves it, Home creates the digest's daily task and the watch
+    # app its notifications with it.
+    "proto/tasks/inbox/": ("tasks", "dashboard", "watch"),
     "proto/links/ui/": ("links",),
     "proto/watch/ui/": ("watch",),
     # mailsort's owner API (mailsort.ui.v2, after v1): its Worker serves it, its UI calls it.
@@ -350,8 +351,6 @@ PROTO_NOT_BUNDLED = (
 # test_ci_changes.py checks this map against the Workers' imports.
 BUNDLED_BY = {
     "contracts/ops-v1/ops-v1.ts": ("mail-hero", "dashboard", "watch", "mailsort", "brief"),
-    # task-intent-v1: the watch app proposes (bounds). The types are generated from proto/ (PROTO_USERS).
-    "contracts/task-intent-v1/task-intent-v1.ts": ("watch",),
 }
 
 # Outputs that describe a reused branch run (strings, one line each).

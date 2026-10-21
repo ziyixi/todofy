@@ -28,7 +28,7 @@ import { API_DOMAIN, localize, REASONS } from './reasons.ts';
 import { errorCode, runAlarm, type AlarmResult } from './scheduler.ts';
 import { HostLocks } from './host-locks.ts';
 import { Store, type RowMeter } from './store.ts';
-import { TodofySink } from './todofy.ts';
+import { retireTodofySink, TasksSink } from './tasks.ts';
 import type { NotificationSink } from './notify.ts';
 import { setGuard, watchStatus, type GuardOutcome } from './ops-status.ts';
 import type * as opsWire from '@ziyixi/proto/ops/v1/ops_wire';
@@ -95,12 +95,14 @@ export class WatchState extends DurableObject<Env> {
   private transact = <T>(fn: () => T): T => this.ctx.storage.transactionSync(fn);
 
   /**
-   * The notification sink: Todofy over the TODOFY binding, with links to this app's host (the only host Todofy allows
-   * for this source). Without either (local development, most tests) the outbox only fills.
+   * The notification sink: Tasks over the TASKS binding (its TaskInbox), with links to this app's host, after the rows
+   * the Todofy sink left are settled (once). Without either (local development, most tests) the outbox only fills.
    */
   private sink(): NotificationSink | null {
     const host = publicHost(this.env);
-    return this.env.TODOFY === undefined || host === null ? null : new TodofySink(this.store, this.env.TODOFY, host);
+    if (this.env.TASKS === undefined || host === null) return null;
+    retireTodofySink(this.store, this.now());
+    return new TasksSink(this.store, this.env.TASKS, host);
   }
 
   // ---- scheduling -------------------------------------------------------------------------------------------------

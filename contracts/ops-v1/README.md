@@ -157,8 +157,9 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
   `critical`; otherwise `ok` (`info` signals allowed).
 - `modes`: booleans; `maintenance` always present. Mail Hero: `force_send_paused` (deployment variable),
   `send_paused` (owner switch), `forwarding` (mode forward with a current endpoint), `backup_active`.
-  Todofy: `processing_paused`, `force_pause_todoist` (its task writes to Tasks are paused; the name stays), `reminder_enabled`, `backup_active`. The watch app: `maintenance` (always false: it has no maintenance switch)
-  and `notifications` (its TODOFY binding is configured: the daily digest and urgent changes go to Todofy). mailsort:
+  Todofy: `processing_paused`, `backup_active` (`force_pause_todoist` and `reminder_enabled` until 2026-10-21, when it
+  stopped writing tasks). The watch app: `maintenance` (always false: it has no maintenance switch)
+  and `notifications` (its TASKS binding is configured: the daily digest and urgent changes go to Tasks). mailsort:
   `maintenance` (always false), `mode_limited` (the deployment variable MODE is below live), `live`, `sorting_off`,
   `breaker` (read from storage; a `status_unavailable` status has only `maintenance` and `mode_limited`). recall:
   `maintenance` (always false: it has no maintenance switch). The brief: `maintenance` (always false), `paused` (the

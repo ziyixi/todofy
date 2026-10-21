@@ -168,38 +168,30 @@ export const PREVIEW_LINES_MAX = 300;
 export const PREVIEW_ITEMS_MAX = 100;
 export const PREVIEW_TEXT_MAX = 300;
 
-// ---- notifications (docs/design.md §7: the outbox and the Todofy sink, W3) ------------------------------------------
+// ---- notifications (docs/design.md §7: the outbox and the Tasks sink) ----------------------------------------------
 
 /** Notification outbox rows are kept this long (delivered or not) and at most this many. */
 export const NOTIFICATIONS_KEPT_MS = 30 * DAY;
 export const NOTIFICATIONS_MAX = 500;
-/**
- * The daily digest is frozen at the first alarm at or after this UTC hour (07:00 in California, 22:00 in Beijing; after
- * Todofy's own 13:00 and 13:30 UTC work). The alarm wakes for it.
- */
+/** The daily digest is frozen at the first alarm at or after this UTC hour (07:00 in California, 22:00 in Beijing). */
 export const DIGEST_UTC_HOUR = 14;
 /**
- * Todofy records at most 10 new intents per source and UTC day, counted by the day it records them
- * (TASK_INTENT_LIMITS.intentsPerSourcePerDay; todofy.test.ts checks the two agree). The sink freezes an urgent intent
- * only while the intents still open (of any day: a pause carries them over) plus those Todofy recorded this UTC day,
- * plus one slot for a digest not yet frozen today, stay below it: 9 urgent intents on a normal day. An urgent change
- * past that waits for the digest, and the digest is proposed before any urgent intent (todofy.ts).
+ * The tasks this app creates per UTC day (its own budget; Tasks' TaskInbox refuses a 21st of a source with
+ * daily_limit). The sink freezes an urgent task only while the tasks still open (of any day: a failure carries them
+ * over) plus those created this UTC day, plus one slot for a digest not yet frozen today, stay below it: 9 urgent tasks
+ * on a normal day. An urgent change past that waits for the digest, which is sent before any urgent task (tasks.ts).
  */
 export const INTENTS_PER_DAY = 10;
-/** Calls one alarm makes to Todofy (a proposal or a status poll, each a service binding call). */
+/** Calls one alarm makes to Tasks (each a service binding call). */
 export const INTENT_SENDS_PER_ALARM = 3;
-/**
- * An intent Todofy holds (recorded, its tasks not all created yet) is polled with taskIntentStatus this often (or
- * after Todofy's hint, if longer; contracts/task-intent-v1 "States": poll a pending intent, re-propose a failed one).
- */
-export const INTENT_POLL_MS = HOUR;
-/** A proposal that failed is tried again after this, doubling up to the maximum. */
+/** A call that failed is tried again after this, doubling up to the maximum. */
 export const INTENT_RETRY_BASE_MS = 5 * MINUTE;
 export const INTENT_RETRY_MAX_MS = 6 * HOUR;
-/**
- * An intent whose tasks do not all exist this long after it was frozen (never recorded, or held by Todofy without
- * being created) is given up (counted in ops-v1): Todofy itself stops its attempts after 7 days.
- */
+/** A task still not created this long after it was frozen is given up (counted in ops-v1). */
 export const INTENT_GIVE_UP_MS = 7 * DAY;
-/** Intent rows (their IDs, states and codes; the text is cleared once Todofy holds it) are kept this long. */
+/** A task's title, and each subtask's, in code points (TaskInbox allows 500 UTF-16 code units). */
+export const TASK_TITLE_MAX = 200;
+/** Subtasks of the digest's task (TaskInbox's maximum). */
+export const SUBTASKS_MAX = 30;
+/** Rows of the sink (their IDs, states and codes; the request is cleared once it is settled) are kept this long. */
 export const INTENTS_KEPT_MS = 30 * DAY;

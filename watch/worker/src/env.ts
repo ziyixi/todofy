@@ -3,7 +3,7 @@
  */
 import type { FetchFn } from './fetcher.ts';
 import type { WatchState } from './state.ts';
-import type { TodofyIntentEntrypoint } from './todofy.ts';
+import type { TaskInboxEntrypoint } from './tasks.ts';
 
 /** The name of the single WatchState instance. */
 export const WATCH_OBJECT = 'watch-v1';
@@ -21,11 +21,11 @@ export interface Env {
    */
   readonly BROWSER?: Fetcher;
   /**
-   * Service binding to the Worker "todofy", entrypoint "Intents" with `props.source = "watch"` (contracts/task-intent-v1;
-   * task intents of this source only, never Todofy's ops-v1 methods): the notification sink
-   * (todofy.ts). Absent in local development and in most workerd tests: the outbox then only fills.
+   * Service binding to the Worker "tasks", entrypoint "TaskInbox" with `props.source = "watch"` (proto/tasks/inbox/v1:
+   * it creates tasks only, no read, update or delete): the notification sink (tasks.ts). Absent in local development and
+   * in most workerd tests: the outbox then only fills.
    */
-  readonly TODOFY?: Service<TodofyIntentEntrypoint>;
+  readonly TASKS?: Service<TaskInboxEntrypoint>;
 
   // vars (committed in ../../wrangler.toml; BUILD_SHA added at deploy by deploy/deploy-vars.mjs)
   /** The watch host, e.g. watch.ziyixi.science: the CSRF Origin. */
