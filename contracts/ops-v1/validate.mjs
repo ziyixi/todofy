@@ -12,7 +12,7 @@
 // $comment). Any other keyword throws, so a schema edit that needs more support fails the tests instead of being skipped.
 //
 //   import { validate } from '<relative path>/contracts/ops-v1/validate.mjs'
-//   const errors = validate(schema, 'TaskIntent', value)   // [] when valid
+//   const errors = validate(schema, 'OpsStatus', value)   // [] when valid
 
 const ANNOTATIONS = new Set(['$schema', '$id', '$defs', 'title', 'description', 'format', 'examples', '$comment'])
 const KEYWORDS = new Set(['$ref', 'type', 'enum', 'const', 'required', 'properties', 'additionalProperties',

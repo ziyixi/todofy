@@ -1,1 +1,1 @@
-"""Todofy: Mail Hero events to Todoist tasks on Cloudflare Workers."""
+"""Todofy: Mail Hero events summarised by Gemini, the mail inbox and daily reports, on Cloudflare Workers."""

@@ -165,7 +165,8 @@ export function App() {
   useEffect(() => {
     if (actions.mutationRevision > 0) void loadCatalog();
   }, [actions.mutationRevision, loadCatalog]);
-  // A window left open overnight, or while Todofy added tasks, shows today's list and counts on return.
+  // A window left open overnight, or while Home, Watch or a mail conversion added tasks, shows today's list and counts
+  // on return.
   useReturnRefresh(() => {
     void list.refresh();
     void loadCatalog();
