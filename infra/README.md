@@ -77,7 +77,8 @@ configurations built to slip past it.
 This is the maximum declared count. Fresh bootstrap creates 34 objects before the first Worker release,
 then adds its exact mail rule (35). An adopted account retains the frozen legacy backup app (36).
 Objects being retired ([Retiring an app](#retiring-an-app)) are not counted: [`retired.tf`](retired.tf) moves them
-out of the managed addresses so that the next apply deletes them.
+out of the managed addresses (a retired Access policy instead leaves with its resource block) so that the next apply
+deletes them.
 Older private inputs can temporarily keep the existing external IdP references; bootstrap captures and
 imports their actual IDs before switching to the managed references.
 
@@ -562,10 +563,15 @@ instance cannot be destroyed". The order, for any app:
    [`access.tf`](access.tf)'s region and [`ids.tf`](ids.tf)), and adds one `moved` block per object to
    [`retired.tf`](retired.tf): from its instance to an address no resource block declares
    (`<type>.retired_<app>`), with the same pair in `RETIRED` of [`infra_guard.py`](../.github/scripts/infra_guard.py).
-   The guard refuses any other move to an undeclared address. A release refuses to drop a live binding the
-   desired state no longer declares (`BINDING_UNDECLARED`), so each binding another app had to the Worker gets an
-   entry in `RETIRED_SERVICE_BINDINGS` of [`control.py`](../tools/cloud-release/control.py): that app's normal
-   release may then remove exactly that name, while a repair still stops.
+   The guard refuses any other move to an undeclared address, and any such move of an Access policy. A reusable
+   policy that only the app's applications used leaves with its whole resource block and keeps its old address;
+   spell its `for_each` keys in a `locals` map in `retired.tf` so that the redacted summary prints them. An
+   application's state records that it depends on its policies, and a move does not carry that record over: a moved
+   policy could be deleted before the application still using it, which Cloudflare refuses, and the apply would
+   stop half done. Left in place, the policy is deleted after the application. A release refuses to drop a live
+   binding the desired state no longer declares (`BINDING_UNDECLARED`), so each binding another app had to the
+   Worker gets an entry in `RETIRED_SERVICE_BINDINGS` of [`control.py`](../tools/cloud-release/control.py): that
+   app's normal release may then remove exactly that name, while a repair still stops.
 2. **After it is on `main` and every app that bound the Worker has deployed without that binding**, delete the
    Worker in the Cloudflare dashboard (Wrangler owns it, not this directory). Then neither the hostname nor the
    database is in use when they go, and the host never serves without Access.
@@ -576,15 +582,19 @@ instance cannot be destroyed". The order, for any app:
    Worker and Durable Object items clear when the Worker is deleted (check that its namespace went with it), the D1
    item after the apply in step 4. Any other finding there is real drift.
 3. **"Infra drift"** of the merge (or a dispatch of it after step 2) is red by design (exit 3, a delete). Check it
-   against exactly this: `delete: 2`, the rows `cloudflare_zero_trust_access_application.retired_<app>` and
-   `cloudflare_d1_database.retired_<app>`, every other row `no-op`; `output changes: 2` (`update` of `access_aud`
-   and `d1_database_ids`); no outputs problem; and its expect line, `delete=2,outputs=2@<fingerprint>`.
+   against exactly this: `delete: 2` (one more per retired policy), the rows
+   `cloudflare_zero_trust_access_application.retired_<app>` and `cloudflare_d1_database.retired_<app>` (and each
+   retired policy at its old address), every other row `no-op`; `output changes: 2` (`update` of `access_aud` and
+   `d1_database_ids`); no outputs problem; and its expect line, `delete=2,outputs=2@<fingerprint>` (the same
+   `delete` count).
 4. **Dispatch "Infra apply"** on `main` with that `expect` and `confirm_destructive` = `delete-replace-forget`. It
-   backs up the encrypted state, deletes the two objects (the database with every row in it; D1 Time Travel goes
-   with it) and ends with a verify plan of "No changes"; the next "Infra drift" is green. Until then the daily
-   "Personal cloud reconcile" reports the plan as needing a manual review and applies nothing.
-5. **A later commit** removes the `moved` blocks and their `RETIRED` pairs, and the app's `RETIRED_SERVICE_BINDINGS`
-   entries: once the state no longer holds the old addresses and no live Worker has the binding, they do nothing.
+   backs up the encrypted state, deletes the objects (the database with every row in it, D1 Time Travel with it; a
+   retired policy after its application) and ends with a verify plan of "No changes"; the next "Infra drift" is
+   green. Until then the daily "Personal cloud reconcile" reports the plan as needing a manual review and applies
+   nothing.
+5. **A later commit** removes the `moved` blocks, their `RETIRED` pairs and any policy-key map, and the app's
+   `RETIRED_SERVICE_BINDINGS` entries: once the state no longer holds the old addresses and no live Worker has the
+   binding, they do nothing.
 
 ## Removing the import blocks
 

@@ -152,6 +152,22 @@ class Guard(unittest.TestCase):
         ordinary = "moved {\n  from = cloudflare_r2_bucket.app[\"old\"]\n  to   = cloudflare_d1_database.app\n}\n"
         self.assertEqual(run({"moved.tf": ordinary}), [])
 
+    def test_a_retired_access_policy_keeps_its_address(self):
+        """An application's state records its dependency on its policies under their addresses, and a move does not
+        rewrite it: a policy moved out of the configuration could be deleted before or alongside the application that
+        still uses it, which Cloudflare refuses, leaving "Infra apply" half done. So no RETIRED pair moves a policy, and
+        the guard refuses such a move even when it is listed; a rename to a declared policy stays ordinary."""
+        self.assertEqual([source for source in infra_guard.RETIRED if source.startswith(f"{infra_guard.ACCESS_POLICY}.")], [])
+        source = 'cloudflare_zero_trust_access_policy.old["old"]'
+        target = "cloudflare_zero_trust_access_policy.retired_old"
+        moved = f"moved {{\n  from = {source}\n  to   = {target}\n}}\n"
+        with mock.patch.dict(infra_guard.RETIRED, {source: target}):
+            self.assert_flags({"retired.tf": moved}, "a retired Access policy is moved")
+        declared = 'resource "cloudflare_zero_trust_access_policy" "owner" {\n  lifecycle { prevent_destroy = true }\n}\n'
+        renamed = "moved {\n  from = cloudflare_zero_trust_access_policy.old\n  to   = cloudflare_zero_trust_access_policy.owner\n}\n"
+        self.assertEqual(run({"access.tf": declared, "moved.tf": renamed}), [])
+        self.assert_flags({"moved.tf": renamed}, "a retired Access policy is moved")
+
     def test_dynamic_provisioner(self):
         dynamic = """
             resource "cloudflare_r2_bucket" "d" {

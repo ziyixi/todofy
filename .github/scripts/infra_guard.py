@@ -17,7 +17,9 @@ What it keeps true (infra/README.md "Scope" and "Next steps"):
 - No `moved` block names a FROZEN address (from or to, any instance key): a rename must not carry a write to a frozen
   object past the apply's gate (infra_state.py FROZEN_OBJECTS, which also matches by object id).
 - A `moved` block's `to` names a declared resource, except the exact RETIRED pairs: a move to an undeclared address
-  takes the object out of prevent_destroy's reach, so the next plan deletes it.
+  takes the object out of prevent_destroy's reach, so the next plan deletes it. An Access policy never leaves that
+  way: the applications' state records their dependency on it under its old address, so a moved policy could be
+  deleted before the application that still uses it. A retired policy keeps its address (infra/retired.tf).
 - No output reads a variable (var.*): outputs are printed by `tofu output` and compared with the public
   wrangler.toml files, so a personal value (the policies' emails) must never become one. Outputs read managed
   objects only (outputs.tf).
@@ -64,14 +66,15 @@ FROZEN = frozenset({"cloudflare_zero_trust_access_application.mail_hero_backup"}
 # Objects being deleted on purpose (infra/README.md "Retiring an app", infra/retired.tf): the only moves whose `to` no
 # resource block declares, as exact `from` -> `to` addresses. Such a move takes the object out of prevent_destroy's reach,
 # so the next plan deletes it, and "Infra apply" still refuses that unless confirm_destructive is given. Remove a pair
-# with its moved block after the apply that deleted the object.
+# with its moved block after the apply that deleted the object. No pair moves an Access policy (ACCESS_POLICY).
 RETIRED: dict[str, str] = {
     'cloudflare_zero_trust_access_application.flowday["flowday"]': "cloudflare_zero_trust_access_application.retired_flowday",
     'cloudflare_zero_trust_access_application.flowday["flowday-bypass"]': "cloudflare_zero_trust_access_application.retired_flowday_bypass",
-    'cloudflare_zero_trust_access_policy.flowday["flowday"]': "cloudflare_zero_trust_access_policy.retired_flowday",
-    'cloudflare_zero_trust_access_policy.flowday["flowday-bypass"]': "cloudflare_zero_trust_access_policy.retired_flowday_bypass",
     'cloudflare_d1_database.app["flowday"]': "cloudflare_d1_database.retired_flowday",
 }
+# A reusable Access policy is never moved out of the configuration: OpenTofu does not rewrite the dependency an
+# application's state records on its policies, so the move would drop the order "application first, then policy".
+ACCESS_POLICY = "cloudflare_zero_trust_access_policy"
 TOP_LEVEL = frozenset({"terraform", "provider", "variable", "locals", "resource", "import", "output", "moved"})
 NEVER_NESTED = frozenset({"provisioner", "connection", "data", "module", "resource"})
 # Committed files under infra/, relative to it. Anything else (a plan named tfplan or plan.out, a .tofu
@@ -356,7 +359,12 @@ def check(infra: Path) -> list[str]:
         problems.append("no resource found")
     for where, block in moves:
         source, target = (_address(block.attrs.get(side, [])) for side in ("from", "to"))
-        if _reference(block.attrs.get("to", [])) not in declared and RETIRED.get(source) != target:
+        if _reference(block.attrs.get("to", [])) in declared:
+            continue
+        if source.startswith(f"{ACCESS_POLICY}."):
+            problems.append(f"{where}: a retired Access policy is moved; it keeps its address so that the apply deletes "
+                            "it after the applications that use it")
+        elif RETIRED.get(source) != target:
             problems.append(f"{where}: a moved block's target is not declared, which deletes the object past "
                             "prevent_destroy; only the exact RETIRED pairs may")
 
