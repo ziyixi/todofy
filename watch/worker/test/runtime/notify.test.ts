@@ -4,8 +4,7 @@
  * request_id it answered. Covered: an urgent change leaves in the alarm that confirms it, as its watch's own task; the
  * digest takes every other event (a BROKEN watch included) once, at the first alarm from 14:00 UTC, and the alarm is
  * armed for it; at most 9 urgent tasks a UTC day, the next urgent change waits for the digest; a lost or refused call
- * is retried with the same bytes and makes one task; a task never holds the watched URL or the page's text; the rows
- * the Todofy sink left are sent to Tasks or end as sink_retired.
+ * is retried with the same bytes and makes one task; a task never holds the watched URL or the page's text.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Watch_NotifyPolicy } from '@ziyixi/proto/watch/ui/v1/watch_pb';
@@ -267,38 +266,5 @@ describe('the Tasks sink', () => {
     expect(row).toMatchObject({ state: 'expired', last_code: 'gave_up', payload: '' });
     const calls = (await h.tasksState()).calls;
     expect(new Set(calls).size).toBe(1);
-  });
-
-  it("sends the Todofy sink's open rows to Tasks once, and ends its held ones as sink_retired", async () => {
-    day = T0 + 70 * DAY;
-    await h.clock(day);
-    const intent = {
-      version: 'task-intent-v1', source: 'watch', intent_id: 'urgent-c0', mode: 'separate',
-      parent: { title: '网页监视 · 紧急变化' },
-      items: [{ title: '合成：old-sink · 任何变化 1 次变化', url: link('old-sink') }],
-    };
-    for (const [id, state] of [['urgent-c0', 'open'], ['urgent-c1', 'held']] as const) {
-      await h.sql(
-        `INSERT INTO intents (intent_id, kind, day, payload, events, state, attempts, next_at, last_code, created_at, updated_at)
-         VALUES (?, 'urgent', '2026-12-10', ?, 1, ?, 1, ?, 'maintenance', ?, ?)`,
-        id, JSON.stringify(intent), state, day, day - HOUR, day - HOUR,
-      );
-    }
-    await h.sql("DELETE FROM meta WHERE key = 'sink'");
-    await h.step(day + MINUTE);
-    const { tasks, calls } = await h.tasksState();
-    expect(calls).toHaveLength(1);
-    expect(tasks.filter((task) => calls.includes(task.request_id))).toEqual([{
-      request_id: calls[0], title: '网页监视 · 紧急变化', description: '',
-      subtasks: [{ title: '合成：old-sink · 任何变化 1 次变化', description: link('old-sink') }],
-    }]);
-    expect((await rows()).map((row) => [row.intent_id, row.state, row.last_code])).toEqual([
-      ['urgent-c0', 'recorded', 'created'],
-      ['urgent-c1', 'expired', 'sink_retired'],
-    ]);
-    const status = (await h.opsStatus()) as { signals: { code: string; metrics: Record<string, number> }[] };
-    expect(status.signals.find((signal) => signal.code === 'notify_unsettled')?.metrics).toEqual({ open: 0, failed: 1 });
-    // Once: a later pass leaves the rows alone.
-    expect((await h.sql<{ value: string }>("SELECT value FROM meta WHERE key = 'sink'"))[0]?.value).toBe('tasks');
   });
 });

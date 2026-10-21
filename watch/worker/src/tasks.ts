@@ -181,28 +181,6 @@ export function freezeTask(request: CreateInboxTaskRequest): string | null {
   return texts.every((text) => fits(text.title, text.description)) ? JSON.stringify(request) : null;
 }
 
-/**
- * An open row of the Todofy sink (a task-intent-v1 TaskIntent, never recorded by Todofy) as a request: the parent's
- * title and description, and each item as a subtask that links where the item did. Null when it does not read.
- */
-export function fromIntent(payload: string, requestId: string): CreateInboxTaskRequest | null {
-  let intent: { parent?: { title?: unknown; description?: unknown }; items?: unknown };
-  try {
-    intent = JSON.parse(payload) as typeof intent;
-  } catch {
-    return null;
-  }
-  const items = Array.isArray(intent.items) ? (intent.items as { title?: unknown; url?: unknown }[]) : [];
-  const text = (value: unknown): string => (typeof value === 'string' ? value : '');
-  const request: CreateInboxTaskRequest = {
-    request_id: requestId,
-    title: oneLine(text(intent.parent?.title), TASK_TITLE_MAX),
-    description: text(intent.parent?.description),
-    subtasks: items.slice(0, SUBTASKS_MAX).map((item) => ({ title: oneLine(text(item.title), TASK_TITLE_MAX), description: text(item.url) })),
-  };
-  return freezeTask(request) === null ? null : request;
-}
-
 // ---- answers ----------------------------------------------------------------------------------------------------------
 
 /** What one call means for the row: the task exists, it is refused for good, or it is sent again later. */
@@ -266,26 +244,6 @@ function dayStart(now: number): number {
 /** The start of `day`'s digest hour (UTC). */
 function digestTime(now: number): number {
   return Math.floor(now / DAY) * DAY + DIGEST_UTC_HOUR * HOUR;
-}
-
-/**
- * The rows the Todofy sink left, settled before the first pass with this sink (once: meta `sink` is `tasks` after it,
- * one row read a pass). One Todofy recorded (`held`) had its tasks in Todofy's hands, which keeps no intents since
- * 2026-10-21, so it ends as expired `sink_retired` (`notify_unsettled` shows it); one never recorded (`open`) is sent
- * to Tasks as a request made from its frozen intent.
- */
-export function retireTodofySink(store: Store, now: number): void {
-  if (store.getMeta('sink') === 'tasks') return;
-  store.run(`UPDATE intents SET state = 'expired', payload = '', event_ids = '[]', last_code = 'sink_retired', updated_at = ? WHERE state = 'held'`, now);
-  for (const row of store.all<{ intent_id: string; payload: string }>(`SELECT intent_id, payload FROM intents WHERE state = 'open'`)) {
-    const request = fromIntent(row.payload, crypto.randomUUID());
-    if (request === null) {
-      store.run(`UPDATE intents SET state = 'expired', payload = '', event_ids = '[]', last_code = 'sink_retired', updated_at = ? WHERE intent_id = ?`, now, row.intent_id);
-    } else {
-      store.run(`UPDATE intents SET payload = ?, next_at = ?, updated_at = ? WHERE intent_id = ?`, JSON.stringify(request), now, now, row.intent_id);
-    }
-  }
-  store.setMeta('sink', 'tasks');
 }
 
 export class TasksSink implements NotificationSink {

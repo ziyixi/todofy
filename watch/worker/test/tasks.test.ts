@@ -1,8 +1,8 @@
 /**
  * The Tasks sink's text and decisions (src/tasks.ts), in Node: the exact request of the digest and of an urgent change,
  * every request the builder can make is one TaskInbox reads (proto/tasks/inbox/v1, strictly) and stays within its
- * bounds, a task never holds a watched URL or page text, an open row of the Todofy sink becomes a request, and every
- * answer TaskInbox may give maps to created, refused or a retry. The workerd suite (test/runtime/notify.test.ts) runs
+ * bounds, a task never holds a watched URL or page text, and every answer TaskInbox may give maps to created, refused or a
+ * retry. The workerd suite (test/runtime/notify.test.ts) runs
  * the sink in WatchState against a stub of TaskInbox.
  */
 import { describe, expect, it } from 'vitest';
@@ -13,7 +13,6 @@ import {
   backoffMs,
   digestTask,
   freezeTask,
-  fromIntent,
   lineTitle,
   oneLine,
   outcomeOf,
@@ -130,29 +129,6 @@ describe('every request is one TaskInbox reads, and keeps the owner decision', (
     expect(oneLine('a\u2029b\r\nc\u0007 d', 10)).toBe('a b c d');
     expect(oneLine('😀'.repeat(5), 3)).toBe('😀😀…');
     expect(oneLine('x\ud800y', 10)).toBe('x\ufffdy');
-  });
-});
-
-describe("an open row of the Todofy sink (task-intent-v1, retired 2026-10-21)", () => {
-  it('becomes a request: the parent, and each item as a subtask with its link', () => {
-    const intent = {
-      version: 'task-intent-v1', source: 'watch', intent_id: 'urgent-0000000000000000', mode: 'separate',
-      parent: { title: '网页监视 · 紧急变化' },
-      items: [{ title: '合成示例：演唱会余票 · 供货状态 1 次变化', url: `https://${HOST}/watches/tickets` }],
-    };
-    const request = fromIntent(JSON.stringify(intent), ID);
-    expect(request).toEqual({
-      request_id: ID,
-      title: '网页监视 · 紧急变化',
-      description: '',
-      subtasks: [{ title: '合成示例：演唱会余票 · 供货状态 1 次变化', description: `https://${HOST}/watches/tickets` }],
-    });
-    expect(readable(request)).toBe(true);
-  });
-
-  it('is given up when it does not read', () => {
-    expect(fromIntent('{', ID)).toBeNull();
-    expect(fromIntent(JSON.stringify({ parent: {}, items: [] }), ID)).toBeNull();
   });
 });
 

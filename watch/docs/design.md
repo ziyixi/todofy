@@ -290,9 +290,6 @@ for source `watch` only; `proto/tasks/inbox/v1`):
   not created 7 days after it was frozen is given up. At most 3 calls an alarm, the digest first. A row open a day, or
   one refused or given up this week, raises `notify_unsettled`. The row (ID, kind, state, code) is kept 30 days. Logs
   carry row IDs, kinds, counts and codes only.
-- **The Todofy sink's rows**, settled once before the first pass with this sink: an open one (never recorded by
-  Todofy) is sent to Tasks as a request made from its frozen intent; a held one (Todofy had it, and keeps no intents
-  since 2026-10-21) ends `expired` with `sink_retired`.
 
 Without the binding (local development, most workerd tests) there is no sink and the outbox only fills; the change
 inbox is always how the owner sees what changed.
