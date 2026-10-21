@@ -25,9 +25,11 @@ replay and unsubscribe passed; the test left zero active subscriptions. The actu
 Bridge commit `e35351c5` adds Tasks tools/Step identity persistence, a private Ops surface and Home status card,
 plus narrow MailApi/RecallApi/HomeApi source adapters. It binds only Tasks. Branch CI `39561368040` found three
 stale test assumptions: Home's exact binding list, Ops selftest mutation anchors, and a mobile drag fixture that
-chose a hidden Monday after Wednesday's date rollover. Their corrections preserve the checks; rerun full CI and
-publish the same green SHA before enabling the remaining bindings. Native/source tests, Home's 276 unit/98
-workerd/163 UI tests, MCP's 32 unit/3 workerd checks and the 437 CI-script checks passed locally.
+chose a hidden Monday after Wednesday's date rollover. Rerun `39563107309` passed those jobs and all source
+checks. Its remaining failure was the TypeScript Ops producer-list expectation. The Python twin and schema
+expectations are updated with it; proto's 497 TS and 113 Python tests now pass locally. Rerun the complete gate
+before enabling the remaining bindings. Native/source tests, Home's 276 unit/98 workerd/163 UI tests,
+MCP's 32 unit/3 workerd checks and the 437 CI-script checks passed locally.
 
 The working tree then wires the prepared content tools and four event readers into the existing MCP DO.
 Keep that second stage uncommitted until the bridge is green and deployed: its HomeApi binding requires the
