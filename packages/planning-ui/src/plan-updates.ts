@@ -407,7 +407,8 @@ export function predictStage(
 
 /**
  * Shows a day drag at once, mirroring moveTaskToDay: the step leaves its source day and is
- * inserted before `beforeId` in the target day, or appended.
+ * inserted before `beforeId` in the target day, or appended. A repeating step dropped on a day
+ * it was done from is open there again, as Tasks reopens that day's mark.
  */
 export function predictMove(
   taskId: string,
@@ -420,7 +421,11 @@ export function predictMove(
       const taskIds = day.taskIds.filter((id) => id !== taskId);
       const before = beforeId ? taskIds.indexOf(beforeId) : -1;
       taskIds.splice(before < 0 ? taskIds.length : before, 0, taskId);
-      return { ...day, taskIds };
+      return {
+        ...day,
+        taskIds,
+        completedTaskIds: day.completedTaskIds.filter((id) => id !== taskId),
+      };
     }
     if (day.date === sourceDate)
       return { ...day, taskIds: day.taskIds.filter((id) => id !== taskId) };

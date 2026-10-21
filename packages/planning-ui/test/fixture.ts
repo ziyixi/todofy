@@ -481,7 +481,11 @@ export function createPrototype(
           const taskIds = day.taskIds.filter((value) => value !== id);
           const before = beforeId ? taskIds.indexOf(beforeId) : -1;
           taskIds.splice(before < 0 ? taskIds.length : before, 0, id);
-          return { ...day, taskIds };
+          // As Tasks does, a step added again to a day it was done from is open there again.
+          const completedTaskIds = day.completedTaskIds.filter(
+            (value) => value !== id,
+          );
+          return { ...day, taskIds, completedTaskIds };
         }
         return source?.date === day.date
           ? { ...day, taskIds: day.taskIds.filter((value) => value !== id) }

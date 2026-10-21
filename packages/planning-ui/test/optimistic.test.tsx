@@ -12,7 +12,12 @@ import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { createPrototype } from "./fixture";
 import { predictMove, predictStage } from "../src/plan-updates";
-import type { PlanningTask, PlusActions, PlusData } from "../src/model";
+import type {
+  DayPlan,
+  PlanningTask,
+  PlusActions,
+  PlusData,
+} from "../src/model";
 
 // jsdom has no layout for real pointer drags (covered by the packaged browser tests), so this
 // stand-in hands each drop straight to the board's own onDragEnd.
@@ -267,6 +272,33 @@ it("keeps a removed card in place and pending until Tasks confirms the removal",
   ).toBe(false);
   await act(() => queue[0]!.confirm());
   expect(ids("2026-10-14")).toEqual([]);
+});
+
+it("predicts a repeating step dropped again on a day it was done from as open there, as Tasks reopens that day's mark", async () => {
+  const data = await createPrototype().load();
+  // Done from today's queue; a repeating step stays open in Plan, so the tray can drop it again.
+  const done = <Day extends DayPlan>(day: Day): Day => ({
+    ...day,
+    taskIds: day.taskIds.filter((id) => id !== "copy"),
+    completedTaskIds: ["copy"],
+  });
+  data.days = data.days.map((day) =>
+    day.date === "2026-10-13" ? done(day) : day,
+  );
+  data.focus = done(data.focus);
+  const added = predictMove("copy", undefined, "2026-10-13")(data);
+  const today = added.days.find((day) => day.date === "2026-10-13")!;
+  expect([today.taskIds.at(-1), today.completedTaskIds]).toEqual(["copy", []]);
+  expect([added.focus.taskIds.at(-1), added.focus.completedTaskIds]).toEqual([
+    "copy",
+    [],
+  ]);
+  // Another day's done steps stay done.
+  data.days[0] = { ...data.days[0]!, completedTaskIds: ["receipt"] };
+  expect(
+    predictMove("copy", undefined, "2026-10-13")(data).days[0]!
+      .completedTaskIds,
+  ).toEqual(["receipt"]);
 });
 
 it("predicts moves like moveTaskToDay, including today's Focus queue, and stage changes by ID", async () => {
