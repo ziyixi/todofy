@@ -1,20 +1,15 @@
-"""The Mailbox's domain rules, independent of any task provider (docs/planning-api.md, "Mail").
+"""Mail's domain rules (docs/mail-api.md): what the Mail entry answers about a mail Todofy keeps.
 
-A mail item is a Mail Hero event Todofy summarised (its ``summaries`` row): its ID is the event ID, its task an
-external reference. Its brief is one plain sentence, the first line the summary prompt asks for
-(core/prompts.SUMMARY_EMAIL); ``brief_of`` reads it from any summary, older ones included. The owner's mail
-categories are an existing label and a priority each (P1-P4, 1 the most urgent); Tasks' Mail conversion
-(runtime/plus_mail.py) adds the label and sets the priority. The request rules at the end are the Mail API's
-(runtime/plus_api.py).
+A mail item is a Mail Hero event Todofy summarised (its ``summaries`` row): its ID is the event ID, its task the ID
+of the Tasks task it was converted to. Its brief is one plain sentence, the first line the summary prompt asks for
+(core/prompts.SUMMARY_EMAIL); ``brief_of`` reads it from any summary, older ones included. Todofy keeps no task
+fields: Tasks converts a mail itself and owns the categories it files with (runtime/mail.py).
 """
 
 import hashlib
 import json
 import re
-import uuid
 from base64 import b64decode, urlsafe_b64encode
-from dataclasses import dataclass
-from typing import Any
 
 # What a read takes of a summary to find its brief: substr(summary, 1, 600).
 BRIEF_SOURCE_CHARS = 600
@@ -28,12 +23,6 @@ _RULE = re.compile(r"^([=\-*_])\1{2,}$")
 _LEADING_MARK = re.compile(r"^(?:[-*>]|\d{1,3}[.)])\s+")
 _SENTENCE = re.compile(r"[。！？]|[.!?](?=\s|$)")
 _ENDS = ("。", "！", "？", ".", "!", "?")
-
-# The owner's mail categories: at most this many, each one label and one priority.
-MAX_MAIL_CATEGORIES = 4
-PRIORITIES = (1, 2, 3, 4)
-# plan_categories.name is at most 40 characters.
-MAX_CATEGORY_NAME = 40
 
 
 def item_etag(row: dict) -> str:
@@ -60,11 +49,6 @@ def page_cursor(token: str) -> tuple[int, str]:
 def next_page(row: dict) -> str:
     value = json.dumps([row["created_at"], row["event_id"]], separators=(",", ":")).encode()
     return urlsafe_b64encode(value).decode()
-
-
-def task_text(text: str, units: int) -> str:
-    """Tasks validates JavaScript string lengths, so a non-BMP character occupies two units."""
-    return text.encode("utf-16-le")[: units * 2].decode("utf-16-le", errors="ignore")
 
 
 def _heading(line: str) -> bool:
@@ -106,100 +90,13 @@ def brief_of(text: str) -> str:
     return ""
 
 
-@dataclass(frozen=True, slots=True)
-class Category:
-    """One saved mail category: Todofy's own ID (plan_categories.id), its label's ID and name as saved, and its
-    domain priority (1 = P1)."""
-
-    id: int
-    label_id: str
-    label: str
-    priority: int
-
-    @property
-    def name(self) -> str:
-        """plan_categories.name: generated, e.g. "quick · P4", at most MAX_CATEGORY_NAME characters."""
-        suffix = f" · P{self.priority}"
-        label = self.label
-        if len(label) + len(suffix) > MAX_CATEGORY_NAME:
-            label = label[: MAX_CATEGORY_NAME - len(suffix) - 1] + "…"
-        return label + suffix
-
-
-@dataclass(frozen=True, slots=True)
-class MailSettings:
-    """The saved categories, in their order, and the destination sent with the last change ("" until one was),
-    never used for filing (runtime/plan_store.py MAIL_KEY)."""
-
-    categories: tuple[Category, ...] = ()
-    destination: str = ""
-
-    @property
-    def etag(self) -> str:
-        """Changes with any category's ID, label or priority, their order, or the destination; not with a label's
-        name, which Tasks owns."""
-        value = [[[c.id, c.label_id, c.priority] for c in self.categories], self.destination]
-        return hashlib.sha256(json.dumps(value, separators=(",", ":")).encode()).hexdigest()
-
-
-def replace_categories(
-    current: list[Category], requested: list[tuple[str, str, int]], next_id: int
-) -> tuple[list[Category], list[int]]:
-    """The categories saved for ``requested`` (label ID, label name, priority), in its order, and the IDs of the
-    current ones to archive. A requested pair that a current category has keeps its ID (and takes the label's
-    current name); every other one gets the next unused ID from ``next_id`` on.
-
-    Raises ValueError("BAD_REQUEST") for more than MAX_MAIL_CATEGORIES, a priority outside P1-P4, the same pair
-    twice, or two names that would be the same.
-    """
-    if len(requested) > MAX_MAIL_CATEGORIES or any(priority not in PRIORITIES for _, _, priority in requested):
-        raise ValueError("BAD_REQUEST")
-    if len({(label_id, priority) for label_id, _, priority in requested}) != len(requested):
-        raise ValueError("BAD_REQUEST")
-    kept = {(category.label_id, category.priority): category for category in current}
-    saved = []
-    for label_id, label, priority in requested:
-        previous = kept.get((label_id, priority))
-        if previous is None:
-            saved.append(Category(next_id, label_id, label, priority))
-            next_id += 1
-        else:
-            saved.append(Category(previous.id, label_id, label, priority))
-    if len({category.name for category in saved}) != len(saved):
-        raise ValueError("BAD_REQUEST")
-    ids = {category.id for category in saved}
-    return saved, [category.id for category in current if category.id not in ids]
-
-
-# ---- the Mail API's requests ----------------------------------------------------------------------------------
+# ---- the Mail entry's requests ---------------------------------------------------------------------------------
 
 ID = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
 
 
 def check_id(value: str) -> str:
-    """A mail, task or label ID a request names; never a browser's temporary ID (tmp-…)."""
+    """A mail or task ID a request names; never a browser's temporary ID (tmp-…)."""
     if not ID.fullmatch(value) or value.startswith("tmp-"):
         raise ValueError("BAD_REQUEST")
     return value
-
-
-def action_id(value: str) -> str:
-    """A write's request ID: a canonical UUIDv4."""
-    try:
-        parsed = uuid.UUID(value)
-    except (ValueError, AttributeError) as error:
-        raise ValueError("BAD_REQUEST") from error
-    if parsed.version != 4 or str(parsed) != value:
-        raise ValueError("BAD_REQUEST")
-    return value
-
-
-def fingerprint(value: Any) -> str:
-    """A receipt's request hash (runtime/plus_receipts.py)."""
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-
-
-def command_id(request_id: str, index: int = 0) -> str:
-    """The Tasks request ID of a write's ``index``th operation: the same for every retry of that write, so Tasks runs
-    it once. Frozen: a conversion retried across a release must keep it."""
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"todofy-plus:{request_id}:{index}"))

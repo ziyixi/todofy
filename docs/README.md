@@ -32,7 +32,7 @@ The documents below have different jobs; keep one authoritative home for each fa
 | Service | Development / Design | Operations / Verification |
 | --- | --- | --- |
 | Mail Hero | [README](../mail-hero/README.md), [AGENTS](../mail-hero/AGENTS.md) | [Setup and recovery](../mail-hero/docs/cloudflare-setup.md), [CI/CD](../mail-hero/docs/ci-cd.md), [verification](../mail-hero/docs/verification-native.md) |
-| Todofy | [Development notes](../todofy/docs/dev-notes.md), [gateway contract](../todofy/docs/gateway-contract.md), [planning API](../todofy/docs/planning-api.md) | [Setup](../todofy/docs/cloudflare-setup.md), [CI/CD](../todofy/docs/ci-cd.md), [verification](../todofy/docs/verification.md) |
+| Todofy | [Development notes](../todofy/docs/dev-notes.md), [gateway contract](../todofy/docs/gateway-contract.md), [Mail API](../todofy/docs/mail-api.md) | [Setup](../todofy/docs/cloudflare-setup.md), [CI/CD](../todofy/docs/ci-cd.md), [verification](../todofy/docs/verification.md) |
 | Tasks | [README](../tasks/README.md), [design](../tasks/docs/design.md), [AGENTS](../tasks/AGENTS.md) | [Backup and restore](../tasks/docs/backup.md), [verification](../tasks/docs/verification.md) |
 | Home | [Current views](../dashboard/docs/design-v2.md), [storage and jobs](../dashboard/docs/design.md) | [Setup](../dashboard/docs/setup.md), [limits](../dashboard/docs/limits.md), [verification](../dashboard/docs/verification.md) |
 | Links | [Design](../links/docs/design.md), [AGENTS](../links/AGENTS.md) | [README](../links/README.md) |

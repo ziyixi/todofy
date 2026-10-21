@@ -246,9 +246,9 @@ def test_hashed_assets_are_cached_but_the_spa_fallback_is_not(worker: Worker) ->
     assert worker.hooks.get(f"/assets/{asset.name}").status_code == 404
 
 
-def test_the_planning_api_has_no_public_route(worker: Worker) -> None:
-    """Tasks reaches PlusService only through the private Planning binding."""
-    for path in ("/api/plus/v1/mailItems", "/api/plus/v1/mailSettings:read"):
+def test_the_mail_entry_has_no_public_route(worker: Worker) -> None:
+    """Tasks and the Personal MCP reach MailService only through a binding of the Mail entrypoint."""
+    for path in ("/api/mail/v1/mailItems", "/api/mail/v1/mailInbox", "/api/plus/v1/mailItems"):
         assert worker.hooks.get(path).status_code == 404, path
         owner = worker.owner.get(path)
         assert (owner.status_code, reason(owner)) == (404, "NOT_FOUND"), path

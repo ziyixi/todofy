@@ -18,7 +18,7 @@ The owner decided on 2026-10-18 to remove it, with no compatibility window; the 
 | Connection tokens and the hooks-host routes (Issue/Read/RevokeExtensionConnection) | Tasks' owner Access login, Origin and CSRF, then Todofy's private Planning channel |
 | The Mailbox (LookupMailItems, FileMailItem, DeleteMailItems, UpdateMailSettings) | Tasks' Mail page: ListMailItems, ConvertMailItem, DeleteMailSummaries, UpdateMailCategories |
 | FlowDay's `FocusEntrypoint` and the extension's FlowDay proxy | FlowDay's `NativeFocusEntrypoint`, reached through the same Planning channel |
-| `todofy/docs/todoist-plus.md` | [planning-api.md](../../todofy/docs/planning-api.md) |
+| `todofy/docs/todoist-plus.md` | [mail-api.md](../../todofy/docs/mail-api.md) |
 | `docs/todoist-plus-verification.md`, `docs/todoist-plus-planning-prototype.md`, the extension's docs | Git history at `69ddb339` |
 
 The nine retired RPCs and the messages only they used are listed in `proto/retired.json`. The planning store

@@ -33,6 +33,7 @@ from todofy.core.gtd import GtdCode, Scope, SnapshotStatus
 from todofy.core.metrics import Step, StepPoint
 from todofy.core.request_id import todoist_request_id
 from todofy.core.sql import gtd as sql
+from todofy.core.sql import mailbox as mailbox_sql
 from todofy.core.sql import reminders as reminder_sql
 from todofy.core.todoist_request import build_task_request
 from todofy.core.vocab import ATTENTION_AGE_SECONDS, ReminderState
@@ -323,7 +324,7 @@ async def _aggregate(env: Any, coordinator: Any, state: State, now: int, offset:
             db.prepare(sql.SNAPSHOT_DAY.sql).bind(yesterday),
             db.prepare(sql.CLOSED_SINCE.sql).bind(yesterday, day),
             # The brief's carryover pool, uncapped: Mail entries of the 14 days before the last 24 h.
-            db.prepare(sql.NATIVE_MAIL_OPEN.sql).bind(*mail_window),
+            db.prepare(mailbox_sql.PENDING_BETWEEN.sql).bind(*mail_window),
             db.prepare(sql.REVIEW_HISTORY.sql).bind(first_week, HISTORY_WEEKS + 1),
         ]
     )

@@ -41,6 +41,12 @@ export interface UiRefusal {
   readonly retry_after: number | null;
 }
 
+/**
+ * How TodofyCore answers one todofy.mail.v1 rpc (worker/todofy/runtime/mail.py): the response message as wire JSON
+ * text, or an ErrorInfo reason with the seconds of a Retry-After.
+ */
+export type MailAnswer = { readonly ok: string } | { readonly error: string; readonly retry_after: number | null };
+
 /** The core's facts for GetIntegration: whether each core secret is set, never its value. */
 export interface CoreSetup {
   readonly mail_source_id: string;
@@ -68,10 +74,8 @@ export interface Coordinator extends Rpc.DurableObjectBranded {
    */
   owner_ui(owner: string, method: string, request: string, cursor: string | null): Promise<UiAnswer>;
   setup(): Promise<CoreSetup>;
-  /** One PlusService rpc from Tasks' Planning channel (Mail, the weekly review); refuses without a TASKS binding. */
-  plus_native_ui(method: string, request: string): Promise<UiAnswer>;
-  /** Bounded Mail readiness scan; no content and no Tasks call. */
-  mail_ready_poll(request: string): Promise<UiAnswer>;
+  /** One todofy.mail.v1 rpc from the Mail entrypoint (src/mail.ts): the rpc's name and its request in wire JSON. */
+  mail(method: string, request: string): Promise<MailAnswer>;
   // ops-v1 (the Ops entrypoint, src/ops.ts). Structured inputs travel as JSON text; the core reads them strictly and
   // writes every answer with the wire JSON profile (worker/todofy/core/ops.py).
   ops_status(): Promise<OpsAnswer<ops.OpsStatus>>;

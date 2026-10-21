@@ -169,23 +169,28 @@ export function reminderPage(size: number): Record<string, unknown> {
 /** The Mailbox's largest answers to the extension: a lookup of 200 mail tasks (briefs at their 60 characters and four
  * categories) and one mail's whole summary (MAX_SUMMARY_BYTES). */
 /** A full ListMailItems page: pending mail, newest first, and the category shortcuts. */
-export function mailItems(count: number): Record<string, unknown> {
+/** A MailItem (todofy.mail.v1) at its limits: a 120-character title, a 60-character brief, a linked task. */
+function mailItem(n: number): Record<string, unknown> {
   return {
-    mail_items: Array.from({ length: count }, (_, n) => ({
-      id: UUID(n),
-      title: text(120, n),
-      etag: 'f'.repeat(64),
-      brief: text(60, n),
-      receive_time: AT,
-      has_summary: true,
-    })),
-    categories: [1, 2, 3, 4].map(n => ({ id: String(n), label: { provider: 'tasks', external_id: `label-${String(n)}` }, priority: `p${String(n)}` })),
-    categories_etag: 'f'.repeat(64),
+    name: `mailItems/${UUID(n)}`,
+    id: UUID(n),
+    title: text(120, n),
+    brief: text(60, n),
+    receive_time: AT,
+    has_summary: true,
+    etag: 'f'.repeat(64),
+    task_id: `task-${String(n)}`,
+    pending: true,
   };
 }
 
-export function mailSummary(): Record<string, unknown> {
-  return { summary: text(Math.floor((64 * 1024) / 3)) };
+export function mailItems(count: number): Record<string, unknown> {
+  return { mail_items: Array.from({ length: count }, (_, n) => mailItem(n)), next_page_token: 'W1sxNzU5MDQ2NDAwXV0' };
+}
+
+/** One mail with its summary at 64 KiB. */
+export function mailItemWithSummary(): Record<string, unknown> {
+  return { ...mailItem(0), summary: text(Math.floor((64 * 1024) / 3)) };
 }
 
 /** TodofyCore's answer of a message: `{ok, next_cursor}`, the message as wire JSON text. */

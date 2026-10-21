@@ -18,8 +18,7 @@ Verified 2026-10-19 UTC. Implementation: `cb4ef15b481c34c82542833a39a60d8796ed6e
 
 The rollover uses four Core D1 statements for an ordinary page. Existing matching reset receipts retain
 their old memberships through durable completion before cleanup. It adds no schema, service, dependency,
-API or retry mechanism. [Rollover controls](../todofy/docs/planning-api.md#weekly-rollover-and-controls)
-remain in force.
+API or retry mechanism. The rollover controls remain in force.
 
 ## Verification
 

@@ -140,13 +140,11 @@ within its noise; todofy-core's upload 542.7 → 554.0 KiB (gzip 151.2 → 153.5
 0.01 → 0.04 ms for a small one, 0.2 → 0.7 ms with 100 attachments, 0.9 ms either way for the largest; Todofy's UI
 bundle is unchanged (its types come from the OpenAPI document).
 
-Tasks' Mail API and the weekly review's two facts (`ReadWeeklyReview`) are the separate `PlusService` in
-`todofy/ui/v1/plus_service.proto`, alongside Todofy's owner API; it keeps the retired Todoist Plus extension's
-name. Its planning methods and `CompleteTask` were retired (`retired.json`, 2026-10-20) when planning moved into
-Tasks (`tasks/ui/v1`); `PlanningTask` stays for `ConvertMailItem`'s answer and `PlanView` stays unused, since
-`retired.json` has no kind for a top-level enum. Sharing a package reuses its existing Python generation. Tasks
-serves its `/api/plus/v1/` routes behind Access and CSRF and forwards them on Todofy's private Planning binding,
-which allows only the methods Tasks calls. See [`todofy/docs/planning-api.md`](../todofy/docs/planning-api.md).
+The mail Todofy keeps is its own package, `todofy.mail.v1` (`todofy/mail/v1/mail_service.proto`): the gateway's
+`Mail` entrypoint serves it to the Workers whose binding grants `read` or `read-write`, and no public host routes it.
+See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusService`
+(`todofy/ui/v1/plus_service.proto`, named after the retired Todoist Plus extension), which Tasks and the Personal MCP
+still call until they move to `MailService`; Todofy no longer serves it.
 
 ## Rules
 

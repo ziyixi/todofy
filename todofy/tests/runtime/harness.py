@@ -570,11 +570,18 @@ def start_worker(config: str, state: Path, variables: dict[str, str]) -> Iterato
 
 
 def start_gateway(
-    state: Path, variables: dict[str, str], config: str = GATEWAY_CONFIG, core: bool = True, tasks: bool = True
+    state: Path,
+    variables: dict[str, str],
+    config: str = GATEWAY_CONFIG,
+    core: bool = True,
+    tasks: bool = True,
+    front: str | None = None,
 ) -> Iterator[Worker]:
     """The gateway (``config``, the primary) with todofy-core and Tasks in one process; ``core=False``
     starts the gateway alone, so every Durable Object call fails, and ``tasks=False`` leaves the core
-    without its TASKS binding, so every Tasks call fails.
+    without its TASKS binding, so every Tasks call fails. ``front`` is a test-only Worker config started as
+    the primary before the gateway (it binds the gateway's entrypoints by the gateway config's name); then
+    ``--var`` reaches only it, and the gateway runs on its config's own vars.
 
     Gateway vars stay ``--var``; core vars are written with the core test config into a
     ``wrangler.test-run-<uuid>.json`` at the repo root (a Python config must sit next to
@@ -593,7 +600,7 @@ def start_gateway(
     generated.write_text(json.dumps(core_config))
     store = str(tasks_config(state / "tasks.json")) if tasks else None
     try:
-        configs = [config, generated.name, *([store] if store else [])]
+        configs = [*([front] if front else []), config, generated.name, *([store] if store else [])]
         yield from _run(Worker(configs, generated.name, state, gateway, store))
     finally:
         generated.unlink(missing_ok=True)

@@ -46,14 +46,14 @@ const LEGACY = 'GET /api/v1/legacyTexts/{id} (1.9 MB of ASCII with escapes)';
 const REPORTS = 'GET /api/v1/latestReports (every report at its limits)';
 // Mail's two largest answers, passed through unread like the legacy text and the reports: a decode of either again
 // would show here.
-const MAIL_ITEMS = 'GET /api/plus/v1/mailItems (a full page of 50 items)';
-const MAIL_SUMMARY = 'GET /api/plus/v1/mailItems:readMailSummary (64 KiB summary)';
+const MAIL_ITEMS = 'GET /api/mail/v1/mailItems (a full page of 50 items)';
+const MAIL_SUMMARY = 'GET /api/mail/v1/mailItems/{id} (64 KiB summary)';
 const PASSED_THROUGH = new Set([LEGACY, REPORTS, MAIL_ITEMS, MAIL_SUMMARY]);
 
 const ANSWERS = {
-  plus_native_ui: {
+  mail: {
     ListMailItems: fixtures.ok(fixtures.mailItems(50)),
-    ReadMailSummary: fixtures.ok(fixtures.mailSummary()),
+    GetMailItem: fixtures.ok(fixtures.mailItemWithSummary()),
   },
   owner_ui: {
     GetServiceStatus: fixtures.ok(fixtures.serviceStatus()),
@@ -142,14 +142,14 @@ async function session({ h, meter }: GatewayIsolate): Promise<Measurement[]> {
   ];
   const measured: Measurement[] = [init];
   for (const [label, path, options] of requests) measured.push(await meter.measure(label, () => expectOk(h, path, options), RUNS));
-  // Tasks' requests on its private Planning channel.
-  const planning: [string, string][] = [
-    [MAIL_ITEMS, '/api/plus/v1/mailItems?page_size=50'],
-    [MAIL_SUMMARY, `/api/plus/v1/mailItems:readMailSummary?id=${fixtures.UUID(0)}`],
+  // Tasks' requests on its Mail binding.
+  const mail: [string, string][] = [
+    [MAIL_ITEMS, '/api/mail/v1/mailItems?page_size=50'],
+    [MAIL_SUMMARY, `/api/mail/v1/mailItems/${fixtures.UUID(0)}`],
   ];
-  for (const [label, path] of planning) {
+  for (const [label, path] of mail) {
     measured.push(await meter.measure(label, async () => {
-      const response = await h.planning(path);
+      const response = await h.mail(path);
       await response.arrayBuffer();
       if (response.status !== 200) throw new Error(`${label}: ${String(response.status)}`);
     }, RUNS));

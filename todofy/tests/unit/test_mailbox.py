@@ -1,4 +1,4 @@
-"""Mail's pure rules: core/mailbox.py (the brief, the categories, the requests). Synthetic text only."""
+"""Mail's pure rules: core/mailbox.py (the brief, the page tokens, the IDs). Synthetic text only."""
 
 import sqlite3
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from todofy.core import mailbox
-from todofy.core.mailbox import Category, MailSettings, brief_of, replace_categories
+from todofy.core.mailbox import brief_of
 
 # ---- the brief ------------------------------------------------------------------------------------------------
 
@@ -75,78 +75,19 @@ def test_the_brief_never_exceeds_its_column():
         db.execute(insert, ("long", "长" * 61))
 
 
-# ---- categories -----------------------------------------------------------------------------------------------
-
-
-def test_a_category_name_is_generated_and_fits_its_column():
-    assert Category(1, "9", "quick", 4).name == "quick · P4"
-    long = Category(1, "9", "很长的标签" * 20, 2).name
-    assert len(long) == mailbox.MAX_CATEGORY_NAME and long.endswith("… · P2")
-
-
-def test_replacing_keeps_the_ids_of_unchanged_categories_and_archives_the_rest():
-    current = [Category(3, "a", "work", 2), Category(4, "b", "quick", 4), Category(5, "c", "deep", 3)]
-    saved, archived = replace_categories(current, [("b", "quick-renamed", 4), ("a", "work", 1), ("d", "new", 3)], 9)
-    assert saved == [Category(4, "b", "quick-renamed", 4), Category(9, "a", "work", 1), Category(10, "d", "new", 3)]
-    assert archived == [3, 5]
-    assert replace_categories(current, [], 9) == ([], [3, 4, 5])
-
-
-@pytest.mark.parametrize(
-    "requested",
-    [
-        pytest.param([("a", "x", 1)] * 2, id="same_pair_twice"),
-        pytest.param([("a", "x", 0)], id="no_priority"),
-        pytest.param([("a", "x", 5)], id="priority_out_of_range"),
-        pytest.param([(str(index), str(index), 1) for index in range(5)], id="more_than_four"),
-        pytest.param([("a", "same" * 20, 1), ("b", "same" * 20 + "!", 1)], id="names_collide"),
-    ],
-)
-def test_a_category_set_breaks_no_rule(requested):
-    with pytest.raises(ValueError, match="BAD_REQUEST"):
-        replace_categories([], requested, 1)
-
-
-def test_the_settings_etag_follows_ids_labels_priorities_order_and_destination_only():
-    base = MailSettings((Category(1, "a", "work", 2), Category(2, "b", "quick", 4)), "p1")
-    assert base.etag == MailSettings((Category(1, "a", "renamed", 2), Category(2, "b", "quick", 4)), "p1").etag
-    changed = [
-        MailSettings((Category(1, "a", "work", 3), Category(2, "b", "quick", 4)), "p1"),
-        MailSettings((Category(2, "b", "quick", 4), Category(1, "a", "work", 2)), "p1"),
-        MailSettings((Category(1, "a", "work", 2), Category(3, "b", "quick", 4)), "p1"),
-        MailSettings(base.categories, "p2"),
-        MailSettings(),
-    ]
-    assert len({base.etag, *(settings.etag for settings in changed)}) == 6
-
-
-def test_task_text_limit_preserves_whole_non_bmp_characters():
-    assert mailbox.task_text("A😀B", 3) == "A😀"
-    assert mailbox.task_text("A😀B", 2) == "A"
-
-
 # ---- requests -------------------------------------------------------------------------------------------------
 
 
-def test_a_writes_tasks_request_ids_are_stable_and_frozen_across_releases():
-    request = "a2b8f9a4-5c1d-4e7f-9a3b-6c2d1e0f4a5b"
-    assert mailbox.command_id(request) == mailbox.command_id(request, 0) != mailbox.command_id(request, 1)
-    # A conversion retried across a release must name the same Tasks request: this value never changes.
-    assert mailbox.command_id("mail-create:00000000-0000-0000-0000-000000000001") == (
-        "45bf0978-b9fd-5afa-9bf7-497854379382"
-    )
+def test_a_page_token_is_the_last_row_s_time_and_id_and_nothing_else():
+    row = {"created_at": 1_790_000_000, "event_id": "00000000-0000-4000-8000-000000000001"}
+    assert mailbox.page_cursor(mailbox.next_page(row)) == (row["created_at"], row["event_id"])
+    assert mailbox.page_cursor("") == (2**52, "")
+    for token in ("garbage", "W10", "x" * 300, mailbox.next_page({"created_at": -1, "event_id": "a"})):
+        with pytest.raises(ValueError, match="BAD_REQUEST"):
+            mailbox.page_cursor(token)
 
 
 @pytest.mark.parametrize("value", ["tmp-local-task", "", "a b", "x" * 101])
 def test_ids_from_a_browser_or_out_of_shape_are_refused(value):
     with pytest.raises(ValueError, match="BAD_REQUEST"):
         mailbox.check_id(value)
-
-
-@pytest.mark.parametrize(
-    "value", ["", "not-a-uuid", "00000000-0000-1000-8000-000000000000", "A2B8F9A4-5C1D-4E7F-9A3B-6C2D1E0F4A5B"]
-)
-def test_a_write_takes_a_canonical_uuid4(value):
-    with pytest.raises(ValueError, match="BAD_REQUEST"):
-        mailbox.action_id(value)
-    assert mailbox.action_id("a2b8f9a4-5c1d-4e7f-9a3b-6c2d1e0f4a5b") == "a2b8f9a4-5c1d-4e7f-9a3b-6c2d1e0f4a5b"

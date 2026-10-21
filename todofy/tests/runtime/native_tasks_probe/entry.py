@@ -7,7 +7,7 @@ import js
 from workers import Response, WorkerEntrypoint
 
 from todofy.core.todoist_request import build_task_request
-from todofy.runtime import gtd, intents, native_tasks, plus_tasks, reminder
+from todofy.runtime import gtd, intents, native_tasks, reminder
 from todofy.runtime.coordinator import TodofyCore
 from todofy.runtime.interop import to_js
 
@@ -35,18 +35,6 @@ class Default(WorkerEntrypoint):
             result = await native_tasks.call(self.env, data["method"], data["body"])
         elif path == "/native/producer":
             result = json.loads(await self.env.PLUS.getByName(data["name"]).produce(json.dumps(data)))
-        elif path == "/native/commands":
-            result = json.loads(await self.env.PLUS.getByName("native-plus-test").run(json.dumps(data)))
-        elif path == "/native/plus":
-            answer = await self.env.PLUS.getByName("native-plus-test").plus_native_ui(
-                data["method"], json.dumps(data.get("body", {}))
-            )
-            text = getattr(answer, "ok", None)
-            result = json.loads(text) if text is not None else {"error": answer.error}
-        elif path == "/native/ready":
-            answer = await self.env.PLUS.getByName("native-plus-test").mail_ready_poll(json.dumps(data))
-            text = getattr(answer, "ok", None)
-            result = json.loads(text) if text is not None else {"error": answer.error}
         elif path == "/native/create":
             frozen = build_task_request(
                 data["title"],
@@ -91,14 +79,6 @@ class NativePlusProbe(TodofyCore):
             return json.dumps(result)
         finally:
             self.running = False
-
-    async def run(self, text):
-        data = json.loads(text)
-        try:
-            result = await plus_tasks.commands(self, data["commands"])
-        except plus_tasks.PlusError as error:
-            result = {"error": error.reason}
-        return json.dumps(result)
 
 
 class ProducerEnv:

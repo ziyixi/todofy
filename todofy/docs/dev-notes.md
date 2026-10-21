@@ -128,7 +128,7 @@ migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the ow
                                gtd_reviews) and mail_reminders.project_id (gtd-features.md);
                                0005_task_intents.sql adds task_intents and task_intent_tasks (§5, task-intent-v1);
                                0006_todoist_plus.sql the Todoist Plus tables and 0007_plan_store.sql the planning
-                               store (planning-api.md)
+                               store (mail-api.md)
 api/                           machine-api-v1.openapi.yaml (the hooks hosts' routes: webhook, newsletter,
                                health; the owner API is ../proto/todofy/ui/v1), newsletter report
                                schemas; the webhook body references ../contracts/mail-received-v1 (shared,

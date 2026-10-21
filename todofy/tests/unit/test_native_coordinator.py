@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from tests.unit.plus_support import ObjectSql, stubbed_pyodide
+from tests.unit.host_support import ObjectSql, stubbed_pyodide
 from todofy.core import intents as intent_rules
 
 NOW = 1_792_240_000
@@ -31,6 +31,9 @@ def coordinator(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
         # The object's storage as a release that still wrote Todoist left it.
         core.sql.exec("CREATE TABLE todoist_calls (minute_bucket INTEGER PRIMARY KEY, count INTEGER NOT NULL)")
         core.sql.exec("INSERT INTO todoist_calls VALUES (?, ?)", NOW // 60, 1000)
+        # And as the releases with PlusService left it: its receipts and the planning writes' journal.
+        core.sql.exec("CREATE TABLE plus_receipts (request_id TEXT PRIMARY KEY)")
+        core.sql.exec("CREATE TABLE native_task_requests (request_id TEXT PRIMARY KEY)")
         for statement in DO_SCHEMA:
             core.sql.exec(statement)
         core.sql.exec("UPDATE control SET todoist_blocked_until = ? WHERE id = 1", NOW + 3600)
@@ -68,6 +71,7 @@ def test_an_old_auth_block_and_call_window_hold_nothing(coordinator: Any) -> Non
     # The call window's table is dropped with the rest of the Todoist state.
     tables = {row.name for row in coordinator.sql.exec("SELECT name FROM sqlite_master WHERE type='table'").toArray()}
     assert "todoist_calls" not in tables and "plus_cache" not in tables and "mail_brief_job" not in tables
+    assert not tables & {"plus_receipts", "native_task_requests"}
 
 
 def test_the_operator_pause_still_holds_every_task_write(coordinator: Any) -> None:

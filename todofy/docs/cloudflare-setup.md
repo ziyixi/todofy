@@ -301,7 +301,7 @@ Rows that D1 retention deletes (legacy text by `expires_at` or `TODOFY_LEGACY_TE
 reports after 90 days, owner actions after 180; since 2026-10 no summary, which only the owner deletes) stay in the backups made before the deletion until those
 rotate out: about 6 weeks while backups succeed, longer while they fail. A restore brings such rows back;
 the next daily retention tick deletes the ones whose time has passed again. The same holds for the summaries
-the owner deletes in Tasks' Mail ([planning-api.md](planning-api.md#mail)); a restore brings those back too.
+the owner deletes in Tasks' Mail ([mail-api.md](mail-api.md#writes-without-receipts)); a restore brings those back too.
 
 Summaries are the one table that now only grows by itself: about 100 rows a day of a few KB (the subject, a
 summary of up to 64 KiB, usually 1-3 KB, and the brief) is roughly 40-70 MB a year in the database's 500 MB,

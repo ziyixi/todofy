@@ -14,10 +14,10 @@ import { declaredBytes, recordRequest, routeOf, type HostKind } from './metrics.
 import { handleOwner } from './owner.ts';
 
 // ops-v1: the named entrypoint a dashboard Worker binds (contracts/ops-v1); no public route. Intents: task-intent-v1
-// only, for the one source its binding's props name (the watch app).
+// only, for the one source its binding's props name (the watch app). Mail: todofy.mail.v1, for the access its
+// binding's props grant (Tasks, the Personal MCP).
 export { Intents, Ops } from './ops.ts';
-export { Planning } from './planning.ts';
-export { MailApi } from './mail-api.ts';
+export { Mail } from './mail.ts';
 
 /** The public host is matched before the hooks hosts. */
 function hostKind(ctx: Context): HostKind {

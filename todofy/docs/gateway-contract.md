@@ -737,9 +737,9 @@ Since 2026-10-05 the gateway passes every answer but a list's page through as To
 measured the same way: an event's detail 2.0 → 0.8-1.5 first and 1.7 → 0.7 warm, a reconcile 2.1 → 1.2-1.5 and
 1.6 → 0.8, the legacy text 6.0-6.4 → 1.0-1.3 and 5.3-5.7 → 1.1, the reports 4.6-5.2 → 1.2-1.6 and 4.7-5.0 → 1.1-1.2
 (bound 3, so a decode again fails it); the lists and the isolate's first request are unchanged. `src/warm.ts` warms
-only what the gateway still reads (the lists' messages and a refusal's MailEvent). The planning API's largest Mail
-answers pass through under the same bound; the CPU suite measures a page of 50 mail items and one mail's 64 KiB
-summary on Tasks' Planning channel ([planning-api.md](planning-api.md)).
+only what the gateway still reads (the lists' messages and a refusal's MailEvent). The Mail entry's largest answers
+pass through under the same bound; the CPU suite measures a page of 50 mail items and one mail's 64 KiB summary on a
+Mail binding ([mail-api.md](mail-api.md)).
 
 Before that, the cost was the generated code reading and writing every answer again: a few tenths of a millisecond per
 small message, about 2 ms for a page of 100 events, the codec's text rules over a report's 230,000

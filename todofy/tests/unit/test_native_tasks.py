@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from tests.unit.plus_support import D1, stubbed_pyodide
+from tests.unit.host_support import D1, stubbed_pyodide
 from todofy.core import native_task_view
 from todofy.core.classify import TaskResult
 from todofy.core.render import FOOTER_PREFIX
@@ -206,20 +206,10 @@ def test_projection_keeps_task_semantics_and_native_concurrency():
 
 
 @pytest.mark.parametrize(
-    ("status", "tasks_reason", "plus_reason"),
-    [
-        (400, "BAD_REQUEST", "BAD_REQUEST"),
-        (400, "PRECONDITION_FAILED", "ACTION_NOT_ALLOWED"),
-        (409, "ALREADY_EXISTS", "ACTION_NOT_ALLOWED"),
-        (409, "ETAG_MISMATCH", "ETAG_MISMATCH"),
-        (404, "NOT_FOUND", "NOT_FOUND"),
-        (503, "UNAVAILABLE", "UNAVAILABLE"),
-        (403, "", "ACTION_NOT_ALLOWED"),
-    ],
+    ("status", "tasks_reason"),
+    [(400, "BAD_REQUEST"), (409, "ETAG_MISMATCH"), (404, "NOT_FOUND"), (503, "UNAVAILABLE"), (403, "")],
 )
-def test_tasks_error_reasons_reach_mail(runtime, status, tasks_reason, plus_reason):
-    from todofy.runtime import plus_tasks
-
+def test_tasks_error_reasons_are_kept(runtime, status, tasks_reason):
     service = Service()
     service.status = status
     details = [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": tasks_reason}] if tasks_reason else []
@@ -228,6 +218,3 @@ def test_tasks_error_reasons_reach_mail(runtime, status, tasks_reason, plus_reas
     with pytest.raises(runtime.native.NativeTasksError) as failure:
         asyncio.run(runtime.native.call(env, "GetTask", {"name": "tasks/native-one"}))
     assert failure.value.reason == tasks_reason
-    with pytest.raises(plus_tasks.PlusError) as mapped:
-        asyncio.run(plus_tasks.native(runtime.native.call(env, "GetTask", {"name": "tasks/native-one"})))
-    assert mapped.value.reason == plus_reason

@@ -9,6 +9,7 @@ COORDINATOR binding, which calls these methods over JS RPC after its own checks
     newsletter(kind, query)                stored or on-demand report (Basic auth passed)
     newsletter_auth_failure()              count a failed Basic credential -> 401 | 429
     owner_ui(owner, method, request, cursor)   the owner API todofy.ui.v1 (owner_ui.py) for the Access owner
+    mail(method, request)                  the Mail entry todofy.mail.v1 (mail.py) for the Workers bound to it
     owner_api(owner, method, path, ...)    the owner API before todofy.ui.v1 (api.py), for the previous gateway
                                            during this deploy only; removed in the next release
     setup()                                the core's facts for the setup page -> dict
@@ -35,7 +36,6 @@ DO SQLite holds only counters and schedule times that may be lost: every
 time then defaults to "due now" and the ledger stays in D1.
 """
 
-import asyncio
 import hashlib
 import json
 import math
@@ -79,12 +79,10 @@ from todofy.runtime import (
     gtd,
     intents,
     ledger,
-    mail_ready,
+    mail,
     metrics,
     native_tasks,
     ops,
-    plus_api,
-    plus_receipts,
     reminder,
     reports,
     retention,
@@ -129,6 +127,9 @@ DO_SCHEMA = (
     "DROP TABLE IF EXISTS plus_cache",
     "DROP TABLE IF EXISTS mail_brief_job",
     "DROP TABLE IF EXISTS mail_brief_queue",
+    # The receipts of PlusService's writes and the journal of Todofy's planning writes: the Mail entry needs neither.
+    "DROP TABLE IF EXISTS plus_receipts",
+    "DROP TABLE IF EXISTS native_task_requests",
     "CREATE TABLE IF NOT EXISTS report_requests (hour_bucket INTEGER PRIMARY KEY, count INTEGER NOT NULL)",
     # Failed precompute attempts per report and UTC day (reports.tick caps them).
     "CREATE TABLE IF NOT EXISTS report_failures (kind TEXT NOT NULL, top_n INTEGER NOT NULL, day TEXT NOT NULL,"
@@ -175,11 +176,9 @@ class TodofyCore(DurableObject):
             *metrics.DO_SCHEMA,
             *ops.DO_SCHEMA,
             *gtd.DO_SCHEMA,
-            *plus_receipts.DO_SCHEMA,
         ):
             self.sql.exec(statement)
         self.running = False
-        self.plus_lock = asyncio.Lock()
         # A wake-up that arrived while the alarm loop was busy; honoured when it finishes.
         self.woken = False
         # Whether a due task intent goes before due mail at the next step (they take turns).
@@ -200,16 +199,11 @@ class TodofyCore(DurableObject):
             # The platform logs carry the details.
             return failed(503, ApiError.UNAVAILABLE).wire()
 
-    async def plus_native_ui(self, method: str, request: str) -> dict[str, Any]:
-        """One PlusService rpc from Tasks' private Planning channel (the gateway's allowlist); unavailable while
-        the core has no TASKS binding."""
-        if getattr(self.env, "TASKS", None) is None:
-            return {"error": "UNAVAILABLE"}
-        return await plus_api.handle(self, method, request)
-
-    async def mail_ready_poll(self, request: str) -> dict[str, Any]:
-        """Private MailApi readiness read: the append ledger cursor, never a mail body or Tasks call."""
-        return await mail_ready.handle(self, request)
+    async def mail(self, method: str, request: str) -> dict[str, Any]:
+        """One todofy.mail.v1 rpc from the gateway's Mail entrypoint, after its binding's access check: ``request`` is
+        the decoded request as wire JSON. Answers {"ok"} or {"error", "retry_after"} (runtime/mail.py), never raises
+        for an expected outcome."""
+        return await mail.handle(self, method, request)
 
     async def ingest(self, idempotency_key: str | None, body: Any) -> dict[str, Any]:
         """POST /hooks/mail after the gateway's checks: the Idempotency-Key header and the unread body stream."""
@@ -700,8 +694,7 @@ class TodofyCore(DurableObject):
         self._settle_interrupted_summaries()
         await ledger.recover_interrupted(env.DB, now, lookup_at=_after(self._lookup_delay()))
         may_start = ops.backup_defer_until(self.sql, now) is None
-        async with self.plus_lock:
-            resume_at = await backup.run(env, self.sql, now, may_start=may_start)
+        resume_at = await backup.run(env, self.sql, now, may_start=may_start)
         if resume_at is not None:
             # A backup job holds the ledger and the ticks until it ends (backup.py).
             await storage.setAlarm(resume_at)

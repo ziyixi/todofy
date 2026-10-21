@@ -1,5 +1,5 @@
 """The weekly backup job (runtime/backup.py) across a release that adds columns, and its Tasks section, on host
-CPython: D1 and the object's SQLite are host SQLite (plus_support.py), R2 a dict and the TASKS binding an in-memory
+CPython: D1 and the object's SQLite are host SQLite (host_support.py), R2 a dict and the TASKS binding an in-memory
 exportBackup. The whole job in workerd, restored, is tests/runtime/test_backup.py. Synthetic rows only.
 """
 
@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from tests.unit.plus_support import D1, ObjectSql, stubbed_pyodide
+from tests.unit.host_support import D1, ObjectSql, stubbed_pyodide
 from tests.unit.test_backup import D1_MIGRATIONS, MIGRATIONS
 from todofy.core import backup as layout
 from todofy.core.sql import backup as sql

@@ -11,6 +11,7 @@
   "tests/runtime/test_hooks.py": 18.9,
   "tests/runtime/test_hooks_limits.py": 16.3,
   "tests/runtime/test_ledger_cas.py": 9.0,
+  "tests/runtime/test_mail_entry.py": 15.1,
   "tests/runtime/test_metrics_daily.py": 95.7,
   "tests/runtime/test_migrations.py": 11.4,
   "tests/runtime/test_ops.py": 74.7,

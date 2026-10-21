@@ -5,7 +5,6 @@ bounded by the primary key's ``day`` prefix. Nothing here selects task text: the
 """
 
 from . import Query
-from .mailbox import NATIVE_PENDING
 
 SNAPSHOT_INDEX = "sqlite_autoindex_gtd_snapshots_1"
 TASKS_INDEX = "sqlite_autoindex_gtd_snapshot_tasks_1"
@@ -58,13 +57,6 @@ CLOSED_SINCE = Query(
     " AND NOT EXISTS (SELECT 1 FROM gtd_snapshot_tasks t WHERE t.day = ? AND t.task_id = y.task_id)",
     TASKS_INDEX,
 )
-# Mail entries of a window (bind its start and end: the 14 days before the last 24 h, the morning brief's
-# carryover pool without its cap of 30) still pending: Mail is content until conversion, so no snapshot is read.
-NATIVE_MAIL_OPEN = Query(
-    f"SELECT count(*) AS n FROM summaries INDEXED BY summaries_pending"
-    f" WHERE created_at > ? AND created_at <= ? AND {NATIVE_PENDING}",
-    "summaries_pending",
-)
 # The review's links: a day's oldest tasks of one project (bind the day, the project and a cap), IDs only.
 # The sort sees at most one day's rows (MAX_SNAPSHOT_ROWS), bounded by the primary key's day prefix.
 OLDEST_TASKS = Query(
@@ -97,14 +89,6 @@ DAILY_RANGE = Query(
 REVIEW_WEEK = Query(
     "SELECT week, state, attempts, next_attempt_at, subject, body, project_id, task_id FROM gtd_reviews WHERE week = ?",
     REVIEWS_INDEX,
-)
-# The newest review task created for either of two weeks (bind this ISO week, then the previous one), which Plan's
-# weekly review links to (PlusService.ReadWeeklyReview).
-LATEST_REVIEW_TASK = Query(
-    "SELECT task_id FROM gtd_reviews WHERE week IN (?, ?) AND state = 'created' AND task_id <> ''"
-    " ORDER BY week DESC LIMIT 1",
-    REVIEWS_INDEX,
-    sort_allowed=True,
 )
 # Created reviews from a week on (bind it) that no completed list has shown done yet.
 OPEN_REVIEWS = Query(
