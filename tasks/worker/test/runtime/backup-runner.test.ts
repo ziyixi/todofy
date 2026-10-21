@@ -127,12 +127,22 @@ async function partRows(parts: BackupPart[]): Promise<unknown[][]> {
 
 test('a job plans, writes one part per table and step, then its manifest and latest.json', async () => {
   const store = new Store();
+  // Without a state the job is due at once, so Home's status brings the Alarm forward.
+  expect(await backupStatus(env(), store)).toEqual({
+    facts: { status: 'never', last_backup_at: null, since: null },
+    due: 0,
+  });
   // The first step only plans, in one batch; nothing is stored yet.
   const planning = measuredReads(harness.db);
   expect(await runBackup(env({ DB: planning.db }), store, SUNDAY)).toBe(SUNDAY + CONTINUE_MS);
   expect(planning.metrics.statements).toBe(PLAN_STATEMENTS);
   expect(store.state.job?.prefix).toBe('backups/2026-10-25T100000Z/');
   expect((await bucket.list({ prefix: 'backups/' })).objects).toEqual([]);
+  // A running job keeps its own pace: the status does not bring its next step forward.
+  expect(await backupStatus(env(), store)).toEqual({
+    facts: { status: 'running', last_backup_at: null, since: SUNDAY },
+    due: Infinity,
+  });
   // Every later step stays within its statement budget.
   let next = SUNDAY + CONTINUE_MS;
   for (let steps = 0; next === SUNDAY + CONTINUE_MS; steps++) {
@@ -145,6 +155,7 @@ test('a job plans, writes one part per table and step, then its manifest and lat
   expect(next).toBe(SUNDAY + 7 * DAY);
   expect(nextRun(SUNDAY, true)).toBe(next);
   expect(store.state).toMatchObject({ status: 'ok', last_backup_at: SUNDAY, failed_jobs: 0, job: null });
+  expect((await backupStatus(env(), store)).due).toBe(SUNDAY + 7 * DAY);
 
   expect(await json(LATEST)).toEqual({ key: 'backups/2026-10-25T100000Z/' });
   const manifest = await json<Manifest>(`backups/2026-10-25T100000Z/${MANIFEST}`);

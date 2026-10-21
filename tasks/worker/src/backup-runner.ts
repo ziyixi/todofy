@@ -133,14 +133,17 @@ function newJob(now: number): Job {
   };
 }
 
-/** The facts Ops reports, and when the next step is due (Infinity without the binding). */
+/**
+ * The facts Ops reports, and when the next job may start: at once without a state, Infinity without the binding or
+ * while a job runs (its own Alarm, a second or a failed step's minute away, keeps it going).
+ */
 export async function backupStatus(env: Env, store: BackupStore): Promise<{ facts: BackupFacts | null; due: number }> {
   if (!env.BACKUPS) return { facts: null, due: Infinity };
   const state = await store.get<BackupState>(STATE_KEY);
   if (!state) return { facts: { status: 'never', last_backup_at: null, since: null }, due: 0 };
   return {
     facts: { status: state.job ? 'running' : state.status, last_backup_at: state.last_backup_at, since: state.since },
-    due: state.job ? 0 : state.next_run,
+    due: state.job ? Infinity : state.next_run,
   };
 }
 
@@ -200,7 +203,8 @@ export async function runBackup(env: Env, store: BackupStore, now: number): Prom
       log({ failed: 'storage_error', prefix: job.prefix });
       state.job = null;
       state.failed_jobs += 1;
-      Object.assign(state, { status: 'failed', error_code: 'storage_error' });
+      state.status = 'failed';
+      state.error_code = 'storage_error';
       state.next_run = state.failed_jobs < MAX_FAILED_JOBS ? now + FAILED_RETRY_MS : nextRun(now);
     }
   }
@@ -289,15 +293,13 @@ async function finish(bucket: R2Bucket, state: BackupState, job: Job, now: numbe
   const json = { httpMetadata: { contentType: 'application/json' } };
   await bucket.put(job.prefix + MANIFEST, manifest, json);
   await bucket.put(LATEST, JSON.stringify({ key: job.prefix }), json);
-  Object.assign(state, {
-    job: null,
-    failed_jobs: 0,
-    status: 'ok',
-    error_code: '',
-    last_backup_at: now,
-    last_key: job.prefix,
-    next_run: nextRun(now, true),
-  });
+  state.job = null;
+  state.failed_jobs = 0;
+  state.status = 'ok';
+  state.error_code = '';
+  state.last_backup_at = now;
+  state.last_key = job.prefix;
+  state.next_run = nextRun(now, true);
   log({ done: job.prefix, rows: tables.reduce((sum, table) => sum + table.rows, 0) });
   try {
     await applyRetention(bucket, job.prefix);
