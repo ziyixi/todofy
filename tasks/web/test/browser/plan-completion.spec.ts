@@ -384,6 +384,22 @@ test.describe("Plan's cards", () => {
     await expect(
       card(ticked.id).locator(".plus-checkbox.is-done"),
     ).toBeVisible();
+    // Focus's done style, compared with Focus's own done row below.
+    const doneStyle = {
+      title: await done.evaluate((title) => getComputedStyle(title).color),
+      check: await card(ticked.id)
+        .locator(".plus-checkbox.is-done")
+        .evaluate((check) => getComputedStyle(check).backgroundColor),
+      opacity: await card(ticked.id)
+        .locator(".planning-calendar-step-top")
+        .evaluate((top) => getComputedStyle(top).opacity),
+    };
+    expect(doneStyle.title).not.toBe(
+      await card(open.id)
+        .locator(".planning-step-title")
+        .evaluate((title) => getComputedStyle(title).color),
+    );
+    expect(doneStyle.opacity).toBe("0.72");
     expect(
       await day
         .locator(".planning-calendar-step")
@@ -414,9 +430,100 @@ test.describe("Plan's cards", () => {
     const completed = page.getByRole("checkbox", { name: "Completed" });
     await expect(completed).not.toBeChecked();
     await completed.check();
+    const focusDone = page.locator(
+      `.plus-focus-done [data-task-id="${ticked.id}"]`,
+    );
+    await expect(focusDone).toBeVisible();
+    expect({
+      title: await focusDone
+        .locator(".plus-focus-title")
+        .evaluate((title) => getComputedStyle(title).color),
+      check: await focusDone
+        .locator(".plus-checkbox.is-done")
+        .evaluate((check) => getComputedStyle(check).backgroundColor),
+      opacity: await focusDone
+        .locator(".plus-focus-block-top")
+        .evaluate((top) => getComputedStyle(top).opacity),
+    }).toEqual(doneStyle);
+  });
+
+  test("a done calendar Step's title opens Tasks' dialog, where reopening puts it back among its day's open steps", async ({
+    page,
+  }) => {
+    const parent = {
+      id: crypto.randomUUID(),
+      title: "Synthetic reopened-step outcome",
+    };
+    const ticked = {
+      id: crypto.randomUUID(),
+      title: "Synthetic reopened step",
+    };
+    const open = { id: crypto.randomUUID(), title: "Synthetic waiting step" };
+    const step = (
+      task: { id: string; title: string },
+      minutes: number,
+    ): SeedTask => ({
+      ...task,
+      kind: "step",
+      parent_id: parent.id,
+      duration_minutes: minutes,
+    });
+    await stubPlanning(page, {
+      tasks: [
+        outcome(parent.id, parent.title),
+        step(ticked, 30),
+        step(open, 45),
+      ],
+      queues: { [today]: [ticked.id, open.id] },
+    });
+    await page.setViewportSize({ width: 1800, height: 1000 });
+    await openPlan(page);
+    await page.getByRole("tab", { name: "Week", exact: true }).click();
+    const day = page.locator(`.planning-calendar-day[data-date="${today}"]`);
+    const total = day.locator(".planning-day-heading small");
+    await day
+      .getByRole("button", {
+        name: `Complete task: ${ticked.title}`,
+        exact: true,
+      })
+      .click();
+    const done = day.getByRole("button", {
+      name: `Completed: ${ticked.title}`,
+      exact: true,
+    });
+    await expect(total).toHaveText("45m");
+    // From the keyboard: the title is the done card's one control.
+    await done.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.locator("dialog.task-dialog");
+    await dialog
+      .getByRole("button", { name: "Reopen task", exact: true })
+      .click();
     await expect(
-      page.locator(`.plus-focus-done [data-task-id="${ticked.id}"]`),
+      page.getByRole("status").filter({ hasText: "Task reopened" }),
     ).toBeVisible();
+    // Tasks reopened the day's mark: the step is open again, in its first place, and counted.
+    await expect(done).toHaveCount(0);
+    await expect(
+      day.getByRole("button", {
+        name: `Complete task: ${ticked.title}`,
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(
+      await day
+        .locator(".planning-calendar-step")
+        .evaluateAll((cards) =>
+          cards.map((item) => [
+            (item as HTMLElement).dataset.taskId,
+            item.classList.contains("is-done"),
+          ]),
+        ),
+    ).toEqual([
+      [ticked.id, false],
+      [open.id, false],
+    ]);
+    await expect(total).toHaveText("1h 15m");
   });
 
   test("a failed Plan completion keeps the card and retries with the same request ID", async ({
