@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from api import Api, ReleaseError
+import control
 from control import ROOT, preflight, record, release_inputs
 
 SHA = "a" * 40
@@ -215,7 +216,7 @@ class DriftAcceptance(unittest.TestCase):
         fixture = self.fixture()
         original = deepcopy(fixture.values)
         fixture.schedules().append({"cron": "* * * * *"})
-        fixture.binding("TODOFY")["props"] = {"source": "synthetic-private-source"}
+        fixture.binding("TASKS")["props"] = {"source": "synthetic-private-source"}
         fixture.values[fixture.domain_path] = []
         required, result = self.check(fixture, check_only=True)
         self.assertFalse(required)
@@ -260,7 +261,7 @@ class DriftAcceptance(unittest.TestCase):
 
     def test_bad_physical_readback_cannot_create_a_successful_deployment(self):
         fixture = self.fixture()
-        fixture.binding("TODOFY")["service"] = "another-worker"
+        fixture.binding("TASKS")["service"] = "another-worker"
         with self.assertRaisesRegex(ReleaseError, "WORKER_CONFIGURATION_NOT_VERIFIED"):
             record(ROOT, fixture.app, SHA, fixture.cloud, fixture.github)
         self.assertEqual(len(fixture.deployments), 1)
@@ -403,6 +404,24 @@ class DriftAcceptance(unittest.TestCase):
                       "reason": "BINDING_UNDECLARED"}],
                 )
                 self.assert_readonly(fixture)
+
+    def test_a_retired_binding_is_one_the_app_no_longer_declares(self):
+        # The release of 2026-10-21 retires these from the live Workers.
+        self.assertEqual(control.RETIRED_SERVICE_BINDINGS, {
+            "todofy": {"FORCE_PAUSE_TODOIST", "REMINDER_ENABLED", "GTD_REVIEW_ENABLED", "GTD_COLLECT_UTC",
+                       "LOOKUP_DELAY_MS", "TASKS_PUBLIC_URL"},
+            "tasks": {"PLANNING"},
+            "watch": {"TODOFY"},
+        })
+        for app, names in control.RETIRED_SERVICE_BINDINGS.items():
+            for path in control.WORKERS[app]:
+                config = control.read_toml(ROOT / path)
+                declared = set(config.get("vars", {})) | {service["binding"] for service in config.get("services", [])}
+                if path == "todofy/gateway/wrangler.toml":
+                    # The gateway keeps linking to tasks; only todofy-core dropped it.
+                    declared -= {"TASKS_PUBLIC_URL"}
+                with self.subTest(app=app, path=path):
+                    self.assertFalse(names & declared)
 
     @patch.dict("control.RETIRED_SERVICE_BINDINGS", {"dashboard": {"OLD_APP"}})
     def test_normal_home_release_removes_a_retired_binding(self):
