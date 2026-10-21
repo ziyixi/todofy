@@ -176,6 +176,13 @@ export function App({
   const writes = useRef({ queued: 0, settled: 0, epoch: 0 });
   const rereadAfterWrites = useRef(false);
   const loadedAt = useRef(snapshot?.readAt ?? 0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
   // Focus's quiet line opens Plan at Start now.
   const [showStart, setShowStart] = useState(false);
@@ -349,6 +356,37 @@ export function App({
     },
     [revalidate, text],
   );
+  // Timer reads started and settled; only the newest one's answer is shown.
+  const timerReads = useRef({ started: 0, settled: 0 });
+  /** One GetFocusTimer, shown unless a write or a full read started meanwhile. */
+  const readTimer = useCallback(async () => {
+    if (!actions.readTimer) return;
+    const read = ++timerReads.current.started;
+    const settled = writes.current.settled;
+    const planRead = reads.current.started;
+    try {
+      const timer = await actions.readTimer();
+      if (
+        mounted.current &&
+        read === timerReads.current.started &&
+        settled === writes.current.settled &&
+        planRead === reads.current.started &&
+        !writes.current.queued
+      )
+        setConfirmed((current) => current && applyConfirmed(current, timer));
+    } catch (failure) {
+      if (mounted.current)
+        setError(
+          (current) =>
+            current ||
+            (failure instanceof Error ? failure.message : text.lastError),
+        );
+    } finally {
+      timerReads.current.settled++;
+    }
+  }, [actions, text.lastError]);
+  // Whether the mini timer is open, for effects that must not rerun when it opens or closes.
+  const miniOpen = useRef(false);
   // In the background, full reads wait: one runs when Plan or Focus shows again, if a read was missed or the
   // data has aged. A missed read means a task write elsewhere, so writes wait for that read.
   const inBackground = useRef(background);
@@ -367,9 +405,18 @@ export function App({
     }
   }, [background, revalidate]);
   useEffect(() => {
-    if (inBackground.current) missedRead.current = true;
-    else void revalidate();
-  }, [revalidate, refreshRevision]);
+    // Shown, mounted behind another page with nothing read yet (the host found a session there), or with the mini
+    // timer open, whose Complete needs the task's current etag: a full read now.
+    if (!inBackground.current || !latestData.current || miniOpen.current) {
+      void revalidate();
+      return;
+    }
+    // Otherwise the full read waits, but the timer is read now: completing or deleting the step elsewhere ends
+    // its session, which the away watch and the session the host keeps must not outlive.
+    missedRead.current = true;
+    if (writes.current.queued) rereadAfterWrites.current = true;
+    else void readTimer();
+  }, [revalidate, readTimer, refreshRevision]);
   useEffect(() => {
     const visible = () => {
       if (
@@ -386,14 +433,18 @@ export function App({
   }, [revalidate]);
   useEffect(() => {
     if (!confirmed || !actions.readTimer) return;
-    let pending = false;
-    let cancelled = false;
     // The mini timer floats in view while the main window is often hidden.
     const visible = () =>
       document.visibilityState === "visible" ||
       mini?.window.document.visibilityState === "visible";
     const refreshTimer = async () => {
-      if (pending || reading || writes.current.queued || !visible()) return;
+      if (
+        timerReads.current.started !== timerReads.current.settled ||
+        reading ||
+        writes.current.queued ||
+        !visible()
+      )
+        return;
       if (
         localDate(new Date().toISOString(), confirmed.plan.timezone) !==
         confirmed.plan.today
@@ -401,28 +452,7 @@ export function App({
         await revalidate();
         return;
       }
-      pending = true;
-      const settled = writes.current.settled;
-      const planRead = reads.current.started;
-      try {
-        const timer = await actions.readTimer!();
-        if (
-          !cancelled &&
-          settled === writes.current.settled &&
-          planRead === reads.current.started &&
-          !writes.current.queued
-        )
-          setConfirmed((current) => current && applyConfirmed(current, timer));
-      } catch (failure) {
-        if (!cancelled)
-          setError(
-            (current) =>
-              current ||
-              (failure instanceof Error ? failure.message : text.lastError),
-          );
-      } finally {
-        pending = false;
-      }
+      await readTimer();
     };
     const interval = window.setInterval(
       () => void refreshTimer(),
@@ -431,7 +461,6 @@ export function App({
     window.addEventListener("focus", refreshTimer);
     mini?.window.addEventListener("focus", refreshTimer);
     return () => {
-      cancelled = true;
       clearInterval(interval);
       window.removeEventListener("focus", refreshTimer);
       mini?.window.removeEventListener("focus", refreshTimer);
@@ -441,9 +470,9 @@ export function App({
     confirmed?.plan.timezone,
     confirmed?.plan.today,
     mini,
+    readTimer,
     reading,
     revalidate,
-    text.lastError,
   ]);
   useEffect(() => {
     const timer = confirmed?.focus.timer;
@@ -517,6 +546,7 @@ export function App({
   }, [session, onSession]);
   // The mini timer's window closes with this page (and on a reload, with the browser's).
   useEffect(() => {
+    miniOpen.current = Boolean(mini);
     if (!mini) return;
     const closed = () => setMini(undefined);
     mini.window.addEventListener("pagehide", closed);
@@ -525,13 +555,6 @@ export function App({
       mini.window.close();
     };
   }, [mini]);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
   const root = useRef<HTMLDivElement>(null);
   const opening = useRef(false);
   useEffect(() => {

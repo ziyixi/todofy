@@ -538,6 +538,75 @@ it("waits with full reads in the background and reads once when shown again", as
   expect(page.actions.load).toHaveBeenCalledTimes(2);
 });
 
+it("behind another page, a task write elsewhere reads the timer at once, and in full while the mini timer is open", async () => {
+  const stub = stubPictureInPicture();
+  const onSession = vi.fn();
+  const readTimer = vi.fn(async (): Promise<TimerSnapshot> => ({
+    timerEtag: "running",
+    timer: timer(),
+  }));
+  const page = mount(data(), { readTimer });
+  page.rerender({ onSession });
+  await screen.findByRole("button", { name: "Mini timer" });
+  const { pip } = await open(stub);
+  // Open, its Complete needs the task's current etag: a full read now, which here shows the step completed on
+  // Today. The session ended, so the window closes at once and the host hears it.
+  const ended = data();
+  ended.focus = { ...ended.focus, timer: undefined, timerEtag: "idle" };
+  (page.actions.load as ReturnType<typeof vi.fn>).mockResolvedValue(ended);
+  page.rerender({ onSession, background: true, refreshRevision: 1 });
+  await act(async () => {});
+  expect(page.actions.load).toHaveBeenCalledTimes(2);
+  expect(readTimer).not.toHaveBeenCalled();
+  expect(pip.closed).toBe(true);
+  expect(onSession).toHaveBeenLastCalledWith(false);
+  cleanup();
+
+  // Closed: only the timer is read, and the full read waits for Plan or Focus.
+  const again = mount(data(), { readTimer });
+  again.rerender({ onSession });
+  await screen.findByRole("button", { name: "Stop session" });
+  again.rerender({ onSession, background: true, refreshRevision: 1 });
+  await act(async () => {});
+  expect(readTimer).toHaveBeenCalledTimes(1);
+  expect(again.actions.load).toHaveBeenCalledTimes(1);
+  expect(onSession).toHaveBeenLastCalledWith(true);
+  readTimer.mockResolvedValue({ timerEtag: "idle" });
+  again.rerender({ onSession, background: true, refreshRevision: 2 });
+  await act(async () => {});
+  expect(readTimer).toHaveBeenCalledTimes(2);
+  expect(onSession).toHaveBeenLastCalledWith(false);
+  again.rerender({ onSession, background: false, refreshRevision: 2 });
+  await act(async () => {});
+  expect(again.actions.load).toHaveBeenCalledTimes(2);
+});
+
+it("mounted behind another page with nothing read, it reads once to learn the session", async () => {
+  const onSession = vi.fn();
+  const actions = {
+    load: vi.fn().mockResolvedValue(data()),
+    timer: vi.fn(),
+    readTimer: vi.fn(),
+    completeTask: vi.fn(),
+  } as unknown as PlusActions;
+  render(
+    <App
+      actions={actions}
+      view="focus"
+      language="en"
+      onOpenTask={vi.fn()}
+      onSettings={vi.fn()}
+      background
+      onSession={onSession}
+    />,
+  );
+  await act(async () => {});
+  expect(actions.load).toHaveBeenCalledTimes(1);
+  expect(actions.readTimer).not.toHaveBeenCalled();
+  expect(onSession).toHaveBeenLastCalledWith(true);
+  expect(document.querySelector(".plus-root")).toBeNull();
+});
+
 it("measures the rule as Focus's card does", () => {
   const running = timer();
   // Count-up: logged time against the estimate, in bands.

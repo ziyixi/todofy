@@ -211,10 +211,13 @@ at. The 60-second timer read also runs while only the mini timer is visible, and
 It closes when the session ends (Stop, Finish, a confirmed completion, or a read with no timer), when the owner
 closes it, and when Plan/Focus unmounts. To keep it on other pages, `App` keeps PlanningPage mounted while a
 session exists (`onSession`), with `background` set: it renders only the mini timer and keeps its data, write
-queue, timer read and pomodoro Finish. Full reads (after a task write elsewhere, or on returning to the window) wait
-until Plan or Focus shows again; then one runs if any was missed, with writes held until it lands, or if the data is
-over a minute old. The cost is one `GetFocusTimer` a minute while a session exists and a window is visible; with no
-session nothing stays mounted. A failure in the background shows nothing on the other page and resets when Plan or
+queue, timer read and pomodoro Finish. A task write elsewhere reads the timer at once, since completing or deleting
+the step (or its parent) there ends the session, and with the mini timer open it reads in full, so its Complete
+has the task's current etag. Other full reads (on returning to the window) wait until Plan or Focus shows again;
+then one runs if a write elsewhere was missed, with writes held until it lands, or if the data is over a minute
+old. Mounted in the background with nothing read yet (Pause when away, below), it reads in full once. The cost is
+one `GetFocusTimer` a minute while a session exists and a window is visible, and one per task write elsewhere; with
+no session nothing stays mounted. A failure in the background shows nothing on the other page and resets when Plan or
 Focus opens.
 
 ### Pause when away

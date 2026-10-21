@@ -194,3 +194,34 @@ test("a session ended on another page closes the window and lets Plan/Focus go",
   expect((await readTimer()).state ?? "idle").not.toMatch(/running|paused/u);
   await expect(page.locator(".planning-ui")).toHaveCount(0);
 });
+
+test("an outcome completed on another page ends its step's session in the mini timer at once", async ({
+  page,
+}) => {
+  const today = await tasksToday();
+  const outcome = crypto.randomUUID();
+  const step = crypto.randomUUID();
+  const name = `Synthetic outcome done elsewhere ${outcome.slice(0, 8)}`;
+  const title = `Synthetic step done elsewhere ${step.slice(0, 8)}`;
+  await stubPlanning(page, {
+    tasks: [
+      { id: outcome, title: name, area: "work", stage: "committed" },
+      { id: step, title, kind: "step", parent_id: outcome },
+    ],
+    queues: { [today]: [step] },
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/#/focus");
+  await page.getByRole("button", { name: `Start: ${title}` }).click();
+  const pip = await openMiniTimer(page);
+  await page.getByRole("link", { name: "Synthetic planning" }).click();
+  // Long before the minute's timer read: the read that follows the write shows the session ended.
+  const started = Date.now();
+  await Promise.all([
+    pip.waitForEvent("close", { timeout: 10_000 }),
+    page.getByRole("button", { name: `Complete ${name}` }).click(),
+  ]);
+  expect(Date.now() - started).toBeLessThan(10_000);
+  expect((await readTimer()).state ?? "idle").not.toMatch(/running|paused/u);
+  await expect(page.locator(".planning-ui")).toHaveCount(0);
+});
