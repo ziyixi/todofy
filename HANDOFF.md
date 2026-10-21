@@ -52,6 +52,29 @@ done day now shows open at once; a browser journey reopens a done step from Task
 the rebase, `ci_changes.py` selects shared packages, contracts and Tasks; all three passed on macOS (planning-ui's 272
 tests; the Worker's 65 unit and 97 runtime tests, the web's 55 unit tests, build and 109 Playwright tests, the tools' 31).
 
+### Tasks desktop PWA features (`claude/pwa-features`)
+
+**Local only, not pushed**, rebased on `origin/main` `9a4f4b15`. Five owner-chosen features for the installed app in
+Chrome on macOS ([README](tasks/README.md#interface), [design](tasks/docs/design.md),
+[interface](packages/planning-ui/docs/interface.md)); no badge, notifications, offline writes or share target:
+
+- Dock shortcuts: Quick add (`/?add=1`, the Add task dialog to Inbox), Today, Plan, Focus.
+- Launch handling: `launch_handler` `focus-existing` plus a `launchQueue` consumer, so links into Tasks (Home, mail
+  reminders, `?task=`, `?review=1`) open in the open app window without a reload; plain tabs behave as before.
+- Window Controls Overlay: when the owner hides Chrome's title bar, search and refresh sit in the title bar.
+- Focus mini timer (Document Picture-in-Picture) from the timer bar's quiet button; it keeps working on other pages.
+- Pause when away (Focus › Day, count-up only): a lock, 10 minutes idle or a sleep pauses the session at the moment
+  the owner left; on return "Away for N min — count it?" Keep / Discard. Additive API:
+  `CommandFocusTimerRequest.effective_time`, `FocusTimer.pause_time`, migration `0007_timer_pause.sql` (backward
+  compatible; the Tasks release applies it before the Worker).
+
+Release deploys Tasks (the proto change runs every proto user's checks; only Tasks changes behaviour). After release:
+Chrome picks up the manifest changes (shortcuts, launch handler, title-bar option) at its own update check of the
+installed app, at most daily; no reinstall. The "Pause when away" toggle asks for Chrome's idle-detection permission
+on its first use. By hand on the Mac: the Dock menu, a Gmail `?task=` link opening in the app window, the title-bar
+toggle clear of the traffic lights, the mini timer's first size and look, and a real lock or lid close with Keep and
+Discard checked in Focus' records.
+
 ### Retire FlowDay and drop Todofy's planning store (`claude/retire-flowday`)
 
 **Ready to release; local only, not pushed.** A branch from `origin/main` `777d5f01`, which holds the Tasks
