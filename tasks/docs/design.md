@@ -204,7 +204,8 @@ Pause/Resume, Stop and Complete call the timer bar's own functions through App's
 write waits; there is no second timer state and nothing is stored in the browser. The window asks for 320 × 120
 (Chrome then reuses the size and place the owner leaves it at) and holds its layout from 240 × 72 up. It gets one
 `<style>` (`mini-timer.css`, imported as text) and the opener's computed `--plus-*` tokens and font, so Tasks'
-overrides carry over without copying the app's stylesheets. It ticks on its own window's timers, to the session's
+overrides carry over without copying the app's stylesheets: Plan and Focus's calmer accent, `#50743b`, which
+`.app-shell .planning-ui` sets over planning-ui's own tokens (they load later, so the plain class would lose). It ticks on its own window's timers, to the session's
 next whole second: the opener's run late while it is hidden or minimised, which is when the mini timer is looked
 at. The 60-second timer read also runs while only the mini timer is visible, and when its window gets focus.
 

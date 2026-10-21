@@ -947,7 +947,9 @@ h1 {
 .planning-content {
   padding: 20px 24px;
 }
-.planning-ui {
+/* Plan and Focus's calmer accent. planning-ui's own `.planning-ui` tokens load after this stylesheet, so the
+   override needs the extra class to win; the mini timer copies the computed value. */
+.app-shell .planning-ui {
   --plus-accent: #50743b;
   --plus-accent-fill: #567c42;
 }

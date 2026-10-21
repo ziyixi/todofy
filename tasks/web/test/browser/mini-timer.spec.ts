@@ -67,7 +67,7 @@ test("the mini timer floats the session, acts through Focus's own commands and c
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
   expect(await pip.title()).toBe("Focus");
   await expect(pip.locator("html")).toHaveAttribute("lang", "en");
-  // Its stylesheet and the page's tokens: the accent Tasks resolves, not planning-ui's fallback.
+  // Its stylesheet and the page's tokens: Tasks' calmer accent for Plan and Focus, not planning-ui's own.
   const accent = (target: Page, selector: string) =>
     target
       .locator(selector)
@@ -75,7 +75,7 @@ test("the mini timer floats the session, acts through Focus's own commands and c
         getComputedStyle(element).getPropertyValue("--plus-accent").trim(),
       );
   expect(await accent(pip, "html")).toBe(await accent(page, ".plus-root"));
-  expect(await accent(pip, "html")).not.toBe("#557921");
+  expect(await accent(pip, "html")).toBe("#50743b");
   await expect(pip.locator(".mini-time")).toHaveCSS("font-weight", "250");
   await expect(pip.locator(".mini-title")).toHaveText(
     "Draft the quarterly review",
