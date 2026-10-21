@@ -11,6 +11,7 @@ import {
 } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
 import { localDate } from '@ziyixi/task-dates';
 import { betWeeks, LANES, mondayOf } from '../../src/planning.ts';
+import { fakeMail, mailEtag } from './fake-mail.ts';
 import { seedWorstWeek, WEEK_ENTRIES, WEEK_STEPS } from './focus-week.ts';
 import { startHarness } from './harness.ts';
 
@@ -508,18 +509,28 @@ test(
 );
 
 /**
- * What other Workers call: Home's Ops.status() as an isolate's very first request, and Todofy's service calls through
- * TasksApi.call (decoded, answered with toWire and JSON.stringify, unlike the owner API's pre-encoded pages): a mail
- * footer lookup (search, 20 tasks with full 16,000-character descriptions), a GTD page of 100 and the backup's plan.
+ * What other Workers call: Home's Ops.status() as an isolate's very first request, and reads through a TasksApi
+ * binding: a search of 20 tasks with full 16,000-character descriptions (the Personal MCP's), a page of 100 and the
+ * backup's plan. And a mail conversion, which reads a 64 KiB summary from Todofy's Mail entry, cuts it to 16,000 UTF-16
+ * units, creates the task and marks the mail.
  */
 const FIRST_OPS_STATUS = "Home's Ops.status() as an isolate's first request";
 test(
-  "Home's status and Todofy's service calls stay within the request bounds",
+  "Home's status and the bindings' calls stay within the request bounds",
   async () => {
     const result = await measureInIsolates(
       COLD_ISOLATES,
       async () => {
-        const harness = await startHarness({ inspectorPort: 0 });
+        const todofy = fakeMail(
+          Array.from({ length: 12 }, (_, index) => ({
+            id: `cpu-mail-${String(index)}`,
+            title: 'Synthetic CPU mail',
+            summary: '汉'.repeat(21845),
+          })),
+        );
+        const harness = await startHarness({ inspectorPort: 0, mail: todofy.handle });
+        // The owner's CSRF token, fetched before the meter connects.
+        expect((await harness.mutate('GET', '/api/tasks/v1/mailCategories')).status).toBe(200);
         const rows = Array.from({ length: 100 }, (_, index) => ({ id: `service-${String(index).padStart(3, '0')}` }));
         await harness.db
           .prepare(
@@ -535,6 +546,7 @@ test(
         const meter = await connectCpuMeter(harness.mf, 'tasks');
         return {
           harness,
+          todofy,
           meter,
           async dispose() {
             meter.close();
@@ -542,21 +554,17 @@ test(
           },
         };
       },
-      async ({ harness, meter }) => {
+      async ({ harness, todofy, meter }) => {
         const ops = await harness.mf.getWorker('tasks-ops');
-        const todofy = await harness.mf.getWorker('tasks-read-write');
+        const binding = await harness.mf.getWorker('tasks-read-write');
         const status = async () => {
           const answer = (await (await ops.fetch('https://tasks.internal/status')).json()) as { health: string };
           expect(answer.health).toBe('ok');
         };
-        const call = async (method: string, body: unknown, count: number) => {
-          const response = await todofy.fetch('https://tasks.internal/rpc', {
-            method: 'POST',
-            body: JSON.stringify({ method, body: JSON.stringify(body) }),
-          });
-          const answer = (await response.json()) as { status: number; body: string };
-          expect(answer.status, answer.body.slice(0, 200)).toBe(200);
-          expect((JSON.parse(answer.body) as { tasks: unknown[] }).tasks).toHaveLength(count);
+        const list = async (query: string, count: number) => {
+          const response = await binding.fetch(`https://tasks.internal/api/tasks/v1/tasks?${query}`);
+          expect(response.status, (await response.clone().text()).slice(0, 200)).toBe(200);
+          expect(((await response.json()) as { tasks: unknown[] }).tasks).toHaveLength(count);
         };
         return [
           await meter.measure(FIRST_OPS_STATUS, status, 1),
@@ -564,26 +572,37 @@ test(
           await meter.measure(
             'a footer search: 20 tasks with full 16,000-character descriptions',
             () =>
-              call(
-                'ListTasks',
-                { view: 'search', query: 'footer-synthetic', page_size: 20, include_description: true },
-                20,
-              ),
+              list('view=search&query=footer-synthetic&page_size=20&include_description=true', 20),
             7,
           ),
           await meter.measure(
             'a service page of 100 tasks',
-            () => call('ListTasks', { view: 'all', page_size: 100 }, 100),
+            () => list('view=all&page_size=100', 100),
             7,
           ),
           await meter.measure(
             "the backup's plan",
             async () => {
-              const response = await todofy.fetch('https://tasks.internal/backup', {
+              const response = await binding.fetch('https://tasks.internal/backup', {
                 method: 'POST',
                 body: JSON.stringify({ table: '' }),
               });
               expect(((await response.json()) as { status: number }).status).toBe(200);
+            },
+            7,
+          ),
+          await meter.measure(
+            'convert a mail whose summary is 64 KiB',
+            async () => {
+              const mail = todofy.mail.find((item) => item.pending !== false);
+              if (!mail) throw new Error('no synthetic mail left');
+              const response = await harness.mutate('POST', '/api/tasks/v1/mailItems:convert', {
+                event_id: mail.id,
+                etag: mailEtag(mail),
+                request_id: crypto.randomUUID(),
+              });
+              expect(response.status, (await response.clone().text()).slice(0, 200)).toBe(200);
+              expect(mail.pending).toBe(false);
             },
             7,
           ),

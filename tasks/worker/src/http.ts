@@ -4,7 +4,7 @@ import { TasksUiService } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { Code, RpcError } from '@ziyixi/proto/rpc-status';
 import { authenticate, checkCsrf, CSRF_COOKIE, csrfKey } from './auth.ts';
 import { handlers, type ApiContext } from './api.ts';
-import { planningRequest } from './planning-proxy.ts';
+import { mailRequest } from './mail-proxy.ts';
 import type { Env } from './env.ts';
 import { BUILD_HEADER, UNKNOWN_ROUTE } from '../../shared/build.ts';
 
@@ -54,11 +54,10 @@ export async function ownerRequest(request: Request, env: Env): Promise<Response
       });
       return secure(Response.json({ token: issued.token }, { headers: { 'set-cookie': issued.setCookie } }), build);
     }
-    if (path.startsWith('/api/plus/')) {
+    if (path.startsWith('/api/mail/')) {
       if (request.method !== 'GET' && request.method !== 'HEAD')
         await checkCsrf(request, env, auth.owner, auth.bypassed);
-      const response = await planningRequest(request, env);
-      if (response) return secure(response, build);
+      return secure(await mailRequest(request, env, requestId), build);
     }
     if (path.startsWith('/api/')) {
       const result = await api.handle(request, context, requestId);

@@ -335,7 +335,7 @@ test('simultaneous replay creates one task and uuid5 command identities remain a
   expect(rows?.total).toBe(1);
 });
 
-test('named bindings enforce generic read-only access and validate RPC bodies', async () => {
+test('named bindings enforce generic read-only access', async () => {
   const reader = await harness.mf.getWorker('tasks-read');
   const writer = await harness.mf.getWorker('tasks-read-write');
   const unknown = await harness.mf.getWorker('tasks-unknown');
@@ -344,18 +344,14 @@ test('named bindings enforce generic read-only access and validate RPC bodies', 
     403,
   );
   expect((await unknown.fetch('https://tasks.internal/api/tasks/v1/catalog')).status).toBe(403);
-  const id = randomUUID();
-  const request = { method: 'CreateTask', body: JSON.stringify({ request_id: id, task: { title: 'RPC synthetic' } }) };
-  const first = await writer.fetch('https://tasks.internal/rpc', { method: 'POST', body: JSON.stringify(request) });
-  const answer = (await first.json()) as { status: number; body: string };
-  expect(answer.status, answer.body).toBe(200);
-  const again = await writer.fetch('https://tasks.internal/rpc', { method: 'POST', body: JSON.stringify(request) });
-  expect(await again.json()).toEqual(answer);
-  const invalid = await writer.fetch('https://tasks.internal/rpc', {
-    method: 'POST',
-    body: JSON.stringify({ method: 'CreateTask', body: '{"unknown":true}' }),
-  });
-  expect(((await invalid.json()) as { status: number }).status).toBe(400);
-  const refused = await reader.fetch('https://tasks.internal/rpc', { method: 'POST', body: JSON.stringify(request) });
-  expect(((await refused.json()) as { status: number }).status).toBe(403);
+  const write = () =>
+    writer.fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Binding synthetic' }),
+    });
+  const path = `https://tasks.internal/api/tasks/v1/tasks?request_id=${randomUUID()}`;
+  const created = await write();
+  expect(created.status, await created.clone().text()).toBe(200);
+  expect(await (await write()).json()).toEqual(await created.json());
 });

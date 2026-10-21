@@ -1,7 +1,8 @@
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
-  PLANNING?: Fetcher;
+  /** Todofy's Mail entry (todofy.mail.v1), read-write. */
+  MAIL?: Fetcher;
   PUBLIC_HOST: string;
   TIME_ZONE?: string;
   ACCESS_ISSUER?: string;

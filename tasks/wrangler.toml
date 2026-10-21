@@ -27,10 +27,10 @@ database_id = "79a1f345-1183-46c3-bc6a-651be106f90c"
 migrations_dir = "migrations"
 
 [[services]]
-binding = "PLANNING"
+binding = "MAIL"
 service = "todofy"
-entrypoint = "Planning"
-props = { source = "tasks" }
+entrypoint = "Mail"
+props = { access = "read-write" }
 
 [vars]
 PUBLIC_HOST = "tasks.ziyixi.science"

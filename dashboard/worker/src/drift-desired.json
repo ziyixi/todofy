@@ -808,7 +808,7 @@
           "source": "config"
         },
         {
-          "name": "PLANNING",
+          "name": "MAIL",
           "type": "service",
           "source": "config"
         },

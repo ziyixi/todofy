@@ -446,8 +446,9 @@ class Files(unittest.TestCase):
         tasks = load(PRODUCTION["tasks"])
         core = load(PRODUCTION["todofy-core"])
         gateway = load(PRODUCTION["todofy"])
+        # Tasks converts mail through Todofy's Mail entry; Todofy writes no task.
         self.assertEqual(tasks["services"], [{
-            "binding": "PLANNING", "service": "todofy", "entrypoint": "Planning", "props": {"source": "tasks"},
+            "binding": "MAIL", "service": "todofy", "entrypoint": "Mail", "props": {"access": "read-write"},
         }])
         self.assertEqual(core["services"], [{
             "binding": "TASKS", "service": "tasks", "entrypoint": "TasksApi", "props": {"access": "read-write"},

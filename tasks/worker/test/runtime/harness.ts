@@ -64,7 +64,8 @@ export async function startHarness(
     inspectorPort?: number;
     jwks?: unknown;
     ownerToken?: string;
-    planning?: (request: Request) => Promise<Response>;
+    /** Todofy's Mail entry (fake-mail.ts); unbound when absent. */
+    mail?: (request: Request) => Promise<Response>;
     /** BUILD_SHA, which a release sets; unset, as in development, by default. */
     build?: string;
   } = {},
@@ -83,7 +84,7 @@ export async function startHarness(
           script: await bundle(),
           compatibilityDate: '2026-09-08',
           d1Databases: { DB: 'tasks-test' },
-          serviceBindings: { ASSETS: asset, ...(options.planning ? { PLANNING: options.planning } : {}) },
+          serviceBindings: { ASSETS: asset, ...(options.mail ? { MAIL: options.mail } : {}) },
           bindings: {
             PUBLIC_HOST: 'tasks.example.test',
             TIME_ZONE: 'America/Los_Angeles',
@@ -110,7 +111,7 @@ export async function startHarness(
           name: `tasks-${access}`,
           modules: true,
           compatibilityDate: '2026-09-08',
-          script: `export default {async fetch(request,env){const path=new URL(request.url).pathname;if(path==='/rpc'){const data=await request.json();return Response.json(await env.TASKS.call(data.method,data.body));}if(path==='/backup')return Response.json(await env.TASKS.exportBackup(await request.text()));return env.TASKS.fetch(request);}}`,
+          script: `export default {async fetch(request,env){const path=new URL(request.url).pathname;if(path==='/backup')return Response.json(await env.TASKS.exportBackup(await request.text()));return env.TASKS.fetch(request);}}`,
           serviceBindings: { TASKS: { name: 'tasks', entrypoint: 'TasksApi', props: { access } } },
         })),
       ],

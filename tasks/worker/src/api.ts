@@ -17,6 +17,7 @@ import { listFocusDays, moveFocusStep } from './focus.ts';
 import { commandFocusTimer, getFocusTimer } from './focus-timer.ts';
 import { getPlan, updateWeeklyBet } from './plan.ts';
 import { createFocusEntry, deleteFocusEntry, updateFocusEntry } from './focus-entries.ts';
+import { convertMailItem, getMailCategories, updateMailCategories } from './mail.ts';
 import { UNKNOWN_ROUTE } from '../../shared/build.ts';
 
 export interface ApiContext {
@@ -27,8 +28,8 @@ export interface ApiContext {
   internal: boolean;
 }
 /**
- * Mail conversion, the mail categories and GTD (mail.proto, gtd.proto) are in the IDL ahead of the code that serves
- * them; until then each answers as a route the Worker does not have.
+ * GTD and the weekly review (gtd.proto) are in the IDL ahead of the code that serves them; until then each answers as
+ * a route the Worker does not have.
  */
 function unserved(): Promise<never> {
   return Promise.reject(new RpcError(Code.NOT_FOUND, 'NOT_FOUND', UNKNOWN_ROUTE));
@@ -54,9 +55,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof TasksUiService>, ApiContex
   createFocusEntry: (input, { env, now }) => createFocusEntry(env.DB, input, now, accountZone(env)),
   updateFocusEntry: (input, { env, now }) => updateFocusEntry(env.DB, input, now),
   deleteFocusEntry: (input, { env, now }) => deleteFocusEntry(env.DB, input, now),
-  convertMailItem: unserved,
-  getMailCategories: unserved,
-  updateMailCategories: unserved,
+  convertMailItem: (input, { env, now }) => convertMailItem(env, input, now, accountZone(env)),
+  getMailCategories: (input, { env }) => getMailCategories(env.DB, input),
+  updateMailCategories: (input, { env, now }) => updateMailCategories(env.DB, input, now),
   getWeeklyReview: unserved,
   listWeeklyReviews: unserved,
   listGtdDays: unserved,
