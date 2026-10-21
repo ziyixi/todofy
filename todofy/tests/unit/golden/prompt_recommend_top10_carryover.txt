@@ -1,4 +1,4 @@
-Below is a list of task summaries I received in the last 24 hours, plus older tasks that are still open. Based on these tasks, please pick up to 10 distinct tasks that genuinely require my attention today or in the near future. For each task, provide a title and a reason.
+Below is a list of task summaries I received in the last 24 hours, plus older mail I have not decided on yet. Based on these tasks, please pick up to 10 distinct tasks that genuinely require my attention today or in the near future. For each task, provide a title and a reason.
 
 Rank only the selected tasks consecutively from #1, never exceeding #10.
 
@@ -31,7 +31,7 @@ IMPORTANT: MERGE similar or duplicate tasks into ONE entry.
   Multiple emails about the same unresolved issue should be combined into a single recommendation,
   while distinct risks or actions must not be collapsed merely because they concern the same service.
 
-IMPORTANT: An item that starts with "[N 天前]" arrived N days ago and its Todoist task is still open.
+IMPORTANT: An item that starts with "[N 天前]" arrived N days ago and still awaits my decision.
   Its age alone is neither a reason to rank it higher nor a reason to skip it.
   Never call it overdue unless its summary states a date that has passed.
   When you select such an item, start its "reason" with "（N 天前）" using the same N,
@@ -43,4 +43,4 @@ Example output when no task requires action:
 Example output when only one task qualifies, even if the limit is higher:
 [{"rank":1,"title":"处理扣款失败","reason":"自动扣款已失败，需在邮件明确的截止时间前处理尚未支付的款项。"}]
 
-The task summaries from the last 24 hours, followed by older tasks that are still open, are as follows:
+The task summaries from the last 24 hours, followed by older mail I have not decided on yet, are as follows:

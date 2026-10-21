@@ -23,7 +23,7 @@ function Window({ report }: { report: SummaryReport | RecommendationReport }) {
             <Time value={report.windowStart} /> – <Time value={report.windowEnd} />
           </span>,
         ],
-        ['邮件摘要数', carried ? `${report.taskCount}（其中 ${carried} 条是前几天仍未完成的任务）` : report.taskCount],
+        ['邮件摘要数', carried ? `${report.taskCount}（其中 ${carried} 条是前几天仍待处理的邮件）` : report.taskCount],
         ['模型', report.model ? <code key="m">{report.model}</code> : <span key="m" className="muted">未调用</span>],
       ]}
     />

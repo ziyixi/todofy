@@ -1,5 +1,5 @@
 """migrations/0004_gtd.sql and the GTD statements on host SQLite (D1 is SQLite): checks, what the
-carryover and the aggregate reads return, and that the previous release's SQL keeps working."""
+aggregate reads return, and that the previous release's SQL keeps working."""
 
 import json
 import re
@@ -12,7 +12,6 @@ import pytest
 from todofy.core import gtd
 from todofy.core.sql import gtd as sql
 from todofy.core.sql import reminders as reminder_sql
-from todofy.core.sql import reports as report_sql
 from todofy.core.sql import retention as retention_sql
 from todofy.core.vocab import ReminderState
 
@@ -139,68 +138,6 @@ def test_closed_since_counts_tasks_gone_since_yesterday(db):
     write_page(db, yesterday, [task("a"), task("b"), task("c")])
     write_page(db, TODAY, [task("b"), task("d")])
     assert db.execute(sql.CLOSED_SINCE.sql, (yesterday, TODAY)).fetchone()[0] == 2
-
-
-def summary(db: sqlite3.Connection, event_id: str, created_at: int, task_id: str, text: str) -> None:
-    db.execute(
-        "INSERT INTO summaries (event_id, created_at, subject, summary, model, task_id) VALUES (?, ?, 's', ?, 'm', ?)",
-        (event_id, created_at, text, task_id),
-    )
-
-
-def test_carryover_candidates_are_older_open_mail_and_the_picks_are_read_by_id(db):
-    write_page(db, TODAY, [task(f"t{index}") for index in range(40)])
-    summary(db, "in-window", NOW - 3600, "t0", "今天的")
-    summary(db, "edge", NOW - DAY, "t1", "正好 24 小时")  # the window is (now-24h, now]: carried
-    summary(db, "closed", NOW - 2 * DAY, "gone", "已完成")
-    summary(db, "no-task", NOW - 2 * DAY, "", "没有任务")
-    summary(db, "too-old", NOW - 14 * DAY, "t2", "太旧")
-    for index in range(3, 40):
-        summary(db, f"e{index}", NOW - DAY - 60 * index, f"t{index}", f"摘要 {index}")
-    summary(db, "long", NOW - 3 * DAY, "t3", "长" * 5000)
-    bind = (NOW - 14 * DAY, NOW - DAY, TODAY, gtd.MAX_SNAPSHOT_ROWS)
-    rows = [dict(row) for row in db.execute(report_sql.CARRYOVER_CANDIDATES.sql, bind)]
-    # IDs and times only, newest first, every open one (the cap of 30 is pick_carried's).
-    assert set(rows[0]) == {"event_id", "created_at"}
-    assert [row["event_id"] for row in rows] == ["edge"] + [f"e{index}" for index in range(3, 40)] + ["long"]
-    order = gtd.pick_carried(rows, NOW)
-    assert len(order) == gtd.CARRYOVER_MAX_ROWS and order[0] == "long"  # the oldest day first
-    ids = order + [""] * (gtd.CARRYOVER_MAX_ROWS - len(order))
-    picked = {
-        row["event_id"]: row["summary"]
-        for row in db.execute(report_sql.CARRYOVER_SUMMARIES.sql, (gtd.CARRYOVER_READ_CHARS, *ids))
-    }
-    assert set(picked) == set(order) and len(picked["long"]) == gtd.CARRYOVER_READ_CHARS
-    # Unused places are bound to '' and match nothing.
-    assert list(db.execute(report_sql.CARRYOVER_SUMMARIES.sql, (10, "edge", *[""] * 29))) != []
-
-
-def test_only_the_latest_scheduled_snapshot_serves_the_carryover(db):
-    offset = 13 * 3600
-    slot_today = NOW - NOW % DAY + offset
-
-    def serving(now: int) -> str | None:
-        slot = gtd.last_collect(now, offset)
-        found = db.execute(report_sql.SLOT_SNAPSHOT.sql, (gtd.day_of(slot), slot)).fetchone()
-        return None if found is None else found["day"]
-
-    yesterday = gtd.shift(gtd.day_of(slot_today), -1)
-    db.execute(sql.SNAPSHOT_START.sql, (yesterday, slot_today - DAY))
-    db.execute(sql.SNAPSHOT_FINISH.sql, ("ok", 1, 0, 1, "", slot_today - DAY + 600, yesterday))
-    assert serving(slot_today - 1) == yesterday  # before today's slot: yesterday's is the latest
-    today = gtd.day_of(slot_today)
-    db.execute(sql.SNAPSHOT_START.sql, (today, slot_today))
-    # Today's is collecting, then failed, then partial: nothing, never yesterday's list.
-    assert serving(slot_today + 1800) is None
-    db.execute(sql.SNAPSHOT_FINISH.sql, ("failed", 0, 0, 0, "todoist_unavailable", slot_today, today))
-    assert serving(slot_today + 1800) is None
-    db.execute(sql.SNAPSHOT_FINISH.sql, ("partial", 2000, 0, 10, "page_cap", slot_today, today))
-    assert serving(slot_today + 1800) is None
-    db.execute(sql.SNAPSHOT_FINISH.sql, ("ok", 2, 0, 1, "", slot_today + 900, today))
-    assert serving(slot_today + 1800) == today and serving(slot_today + 10 * 3600) == today
-    # An ok snapshot of the same day taken before the slot (after the object's state was lost) does not.
-    db.execute(sql.SNAPSHOT_FINISH.sql, ("ok", 2, 0, 1, "", slot_today - 3600, today))
-    assert serving(slot_today + 1800) is None
 
 
 def test_daily_rows_upsert_and_read_back(db):

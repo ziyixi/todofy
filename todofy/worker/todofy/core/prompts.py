@@ -96,16 +96,17 @@ RECOMMEND_TOP_TASKS = (
 
 REPORT_SEPARATOR = "=" * 25 + "\n"
 
-# The morning brief's carryover (docs/gtd-features.md §3): with older still-open tasks in the input, the
+# The morning brief's carryover (core/carryover.py): with older mail still awaiting my decision in the input, the
 # prompt says so and adds one rule. Without carryover the prompt is RECOMMEND_TOP_TASKS byte for byte.
 CARRYOVER_EDITS = (
     (
         "Below is a list of task summaries I received in the last 24 hours. ",
-        "Below is a list of task summaries I received in the last 24 hours, plus older tasks that are still open. ",
+        "Below is a list of task summaries I received in the last 24 hours,"
+        " plus older mail I have not decided on yet. ",
     ),
     (
         "\nExample output when no task requires action:\n",
-        '\nIMPORTANT: An item that starts with "[N 天前]" arrived N days ago and its Todoist task is still open.\n'
+        '\nIMPORTANT: An item that starts with "[N 天前]" arrived N days ago and still awaits my decision.\n'
         "  Its age alone is neither a reason to rank it higher nor a reason to skip it.\n"
         "  Never call it overdue unless its summary states a date that has passed.\n"
         '  When you select such an item, start its "reason" with "（N 天前）" using the same N,\n'
@@ -114,7 +115,7 @@ CARRYOVER_EDITS = (
     ),
     (
         "The task summaries from the last 24 hours are as follows:",
-        "The task summaries from the last 24 hours, followed by older tasks that are still open, are as follows:",
+        "The task summaries from the last 24 hours, followed by older mail I have not decided on yet, are as follows:",
     ),
 )
 

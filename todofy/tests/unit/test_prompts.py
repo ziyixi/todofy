@@ -145,7 +145,7 @@ def test_report_input_matches_go_handlers(golden):
     assert prompts.report_input([]) == prompts.REPORT_SEPARATOR
 
 
-# ---- the morning brief's carryover (docs/gtd-features.md §3) ---------------------------------
+# ---- the morning brief's carryover (core/carryover.py) ---------------------------------------
 
 
 @pytest.mark.parametrize("top_n", [1, 3, 10])
@@ -154,7 +154,7 @@ def test_without_carryover_the_prompt_is_the_old_one(golden, top_n):
 
 
 def test_the_carryover_prompt_is_pinned(golden):
-    """Changing this text changes what the model is told about older tasks: update the golden on purpose."""
+    """Changing this text changes what the model is told about older mail: update the golden on purpose."""
     assert prompts.recommend_prompt(10, carryover=True).encode() == golden.bytes("prompt_recommend_top10_carryover.txt")
 
 
@@ -165,7 +165,7 @@ def test_the_carryover_prompt_differs_only_by_its_three_edits():
         assert new.replace("{top_n}", "3") in carried
         rebuilt = rebuilt.replace(new, old)
     assert rebuilt == plain
-    assert '"[N 天前]"' in carried and "still open" in carried
+    assert '"[N 天前]"' in carried and "still awaits my decision" in carried
     assert "Never call it overdue unless its summary states a date that has passed" in carried
     # The age reaches the reader: a carried pick's reason starts with it (the newsletter shows reasons).
     assert 'start its "reason" with "（N 天前）"' in carried

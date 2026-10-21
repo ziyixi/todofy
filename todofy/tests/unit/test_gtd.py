@@ -297,17 +297,7 @@ def test_the_review_stays_at_17_utc_across_the_us_dst_change():
     assert gtd.iso_week(at(2026, 11, 1, 17)) == "2026-W44"
 
 
-# ---- carryover and review text -------------------------------------------------------------
-
-
-def test_carried_lines_say_how_many_days_ago():
-    assert gtd.carried_line("缴费", NOW, NOW - DAY - 5) == "[1 天前] 缴费"
-    assert gtd.carried_line("缴费", NOW, NOW - 13 * DAY) == "[13 天前] 缴费"
-    assert gtd.carried_line("缴费", NOW, NOW - 3600) == "[1 天前] 缴费"  # never "0 days"
-    # A long stored summary (up to 64 KiB) is cut on a UTF-8 boundary.
-    long = gtd.carried_line("缴" * 2000, NOW, NOW - 2 * DAY)
-    assert long.startswith("[2 天前] 缴") and len(long.encode()) <= gtd.CARRYOVER_LINE_BYTES + len("[2 天前] ".encode())
-    long.encode().decode()
+# ---- review text ---------------------------------------------------------------------------
 
 
 def test_the_last_collect_is_today_s_slot_once_it_passed_else_yesterday_s():
@@ -316,45 +306,6 @@ def test_the_last_collect_is_today_s_slot_once_it_passed_else_yesterday_s():
     assert gtd.last_collect(midnight + offset, offset) == midnight + offset
     assert gtd.last_collect(midnight + offset + 1800, offset) == midnight + offset
     assert gtd.last_collect(midnight + offset - 1, offset) == midnight + offset - DAY
-
-
-def candidates(now: int, per_day: dict[int, int]) -> list[dict[str, object]]:
-    """``per_day`` maps "N 天前" to how many open mail tasks arrived that day."""
-    rows = []
-    for days, count in per_day.items():
-        for index in range(count):
-            rows.append({"event_id": f"d{days}-{index}", "created_at": now - days * DAY - 60 * (index + 1)})
-    return rows
-
-
-def test_the_carryover_is_spread_over_the_days_oldest_day_first():
-    # A normal week: 40 open tasks from yesterday, 5 from 2 days ago, 2 each from 9 and 13 days ago.
-    picked = gtd.pick_carried(candidates(NOW, {1: 40, 2: 5, 9: 2, 13: 2}), NOW)
-    assert len(picked) == gtd.CARRYOVER_MAX_ROWS
-    days = {day: sum(event.startswith(f"d{day}-") for event in picked) for day in (1, 2, 9, 13)}
-    # Every older task is carried; yesterday's fill the rest, newest first.
-    assert days == {1: 21, 2: 5, 9: 2, 13: 2}
-    assert picked[:4] == ["d13-0", "d9-0", "d2-0", "d1-0"]
-    assert [event for event in picked if event.startswith("d1-")] == [f"d1-{index}" for index in range(21)]
-    # More days than slots in a round: the oldest days go first.
-    many = gtd.pick_carried(candidates(NOW, {day: 5 for day in range(1, 14)}), NOW, cap=15)
-    assert sorted({int(event[1:].split("-")[0]) for event in many[:13]}) == list(range(1, 14))
-    assert many[13:] == ["d13-1", "d12-1"]
-    assert gtd.pick_carried([], NOW) == []
-
-
-def test_carried_lines_keep_the_pick_order_until_the_byte_cap_then_newest_first():
-    rows = [
-        {"event_id": "old", "summary": "旧", "created_at": NOW - 9 * DAY},
-        {"event_id": "new", "summary": "新", "created_at": NOW - DAY - 60},
-    ]
-    assert gtd.carried_lines(rows, ["old", "new", "gone"], NOW) == ["[1 天前] 新", "[9 天前] 旧"]
-    big = [{"event_id": f"e{i}", "summary": "长" * 400, "created_at": NOW - (2 + i) * DAY} for i in range(30)]
-    lines = gtd.carried_lines(big, [f"e{i}" for i in range(30)], NOW)
-    assert sum(len(line.encode()) + 1 for line in lines) <= gtd.CARRYOVER_MAX_BYTES
-    # The cap keeps the first picks in pick order (e0, e1, ...), shown newest first.
-    assert 0 < len(lines) < 30
-    assert lines[0].startswith("[2 天前]") and lines[-1].startswith(f"[{1 + len(lines)} 天前]")
 
 
 def daily(**fields: object) -> gtd.Daily:

@@ -5,9 +5,9 @@ stored row only when it was computed since the latest precompute time and is
 usable (``ok`` or ``empty_window``); otherwise the coordinator computes one
 within 40 s, under its hourly computation cap, and answers 503 when that
 fails. The recommendation's input is the 24 h window plus the carryover: older
-mail tasks the day's Tasks snapshot still lists as open (docs/gtd-features.md
-§3); without that snapshot, after a failed attempt that day, or when the token
-budget cannot take the carried lines, it is exactly the 24 h report. The newsletter
+mail that still awaits a decision in Mail (core/carryover.py); after a failed
+attempt that day, or when the token budget cannot take the carried lines, it is
+exactly the 24 h report. The newsletter
 reads only the HTTP status, so an old or unusable report is never sent as a 200.
 Every report is built by core/report_schema.py as a todofy.report.v1 message written with the wire codec, so
 what is stored and served keeps the contract (api/summary-v1, api/recommendation-v1, generated from
@@ -20,7 +20,8 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs
 
-from todofy.core import gtd, prompts
+from todofy.core import carryover as carry
+from todofy.core import prompts
 from todofy.core.api_errors import ApiError
 from todofy.core.backoff import DAY, HOUR, MINUTE, REPORT_ON_DEMAND_BUDGET
 from todofy.core.metrics import Step
@@ -100,7 +101,7 @@ async def compute(env: Any, coordinator: Any, kind: str, top_n: int, now: int, b
     window = await env.DB.prepare(sql.REPORT_WINDOW.sql).bind(start, now, MAX_WINDOW_SUMMARIES).all()
     new = [row.summary for row in window.results]
     stamps = {"computed_at": _stamp(now), "window_start": _stamp(start), "window_end": _stamp(now)}
-    # The recommendation also sees older mail tasks still open in Tasks (never the summary report).
+    # The recommendation also sees older mail still awaiting a decision (never the summary report).
     # After a failed attempt today (Gemini error or unusable answer), every later attempt is exactly
     # the 24 h report, so the carryover can cost the brief at most one attempt.
     carried: list[str] = []
@@ -259,37 +260,28 @@ async def latest(db: Any) -> dict:
 
 
 async def carryover(env: Any, window_start: int, now: int) -> list[str]:
-    """Mail tasks from the REPORT_CARRYOVER_DAYS before the 24 h window that the latest scheduled
-    Tasks snapshot still lists as open: at most CARRYOVER_MAX_ROWS, spread over the days they
-    arrived (core.gtd.pick_carried), each ``[N 天前] summary`` cut to CARRYOVER_LINE_BYTES, newest first.
+    """Mail from the REPORT_CARRYOVER_DAYS before the 24 h window that still awaits a decision in Mail: at most
+    CARRYOVER_MAX_ROWS, spread over the days they arrived (core.carryover.pick_carried), each ``[N 天前] summary``
+    cut to CARRYOVER_LINE_BYTES, newest first. Two D1 reads, no Tasks call.
 
-    Empty (and the recommendation exactly the 24 h report) unless the snapshot of the latest
-    GTD_COLLECT_UTC time at or before now is ``ok`` (never an older day's list), with
-    REPORT_CARRYOVER_DAYS = 0 or GTD_COLLECT_UTC = off, or when anything here fails.
+    Empty (and the recommendation exactly the 24 h report) with REPORT_CARRYOVER_DAYS = 0, or when anything here
+    fails.
     """
-    days = min(integer(env, "REPORT_CARRYOVER_DAYS", gtd.DEFAULT_CARRYOVER_DAYS), gtd.MAX_CARRYOVER_DAYS)
-    offset = gtd.utc_offset(var(env, "GTD_COLLECT_UTC", gtd.DEFAULT_COLLECT_UTC))
-    if days <= 0 or offset is None:
+    days = min(integer(env, "REPORT_CARRYOVER_DAYS", carry.DEFAULT_CARRYOVER_DAYS), carry.MAX_CARRYOVER_DAYS)
+    if days <= 0:
         return []
     db = env.DB
     try:
-        slot = gtd.last_collect(now, offset)
-        snapshot = await db.prepare(sql.SLOT_SNAPSHOT.sql).bind(gtd.day_of(slot), slot).first()
-        if snapshot is None:
-            print(json.dumps({"report": RECOMMENDATION, "carryover": "no_snapshot"}))
-            return []
         candidates = await (
-            db.prepare(sql.CARRYOVER_CANDIDATES.sql)
-            .bind(now - days * DAY, window_start, snapshot["day"], gtd.MAX_SNAPSHOT_ROWS)
-            .all()
+            db.prepare(sql.CARRYOVER_CANDIDATES.sql).bind(now - days * DAY, window_start, carry.MAX_CANDIDATES).all()
         )
-        order = gtd.pick_carried([dict(row) for row in candidates.results], now)
+        order = carry.pick_carried([dict(row) for row in candidates.results], now)
         if not order:
             print(json.dumps({"report": RECOMMENDATION, "carryover": 0}))
             return []
-        ids = order + [""] * (gtd.CARRYOVER_MAX_ROWS - len(order))
-        rows = await db.prepare(sql.CARRYOVER_SUMMARIES.sql).bind(gtd.CARRYOVER_READ_CHARS, *ids).all()
-        carried = gtd.carried_lines([dict(row) for row in rows.results], order, now)
+        ids = order + [""] * (carry.CARRYOVER_MAX_ROWS - len(order))
+        rows = await db.prepare(sql.CARRYOVER_SUMMARIES.sql).bind(carry.CARRYOVER_READ_CHARS, *ids).all()
+        carried = carry.carried_lines([dict(row) for row in rows.results], order, now)
     except Exception as exc:
         print(json.dumps({"report": RECOMMENDATION, "carryover": "failed", "error": type(exc).__name__}))
         return []

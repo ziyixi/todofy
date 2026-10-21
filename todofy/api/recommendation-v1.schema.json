@@ -97,7 +97,7 @@
           "maximum": 1000000
         },
         "carryover_count": {
-          "description": "Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as \"[N 天前] summary\"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before.",
+          "description": "Older mail (up to 14 days, at most 30) that still awaits a decision in Mail, shown to the model as \"[N 天前] summary\"; 0 when there was none or it could not be read, and then the report is exactly the 24 h one. Before 2026-10-21 it counted older mail tasks the day's task snapshot still listed as open. Added 2026-09-30; absent from reports stored before.",
           "type": "integer",
           "minimum": 0,
           "maximum": 1000000
@@ -195,7 +195,7 @@
           "maximum": 1000000
         },
         "carryover_count": {
-          "description": "Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as \"[N 天前] summary\"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before.",
+          "description": "Older mail (up to 14 days, at most 30) that still awaits a decision in Mail, shown to the model as \"[N 天前] summary\"; 0 when there was none or it could not be read, and then the report is exactly the 24 h one. Before 2026-10-21 it counted older mail tasks the day's task snapshot still listed as open. Added 2026-09-30; absent from reports stored before.",
           "type": "integer",
           "minimum": 0,
           "maximum": 1000000
@@ -295,7 +295,7 @@
           "maximum": 1000000
         },
         "carryover_count": {
-          "description": "Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as \"[N 天前] summary\"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before.",
+          "description": "Older mail (up to 14 days, at most 30) that still awaits a decision in Mail, shown to the model as \"[N 天前] summary\"; 0 when there was none or it could not be read, and then the report is exactly the 24 h one. Before 2026-10-21 it counted older mail tasks the day's task snapshot still listed as open. Added 2026-09-30; absent from reports stored before.",
           "type": "integer",
           "minimum": 0,
           "maximum": 1000000
@@ -395,7 +395,7 @@
           "maximum": 1000000
         },
         "carryover_count": {
-          "description": "Older mail tasks (up to 14 days, at most 30) that the day's Todoist snapshot still lists as open, shown to the model as \"[N 天前] summary\"; 0 when no usable snapshot existed, and then the report is exactly the 24 h one. Added 2026-09-30; absent from reports stored before.",
+          "description": "Older mail (up to 14 days, at most 30) that still awaits a decision in Mail, shown to the model as \"[N 天前] summary\"; 0 when there was none or it could not be read, and then the report is exactly the 24 h one. Before 2026-10-21 it counted older mail tasks the day's task snapshot still listed as open. Added 2026-09-30; absent from reports stored before.",
           "type": "integer",
           "minimum": 0,
           "maximum": 1000000

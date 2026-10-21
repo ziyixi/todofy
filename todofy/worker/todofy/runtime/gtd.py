@@ -24,6 +24,7 @@ from datetime import date
 from typing import Any
 from urllib.parse import urlsplit
 
+from todofy.core import carryover
 from todofy.core import gtd as rules
 from todofy.core import ops as ops_rules
 from todofy.core.backoff import DAY, REMINDER_CHECK_INTERVAL, TASK_STEP_BUDGET
@@ -315,7 +316,7 @@ async def _aggregate(env: Any, coordinator: Any, state: State, now: int, offset:
     db, day = env.DB, state.day
     yesterday = rules.shift(day, -1)
     first_week = rules.week_shift(rules.iso_week(now), -HISTORY_WEEKS)
-    mail_window = (now - rules.MAX_CARRYOVER_DAYS * DAY, now - DAY)
+    mail_window = (now - carryover.MAX_CARRYOVER_DAYS * DAY, now - DAY)
     rows, before, closed, mail, history = await db.batch(
         [
             db.prepare(sql.SNAPSHOT_ROWS.sql).bind(day, rules.MAX_SNAPSHOT_ROWS),

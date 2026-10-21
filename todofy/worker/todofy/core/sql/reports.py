@@ -3,27 +3,22 @@
 The two upserts name the unique key their conflict clause hits.
 """
 
-from ..gtd import CARRYOVER_MAX_ROWS
+from ..carryover import CARRYOVER_MAX_ROWS
 from . import Query
+from .mailbox import NATIVE_PENDING
 
 REPORT_WINDOW = Query(
     "SELECT summary FROM summaries WHERE created_at > ? AND created_at <= ? ORDER BY created_at LIMIT ?",
     "summaries_created",
 )
-# The morning brief's carryover (docs/gtd-features.md §3), three reads. The snapshot of the latest
-# scheduled collection: bind its day and its time; only an ok snapshot finished at or after it serves.
-SLOT_SNAPSHOT = Query(
-    "SELECT day, finished_at FROM gtd_snapshots WHERE day = ? AND status = 'ok' AND finished_at >= ?",
-    "sqlite_autoindex_gtd_snapshots_1",
-)
-# Mail tasks from before the 24 h window (bind the carryover's start and the window's start) still open
-# in that snapshot (bind its day), IDs and times only, at most a snapshot's row cap: walks
-# summaries_created plus one primary-key probe each. core.gtd.pick_carried spreads the 30 over the days.
+# The morning brief's carryover (core/carryover.py), two reads. Mail from before the 24 h window (bind the
+# carryover's start, the window's start and MAX_CANDIDATES) still awaiting a decision, IDs and times only, newest
+# first along summaries_pending. core.carryover.pick_carried spreads the 30 over the days.
 CARRYOVER_CANDIDATES = Query(
-    "SELECT event_id, created_at FROM summaries WHERE created_at > ? AND created_at <= ? AND task_id <> ''"
-    " AND EXISTS (SELECT 1 FROM gtd_snapshot_tasks g WHERE g.day = ? AND g.task_id = summaries.task_id)"
-    " ORDER BY created_at DESC LIMIT ?",
-    "summaries_created",
+    "SELECT event_id, created_at FROM summaries INDEXED BY summaries_pending"
+    f" WHERE created_at > ? AND created_at <= ? AND {NATIVE_PENDING}"
+    " ORDER BY created_at DESC, event_id DESC LIMIT ?",
+    "summaries_pending",
 )
 # The picked summaries by primary key: bind CARRYOVER_READ_CHARS, then CARRYOVER_MAX_ROWS event IDs
 # (unused places bound to ''). Each summary is read cut to that many characters.
