@@ -282,12 +282,6 @@ Worker upload proves a VPS update, a complete backup or live business success. R
 [production.sh](../tools/deploy-probes/production.sh) and [access.sh](../tools/deploy-probes/access.sh), with each
 application retaining its own config, credentials, wrapper and expected paths.
 
-[Tasks Todofy import](../.github/workflows/tasks-todofy-import.yml) is a one-time manual dispatch on main in the
-`production` environment, under the Tasks release's `tasks-production` lock, with the releases' `CF_API_TOKEN`. It
-copies Todofy's GTD days and reviews, Mail categories and task routes into Tasks' D1 after the release in which Tasks
-took them over: read-only exports, counts only in the log, and one write, the generated SQL, only when its `apply`
-input is set ([runbook](../tasks/docs/backup.md#one-time-todofy-import)). It is deleted with Todofy's copies.
-
 The old generated-config rollback procedure is retained in [history](history.md#committed-config-rollback).
 Follow the current application runbook and HANDOFF before attempting a rollback.
 
