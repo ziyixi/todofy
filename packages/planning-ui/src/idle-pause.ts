@@ -1,7 +1,8 @@
 /**
  * Pause when away, the decision alone: when the owner leaves a running count-up (the screen locks, no input for
- * AWAY_AFTER_MS, or the machine sleeps), Focus pauses it in Tasks at the moment they left; when they are back it asks
- * whether to count that time. Keep resumes at the pause time, as if the session never paused; Discard resumes now.
+ * AWAY_AFTER_MS, or the machine sleeps), Focus pauses it in Tasks at the moment they left; only when they are back
+ * does it ask whether to count that time (gone again before answering, it waits for the next return). Keep resumes at
+ * the pause time, as if the session never paused; Discard resumes now.
  *
  * Pure and clock-free: useIdlePause.ts feeds it the detector's readings, a heartbeat and the confirmed timer, with
  * the time of each, and sends the commands it answers through App's write queue.
@@ -96,8 +97,28 @@ export function awayMinutes(phase: { pausedAt: number; returnedAt: number }) {
 function back(reading: Reading | undefined): boolean {
   return Boolean(reading && !reading.idle && !reading.locked);
 }
+/** A reading says the owner is not here: a stopped detector's silence says nothing. */
+function gone(reading: Reading | undefined): boolean {
+  return Boolean(reading && (reading.idle || reading.locked));
+}
 function asking(etag: string, pausedAt: number, returnedAt: number): Phase {
   return { name: "asking", etag, pausedAt, returnedAt, answered: false };
+}
+/**
+ * The owner left again before answering: the question waits for the next return, so while they are away the bar
+ * says Paused. An answer already in flight is left to its own confirmation.
+ */
+function leftAgain(phase: Phase): Phase | undefined {
+  if (phase.name === "asking" && !phase.answered)
+    return { name: "away", etag: phase.etag, pausedAt: phase.pausedAt };
+  if (phase.name === "pausing" && phase.returnedAt !== undefined)
+    return {
+      name: "pausing",
+      taskId: phase.taskId,
+      since: phase.since,
+      sending: phase.sending,
+    };
+  return undefined;
 }
 /** A confirmed Pause: the question at once when the owner is already back. */
 function paused(
@@ -198,6 +219,10 @@ export function idleStep(
       // A detector that stopped reports nothing; the next one's first reading is a new baseline.
       if (phase.name === "watching" && event.reading)
         return detect(next, event.at);
+      if (gone(event.reading)) {
+        const left = leftAgain(phase);
+        return [left ? { ...next, phase: left } : settle(next, event.at)];
+      }
       if (!back(event.reading)) return [settle(next, event.at)];
       // Back: the latest return is the one the question counts to.
       if (phase.name === "pausing" || phase.name === "asking")
@@ -228,8 +253,16 @@ export function idleStep(
     case "failed":
       if (phase.name === "pausing")
         return [waitingPause(state, { ...phase, sending: false }, event.at)];
+      // The answer failed: the question takes one again, or on the next return when the owner left meanwhile.
       if (phase.name === "asking")
-        return [{ ...state, phase: { ...phase, answered: false } }];
+        return [
+          {
+            ...state,
+            phase: gone(state.reading)
+              ? { name: "away", etag: phase.etag, pausedAt: phase.pausedAt }
+              : { ...phase, answered: false },
+          },
+        ];
       return [state];
     case "answer":
       if (phase.name !== "asking" || phase.answered) return [state];

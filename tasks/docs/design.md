@@ -257,9 +257,13 @@ Headless Chromium cannot install an app: `pwa.spec.ts` checks the parsed manifes
 `env(titlebar-area-*)` fallbacks apply). `mini-timer.spec.ts` uses the real Document Picture-in-Picture API (only
 the window's size is set by the test: headless Chrome opens it at the page's viewport). `idle-pause.spec.ts` uses
 the real Idle Detection API; CDP grants its permission (`Browser.grantPermissions`) and sets the OS's idle and lock
-state (`Emulation.setIdleOverride`). The Dock menu, links from Gmail and Todofy's `/task/<id>` redirect landing in
-the open window, the title bar's toggle and clearances, the mini timer's first size, resizing and remembered place,
-and a real screen lock and lid close with a count-up running are checked by hand in the installed app.
+state (`Emulation.setIdleOverride`, which lasts for one document: a detector's first reading after a load is the
+host's real input state, idle on a Mac left alone and active on a CI runner, so the test waits for that reading and
+then sets active and unlocked rather than assuming either). Playwright's clock holds the page at each moment the
+owner leaves or returns, so the pause and the minutes asked are checked exactly. The Dock menu, links from Gmail
+and Todofy's `/task/<id>` redirect landing in the open window, the title bar's toggle and clearances, the mini
+timer's first size, resizing and remembered place, and a real screen lock and lid close with a count-up running are
+checked by hand in the installed app.
 
 ## Performance and Cloudflare
 

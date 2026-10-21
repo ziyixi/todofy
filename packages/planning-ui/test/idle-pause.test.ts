@@ -367,21 +367,79 @@ it("Keep resumes at the pause time, Discard now; one answer at a time", () => {
   ).toEqual({ name: "watching" });
 });
 
-it("a second absence while the question waits sends nothing and counts to the latest return", () => {
-  const { state, commands } = play(
+it("a second absence while the question waits sends nothing, shows Paused while away and counts to the latest return", () => {
+  const gone = play(
     [
       { type: "reading", reading: locked, at: T0 + 20 * MIN },
       { type: "beat", at: T0 + 60 * MIN },
-      { type: "reading", reading: active, at: T0 + 65 * MIN },
     ],
     asking(),
   );
+  expect(gone.commands).toEqual([]);
+  // Still away: no question until the owner is back.
+  expect(gone.state.phase).toEqual({
+    name: "away",
+    etag: "p1",
+    pausedAt: T0 + 5 * MIN,
+  });
+  const { state, commands } = play(
+    [{ type: "reading", reading: active, at: T0 + 65 * MIN }],
+    gone.state,
+  );
   expect(commands).toEqual([]);
-  expect(state.phase).toMatchObject({
+  expect(state.phase).toEqual({
     name: "asking",
+    etag: "p1",
+    pausedAt: T0 + 5 * MIN,
     returnedAt: T0 + 65 * MIN,
+    answered: false,
   });
   expect(awayMinutes(state.phase as never)).toBe(60);
+  // No input for the threshold while it waits is gone again too.
+  expect(
+    play([{ type: "reading", reading: idle, at: T0 + 27 * MIN }], asking())
+      .state.phase,
+  ).toMatchObject({ name: "away" });
+  // A detector that stops says nothing about the owner: the question stays.
+  expect(
+    play([{ type: "reading", reading: undefined, at: T0 + 20 * MIN }], asking())
+      .state.phase,
+  ).toMatchObject({ name: "asking" });
+});
+
+it("back and gone again before the pause is confirmed: it confirms to Paused, and the next return asks", () => {
+  const { state } = play(
+    [
+      { type: "reading", reading: locked, at: T0 + 5 * MIN },
+      { type: "reading", reading: active, at: T0 + 9 * MIN },
+      { type: "reading", reading: locked, at: T0 + 10 * MIN },
+      { type: "paused", etag: "p1", pausedAt: T0 + 5 * MIN },
+    ],
+    watching(),
+  );
+  expect(state.phase).toEqual({
+    name: "away",
+    etag: "p1",
+    pausedAt: T0 + 5 * MIN,
+  });
+  expect(
+    play([{ type: "reading", reading: active, at: T0 + 30 * MIN }], state)
+      .state.phase,
+  ).toMatchObject({ name: "asking", returnedAt: T0 + 30 * MIN });
+});
+
+it("an answer in flight is left to its confirmation when the owner leaves; failed, the next return asks", () => {
+  const sent = play(
+    [
+      { type: "answer", keep: true },
+      { type: "reading", reading: locked, at: T0 + 18 * MIN },
+    ],
+    asking(),
+  );
+  expect(sent.state.phase).toMatchObject({ name: "asking", answered: true });
+  expect(
+    play([{ type: "failed", at: T0 + 19 * MIN }], sent.state).state.phase,
+  ).toEqual({ name: "away", etag: "p1", pausedAt: T0 + 5 * MIN });
 });
 
 it("counts the minutes away rounded, at least one", () => {

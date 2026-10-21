@@ -358,6 +358,22 @@ it("pauses at the moment the screen locked; back, the bar and the mini timer ask
   expect(pip.document.querySelector(".mini-controls")).toBeNull();
   expect(pip.document.querySelector(".mini-foot")).toBeTruthy();
 
+  // Gone again before answering: Paused while away, and the next return asks again, counted to it.
+  vi.setSystemTime(NOW + 18 * MIN);
+  await report("active", "locked");
+  expect(page.timer).toHaveBeenCalledTimes(1);
+  expect(within(bar()).getByText("Paused")).toBeTruthy();
+  expect(within(bar()).queryByRole("button", { name: "Keep" })).toBeNull();
+  expect(
+    pip.document.querySelector(".mini")?.hasAttribute("data-away"),
+  ).toBe(false);
+  vi.setSystemTime(NOW + 20 * MIN);
+  await report("active", "unlocked");
+  expect(within(bar()).getByText("Away for 15 min — count it?")).toBeTruthy();
+  expect(mini.getByRole("status").textContent).toBe(
+    "Away for 15 min — count it?",
+  );
+
   await act(async () =>
     fireEvent.click(mini.getByRole("button", { name: "Keep" })),
   );
