@@ -375,6 +375,11 @@ it('discovers tools/events and preserves the subscription across a restart, then
   expect(catalog.events.map(event => event.name)).toEqual([
     'personal_cloud.test', 'task.changed', 'task.must_start', 'mail.ready', 'service.attention', 'work.attention',
   ]);
+  const tools = await call<{ tools: { name: string }[] }>(first, 'tools/list');
+  expect(tools.tools).toHaveLength(34);
+  expect(tools.tools.map(tool => tool.name)).toEqual(expect.arrayContaining([
+    'work_context', 'work_get', 'work_checkpoint', 'work_report', 'watch_preview', 'watch_create', 'watch_control', 'recall_activity', 'recall_view',
+  ]));
   const catalogStatus = await call<ToolReply>(first, 'tools/call', { name: 'connection_status', arguments: {} });
   expect(catalogStatus.structuredContent.status?.last_subscription_request).toBeNull();
   const params = { name: 'personal_cloud.test', arguments: {}, delivery: callback, ttlMs: null, cursor: null };

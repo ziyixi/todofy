@@ -19,8 +19,11 @@ Owner authorized implementation and production release of persistent work record
 and semantic review, Recall activity/image tools and the Personal Cloud plugin instructions. Keep the existing
 Worker/SQLite DO, Free budgets, OAuth/App identity, source ownership and normal same-green-SHA release process.
 Watch supplies bounded confirmed-change evidence; Dots judges relevance in each work. No server-side model calls,
-new execution platform, browser-extension changes or production-content tests. Local, branch CI and real Dots
-acceptance are pending. Existing services and user-created watches remain unchanged.
+new execution platform, browser-extension changes or production-content tests. Local MCP type/lint, 63 unit tests,
+7 workerd tests (including a real 60-second Watch feed cycle and restart), Recall private-service tests and the
+wrapper dry-run passed. Watch's own unit/runtime/UI/proto checks passed. Branch CI is running; deployment and
+actual Dots acceptance remain pending. Evidence is in [work-memory verification](docs/work-memory-verification.md).
+Existing services and user-created watches remain unchanged.
 
 ## Latest verified release
 

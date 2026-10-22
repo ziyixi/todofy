@@ -36,6 +36,7 @@ class PersonalMcpIntegration(unittest.TestCase):
             {"binding": "TODOFY_MAIL", "service": "todofy", "entrypoint": "Mail", "props": {"access": "read"}},
             {"binding": "RECALL", "service": "recall", "entrypoint": "RecallApi"},
             {"binding": "HOME", "service": "home", "entrypoint": "HomeApi"},
+            {"binding": "WATCH", "service": "watch", "entrypoint": "WatchApi", "props": {"access": "read-write"}},
         ])
         for key in ("d1_databases", "r2_buckets", "assets", "triggers"):
             self.assertNotIn(key, config)

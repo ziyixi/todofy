@@ -15,7 +15,14 @@ existing services and Free-plan budgets. It adds no model API, service, database
 - Recall tests verify the filtered activity route, WebP/JPEG MCP image content and an explicit missing archived
   image. Synthetic image bytes in these transport tests alone do not prove that Dots viewed a real image.
 
-Workerd persistence, full CI, deployed identities and actual-client checks are recorded below as they finish.
+MCP TypeScript/lint, 63 unit tests, 7 real workerd tests and 9 deploy-wrapper tests pass locally. The workerd
+journey observes a real 60-second Watch poll after restart, a scoped signed callback, silent checkpoints and
+the source evidence reference. Recall's changed private service passes its two runtime cases. The production
+wrapper dry-run includes `WATCH (watch#WatchApi)` and retains the existing single SQLite DO.
+
+Watch's Worker unit tests, generated-API/runtime checks, Web tests/build, proto lint/schema/breaking checks and
+bundle check passed locally. Full branch CI, deployed identities and actual-client checks are recorded below as
+they finish.
 No production mail, private task, browsing record or watched page is used as a test fixture.
 
 ## Release and client evidence
