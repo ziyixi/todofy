@@ -277,7 +277,7 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # app its notifications with it.
     "proto/tasks/inbox/": ("tasks", "dashboard", "watch"),
     "proto/links/ui/": ("links",),
-    "proto/watch/ui/": ("watch",),
+    "proto/watch/ui/": ("watch", "personal-mcp"),
     # mailsort's owner API (mailsort.ui.v2, after v1): its Worker serves it, its UI calls it.
     "proto/mailsort/ui/": ("mailsort",),
     "proto/fleet/ui/": ("fleet",),

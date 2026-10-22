@@ -18,7 +18,7 @@ import { HttpTranscoder } from '@ziyixi/proto/http-transcoder';
 import { WatchUiService } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { handlers, type ApiContext } from './api.ts';
 import { quickActionRenderer, type BrowserRenderer } from './browser.ts';
-import { buildSha, devFetch, publicHost, REQUEST_ID_HEADER, type Env } from './env.ts';
+import { buildSha, devFetch, publicHost, PRIVATE_API_HEADER, REQUEST_ID_HEADER, type Env } from './env.ts';
 import { supportedSelector } from './extract/html.ts';
 import type { FetchFn } from './fetcher.ts';
 import { NO_JUDGE } from './judge.ts';
@@ -32,15 +32,14 @@ import { TasksSink } from './tasks.ts';
 import type { NotificationSink } from './notify.ts';
 import { setGuard, watchStatus, type GuardOutcome } from './ops-status.ts';
 import type * as opsWire from '@ziyixi/proto/ops/v1/ops_wire';
-import { RpcError } from '@ziyixi/proto/rpc-status';
+import { Code, RpcError } from '@ziyixi/proto/rpc-status';
 
 
-/**
- * The transcoder's authorize hook: nothing left to check. Only the Worker's fetch handler reaches this object, after it
- * verified the owner's Access JWT and, for every method but GET, HEAD and OPTIONS, Origin and the CSRF token.
- */
-function authorize(): void {
-  // Checked by http.ts before forwarding.
+/** Public requests were authenticated by http.ts; the private feed additionally requires WatchApi. */
+function authorize(_request: Request, route: { method: { localName: string } }, ctx: ApiContext): void {
+  if (route.method.localName === 'pollWatchEvents' && !ctx.privateApi) {
+    throw new RpcError(Code.PERMISSION_DENIED, 'FORBIDDEN', 'The Watch event feed requires a private service binding');
+  }
 }
 
 const api = new HttpTranscoder(WatchUiService, handlers, {
@@ -214,6 +213,7 @@ export class WatchState extends DurableObject<Env> {
     const requestId = request.headers.get(REQUEST_ID_HEADER) ?? '';
     const now = this.now();
     const ctx: ApiContext = {
+      privateApi: request.headers.get(PRIVATE_API_HEADER) === 'true',
       store: this.store,
       now,
       configEnv: { selectorOk: supportedSelector, browserEnabled: this.env.BROWSER !== undefined },

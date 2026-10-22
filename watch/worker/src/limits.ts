@@ -195,3 +195,8 @@ export const TASK_TITLE_MAX = 200;
 export const SUBTASKS_MAX = 30;
 /** Rows of the sink (their IDs, states and codes; the request is cleared once it is settled) are kept this long. */
 export const INTENTS_KEPT_MS = 30 * DAY;
+
+/** Frozen evidence around changed lines, per side. */
+export const CONTEXT_LINES_MAX = 40;
+export const CONTEXT_JSON_MAX = 8 * 1024;
+export const CONTEXT_NEIGHBORS = 2;

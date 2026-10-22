@@ -1126,7 +1126,7 @@ jobs:
 
   personal-mcp-deploy:
     name: Personal MCP deploy
-    needs: [changes, personal-mcp-checks, gate, tasks-deploy, todofy-deploy, recall-deploy]
+    needs: [changes, personal-mcp-checks, gate, tasks-deploy, todofy-deploy, recall-deploy, watch-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
@@ -1136,6 +1136,7 @@ jobs:
       && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
       && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
       && (needs.recall-deploy.result == 'success' || needs.recall-deploy.result == 'skipped')
+      && (needs.watch-deploy.result == 'success' || needs.watch-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.personal_mcp_deploy == 'true' }}

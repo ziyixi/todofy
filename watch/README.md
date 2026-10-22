@@ -36,6 +36,25 @@ change inbox. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md).
   (nine on a normal day). Tasks never carry page text or a watched URL: open the link to see the change. They are
   created through Tasks' create-only `TaskInbox` (`docs/design.md` §7).
 
+## Private Dots integration
+
+`WatchApi` is a service-binding entrypoint with `props.access = "read"` or `"read-write"`; missing access is
+refused. It serves the generated WatchUiService, including a private `PollWatchEvents` cursor feed. The public
+owner API keeps its Access and CSRF checks and refuses that feed even with a forged internal header.
+
+A Dots-owned watch explicitly selects `notify_policy = NONE`: checks, confirmed changes and health events remain,
+while no Tasks notification is created. Existing watches keep their previous notification policy. `intent` describes
+what the owner wants to learn; the Worker does not call a model or change its baseline based on a Dots decision.
+MCP owns the work-to-watch association and the work's relevance judgments.
+
+`GetChange` includes frozen `before_context` and `after_context` around the changed lines. `context_available = false`
+means the old change predates evidence capture; `context_truncated = true` means extraction, snapshot or context
+limits cut evidence, or completeness of an old snapshot is unknown. Neither is evidence that a change is irrelevant.
+
+`PollWatchEvents` starts with `{baseline: true}`, then reads after each returned opaque `cursor` with `page_size`
+up to 100. It orders confirmation and health transitions by a stable sequence, independently of Tasks delivery.
+The feed keeps 30 days or 500 events; `CURSOR_EXPIRED` requires explicit reconciliation before taking another baseline.
+
 ## Develop
 
 From `worker/` (Node 26; the pinned toolchains are in each package's lockfile):

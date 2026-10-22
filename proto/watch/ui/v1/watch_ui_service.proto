@@ -1,8 +1,9 @@
 // The watch app's owner API: the HTTP/JSON interface between its UI (watch/web) and the Worker "watch"
 // (watch/worker), whose Durable Object WatchState holds every watch, snapshot and change.
 //
-// Callers. Only the watch UI calls it (same origin, watch.ziyixi.science). No other app calls these routes;
-// later steps give the dashboard counts through ops-v1, never this API.
+// Callers. The owner UI calls the public routes. The private WatchApi service binding grants generated
+// read or read/write operations to Personal MCP; PollWatchEvents is available only through that binding.
+// The dashboard receives counts through ops-v1.
 //
 // Transport. google.api.http bindings under /api/v1, served by the shared transcoder
 // (proto/ts/http-transcoder.ts) and called through the shared client (proto/ts/http-client.ts). Bodies, query
@@ -180,6 +181,17 @@ service WatchUiService {
       body: "*"
     };
     option (google.api.method_signature) = "name";
+  }
+
+  // Private service-binding feed, independent of Tasks delivery. Public owner HTTP refuses this method.
+  // A baseline skips history. Events are ordered by when they were confirmed or their health transition
+  // occurred, including changes first detected before the baseline. The cursor must be saved only after
+  // the whole page is durably consumed. Retention is 30 days or 500 events; CURSOR_EXPIRED requires an
+  // explicit resynchronization, never an automatic history-skipping baseline.
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: a private bounded event feed uses a custom collection read. --)
+  rpc PollWatchEvents(PollWatchEventsRequest) returns (PollWatchEventsResponse) {
+    option (google.api.http) = {get: "/api/v1/watchEvents:poll"};
   }
 
   // The scheduler's and the browser ledger's state, and the counts of the health view.
@@ -535,4 +547,59 @@ message ServiceStatus {
   int32 fetch_count_today = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The deployed commit.
   string build = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of PollWatchEvents. Only the private WatchApi binding may call this method.
+// (-- api-linter: core::0158::request-page-token-field=disabled
+//     aip.dev/not-precedent: a durable incremental feed uses cursor on every page, including when caught up. --)
+message PollWatchEventsRequest {
+  // Position returned by a previous call. Required unless baseline is true; opaque to callers.
+  string cursor = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Skip existing events and return the current cursor; requires an empty cursor.
+  bool baseline = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Default and maximum 100; values above 100 are read as 100.
+  int32 page_size = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// An immutable transition record, addressed through its watch and optional change.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: a feed record of another resource has no independent address. --)
+message WatchEvent {
+  // The transition represented by this record.
+  enum Kind {
+    // Never written.
+    KIND_UNSPECIFIED = 0;
+    // A deterministic candidate became confirmed.
+    KIND_CHANGE_CONFIRMED = 1;
+    // Three checks failed consecutively.
+    KIND_WATCH_BROKEN = 2;
+    // The scheduler paused a watch after fourteen days of failures.
+    KIND_WATCH_PAUSED = 3;
+  }
+  // Monotonic event sequence, encoded as decimal text; stable across Tasks delivery and object restarts.
+  string sequence = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What happened.
+  Kind kind = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The source watch.
+  string watch = 3 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Watch"
+  ];
+  // The confirmed change; empty for a health transition.
+  string change = 4 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Change"
+  ];
+  // When the transition was recorded.
+  google.protobuf.Timestamp create_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One page; cursor stays present even when no events are returned.
+message PollWatchEventsResponse {
+  // At most 100 events, oldest first. No watched URL or page content is included.
+  repeated WatchEvent events = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Position after consuming this page. Baseline returns the current position without events.
+  string cursor = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // More events can be read immediately with this cursor.
+  bool has_more = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

@@ -215,7 +215,7 @@ export function watchOf(draft: Draft): Watch {
   out.normalize = Object.assign(out.normalize ?? create(NormalizeOptionsSchema), { ignoredLines: [...draft.ignoredLines], maskNumbers: draft.maskNumbers, disableDefaultMasks: draft.disableDefaultMasks })
   out.stability = Object.assign(out.stability ?? create(StabilitySchema), { skipConfirmation: draft.skipConfirmation })
   out.checkIntervalMinutes = draft.interval
-  out.notifyPolicy = draft.urgent ? Watch_NotifyPolicy.URGENT : Watch_NotifyPolicy.DIGEST
+  out.notifyPolicy = draft.urgent ? Watch_NotifyPolicy.URGENT : draft.base?.notifyPolicy === Watch_NotifyPolicy.NONE ? Watch_NotifyPolicy.NONE : Watch_NotifyPolicy.DIGEST
   out.requestLocale = draft.locale.trim()
   out.fetchPolicy = Object.assign(out.fetchPolicy ?? create(FetchPolicySchema), { allowHttp: draft.allowHttp, ignoreRobots: draft.ignoreRobots })
   out.shadowMode = draft.shadow
@@ -332,6 +332,7 @@ export function settingsForm(draft: Draft, onInput: () => void, options: FormOpt
       labelled('检查频率', bind(draft, 'interval', select(INTERVALS), onInput)),
       draft.source === 'html' ? check('不等待二次确认', box('skipConfirmation'), '默认约 15 分钟后再抓一次，确认变化不是一闪而过') : null,
       check('紧急提醒（不进每日摘要）', box('urgent')),
+      ...(draft.base?.notifyPolicy === Watch_NotifyPolicy.NONE && !draft.urgent ? [el('p', { class: 'hint' }, '此监视由 Dots 处理变化，不创建 Tasks 提醒。')] : []),
       check('影子模式（7 天）', box('shadow'), '把会被过滤的变化也显示出来，方便调整规则'),
       check('数字也遮盖', box('maskNumbers'), '计数器、浏览量等数字只是噪声时'),
       check('关闭默认遮盖', box('disableDefaultMasks'), '相对时间、时间戳、随机串也算变化'),

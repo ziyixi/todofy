@@ -6,7 +6,7 @@
  */
 import { create } from '@ziyixi/proto/protobuf'
 import { Change_State, Change_SuppressionReason } from '@ziyixi/proto/watch/ui/v1/change_pb'
-import { WatchSchema } from '@ziyixi/proto/watch/ui/v1/watch_pb'
+import { Watch_NotifyPolicy, WatchSchema } from '@ziyixi/proto/watch/ui/v1/watch_pb'
 import { PreviewWatchResponseSchema } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb'
 import { mountApp } from './app.ts'
 import { draftOf, watchOf } from './settings.ts'
@@ -81,6 +81,15 @@ describe('saving a new watch', () => {
 })
 
 describe('the settings form', () => {
+  it('preserves a Dots watch intent and NONE notifications when saving unrelated settings', () => {
+    const stored = watch('dots', { intent: 'Tell me about releases.', notifyPolicy: Watch_NotifyPolicy.NONE })
+    const draft = draftOf(stored)
+    draft.displayName = 'Releases'
+    const saved = watchOf(draft)
+    expect(saved.intent).toBe(stored.intent)
+    expect(saved.notifyPolicy).toBe(Watch_NotifyPolicy.NONE)
+  })
+
   const stored = create(WatchSchema, {
     name: 'watches/kettle',
     etag: 'etag-kettle-1',

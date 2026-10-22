@@ -20,6 +20,8 @@ import { findNumber, numberText } from './extract/number.ts';
 import { cleanLine, maskLine, normalizeLines } from './normalize.ts';
 
 export interface Content {
+  /** Extraction or snapshot lost lines; older callers may not carry a completeness marker. */
+  readonly truncated?: boolean;
   readonly lines: readonly string[];
   readonly keys: readonly string[];
   readonly number: string | null;
@@ -43,7 +45,7 @@ export function buildContent(raw: RawPage, normalize: NormalizeConfig, trigger: 
     raw.items === null
       ? normalized.lines
       : raw.items.map((item) => maskLine(cleanLine(item.key), false, normalize.defaultMasks).text).filter((key) => key !== '');
-  return { ok: true, content: { lines: normalized.lines, keys, number, availability: raw.availability }, masked: normalized.masked, ignored: 0 };
+  return { ok: true, content: { lines: normalized.lines, keys, number, availability: raw.availability, truncated: raw.truncated }, masked: normalized.masked, ignored: 0 };
 }
 
 /**

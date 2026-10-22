@@ -1,9 +1,10 @@
 # Connection acceptance
 
-## Implemented first gate
+## Original connection gate (historical)
 
-The only event is `personal_cloud.test`, with no filters and a synthetic message plus the deployed build SHA.
-The tools read connection status and enqueue this test event. The Worker has no business-service bindings.
+The first gate exposed only `personal_cloud.test`, with no filters and a synthetic message plus the build SHA.
+That gate passed before business bindings were added. The current catalog is in [README](../README.md), with
+work continuation and source behavior in [work memory](work-memory.md).
 
 Subscriptions live in the single `SubscriptionStore` SQLite DO. A subscription ID includes its owner, callback,
 event name and arguments. A signed challenge must succeed before it is saved. Repeated subscriptions renew the
@@ -68,7 +69,8 @@ private Ops entrypoint before Home begins monitoring it.
 After the business Worker release:
 
 1. Open the existing Personal Cloud plugin's **Manage** page and choose **Refresh tools**. Keep the existing
-   account and OAuth connection; do not register a second App. Verify 18 tools and five event types.
+   account and OAuth connection; do not register a second App. The work-memory release exposes 34 tools and six
+   event types. Verify the actual catalog; the original 18 tools remain available.
 2. Verify a temporary synthetic Inbox task, Steps, exact request replay, read-back and soft-delete. Do not test
    completion against real tasks or use real mail/browsing contents as fixtures.
 3. Subscribe to a business event using Dots' native lifecycle. Subscriptions establish a current baseline;
@@ -87,3 +89,21 @@ A subscription source error appears in Home. For `cursor_reset_required`, inspec
 then explicitly stop and recreate only that source subscription to establish a current baseline. This does not
 replay missing history. A failed callback remains visible until the owner stops that subscription; recreating it
 verifies the new callback and starts from current state. No automatic replay or second notification path is added.
+
+## Work-memory release
+
+`WatchApi` must deploy before MCP binds it, alongside the existing Recall activity-read permission. Actions
+enforces this provider order. Work records use the existing `SubscriptionStore`; no new namespace, secret or
+OAuth audience is needed. `work.attention` accepts `{work_id}` or `{}` for all open work. The subscription keeps
+the real callback private and emits only report identity and source refs. A later subscription also discovers
+already pending reports in its scope.
+
+Before creating or attaching a Watch, MCP establishes its source cursor. Confirmed candidates and broken/paused
+transitions become durable work reports. Source checking runs while a work subscription uses Watch links, or
+when `work_context`/`work_get` is read, at most once per minute. Stopping the subscription stops background
+polling; an authorized native hourly review can still refresh it through those read tools.
+
+`work_context` and `work_get` expose the latest Watch source check and error. `watch_cursor_expired` preserves
+the old position and requires reviewing the linked Watch changes; it never silently skips missing history.
+Automatic history recovery is outside this release. Native hourly review creation and actual Dots continuation
+must be recorded separately from the server deployment. See [work-memory verification](../../docs/work-memory-verification.md).

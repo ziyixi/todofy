@@ -12,6 +12,7 @@ interface Stored {
   readonly k: readonly string[] | null;
   readonly n: string | null;
   readonly a: string | null;
+  readonly t?: boolean;
 }
 
 async function pipe(bytes: Uint8Array, stream: CompressionStream | DecompressionStream): Promise<Uint8Array> {
@@ -41,6 +42,7 @@ export async function encodeSnapshot(content: Content): Promise<{ readonly bytes
       k: keysAreLines ? null : content.keys.slice(0, lines === content.lines.length ? content.keys.length : lines),
       n: content.number,
       a: content.availability,
+      t: content.truncated === true || lines < content.lines.length,
     };
     const bytes = await gzip(new TextEncoder().encode(JSON.stringify(stored)));
     if (bytes.byteLength <= SNAPSHOT_MAX_GZIP || lines === 0) return { bytes, lines };
@@ -52,5 +54,5 @@ export async function encodeSnapshot(content: Content): Promise<{ readonly bytes
 export async function decodeSnapshot(body: ArrayBuffer | Uint8Array): Promise<Content> {
   const bytes = body instanceof Uint8Array ? body : new Uint8Array(body);
   const stored = JSON.parse(new TextDecoder().decode(await gunzip(bytes))) as Stored;
-  return { lines: stored.l, keys: stored.k ?? stored.l, number: stored.n, availability: stored.a };
+  return { lines: stored.l, keys: stored.k ?? stored.l, number: stored.n, availability: stored.a, truncated: stored.t ?? true };
 }

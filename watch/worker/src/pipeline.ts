@@ -143,7 +143,7 @@ function applyFailure(deps: CheckDeps, row: WatchRow, config: WatchConfig, at: S
       next_check_at: next,
       ...(at.fetchedAt !== null ? { last_fetch_at: at.fetchedAt } : {}),
     });
-    for (const kind of events) deps.store.enqueue(kind, row.id, null, 'digest', at.now);
+    for (const kind of events) deps.store.enqueue(kind, row.id, null, config.notify === 'none' ? 'none' : 'digest', at.now);
     // Past its window the change is decided as it was seen: the page showed it, and nothing refuted it.
     if (pending !== undefined && !windowOpen) decideAsSeen(deps, row, config, pending, at.now, NOTE_UNCONFIRMED);
   });
@@ -199,6 +199,10 @@ function changeRow(row: WatchRow, now: number, evaluation: Evaluation, state: Ch
     snapshot_id: snapshotId,
     before_snapshot_id: null,
     attempts: 0,
+    before_context: JSON.stringify(evaluation.beforeContext),
+    after_context: JSON.stringify(evaluation.afterContext),
+    context_available: 1,
+    context_truncated: evaluation.contextTruncated ? 1 : 0,
   };
 }
 
@@ -356,6 +360,10 @@ export async function runCheck(deps: CheckDeps, id: string, now: number, budget:
         truncated: kept.truncated ? 1 : 0,
         previous_value: evaluation.previous,
         current_value: evaluation.current,
+        before_context: JSON.stringify(evaluation.beforeContext),
+        after_context: JSON.stringify(evaluation.afterContext),
+        context_available: 1,
+        context_truncated: evaluation.contextTruncated ? 1 : 0,
       };
     };
     if (shaOfView === candidateSha) {

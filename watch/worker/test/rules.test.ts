@@ -16,7 +16,7 @@ import { jsonValues, readJsonLd } from '../src/extract/structured.ts';
 import { contentTypeFits, isChallenge, isMojibake, isTooShort, statusFailure } from '../src/health.ts';
 import { DAY, HOUR, MINUTE } from '../src/limits.ts';
 import { parseRobots, robotsAllows, robotsFromAnswer } from '../src/robots.ts';
-import { decodeSnapshot, encodeSnapshot } from '../src/snapshot.ts';
+import { decodeSnapshot, encodeSnapshot, gzip } from '../src/snapshot.ts';
 import { checkRedirect, checkUri } from '../src/url-policy.ts';
 
 const T = Date.parse('2026-10-01T10:00:00Z');
@@ -260,15 +260,22 @@ describe('the health gate', () => {
 });
 
 describe('snapshots', () => {
+  it('marks completeness of snapshots recorded before the marker as unknown', async () => {
+    const legacy = { l: ['Retained text'], k: null, n: null, a: null };
+    const bytes = await gzip(new TextEncoder().encode(JSON.stringify(legacy)));
+    expect((await decodeSnapshot(bytes)).truncated).toBe(true);
+  });
+
   it('round-trip, and keep only the first lines of a text over 64 KiB compressed', async () => {
     const content = { lines: ['a', 'b'], keys: ['k1'], number: '12', availability: 'InStock' };
     const { bytes, lines } = await encodeSnapshot(content);
     expect(lines).toBe(2);
-    expect(await decodeSnapshot(bytes)).toEqual(content);
+    expect(await decodeSnapshot(bytes)).toEqual({ ...content, truncated: false });
     const random = Array.from({ length: 3000 }, (_, i) => `${String(i)} ${crypto.randomUUID()} ${crypto.randomUUID()}`);
     const big = await encodeSnapshot({ lines: random, keys: random, number: null, availability: null });
     expect(big.bytes.byteLength).toBeLessThanOrEqual(64 * 1024);
     expect(big.lines).toBeLessThan(3000);
     expect((await decodeSnapshot(big.bytes)).lines).toEqual(random.slice(0, big.lines));
+    expect((await decodeSnapshot(big.bytes)).truncated).toBe(true);
   });
 });

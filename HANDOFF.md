@@ -10,6 +10,18 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 [October 20](docs/history/handoff-2026-10-20.md), [October 19](docs/history/handoff-2026-10-19.md),
 [October 18](docs/history/handoff-2026-10-18.md), [October 11](docs/history/handoff-2026-10-11.md).
 
+## Current work
+
+### Personal work memory (`codex/personal-work-memory`)
+
+Based on `f3d8c797` in the isolated `/private/tmp/todofy-tasks-design` worktree; shared checkout untouched.
+Owner authorized implementation and production release of persistent work records, work-scoped Watch management
+and semantic review, Recall activity/image tools and the Personal Cloud plugin instructions. Keep the existing
+Worker/SQLite DO, Free budgets, OAuth/App identity, source ownership and normal same-green-SHA release process.
+Watch supplies bounded confirmed-change evidence; Dots judges relevance in each work. No server-side model calls,
+new execution platform, browser-extension changes or production-content tests. Local, branch CI and real Dots
+acceptance are pending. Existing services and user-created watches remain unchanged.
+
 ## Latest verified release
 
 Approved Tasks interface (`53e0c2b1`) passed full

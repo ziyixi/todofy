@@ -3,13 +3,18 @@ import { z } from 'zod';
 import { registerTaskTools, type TaskToolEnv, type TaskWriteState } from './tasks.ts';
 import { registerContentTools, type ContentToolEnv } from './content.ts';
 import { SOURCE_NAMES } from './events.ts';
+import { registerWorkTools } from './work-tools.ts';
+import type { WorkStore } from './work-store.ts';
+import { registerWatchTools, type WatchToolEnv } from './watch.ts';
 
 export const TEST_EVENT_NAME = 'personal_cloud.test';
 export const TEST_EVENT_MESSAGE = 'Personal MCP connection test';
-export const EVENT_NAMES = [TEST_EVENT_NAME, ...SOURCE_NAMES] as const;
+export const WORK_EVENT_NAME = 'work.attention';
+export const EVENT_NAMES = [TEST_EVENT_NAME, ...SOURCE_NAMES, WORK_EVENT_NAME] as const;
 export type EventName = typeof EVENT_NAMES[number];
 
 const noArguments = z.strictObject({});
+const eventArguments = z.strictObject({ work_id: z.uuid().optional() });
 const callbackUrl = z.url({ protocol: /^https$/ });
 const signingSecret = z.string().max(94).regex(/^whsec_[A-Za-z0-9+/]+={0,2}$/).refine((value) => {
   try {
@@ -22,7 +27,7 @@ const signingSecret = z.string().max(94).regex(/^whsec_[A-Za-z0-9+/]+={0,2}$/).r
 
 const subscribeParamsSchema = z.object({
   name: z.enum(EVENT_NAMES),
-  arguments: noArguments.default({}),
+  arguments: eventArguments.default({}),
   delivery: z.object({
     mode: z.literal('webhook'),
     url: callbackUrl,
@@ -30,7 +35,7 @@ const subscribeParamsSchema = z.object({
   }),
   cursor: z.string().nullable().optional(),
   ttlMs: z.number().int().positive().nullable().optional(),
-});
+}).refine(params => params.name === WORK_EVENT_NAME || !params.arguments.work_id, 'Only work.attention accepts work_id.');
 
 const subscribeResultSchema = z.object({
   id: z.string().min(1),
@@ -41,25 +46,28 @@ const subscribeResultSchema = z.object({
 
 const unsubscribeParamsSchema = z.object({
   name: z.enum(EVENT_NAMES),
-  arguments: noArguments.default({}),
+  arguments: eventArguments.default({}),
   delivery: z.object({
     mode: z.literal('webhook'),
     url: callbackUrl,
   }),
-});
+}).refine(params => params.name === WORK_EVENT_NAME || !params.arguments.work_id, 'Only work.attention accepts work_id.');
 
 export type SubscribeParams = z.infer<typeof subscribeParamsSchema>;
 export type SubscribeResult = z.infer<typeof subscribeResultSchema>;
 export type UnsubscribeParams = z.infer<typeof unsubscribeParamsSchema>;
 
 export interface GateApi extends TaskWriteState {
+  readonly work: WorkStore;
+  refreshWorkSources(): Promise<Record<string, unknown>>;
+  initializeWorkSources(): Promise<void>;
   subscribe(params: SubscribeParams): Promise<SubscribeResult>;
   unsubscribe(params: UnsubscribeParams): Promise<Record<string, never>>;
   status(): Promise<unknown>;
   emitTest(requestId: string): Promise<unknown>;
 }
 
-export function createServer(api: GateApi, buildSha: string, env: TaskToolEnv & ContentToolEnv): McpServer {
+export function createServer(api: GateApi, buildSha: string, env: TaskToolEnv & ContentToolEnv & WatchToolEnv): McpServer {
   const capabilities = { tools: {}, events: {} };
   const server = new McpServer({ name: 'personal-cloud', version: '0.1.0' }, { capabilities });
 
@@ -91,7 +99,13 @@ export function createServer(api: GateApi, buildSha: string, env: TaskToolEnv & 
         'mail.ready': z.strictObject({ event_id: z.string(), ready_time: z.string() }),
         'service.attention': z.strictObject({ occurrence_seq: z.number().int(), source: z.string(), code: z.string() }),
       }[name]),
-    }))],
+    })), {
+      name: WORK_EVENT_NAME, delivery: ['webhook'], inputSchema: z.toJSONSchema(eventArguments),
+      description: 'An unhandled report from a linked work source. Optional work_id selects one work; omitted follows all open work. Read work_get, handle the report, then checkpoint the handled sequence. Checkpoints never trigger this event.',
+      payloadSchema: z.toJSONSchema(z.strictObject({ work_id: z.uuid(), report_seq: z.number().int(),
+        kind: z.enum(['progress', 'question', 'blocked', 'result']),
+        source: z.strictObject({ type: z.string(), ref: z.string() }) })),
+    }],
   }));
   server.server.setRequestHandler('events/subscribe', {
     params: subscribeParamsSchema,
@@ -123,5 +137,7 @@ export function createServer(api: GateApi, buildSha: string, env: TaskToolEnv & 
 
   registerTaskTools(server, env, api);
   registerContentTools(server, env);
+  registerWorkTools(server, api.work, () => api.refreshWorkSources(), () => api.initializeWorkSources());
+  registerWatchTools(server, env, api.work, () => api.initializeWorkSources());
   return server;
 }

@@ -114,6 +114,7 @@ export class FakeServer {
 
   private handlersOf(server: FakeServer): ServiceHandlers<ShapeOf<typeof WatchUiService>, undefined> {
     return {
+      pollWatchEvents: () => fail(Code.PERMISSION_DENIED, 'FORBIDDEN'),
       getWatch: (request) => Promise.resolve(clone(WatchSchema, server.existing(request.name))),
       listWatches: () => Promise.resolve(create(ListWatchesResponseSchema, { watches: [...server.watches.values()] })),
       createWatch: (request) => {

@@ -59,7 +59,7 @@ browser ──Access──▶ Worker "watch" (fetch)
 - `trigger`, one of: `any_change` (floors of lines and share), `text_appears`, `text_disappears`, `new_item`, `number`
   (thresholds, a share of change, a label), `availability` (JSON-LD only).
 - `stability`: the confirmation fetch (HTML only, 15 to 120 minutes, default 15) or `skip_confirmation`.
-- `check_interval_minutes`, `fetcher` (HTTP or BROWSER), `notify_policy` (DIGEST or URGENT, for W3),
+- `check_interval_minutes`, `fetcher` (HTTP or BROWSER), `notify_policy` (DIGEST, URGENT, or NONE),
   `request_locale` (the Accept-Language, default `zh-CN,zh;q=0.9,en;q=0.8`: the object runs in one place, so the
   page's language must not depend on it), `ai` (refused when enabled), `fetch_policy`, `shadow_mode`.
 
@@ -216,7 +216,7 @@ not memory.
 ## 6. WatchState's storage
 
 `worker/src/store.ts`; every table is bounded (schema v3 adds the sink's `intents` and a partial index of the
-undelivered events). After an alarm the watches whose checks may have added rows are pruned
+undelivered events; v4 adds frozen context to each change). After an alarm the watches whose checks may have added rows are pruned
 (`pruneWatches`, through the `(watch_id, state, id)` index: only that watch's rows are read); the global tables at
 most once an hour and every watch once per UTC day (`pruneGlobal`).
 
@@ -224,7 +224,7 @@ most once an hour and every watch once per UTC day (`pruneGlobal`).
 | --- | --- | --- |
 | `watches` | the settings (wire JSON) and the scheduler's state: state, failures, last outcome and failure, validators, raw and seen hashes, the notified and previous snapshots, a pending change, shadow end | 50 rows |
 | `snapshots` | a Content (normalized lines, item keys, number, availability), gzipped JSON of at most 64 KiB (a larger text keeps its first lines) | 20 per watch, plus the notified, the previous and a pending one |
-| `changes` | a recorded difference: state, reason, shadow, trigger kind, summary, counts, kept diff (at most 32 KiB), values, times | 50 suppressed and 200 in all per watch: the oldest acknowledged go first, then suppressed, then confirmed ones beyond the 50 newest (never a pending one) |
+| `changes` | frozen bounded context and a recorded difference: state, reason, shadow, trigger kind, summary, counts, kept diff (at most 32 KiB), values, times | 50 suppressed and 200 in all per watch: the oldest acknowledged go first, then suppressed, then confirmed ones beyond the 50 newest (never a pending one) |
 | `hosts`, `robots` | the etiquette per host | one row per host |
 | `ledger` | per UTC day: external requests, browser milliseconds, the browser's exhausted flag | 8 days |
 | `requests` | AIP-155 request IDs with their first response | 24 hours |
@@ -308,6 +308,35 @@ watch's name, URL, page text or a diff. Its one write: it arms the alarm when no
 daily) and `daily_sweep` (the sweep of every watch's bounds waits for the shed's end); an owner's check, a pending
 change's confirmation, previews, the owner API and the notifications go on.
 
+### Private work monitoring
+
+The `WatchApi` entrypoint serves the same generated WatchUiService through a service binding whose `access` prop
+must be `read` or `read-write`. It forwards into WatchState; it does not add a fetcher, store or scheduler. The
+public forwarding path strips the private marker, and the transcoder refuses `PollWatchEvents` without it.
+
+The optional `Watch.intent` is at most 200 characters. It is deliberately absent from `readHash` and `checkHash`:
+changing the work goal does not reset the deterministic comparison. Dots can read and judge the candidate against
+the current work goal, recording relevance and reasons in the work log. The Worker still decides only its existing
+rules and confirmation. A semantic decision never alters baseline, ignored lines or `Change.classifier`.
+
+`NotifyPolicy.NONE` retains checks and the change inbox without creating Tasks. `enqueue` still inserts the same
+immutable event, settling its unused Tasks delivery at creation. Health transitions respect NONE too. The feed
+reads all event rows, including those delivered to Tasks; it does not consume `delivered_at`. Existing watches
+continue to default to DIGEST.
+
+`PollWatchEvents` starts from an explicit baseline and returns ascending transition sequences, a persistent opaque
+cursor and `has_more`; each page contains at most 100 events and no page content. Confirmation inserts its event
+at confirmation time, so a candidate detected before the baseline still appears if confirmed afterwards. The
+SQLite autoincrement sequence retains the head after deletion; pruning records the highest expired sequence.
+A cursor below that floor fails as `CURSOR_EXPIRED` instead of silently skipping history. Retention stays at
+30 days or 500 events; the private reader must reconcile a gap before taking a new baseline.
+
+Each change freezes normalized context around changed lines while both compared texts exist: at most 40 lines,
+500 characters per line and 8 KiB JSON per side. Insertions and deletions include neighboring unchanged anchors
+on the opposite side. Evidence survives snapshot pruning. Old changes have `context_available = false`; new
+changes flag extraction, snapshot and context losses as `context_truncated`. A snapshot predating the explicit
+completeness marker is also treated as incomplete. These fields describe evidence; they do not classify relevance.
+
 ## 8. HTTP surface, limits and cost
 
 - The whole host is behind the Access application "watch" (W2). The Worker verifies the JWT on every path but
@@ -357,6 +386,14 @@ its bound (50 watches, 200 changes and 22 snapshots each) and holds each path to
 | ListWatches, GetServiceStatus (they count the open changes) | ~5,200 here, at most ~10,000 | 0 |
 | the inbox (a page of ListChanges) | ~150 | 0 |
 | ops-v1 `status()`, 48 a day (the dashboard's tick; `ops.test.ts` at the bounds: 50 watches, 1,000 new changes, 500 undelivered events, a week of unsettled and failed intents) | 1,709 at the bounds, at most `STATUS_ROWS_MAX` 1,750; ~65 on a normal day | 0 (1 when it re-arms a missing alarm) |
+
+The work-monitoring extension was checked locally on 2026-10-22: the existing CPU and row-budget runtime tests
+passed, with the same budgets. A private feed poll reads the sequence, retention floor and at most 101 indexed
+event rows (the extra row answers `has_more`); an idle poll reads at most four rows and writes none. At one
+poll per minute this adds at most 5,760 idle reads per day while the MCP source is subscribed. Retention's extra
+scan at the retained 500-row bound adds about 12,000 reads per day, plus events created since each hourly prune; evidence adds up to 16 KiB
+per change without an additional row write. The dry-run Worker bundle measured 129.1 KiB gzip against 140 KiB;
+the built UI measured 51.2 KiB against 56 KiB. These are local checks, not production or Dots acceptance.
 
 A day, typically (50 watches at 6 hours, ~250 checks, a few dozen changes, a few dozen page loads): under 100,000
 rows read and 5,000 written, plus ~3,000 read by the dashboard's 48 `status()` calls (84,000 at their bounds). At

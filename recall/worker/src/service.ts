@@ -1,4 +1,4 @@
-/** Private access to four Recall reads, using the owner's existing generated API and archive read path. */
+/** Private access to Recall's page, snapshot and activity reads over its existing generated API. */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { withPrivateHeaders } from '@ziyixi/edge-auth';
 import { RpcError } from '@ziyixi/proto/rpc-status';
@@ -6,7 +6,7 @@ import { RECALL_OBJECT, REQUEST_ID_HEADER, type Env } from './env.ts';
 import { newRequestId } from './ids.ts';
 import { errorResponse, recallError, REASONS } from './reasons.ts';
 
-const PAGE_READ = /^\/api\/v1\/pages\/[^/]+(?:\/documents(?:\/[^/]+)?)?$/;
+const PAGE_READ = /^\/api\/v1\/pages\/[^/]+(?:\/documents(?:\/[^/]+)?|\/visits)?$/;
 
 export async function serviceRead(request: Request, env: Env): Promise<Response> {
   const requestId = newRequestId();

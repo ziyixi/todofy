@@ -79,7 +79,7 @@ export interface WatchConfig {
   readonly confirmDelayMinutes: number | null;
   readonly intervalMinutes: number;
   readonly fetcher: 'http' | 'browser';
-  readonly notify: 'digest' | 'urgent';
+  readonly notify: 'digest' | 'urgent' | 'none';
   readonly locale: string;
   readonly aiIntent: string;
   readonly allowHttp: boolean;
@@ -107,6 +107,7 @@ export interface ConfigEnv {
 /** The owner's fields of Watch: the stored settings and what an update mask may name besides `shadow_mode`. */
 export const SETTINGS_FIELDS = [
   'display_name',
+  'intent',
   'uri',
   'source',
   'normalize',
@@ -219,7 +220,7 @@ export function readConfig(watch: Watch, env: ConfigEnv): WatchConfig | ConfigPr
   if (interval < range.min || interval > range.max) return 'INVALID_INTERVAL';
   const locale = watch.requestLocale.trim();
   if (locale.length > LOCALE_MAX || !LOCALE_PATTERN.test(locale)) return 'BAD_REQUEST';
-  if (codePoints(watch.ai?.intent ?? '') > AI_INTENT_MAX) return 'BAD_REQUEST';
+  if (codePoints(watch.intent) > AI_INTENT_MAX || codePoints(watch.ai?.intent ?? '') > AI_INTENT_MAX) return 'BAD_REQUEST';
   if (watch.ai?.enabled === true) return 'AI_NOT_AVAILABLE';
   if (fetcher === 'browser' && !env.browserEnabled) return 'BROWSER_NOT_AVAILABLE';
   // The confirmation fetch is for pages only: feeds and structured sources are what the site publishes.
@@ -234,7 +235,7 @@ export function readConfig(watch: Watch, env: ConfigEnv): WatchConfig | ConfigPr
     confirmDelayMinutes: confirm,
     intervalMinutes: interval,
     fetcher,
-    notify: watch.notifyPolicy === Watch_NotifyPolicy.URGENT ? 'urgent' : 'digest',
+    notify: watch.notifyPolicy === Watch_NotifyPolicy.NONE ? 'none' : watch.notifyPolicy === Watch_NotifyPolicy.URGENT ? 'urgent' : 'digest',
     locale: locale === '' ? DEFAULT_LOCALE : locale,
     aiIntent: watch.ai?.intent ?? '',
     allowHttp,

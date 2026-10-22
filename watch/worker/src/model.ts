@@ -117,5 +117,9 @@ export function changeMessage(row: ChangeRow, displayName: string): Change {
     resolveTime: ts(row.resolve_time),
     acknowledgeTime: ts(row.ack_time),
     watchDisplayName: displayName,
+    beforeContext: JSON.parse(row.before_context) as string[],
+    afterContext: JSON.parse(row.after_context) as string[],
+    contextAvailable: row.context_available === 1,
+    contextTruncated: row.context_truncated === 1,
   });
 }

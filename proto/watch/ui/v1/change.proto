@@ -116,6 +116,20 @@ message Change {
   google.protobuf.Timestamp acknowledge_time = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The watch's display name when the change was read (for a list across watches).
   string watch_display_name = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Frozen normalized lines around removed lines, with two neighboring lines on each side. At most 40
+  // lines, 500 characters per line and 8 KiB of JSON; not reconstructed from the current page.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: before/after identify the two sides of this frozen diff evidence. --)
+  repeated string before_context = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The corresponding frozen context around added lines, with the same limits as before_context.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: before/after identify the two sides of this frozen diff evidence. --)
+  repeated string after_context = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Context was captured for this change. False for changes recorded before this feature was deployed.
+  bool context_available = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // An extraction, snapshot or context limit cut evidence, or the historical snapshot's completeness is
+  // unknown. A semantic reader must not treat this as complete evidence of an irrelevant change.
+  bool context_truncated = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One line of a change's difference.

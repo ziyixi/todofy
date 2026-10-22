@@ -127,6 +127,7 @@ export interface Harness {
   fetch(path: string, init?: RequestInit): Promise<Response>;
   /** WatchUiService through the shared typed client, exactly as the UI calls it (CSRF and Origin on mutations). */
   readonly api: HttpClient<ShapeOf<typeof WatchUiService>>;
+  serviceFetch(path: string, init?: RequestInit, access?: string): Promise<Response>;
   /** A raw request with the CSRF token and the loopback Origin. */
   mutate(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<Response>;
   /** Sets the clock the owner API reads. */
@@ -211,9 +212,16 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           compatibilityDate: '2026-09-08',
           durableObjects: { WATCH: { className: 'WatchState', scriptName: options.splitObject === true ? OBJECT_WORKER : 'watch', useSQLite: true } },
           // The dashboard's view: the named entrypoint Ops of "watch" (ops-v1), as dashboard/wrangler.toml binds it.
-          serviceBindings: { OPS: { name: 'watch', entrypoint: 'Ops' } },
+          serviceBindings: { OPS: { name: 'watch', entrypoint: 'Ops' },
+            WATCH_READ: { name: 'watch', entrypoint: 'WatchApi', props: { access: 'read' } },
+            WATCH_WRITE: { name: 'watch', entrypoint: 'WatchApi', props: { access: 'read-write' } },
+            WATCH_DENIED: { name: 'watch', entrypoint: 'WatchApi', props: {} } },
           script: `export default { async fetch(request, env) {
             const { op, args } = await request.json()
+            if (op === 'watch_api') {
+              const binding = args[0] === 'read' ? env.WATCH_READ : args[0] === 'read-write' ? env.WATCH_WRITE : env.WATCH_DENIED
+              return binding.fetch(args[1], args[2])
+            }
             const stub = env.WATCH.get(env.WATCH.idFromName('watch-v1'))
             try {
               if (op === 'step') return Response.json({ ok: await stub.step(args[0]) })
@@ -274,6 +282,10 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       return (await response.json()) as Awaited<ReturnType<Harness['tasksState']>>;
     },
     api: createHttpClient(WatchUiService, send),
+    async serviceFetch(path, init = {}, access = 'read-write') {
+      const worker = await mf.getWorker('probe');
+      return worker.fetch('http://probe/', { method: 'POST', body: JSON.stringify({ op: 'watch_api', args: [access, `https://watch.internal${path}`, init] }) }) as unknown as Promise<Response>;
+    },
     async mutate(method, path, body) {
       const { token, cookie } = await csrfToken();
       const headers: Record<string, string> = { origin: ORIGIN, 'x-csrf-token': token, cookie };

@@ -60,6 +60,8 @@ message Watch {
     NOTIFY_POLICY_DIGEST = 1;
     // At once, on its own.
     NOTIFY_POLICY_URGENT = 2;
+    // Keep changes and the private event feed without creating Tasks notifications.
+    NOTIFY_POLICY_NONE = 3;
   }
 
   // Why a watch is paused.
@@ -125,6 +127,9 @@ message Watch {
   string etag = 21 [(google.api.field_behavior) = OPTIONAL];
   // Confirmed changes the owner has not acknowledged yet.
   int32 new_change_count = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What the owner wants to learn from these changes, at most 200 characters. Read by Dots; the Worker
+  // never calls a model. Updating this field leaves the comparison baseline and trigger unchanged.
+  string intent = 23 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // What a watch reads from the response: exactly one field is set (none: an HtmlSource without selectors).
@@ -284,7 +289,7 @@ message Stability {
 message AiOptions {
   // Ask the judge. Refused with AI_NOT_AVAILABLE in v1.
   bool enabled = 1 [(google.api.field_behavior) = OPTIONAL];
-  // What the owner cares about on this page, for the judge: at most 200 characters. Kept, unused in v1.
+  // Legacy judge intent, at most 200 characters. Kept and unused; Dots reads Watch.intent instead.
   string intent = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 

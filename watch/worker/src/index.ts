@@ -7,6 +7,7 @@ import type { Env } from './env.ts';
 import { handleRequest } from './http.ts';
 
 export { WatchState } from './state.ts';
+export { WatchApi } from './service.ts';
 // ops-v1 for the dashboard's service binding (no public route).
 export { Ops } from './ops.ts';
 

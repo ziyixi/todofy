@@ -15,11 +15,14 @@ import type { TriggerConfig, TriggerKind } from './config.ts';
 import type { Content } from './content.ts';
 import { diffLines, type DiffResult } from './diff.ts';
 import { AVAILABLE } from './extract/structured.ts';
-import { DIFF_JSON_MAX, DIFF_LINE_MAX, DIFF_LINES_KEPT } from './limits.ts';
+import { CONTEXT_JSON_MAX, CONTEXT_LINES_MAX, CONTEXT_NEIGHBORS, DIFF_JSON_MAX, DIFF_LINE_MAX, DIFF_LINES_KEPT } from './limits.ts';
 
 export type SuppressionCode = 'BELOW_THRESHOLD' | 'TRIGGER_NOT_MET' | 'FLICKER';
 
 export interface Evaluation {
+  readonly beforeContext: readonly string[];
+  readonly afterContext: readonly string[];
+  readonly contextTruncated: boolean;
   readonly kind: TriggerKind;
   readonly fired: boolean;
   /** Why it did not fire (null when it fired). */
@@ -73,12 +76,57 @@ function counts(added: number, removed: number): string {
   return '内容有变化';
 }
 
+/** Freeze changed lines and their neighbors while the original compared texts still exist. */
+function contextLines(lines: readonly string[], changed: readonly string[], anchors: ReadonlySet<string>): { lines: string[]; truncated: boolean } {
+  const changedLines = new Set(changed);
+  const wanted = new Set<number>();
+  for (let index = 0; index < lines.length; index++) {
+    if (!changedLines.has(lines[index] ?? '') && !anchors.has(lines[index] ?? '')) continue;
+    for (let neighbor = Math.max(0, index - CONTEXT_NEIGHBORS); neighbor <= Math.min(lines.length - 1, index + CONTEXT_NEIGHBORS); neighbor++) wanted.add(neighbor);
+  }
+  // Insertions/deletions still need context on the side without changed lines.
+  if (wanted.size === 0) for (let index = 0; index < Math.min(lines.length, 5); index++) wanted.add(index);
+  const kept: string[] = [];
+  let bytes = 2;
+  let truncated = false;
+  const encoder = new TextEncoder();
+  for (const index of [...wanted].sort((a, b) => a - b)) {
+    const source = lines[index] ?? '';
+    const line = source.length > DIFF_LINE_MAX ? `${source.slice(0, DIFF_LINE_MAX - 1)}…` : source;
+    const size = encoder.encode(JSON.stringify(line)).byteLength + 1;
+    if (kept.length >= CONTEXT_LINES_MAX || bytes + size > CONTEXT_JSON_MAX) { truncated = true; break; }
+    kept.push(line);
+    bytes += size;
+    if (line !== source) truncated = true;
+  }
+  return { lines: kept, truncated };
+}
+
+function changeContext(before: Content, after: Content, diff: DiffResult) {
+  const anchors = (lines: readonly string[], changed: readonly string[]): Set<string> => {
+    const target = new Set(changed);
+    const around = new Set<string>();
+    for (let index = 0; index < lines.length; index++) {
+      if (!target.has(lines[index] ?? '')) continue;
+      for (const line of lines.slice(Math.max(0, index - CONTEXT_NEIGHBORS), index + CONTEXT_NEIGHBORS + 1)) {
+        if (!target.has(line)) around.add(line);
+      }
+    }
+    return around;
+  };
+  const previous = contextLines(before.lines, diff.removed, diff.removed.length ? new Set() : anchors(after.lines, diff.added));
+  const current = contextLines(after.lines, diff.added, diff.added.length ? new Set() : anchors(before.lines, diff.removed));
+  return { beforeContext: previous.lines, afterContext: current.lines,
+    contextTruncated: previous.truncated || current.truncated || before.truncated === true || after.truncated === true };
+}
+
 /** The trigger on `current`, against the notified `baseline` and the `previous` check's text. */
 export function evaluate(trigger: TriggerConfig, baseline: Content, previous: Content, current: Content): Evaluation {
   const diff = diffLines(baseline.lines, current.lines);
   const added = diff.added.length;
   const removed = diff.removed.length;
-  const base = { kind: trigger.kind, added, removed, diff, previous: '', current: '' };
+  const context = changeContext(baseline, current, diff);
+  const base = { kind: trigger.kind, added, removed, diff, previous: '', current: '', ...context };
   const result = (fired: boolean, reason: SuppressionCode, summary: string, values: { previous?: string; current?: string } = {}): Evaluation => ({
     ...base,
     ...values,

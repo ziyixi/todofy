@@ -609,8 +609,8 @@ class Classify(unittest.TestCase):
             "proto/mailhero/webhook/v1/mail_received.proto": {"mail-hero", "todofy"},
             # The links app's UI API reaches only the links app.
             "proto/links/ui/v1/links_ui_service.proto": {"links"},
-            # The watch app's UI API reaches only the watch app.
-            "proto/watch/ui/v1/watch_ui_service.proto": {"watch"},
+            # Watch serves the owner API and the private MCP binding.
+            "proto/watch/ui/v1/watch_ui_service.proto": {"watch", "personal-mcp"},
             "proto/fleet/ui/v1/fleet_ui_service.proto": {"fleet"},
             "proto/fleet/telemetry/v1/host_report.proto": {"fleet", "platform"},
             "proto/platform/runtime/v1/runtime.proto": {"fleet", "platform"},
@@ -710,7 +710,7 @@ class Classify(unittest.TestCase):
         )
         self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), ts)
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
-        self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch"})
+        self.assertEqual(ci_changes.proto_deploys("proto/watch/ui/v1/watch.proto"), {"watch", "personal-mcp"})
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/ui/v1/fleet_ui_service.proto"), {"fleet"})
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/telemetry/v1/host_report.proto"), {"fleet", "platform"})
         self.assertEqual(ci_changes.proto_deploys("proto/mailhero/ui/v2/message.proto"), {"mail-hero"})
@@ -1361,6 +1361,7 @@ class DeployConditions(unittest.TestCase):
         ("personal-mcp-deploy", "tasks-deploy"),
         ("personal-mcp-deploy", "todofy-deploy"),
         ("personal-mcp-deploy", "recall-deploy"),
+        ("personal-mcp-deploy", "watch-deploy"),
     }
 
     # Check jobs a deploy may also find skipped, but only when this push to main reuses a green branch run of

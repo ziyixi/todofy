@@ -15,6 +15,7 @@ export function buildOpsStatus(status?: ConnectionStatus): wire.OpsStatus {
     pending_deliveries: status.deliveries.pending ?? 0,
     accepted_deliveries: status.deliveries.accepted ?? 0,
     failed_deliveries: failed,
+    open_work: status.work.open, waiting_work: status.work.waiting, unhandled_work_reports: status.work.pending_reports,
   } : {};
   if (status?.last_tool_at) counters.last_tool_at_ms = status.last_tool_at;
   if (status?.last_subscription_at) counters.last_subscription_at_ms = status.last_subscription_at;

@@ -113,6 +113,51 @@ it("lists pending Mail with Tasks' category shortcuts and reads its saved summar
   ]);
 });
 
+it('reads captured activity through the generated timeline route with matching time and device filters', async () => {
+  const device = '00000000-0000-4000-8000-000000000007';
+  const client = tools({ recall: request => {
+    expect(request.path).toBe('/api/v1/pages/-/visits');
+    expect(Object.fromEntries(request.query)).toMatchObject({
+      start_time: AT, end_time: '2026-10-20T13:00:00Z', device_id: device,
+      order_by: 'start_time desc', page_size: '2', page_token: 'previous',
+    });
+    return Response.json({ visits: [{ name: `${PAGE}/visits/${device}`, title: 'Synthetic activity',
+      url: 'https://example.org/synthetic', start_time: AT, end_time: '2026-10-20T12:01:00Z',
+      focus_seconds: 60, device_id: device }], next_page_token: 'more' });
+  } });
+  const reply = await client.call('recall_activity', { start_time: AT, end_time: '2026-10-20T13:00:00Z',
+    device_id: device, page_size: 2, page_token: 'previous' });
+  expect(reply.result?.structuredContent).toMatchObject({ visits: [{ focus_seconds: 60, device_id: device }], next_page_token: 'more' });
+  const bad = await client.call('recall_activity', { start_time: AT, end_time: AT });
+  expect(bad.result?.isError).toBe(true);
+  expect(client.seen).toHaveLength(1);
+});
+
+it.each(['webp', 'jpeg'] as const)('returns a %s screenshot as image content without putting base64 or the body into text', async format => {
+  const bytes = btoa(`synthetic-${format}-bytes`);
+  const client = tools({ recall: request => Response.json(request.path.endsWith('/documents/00000000-0000-4000-8000-000000000002')
+    ? { name: DOCUMENT, capture_time: AT, text: 'Synthetic body kept out of image metadata',
+      [`screenshot_${format}_base64`]: bytes, screenshot_width: 400, screenshot_height: 200, text_archived: true }
+    : { name: PAGE, latest_document: DOCUMENT }) });
+  const reply = await client.call('recall_view', { page: PAGE });
+  expect(reply.result?.structuredContent).toMatchObject({ image_available: true,
+    document: { name: DOCUMENT, capture_time: AT, text_archived: true, screenshot_width: 400 } });
+  expect(reply.result?.content).toContainEqual({ type: 'image', data: bytes, mimeType: `image/${format}` });
+  const text = reply.result?.content.filter(item => item.type === 'text').map(item => item.text).join('');
+  expect(text).not.toContain(bytes);
+  expect(text).not.toContain('Synthetic body kept out');
+});
+
+it('keeps a missing archived image explicit rather than falling back to a different snapshot', async () => {
+  const client = tools({ recall: request => Response.json(request.path.includes('/documents/')
+    ? { name: DOCUMENT, content_error: 'archive_not_connected', text_archived: true }
+    : { name: PAGE, latest_document: DOCUMENT }) });
+  const reply = await client.call('recall_view', { page: PAGE });
+  expect(reply.result?.structuredContent).toMatchObject({ image_available: false, reason: 'archive_not_connected' });
+  expect(reply.result?.content.some(item => item.type === 'image')).toBe(false);
+  expect(client.seen.filter(call => call.path.includes('/documents/'))).toHaveLength(1);
+});
+
 it('retains Mail collection identity across a lost reply and exposes stale etags', async () => {
   const receipts = new Map<string, { input: string; result: { id: string; title: string; project_id: string } }>();
   const tasks = new Map<string, unknown>();

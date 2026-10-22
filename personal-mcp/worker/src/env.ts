@@ -1,7 +1,8 @@
 import type { SubscriptionStore } from './store.ts';
 import type { ContentToolEnv } from './content.ts';
+import type { WatchToolEnv } from './watch.ts';
 
-export interface Env extends ContentToolEnv {
+export interface Env extends ContentToolEnv, WatchToolEnv {
   SUBSCRIPTIONS: DurableObjectNamespace<SubscriptionStore>;
   PUBLIC_HOST: string;
   ACCESS_ISSUER: string;

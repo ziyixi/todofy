@@ -24,6 +24,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   METHOD_NOT_ALLOWED: { code: Code.UNIMPLEMENTED, message: 'this method is not allowed on this path', zh: '不支持该请求方法' },
   UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'the service is unavailable; repeat the request', zh: '服务暂时不可用，请稍后再试' },
   INTERNAL: { code: Code.INTERNAL, message: 'internal error', zh: '服务出错了，请稍后刷新页面' },
+  CURSOR_EXPIRED: { code: Code.OUT_OF_RANGE, message: 'the event cursor expired; resynchronize before taking a new baseline', zh: '事件游标已过期，请核对当前变化后重新开始订阅' },
   WATCH_EXISTS: { code: Code.ALREADY_EXISTS, message: 'a watch holds this ID', zh: '这个 ID 已被另一个监视使用' },
   ETAG_MISMATCH: { code: Code.ABORTED, message: 'the watch changed since the etag', zh: '这个监视已在别处修改' },
   INVALID_WATCH_ID: { code: Code.INVALID_ARGUMENT, message: 'not a valid watch ID', zh: 'ID 只能用小写字母、数字和连字符，以字母开头，最多 40 个字符' },

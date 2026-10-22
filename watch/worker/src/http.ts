@@ -17,7 +17,7 @@
 import { issueCsrf, STRICT_CSP, withPrivateHeaders } from '@ziyixi/edge-auth';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { authenticate, checkCsrf, CSRF_COOKIE, csrfKey } from './auth.ts';
-import { buildSha, REQUEST_ID_HEADER, WATCH_OBJECT, type Env } from './env.ts';
+import { buildSha, PRIVATE_API_HEADER, REQUEST_ID_HEADER, WATCH_OBJECT, type Env } from './env.ts';
 import { MAX_BODY_BYTES } from './limits.ts';
 import { errorResponse, REASONS, watchError } from './reasons.ts';
 
@@ -44,6 +44,7 @@ interface Routed {
 /** The API request forwarded to WatchState, with the request ID. */
 async function forward(request: Request, env: Env, requestId: string): Promise<Response> {
   const headers = new Headers(request.headers);
+  headers.delete(PRIVATE_API_HEADER);
   headers.set(REQUEST_ID_HEADER, requestId);
   const stub = env.WATCH.get(env.WATCH.idFromName(WATCH_OBJECT));
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';

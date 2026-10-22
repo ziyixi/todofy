@@ -665,6 +665,11 @@
           "name": "TODOFY_MAIL",
           "type": "service",
           "source": "config"
+        },
+        {
+          "name": "WATCH",
+          "type": "service",
+          "source": "config"
         }
       ],
       "personal": []

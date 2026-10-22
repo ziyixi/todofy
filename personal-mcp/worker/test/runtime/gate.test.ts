@@ -25,6 +25,7 @@ interface RuntimeOptions {
   validChallenge?: boolean;
   tasks?: (request: Request) => Response | Promise<Response>;
   mail?: (request: Request) => Response | Promise<Response>;
+  watch?: (request: Request) => Response | Promise<Response>;
   home?: HomeService['readHome'];
   callbackStatus?: number;
 }
@@ -51,6 +52,7 @@ async function start(persist: string, received: unknown[], options: RuntimeOptio
       TASKS: options.tasks ?? (() => new Response(null, { status: 503 })),
       TODOFY_MAIL: options.mail ?? (() => new Response(null, { status: 503 })),
       RECALL: () => new Response(null, { status: 503 }),
+      WATCH: options.watch ?? (() => new Response(null, { status: 503 })),
       HOME: { name: 'home-fixture', entrypoint: 'HomeApi' },
     },
     bindings: { PUBLIC_HOST: 'mcp.example.org', ACCESS_ISSUER: 'https://test.cloudflareaccess.com',
@@ -287,6 +289,81 @@ it('reports a permanent callback failure in Ops and clears it on explicit unsubs
   });
 });
 
+it('connects Watch facts to filtered durable work notifications, with silent checkpoints and no task side effects', async () => {
+  const persist = await mkdtemp(join(tmpdir(), 'personal-mcp-work-sources-'));
+  directories.push(persist);
+  const received: unknown[] = [];
+  let head = 10;
+  let baselines = 0;
+  let polls = 0;
+  const watched = 'watches/synthetic-work-source';
+  const options: RuntimeOptions = { watch(request) {
+    const url = new URL(request.url);
+    expect([request.method, url.pathname]).toEqual(['GET', '/api/v1/watchEvents:poll']);
+    const baseline = url.searchParams.get('baseline') === 'true';
+    if (baseline) baselines++;
+    else polls++;
+    return Response.json({ cursor: String(head), events: !baseline && Number(url.searchParams.get('cursor')) < head
+      ? [{ sequence: String(head), kind: 'change_confirmed', watch: watched,
+        change: `${watched}/changes/synthetic-change`, create_time: '2026-10-22T12:00:00Z' }] : [] });
+  }, tasks() { throw new Error('Work changes must not create Tasks'); } };
+  const id = '00000000-0000-4000-8000-000000000081';
+  const other = '00000000-0000-4000-8000-000000000082';
+  const first = await start(persist, received, options);
+  async function tool<T>(mf: Miniflare, name: string, args: Record<string, unknown>) {
+    const reply = await call<{ isError?: boolean; structuredContent: T }>(mf, 'tools/call', { name, arguments: args });
+    expect(reply.isError).not.toBe(true);
+    return reply.structuredContent;
+  }
+  const createWork = (workId: string, ref: string, type: string) => tool(first, 'work_create', {
+    request_id: workId, title: 'Synthetic work', goal: 'Observe a synthetic change', scope: 'Synthetic fixtures only',
+    completion_criteria: 'The synthetic result was checked', next_action: 'Read the source', links: [{ type, ref }],
+  });
+  await createWork(id, watched, 'watch');
+  await createWork(other, 'codex://threads/synthetic', 'codex');
+  expect(baselines).toBe(1);
+  const params = { name: 'work.attention', arguments: { work_id: id }, delivery: callback, ttlMs: null };
+  const subscribed = await call<{ id: string }>(first, 'events/subscribe', params);
+  expect((await call<{ id: string }>(first, 'events/subscribe', params)).id).toBe(subscribed.id);
+  const otherScope = await call<{ id: string }>(first, 'events/subscribe', { ...params, arguments: {} });
+  expect(otherScope.id).not.toBe(subscribed.id);
+  await call(first, 'events/unsubscribe', { ...params, arguments: {} });
+  await tool(first, 'work_checkpoint', { work_id: id, request_id: crypto.randomUUID(), etag: '1',
+    changes: { checkpoint: 'Synthetic own note', next_action: 'Wait for the source' } });
+  await tool(first, 'work_report', { work_id: other, report_id: 'synthetic-unrelated', kind: 'progress',
+    summary: 'Synthetic private progress outside this subscription', source: { type: 'codex', ref: 'codex://threads/synthetic' } });
+  const report = { work_id: id, report_id: 'synthetic-linked-report', kind: 'progress',
+    summary: 'Synthetic private report body', source: { type: 'watch', ref: watched } };
+  await tool(first, 'work_report', report);
+  expect(received).toEqual([]);
+  await first.dispose();
+  stores.splice(stores.indexOf(first), 1);
+  const second = await start(persist, received, options);
+  await expect.poll(() => received.length, { timeout: 10_000 }).toBe(1);
+  expect(received[0]).toMatchObject({ name: 'work.attention', data: { work_id: id, kind: 'progress',
+    source: { type: 'watch', ref: watched } } });
+  expect(JSON.stringify(received)).not.toContain('Synthetic private');
+  const repeated = await tool<{ repeated: boolean }>(second, 'work_report', report);
+  expect(repeated.repeated).toBe(true);
+  head = 11;
+  // Let the production Alarm consume the source feed. No direct invocation or shortened production timer.
+  await expect.poll(() => received.length, { timeout: 70_000, interval: 500 }).toBe(2);
+  expect(polls).toBe(1);
+  expect(baselines).toBe(1);
+  const read = await tool<{ work: { etag: string }; handled_through_candidate: number;
+    pending_reports: { report_id: string; evidence_ref: string }[]; sources: { watch: { error_code: null } } }>(second, 'work_get', { work_id: id });
+  expect(read.work.etag).toBe('2');
+  expect(read.pending_reports.map(item => item.report_id)).toEqual(['synthetic-linked-report', 'watch:11']);
+  expect(read.pending_reports[1]?.evidence_ref).toBe(`${watched}/changes/synthetic-change`);
+  expect(read.sources.watch.error_code).toBeNull();
+  await tool(second, 'work_checkpoint', { work_id: id, request_id: crypto.randomUUID(), etag: read.work.etag,
+    handled_through_report_seq: read.handled_through_candidate, changes: { state: 'done', result: 'Synthetic observation accepted' } });
+  await call(second, 'events/unsubscribe', params);
+  const ops = await (await (await second.getWorker('ops-probe')).fetch('https://ops.internal/')).json();
+  expect(ops).toMatchObject({ health: 'ok', counters: { active_subscriptions: 0, open_work: 1, unhandled_work_reports: 1 } });
+  expect(JSON.stringify(ops)).not.toContain('Synthetic');
+}, 90_000);
+
 it('discovers tools/events and preserves the subscription across a restart, then delivers once and unsubscribes', async () => {
   const persist = await mkdtemp(join(tmpdir(), 'personal-mcp-test-'));
   directories.push(persist);
@@ -296,7 +373,7 @@ it('discovers tools/events and preserves the subscription across a restart, then
   expect(discovery.capabilities).toHaveProperty('events');
   const catalog = await call<{ events: { name: string }[] }>(first, 'events/list');
   expect(catalog.events.map(event => event.name)).toEqual([
-    'personal_cloud.test', 'task.changed', 'task.must_start', 'mail.ready', 'service.attention',
+    'personal_cloud.test', 'task.changed', 'task.must_start', 'mail.ready', 'service.attention', 'work.attention',
   ]);
   const catalogStatus = await call<ToolReply>(first, 'tools/call', { name: 'connection_status', arguments: {} });
   expect(catalogStatus.structuredContent.status?.last_subscription_request).toBeNull();

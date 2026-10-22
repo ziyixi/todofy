@@ -50,3 +50,9 @@ entrypoint = "RecallApi"
 binding = "HOME"
 service = "home"
 entrypoint = "HomeApi"
+
+[[services]]
+binding = "WATCH"
+service = "watch"
+entrypoint = "WatchApi"
+props = { access = "read-write" }

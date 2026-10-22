@@ -9,6 +9,8 @@ import type { TaskInboxEntrypoint } from './tasks.ts';
 export const WATCH_OBJECT = 'watch-v1';
 /** The header the Worker passes its request ID to WatchState in. */
 export const REQUEST_ID_HEADER = 'x-watch-request-id';
+/** Set only by WatchApi; public forwarding always removes it. */
+export const PRIVATE_API_HEADER = 'x-watch-private-api';
 
 export interface Env {
   /** The single SQLite-backed object "watch-v1": every watch, snapshot and change, and the scheduler. */

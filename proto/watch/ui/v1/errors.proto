@@ -51,4 +51,6 @@ enum ErrorReason {
   ERROR_REASON_AI_NOT_AVAILABLE = 10;
   // FAILED_PRECONDITION (400): FETCHER_BROWSER, and the deployment has no browser binding.
   ERROR_REASON_BROWSER_NOT_AVAILABLE = 11;
+  // OUT_OF_RANGE (400): events after the cursor have expired; explicitly resynchronize before baselining.
+  ERROR_REASON_CURSOR_EXPIRED = 12;
 }

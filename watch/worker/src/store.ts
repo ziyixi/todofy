@@ -34,7 +34,7 @@ import {
 } from './limits.ts';
 
 /** Bump with every schema change; `migrate` runs the steps above the stored version. */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const SCHEMA_V1 = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -172,6 +172,21 @@ const SCHEMA_V3 = [
   `CREATE INDEX IF NOT EXISTS intents_recorded ON intents (recorded_at) WHERE recorded_at IS NOT NULL`,
 ];
 
+const SCHEMA_V4 = {
+  before_context: "TEXT NOT NULL DEFAULT '[]'",
+  after_context: "TEXT NOT NULL DEFAULT '[]'",
+  context_available: 'INTEGER NOT NULL DEFAULT 0',
+  context_truncated: 'INTEGER NOT NULL DEFAULT 0',
+};
+
+export interface WatchEventRow extends Record<string, SqlStorageValue> {
+  id: number;
+  kind: 'change_confirmed' | 'watch_broken' | 'watch_paused';
+  watch_id: string;
+  change_id: string | null;
+  created_at: number;
+}
+
 /** The global tables are pruned at most this often (meta `pruned_at`). */
 export const PRUNE_GLOBAL_EVERY_MS = HOUR;
 
@@ -237,6 +252,10 @@ export interface ChangeRow {
   /** A pending change: the text before it (its edge's start, for a third version). */
   before_snapshot_id: number | null;
   attempts: number;
+  before_context: string;
+  after_context: string;
+  context_available: number;
+  context_truncated: number;
 }
 
 export interface SnapshotRow {
@@ -284,7 +303,14 @@ export class Store {
     if (version < 1) for (const statement of SCHEMA_V1) this.sql.exec(statement);
     if (version < 2) for (const statement of SCHEMA_V2) this.sql.exec(statement);
     if (version < 3) for (const statement of SCHEMA_V3) this.sql.exec(statement);
-    if (version !== SCHEMA_VERSION) this.sql.exec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)`, String(SCHEMA_VERSION));
+    if (version < 4) {
+      // An older binary can lower the version marker on rollback while leaving additive columns in place.
+      const columns = new Set(this.sql.exec<{ name: string }>(`PRAGMA table_info(changes)`).toArray().map(row => row.name));
+      for (const [name, declaration] of Object.entries(SCHEMA_V4)) {
+        if (!columns.has(name)) this.sql.exec(`ALTER TABLE changes ADD COLUMN ${name} ${declaration}`);
+      }
+    }
+    if (version < SCHEMA_VERSION) this.sql.exec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)`, String(SCHEMA_VERSION));
   }
 
   /** The rows read and written since the last call (the workerd tests' row budgets), and a fresh count. */
@@ -539,8 +565,27 @@ export class Store {
 
   // ---- notifications -------------------------------------------------------------------------------------------------
 
-  enqueue(kind: 'change_confirmed' | 'watch_broken' | 'watch_paused', watchId: string, changeId: string | null, policy: 'digest' | 'urgent', now: number): void {
-    this.run(`INSERT INTO notifications (kind, watch_id, change_id, policy, created_at) VALUES (?, ?, ?, ?, ?)`, kind, watchId, changeId, policy, now);
+  enqueue(kind: 'change_confirmed' | 'watch_broken' | 'watch_paused', watchId: string, changeId: string | null, policy: 'digest' | 'urgent' | 'none', now: number): void {
+    // NONE needs no Tasks delivery. Settle that delivery at creation, retaining the same immutable event for polling.
+    this.run(`INSERT INTO notifications (kind, watch_id, change_id, policy, created_at, delivered_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      kind, watchId, changeId, policy === 'none' ? 'digest' : policy, now, policy === 'none' ? now : null);
+  }
+
+  /** sqlite_sequence retains the head even when every notification was deleted. */
+  eventHead(): number {
+    return this.one<{ seq: number }>(`SELECT seq FROM sqlite_sequence WHERE name = 'notifications'`)?.seq ?? 0;
+  }
+
+  /** Highest expired sequence. Pre-upgrade retention may already have removed an initial prefix. */
+  eventFloor(): number {
+    const saved = this.getMeta('watch_events_floor');
+    if (saved !== null) return Number(saved);
+    const first = this.one<{ id: number }>(`SELECT id FROM notifications ORDER BY id LIMIT 1`);
+    return first === undefined ? this.eventHead() : first.id - 1;
+  }
+
+  watchEvents(after: number, limit: number): WatchEventRow[] {
+    return this.all<WatchEventRow>(`SELECT id, kind, watch_id, change_id, created_at FROM notifications WHERE id > ? ORDER BY id LIMIT ?`, after, limit);
   }
 
   // ---- bounds --------------------------------------------------------------------------------------------------------
@@ -559,9 +604,13 @@ export class Store {
     deleted += this.run(`DELETE FROM previews WHERE at <= ?`, now - PREVIEW_CACHE_MS);
     deleted += this.run(`DELETE FROM url_fetches WHERE at <= ?`, now - URL_MIN_SPACING_MS);
     deleted += this.run(`DELETE FROM ledger WHERE day < ?`, new Date(now - 8 * DAY).toISOString().slice(0, 10));
-    deleted += this.run(`DELETE FROM notifications WHERE created_at <= ?`, now - NOTIFICATIONS_KEPT_MS);
-    const cut = this.one<{ id: number }>(`SELECT id FROM notifications ORDER BY id DESC LIMIT 1 OFFSET ?`, NOTIFICATIONS_MAX);
-    if (cut !== undefined) deleted += this.run(`DELETE FROM notifications WHERE id <= ?`, cut.id);
+    const expired = this.one<{ id: number | null }>(`SELECT max(id) AS id FROM notifications WHERE created_at <= ?`, now - NOTIFICATIONS_KEPT_MS)?.id ?? 0;
+    const cut = this.one<{ id: number }>(`SELECT id FROM notifications ORDER BY id DESC LIMIT 1 OFFSET ?`, NOTIFICATIONS_MAX)?.id ?? 0;
+    const floor = Math.max(expired, cut);
+    if (floor > 0) {
+      this.setMeta('watch_events_floor', String(Math.max(floor, this.eventFloor())));
+      deleted += this.run(`DELETE FROM notifications WHERE id <= ?`, floor);
+    }
     deleted += this.run(`DELETE FROM intents WHERE created_at <= ? AND state <> 'open'`, now - INTENTS_KEPT_MS);
     deleted += this.run(`DELETE FROM hosts WHERE host NOT IN (SELECT host FROM watches) AND next_at <= ? AND coalesce(backoff_until, 0) <= ?`, now, now);
     const day = new Date(now).toISOString().slice(0, 10);

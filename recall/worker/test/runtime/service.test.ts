@@ -20,7 +20,7 @@ describe('the private RecallApi binding', () => {
     method: call.httpMethod, ...(call.body === undefined ? {} : { body: call.body, headers: { 'content-type': 'application/json' } }),
   }));
 
-  it('reuses all four generated read methods without owner cookies or machine credentials', async () => {
+  it('reuses the generated page, snapshot and activity reads without owner or machine credentials', async () => {
     const api = client();
     const found = await api.searchPages({ query: 'zephyr' });
     expect(found.results).toHaveLength(1);
@@ -29,6 +29,9 @@ describe('the private RecallApi binding', () => {
     const snapshots = await api.listDocuments({ parent: metadata.name });
     expect(snapshots.documents).toHaveLength(1);
     expect(await api.getDocument({ name: snapshots.documents[0]?.name ?? '' })).toMatchObject({ text: 'Synthetic archive word zephyr.', contentError: '' });
+    const activity = await api.listVisits({ parent: 'pages/-', orderBy: 'start_time desc', pageSize: 1 });
+    expect(activity.visits).toHaveLength(1);
+    expect(activity.visits[0]?.url).toBe(url);
     const response = await h.serviceFetch(`/api/v1/pages/${pageId}`);
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(h.logs.join('\n')).not.toContain(url);
@@ -36,7 +39,7 @@ describe('the private RecallApi binding', () => {
   });
 
   it('does not grant the other owner reads, writes, machine routes or public unauthenticated reads', async () => {
-    for (const path of ['/api/v1/settings', '/api/v1/serviceStatus', '/api/v1/pages/-/visits', '/api/machine/v1/changes']) {
+    for (const path of ['/api/v1/settings', '/api/v1/serviceStatus', '/api/v1/pages/-/unknown', '/api/machine/v1/changes']) {
       expect((await h.serviceFetch(path)).status, path).toBe(404);
     }
     const { pageId } = await page(url);

@@ -2,15 +2,17 @@ import { DurableObject } from 'cloudflare:workers';
 import { createMcpHandler, ProtocolError } from '@modelcontextprotocol/server';
 import { asciiLowerCase, withPrivateHeaders } from '@ziyixi/edge-auth';
 import { authenticate } from './auth.ts';
-import { createServer, EVENT_NAMES, TEST_EVENT_NAME, type EventName, type GateApi, type SubscribeParams, type UnsubscribeParams } from './server.ts';
+import { createServer, EVENT_NAMES, TEST_EVENT_NAME, WORK_EVENT_NAME, type EventName, type GateApi, type SubscribeParams, type UnsubscribeParams } from './server.ts';
 import { baselineSource, pollSource, SOURCE_NAMES, type SourceEvent, type SourceName, type SourceState } from './events.ts';
 import type { Env } from './env.ts';
 import { postSigned, validateCallback, verifyCallback } from './webhook.ts';
 import { buildOpsStatus } from './ops.ts';
 import { RpcStatusError } from '@ziyixi/proto/http-client';
+import { WorkStore, type WorkAttention } from './work-store.ts';
+import { WorkWatchSource } from './watch-events.ts';
 
 type Subscription = {
-  id: string; owner: string; name: EventName; url: string; secret: string; expires_at: number | null; verified_at: number;
+  id: string; owner: string; name: EventName; arguments: string; url: string; secret: string; expires_at: number | null; verified_at: number;
 };
 type SourceRow = { name: SourceName; state: string; checked_at: number; error_code: string | null };
 type Delivery = { subscription_id: string; event_id: string; body: string; attempts: number };
@@ -30,6 +32,9 @@ const RETRY_MS = [60_000, 300_000];
 const SOURCE_INTERVAL_MS = 60_000;
 
 export class SubscriptionStore extends DurableObject<Env> implements GateApi {
+  readonly work: WorkStore;
+  private readonly workWatches: WorkWatchSource;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     const hasTotals = ctx.storage.sql.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='delivery_totals'").toArray().length > 0;
@@ -53,6 +58,8 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     `);
     if (!ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(subscriptions)').toArray().some(column => column.name === 'name'))
       ctx.storage.sql.exec("ALTER TABLE subscriptions ADD COLUMN name TEXT NOT NULL DEFAULT 'personal_cloud.test'");
+    if (!ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(subscriptions)').toArray().some(column => column.name === 'arguments'))
+      ctx.storage.sql.exec("ALTER TABLE subscriptions ADD COLUMN arguments TEXT NOT NULL DEFAULT '{}'");
     if (!hasTotals) ctx.storage.sql.exec(`INSERT INTO delivery_totals SELECT state, count(*) FROM deliveries GROUP BY state`);
     ctx.storage.sql.exec(`
       CREATE TRIGGER IF NOT EXISTS delivery_insert AFTER INSERT ON deliveries BEGIN
@@ -66,6 +73,8 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
         INSERT INTO delivery_totals VALUES (NEW.state, 1) ON CONFLICT(state) DO UPDATE SET count=count+1;
       END;
     `);
+    this.work = new WorkStore(ctx.storage, attention => { this.queueWorkNotice(attention); });
+    this.workWatches = new WorkWatchSource(ctx.storage, this.work, env);
     void ctx.blockConcurrencyWhile(async () => { await ctx.storage.delete('last_event_request'); });
   }
 
@@ -80,13 +89,19 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     }));
     const attempt = request.headers.get('Mcp-Method') === 'events/subscribe'
       ? await this.recordSubscriptionRequest(request) : undefined;
+    if (request.headers.get('Mcp-Method') === 'tools/call'
+      && ['work_report', 'work_context', 'work_get'].includes(request.headers.get('Mcp-Name') ?? ''))
+      await this.ctx.storage.setAlarm(Date.now() + 1000);
     const handler = createMcpHandler(() => createServer(this, this.env.BUILD_SHA ?? 'development', this.env), {
       legacy: 'reject', responseMode: 'auto',
     });
     try {
       const response = await handler.fetch(request);
       if (attempt) await this.recordSubscriptionResponse(attempt, response);
-      if (request.headers.get('Mcp-Method') === 'tools/call' && response.ok) await this.ctx.storage.put('last_tool_at', Date.now());
+      if (request.headers.get('Mcp-Method') === 'tools/call' && response.ok) {
+        await this.ctx.storage.put('last_tool_at', Date.now());
+        await this.schedulePending();
+      }
       return withPrivateHeaders(response);
     } catch (error) {
       if (attempt) await this.ctx.storage.put('last_subscription_request', { ...attempt, phase: 'rejected', reason: 'handler_failed' });
@@ -168,13 +183,14 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
   }
 
   private async subscriptionId(params: UnsubscribeParams): Promise<string> {
-    // These personal events have no filter arguments, so their identity has no key-order ambiguity.
-    const identity = JSON.stringify([this.owner(), params.delivery.url, params.name, {}]);
+    const args = params.arguments.work_id ? { work_id: params.arguments.work_id } : {};
+    const identity = JSON.stringify([this.owner(), params.delivery.url, params.name, args]);
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity));
     return `sub_${Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')}`;
   }
 
   async subscribe(params: SubscribeParams) {
+    if (params.arguments.work_id) this.work.get({ work_id: params.arguments.work_id });
     validateCallback(params.delivery.url, params.delivery.secret, this.env.CALLBACK_HOSTS);
     const id = await this.subscriptionId(params);
     const existing = this.ctx.storage.sql.exec<Subscription>('SELECT * FROM subscriptions WHERE id = ?', id).toArray()[0];
@@ -186,16 +202,20 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     }
     const expiresAt = params.ttlMs === null ? null : now + (params.ttlMs ?? DEFAULT_LIFETIME_MS);
     let baseline: SourceState | undefined;
-    if (params.name !== TEST_EVENT_NAME && !this.activeSources().includes(params.name)) {
+    if (params.name === WORK_EVENT_NAME) {
+      if (this.workWatches.hasLinks()) await this.initializeWorkSources();
+      await this.ctx.storage.setAlarm(Date.now() + 1000);
+    } else if (params.name !== TEST_EVENT_NAME && !this.activeSources().includes(params.name)) {
       const previous = this.source(params.name);
       try { baseline = await baselineSource(params.name, this.env, previous ? JSON.parse(previous.state) as SourceState : undefined); }
       catch { throw new ProtocolError(-32000, 'The event source is unavailable. Check its Home status before subscribing again.', { reason: 'source_unavailable' }); }
     }
     this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.sql.exec(`INSERT INTO subscriptions (id, owner, name, url, secret, expires_at, verified_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      this.ctx.storage.sql.exec(`INSERT INTO subscriptions (id, owner, name, url, secret, expires_at, verified_at, arguments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET secret=excluded.secret, expires_at=excluded.expires_at, verified_at=excluded.verified_at`,
-      id, this.owner(), params.name, params.delivery.url, params.delivery.secret, expiresAt, verifiedAt);
+      id, this.owner(), params.name, params.delivery.url, params.delivery.secret, expiresAt, verifiedAt, JSON.stringify(params.arguments));
       if (baseline) this.ctx.storage.sql.exec('INSERT OR REPLACE INTO event_sources VALUES (?, ?, ?, NULL)', params.name, JSON.stringify(baseline), now);
+      if (params.name === WORK_EVENT_NAME) this.queuePendingWork(params.arguments.work_id);
     });
     await this.schedulePending();
     return { id, refreshBefore: expiresAt === null ? null : new Date(expiresAt).toISOString(), cursor: null, truncated: false };
@@ -224,9 +244,15 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
       const row = this.source(name);
       return { name, checked_at: row?.checked_at ?? null, error_code: row?.error_code ?? (row ? null : 'source_state_missing') };
     });
-    return { stage: 'business_tools', build_sha: this.env.BUILD_SHA ?? 'development', subscriptions: active,
+    const work = this.ctx.storage.sql.exec<{ open: number; waiting: number; pending_reports: number }>(`SELECT
+      count(*) AS open, coalesce(sum(state='waiting'),0) AS waiting,
+      (SELECT count(*) FROM work_entries e JOIN work w ON w.id=e.work_id WHERE w.state IN ('active','waiting')
+        AND e.report_id IS NOT NULL AND e.seq>w.handled_through_report_seq) AS pending_reports
+      FROM work WHERE state IN ('active','waiting')`).one();
+    return { stage: 'work_memory', build_sha: this.env.BUILD_SHA ?? 'development', subscriptions: active,
       deliveries: Object.fromEntries(counts.map(row => [row.state, row.count])), last_delivery: last,
-      sources,
+      sources: [...sources, ...(this.workWatches.hasLinks() ? [this.workWatches.status()] : [])],
+      work: { open: work.open, waiting: work.waiting, pending_reports: work.pending_reports },
       last_tool_at: await this.ctx.storage.get<number>('last_tool_at') ?? null,
       last_subscription_at: await this.ctx.storage.get<number>('last_subscription_at') ?? null,
       last_subscription_request: await this.ctx.storage.get<SubscriptionRequest>('last_subscription_request') ?? null,
@@ -234,6 +260,13 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
   }
 
   async getOpsStatus() { return buildOpsStatus(await this.status()); }
+
+  initializeWorkSources(): Promise<void> { return this.workWatches.initialize(); }
+
+  async refreshWorkSources(): Promise<Record<string, unknown>> {
+    await this.workWatches.refresh();
+    return this.workWatches.hasLinks() ? { watch: this.workWatches.status() } : {};
+  }
 
   async emitTest(requestId: string): Promise<unknown> {
     const eventId = `test_${requestId}`;
@@ -262,6 +295,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
 
   override async alarm(): Promise<void> {
     await this.pollSources();
+    if (this.hasWorkSubscription()) await this.workWatches.refresh();
     const pending = this.ctx.storage.sql.exec<Delivery>(
       "SELECT subscription_id, event_id, body, attempts FROM deliveries WHERE state = 'pending' AND next_at <= ? ORDER BY next_at LIMIT 5", Date.now(),
     ).toArray();
@@ -342,9 +376,42 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     );
   }
 
+  private queueWorkNotice(attention: WorkAttention): void {
+    const now = Date.now();
+    const { event_id: eventId, timestamp, ...data } = attention;
+    const body = JSON.stringify({ eventId, name: WORK_EVENT_NAME, timestamp, data, cursor: null });
+    const subscriptions = this.ctx.storage.sql.exec<Subscription>(
+      'SELECT * FROM subscriptions WHERE owner=? AND name=? AND (expires_at IS NULL OR expires_at>?)',
+      this.owner(), WORK_EVENT_NAME, now,
+    ).toArray();
+    for (const sub of subscriptions) {
+      const filter = JSON.parse(sub.arguments) as { work_id?: string };
+      if (filter.work_id && filter.work_id !== attention.work_id) continue;
+      this.ctx.storage.sql.exec('INSERT OR IGNORE INTO deliveries (subscription_id,event_id,body,next_at) VALUES (?,?,?,?)',
+        sub.id, eventId, body, now);
+    }
+  }
+
+  private queuePendingWork(workId?: string): void {
+    const reports = this.ctx.storage.sql.exec<{ id: string; seq: number; kind: WorkAttention['kind'];
+      source_type: WorkAttention['source']['type']; source_ref: string; created_at: string }>(`SELECT
+        w.id,e.seq,e.kind,e.source_type,e.source_ref,e.created_at FROM work w JOIN work_entries e ON e.seq=w.last_report_seq
+        WHERE w.state IN ('active','waiting') AND w.last_report_seq>w.handled_through_report_seq${workId ? ' AND w.id=?' : ''}`,
+    ...(workId ? [workId] : [])).toArray();
+    for (const report of reports) this.queueWorkNotice({ event_id: `work_${report.id}_${String(report.seq)}`,
+      work_id: report.id, report_seq: report.seq, kind: report.kind, timestamp: report.created_at,
+      source: { type: report.source_type, ref: report.source_ref } });
+  }
+
+  private hasWorkSubscription(): boolean {
+    return this.ctx.storage.sql.exec('SELECT 1 FROM subscriptions WHERE owner=? AND name=? AND (expires_at IS NULL OR expires_at>?) LIMIT 1',
+      this.owner(), WORK_EVENT_NAME, Date.now()).toArray().length > 0;
+  }
+
   private async schedulePending(): Promise<void> {
     const row = this.ctx.storage.sql.exec<{ next_at: number | null }>("SELECT min(next_at) AS next_at FROM deliveries WHERE state = 'pending'").one();
     const checks = this.activeSources().map(name => this.source(name)?.checked_at ?? Date.now());
+    if (this.hasWorkSubscription() && this.workWatches.hasLinks()) checks.push(this.workWatches.status().checked_at ?? Date.now());
     const sourceAt = checks.length ? Math.min(...checks) + SOURCE_INTERVAL_MS : null;
     const next = [row.next_at, sourceAt].filter((value): value is number => value !== null);
     if (!next.length) await this.ctx.storage.deleteAlarm();

@@ -86,3 +86,28 @@ describe('the kept diff and stage 3 for triggers', () => {
     expect(buildContent(raw, normalize, { kind: 'availability', onlyWhenAvailable: false })).toEqual({ ok: false, failure: 'VALUE_MISSING' });
   });
 });
+
+describe('frozen semantic context', () => {
+  const trigger: TriggerConfig = { kind: 'any_change', minLines: 1, minPercent: 0 };
+
+  it('keeps neighboring evidence for an insertion deep in a page on both sides', () => {
+    const original = Array.from({ length: 100 }, (_, index) => `Section ${String(index)}`);
+    const before = text(...original);
+    const after = text(...original.slice(0, 80), 'Applications are now open.', ...original.slice(80));
+    const result = evaluate(trigger, before, before, after);
+    expect(result.beforeContext).toContain('Section 79');
+    expect(result.afterContext).toContain('Applications are now open.');
+    expect(result.contextTruncated).toBe(false);
+    expect(result.beforeContext).not.toContain('Section 0');
+  });
+
+  it('marks extraction and bounded context losses explicitly', () => {
+    const before = text('Old page');
+    const after = text(...Array.from({ length: 100 }, (_, index) => `${String(index)} ${'汉'.repeat(600)}`));
+    const result = evaluate(trigger, before, before, after);
+    expect(result.contextTruncated).toBe(true);
+    expect(result.afterContext.length).toBeLessThanOrEqual(40);
+    expect(new TextEncoder().encode(JSON.stringify(result.afterContext)).byteLength).toBeLessThanOrEqual(8 * 1024);
+    expect(evaluate(trigger, before, before, { ...text('New page'), truncated: true }).contextTruncated).toBe(true);
+  });
+});
