@@ -5,39 +5,21 @@ a dated record and link it here. Rules are in [AGENTS](AGENTS.md); entry points 
 private content, credentials or raw production output here.
 
 Archives (their waiting lists are not instructions): [October 22](docs/history/handoff-2026-10-22.md)
-(Tasks UI refinement), [October 21](docs/history/handoff-2026-10-21.md) (the Private
+(Tasks UI refinement and approved interface), [October 21](docs/history/handoff-2026-10-21.md) (the Private
 MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirement),
 [October 20](docs/history/handoff-2026-10-20.md), [October 19](docs/history/handoff-2026-10-19.md),
 [October 18](docs/history/handoff-2026-10-18.md), [October 11](docs/history/handoff-2026-10-11.md).
 
-## Current work
-
-### Approved Tasks interface (`codex/tasks-interface`)
-
-Based on `57a50db5`, isolated in `/private/tmp/todofy-tasks-design`; the shared checkout is untouched.
-Implement the owner-selected [visual target](tasks/docs/images/task-interface-approved.png): grouped sidebar,
-refined two-column task editor, Execution (Steps/Standalone/Quick) and an independent Routine switch. Manual
-active/waiting/onhold/parked fields are removed from the editors, while their persisted values and native
-planning rules remain intact. No schema, API, provider, resource or budget changes.
-
-The execution control is shared by native Tasks and Plan's existing editor; mappings stay in their current
-owners. Verify saves/no-op saves/etag, timing visibility, date and child controls, category dragging, project
-hierarchy and menu access, cached/asynchronous layout and the selected visual target before release. Only
-synthetic ephemeral data may be used. Local web lint/typecheck/72 units, shared planning typecheck/324 units,
-production build and 44 affected browser cases pass. Real Mac Chrome acceptance and the
-[visual comparison](tasks/design-qa.md) pass, including 360 px overflow and Add-composer focus checks.
-Final review caught loss of input focus after Enter created a child; the new browser assertion reproduced
-the failure, and the seven refinement cases pass with the minimal focus fix. Superseded branch CI
-39725923878 was cancelled; it is not release evidence.
-Branch CI and same-green-SHA production publication remain pending.
-
 ## Latest verified release
 
-Tasks UI refinement (`6ef11633`) passed full [branch CI](https://github.com/ziyixi/todofy/actions/runs/39715961056)
-and [same-SHA production release](https://github.com/ziyixi/todofy/actions/runs/39716958836). Worker
-`a7fbbf96-aacb-4e88-a7d6-1b84674b1c3d` serves that commit at 100%. All 135 browser cases pass, with synthetic
-Mac Chrome acceptance for the compact timer and description saving. The [rendered review](tasks/docs/ui-refinement.md)
-and [dated evidence](docs/history/handoff-2026-10-22.md) explain the changes and verification limits.
+Approved Tasks interface (`53e0c2b1`) passed full
+[branch CI](https://github.com/ziyixi/todofy/actions/runs/39726201336) and the
+[same-SHA production release](https://github.com/ziyixi/todofy/actions/runs/39727616734). Worker
+`1188a42f-7067-437a-a672-cbed941801f6` serves that commit at 100%; deployment `7244493156` is verified.
+All 135 browser cases pass, with synthetic Mac Chrome acceptance for task details, Execution/Routine and
+navigation. No production task was edited. The [visual review](tasks/design-qa.md) and
+[dated evidence](docs/history/handoff-2026-10-22.md#approved-tasks-interface) record the design, tests and limits.
+The shared checkout remains untouched; implementation and acceptance ran in the isolated worktree.
 
 ## Open from earlier releases
 
