@@ -17,7 +17,7 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 - Collapsed inline subtasks in main lists; expand to edit, complete or reorder children without opening their parent.
 - Drag a task's title or row: the edges insert beside a task, the middle makes it a subtask. Drag Subtasks or Steps within their own list in the parent editor; the order is saved on drop.
 - Each row normally has one completion circle. Select task in its menu, or Ctrl/Cmd/Shift-click, enters bulk selection with checkboxes in the same position.
-- Existing editors stay open after Save. Main-list subtasks can move to another parent or become independent; Steps stay in details and execution views.
+- Existing editors stay open after Save, with a check and Saved confirmation. Description Done saves the current draft and immediately renders Markdown. Main-list subtasks can move to another parent or become independent; Steps stay in details and execution views.
 - Drag to a sidebar project/Inbox to move, a label to add it, or Today to schedule. Native task properties appear separately from ordinary labels.
 - Visible planning stage, context, task options, start-ahead window and Deep/Shallow effort in task details.
 - Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.
@@ -29,14 +29,14 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 - Focus counts up by default: Start, work, then complete the step, which saves its time. Each step shows its logged
   time, which opens its records to change or add; Day, Week and Month views show where the time went, and a
   Completed checkbox shows the day's completed steps. The timer bar's Mini timer button floats the session in a
-  small always-on-top window (Document Picture-in-Picture): the step, the time and a hairline of its time against
-  the estimate, with Pause/Resume, Stop and Complete on hover. It stays open on other pages and closes when the
+  small always-on-top window (Document Picture-in-Picture): the Step title, a steady clock, cumulative time against
+  the estimate and visible Pause/Resume, Stop and Complete controls. The title remains visible at 64px high. It stays open on other pages and closes when the
   session ends. With Focus' Pause when away on (a per-device setting; Chrome asks for its permission on that click),
   a count-up pauses in Tasks at the moment the screen locked, input stopped for 10 minutes or the machine slept,
   whichever page the window shows, and on return asks "Away for N min — count it?" in the timer bar, on the step's
   Focus card and in the mini timer: Keep counts the time away, as if it never paused; Discard resumes from now. A
   pomodoro is never paused.
-- A Step's planning panel shows only its time estimate; Plan's Add steps gives each new Step a time (30 min unless
+- A Step's planning panel edits its time estimate and can delete it after confirmation; Plan's Add steps gives each new Step a time (30 min unless
   another is chosen). In Week a click selects a commitment and a double-click opens it; elsewhere in Plan a click opens.
 - Installable desktop PWA; an explicit offline page, with task data available online. The Dock icon's menu offers
   Quick add (Inbox, no date, over the current page), Today, Plan and Focus. Links into Tasks (Home, mail reminders,
@@ -55,7 +55,9 @@ restore into a new database and the one-time copy of what Todofy kept for Tasks.
 
 A Task or Subtask describes an outcome. Add a Step beneath it to arrange an executable action in the week,
 or select Standalone action to schedule the Task itself. Only these executable items expose a clock time
-and estimate. Quick actions are always standalone, including existing Quick tasks; no second checkbox is needed.
+and estimate. Quick actions are always standalone, including existing Quick tasks; no second checkbox is needed. A Quick action
+with a Deadline stays out of the Quick tray until its start-ahead window opens, unless already active; zero lead opens
+on the Deadline day.
 A Step cannot contain children. Task details can add, complete, reopen or delete either kind
 of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites. A task waits
 for at most 5 tasks, the account holds at most 300 dependencies, and none may close a cycle.

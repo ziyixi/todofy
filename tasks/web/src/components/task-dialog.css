@@ -11,12 +11,14 @@
 .task-detail-dialog .dialog-footer {
   flex-shrink: 0;
 }
-.task-detail-dialog .dialog-footer .primary-button {
-  min-width: 112px;
-}
-.task-save-status {
-  color: var(--muted);
-  font-size: 12px;
+.task-detail-dialog .task-save-button {
+  width: 128px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
 }
 .task-detail-dialog form {
   display: flex;

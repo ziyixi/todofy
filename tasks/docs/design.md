@@ -73,13 +73,16 @@ Completed children remain visible. Moving an existing timed date retains its clo
 timezone, including daylight-saving changes. Context-menu date text saves ordinary Tasks as calendar dates
 and points to task details for explicit executable timing; Steps retain the entered time.
 
-Existing descriptions render Markdown and bare links; Edit description opens the draft and Done returns to
-the preview. Save changes persists the draft. The editor, Plan and Focus load with the app, so their first
-open waits for no chunk and no Suspense reveal. The renderer loads in its own chunk, as Mail and the catalog
-editor do; it omits remote images and raw HTML, and opens links only on a user click. A failed completion
-shows its reason inside the open editor.
+Existing descriptions render Markdown and bare links immediately. Edit description opens the draft; Done
+saves the current task draft, including planning changes, and returns to the preview after confirmation.
+A failed save keeps the description editor open with its draft. The editor, Plan, Focus and description
+renderer load with the app, so their first open waits for no chunk or Suspense reveal. The renderer omits
+remote images and raw HTML, and opens links only on a user click. A failed completion shows its reason inside
+the open editor.
 Existing saves keep the editor open with the returned write baseline and unchanged frame/scroll; an
-unchanged save writes nothing. Creation, completion and deletion retain their existing close behavior.
+unchanged save writes nothing. The Save action shows a check and Saved until the next draft change,
+with a polite announcement and a fixed button width. Creation, completion and deletion retain their
+existing close behavior.
 
 Quick Add opens with `Q`; `Ctrl/Cmd+Enter` saves, Escape and backdrop close the dialog. Create actions retain
 their request identity after a lost response. Lists support selection, batch completion/move and custom
@@ -218,7 +221,10 @@ Picture-in-Picture window (Chrome 116+; no button without the API): a window tha
 be navigated and closes with the page. planning-ui renders `MiniTimer` into it through a React portal, so its
 Pause/Resume, Stop and Complete call the timer bar's own functions through App's one write queue, disabled while a
 write waits; there is no second timer state and nothing is stored in the browser. The window asks for 320 × 120
-(Chrome then reuses the size and place the owner leaves it at) and holds its layout from 240 × 72 up. It gets one
+(Chrome then reuses the size and place the owner leaves it at). At 64px high, the Step title stays visible above
+the clock and the controls. Taller windows also show the parent outcome and cumulative time against the estimate.
+Pause/Resume, Stop and Complete stay visible without hover; each has a text tooltip. The clock uses tabular digits
+at medium weight; the main Focus bar uses the same weight. See the [rendered review](ui-refinement.md). It gets one
 `<style>` (`mini-timer.css`, imported as text) and the opener's computed `--plus-*` tokens and font, so Tasks'
 overrides carry over without copying the app's stylesheets: Plan and Focus's calmer accent, `#50743b`, which
 `.app-shell .planning-ui` sets over planning-ui's own tokens (they load later, so the plain class would lose). It ticks on its own window's timers, to the session's

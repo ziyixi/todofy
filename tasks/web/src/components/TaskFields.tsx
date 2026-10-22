@@ -19,6 +19,7 @@ interface Props {
   dateText: string;
   preview: string;
   patch: <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) => void;
+  onDescriptionDone: () => Promise<boolean>;
   setDraft: React.Dispatch<React.SetStateAction<TaskDraft>>;
   setDateText: (value: string) => void;
   setPreview: (value: string) => void;
@@ -40,6 +41,7 @@ export function TaskFields({
   dateText,
   preview,
   patch,
+  onDescriptionDone,
   setDraft,
   setDateText,
   setPreview,
@@ -101,6 +103,7 @@ export function TaskFields({
             data-autofocus
             placeholder="Task name"
             value={draft.title}
+            disabled={busy}
             onChange={(event) => patch("title", event.target.value)}
             rows={task ? 2 : 1}
             maxLength={500}
@@ -111,6 +114,7 @@ export function TaskFields({
           <TaskDescription
             value={draft.description}
             onChange={(value) => patch("description", value)}
+            onDone={onDescriptionDone}
             busy={busy}
           />
         ) : (
@@ -123,6 +127,7 @@ export function TaskFields({
               className="description-input"
               placeholder="Description"
               value={draft.description}
+              disabled={busy}
               onChange={(event) => patch("description", event.target.value)}
               rows={2}
             />

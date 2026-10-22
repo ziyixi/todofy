@@ -1,0 +1,257 @@
+import { type ComponentProps, type ReactNode } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { create } from "@ziyixi/proto/protobuf";
+import { TaskSchema } from "@ziyixi/proto/tasks/ui/v1/task_pb";
+import type { Catalog, Task } from "../api";
+import { TaskDialog } from "./TaskDialog";
+
+// jsdom has no native showModal; browser regressions exercise the real Dialog.
+vi.mock("./Dialog", () => ({
+  Dialog: ({ title, children }: { title: string; children: ReactNode }) => (
+    <section role="dialog" aria-label={title}>
+      {children}
+    </section>
+  ),
+}));
+
+afterEach(cleanup);
+
+const catalog: Catalog = {
+  projects: [],
+  sections: [],
+  labels: [],
+  filters: [],
+  timeZone: "America/Los_Angeles",
+};
+const original = create(TaskSchema, {
+  id: "synthetic-editor",
+  name: "tasks/synthetic-editor",
+  etag: "1",
+  title: "Synthetic editor task",
+  description: "Read [the guide](https://example.org/guide).",
+  priority: 4,
+  kind: "task",
+});
+type SaveTask = ComponentProps<typeof TaskDialog>["onSave"];
+
+function editor(onSave: SaveTask, task = original) {
+  const onClose = vi.fn();
+  return {
+    onClose,
+    ...render(
+      <TaskDialog
+        task={task}
+        catalog={catalog}
+        onSave={onSave}
+        onClose={onClose}
+        onDelete={async () => {}}
+        onComplete={async () => undefined}
+        onOpen={() => {}}
+        onChildAdded={() => {}}
+      />,
+    ),
+  };
+}
+
+const description = () =>
+  within(screen.getByRole("region", { name: "Task description" }));
+
+it("renders saved Markdown on the first render without a raw-source fallback", () => {
+  editor(async () => original);
+  expect(
+    description().getByRole("link", { name: "the guide" }).getAttribute("href"),
+  ).toBe("https://example.org/guide");
+  expect(screen.queryByText(/\[the guide\]/)).toBeNull();
+});
+
+it("Done waits for the save, then shows the saved Markdown and uses its returned etag", async () => {
+  let confirmSave!: (task: Task) => void;
+  const save = vi
+    .fn<SaveTask>()
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          confirmSave = resolve;
+        }),
+    )
+    .mockImplementation(async (draft, task) =>
+      create(TaskSchema, {
+        ...(task ?? original),
+        ...draft,
+        etag: "3",
+      }),
+    );
+  const { onClose, unmount } = editor(save);
+  fireEvent.click(
+    description().getByRole("button", { name: "Edit description" }),
+  );
+  const input = description().getByRole("textbox", { name: "Description" });
+  const markdown =
+    "## Reading\n\n**Saved text** with [a link](https://example.org/saved).\n\n- Saved item";
+  fireEvent.change(input, { target: { value: markdown } });
+  fireEvent.change(screen.getByRole("combobox", { name: "Planning stage" }), {
+    target: { value: "weekly" },
+  });
+  fireEvent.click(description().getByRole("button", { name: "Done" }));
+  expect(save).toHaveBeenCalledOnce();
+  expect(save.mock.calls[0]?.[0].description).toBe(markdown);
+  expect(save.mock.calls[0]?.[3]?.paths).toContain("stage");
+  expect((input as HTMLTextAreaElement).disabled).toBe(true);
+  expect(
+    (screen.getByRole("textbox", { name: "Task name" }) as HTMLTextAreaElement)
+      .disabled,
+  ).toBe(true);
+  expect(
+    (description().getByRole("button", { name: "Done" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(screen.queryByText("Saved", { exact: true })).toBeNull();
+  const saved = create(TaskSchema, {
+    ...original,
+    description: markdown,
+    etag: "2",
+    stage: "weekly",
+  });
+  await act(async () => confirmSave(saved));
+  expect(description().queryByRole("textbox")).toBeNull();
+  expect(description().getByRole("heading", { name: "Reading" })).toBeTruthy();
+  expect(
+    description().getByRole("link", { name: "a link" }).getAttribute("href"),
+  ).toBe("https://example.org/saved");
+  expect(description().getByRole("listitem").textContent).toBe("Saved item");
+  expect(screen.getByRole("status").textContent).toBe("Saved");
+  expect(onClose).not.toHaveBeenCalled();
+  expect(
+    (screen.getByRole("textbox", { name: "Task name" }) as HTMLTextAreaElement)
+      .disabled,
+  ).toBe(false);
+  fireEvent.change(screen.getByRole("textbox", { name: "Task name" }), {
+    target: { value: "Synthetic second edit" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(save.mock.calls[1]?.[1]?.etag).toBe("2");
+  await waitFor(() =>
+    expect(screen.getByRole("status").textContent).toBe("Saved"),
+  );
+  unmount();
+  editor(async () => saved, saved);
+  expect(description().getByRole("heading", { name: "Reading" })).toBeTruthy();
+  expect(description().queryByRole("textbox")).toBeNull();
+});
+
+it("keeps the description draft editable on a failed Done and reports no success", async () => {
+  const save = vi
+    .fn<SaveTask>()
+    .mockRejectedValue(new Error("synthetic failure"));
+  const { onClose } = editor(save);
+  fireEvent.click(
+    description().getByRole("button", { name: "Edit description" }),
+  );
+  fireEvent.change(
+    description().getByRole("textbox", { name: "Description" }),
+    {
+      target: { value: "**Draft to keep**" },
+    },
+  );
+  fireEvent.click(description().getByRole("button", { name: "Done" }));
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Could not confirm",
+    ),
+  );
+  const input = description().getByRole("textbox", {
+    name: "Description",
+  }) as HTMLTextAreaElement;
+  expect(input.value).toBe("**Draft to keep**");
+  expect(input.disabled).toBe(false);
+  expect(screen.getByRole("status").textContent).toBe("");
+  expect(onClose).not.toHaveBeenCalled();
+});
+
+it("keeps Save feedback on unchanged interaction and clears it when a field changes", async () => {
+  const save = vi.fn<SaveTask>().mockResolvedValue(original);
+  editor(save);
+  const saveButton = screen.getByRole("button", { name: "Save changes" });
+  fireEvent.click(saveButton);
+  await waitFor(() =>
+    expect(screen.getByRole("status").textContent).toBe("Saved"),
+  );
+  expect(saveButton.textContent).toBe("Saved");
+  fireEvent.click(screen.getByRole("textbox", { name: "Task name" }));
+  expect(screen.getByRole("status").textContent).toBe("Saved");
+  fireEvent.click(
+    description().getByRole("button", { name: "Edit description" }),
+  );
+  expect(screen.getByRole("status").textContent).toBe("Saved");
+  fireEvent.change(
+    description().getByRole("textbox", { name: "Description" }),
+    {
+      target: { value: "Changed draft" },
+    },
+  );
+  expect(screen.getByRole("status").textContent).toBe("");
+  expect(saveButton.textContent).toBe("Save changes");
+});
+
+it("disables both new-task text fields until its pending create is confirmed", async () => {
+  let confirmSave!: (task: Task) => void;
+  const save = vi.fn<SaveTask>(
+    () =>
+      new Promise((resolve) => {
+        confirmSave = resolve;
+      }),
+  );
+  const onClose = vi.fn();
+  render(
+    <TaskDialog
+      catalog={catalog}
+      onSave={save}
+      onClose={onClose}
+      onDelete={async () => {}}
+      onComplete={async () => undefined}
+      onOpen={() => {}}
+      onChildAdded={() => {}}
+    />,
+  );
+  const title = screen.getByRole("textbox", {
+    name: "Task name",
+  }) as HTMLTextAreaElement;
+  const input = screen.getByRole("textbox", {
+    name: "Description",
+  }) as HTMLTextAreaElement;
+  fireEvent.change(title, { target: { value: "Synthetic pending create" } });
+  fireEvent.change(input, {
+    target: { value: "Description sent with the create." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+  expect(save).toHaveBeenCalledOnce();
+  expect(save.mock.calls[0]?.[0]).toMatchObject({
+    title: "Synthetic pending create",
+    description: "Description sent with the create.",
+  });
+  expect(save.mock.calls[0]?.[1]).toBeUndefined();
+  expect(title.disabled).toBe(true);
+  expect(input.disabled).toBe(true);
+  expect(screen.getByRole("dialog", { name: "Add task" })).toBeTruthy();
+  expect(onClose).not.toHaveBeenCalled();
+  await act(async () =>
+    confirmSave(
+      create(TaskSchema, {
+        ...original,
+        title: "Synthetic pending create",
+        description: "Description sent with the create.",
+      }),
+    ),
+  );
+  expect(onClose).toHaveBeenCalledOnce();
+});

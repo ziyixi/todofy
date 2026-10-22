@@ -8,368 +8,259 @@ body {
   color-scheme: light;
 }
 .mini {
-  /* The hero scales with the window; the gaps scale with the hero; text steps at breakpoints. */
-  --time-size: clamp(26px, min(37vh, 14.5vw), 120px);
-  --gap-title: calc(4px + var(--time-size) * 0.22);
-  --gap-rule: calc(6px + var(--time-size) * 0.27);
-  --pad-x: 24px;
-  --title-size: 13px;
-  --label-size: 11px;
-  --icon: 18px;
-  --hit: 28px;
+  --time-size: clamp(24px, min(29vh, 12vw), 64px);
+  --hit: 30px;
+  --icon: 17px;
   box-sizing: border-box;
-  /* The PiP viewport, whatever wraps .mini (React's portal container is a plain div). */
   height: 100vh;
-  /* One optical group, centred a hair above the middle of the window. */
-  padding: 0 var(--pad-x) 2px;
+  padding: 12px 16px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "outcome outcome"
-    "title title"
-    "time slot"
-    "foot foot";
+  grid-template-areas: "heading heading" "time controls" "foot foot";
   align-content: center;
-  column-gap: 16px;
-  line-height: 1;
-  animation: mini-in 320ms cubic-bezier(0.2, 0, 0, 1) both;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 5px;
+  line-height: 1.2;
 }
 .mini * {
   box-sizing: border-box;
 }
-
-/* Every text box is trimmed to cap height and baseline, so each gap is the gap the eye sees.
-   Single lines that clip get the trimmed space back as padding, for descenders and CJK. */
-.mini-outcome,
-.mini-title,
-.mini-message {
+.mini-heading {
+  grid-area: heading;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 3px 12px;
   min-width: 0;
-  white-space: nowrap;
+}
+.mini-title,
+.mini-outcome,
+.mini-message {
+  margin: 0;
+  min-width: 0;
+}
+.mini-title,
+.mini-outcome {
   overflow: hidden;
   text-overflow: ellipsis;
-  text-box: trim-both cap alphabetic;
-  padding-block: 0.3em;
-  margin-block: -0.3em;
-}
-.mini-outcome {
-  grid-area: outcome;
-  display: none;
-  font-size: 12px;
-  color: var(--plus-muted);
-  margin-bottom: calc(7px - 0.3em);
+  white-space: nowrap;
 }
 .mini-title {
-  grid-area: title;
-  font-size: var(--title-size);
-  font-weight: 400;
-  margin-bottom: calc(var(--gap-title) - 0.3em);
+  font-size: 13px;
+  font-weight: 500;
 }
 .mini-title.is-fallback {
   color: var(--plus-muted);
 }
-
-/* The hero. Light, tabular, its box exactly cap height to baseline. */
+.mini-outcome {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--plus-muted);
+}
+.mini-status {
+  font-size: 11px;
+  color: var(--plus-muted);
+  white-space: nowrap;
+}
+.mini-compact-label {
+  display: none;
+}
 .mini-time {
   grid-area: time;
+  min-width: 0;
   font-size: var(--time-size);
-  font-weight: 250;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  text-box: trim-both cap alphabetic;
-  /* Digits sit inside their tabular cells: pull the first one's ink onto the text edge, by that digit's own side
-     bearing (SF at this weight, measured in Chrome), so the edge holds as 19:59 turns 20:00. This one fits 3; a
-     session counts at most 4 hours, so 6 to 9 never lead. */
-  margin-left: -0.05em;
-  transition: color 400ms ease;
-}
-.mini-time[data-lead="0"] {
-  margin-left: -0.042em;
-}
-.mini-time[data-lead="1"] {
-  margin-left: -0.13em;
-}
-.mini-time[data-lead="2"] {
-  margin-left: -0.079em;
-}
-.mini-time[data-lead="4"] {
-  margin-left: -0.036em;
-}
-.mini-time[data-lead="5"] {
-  margin-left: -0.069em;
-}
-/* SF centres a colon between digits; its tabular side bearings read loose at this size. */
-.mini-colon {
-  margin: 0 -0.035em;
-}
-
-/* The slot right of the time: the status at rest, the controls on hover or keyboard focus. */
-.mini-status {
-  grid-area: slot;
-  align-self: end;
-  justify-self: end;
-  font-size: var(--title-size);
-  color: var(--plus-muted);
-  text-box: trim-both cap alphabetic;
-  transition: opacity 260ms ease 380ms;
 }
 .mini-controls {
-  grid-area: slot;
-  align-self: center;
+  grid-area: controls;
   display: flex;
-  gap: 2px;
-  /* The last icon's ink, not its hit area, meets the right text edge. */
-  margin-right: calc((var(--hit) - var(--icon)) / -2 - 3px);
-  opacity: 0;
-  transition: opacity 260ms ease 380ms;
-}
-:root:hover .mini-controls,
-.mini:focus-within .mini-controls {
+  gap: 3px;
   opacity: 1;
-  transition: opacity 180ms cubic-bezier(0.2, 0, 0, 1);
-}
-:root:hover .mini-status,
-.mini:focus-within .mini-status {
-  opacity: 0;
-  transition: opacity 120ms ease;
 }
 .mini-controls button {
-  display: grid;
-  place-items: center;
   width: var(--hit);
   height: var(--hit);
+  display: grid;
+  place-items: center;
   padding: 0;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 7px;
   background: none;
   color: var(--plus-muted);
   cursor: pointer;
-  transition: color 160ms ease;
+}
+.mini-controls button.mini-primary {
+  border-color: color-mix(in srgb, var(--plus-accent) 14%, var(--plus-bg));
+  background: color-mix(in srgb, var(--plus-accent) 7%, var(--plus-bg));
+  color: var(--plus-accent);
 }
 .mini-controls button:hover {
+  background: color-mix(in srgb, var(--plus-text) 5%, var(--plus-bg));
   color: var(--plus-text);
 }
-.mini-controls button:focus-visible {
-  outline: 1.5px solid var(--plus-accent);
-  outline-offset: -2px;
-  border-radius: 50%;
+.mini-controls button:focus-visible,
+.mini-answers button:focus-visible {
+  outline: 2px solid var(--plus-accent);
+  outline-offset: 2px;
 }
-.mini-controls button:disabled {
+.mini-controls button:disabled,
+.mini-answers button:disabled {
   opacity: 0.4;
-  color: var(--plus-muted);
   cursor: default;
 }
 .mini-controls svg {
   width: var(--icon);
   height: var(--icon);
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.25px;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  stroke-width: 1.6;
 }
-.mini-controls svg > * {
-  vector-effect: non-scaling-stroke;
-}
-
-/* The rule: the step's logged time against its estimate (a pomodoro: against its length). */
 .mini-foot {
   grid-area: foot;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: var(--gap-rule);
-  /* The label's cap height, whether or not a label shows. */
-  min-height: calc(var(--label-size) * 0.71);
+  min-height: 13px;
 }
 .mini-rule {
   position: relative;
   flex: 1;
-  height: 1px;
+  min-width: 24px;
+  height: 3px;
+  border-radius: 3px;
+  overflow: hidden;
   background: var(--plus-line);
-  transition: background-color 400ms ease;
 }
-/* Over the estimate the rule's whole width is the logged time: the fill stops at the estimate
-   and the rest of the line is the overrun. */
-.mini[data-progress="over"] .mini-rule {
-  background: var(--plus-warning);
-}
-/* Work and Personal fill in their edge colour; an unassigned step in the muted tone, as Week
-   and Month draw its records (--plus-area-none is the track's own colour). */
 .mini-fill {
   position: absolute;
   inset: 0;
-  background: var(--area-color, var(--plus-muted));
+  background: var(--area-color, var(--plus-accent));
   transform-origin: left;
   transform: scaleX(var(--progress, 0));
-  /* One tick's growth glides over the second it covers. */
-  transition:
-    transform 1000ms linear,
-    background-color 400ms ease;
+  transition: transform 1000ms linear;
 }
 .mini-label {
-  font-size: var(--label-size);
-  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  flex: 0 0 7.8em;
+  text-align: right;
+  font-size: 11px;
   color: var(--plus-muted);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  text-box: trim-both cap alphabetic;
-  transition: color 400ms ease;
 }
-.mini[data-progress="near"] .mini-label {
-  color: var(--plus-text);
+.mini[data-progress="over"] .mini-rule {
+  background: var(--plus-warning);
 }
 .mini[data-progress="over"] .mini-label {
   color: var(--plus-warning);
 }
-
-/* One line of text: a failed write in the rule's place, or (slice C) the away question. */
-.mini-message {
-  grid-area: foot;
-  font-size: var(--title-size);
-  margin-top: calc(var(--gap-rule) - 0.3em);
+.mini[data-progress="near"] .mini-label {
+  color: var(--plus-text);
 }
-.mini-error {
-  color: var(--plus-danger);
-}
-
-/* Paused: the time steps back to the muted tone; the progress keeps its place, quieter. */
 .mini[data-status="paused"] .mini-time {
   color: var(--plus-muted);
 }
 .mini[data-status="paused"] .mini-fill {
-  background: color-mix(in srgb, var(--area-color, var(--plus-muted)) 55%, var(--plus-bg));
-}
-
-/* Away (slice C). The question takes the title's line, so it reads first; the answers take the
-   controls' slot, always shown, Keep first; the rule stays, paused. Nothing else moves.
-   Large windows keep the title and read question and answers as one line under the time. */
-.mini[data-away] .mini-title {
-  display: none;
+  opacity: 0.6;
 }
 .mini-question {
-  grid-area: title;
-  margin-top: -0.3em;
-  margin-bottom: calc(var(--gap-title) - 0.3em);
+  grid-column: 1 / -1;
+  font-size: 12px;
 }
 .mini-answers {
-  grid-area: slot;
-  align-self: end;
+  grid-area: controls;
   display: flex;
-  gap: 16px;
+  gap: 10px;
 }
 .mini-answers button {
+  min-height: var(--hit);
   padding: 0;
   border: 0;
-  background: none;
+  border-radius: 4px;
   font: inherit;
-  font-size: var(--title-size);
+  font-size: 12px;
   font-weight: 500;
+  background: none;
   color: var(--plus-accent);
   cursor: pointer;
-  text-box: trim-both cap alphabetic;
-  text-decoration: underline 1px transparent;
-  text-underline-offset: 4px;
-  transition: text-decoration-color 160ms ease;
 }
-.mini-answers button:hover {
-  text-decoration-color: currentColor;
+.mini-error {
+  grid-area: foot;
+  font-size: 11px;
+  color: var(--plus-danger);
 }
-.mini-answers button:focus-visible {
-  outline: 1.5px solid var(--plus-accent);
-  outline-offset: 4px;
-  border-radius: 3px;
-}
-.mini-answers button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-/* Large windows: more air, a lighter hero, the outcome as a quiet line over the step. */
-@media (min-width: 420px) and (min-height: 170px) {
+@media (min-width: 420px) and (min-height: 180px) {
   .mini {
-    --pad-x: 32px;
-    --title-size: 14px;
-    --label-size: 12px;
-    --icon: 20px;
-    --hit: 32px;
+    padding: 20px 24px;
+    row-gap: 12px;
+    --hit: 34px;
+    --icon: 19px;
   }
-  .mini-time {
-    font-weight: 200;
+  .mini-title {
+    font-size: 15px;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .mini-outcome,
+  .mini-status,
+  .mini-label {
+    font-size: 12px;
+  }
+}
+@media (max-height: 100px) {
+  .mini {
+    padding: 6px 12px;
+    row-gap: 4px;
+    --time-size: 24px;
+    --hit: 26px;
+    --icon: 16px;
   }
   .mini-outcome {
-    display: block;
-  }
-  .mini[data-away] {
-    grid-template-areas:
-      "outcome outcome"
-      "title title"
-      "time time"
-      "question answers";
-  }
-  .mini[data-away] .mini-title {
-    display: block;
-  }
-  .mini[data-away] .mini-foot {
     display: none;
   }
-  .mini-question {
-    grid-area: question;
-    margin-top: calc(var(--gap-rule) - 0.3em);
-    margin-bottom: -0.3em;
+  .mini-title {
+    font-size: 12px;
   }
-  .mini-answers {
-    grid-area: answers;
-    margin-top: var(--gap-rule);
-  }
-}
-/* Two lines of title once there is height for them. */
-@media (min-width: 420px) and (min-height: 230px) {
-  .mini-title,
-  .mini[data-away] .mini-title {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    white-space: normal;
-    line-height: 1.35;
-  }
-}
-/* Compact windows: the rule keeps no label. */
-@media (max-height: 99px), (max-width: 279px) {
-  .mini {
-    --pad-x: 16px;
-    --title-size: 12px;
-    --icon: 16px;
-    --hit: 24px;
-  }
-  .mini-time {
-    font-weight: 300;
+  .mini-foot {
+    min-height: 3px;
   }
   .mini-label {
     display: none;
   }
-  .mini-foot {
-    min-height: 1px;
+  .mini-compact-label {
+    display: inline;
   }
-}
-/* The smallest windows Chrome allows: the time, its controls and the rule. Away, the question
-   stays and the rule gives way. */
-@media (max-height: 76px) {
-  .mini-title {
+  .mini-status:has(.mini-compact-label) .mini-mode {
     display: none;
   }
-  .mini[data-away] .mini-foot {
-    display: none;
+  .mini-error {
+    font-size: 11px;
+  }
+  .mini[data-failed] {
+    padding-block: 4px;
+    row-gap: 2px;
+    --time-size: 20px;
+    --hit: 24px;
   }
 }
-
-@keyframes mini-in {
-  from {
-    opacity: 0;
+@media (max-width: 279px) {
+  .mini {
+    padding-inline: 10px;
+    column-gap: 8px;
+    --hit: 26px;
+    --icon: 16px;
+  }
+  .mini-heading {
+    column-gap: 8px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .mini,
-  .mini * {
-    animation: none !important;
-    transition: none !important;
+  .mini-fill {
+    transition: none;
   }
 }

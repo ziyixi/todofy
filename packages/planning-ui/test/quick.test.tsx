@@ -45,7 +45,7 @@ it("shows what the native Quick / Ops filter shows: no date, or due or a deadlin
       task("last-day", { due: on(2) }),
       task("too-late", { due: on(3) }),
       task("undated"),
-      task("deadline", { due: on(8), deadline: on(2) }),
+      task("deadline", { due: on(8), deadline: on(2), leadDays: 2 }),
       task("timed", { due: `${on(2)}T09:00:00` }),
       // Half an hour before local midnight after the last day: in, though its UTC day is not.
       task("fixed-in", { due: `${on(3)}T06:30:00Z` }),
@@ -79,6 +79,57 @@ it("lists dated tasks first by day, then the undated, the higher priority first 
     "undated-high",
     "undated-low",
   ]);
+});
+
+it("waits for a Quick task's Deadline start window without hiding undated, overdue or active work", () => {
+  const items = [
+    task("before-window", { kind: "task", deadline: on(8), leadDays: 7 }),
+    task("due-soon-before-window", {
+      kind: "task",
+      due: TODAY,
+      deadline: on(8),
+      leadDays: 7,
+    }),
+    task("window-start", { kind: "task", deadline: on(7), leadDays: 7 }),
+    // mustStart is a Review fact: Waiting suppresses it without closing the calendar window.
+    task("waiting-in-window", {
+      kind: "task",
+      deadline: on(2),
+      leadDays: 7,
+      planningFlags: ["quick", "waiting"],
+      mustStart: false,
+    }),
+    task("no-deadline", { kind: "task" }),
+    task("overdue-deadline", { kind: "task", deadline: on(-1) }),
+    task("deadline-today", { kind: "task", deadline: TODAY }),
+    task("no-lead-yet", { kind: "task", deadline: on(1) }),
+    task("active", {
+      kind: "task",
+      deadline: on(30),
+      leadDays: 7,
+      planningFlags: ["quick", "active"],
+      mustStart: false,
+    }),
+  ];
+  expect(quick(items)).toEqual([
+    "window-start",
+    "waiting-in-window",
+    "no-deadline",
+    "overdue-deadline",
+    "deadline-today",
+    "active",
+  ]);
+  // Eligibility is account calendar days and never changes the task's native planning facts.
+  expect(items[0]).toMatchObject({
+    deadline: on(8),
+    leadDays: 7,
+    mustStart: false,
+  });
+  expect(items[2]).toMatchObject({
+    deadline: on(7),
+    leadDays: 7,
+    mustStart: false,
+  });
 });
 
 it("leaves out of Week's line what is in a shown day, a next step above it, or set aside", () => {

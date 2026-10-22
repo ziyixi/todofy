@@ -1,4 +1,4 @@
-import { addDays, hasPlanningFlag, isSchedulable } from "./domain";
+import { addDays, hasPlanningFlag, isSchedulable, startDate } from "./domain";
 import { localDate } from "./mail";
 import {
   committedOutcomes,
@@ -96,8 +96,9 @@ export function weekChoices(plan: PlanState): PlanningTask[] {
  * The tasks the native Quick / Ops filter (@quick & (no date | 3 days)) shows, read as widely as
  * Todofy's gate does before it hides that filter: the literal `quick` label, and no due date, or a
  * due day or a deadline at most two days after `today` (the account's date), overdue included. A
- * due time in a fixed zone (ending in Z) counts on its day in the account's time zone. Dated ones
- * first, by day, then the undated; the higher priority first within each.
+ * due time in a fixed zone (ending in Z) counts on its day in the account's time zone. A Deadline
+ * keeps it out until its start window (the deadline day when leadDays is zero), unless already
+ * active. Dated ones first, by day, then the undated; higher priority first within each.
  */
 export function quickTasks(
   plan: Pick<PlanState, "tasks" | "timezone">,
@@ -110,6 +111,10 @@ export function quickTasks(
     .filter(
       (task) =>
         hasPlanningFlag(task, QUICK_LABEL) &&
+        (!task.deadline ||
+          hasPlanningFlag(task, ACTIVE_LABEL) ||
+          today >=
+            (startDate(task.deadline, task.leadDays, true) || task.deadline)) &&
         (!task.due ||
           dueDay(task.due) <= last ||
           (Boolean(task.deadline) && task.deadline <= last)),

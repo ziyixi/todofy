@@ -503,6 +503,13 @@ export function createPlanningActions(transports: {
     async updateLead(task, deadline, leadDays) {
       return save(task, ["deadline", "lead_days"], { deadline, leadDays });
     },
+    async deleteTask(task, requestId) {
+      await tasks.deleteTask({
+        name: `tasks/${task.id}`,
+        etag: task.etag,
+        requestId,
+      });
+    },
     async setDependencies(task, prerequisiteIds, added) {
       const write = (etag: string, ids: readonly string[]) =>
         tasks.updateTask({

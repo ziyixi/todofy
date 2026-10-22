@@ -65,8 +65,9 @@ show logged time by area, steps done and where the time went (`focus-stats.ts`).
 complete and reorder by their whole row; other days are read-only. A header checkbox shows the day's
 completed steps. Plan and Focus both count from Tasks' today (`PlanState.today`, `FocusState.date`). A task's estimate is its Tasks
 duration: the host supplies `updateEstimate`, which writes Tasks and answers the saved duration
-and the task's new etag (`{ estimate, etag }`). A Step opens a panel that sets only its time (`StepEditor`); tasks open the full planning
-panel.
+and the task's new etag (`{ estimate, etag }`). A Step opens a panel for its time and direct deletion
+with confirmation (`StepEditor`); tasks open the full planning panel. Deletion uses Tasks' existing
+DeleteTask under Plan's etag and a stable request ID, then reads the authoritative task and Focus state.
 
 Review keeps candidate columns together and gives Committed a separate full-width row of horizontal cards.
 Every Plan and Focus card's left edge is its area's colour (Work slate, Personal ochre, Unassigned none), and
@@ -76,3 +77,5 @@ day: calendar cards pass their own day, the rest Focus's. A retry resends the fi
 Step stays in its day after the open ones, in Focus's done style, outside the day's total; its title opens Tasks' own
 dialog, where it can be reopened. Quick actions always qualify as standalone, even when an older
 response contains only the Quick flag. Ordinary labels do not imply planning properties.
+Quick's existing Due selection and order also respect its Deadline start window: future windows stay
+hidden, zero lead opens on the deadline day, and active work remains eligible.

@@ -1,7 +1,28 @@
 import { expect, it } from "vitest";
 import { createPlanningActions } from "../src/api";
 import type { HttpCall, HttpSend } from "@ziyixi/proto/http-client";
-import type { FocusState } from "../src/model";
+import type { FocusState, PlanningTask } from "../src/model";
+
+it("deletes a Step through Tasks under Plan's etag and the same request ID on retry", async () => {
+  const calls: HttpCall[] = [];
+  const send: HttpSend = async (call) => {
+    calls.push(call);
+    if (calls.length === 1) throw new Error("Synthetic lost response");
+    return Response.json({});
+  };
+  const actions = createPlanningActions({ tasks: send });
+  const task = { id: "synthetic-step", etag: "step-3" } as PlanningTask;
+  await expect(actions.deleteTask(task, "same-delete-request")).rejects.toThrow(
+    "Synthetic lost response",
+  );
+  await actions.deleteTask(task, "same-delete-request");
+  expect(calls).toHaveLength(2);
+  expect(calls[0]).toEqual(calls[1]);
+  expect(calls[0]).toMatchObject({
+    httpMethod: "DELETE",
+    url: "/api/tasks/v1/tasks/synthetic-step?etag=step-3&request_id=same-delete-request",
+  });
+});
 
 it("reads the weekly review's two facts for the plan's week from Tasks, a zero count included", async () => {
   const calls: HttpCall[] = [];
@@ -203,7 +224,14 @@ it("sends when a Pause or Resume takes effect, keeps the pause time to the milli
   await expect(
     api.timer("pause", "step", focus, undefined, undefined, at),
   ).rejects.toThrow("Synthetic network failure");
-  const paused = await api.timer("pause", "step", focus, undefined, undefined, at);
+  const paused = await api.timer(
+    "pause",
+    "step",
+    focus,
+    undefined,
+    undefined,
+    at,
+  );
   expect(bodies[0]).toEqual({
     request_id: expect.any(String),
     etag: "2",
@@ -219,7 +247,14 @@ it("sends when a Pause or Resume takes effect, keeps the pause time to the milli
     pausedAt: at,
   });
   // Another moment is another request; without one, Tasks' now.
-  await api.timer("pause", "step", focus, undefined, undefined, "2026-10-17T12:06:00.000Z");
+  await api.timer(
+    "pause",
+    "step",
+    focus,
+    undefined,
+    undefined,
+    "2026-10-17T12:06:00.000Z",
+  );
   expect(bodies[2]!.request_id).not.toBe(bodies[0]!.request_id);
   await api.timer("resume", "step", { ...focus, timerEtag: "3" });
   expect(bodies[3]).toEqual({

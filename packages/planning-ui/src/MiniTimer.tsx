@@ -1,10 +1,5 @@
-import {
-  Fragment,
-  useEffect,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { Check, Pause, Play, Square } from "lucide-react";
 import { duration, elapsed, formattedMinutes } from "./domain";
 import { words } from "./i18n";
 import type { FocusState, Language } from "./model";
@@ -55,38 +50,31 @@ export function miniRule(
     : { band: "on", progress, label: formattedMinutes(estimate) };
 }
 
-// 24-unit glyphs drawn for the 1.25px hairline the stylesheet gives them.
-const PAUSE = <path d="M9.25 6.5v11M14.75 6.5v11" />;
-const PLAY = (
-  <path d="M8.5 6.6v10.8a.6.6 0 0 0 .9.52l8.9-5.4a.6.6 0 0 0 0-1.04L9.4 6.08a.6.6 0 0 0-.9.52z" />
-);
-const STOP = <rect x="7" y="7" width="10" height="10" rx="1.5" />;
-const CHECK = <path d="m5.75 12.4 4 4L18.25 7.9" />;
-
 function Control({
   label,
   title,
   busy,
   onClick,
   children,
+  primary,
 }: {
   label: string;
   title: string;
   busy: boolean;
   onClick: () => void;
   children: ReactNode;
+  primary?: boolean;
 }) {
   return (
     <button
       type="button"
+      className={primary ? "mini-primary" : undefined}
       aria-label={`${label}: ${title}`}
       title={label}
       disabled={busy}
       onClick={onClick}
     >
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        {children}
-      </svg>
+      {children}
     </button>
   );
 }
@@ -120,10 +108,8 @@ export interface MiniTimerProps {
 }
 
 /**
- * The Focus mini timer (Document Picture-in-Picture): the time as the one large thing, the step over it, its
- * controls beside it on hover or keyboard focus, and a hairline rule of the step's time against its estimate.
- * Away, the question takes the step's line and its answers the controls' place. mini-timer.css styles exactly this
- * DOM. It re-renders only itself, once a second while the session runs.
+ * A compact session: task identity, a steady clock, visible controls and logged time against the estimate.
+ * The same content reflows down to Chrome's 64px viewport. Only this component ticks once a second.
  */
 export function MiniTimer({
   clock,
@@ -169,6 +155,15 @@ export function MiniTimer({
   );
   const rule = miniRule(timer, seconds, recorded + seconds, estimate, language);
   const name = title ?? text.focus;
+  const pomodoro = timer.mode === "pomodoro" && Boolean(timer.targetSeconds);
+  const total = pomodoro ? seconds : recorded + seconds;
+  const target = pomodoro ? (timer.targetSeconds ?? 0) / 60 : estimate;
+  const clockLabel = pomodoro ? text.miniRemaining : text.miniSession;
+  const ratio = target
+    ? `${formattedMinutes(Math.floor(total / 60))} / ${formattedMinutes(target)}`
+    : "";
+  const progressLabel =
+    rule.band === "over" || rule.band === "near" ? rule.label : ratio;
   return (
     <div
       className="mini"
@@ -176,6 +171,7 @@ export function MiniTimer({
       data-status={timer.status}
       data-progress={rule.band}
       data-away={away ? "" : undefined}
+      data-failed={failed ? "" : undefined}
       aria-busy={busy}
       style={
         {
@@ -183,26 +179,43 @@ export function MiniTimer({
           ...(timer.area !== "unassigned" && {
             "--area-color": `var(--plus-area-${timer.area})`,
           }),
-          "--progress": rule.progress,
+          "--progress": Math.max(0, Math.min(1, rule.progress)),
         } as CSSProperties
       }
     >
-      {outcome && <p className="mini-outcome">{outcome}</p>}
-      <p className={`mini-title${title ? "" : " is-fallback"}`} title={title}>
-        {name}
-      </p>
-      {away && (
-        <p className="mini-message mini-question" role="status">
-          {text.away(away.minutes)}
-        </p>
-      )}
-      <div className="mini-time" role="timer" data-lead={time[0]}>
-        {time.split(":").map((part, index) => (
-          <Fragment key={index}>
-            {index > 0 && <span className="mini-colon">:</span>}
-            {part}
-          </Fragment>
-        ))}
+      <div className="mini-heading">
+        {outcome && (
+          <p className="mini-outcome" title={outcome}>
+            {outcome}
+          </p>
+        )}
+        {away ? (
+          <p className="mini-message mini-question" role="status">
+            {text.away(away.minutes)}
+          </p>
+        ) : (
+          <>
+            <p
+              className={`mini-title${title ? "" : " is-fallback"}`}
+              title={title && outcome ? `${outcome} / ${title}` : title}
+            >
+              {name}
+            </p>
+            <span className="mini-status">
+              <span className="mini-mode">
+                {running ? clockLabel : text.paused}
+              </span>
+              {running && ratio && (
+                <span className="mini-compact-label" aria-hidden="true">
+                  {ratio}
+                </span>
+              )}
+            </span>
+          </>
+        )}
+      </div>
+      <div className="mini-time" role="timer" aria-label={clockLabel}>
+        {time}
       </div>
       {away ? (
         <div className="mini-answers">
@@ -215,15 +228,15 @@ export function MiniTimer({
         </div>
       ) : (
         <>
-          <span className="mini-status">{running ? "" : text.paused}</span>
           <div className="mini-controls">
             <Control
+              primary
               label={running ? text.pause : text.resume}
               title={name}
               busy={busy}
               onClick={() => onTimer(running ? "pause" : "resume")}
             >
-              {running ? PAUSE : PLAY}
+              {running ? <Pause /> : <Play />}
             </Control>
             <Control
               label={text.stop}
@@ -231,7 +244,7 @@ export function MiniTimer({
               busy={busy}
               onClick={() => onTimer("stop")}
             >
-              {STOP}
+              <Square />
             </Control>
             {onComplete && (
               <Control
@@ -240,20 +253,37 @@ export function MiniTimer({
                 busy={busy}
                 onClick={onComplete}
               >
-                {CHECK}
+                <Check />
               </Control>
             )}
           </div>
         </>
       )}
       {failed ? (
-        <p className="mini-message mini-error">{text.notSaved}</p>
+        <p className="mini-message mini-error" role="alert">
+          {text.notSaved}
+        </p>
       ) : (
         <div className="mini-foot">
-          <div className="mini-rule" aria-hidden="true">
-            <i className="mini-fill" />
-          </div>
-          {rule.label && <span className="mini-label">{rule.label}</span>}
+          {target > 0 && (
+            <div
+              className="mini-rule"
+              role="progressbar"
+              aria-label={text.miniProgress}
+              aria-valuemin={0}
+              aria-valuemax={target}
+              aria-valuenow={Math.min(target, total / 60)}
+              aria-valuetext={ratio}
+            >
+              <i className="mini-fill" />
+            </div>
+          )}
+          <span
+            className="mini-label"
+            title={target ? text.miniProgress : undefined}
+          >
+            {progressLabel || text.unknown}
+          </span>
         </div>
       )}
     </div>

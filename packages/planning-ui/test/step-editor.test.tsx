@@ -41,6 +41,7 @@ async function open(
   actions: PlusActions,
   taskId = "copy",
   language: Language = "en",
+  onOpenTask = vi.fn(),
 ) {
   render(
     <App
@@ -48,7 +49,7 @@ async function open(
       view="focus"
       language={language}
       externalTaskId={taskId}
-      onOpenTask={() => {}}
+      onOpenTask={onOpenTask}
       onSettings={() => {}}
     />,
   );
@@ -63,7 +64,7 @@ const pressed = (dialog: HTMLElement) =>
     .queryAllByRole("button", { pressed: true })
     .map((button) => button.textContent);
 
-it("shows a step only its heading, the note line, its parents and the time choices", async () => {
+it("shows a step's heading, parents, time choices and direct deletion", async () => {
   const dialog = await open(native());
   expect(screen.getByRole("dialog", { name: "Write the introduction" })).toBe(
     dialog,
@@ -77,7 +78,15 @@ it("shows a step only its heading, the note line, its parents and the time choic
   );
   expect(
     panel.getAllByRole("button").map((button) => button.textContent),
-  ).toEqual(["", "Open task", "15 min", "30 min", "60 min", "90 min"]);
+  ).toEqual([
+    "",
+    "Open task",
+    "15 min",
+    "30 min",
+    "60 min",
+    "90 min",
+    "Delete step",
+  ]);
   expect(panel.getByRole("button", { name: "Close" })).toBeTruthy();
   const group = panel.getByRole("group", {
     name: "Estimate: Write the introduction",
@@ -96,6 +105,93 @@ it("shows a step only its heading, the note line, its parents and the time choic
 
 /** The step as Plan holds it, whose etag the estimate write goes under. */
 const copy = expect.objectContaining({ id: "copy", etag: expect.any(String) });
+
+it("deletes a Step from Plan after confirmation, without opening the full task editor", async () => {
+  const actions = native();
+  const load = vi.spyOn(actions, "load");
+  const deleteTask = actions.deleteTask.bind(actions);
+  let finish!: () => void;
+  const remove = vi.spyOn(actions, "deleteTask").mockImplementation(
+    (task, requestId) =>
+      new Promise<void>((resolve) => {
+        finish = () => resolve(deleteTask(task, requestId));
+      }),
+  );
+  const onOpenTask = vi.fn();
+  const dialog = await open(actions, "copy", "en", onOpenTask);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete step" }));
+  expect(remove).not.toHaveBeenCalled();
+  expect(
+    within(dialog).getByRole("group", { name: "Delete step" }).textContent,
+  ).toContain("Delete “Write the introduction”?");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  await waitFor(() =>
+    expect(remove).toHaveBeenCalledWith(copy, expect.any(String)),
+  );
+  expect(
+    within(dialog).getByRole<HTMLButtonElement>("button", { name: "Delete" })
+      .disabled,
+  ).toBe(true);
+  expect(dialog.hasAttribute("open")).toBe(true);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  expect(remove).toHaveBeenCalledOnce();
+  await act(async () => finish());
+  await waitFor(() => expect(dialog.hasAttribute("open")).toBe(false));
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+  expect(onOpenTask).not.toHaveBeenCalled();
+  const data = await actions.load();
+  expect(data.plan.tasks.some((task) => task.id === "copy")).toBe(false);
+  expect(data.days.every((day) => !day.taskIds.includes("copy"))).toBe(true);
+});
+
+it("keeps the Step and confirmation after failed deletion, reusing its identity on retry", async () => {
+  const actions = native();
+  const remove = vi
+    .spyOn(actions, "deleteTask")
+    .mockRejectedValueOnce(new Error("Synthetic delete refused"));
+  const dialog = await open(actions);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete step" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Synthetic delete refused",
+    ),
+  );
+  expect(dialog.hasAttribute("open")).toBe(true);
+  expect(
+    (await actions.load()).plan.tasks.some((task) => task.id === "copy"),
+  ).toBe(true);
+  await waitFor(() =>
+    expect(
+      within(dialog).getByRole<HTMLButtonElement>("button", { name: "Delete" })
+        .disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(remove).toHaveBeenCalledTimes(2));
+  expect(remove.mock.calls[1]?.[1]).toBe(remove.mock.calls[0]?.[1]);
+  await waitFor(() => expect(dialog.hasAttribute("open")).toBe(false));
+});
+
+it("lets Escape cancel deletion and returns keyboard focus to Delete step", async () => {
+  const actions = native();
+  const remove = vi.spyOn(actions, "deleteTask");
+  const dialog = await open(actions);
+  const trigger = within(dialog).getByRole("button", { name: "Delete step" });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+  expect(document.activeElement).toBe(cancel);
+  fireEvent.keyDown(cancel, { key: "Escape" });
+  expect(
+    within(dialog).queryByRole("group", { name: "Delete step" }),
+  ).toBeNull();
+  expect(document.activeElement).toBe(
+    within(dialog).getByRole("button", { name: "Delete step" }),
+  );
+  expect(dialog.hasAttribute("open")).toBe(true);
+  expect(remove).not.toHaveBeenCalled();
+});
 
 it("shows a chosen preset at once and keeps it, and focus, when Tasks saves it", async () => {
   const actions = native();

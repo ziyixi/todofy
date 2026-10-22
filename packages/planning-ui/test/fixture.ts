@@ -404,6 +404,18 @@ export function createPrototype(
       };
       return structuredClone(plan.tasks.find((task) => task.id === item.id)!);
     },
+    async deleteTask(item) {
+      plan = {
+        ...plan,
+        tasks: plan.tasks.filter((task) => task.id !== item.id),
+        dependencies: plan.dependencies.filter((edge) => edge.taskId !== item.id && edge.prerequisiteId !== item.id),
+      };
+      days = days.map((day) => ({
+        ...day,
+        taskIds: day.taskIds.filter((id) => id !== item.id),
+        completedTaskIds: day.completedTaskIds.filter((id) => id !== item.id),
+      }));
+    },
     async completeTask(item, _requestId, focusDay) {
       // As Tasks settles a completion: a related session's day, else the given day or today.
       const settled =

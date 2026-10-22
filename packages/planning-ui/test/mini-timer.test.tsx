@@ -148,10 +148,12 @@ function data(session: Timer | undefined = timer()): PlusData {
 function mount(loaded: PlusData, more: Partial<PlusActions> = {}) {
   const actions = {
     load: vi.fn().mockResolvedValue(loaded),
-    timer: vi.fn(async (): Promise<TimerSnapshot> => ({
-      timerEtag: "paused",
-      timer: timer({ status: "paused", etag: "paused", elapsedSeconds: 60 }),
-    })),
+    timer: vi.fn(
+      async (): Promise<TimerSnapshot> => ({
+        timerEtag: "paused",
+        timer: timer({ status: "paused", etag: "paused", elapsedSeconds: 60 }),
+      }),
+    ),
     completeTask: vi.fn().mockResolvedValue(undefined),
     ...more,
   } as unknown as PlusActions;
@@ -220,10 +222,15 @@ it("opens a 320 × 120 window with its stylesheet, the page's tokens and font, a
   expect(mini.getByText("Synthetic focused step").className).toBe("mini-title");
   const time = mini.getByRole("timer");
   expect(time.textContent).toBe("24:13");
-  expect(time.dataset.lead).toBe("2");
-  expect(time.querySelectorAll(".mini-colon")).toHaveLength(1);
-  expect(pip.document.querySelector(".mini-label")?.textContent).toBe("45m");
-  expect(pip.document.querySelector(".mini-status")?.textContent).toBe("");
+  expect(time.getAttribute("aria-label")).toBe("Session");
+  expect(pip.document.querySelector(".mini-label")?.textContent).toBe(
+    "24m / 45m",
+  );
+  const progress = mini.getByRole("progressbar", {
+    name: "Logged time / estimate",
+  });
+  expect(progress.getAttribute("aria-valuetext")).toBe("24m / 45m");
+  expect(Number(progress.getAttribute("aria-valuenow"))).toBeCloseTo(1453 / 60);
 });
 
 it("acts through the timer bar's own commands and the one write queue", async () => {
@@ -324,7 +331,9 @@ it("leaves out Complete for a step Plan does not list, and shows Focus when no s
   ).toBeTruthy();
   expect(mini.queryByRole("button", { name: /^Complete task/u })).toBeNull();
   // Its estimate comes from Tasks' Focus read.
-  expect(pip.document.querySelector(".mini-label")?.textContent).toBe("1h");
+  expect(pip.document.querySelector(".mini-label")?.textContent).toBe(
+    "24m / 1h",
+  );
   cleanup();
 
   const unknown = stubPictureInPicture();
@@ -541,10 +550,12 @@ it("waits with full reads in the background and reads once when shown again", as
 it("behind another page, a task write elsewhere reads the timer at once, and in full while the mini timer is open", async () => {
   const stub = stubPictureInPicture();
   const onSession = vi.fn();
-  const readTimer = vi.fn(async (): Promise<TimerSnapshot> => ({
-    timerEtag: "running",
-    timer: timer(),
-  }));
+  const readTimer = vi.fn(
+    async (): Promise<TimerSnapshot> => ({
+      timerEtag: "running",
+      timer: timer(),
+    }),
+  );
   const page = mount(data(), { readTimer });
   page.rerender({ onSession });
   await screen.findByRole("button", { name: "Mini timer" });
@@ -668,10 +679,12 @@ it("counts a pomodoro down and fills an unassigned step's rule in the muted tone
   expect(Number(box.style.getPropertyValue("--progress"))).toBeCloseTo(
     378 / 1500,
   );
-  expect(pip.document.querySelector(".mini-label")?.textContent).toBe("25m");
+  expect(pip.document.querySelector(".mini-label")?.textContent).toBe(
+    "6m / 25m",
+  );
 });
 
-it("counts the step's earlier records on the session's day, and pulls a leading 1 onto the text edge", async () => {
+it("counts earlier records separately from an hour-long session", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
   const loaded = data(
@@ -694,8 +707,6 @@ it("counts the step's earlier records on the session's day, and pulls a leading 
   const { pip, mini } = await open(stub);
   const time = mini.getByRole("timer");
   expect(time.textContent).toBe("1:04:59");
-  expect(time.dataset.lead).toBe("1");
-  expect(time.querySelectorAll(".mini-colon")).toHaveLength(2);
   // 20m recorded and 1:04:59 now: 40 minutes over 45.
   expect(
     pip.document.querySelector(".mini")?.getAttribute("data-progress"),
@@ -703,4 +714,20 @@ it("counts the step's earlier records on the session's day, and pulls a leading 
   expect(pip.document.querySelector(".mini-label")?.textContent).toBe(
     "40m over",
   );
+});
+
+it("keeps an unestimated session honest instead of drawing an empty estimate track", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+  const loaded = data();
+  loaded.plan.tasks[1]!.estimatedMinutes = 0;
+  const stub = stubPictureInPicture();
+  mount(loaded);
+  await screen.findByRole("button", { name: "Mini timer" });
+  const { mini } = await open(stub);
+  expect(mini.getByRole("timer", { name: "Session" }).textContent).toBe(
+    "24:13",
+  );
+  expect(mini.getByText("Not estimated")).toBeTruthy();
+  expect(mini.queryByRole("progressbar")).toBeNull();
 });

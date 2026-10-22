@@ -305,6 +305,8 @@ export interface PlusActions {
     requestId: string,
     focusDay: string,
   ): Promise<void>;
+  /** Deletes in Tasks under Plan's etag; Tasks owns queue, dependency and time-record semantics. */
+  deleteTask(task: PlanningTask, requestId: string): Promise<void>;
   /**
    * Saves the tasks `task` waits for, one write of the waiting task under its etag. `added` names
    * the one this write adds, which Tasks may refuse. Tasks keeps a dependency it already has as it

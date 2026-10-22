@@ -1,14 +1,16 @@
-import { lazy, Suspense, useState } from "react";
+import { useState } from "react";
 import { AlignLeft, Pencil } from "lucide-react";
-const Markdown = lazy(() => import("./DescriptionMarkdown"));
+import DescriptionMarkdown from "./DescriptionMarkdown";
 
 export function TaskDescription({
   value,
   onChange,
+  onDone,
   busy,
 }: {
   value: string;
   onChange: (value: string) => void;
+  onDone: () => Promise<boolean>;
   busy: boolean;
 }) {
   const [editing, setEditing] = useState(false);
@@ -26,13 +28,17 @@ export function TaskDescription({
             autoFocus
             placeholder="Description"
             value={value}
+            disabled={busy}
             onChange={(event) => onChange(event.target.value)}
             rows={5}
           />
           <button
             type="button"
             className="text-button description-done"
-            onClick={() => setEditing(false)}
+            disabled={busy}
+            onClick={async () => {
+              if (await onDone()) setEditing(false);
+            }}
           >
             Done
           </button>
@@ -41,11 +47,7 @@ export function TaskDescription({
         <>
           {value && (
             <div className="description-preview">
-              <Suspense fallback={<p className="description-loading">{value}</p>}>
-                <Markdown>
-                  {value}
-                </Markdown>
-              </Suspense>
+              <DescriptionMarkdown>{value}</DescriptionMarkdown>
             </div>
           )}
           <button

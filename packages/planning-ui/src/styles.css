@@ -425,6 +425,22 @@
 .plus-step-editor .plus-task-breadcrumb {
   margin-bottom: 14px;
 }
+.plus-step-delete-actions {
+  margin-top: 20px;
+}
+.plus-step-delete-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.plus-step-delete-confirm > span {
+  flex: 1 1 auto;
+  font-size: 13px;
+}
+.plus-step-delete {
+  color: var(--plus-danger) !important;
+}
 .plus-estimate-presets button[aria-disabled="true"] {
   cursor: default;
 }
@@ -513,8 +529,10 @@
 }
 .plus-timer-bar output {
   font-variant-numeric: tabular-nums;
-  font-size: 18px;
-  letter-spacing: 0.5px;
+  font-size: 23px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.02em;
 }
 /* Pause when away: the question takes a line of its own above the row, in the body colour, so only the title
    gives way at narrow widths; Keep and Discard are quiet text actions in Pause/Resume's place, as in the mini

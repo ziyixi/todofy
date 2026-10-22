@@ -724,6 +724,7 @@ export function App({
           aria-label={
             data.focus.timer.status === "running" ? text.pause : text.resume
           }
+          title={data.focus.timer.status === "running" ? text.pause : text.resume}
           onClick={() =>
             commandTimer(
               data.focus.timer?.status === "running" ? "pause" : "resume",
@@ -742,6 +743,7 @@ export function App({
         className="plus-icon"
         disabled={busy || timerSettling}
         aria-label={text.stop}
+        title={text.stop}
         onClick={() => commandTimer("stop", data.focus.timer!.taskId)}
       >
         <Square size={15} />
@@ -751,6 +753,7 @@ export function App({
           className="plus-icon"
           disabled={busy || timerSettling}
           aria-label={text.complete}
+          title={text.complete}
           onClick={() => void complete(timerTask)}
         >
           <Check size={18} />

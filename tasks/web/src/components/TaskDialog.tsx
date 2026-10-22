@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
-import { Trash2 } from "lucide-react";
+import { Check, Trash2 } from "lucide-react";
 import type { Catalog, Task, TaskDraft } from "../api";
 import { api, describeError } from "../api";
 import { Dialog } from "./Dialog";
@@ -70,7 +70,13 @@ export function TaskDialog({
   );
   const planning = useTaskPlanning(task);
   const [busy, setBusy] = useState(false);
-  const [saveComplete, setSaveComplete] = useState(false);
+  const [savedDraft, setSavedDraft] = useState<{
+    content: TaskDraft;
+    planning: ReturnType<typeof planningDraft>;
+  }>();
+  // Track draft changes so viewing a property keeps the save confirmation.
+  const saveComplete =
+    savedDraft?.content === draft && savedDraft?.planning === planning.draft;
   const saveRequestId = useRef(crypto.randomUUID());
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -80,11 +86,10 @@ export function TaskDialog({
   const executable = isStep || planning.draft.singleAction;
   const patch = <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!draft.title.trim() || busy) return;
+  async function save() {
+    if (!draft.title.trim() || busy) return false;
     setBusy(true);
-    setSaveComplete(false);
+    setSavedDraft(undefined);
     setError("");
     try {
       // Content and planning are one write of the task, under its etag.
@@ -101,16 +106,24 @@ export function TaskDialog({
         planningChanges(planning.draft, planningDraft(currentTask)),
       );
       setCurrentTask(saved);
-      setDraft(taskDraft(saved));
-      planning.setDraft(planningDraft(saved));
+      const content = taskDraft(saved);
+      const nextPlanning = planningDraft(saved);
+      setDraft(content);
+      planning.setDraft(nextPlanning);
       saveRequestId.current = crypto.randomUUID();
-      if (task) setSaveComplete(true);
+      if (task) setSavedDraft({ content, planning: nextPlanning });
       else onClose();
+      return true;
     } catch (reason) {
       setError(describeError(reason));
+      return false;
     } finally {
       setBusy(false);
     }
+  }
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    void save();
   }
   async function previewDate() {
     if (!dateText.trim()) return;
@@ -219,8 +232,6 @@ export function TaskDialog({
       )}
       <form
         onSubmit={submit}
-        onChangeCapture={() => setSaveComplete(false)}
-        onClickCapture={() => setSaveComplete(false)}
         onKeyDown={(event) => {
           if (
             event.key === "Enter" &&
@@ -240,6 +251,7 @@ export function TaskDialog({
           dateText={dateText}
           preview={preview}
           patch={patch}
+          onDescriptionDone={save}
           setDraft={setDraft}
           setDateText={setDateText}
           setPreview={setPreview}
@@ -299,17 +311,35 @@ export function TaskDialog({
               Delete
             </button>
           )}
-          <span className="spacer task-save-status" role="status">
-            {saveComplete ? "Saved" : ""}
+          <span
+            className="spacer task-save-status"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="visually-hidden">
+              {saveComplete ? "Saved" : ""}
+            </span>
           </span>
           <button type="button" className="secondary-button" onClick={onClose}>
             {task ? "Close" : "Cancel"}
           </button>
           <button
-            className="primary-button"
+            className="primary-button task-save-button"
+            aria-label={currentTask ? "Save changes" : undefined}
             disabled={busy || !draft.title.trim()}
           >
-            {busy ? "Saving…" : currentTask ? "Save changes" : "Add task"}
+            {busy ? (
+              "Saving…"
+            ) : saveComplete ? (
+              <>
+                <Check size={14} />
+                Saved
+              </>
+            ) : currentTask ? (
+              "Save changes"
+            ) : (
+              "Add task"
+            )}
           </button>
         </footer>
       </form>

@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   addDays,
+  addRecord,
   otherDays,
   readFocus,
   readPlan,
@@ -607,6 +608,123 @@ test("Add steps sends each new step with the time chosen beside it", async ({
   await expect(addSteps).toBeFocused();
   await addSteps.click();
   await expect(time).toHaveValue("30");
+});
+
+test("Plan deletes a Step inline, removes its queue row and preserves its recorded time", async ({
+  page,
+  request,
+}, testInfo) => {
+  const parent = crypto.randomUUID();
+  const draft = crypto.randomUUID();
+  const title = "Synthetic step to delete";
+  const today = await tasksToday();
+  const state = await stubPlanning(page, {
+    tasks: [
+      outcome(parent, "Synthetic deletion outcome"),
+      step(draft, title, parent, { duration_minutes: 30 }),
+    ],
+    queues: { [today]: [draft] },
+  });
+  await addRecord(draft, today, 15, "work");
+  const before = await readFocus(today, today);
+  expect(before.entries).toHaveLength(1);
+  const original = await (
+    await request.get(`/api/tasks/v1/tasks/${draft}`)
+  ).json();
+  await page.setViewportSize({ width: 1800, height: 1000 });
+  await openPlan(page, state);
+  await page.getByRole("tab", { name: "Week", exact: true }).click();
+  const day = page.locator(`.planning-calendar-day[data-date="${today}"]`);
+  const card = day.locator(`[data-task-id="${draft}"]`);
+  const plannedStep = page.locator(`.planning-week [data-task-id="${draft}"]`);
+  await expect(card).toHaveCount(1);
+  await card.getByRole("button", { name: title, exact: true }).click();
+  const panel = page.getByRole("dialog", { name: title, exact: true });
+  await expect(panel.locator(".plus-step-editor")).toBeVisible();
+  await panel.getByRole("button", { name: "Delete step", exact: true }).click();
+  const confirmation = panel.getByRole("group", { name: "Delete step" });
+  await expect(confirmation).toContainText(`Delete “${title}”?`);
+  await expect(
+    confirmation.getByRole("button", { name: "Cancel" }),
+  ).toBeFocused();
+  await expect(page.locator(".task-dialog")).toHaveCount(0);
+  await page.screenshot({
+    path: testInfo.outputPath("plan-step-delete-confirmation.png"),
+  });
+  const deleted = page.waitForResponse(
+    (response) =>
+      response.request().method() === "DELETE" &&
+      new URL(response.url()).pathname === `/api/tasks/v1/tasks/${draft}`,
+  );
+  await confirmation
+    .getByRole("button", { name: "Delete", exact: true })
+    .focus();
+  await page.keyboard.press("Enter");
+  expect((await deleted).status()).toBe(200);
+  await expect(panel).toBeHidden();
+  await expect(card).toHaveCount(0);
+  await expect(plannedStep).toHaveCount(0);
+  expect((await request.get(`/api/tasks/v1/tasks/${draft}`)).status()).toBe(
+    404,
+  );
+  const after = await readFocus(today, today);
+  expect((after.days as Json[])[0]?.task_ids ?? []).not.toContain(draft);
+  expect((after.days as Json[])[0]?.done_task_ids ?? []).not.toContain(draft);
+  expect(after.entries).toEqual(before.entries);
+  const changes = writes(state);
+  expect(changes).toHaveLength(1);
+  expect(changes[0]).toMatchObject({
+    method: "DELETE",
+    path: expect.stringContaining(`/api/tasks/v1/tasks/${draft}?`),
+  });
+  expect(query(changes[0]!, "etag")).toBe(original.etag);
+  expect(query(changes[0]!, "request_id")).toMatch(/^[0-9a-f-]{36}$/u);
+  await expect(page.locator(".task-dialog")).toHaveCount(0);
+  await page.screenshot({
+    path: testInfo.outputPath("plan-step-deleted-time-preserved.png"),
+  });
+});
+
+test("Week hides Quick tasks before their Deadline start window and keeps ready or undated tasks", async ({
+  page,
+}, testInfo) => {
+  const today = await tasksToday();
+  const quick = (title: string, fields: Partial<SeedTask> = {}) =>
+    outcome(crypto.randomUUID(), title, {
+      stage: "none",
+      planning_flags: ["quick"],
+      ...fields,
+    });
+  const state = await stubPlanning(page, {
+    tasks: [
+      quick("Synthetic quick future", {
+        deadline: addDays(today, 8),
+        lead_days: 7,
+      }),
+      quick("Synthetic quick ready", {
+        deadline: addDays(today, 7),
+        lead_days: 7,
+      }),
+      quick("Synthetic quick undated"),
+    ],
+  });
+  await openPlan(page, state);
+  await page.getByRole("tab", { name: "Week", exact: true }).click();
+  const tray = page.getByRole("region", { name: "Quick tasks", exact: true });
+  await expect(tray.locator(".planning-quick-card")).toHaveCount(2);
+  await expect(
+    tray.getByRole("button", { name: /^Synthetic quick future,/u }),
+  ).toHaveCount(0);
+  await expect(
+    tray.getByRole("button", { name: /^Synthetic quick ready,/u }),
+  ).toBeVisible();
+  await expect(
+    tray.getByRole("button", { name: /^Synthetic quick undated,/u }),
+  ).toBeVisible();
+  expect(writes(state)).toEqual([]);
+  await page.screenshot({
+    path: testInfo.outputPath("plan-quick-deadline-window.png"),
+  });
 });
 
 test("a double-click opens the panel: a Committed card stays selected, and the rest of a double-click never closes or writes", async ({

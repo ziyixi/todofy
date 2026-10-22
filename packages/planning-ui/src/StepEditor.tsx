@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ExternalLink, X } from "lucide-react";
 import { useAnnouncement } from "./announce";
 import { displayedTitle, STEP_MINUTES, validMinutes } from "./domain";
@@ -32,9 +32,10 @@ export interface StepEditorProps {
 
 /**
  * A Step's planning panel. A step takes its stage and area from its outcome, so its only planning
- * fact is how long it takes: four presets and a typed number of minutes. Every other field is in
- * the task's own dialog (Open task). A choice shows at once and the step's cards wait until Tasks
- * saves it; the presets are only aria-disabled meanwhile, so focus stays on the one pressed.
+ * fact is how long it takes: four presets and a typed number of minutes. It can also be deleted
+ * here after confirmation. Other fields are in the task's own dialog (Open task). A choice shows
+ * at once and the step's cards wait until Tasks saves it; the presets are only aria-disabled
+ * meanwhile, so focus stays on the one pressed.
  */
 export function StepEditor({
   task,
@@ -54,12 +55,21 @@ export function StepEditor({
   const preset = STEP_MINUTES.some((value) => value === saved);
   // Only typed minutes have a draft; otherwise the field shows a saved value no preset has.
   const [draft, setDraft] = useState<string>();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const deleteRequest = useRef("");
+  const deleteButton = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const editingDisabled = busy || confirmDelete;
   const [status, announce] = useAnnouncement();
   const shown = draft ?? (saved !== undefined && !preset ? String(saved) : "");
   const invalid = draft !== undefined && !validMinutes(Number(draft || NaN));
+  useEffect(() => {
+    if (confirmDelete) cancelButton.current?.focus();
+    else if (deleteRequest.current) deleteButton.current?.focus();
+  }, [confirmDelete]);
 
   async function save(minutes: number) {
-    if (busy || minutes === saved) return;
+    if (editingDisabled || minutes === saved) return;
     const done = await run(() => actions.updateEstimate(task, minutes), {
       pending: [pendingTask(task.id)],
       predict: predictEstimate(task.id, minutes),
@@ -68,12 +78,20 @@ export function StepEditor({
   }
   /** Enter or leaving the field: a changed, valid value saves; leaving drops an invalid one. */
   function saveTyped(leaving: boolean) {
-    if (draft === undefined || busy) return;
+    if (draft === undefined || editingDisabled) return;
     const minutes = Number(draft || NaN);
     if (validMinutes(minutes)) {
       setDraft(undefined);
       void save(minutes);
     } else if (leaving) setDraft(undefined);
+  }
+
+  async function remove() {
+    if (busy) return;
+    const done = await run(() =>
+      actions.deleteTask(task, deleteRequest.current),
+    );
+    if (done) onClose?.();
   }
 
   return (
@@ -119,7 +137,7 @@ export function StepEditor({
             type="button"
             className={saved === value ? "selected" : ""}
             aria-pressed={saved === value}
-            aria-disabled={busy || undefined}
+            aria-disabled={editingDisabled || undefined}
             onClick={() => void save(value)}
           >
             {value} {text.minutes}
@@ -134,8 +152,8 @@ export function StepEditor({
           value={shown}
           aria-label={text.estimate}
           aria-invalid={invalid || undefined}
-          aria-disabled={busy || undefined}
-          readOnly={busy}
+          aria-disabled={editingDisabled || undefined}
+          readOnly={editingDisabled}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
@@ -149,6 +167,50 @@ export function StepEditor({
           }}
           onBlur={() => saveTyped(true)}
         />
+      </div>
+      <div className="plus-step-delete-actions">
+        {confirmDelete ? (
+          <div
+            className="plus-step-delete-confirm"
+            role="group"
+            aria-label={text.deleteStep}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              event.stopPropagation();
+              if (!busy) setConfirmDelete(false);
+            }}
+          >
+            <span>{text.confirmDeleteStep(title)}</span>
+            <button
+              ref={cancelButton}
+              className="plus-button"
+              disabled={busy}
+              onClick={() => setConfirmDelete(false)}
+            >
+              {text.cancel}
+            </button>
+            <button
+              className="plus-button plus-step-delete"
+              disabled={busy}
+              onClick={() => void remove()}
+            >
+              {text.delete}
+            </button>
+          </div>
+        ) : (
+          <button
+            ref={deleteButton}
+            className="plus-text-button plus-step-delete"
+            disabled={busy}
+            onClick={() => {
+              deleteRequest.current = crypto.randomUUID();
+              setConfirmDelete(true);
+            }}
+          >
+            {text.deleteStep}
+          </button>
+        )}
       </div>
       <p className="plus-sr-only" role="status">
         {status}
