@@ -26,7 +26,9 @@ export async function answer(source: 'MAIL' | 'RECALL' | 'HOME' | 'WATCH', actio
     if (error instanceof ProtocolError) throw error;
     const code = error instanceof RpcStatusError ? error.status.reason ?? error.status.status ?? `${source}_REQUEST_FAILED`
       : collect ? 'MAIL_COLLECTION_UNCONFIRMED' : `${source}_UNAVAILABLE`;
-    const message = error instanceof RpcStatusError ? REASON_MESSAGES[code] ?? error.status.message
+    const sourceMessage = code === 'ETAG_MISMATCH' && source === 'MAIL'
+      ? 'The Mail entry changed. Read mail_list again and review the requested collection before retrying.' : REASON_MESSAGES[code];
+    const message = error instanceof RpcStatusError ? sourceMessage ?? error.status.message
       : collect ? 'Could not confirm the Mail collection. Retry with the same request_id, etag and input.'
         : 'Could not read the source. Try the same read again later.';
     const result = { error: { code, message } };
