@@ -4,41 +4,19 @@ Updated 2026-10-22 UTC. Active work, open acceptance and dated compatibility onl
 a dated record and link it here. Rules are in [AGENTS](AGENTS.md); entry points in [README](README.md). Never put
 private content, credentials or raw production output here.
 
-Archives (their waiting lists are not instructions): [October 21](docs/history/handoff-2026-10-21.md) (the Private
+Archives (their waiting lists are not instructions): [October 22](docs/history/handoff-2026-10-22.md)
+(Tasks UI refinement), [October 21](docs/history/handoff-2026-10-21.md) (the Private
 MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirement),
 [October 20](docs/history/handoff-2026-10-20.md), [October 19](docs/history/handoff-2026-10-19.md),
 [October 18](docs/history/handoff-2026-10-18.md), [October 11](docs/history/handoff-2026-10-11.md).
 
-## Current work
+## Latest verified release
 
-### Tasks UI refinement (`codex/tasks-design`)
-
-Based on `43eb37bb`, isolated in `/private/tmp/todofy-tasks-design`; the owner's shared checkout is untouched.
-Scope: compact Focus timer, visible Save feedback, description Done persistence/immediate Markdown,
-Quick eligibility before its Deadline lead window, and direct Step deletion in Plan. No schema, production-data,
-provider, budget or infrastructure changes. Existing generated Tasks actions own writes and deletion semantics.
-
-Product Design audit captured current synthetic Focus and real Chrome PiP at320×64 and320×120. At64px the
-old CSS hid the task and all idle controls. Refinement retains the task, shows controls and cumulative time
-against estimate, reuses existing tokens/icons and strengthens only the main Focus bar's clock. Saved feedback
-keeps its footprint; Done saves the current draft through the existing write and keeps it on failure. Quick
-uses account day and existing startDate; zero lead opens on Deadline day, explicitly active items remain visible.
-
-Local lint/types/build pass, as do Tasks web's 65 unit tests and planning-ui's 323 unit tests. The first full
-133-case browser run passed 131; its two failures exposed the Save button's wrapped label changing footer/body
-geometry. Fixed with width 128px and nowrap; the existing geometry checks pass. New editor tests verify native D1
-persistence after Done, failure retaining the draft, Saved feedback and cached reopen. PiP layout passed at
-320×64, 320×120, 260×100, 420×180 and 420×240 for running, paused/resumed and hour-long time. The other original
-browser cases passed in that full run. Final branch CI will run the complete suite again.
-
-The [rendered UI review](tasks/docs/ui-refinement.md) records the selected changes and synthetic screenshots.
-The original local preview was stopped for tests; reseed a new ephemeral preview after browser tests finish.
-Native Plan deletion and Quick-window browser checks also pass: deletion removes the task and queue rows,
-retains the exact existing time record, and stays in the Plan panel. Mac Chrome verified the compact/default
-PiP, Pause/Resume, closing through its toggle and description Done/Saved/Markdown, using only ephemeral fixtures.
-Next: push branch CI and release the same green SHA to main. Manual Chrome Restore confirmation remains pending because it can reload
-unrelated private tabs; do not perform that recovery without the owner's reply. A new Chrome connection is
-available for the synthetic preview without restoring those tabs. No production data has been changed.
+Tasks UI refinement (`6ef11633`) passed full [branch CI](https://github.com/ziyixi/todofy/actions/runs/39715961056)
+and [same-SHA production release](https://github.com/ziyixi/todofy/actions/runs/39716958836). Worker
+`a7fbbf96-aacb-4e88-a7d6-1b84674b1c3d` serves that commit at 100%. All 135 browser cases pass, with synthetic
+Mac Chrome acceptance for the compact timer and description saving. The [rendered review](tasks/docs/ui-refinement.md)
+and [dated evidence](docs/history/handoff-2026-10-22.md) explain the changes and verification limits.
 
 ## Open from earlier releases
 
