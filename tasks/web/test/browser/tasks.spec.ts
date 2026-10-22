@@ -179,7 +179,7 @@ test("steps remain attached and date preview keeps deadline independent", async 
   const parent = await createTask(request, "Synthetic parent commitment");
   await page.goto(`/?task=${parent.id}#/inbox`);
   const dialog = page.locator("dialog.task-dialog");
-  await dialog.getByRole("button", { name: "Step", exact: true }).click();
+  await dialog.getByRole("button", { name: "Add step", exact: true }).click();
   await dialog
     .getByRole("textbox", { name: "New step" })
     .fill("Synthetic step under two hours");

@@ -268,6 +268,7 @@ export function TaskDialog({
             <TaskPlanningFields
               value={planning.draft}
               onChange={planning.patch}
+              onExecutionChange={planning.setExecution}
               disabled={busy || Boolean(currentTask?.completed)}
             />
           )}

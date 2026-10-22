@@ -543,12 +543,12 @@ it("keeps the panel open, and its controls still, through the rest of the double
   expect(fireEvent.mouseDown(planning, { detail: 2 })).toBe(false);
   expect(fireEvent.mouseDown(dialog, { detail: 2 })).toBe(false);
   fireEvent.click(dialog, { detail: 2 });
-  const waiting = within(dialog).getByRole<HTMLInputElement>("checkbox", {
-    name: "Waiting",
+  const routine = within(dialog).getByRole<HTMLInputElement>("switch", {
+    name: "Routine",
   });
-  fireEvent.click(waiting, { detail: 2 });
+  fireEvent.click(routine, { detail: 2 });
   expect(dialog.hasAttribute("open")).toBe(true);
-  expect(waiting.checked).toBe(false);
+  expect(routine.checked).toBe(false);
   expect(write).not.toHaveBeenCalled();
   // A single press is left alone, and a click on the backdrop still closes it.
   expect(fireEvent.mouseDown(planning, { detail: 1 })).toBe(true);

@@ -81,24 +81,41 @@ test("parent editors keep subtasks and executable steps separate and can delete 
   const dialog = await openTask(page, parent.id);
   const subtaskTitle = "Synthetic child outcome";
   const stepTitle = "Synthetic small executable step";
-  await dialog
-    .getByRole("textbox", { name: "New subtask", exact: true })
-    .fill(subtaskTitle);
-  await dialog
-    .getByRole("textbox", { name: "New subtask", exact: true })
-    .press("Enter");
   const subtasks = dialog.getByRole("region", {
     name: "Subtasks",
     exact: true,
   });
   const steps = dialog.getByRole("region", { name: "Steps", exact: true });
+  const addSubtask = subtasks.getByRole("button", {
+    name: "Add subtask",
+    exact: true,
+  });
+  await expect(dialog.getByRole("textbox", { name: /^New (step|subtask)$/ }))
+    .toHaveCount(0);
+  expect((await steps.boundingBox())!.y).toBeLessThan(
+    (await subtasks.boundingBox())!.y,
+  );
+  await addSubtask.click();
+  const subtaskName = subtasks.getByRole("textbox", {
+    name: "New subtask",
+    exact: true,
+  });
+  await expect(subtaskName).toBeFocused();
+  await addSubtask.click();
+  await expect(subtaskName).toBeFocused();
+  await subtaskName.fill(subtaskTitle);
+  await subtaskName.press("Enter");
   await expect(
     subtasks.getByRole("button", { name: subtaskTitle, exact: true }),
   ).toBeVisible();
-  await dialog
-    .getByRole("group", { name: "Add a child", exact: true })
-    .getByRole("button", { name: "Step", exact: true })
-    .click();
+  await subtaskName.press("Escape");
+  await expect(subtaskName).toHaveCount(0);
+  await expect(addSubtask).toBeFocused();
+  await expect(dialog).toBeVisible();
+  await steps.getByRole("button", { name: "Add step", exact: true }).click();
+  await expect(
+    steps.getByRole("textbox", { name: "New step", exact: true }),
+  ).toBeFocused();
   await dialog
     .getByRole("combobox", { name: "Step estimate", exact: true })
     .selectOption("45");
@@ -191,8 +208,9 @@ test("ordinary task planning, effort and deadline lead are visible and survive s
     .getByRole("combobox", { name: "Task context", exact: true })
     .selectOption("work");
   await dialog
-    .getByRole("checkbox", { name: "Standalone action", exact: true })
-    .check();
+    .getByRole("radiogroup", { name: "Execution", exact: true })
+    .getByText("Standalone", { exact: true })
+    .click();
   await dialog
     .getByRole("combobox", { name: "Effort", exact: true })
     .selectOption("deep");
@@ -233,7 +251,7 @@ test("ordinary task planning, effort and deadline lead are visible and survive s
     dialog.getByRole("combobox", { name: "Task context", exact: true }),
   ).toHaveValue("work");
   await expect(
-    dialog.getByRole("checkbox", { name: "Standalone action", exact: true }),
+    dialog.getByRole("radio", { name: "Standalone", exact: true }),
   ).toBeChecked();
   await expect(
     dialog.getByRole("combobox", { name: "Effort", exact: true }),
@@ -246,51 +264,98 @@ test("ordinary task planning, effort and deadline lead are visible and survive s
   ).toHaveValue("weeks");
 });
 
-test("Quick automatically enables standalone scheduling and keeps it checked after saving", async ({
+test("Execution changes Quick to Standalone to Steps, preserving Routine and existing status flags", async ({
   page,
   request,
 }) => {
   const task = await createTask(
     request,
-    `Synthetic Quick action ${crypto.randomUUID()}`,
-    { due_date: "2030-01-02" },
+    `Synthetic execution modes ${crypto.randomUUID()}`,
+    {
+      due_date: "2030-01-02",
+      planning_flags: ["active", "waiting", "onhold", "routine"],
+    },
   );
   const dialog = await openTask(page, task.id);
-  const standalone = dialog.getByRole("checkbox", {
-    name: "Standalone action",
+  const execution = dialog.getByRole("radiogroup", {
+    name: "Execution",
     exact: true,
   });
-  await expect(standalone).not.toBeChecked();
-  await dialog
-    .getByRole("checkbox", { name: "Quick action", exact: true })
-    .check();
-  await expect(standalone).toBeChecked();
-  await expect(standalone).toBeDisabled();
-  await dialog.getByRole("button", { name: "Date", exact: true }).click();
-  await expect(
-    dialog.getByRole("button", { name: "Time options", exact: true }),
-  ).toBeVisible();
-  await dialog.getByRole("button", { name: "Date", exact: true }).click();
-  await dialog
-    .getByRole("button", { name: "Save changes", exact: true })
-    .click();
+  const routine = dialog.getByRole("switch", { name: "Routine", exact: true });
+  const date = dialog.getByRole("button", { name: "Date", exact: true });
+  const estimate = dialog.getByRole("spinbutton", {
+    name: "Duration (minutes)",
+    exact: true,
+  });
+  const timeOptions = dialog.getByRole("button", {
+    name: "Time options",
+    exact: true,
+  });
+  const save = dialog.getByRole("button", { name: "Save changes", exact: true });
+  const checkedMode = async (name: string) => {
+    await expect(execution.getByRole("radio")).toHaveCount(3);
+    await expect(execution.getByRole("radio", { checked: true })).toHaveCount(1);
+    await expect(execution.getByRole("radio", { name, exact: true })).toBeChecked();
+    await expect(routine).toBeChecked();
+  };
+  await checkedMode("Steps");
+  await expect(estimate).toHaveCount(0);
+  await date.click();
+  await expect(timeOptions).toHaveCount(0);
+  await dialog.locator(".schedule-popup").press("Escape");
+
+  await execution.getByText("Quick", { exact: true }).click();
+  await checkedMode("Quick");
+  // Scheduling controls follow the draft immediately, before any save.
+  await expect(estimate).toBeVisible();
+  await estimate.fill("45");
+  await date.click();
+  await expect(timeOptions).toBeVisible();
+  await timeOptions.click();
+  await dialog.getByLabel("Time", { exact: true }).fill("14:15");
+  await dialog.locator(".schedule-popup").press("Escape");
+  await save.click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  const quick = await savedTask(request, task.id);
+  expect(quick.planning_flags).toEqual([
+    "quick", "waiting", "active", "onhold", "routine", "task",
+  ]);
+  expect(quick.duration_minutes).toBe(45);
+  expect(quick.due_datetime).toBeTruthy();
+  await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await openTask(page, task.id);
+  await checkedMode("Quick");
+  await expect(estimate).toHaveValue("45");
+
+  await execution.getByText("Standalone", { exact: true }).click();
+  await checkedMode("Standalone");
+  await expect(estimate).toBeVisible();
+  await date.click();
+  await expect(timeOptions).toBeVisible();
+  await dialog.locator(".schedule-popup").press("Escape");
+  await save.click();
   await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
   expect((await savedTask(request, task.id)).planning_flags).toEqual([
-    "quick",
-    "task",
+    "waiting", "active", "onhold", "routine", "task",
   ]);
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
-  // Closing the editor removes its task link, so reopen the task from a fresh page.
+
+  await execution.getByText("Steps", { exact: true }).click();
+  await checkedMode("Steps");
+  await expect(estimate).toHaveCount(0);
+  await date.click();
+  await expect(timeOptions).toHaveCount(0);
+  await expect(dialog.getByLabel("Time", { exact: true })).toHaveCount(0);
+  await dialog.locator(".schedule-popup").press("Escape");
+  await save.click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  const steps = await savedTask(request, task.id);
+  expect(steps.planning_flags).toEqual(["waiting", "active", "onhold", "routine"]);
+  expect(steps.duration_minutes).toBe(45);
+  expect(steps.due_datetime).toBe(quick.due_datetime);
+  await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
   await openTask(page, task.id);
-  await expect(standalone).toBeChecked();
-  await expect(standalone).toBeDisabled();
-  await dialog
-    .getByRole("checkbox", { name: "Quick action", exact: true })
-    .uncheck();
-  await expect(standalone).toBeChecked();
-  await expect(standalone).toBeEnabled();
+  await checkedMode("Steps");
+  await expect(estimate).toHaveCount(0);
 });
 
 test("repeat controls save calendar rules while only steps expose a clock time", async ({
@@ -600,17 +665,19 @@ test("a named dependency blocks a task until its real prerequisite is completed"
   );
 });
 
-test("clearing a deadline clears its lead and Parked stays exclusive with a chosen stage or progress", async ({
+test("legacy manual flags survive unrelated edits, while choosing a stage unparks and clearing a deadline clears its lead", async ({
   page,
   request,
 }) => {
   const task = await createTask(
     request,
-    `Synthetic parked deadline ${crypto.randomUUID()}`,
+    `Synthetic retained parked deadline ${crypto.randomUUID()}`,
     {
+      due_date: "2030-03-15",
       deadline: "2030-03-29",
       area: "work",
-      planning_flags: ["parked"],
+      effort: "deep",
+      planning_flags: ["parked", "waiting", "onhold", "routine"],
       lead_days: 14,
     },
   );
@@ -619,20 +686,25 @@ test("clearing a deadline clears its lead and Parked stays exclusive with a chos
     name: "Planning stage",
     exact: true,
   });
-  const parked = dialog.getByRole("checkbox", { name: "Parked", exact: true });
-  const active = dialog.getByRole("checkbox", {
-    name: "In progress",
-    exact: true,
-  });
-  await expect(parked).toBeChecked();
-  await stage.selectOption("weekly");
-  await expect(parked).not.toBeChecked();
-  await active.check();
-  await parked.check();
+  for (const name of ["In progress", "Waiting", "On hold", "Parked"])
+    await expect(dialog.getByRole("checkbox", { name, exact: true })).toHaveCount(0);
   await expect(stage).toHaveValue("none");
-  await expect(active).not.toBeChecked();
+  await expect(dialog.getByRole("switch", { name: "Routine", exact: true }))
+    .toBeChecked();
+  await dialog
+    .getByRole("combobox", { name: "Task context", exact: true })
+    .selectOption("personal");
+  await dialog
+    .getByRole("radiogroup", { name: "Execution", exact: true })
+    .getByText("Standalone", { exact: true })
+    .click();
+  await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  expect((await savedTask(request, task.id)).planning_flags).toEqual([
+    "waiting", "parked", "onhold", "routine", "task",
+  ]);
+
   await stage.selectOption("committed");
-  await expect(parked).not.toBeChecked();
   await dialog.getByRole("button", { name: "Deadline", exact: true }).click();
   await dialog
     .getByRole("button", { name: "No deadline", exact: true })
@@ -643,36 +715,28 @@ test("clearing a deadline clears its lead and Parked stays exclusive with a chos
   });
   await expect(amount).toBeDisabled();
   await expect(amount).toHaveValue("");
-  await dialog
-    .getByRole("button", { name: "Save changes", exact: true })
-    .click();
+  await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
-  await expect(dialog).not.toBeVisible();
   const cleared = await savedTask(request, task.id);
   expect(cleared.deadline || "").toBe("");
   expect(cleared.stage).toBe("committed");
   expect(cleared.lead_days ?? 0).toBe(0);
-  expect(cleared.planning_flags ?? []).not.toContain("parked");
+  expect(cleared.planning_flags).toEqual(["waiting", "onhold", "routine", "task"]);
+  expect(cleared).toMatchObject({
+    due_date: "2030-03-15",
+    area: "personal",
+    effort: "deep",
+  });
+  await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
   await openTask(page, task.id);
   await expect(stage).toHaveValue("committed");
   await expect(amount).toBeDisabled();
   await expect(amount).toHaveValue("");
-  await parked.check();
-  await dialog
-    .getByRole("button", { name: "Save changes", exact: true })
-    .click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
-  await expect(dialog).not.toBeVisible();
-  await openTask(page, task.id);
-  await expect(parked).toBeChecked();
-  await expect(stage).toHaveValue("none");
-  await expect(active).not.toBeChecked();
+  await expect(dialog.getByRole("radio", { name: "Standalone", exact: true }))
+    .toBeChecked();
+  await expect(dialog.getByRole("switch", { name: "Routine", exact: true }))
+    .toBeChecked();
 });
 
 test("the initial children read finishes before adding, so new children cannot be overwritten", async ({
@@ -721,16 +785,18 @@ test("the initial children read finishes before adding, so new children cannot b
       name: "New subtask",
       exact: true,
     });
-    await name.fill(title);
-    const add = children.getByRole("button", { name: "Add", exact: true });
+    const addSubtask = children.getByRole("button", {
+      name: "Add subtask",
+      exact: true,
+    });
     const addDependency = dependencies.getByRole("button", {
       name: "Add dependency",
       exact: true,
     });
-    await expect(add).toBeDisabled();
+    await expect(addSubtask).toBeDisabled();
+    await expect(name).toHaveCount(0);
     // The task's dependencies came with GetTask: nothing to wait for.
     await expect(addDependency).toBeEnabled();
-    await name.press("Enter");
     const before = await request.get(
       `/api/tasks/v1/tasks?parent_id=${parent.id}`,
     );
@@ -743,8 +809,11 @@ test("the initial children read finishes before adding, so new children cannot b
     await expect(
       children.getByRole("button", { name: existing.title, exact: true }),
     ).toBeVisible();
-    await expect(add).toBeEnabled();
-    await add.click();
+    await expect(addSubtask).toBeEnabled();
+    await addSubtask.click();
+    await expect(name).toBeFocused();
+    await name.fill(title);
+    await children.getByRole("button", { name: "Add", exact: true }).click();
     await expect(
       children.getByRole("button", { name: title, exact: true }),
     ).toBeVisible();

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { api, describeError, type Task } from "../api";
 import { todayDate } from "../dates";
@@ -33,11 +33,16 @@ export function TaskChildren({
   // GetTask counts the children, so a task without any reads nothing here.
   const [loading, setLoading] = useState(task.childCount > 0);
   const [page, setPage] = useState("");
-  const [adding, setAdding] = useState<"task" | "step">("task");
+  const [adding, setAdding] = useState<"task" | "step" | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const addTrigger = useRef<HTMLButtonElement | null>(null);
   const [title, setTitle] = useState("");
   const [minutes, setMinutes] = useState(30);
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [deleting, setDeleting] = useState("");
+  useEffect(() => {
+    if (adding) input.current?.focus();
+  }, [adding]);
   // Once per task: a child added here joins the list, and a later count (after a save) reads nothing more.
   useEffect(() => {
     if (!task.childCount) return;
@@ -62,7 +67,7 @@ export function TaskChildren({
     };
   }, [task.id, onError]);
   async function add() {
-    if (!title.trim() || busy || loading) return;
+    if (!adding || !title.trim() || busy || loading) return;
     onBusy(true);
     onError("");
     try {
@@ -189,7 +194,7 @@ export function TaskChildren({
             Reading subtasks and steps…
           </span>
         )}
-        {(["task", "step"] as const).map((kind) => {
+        {(["step", "task"] as const).map((kind) => {
           const rows = children.filter(
             (child) => (child.kind || "task") === kind,
           );
@@ -206,6 +211,19 @@ export function TaskChildren({
                     ? "…"
                     : `${rows.filter((child) => child.completed).length}/${rows.length}`}
                 </span>
+                <button
+                  type="button"
+                  className="text-button task-child-add-trigger"
+                  disabled={busy || loading}
+                  onClick={(event) => {
+                    addTrigger.current = event.currentTarget;
+                    if (adding === kind) input.current?.focus();
+                    else setAdding(kind);
+                  }}
+                >
+                  <Plus size={15} />
+                  {kind === "step" ? "Add step" : "Add subtask"}
+                </button>
               </h3>
               {(loading || !rows.length) && (
                 <p className="muted child-empty">
@@ -251,6 +269,62 @@ export function TaskChildren({
                   }
                 />
               ))}
+              {adding === kind && (
+                <div className="task-child-add">
+                  <div className="inline-add">
+                    <Plus size={15} />
+                    <input
+                      ref={input}
+                      aria-label={kind === "step" ? "New step" : "New subtask"}
+                      placeholder={
+                        kind === "step"
+                          ? "Add an executable step"
+                          : "Add subtask"
+                      }
+                      value={title}
+                      disabled={busy}
+                      onChange={(event) => setTitle(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing) return;
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setAdding(null);
+                          addTrigger.current?.focus();
+                        } else if (event.key === "Enter") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void add();
+                        }
+                      }}
+                    />
+                    {kind === "step" && (
+                      <select
+                        aria-label="Step estimate"
+                        value={minutes}
+                        disabled={busy}
+                        onChange={(event) =>
+                          setMinutes(Number(event.target.value))
+                        }
+                      >
+                        {[15, 30, 45, 60, 90, 120].map((value) => (
+                          <option value={value} key={value}>
+                            {value}m
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={busy || loading || !title.trim()}
+                      onClick={() => void add()}
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              )}
             </section>
           );
         })}
@@ -264,67 +338,6 @@ export function TaskChildren({
             Load more children
           </button>
         )}
-        <div className="task-child-add">
-          <div
-            className="child-kind-tabs"
-            role="group"
-            aria-label="Add a child"
-          >
-            <button
-              type="button"
-              aria-pressed={adding === "task"}
-              onClick={() => setAdding("task")}
-            >
-              Subtask
-            </button>
-            <button
-              type="button"
-              aria-pressed={adding === "step"}
-              onClick={() => setAdding("step")}
-            >
-              Step
-            </button>
-          </div>
-          <div className="inline-add">
-            <Plus size={15} />
-            <input
-              aria-label={adding === "step" ? "New step" : "New subtask"}
-              placeholder={
-                adding === "step" ? "Add an executable step" : "Add subtask"
-              }
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void add();
-                }
-              }}
-            />
-            {adding === "step" && (
-              <select
-                aria-label="Step estimate"
-                value={minutes}
-                onChange={(event) => setMinutes(Number(event.target.value))}
-              >
-                {[15, 30, 45, 60, 90, 120].map((value) => (
-                  <option value={value} key={value}>
-                    {value}m
-                  </option>
-                ))}
-              </select>
-            )}
-            <button
-              type="button"
-              className="text-button"
-              disabled={busy || loading || !title.trim()}
-              onClick={() => void add()}
-            >
-              Add
-            </button>
-          </div>
-        </div>
       </section>
     </TaskDragProvider>
   );

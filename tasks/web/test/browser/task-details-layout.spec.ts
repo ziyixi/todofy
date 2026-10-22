@@ -18,7 +18,7 @@ async function createResource(
   expect(response.status(), await response.text()).toBe(200);
   return response.json() as Promise<{ id: string; title: string }>;
 }
-test("details show the task's own planning flags at once and keep their frame fixed as children arrive", async ({
+test("details show Execution immediately and keep their controls fixed as children arrive", async ({
   page,
   request,
 }, testInfo) => {
@@ -55,13 +55,21 @@ test("details show the task's own planning flags at once and keep their frame fi
   });
   await expect(dialog).toBeVisible();
   // GetTask answered the planning facts: they show with the dialog, not later.
+  const execution = dialog.getByRole("radiogroup", {
+    name: "Execution",
+    exact: true,
+  });
+  const routine = dialog.getByRole("switch", { name: "Routine", exact: true });
   await expect(
-    dialog.getByRole("checkbox", { name: "Standalone action", exact: true }),
+    execution.getByRole("radio", { name: "Quick", exact: true }),
   ).toBeChecked();
+  await expect(routine).toBeChecked();
   await expect(
     dialog.getByRole("combobox", { name: "Planning stage", exact: true }),
   ).toHaveValue("committed");
   const before = await dialog.boundingBox();
+  const executionBefore = await execution.boundingBox();
+  const routineBefore = await routine.boundingBox();
   await page.screenshot({
     path: testInfo.outputPath("tasks-details-loading-before.png"),
   });
@@ -82,10 +90,14 @@ test("details show the task's own planning flags at once and keep their frame fi
   );
   expect(afterChildren?.height).toBe(before?.height);
   expect(afterChildren?.y).toBe(before?.y);
-  const action = dialog.getByRole("group", { name: "Action", exact: true });
-  const status = dialog.getByRole("group", { name: "Status", exact: true });
-  await expect(action.getByRole("checkbox")).toHaveCount(3);
-  await expect(status.getByRole("checkbox")).toHaveCount(4);
+  expect(await execution.boundingBox()).toEqual(executionBefore);
+  expect(await routine.boundingBox()).toEqual(routineBefore);
+  await expect(execution.getByRole("radio")).toHaveCount(3);
+  await expect(execution.getByRole("radio", { checked: true })).toHaveCount(1);
+  for (const name of ["In progress", "Waiting", "On hold", "Parked"])
+    await expect(
+      dialog.getByRole("checkbox", { name, exact: true }),
+    ).toHaveCount(0);
 });
 
 test("reopening a task shows its dependencies with the dialog, with no check pending and no children read", async ({
@@ -177,7 +189,7 @@ test("label selection floats above details and quick add without expanding eithe
     exact: true,
   });
   await expect(
-    dialog.getByRole("checkbox", { name: "Standalone action", exact: true }),
+    dialog.getByRole("radiogroup", { name: "Execution", exact: true }),
   ).toBeVisible();
   const before = await dialog.boundingBox();
   const scrollBefore = await dialog
@@ -413,7 +425,7 @@ test("narrow task details keep grouped controls and floating labels within the v
       title: `Synthetic narrow label ${String(index)} ${crypto.randomUUID()}`,
     });
   await page.setViewportSize({ width: 600, height: 900 });
-  // Planning facts that fill the Action and Status groups.
+  // Existing execution and manual status flags must fit the narrow editor.
   const task = await createResource(request, "tasks", {
     title: `Synthetic narrow details ${crypto.randomUUID()}`,
     stage: "committed",
@@ -425,21 +437,42 @@ test("narrow task details keep grouped controls and floating labels within the v
     name: "Task details",
     exact: true,
   });
-  const action = dialog.getByRole("group", { name: "Action", exact: true });
-  const status = dialog.getByRole("group", { name: "Status", exact: true });
+  const execution = dialog.getByRole("radiogroup", {
+    name: "Execution",
+    exact: true,
+  });
+  const routine = dialog.getByRole("switch", { name: "Routine", exact: true });
   await expect(
-    action.getByRole("checkbox", { name: "Standalone action", exact: true }),
+    execution.getByRole("radio", { name: "Quick", exact: true }),
   ).toBeChecked();
-  const a = await action.boundingBox();
-  const s = await status.boundingBox();
-  expect(s?.y).toBeGreaterThanOrEqual((a?.y || 0) + (a?.height || 0));
-  for (const checkbox of await dialog
-    .getByRole("region", { name: "Task planning", exact: true })
-    .getByRole("checkbox")
-    .all()) {
-    const box = await checkbox.boundingBox();
-    expect(box?.width).toBe(14);
-    expect(box?.height).toBe(14);
+  await expect(execution.getByRole("radio", { checked: true })).toHaveCount(1);
+  await expect(routine).toBeChecked();
+  const group = (await execution.boundingBox())!;
+  const toggle = (await routine.boundingBox())!;
+  expect(group.x).toBeGreaterThanOrEqual(0);
+  expect(group.x + group.width).toBeLessThanOrEqual(600);
+  expect(toggle.x).toBeGreaterThanOrEqual(group.x + group.width);
+  expect(toggle.x + toggle.width).toBeLessThanOrEqual(600);
+  expect(toggle.width).toBeGreaterThanOrEqual(32);
+  expect(toggle.height).toBeGreaterThanOrEqual(18);
+  let previous:
+    | { x: number; y: number; width: number; height: number }
+    | undefined;
+  for (const name of ["Steps", "Standalone", "Quick"]) {
+    const option = execution.getByRole("radio", { name, exact: true });
+    const box = (await option.locator("..").boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(40);
+    expect(box.height).toBeGreaterThanOrEqual(32);
+    expect(box.x).toBeGreaterThanOrEqual(group.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(group.x + group.width + 1);
+    if (previous) {
+      expect(box.y).toBe(previous.y);
+      expect(box.height).toBe(previous.height);
+      expect(Math.abs(box.x - previous.x - previous.width)).toBeLessThanOrEqual(
+        1,
+      );
+    }
+    previous = box;
   }
   const before = await dialog.boundingBox();
   await dialog.getByText("Add labels", { exact: true }).click();
@@ -455,6 +488,16 @@ test("narrow task details keep grouped controls and floating labels within the v
   await page.keyboard.press("Escape");
   await expect(popup).not.toBeVisible();
   await expect(dialog).toBeVisible();
+  await page.setViewportSize({ width: 360, height: 740 });
+  for (const option of await dialog
+    .locator(".task-execution-option > span")
+    .all()) {
+    const size = await option.evaluate((element) => ({
+      available: element.clientWidth,
+      text: element.scrollWidth,
+    }));
+    expect(size.text).toBeLessThanOrEqual(size.available + 1);
+  }
   await page.setViewportSize({ width: 900, height: 420 });
   await dialog.getByText("Add labels", { exact: true }).click();
   await expect(popup).toBeVisible();

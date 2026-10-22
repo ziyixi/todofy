@@ -1,0 +1,171 @@
+.task-execution {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  padding: 16px 0;
+  border-block: 1px solid var(--plus-line, #e8e8e5);
+  color: var(--plus-text, #202020);
+}
+.task-execution svg {
+  stroke-width: 1.65;
+}
+.task-execution-mode {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.task-execution-mode legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  margin-bottom: 8px;
+  color: var(--plus-muted, #666);
+  font-size: 13px;
+}
+.task-execution-options {
+  display: flex;
+  margin-left: 30px;
+}
+.task-execution .task-execution-option {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.task-execution .task-execution-options .task-execution-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: 0;
+  opacity: 0;
+}
+.task-execution-option > span {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--plus-line, #dededb);
+  background: var(--plus-bg, #fff);
+  color: var(--plus-text, #202020);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}
+.task-execution-option + .task-execution-option {
+  margin-left: -1px;
+}
+.task-execution-option:first-child > span {
+  border-radius: 5px 0 0 5px;
+}
+.task-execution-option:last-child > span {
+  border-radius: 0 5px 5px 0;
+}
+.task-execution-option input:checked + span {
+  position: relative;
+  z-index: 1;
+  border-color: var(--plus-accent, #427b32);
+  background: var(--plus-selected, #f0f7e9);
+  color: var(--plus-selected-text, #2f6227);
+  font-weight: 600;
+}
+.task-execution-option input:focus-visible + span {
+  position: relative;
+  z-index: 2;
+  outline: 2px solid var(--plus-accent, #427b32);
+  outline-offset: 2px;
+}
+.task-execution-option input:disabled + span {
+  opacity: 0.5;
+  cursor: default;
+}
+.task-execution-hint {
+  margin: 8px 0 0 30px;
+  color: var(--plus-muted, #777);
+  font-size: 12px;
+  line-height: 18px;
+}
+.task-execution .task-execution-routine {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  align-self: start;
+  margin: 4px 0 0;
+  padding-left: 24px;
+  border-left: 1px solid var(--plus-line, #e8e8e5);
+  color: var(--plus-text, #202020);
+  font-size: 13px;
+  cursor: pointer;
+}
+.task-execution-routine > span {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.task-execution .task-execution-routine input {
+  appearance: none;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  padding: 2px;
+  border: 0;
+  border-radius: 12px;
+  background: #cecece;
+  cursor: pointer;
+}
+.task-execution-routine input::before {
+  content: "";
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px #0002;
+}
+.task-execution-routine input:checked {
+  background: var(--plus-accent, #427b32);
+}
+.task-execution-routine input:checked::before {
+  transform: translateX(16px);
+}
+.task-execution-routine input:focus-visible {
+  outline: 2px solid var(--plus-accent, #427b32);
+  outline-offset: 3px;
+}
+.task-execution-routine input:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+@media (max-width: 600px) {
+  .task-execution {
+    gap: 12px;
+  }
+  .task-execution .task-execution-routine {
+    padding-left: 12px;
+  }
+  .task-execution-options,
+  .task-execution-hint {
+    margin-left: 0;
+  }
+  .task-execution-option > span {
+    padding-inline: 6px;
+  }
+}
+@media (max-width: 480px) {
+  .task-execution {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .task-execution .task-execution-routine {
+    flex-direction: row;
+    justify-self: start;
+    margin: 0;
+    padding-left: 0;
+    border-left: 0;
+    gap: 12px;
+  }
+}

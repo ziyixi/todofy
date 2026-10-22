@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Clock3 } from "lucide-react";
 
 export function StartAheadPicker({
   days,
@@ -19,6 +20,7 @@ export function StartAheadPicker({
     <label className="start-ahead-field">
       <span className="property-heading">Start ahead</span>
       <span className="start-ahead-controls">
+        <Clock3 size={16} aria-hidden="true" />
         <input
           aria-label="Start ahead amount"
           type="number"

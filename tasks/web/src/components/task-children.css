@@ -16,6 +16,16 @@
   font-weight: 400;
   color: #888;
 }
+.task-child-add-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 4px 0 4px 8px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--accent);
+}
 .child-empty {
   margin: 5px 0 8px;
   font-size: 12px;
@@ -86,24 +96,6 @@
 }
 .task-child-add {
   margin-top: 14px;
-}
-.child-kind-tabs {
-  display: inline-flex;
-  gap: 3px;
-  padding: 3px;
-  border: 1px solid #e3e3e3;
-  border-radius: 6px;
-  margin-bottom: 6px;
-}
-.child-kind-tabs button {
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 11px;
-  color: #777;
-}
-.child-kind-tabs button[aria-pressed="true"] {
-  background: #eee;
-  color: #333;
 }
 .task-child-add .inline-add {
   padding: 4px 0;

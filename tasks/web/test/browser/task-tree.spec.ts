@@ -160,6 +160,7 @@ test("adding the first child in details makes its parent expandable in the main 
     name: "Task details",
     exact: true,
   });
+  await dialog.getByRole("button", { name: "Add subtask", exact: true }).click();
   await dialog
     .getByRole("textbox", { name: "New subtask", exact: true })
     .fill("Synthetic first added child");

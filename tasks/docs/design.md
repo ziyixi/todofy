@@ -24,13 +24,24 @@ IDs survived the cutover.
 
 ## Task interface
 
+The [approved desktop visual](images/task-interface-approved.png) defines the task dialog and sidebar layout.
+
 Task and Subtask share `kind=task`; their hierarchy describes outcomes. An executable Step is a generic Task
 resource with `kind=step` and a Task/Subtask parent. A Step cannot contain children. Only Steps and Tasks
-explicitly marked Standalone action enter the day calendar. Adding an ordinary Subtask does not make it a Step.
-The editor separates Subtasks and Steps, with completion, reopening, deletion and Step estimates in each list.
+set to Standalone or Quick enter the day calendar. Adding an ordinary Subtask does not make it a Step.
+The editor shows Steps before Subtasks, with completion, reopening, deletion and Step estimates in each list.
+Each list's header opens its own compact Add step or Add subtask input; Escape closes it and returns focus to the header action.
 It reads a task's children only when its GetTask reply counts some (`child_count`).
-Quick implies Standalone: new writes enforce it, and existing Quick state is projected as standalone without
-a database backfill. Clearing Quick retains Standalone until it is explicitly cleared.
+Native task details and Plan's task editor share an Execution choice: Steps clears `task` and `quick`, Standalone
+sets `task` and clears `quick`, and Quick sets both. The choice does not change `kind`. Routine has its own switch. Existing
+Quick state is projected as standalone without a database backfill. Task editors omit manual In progress,
+Waiting, On hold and Parked controls; saved flags retain their planning behavior and survive unrelated edits.
+Choosing a planning stage still clears Parked, and Plan's existing Start and drag actions remain available.
+
+The sidebar places Search and Add task first, followed by Tasks (Inbox, Today, Upcoming, Mail), Planning
+(Plan, Focus, GTD), Favorites and My projects. Project branches expand independently and remember their open
+state in browser storage. Labels & filters, Completed tasks and archived-project browsing occupy the footer.
+Existing project routes, menus, task counts and drag targets retain their contracts.
 
 Main lists also expose collapsed child branches. Expansion reads the existing parent query in bounded
 pages; the same row actions work for children. Today/search children already present in the root result

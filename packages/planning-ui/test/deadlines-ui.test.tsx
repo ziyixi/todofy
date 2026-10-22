@@ -550,7 +550,7 @@ it("takes the line to the first staged card that should start when Start now is 
   );
 });
 
-it("says where a deadline stands in task details and marks it in progress there", async () => {
+it("says where a deadline stands in task details without manual progress controls", async () => {
   const actions = createPrototype();
   const update = vi
     .spyOn(actions, "updateTask")
@@ -590,28 +590,17 @@ it("says where a deadline stands in task details and marks it in progress there"
     target: { value: on(20) },
   });
   expect(screen.getByText("Start window: Tue, Oct 27")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Mark in progress" }));
-  await waitFor(() => expect(update).toHaveBeenCalledOnce());
-  expect(update.mock.calls[0]![1]).toEqual({ active: true });
-  await waitFor(() =>
-    expect(
-      within(screen.getByRole("region", { name: "Steps & timing" })).getByRole(
-        "status",
-      ).textContent,
-    ).toBe("Marked in progress: Prepare the visa documents"),
-  );
+  expect(screen.queryByRole("button", { name: /in progress/iu })).toBeNull();
   rerender(editor({ ...visa, planningFlags: ["active"] }));
   expect(screen.getByText("In progress · 5 days left")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Not in progress" }));
-  await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
-  expect(update.mock.calls[1]![1]).toEqual({ active: false });
-  // No button without a deadline.
+  expect(screen.queryByRole("button", { name: /in progress/iu })).toBeNull();
   rerender(editor({ ...visa, deadline: "", planningFlags: [] }));
   expect(screen.queryByRole("button", { name: /in progress/iu })).toBeNull();
+  expect(update).not.toHaveBeenCalled();
   await act(async () => {});
 });
 
-it("takes a parked task out of Parked when its details save a stage or mark it in progress", async () => {
+it("takes a parked task out of Parked when its details save a stage", async () => {
   const actions = createPrototype();
   const update = vi
     .spyOn(actions, "updateTask")
@@ -672,11 +661,10 @@ it("takes a parked task out of Parked when its details save a stage or mark it i
   save("monthly");
   await waitFor(() => expect(update).toHaveBeenCalledTimes(3));
   expect(update.mock.calls[2]![1]).toEqual({ stage: "monthly" });
-  // Marked in progress, a parked task with a deadline leaves Parked as well.
+  // A deadline keeps the same stage behavior without a manual progress control.
   rerender(editor({ ...garden, deadline: on(9), leadDays: 7 }));
-  fireEvent.click(screen.getByRole("button", { name: "Mark in progress" }));
-  await waitFor(() => expect(update).toHaveBeenCalledTimes(4));
-  expect(update.mock.calls[3]![1]).toEqual({ active: true, parked: false });
+  expect(screen.queryByRole("button", { name: /in progress/iu })).toBeNull();
+  expect(update).toHaveBeenCalledTimes(3);
   await act(async () => {});
 });
 

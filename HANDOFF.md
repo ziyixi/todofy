@@ -10,6 +10,24 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 [October 20](docs/history/handoff-2026-10-20.md), [October 19](docs/history/handoff-2026-10-19.md),
 [October 18](docs/history/handoff-2026-10-18.md), [October 11](docs/history/handoff-2026-10-11.md).
 
+## Current work
+
+### Approved Tasks interface (`codex/tasks-interface`)
+
+Based on `57a50db5`, isolated in `/private/tmp/todofy-tasks-design`; the shared checkout is untouched.
+Implement the owner-selected [visual target](tasks/docs/images/task-interface-approved.png): grouped sidebar,
+refined two-column task editor, Execution (Steps/Standalone/Quick) and an independent Routine switch. Manual
+active/waiting/onhold/parked fields are removed from the editors, while their persisted values and native
+planning rules remain intact. No schema, API, provider, resource or budget changes.
+
+The execution control is shared by native Tasks and Plan's existing editor; mappings stay in their current
+owners. Verify saves/no-op saves/etag, timing visibility, date and child controls, category dragging, project
+hierarchy and menu access, cached/asynchronous layout and the selected visual target before release. Only
+synthetic ephemeral data may be used. Local web lint/typecheck/72 units, shared planning typecheck/324 units,
+production build and 44 affected browser cases pass. Real Mac Chrome acceptance and the
+[visual comparison](tasks/design-qa.md) pass, including 360 px overflow and Add-composer focus checks.
+Branch CI and same-green-SHA production publication remain pending.
+
 ## Latest verified release
 
 Tasks UI refinement (`6ef11633`) passed full [branch CI](https://github.com/ziyixi/todofy/actions/runs/39715961056)

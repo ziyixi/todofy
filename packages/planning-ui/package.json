@@ -40,6 +40,7 @@
     "./domain": "./src/domain.ts",
     "./plan-view-state": "./src/plan-view-state.ts",
     "./TaskEditor": "./src/TaskEditor.tsx",
+    "./ExecutionFields": "./src/ExecutionFields.tsx",
     "./planning-board.css": "./src/planning-board.css",
     "./PlanningCalendar": "./src/PlanningCalendar.tsx",
     "./planning-week.css": "./src/planning-week.css",

@@ -1,5 +1,11 @@
 import { useState, type ReactNode } from "react";
-import { Check, ChevronRight } from "lucide-react";
+import {
+  ChartNoAxesColumnIncreasing,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
+} from "lucide-react";
 import type { Catalog, Task, TaskDraft } from "../api";
 import { LabelPicker } from "./LabelPicker";
 import { TaskDescription } from "./TaskDescription";
@@ -105,7 +111,7 @@ export function TaskFields({
             value={draft.title}
             disabled={busy}
             onChange={(event) => patch("title", event.target.value)}
-            rows={task ? 2 : 1}
+            rows={1}
             maxLength={500}
             required
           />
@@ -136,114 +142,129 @@ export function TaskFields({
         {children}
       </div>
       <aside className="task-properties">
-        <ProjectPicker
-          catalog={catalog}
-          projectId={draft.projectId}
-          sectionId={draft.sectionId}
-          disabled={busy}
-          open={openProperty === "project"}
-          onOpenChange={propertyOpenChange("project")}
-          onChange={(projectId, sectionId) =>
-            setDraft((current) => ({
-              ...current,
-              projectId,
-              sectionId,
-              parentId: current.projectId === projectId ? current.parentId : "",
-            }))
-          }
-        />
-        <SchedulePicker
-          label="Date"
-          open={openProperty === "date"}
-          onOpenChange={propertyOpenChange("date")}
-          value={draft.dueDate}
-          disabled={busy}
-          timeZone={draft.dueTimezone || catalog.timeZone}
-          onChange={(value) => {
-            if (!value) {
-              patch("recurrence", "");
-              setDateText("");
-              setPreview("");
-            }
-            return setDate(value);
-          }}
-          text={dateText}
-          onTextChange={setDateText}
-          onParse={previewDate}
-          preview={preview}
-          time={
-            draft.dueDatetime
-              ? new Date(draft.dueDatetime).toLocaleTimeString("sv-SE", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  timeZone: draft.dueTimezone || catalog.timeZone || undefined,
-                })
-              : ""
-          }
-          onTimeChange={executable ? setTime : undefined}
-          recurrence={draft.recurrence}
-          onRecurrenceChange={(value) => {
-            patch("recurrence", value);
-            setPreview("");
-          }}
-        />
-        <SchedulePicker
-          label="Deadline"
-          open={openProperty === "deadline"}
-          onOpenChange={propertyOpenChange("deadline")}
-          value={draft.deadline}
-          disabled={busy}
-          timeZone={catalog.timeZone}
-          onChange={(value) => {
-            patch("deadline", value);
-            if (!value) onLeadChange(0);
-          }}
-        />
-        <StartAheadPicker
-          days={leadDays}
-          deadline={draft.deadline}
-          disabled={busy || Boolean(task?.completed) || !draft.deadline}
-          onChange={onLeadChange}
-        />
-        <PriorityPicker
-          value={draft.priority}
-          disabled={busy}
-          open={openProperty === "priority"}
-          onOpenChange={propertyOpenChange("priority")}
-          onChange={(value) => patch("priority", value)}
-        />
-        {labelsField}
-        <label className="task-effort-field">
-          <span className="property-heading">Effort</span>
-          <select
-            aria-label="Effort"
-            value={draft.effort}
+        <div className="task-property-group">
+          <ProjectPicker
+            catalog={catalog}
+            projectId={draft.projectId}
+            sectionId={draft.sectionId}
             disabled={busy}
-            onChange={(event) => patch("effort", event.target.value)}
-          >
-            <option value="">Not set</option>
-            <option value="deep">Deep work</option>
-            <option value="shallow">Shallow work</option>
-          </select>
-        </label>
-        {executable && (
-          <label className="task-effort-field">
-            <span className="property-heading">Estimate</span>
-            <input
-              aria-label="Duration (minutes)"
-              type="number"
-              min={0}
-              max={1440}
-              step={5}
-              value={draft.durationMinutes || ""}
-              placeholder="Minutes"
-              disabled={busy}
-              onChange={(event) =>
-                patch("durationMinutes", Number(event.target.value))
+            open={openProperty === "project"}
+            onOpenChange={propertyOpenChange("project")}
+            onChange={(projectId, sectionId) =>
+              setDraft((current) => ({
+                ...current,
+                projectId,
+                sectionId,
+                parentId:
+                  current.projectId === projectId ? current.parentId : "",
+              }))
+            }
+          />
+        </div>
+        <div className="task-property-group">
+          <SchedulePicker
+            label="Date"
+            open={openProperty === "date"}
+            onOpenChange={propertyOpenChange("date")}
+            value={draft.dueDate}
+            disabled={busy}
+            timeZone={draft.dueTimezone || catalog.timeZone}
+            onChange={(value) => {
+              if (!value) {
+                patch("recurrence", "");
+                setDateText("");
+                setPreview("");
               }
-            />
+              return setDate(value);
+            }}
+            text={dateText}
+            onTextChange={setDateText}
+            onParse={previewDate}
+            preview={preview}
+            time={
+              draft.dueDatetime
+                ? new Date(draft.dueDatetime).toLocaleTimeString("sv-SE", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone:
+                      draft.dueTimezone || catalog.timeZone || undefined,
+                  })
+                : ""
+            }
+            onTimeChange={executable ? setTime : undefined}
+            recurrence={draft.recurrence}
+            onRecurrenceChange={(value) => {
+              patch("recurrence", value);
+              setPreview("");
+            }}
+          />
+          <SchedulePicker
+            label="Deadline"
+            open={openProperty === "deadline"}
+            onOpenChange={propertyOpenChange("deadline")}
+            value={draft.deadline}
+            disabled={busy}
+            timeZone={catalog.timeZone}
+            onChange={(value) => {
+              patch("deadline", value);
+              if (!value) onLeadChange(0);
+            }}
+          />
+          <StartAheadPicker
+            days={leadDays}
+            deadline={draft.deadline}
+            disabled={busy || Boolean(task?.completed) || !draft.deadline}
+            onChange={onLeadChange}
+          />
+        </div>
+        <div className="task-property-group">
+          <PriorityPicker
+            value={draft.priority}
+            disabled={busy}
+            open={openProperty === "priority"}
+            onOpenChange={propertyOpenChange("priority")}
+            onChange={(value) => patch("priority", value)}
+          />
+          {labelsField}
+          <label className="task-effort-field">
+            <span className="property-heading">Effort</span>
+            <span className="task-select-control">
+              <ChartNoAxesColumnIncreasing size={16} aria-hidden="true" />
+              <select
+                aria-label="Effort"
+                value={draft.effort}
+                disabled={busy}
+                onChange={(event) => patch("effort", event.target.value)}
+              >
+                <option value="">Not set</option>
+                <option value="deep">Deep work</option>
+                <option value="shallow">Shallow work</option>
+              </select>
+              <ChevronDown size={12} aria-hidden="true" />
+            </span>
           </label>
-        )}
+          {executable && (
+            <label className="task-effort-field">
+              <span className="property-heading">Estimate</span>
+              <span className="task-select-control task-estimate-control">
+                <Clock3 size={16} aria-hidden="true" />
+                <input
+                  aria-label="Duration (minutes)"
+                  type="number"
+                  min={0}
+                  max={1440}
+                  step={5}
+                  value={draft.durationMinutes || ""}
+                  placeholder="Minutes"
+                  disabled={busy}
+                  onChange={(event) =>
+                    patch("durationMinutes", Number(event.target.value))
+                  }
+                />
+              </span>
+            </label>
+          )}
+        </div>
       </aside>
     </div>
   );

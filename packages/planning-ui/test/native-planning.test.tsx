@@ -147,11 +147,10 @@ it("edits native flags directly and shows saved stage rather than a date-derived
       .getByRole("button", { name: "Save" })
       .hasAttribute("disabled"),
   ).toBe(true);
-  fireEvent.click(screen.getByText("Task options"));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Quick action" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Quick" }));
   expect(updateTask).toHaveBeenCalledWith(
     expect.objectContaining({ id: task.id }),
-    { quick: true },
+    { singleAction: true, quick: true },
   );
 });
 
@@ -243,7 +242,7 @@ it("schedules only explicit native steps or tasks deliberately marked standalone
   ).toEqual([child.id, step.id]);
 });
 
-it("exposes native options without an independent blocked checkbox and accepts a custom lead", async () => {
+it("exposes execution and Routine without manual status controls and accepts a custom lead", async () => {
   const { LeadSelect } = await import("../src/TaskEditor");
   const update = vi.fn();
   render(
@@ -276,36 +275,21 @@ it("exposes native options without an independent blocked checkbox and accepts a
       onOpenTask={vi.fn()}
     />,
   );
-  expect(screen.getByRole("region", { name: "Task options" }).tagName).toBe(
-    "SECTION",
-  );
-  expect(screen.queryByRole("checkbox", { name: "Blocked" })).toBeNull();
   expect(
-    screen.getByRole("checkbox", { name: "Schedule as a step" }),
-  ).toBeTruthy();
-  const options = screen.getByRole("region", { name: "Task options" });
-  expect(
-    within(options)
-      .getAllByRole("group")
-      .map((group) => group.querySelector("legend")?.textContent),
-  ).toEqual(["Action", "Status"]);
-  expect(
-    within(screen.getByRole("group", { name: "Action" }))
-      .getAllByRole("checkbox")
+    within(screen.getByRole("radiogroup", { name: "Execution" }))
+      .getAllByRole("radio")
       .map((input) => input.closest("label")?.textContent),
-  ).toEqual(["Schedule as a step", "Quick action", "Routine"]);
-  expect(
-    within(screen.getByRole("group", { name: "Status" }))
-      .getAllByRole("checkbox")
-      .map((input) => input.closest("label")?.textContent),
-  ).toEqual(["Waiting", "On hold"]);
+  ).toEqual(["Steps", "Standalone", "Quick"]);
+  expect(screen.getByRole("switch", { name: "Routine" })).toBeTruthy();
+  expect(screen.queryByRole("checkbox")).toBeNull();
+  expect(screen.queryByRole("button", { name: /in progress/iu })).toBeNull();
 });
 
-it("keeps grouped native flags checked and disabled without local draft state", () => {
+it("follows saved execution and Routine, honors busy and leaves Step controls unchanged", () => {
   const props = {
     task: {
       ...task,
-      kind: "step" as const,
+      kind: "task" as const,
       planningFlags: ["quick", "waiting"],
     },
     tasks: [task],
@@ -320,18 +304,14 @@ it("keeps grouped native flags checked and disabled without local draft state", 
     onOpenTask: vi.fn(),
   };
   const { rerender } = render(<TaskEditor {...props} />);
-  expect(
-    screen.queryByRole("checkbox", { name: "Schedule as a step" }),
-  ).toBeNull();
-  const quick = screen.getByRole("checkbox", {
-    name: "Quick action",
+  const quick = screen.getByRole("radio", {
+    name: "Quick",
   }) as HTMLInputElement;
   expect(quick.checked).toBe(true);
   expect(quick.disabled).toBe(true);
-  expect(
-    (screen.getByRole("checkbox", { name: "Waiting" }) as HTMLInputElement)
-      .checked,
-  ).toBe(true);
+  expect((screen.getByRole("switch") as HTMLInputElement).disabled).toBe(
+    true,
+  );
   rerender(
     <TaskEditor
       {...props}
@@ -342,8 +322,11 @@ it("keeps grouped native flags checked and disabled without local draft state", 
   expect(quick.checked).toBe(false);
   expect(quick.disabled).toBe(false);
   expect(
-    (screen.getByRole("checkbox", { name: "Routine" }) as HTMLInputElement)
+    (screen.getByRole("switch", { name: "Routine" }) as HTMLInputElement)
       .checked,
+  ).toBe(true);
+  expect(
+    (screen.getByRole("radio", { name: "Steps" }) as HTMLInputElement).checked,
   ).toBe(true);
   rerender(
     <TaskEditor
@@ -352,9 +335,53 @@ it("keeps grouped native flags checked and disabled without local draft state", 
       task={{ ...props.task, kind: "task", planningFlags: ["quick"] }}
     />,
   );
-  const standalone = screen.getByRole("checkbox", {
-    name: "Schedule as a step",
-  }) as HTMLInputElement;
-  expect(standalone.checked).toBe(true);
-  expect(standalone.disabled).toBe(true);
+  expect(quick.checked).toBe(true);
+  expect(quick.disabled).toBe(false);
+  rerender(<TaskEditor {...props} task={{ ...props.task, kind: "step" }} />);
+  expect(screen.queryByRole("radiogroup")).toBeNull();
+  expect(screen.queryByRole("switch")).toBeNull();
+});
+
+it("switches Quick to Standalone or Steps atomically while Routine changes independently", () => {
+  const updateTask = vi.fn().mockResolvedValue(task);
+  const run: RunOperation = async (operation) => {
+    await operation();
+    return true;
+  };
+  const saved = {
+    ...task,
+    kind: "task" as const,
+    planningFlags: ["quick", "active", "waiting", "onhold", "parked", "routine"],
+  };
+  render(
+    <TaskEditor
+      task={saved}
+      tasks={[saved]}
+      dependencies={[]}
+      language="en"
+      busy={false}
+      actions={{ updateTask } as unknown as PlusActions}
+      run={run}
+      today="2026-10-17"
+      todayTaskIds={[]}
+      addFocus={vi.fn()}
+      onOpenTask={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Standalone" }));
+  expect(updateTask).toHaveBeenLastCalledWith(saved, {
+    singleAction: true,
+    quick: false,
+  });
+  // Controls follow the server; an unconfirmed write leaves Quick selected.
+  expect(
+    (screen.getByRole("radio", { name: "Quick" }) as HTMLInputElement).checked,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("radio", { name: "Steps" }));
+  expect(updateTask).toHaveBeenLastCalledWith(saved, {
+    singleAction: false,
+    quick: false,
+  });
+  fireEvent.click(screen.getByRole("switch", { name: "Routine" }));
+  expect(updateTask).toHaveBeenLastCalledWith(saved, { routine: false });
 });

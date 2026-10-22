@@ -14,6 +14,7 @@ export default defineConfig({
     dedupe: [
       "react",
       "react-dom",
+      "lucide-react",
       "@dnd-kit/react",
       "@dnd-kit/dom",
       "@dnd-kit/abstract",

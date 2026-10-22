@@ -212,16 +212,18 @@ test("native Plan, Focus timer and Mail use the owner transport without an exten
     .toEqual(["stage", { stage: "monthly" }]);
   await moved.click();
   const details = page.getByRole("dialog");
-  await details.getByText("Task options", { exact: true }).click();
-  await details
-    .getByRole("checkbox", { name: "Quick action", exact: true })
-    .click();
+  const execution = details.getByRole("radiogroup", {
+    name: "Execution",
+    exact: true,
+  });
+  await execution.getByText("Quick", { exact: true }).click();
   await expect(
-    details.getByRole("checkbox", { name: "Quick action", exact: true }),
+    execution.getByRole("radio", { name: "Quick", exact: true }),
   ).toBeChecked();
+  await expect(execution.getByRole("radio", { checked: true })).toHaveCount(1);
   await expect
     .poll(() => taskWrites(state, outcomeId)[1])
-    .toEqual(["planning_flags", { planning_flags: ["quick"] }]);
+    .toEqual(["planning_flags", { planning_flags: ["quick", "task"] }]);
   await details.getByRole("button", { name: "Close", exact: true }).click();
   await expect(
     page.getByRole("link", { name: "Planning settings", exact: true }),

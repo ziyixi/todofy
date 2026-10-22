@@ -11,15 +11,19 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 
 ## Interface
 
-- Desktop Inbox, Today, Upcoming, search, nested projects, sections, labels and saved filters. In a filter,
+- Desktop Inbox, Today, Upcoming, search, nested projects, sections, labels and saved filters. The sidebar groups
+  Inbox/Today/Upcoming/Mail under Tasks and Plan/Focus/GTD under Planning, with Favorites and a collapsible
+  project tree below. Search and Add task stay above them; catalog, completed and archived browsing stay in the footer. In a filter,
   `#Inbox` matches tasks with no project as well as tasks in the Inbox project.
-- Task editing, separate Subtask and Step lists, priority, dates, deadlines, structured repeat and completion history.
+- Task editing, separate Steps and Subtasks lists with Add step/Add subtask in their headers, priority, dates,
+  deadlines, structured repeat and completion history.
 - Collapsed inline subtasks in main lists; expand to edit, complete or reorder children without opening their parent.
 - Drag a task's title or row: the edges insert beside a task, the middle makes it a subtask. Drag Subtasks or Steps within their own list in the parent editor; the order is saved on drop.
 - Each row normally has one completion circle. Select task in its menu, or Ctrl/Cmd/Shift-click, enters bulk selection with checkboxes in the same position.
 - Existing editors stay open after Save, with a check and Saved confirmation. Description Done saves the current draft and immediately renders Markdown. Main-list subtasks can move to another parent or become independent; Steps stay in details and execution views.
 - Drag to a sidebar project/Inbox to move, a label to add it, or Today to schedule. Native task properties appear separately from ordinary labels.
-- Visible planning stage, context, task options, start-ahead window and Deep/Shallow effort in task details.
+- Visible planning stage, context, Execution choice, independent Routine switch, start-ahead window and
+  Deep/Shallow effort in task details.
 - Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.
 - GTD (`#/gtd`) shows the daily counts of open, overdue and undated tasks and the Inbox's age, with 30-day trends and
   the latest weekly review. Tasks counts once a day after 06:00 and creates the review task on Sunday from 10:00.
@@ -53,11 +57,14 @@ separates local results from the remaining release and migration work. [Import](
 export and identity-check commands. [Backup](docs/backup.md) describes Tasks' own weekly backup, Time Travel, the
 restore into a new database and the one-time copy of what Todofy kept for Tasks.
 
-A Task or Subtask describes an outcome. Add a Step beneath it to arrange an executable action in the week,
-or select Standalone action to schedule the Task itself. Only these executable items expose a clock time
-and estimate. Quick actions are always standalone, including existing Quick tasks; no second checkbox is needed. A Quick action
+A Task or Subtask describes an outcome. Execution selects Steps, Standalone or Quick in both task editors:
+Steps arranges the actions beneath the task, Standalone schedules the task itself, and Quick makes it a short
+standalone action. Routine is independent of that choice. Executable Steps and tasks set to Standalone or Quick
+expose a clock time and estimate, including existing Quick tasks. A Quick action
 with a Deadline stays out of the Quick tray until its start-ahead window opens, unless already active; zero lead opens
 on the Deadline day.
+Task editors no longer offer manual In progress, Waiting, On hold or Parked controls. Their saved flags still
+affect planning and survive unrelated edits; choosing a planning stage still takes a task out of Parked.
 A Step cannot contain children. Task details can add, complete, reopen or delete either kind
 of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites. A task waits
 for at most 5 tasks, the account holds at most 300 dependencies, and none may close a cycle.

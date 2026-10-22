@@ -120,7 +120,7 @@ test("empty search stays quiet and category counts update after a task completes
   await row
     .getByRole("button", { name: `Complete ${taskTitle}`, exact: true })
     .click();
-  await expect(projectLink.locator(".category-count")).toHaveText("0");
+  await expect(projectLink.locator(".category-count")).toHaveCount(0);
   await page.getByRole("button", { name: "My projects", exact: true }).click();
   await expect(projectLink).toHaveCount(0);
   await page.reload();

@@ -1,5 +1,10 @@
+.task-dialog:not(.quick-add-dialog) {
+  width: min(920px, calc(100vw - 36px));
+}
 .task-detail-dialog {
-  height: min(780px, calc(100dvh - 56px));
+  --accent: #50743b;
+  --accent-fill: #50743b;
+  height: min(840px, calc(100dvh - 56px));
   overflow: hidden;
 }
 .task-detail-dialog .dialog-content {
@@ -10,6 +15,11 @@
 .task-detail-dialog .dialog-header,
 .task-detail-dialog .dialog-footer {
   flex-shrink: 0;
+  padding: 14px 20px;
+}
+.task-detail-dialog .dialog-header h2 {
+  color: #666e61;
+  font-size: 13px;
 }
 .task-detail-dialog .task-save-button {
   width: 128px;
@@ -29,19 +39,203 @@
 .task-detail-dialog .task-edit-body {
   flex: 1;
   min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 260px;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
 .task-detail-dialog .task-edit-main {
   min-width: 0;
+  padding: 28px 30px;
+}
+.task-detail-dialog .task-title-row {
+  gap: 12px;
+}
+.task-detail-dialog .title-input {
+  min-height: 34px;
+  font-size: 25px;
+  font-weight: 650;
+  line-height: 1.4;
+  letter-spacing: -0.35px;
+}
+.task-detail-dialog .task-finish {
+  width: 26px;
+  height: 26px;
+  flex-basis: 26px;
+  margin-top: 5px;
+}
+.task-detail-dialog .task-description-detail {
+  width: calc(100% - 38px);
+  margin-left: 38px;
 }
 .task-detail-dialog .task-planning-fields,
 .task-detail-dialog .task-children,
 .task-detail-dialog .task-dependencies {
-  margin-left: 32px;
+  margin-left: 0;
+}
+.task-detail-dialog .task-description-detail {
+  margin-top: 12px;
+}
+.task-detail-dialog .description-preview {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #30332d;
+}
+.task-detail-dialog .description-preview h1,
+.task-detail-dialog .description-preview h2,
+.task-detail-dialog .description-preview h3 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.task-detail-dialog .description-edit {
+  margin-top: 10px;
+  color: var(--accent);
+  font-size: 14px;
+}
+.task-detail-dialog .description-input {
+  font-size: 15px;
+}
+.task-detail-dialog .task-properties {
+  padding: 26px 20px;
+  gap: 20px;
+  background: #fafbf8;
+}
+.task-property-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 20px;
+}
+.task-property-group + .task-property-group {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+.quick-add-dialog .task-property-group {
+  display: contents;
+}
+.task-detail-dialog .property-heading {
+  font-size: 13px;
+  font-weight: 400;
+  color: #687061;
+}
+.task-detail-dialog .property-trigger {
+  min-height: 34px;
+  padding: 6px 7px;
+  gap: 9px;
+  font-size: 15px;
+  color: #30372d;
+}
+.task-detail-dialog .property-trigger > svg {
+  stroke-width: 1.65;
+}
+.task-select-control {
+  position: relative;
+  display: block;
+}
+.task-select-control > svg:first-child {
+  position: absolute;
+  left: 7px;
+  top: 9px;
+  color: #687061;
+  stroke-width: 1.65;
+  pointer-events: none;
+}
+.task-select-control > svg:last-child:not(:first-child) {
+  position: absolute;
+  right: 7px;
+  top: 11px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.task-properties .task-select-control > select,
+.task-properties .task-select-control > input {
+  min-height: 34px;
+  padding: 6px 26px 6px 32px;
+  font-size: 14px;
+  appearance: none;
+}
+.task-select-control > input::-webkit-inner-spin-button {
+  margin-right: -18px;
+}
+.task-detail-dialog .start-ahead-controls {
+  align-items: center;
+  min-height: 34px;
+  gap: 5px;
+  padding-left: 7px;
+}
+.task-detail-dialog .start-ahead-controls > svg {
+  color: #687061;
+  margin-right: 4px;
+  stroke-width: 1.65;
+}
+.task-detail-dialog .start-ahead-controls input {
+  flex: 0 0 36px;
+  width: 36px;
+  padding: 5px 0;
+  font-size: 14px;
+}
+.task-detail-dialog .start-ahead-controls select {
+  padding-left: 0;
+  font-size: 14px;
+}
+.task-detail-dialog .start-ahead-field small {
+  font-size: 11px;
+  line-height: 1.45;
+}
+.task-detail-dialog .task-children {
+  margin-top: 16px;
+}
+.task-detail-dialog .task-child-group h3 {
+  min-height: 30px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.task-detail-dialog .task-child-row {
+  min-height: 42px;
+}
+.task-detail-dialog .task-child-title {
+  font-size: 15px;
+}
+.task-detail-dialog .task-child-add-trigger {
+  font-size: 14px;
+}
+.task-detail-dialog
+  .task-child-row
+  .complete-button
+  > svg:first-child:not(:only-child) {
+  width: 20px;
+  height: 20px;
+}
+.task-detail-dialog .child-estimate {
+  color: #747a6e;
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  .task-detail-dialog .task-edit-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .task-detail-dialog .task-properties {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 20px;
+    gap: 20px;
+  }
+  .task-detail-dialog .task-property-group {
+    display: contents;
+  }
+  .task-detail-dialog .task-edit-main {
+    padding: 20px;
+  }
 }
 @media (max-width: 650px) {
   .task-detail-dialog {
     height: calc(100dvh - 24px);
+  }
+  .task-detail-dialog .title-input {
+    font-size: 22px;
+  }
+  .task-planning-select-control {
+    margin-left: 0;
   }
 }

@@ -255,3 +255,153 @@ it("disables both new-task text fields until its pending create is confirmed", a
   );
   expect(onClose).toHaveBeenCalledOnce();
 });
+
+it("maps each Execution choice atomically while Routine and hidden saved flags stay intact", async () => {
+  const task = create(TaskSchema, {
+    ...original,
+    stage: "committed",
+    planningFlags: ["active", "waiting", "onhold", "routine"],
+  });
+  const save = vi
+    .fn<SaveTask>()
+    .mockImplementation(async (draft, current, _id, planning) =>
+      create(TaskSchema, {
+        ...(current || original),
+        ...draft,
+        ...planning?.values,
+        etag: String(Number(current?.etag || 0) + 1),
+      }),
+    );
+  const { onClose } = editor(save, task);
+  for (const name of ["In progress", "Waiting", "On hold", "Parked"])
+    expect(screen.queryByRole("checkbox", { name })).toBeNull();
+  expect(
+    (
+      screen.getByRole("radio", {
+        name: "Steps",
+      }) as HTMLInputElement
+    ).checked,
+  ).toBe(true);
+  expect(
+    screen.queryByRole("spinbutton", { name: "Duration (minutes)" }),
+  ).toBeNull();
+
+  for (const [index, mode] of ["Quick", "Standalone", "Steps"].entries()) {
+    fireEvent.click(screen.getByRole("radio", { name: mode }));
+    expect(
+      (
+        screen.getByRole("switch", {
+          name: "Routine",
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+    expect(
+      screen
+        .getAllByRole("radio")
+        .filter((radio) => (radio as HTMLInputElement).checked),
+    ).toHaveLength(1);
+    expect(
+      Boolean(screen.queryByRole("spinbutton", { name: "Duration (minutes)" })),
+    ).toBe(mode !== "Steps");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe("Saved"),
+    );
+    const flags = save.mock.calls[index]?.[3]?.values.planningFlags || [];
+    expect(flags).toEqual([
+      ...(mode !== "Steps" ? ["task"] : []),
+      ...(mode === "Quick" ? ["quick"] : []),
+      "active",
+      "waiting",
+      "onhold",
+      "routine",
+    ]);
+    expect(save.mock.calls[index]?.[3]?.paths).toContain("planning_flags");
+    expect(save.mock.calls[index]?.[1]?.etag).toBe(String(index + 1));
+  }
+  expect(onClose).not.toHaveBeenCalled();
+});
+
+it("preserves a legacy Quick's no-op mask and only changes Routine when toggled", async () => {
+  const task = create(TaskSchema, {
+    ...original,
+    planningFlags: ["quick", "waiting"],
+  });
+  const save = vi
+    .fn<SaveTask>()
+    .mockImplementation(async (draft, current, _id, planning) =>
+      create(TaskSchema, {
+        ...(current || original),
+        ...draft,
+        ...planning?.values,
+        etag: "2",
+      }),
+    );
+  editor(save, task);
+  expect(
+    (
+      screen.getByRole("radio", {
+        name: "Quick",
+      }) as HTMLInputElement
+    ).checked,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(screen.getByRole("status").textContent).toBe("Saved"),
+  );
+  expect(save.mock.calls[0]?.[3]?.paths).toEqual([]);
+  fireEvent.click(screen.getByRole("switch", { name: "Routine" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(save.mock.calls[1]?.[3]?.values.planningFlags).toEqual([
+    "task",
+    "quick",
+    "waiting",
+    "routine",
+  ]);
+});
+
+it("keeps an imported parked flag on an unrelated edit and clears it only when choosing a stage", async () => {
+  const task = create(TaskSchema, { ...original, planningFlags: ["parked"] });
+  const save = vi
+    .fn<SaveTask>()
+    .mockImplementation(async (draft, current, _id, planning) =>
+      create(TaskSchema, {
+        ...(current || original),
+        ...draft,
+        ...planning?.values,
+        etag: String(Number(current?.etag || 0) + 1),
+      }),
+    );
+  editor(save, task);
+  fireEvent.change(screen.getByRole("textbox", { name: "Task name" }), {
+    target: { value: "Synthetic renamed task" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(screen.getByRole("status").textContent).toBe("Saved"),
+  );
+  expect(save.mock.calls[0]?.[3]?.paths).toEqual([]);
+  expect(save.mock.calls[0]?.[3]?.values.planningFlags).toEqual(["parked"]);
+  fireEvent.change(screen.getByRole("combobox", { name: "Planning stage" }), {
+    target: { value: "committed" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(save.mock.calls[1]?.[3]?.values.planningFlags).toEqual([]);
+});
+
+it("leaves an actual Step executable without offering an Execution mode", () => {
+  editor(
+    async () => original,
+    create(TaskSchema, {
+      ...original,
+      kind: "step",
+      parentId: "synthetic-parent",
+    }),
+  );
+  expect(screen.queryByRole("radiogroup", { name: "Execution" })).toBeNull();
+  expect(
+    screen.getByRole("spinbutton", { name: "Duration (minutes)" }),
+  ).toBeTruthy();
+});

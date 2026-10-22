@@ -8,7 +8,7 @@ import {
 } from "@ziyixi/proto/tasks/ui/v1/task_pb";
 import { TaskCountSchema } from "@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb";
 import { Sidebar } from "./Sidebar";
-import { EMPTY_CATALOG } from "../api";
+import { EMPTY_CATALOG, type Catalog } from "../api";
 import { readRoute } from "../routes";
 
 const project = create(ProjectSchema, {
@@ -38,14 +38,17 @@ const catalog = {
     create(TaskCountSchema, { view: "project", id: "studio", count: 3 }),
     create(TaskCountSchema, { view: "label", id: "scope", count: 1 }),
     create(TaskCountSchema, { view: "filter", id: "urgent", count: 0 }),
+    ...["search", "upcoming", "mail", "plan", "focus", "gtd"].map((view) =>
+      create(TaskCountSchema, { view, count: 9 }),
+    ),
   ],
 };
-function sidebar() {
+function sidebar(nextCatalog: Catalog = catalog, onAddTask = vi.fn()) {
   return render(
     <Sidebar
       route={{ page: "inbox", id: "" }}
-      catalog={catalog}
-      onAddTask={vi.fn()}
+      catalog={nextCatalog}
+      onAddTask={onAddTask}
       onAddProject={vi.fn()}
       onEditCatalog={vi.fn()}
       onCatalogSaved={async () => {}}
@@ -63,24 +66,59 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("shows exact category counts without renaming navigation or inventing planning counts", () => {
+it("shows positive category counts and keeps other navigation free of count badges", () => {
   sidebar();
   for (const [name, count] of [
     ["Inbox", "2"],
     ["Synthetic studio", "3"],
     ["Synthetic scope", "1"],
-    ["Synthetic urgent", "0"],
   ]) {
     expect(
       screen.getByRole("link", { name }).querySelector(".category-count")
         ?.textContent,
     ).toBe(count);
   }
-  expect(
-    screen.getByRole("link", { name: "Plan" }).querySelector(".category-count"),
-  ).toBeNull();
+  for (const name of [
+    "Synthetic urgent",
+    "Search",
+    "Upcoming",
+    "Mail",
+    "Plan",
+    "Focus",
+    "GTD",
+  ])
+    expect(
+      screen.getByRole("link", { name }).querySelector(".category-count"),
+    ).toBeNull();
   expect(screen.queryByRole("link", { name: "Planning settings" })).toBeNull();
   expect(screen.getByRole("link", { name: "Labels & filters" })).toBeTruthy();
+});
+
+it("places Search before Add task and groups the existing task and planning routes", () => {
+  const onAddTask = vi.fn();
+  sidebar(catalog, onAddTask);
+  const search = screen.getByRole("link", { name: "Search" });
+  const add = screen.getByRole("button", { name: /Add task/ });
+  expect(
+    search.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Tasks" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Planning" })).toBeTruthy();
+  const navigation = screen.getByRole("navigation", { name: "Main navigation" });
+  expect(
+    [...navigation.querySelectorAll("a")].map((link) => link.getAttribute("href")),
+  ).toEqual([
+    "#/inbox",
+    "#/today",
+    "#/upcoming",
+    "#/mail",
+    "#/plan",
+    "#/focus",
+    "#/gtd",
+  ]);
+  expect(add.querySelector("kbd")?.textContent).toBe("Q");
+  fireEvent.click(add);
+  expect(onAddTask).toHaveBeenCalledOnce();
 });
 
 it("collapses My projects using its real button and remembers the choice after reload", () => {
@@ -98,6 +136,93 @@ it("collapses My projects using its real button and remembers the choice after r
       .getAttribute("aria-expanded"),
   ).toBe("false");
   fireEvent.click(screen.getByRole("button", { name: "My projects" }));
+  expect(screen.getByRole("link", { name: project.title })).toBeTruthy();
+});
+
+it("keeps favorite shortcuts and nested projects reachable while remembering branch expansion", () => {
+  const nestedCatalog = {
+    ...catalog,
+    projects: [
+      ...catalog.projects,
+      create(ProjectSchema, { id: "work", title: "Synthetic work" }),
+      create(ProjectSchema, {
+        id: "research",
+        parentId: "work",
+        title: "Synthetic research",
+        favorite: true,
+      }),
+      create(ProjectSchema, {
+        id: "notes",
+        parentId: "research",
+        title: "Synthetic research notes",
+      }),
+    ],
+  };
+  const view = sidebar(nestedCatalog);
+  expect(
+    screen.getAllByRole("link", { name: "Synthetic research" }),
+  ).toHaveLength(1);
+  expect(
+    screen.queryByRole("link", { name: "Synthetic research notes" }),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Expand Synthetic work" }));
+  expect(
+    screen.getAllByRole("link", { name: "Synthetic research" }),
+  ).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: "Expand Synthetic research" }));
+  expect(
+    screen.getByRole("link", { name: "Synthetic research notes" }),
+  ).toBeTruthy();
+  view.unmount();
+  sidebar(nestedCatalog);
+  expect(
+    screen
+      .getByRole("button", { name: "Collapse Synthetic work" })
+      .getAttribute("aria-expanded"),
+  ).toBe("true");
+  expect(
+    screen.getByRole("link", { name: "Synthetic research notes" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Collapse Synthetic work" }));
+  expect(
+    screen.getAllByRole("link", { name: "Synthetic research" }),
+  ).toHaveLength(1);
+});
+
+it("opens archived browsing from the footer even when My projects is collapsed", () => {
+  browserStorage.setItem("tasks.projects-open", "false");
+  sidebar({
+    ...catalog,
+    projects: [
+      ...catalog.projects,
+      create(ProjectSchema, {
+        id: "archived",
+        title: "Synthetic archived project",
+        archived: true,
+      }),
+    ],
+  });
+  const archived = screen.getByRole("button", { name: "Archived projects" });
+  expect(archived.closest(".sidebar-bottom")).toBeTruthy();
+  fireEvent.click(archived);
+  expect(
+    screen.getByRole("link", { name: "Synthetic archived project" }),
+  ).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: "Archived projects" })
+      .getAttribute("aria-expanded"),
+  ).toBe("true");
+  expect(screen.queryByRole("link", { name: project.title })).toBeNull();
+  expect(
+    screen.getByRole("button", {
+      name: "More actions for Synthetic archived project",
+    }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Show active projects" }));
+  expect(
+    screen.queryByRole("link", { name: "Synthetic archived project" }),
+  ).toBeNull();
   expect(screen.getByRole("link", { name: project.title })).toBeTruthy();
 });
 

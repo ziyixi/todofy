@@ -46,10 +46,13 @@ domain rules and the API mapping over a fake transport; Tasks' Playwright journe
 (`tasks/web/test/browser/planning-*.spec.ts`) cover them in the browser. The behaviour and the API used
 for each operation are described in [docs/interface.md](docs/interface.md).
 
-Tasks distinguishes ordinary tasks/subtasks from executable steps. Only `kind=step` or a task explicitly
-marked **Schedule as a step** appears among calendar candidates. Planning state is the task's saved stage
-and its planning flags (`waiting`, `parked`, `active`, …), never its ordinary tags. Dependencies determine
-blocked status; Waiting remains available for something outside the task graph. The start-ahead field
+Tasks distinguishes ordinary tasks/subtasks from executable steps. Only `kind=step` or a task set to Standalone
+or Quick appears among calendar candidates. Both task editors use the controlled `ExecutionFields` component
+(`@ziyixi/planning-ui/ExecutionFields`): Steps, Standalone and Quick are one radio choice; Routine is an independent
+switch. The parent maps the choice to `task`/`quick` flags without changing the task's kind or other flags.
+Planning state is the task's saved stage and its planning flags (`waiting`, `parked`, `active`, …), never its
+ordinary tags. Manual In progress, Waiting, On hold and Parked controls are absent from task editors; persisted
+flags, dependencies and Plan's existing Start/drag actions retain their behavior. The start-ahead field
 accepts 0–365 calendar days and Start now opens exactly that many days before the deadline.
 
 Focus keeps its day queues, the one timer and time records in Tasks (`proto/tasks/ui/v1/focus.proto`). The

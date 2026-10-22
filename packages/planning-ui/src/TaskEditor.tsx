@@ -11,39 +11,18 @@ import {
 } from "./domain";
 import { detailStatus } from "./deadlines";
 import { TaskDependencies } from "./TaskDependencies";
+import { ExecutionFields, type ExecutionMode } from "./ExecutionFields";
 import { words } from "./i18n";
 import { PARKED_LABEL } from "./planning-outcomes";
 import { PendingMark } from "./StatusMarks";
-import { ACTIVE_LABEL } from "./weekly-review";
 import type {
   Language,
   PlanningTask,
   PlusActions,
-  PlanUpdate,
   RunOperation,
   StepDraft,
   TaskDependency,
 } from "./model";
-
-const NATIVE_OPTION_GROUPS = [
-  {
-    en: "Action",
-    zh: "行动",
-    options: [
-      ["singleAction", "task", "Schedule as a step", "可作为步骤安排"],
-      ["quick", "quick", "Quick action", "快速行动"],
-      ["routine", "routine", "Routine", "日常事务"],
-    ],
-  },
-  {
-    en: "Status",
-    zh: "状态",
-    options: [
-      ["waiting", "waiting", "Waiting", "等待中"],
-      ["onHold", "onhold", "On hold", "暂缓"],
-    ],
-  },
-] as const;
 
 /** Native start-ahead accepts a calendar-day count; legacy hosts retain their saved presets. */
 export function LeadSelect({
@@ -210,9 +189,12 @@ export function TaskEditor({
     .map((title) => ({ title, estimatedMinutes: Number(minutes) }));
   // From the fields as shown, so a date being chosen already says where it stands.
   const status = detailStatus(task, deadline, lead, today, language);
-  const active = hasPlanningFlag(task, ACTIVE_LABEL);
-  // Set aside: a stage or "in progress" chosen here takes it out of Parked too, as a drag out of
-  // that lane does; otherwise the card would stay there, whatever its stage.
+  const execution: ExecutionMode = hasPlanningFlag(task, "quick")
+    ? "quick"
+    : hasPlanningFlag(task, "task")
+      ? "standalone"
+      : "steps";
+  // Choosing a stage takes it out of Parked, as a drag out of that lane does.
   const parked = hasPlanningFlag(task, PARKED_LABEL);
   const estimateValues = [
     ...new Set([
@@ -285,16 +267,6 @@ export function TaskEditor({
     if (busy || !timingChanged || timingConflict) return;
     if (await run(() => actions.updateLead(task, deadline, lead)))
       setTiming(undefined);
-  }
-
-  async function toggleActive() {
-    const title = displayedTitle(task.title);
-    const update =
-      parked && !active ? { active: true, parked: false } : { active: !active };
-    if (await run(() => actions.updateTask(task, update)))
-      setAnnouncement(
-        `${active ? text.unmarkedActive : text.markedActive}: ${title}`,
-      );
   }
 
   async function addSteps() {
@@ -422,60 +394,25 @@ export function TaskEditor({
           </button>
         </div>
       )}
-      {task.planningFlags !== undefined && (
-        <section
-          className="plus-task-options"
-          aria-label={language === "zh" ? "任务选项" : "Task options"}
-        >
-          <h3>{language === "zh" ? "任务选项" : "Task options"}</h3>
-          <div className="plus-task-option-groups">
-            {NATIVE_OPTION_GROUPS.map((group) => (
-              <fieldset className="plus-task-option-group" key={group.en}>
-                <legend>{language === "zh" ? group.zh : group.en}</legend>
-                <div>
-                  {group.options
-                    .filter(
-                      ([field]) =>
-                        field !== "singleAction" || task.kind !== "step",
-                    )
-                    .map(([field, flag, en, zh]) => (
-                      <label
-                        key={field}
-                        className={
-                          field === "singleAction"
-                            ? "plus-task-option-standalone"
-                            : undefined
-                        }
-                      >
-                        <input
-                          type="checkbox"
-                          checked={hasPlanningFlag(task, flag)}
-                          disabled={
-                            busy ||
-                            (field === "singleAction" &&
-                              hasPlanningFlag(task, "quick"))
-                          }
-                          title={
-                            field === "singleAction" &&
-                            hasPlanningFlag(task, "quick")
-                              ? "Quick actions are always standalone"
-                              : undefined
-                          }
-                          onChange={(event) => {
-                            const update: PlanUpdate = {
-                              [field]: event.target.checked,
-                            };
-                            void run(() => actions.updateTask(task, update));
-                          }}
-                        />
-                        <span>{language === "zh" ? zh : en}</span>
-                      </label>
-                    ))}
-                </div>
-              </fieldset>
-            ))}
-          </div>
-        </section>
+      {task.planningFlags !== undefined && task.kind !== "step" && (
+        <ExecutionFields
+          mode={execution}
+          routine={hasPlanningFlag(task, "routine")}
+          language={language}
+          disabled={busy}
+          onModeChange={(mode) => {
+            if (mode === execution) return;
+            void run(() =>
+              actions.updateTask(task, {
+                singleAction: mode !== "steps",
+                quick: mode === "quick",
+              }),
+            );
+          }}
+          onRoutineChange={(routine) => {
+            void run(() => actions.updateTask(task, { routine }));
+          }}
+        />
       )}
       <div className="plus-section-title">
         <h3>
@@ -610,16 +547,6 @@ export function TaskEditor({
         >
           {text.save}
         </button>
-        {/* Each click saves the progress choice through the current source. */}
-        {task.deadline && (
-          <button
-            className="plus-button"
-            disabled={busy}
-            onClick={() => void toggleActive()}
-          >
-            {active ? text.unmarkActive : text.markActive}
-          </button>
-        )}
       </div>
       {timingConflict && (
         <div role="alert" className="plus-muted">
