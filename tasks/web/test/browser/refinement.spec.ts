@@ -108,6 +108,7 @@ test("parent editors keep subtasks and executable steps separate and can delete 
   await expect(
     subtasks.getByRole("button", { name: subtaskTitle, exact: true }),
   ).toBeVisible();
+  await expect(subtaskName).toBeFocused();
   await subtaskName.press("Escape");
   await expect(subtaskName).toHaveCount(0);
   await expect(addSubtask).toBeFocused();
@@ -128,6 +129,9 @@ test("parent editors keep subtasks and executable steps separate and can delete 
   await expect(
     steps.getByRole("button", { name: stepTitle, exact: true }),
   ).toBeVisible();
+  await expect(
+    steps.getByRole("textbox", { name: "New step", exact: true }),
+  ).toBeFocused();
   await expect(steps).toContainText("45m");
   const list = await request.get(
     `/api/tasks/v1/tasks?parent_id=${parent.id}&include_completed=true`,

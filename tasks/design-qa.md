@@ -49,10 +49,13 @@ from the illustration were not recreated.
 Completed Chrome checks cover Quick/Routine save and reopen, restoring Steps, sidebar expansion and its menu,
 and no app console errors; an unrelated Zotero extension message was excluded. The later Add-button refocus
 issue has been repaired and verified in Chrome, including Escape returning focus to the Add button.
+Final code review also caught focus loss after Enter created a child. A browser assertion reproduced the
+failure; restoring focus after a successful add fixes continuous keyboard entry for both child kinds.
 
 The 44 affected browser regressions pass, including saved execution flags, stage/deadline semantics,
 category dragging, no-op saves, cached reopening and asynchronous/popup geometry. Web lint, typecheck and
-72 unit tests pass; shared planning typecheck and 324 unit tests pass. The production build adds no dependency
+72 unit tests pass; shared planning typecheck and 324 unit tests pass. The seven refinement cases were rerun
+after the focus fix. The production build adds no dependency
 or API request; the main JavaScript is 339.09 kB gzip (339.89 kB before this change).
 Full branch CI and production release are recorded separately in HANDOFF.
 

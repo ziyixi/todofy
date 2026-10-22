@@ -26,6 +26,9 @@ hierarchy and menu access, cached/asynchronous layout and the selected visual ta
 synthetic ephemeral data may be used. Local web lint/typecheck/72 units, shared planning typecheck/324 units,
 production build and 44 affected browser cases pass. Real Mac Chrome acceptance and the
 [visual comparison](tasks/design-qa.md) pass, including 360 px overflow and Add-composer focus checks.
+Final review caught loss of input focus after Enter created a child; the new browser assertion reproduced
+the failure, and the seven refinement cases pass with the minimal focus fix. Superseded branch CI
+39725923878 was cancelled; it is not release evidence.
 Branch CI and same-green-SHA production publication remain pending.
 
 ## Latest verified release

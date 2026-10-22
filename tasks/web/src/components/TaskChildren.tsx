@@ -40,9 +40,10 @@ export function TaskChildren({
   const [minutes, setMinutes] = useState(30);
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [deleting, setDeleting] = useState("");
+  // A successful add renews requestId; return to the re-enabled composer for the next item.
   useEffect(() => {
     if (adding) input.current?.focus();
-  }, [adding]);
+  }, [adding, requestId]);
   // Once per task: a child added here joins the list, and a later count (after a save) reads nothing more.
   useEffect(() => {
     if (!task.childCount) return;
