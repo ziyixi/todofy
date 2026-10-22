@@ -1,5 +1,8 @@
 # Personal MCP verification
 
+The October 22 Work/Watch/Recall release is recorded in [work-memory verification](work-memory-verification.md).
+It supersedes the tool inventory below; this page retains the original connection and business acceptance.
+
 Status on 2026-10-21 UTC: the OAuth/synthetic-event gate is accepted and the business release is live.
 The existing private App and owner connection are retained. Business evidence is separate from the original
 gate and from synthetic local source tests.

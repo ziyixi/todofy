@@ -12,29 +12,24 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-### Personal work memory (`codex/personal-work-memory`)
-
-Based on `f3d8c797` in the isolated `/private/tmp/todofy-tasks-design` worktree; shared checkout untouched.
-Owner authorized implementation and production release of persistent work records, work-scoped Watch management
-and semantic review, Recall activity/image tools and the Personal Cloud plugin instructions. Keep the existing
-Worker/SQLite DO, Free budgets, OAuth/App identity, source ownership and normal same-green-SHA release process.
-Watch supplies bounded confirmed-change evidence; Dots judges relevance in each work. No server-side model calls,
-new execution platform, browser-extension changes or production-content tests. Local MCP type/lint, 63 unit tests,
-7 workerd tests (including a real 60-second Watch feed cycle and restart), Recall private-service tests and the
-wrapper dry-run passed. Watch's own unit/runtime/UI/proto checks passed. Branch CI is running; deployment and
-actual Dots acceptance remain pending. Evidence is in [work-memory verification](docs/work-memory-verification.md).
-Existing services and user-created watches remain unchanged.
+No application implementation is in flight. Work-memory real-client acceptance waits for the owner to unlock the
+Mac; see Open acceptance below. The isolated worktree is `/private/tmp/todofy-tasks-design`, branch
+`codex/personal-work-memory`; the shared checkout remains untouched.
 
 ## Latest verified release
 
-Approved Tasks interface (`53e0c2b1`) passed full
-[branch CI](https://github.com/ziyixi/todofy/actions/runs/39726201336) and the
-[same-SHA production release](https://github.com/ziyixi/todofy/actions/runs/39727616734). Worker
-`1188a42f-7067-437a-a672-cbed941801f6` serves that commit at 100%; deployment `7244493156` is verified.
-All 135 browser cases pass, with synthetic Mac Chrome acceptance for task details, Execution/Routine and
-navigation. No production task was edited. The [visual review](tasks/design-qa.md) and
-[dated evidence](docs/history/handoff-2026-10-22.md#approved-tasks-interface) record the design, tests and limits.
-The shared checkout remains untouched; implementation and acceptance ran in the isolated worktree.
+Personal work memory (`84183945`) passed the complete [branch CI](https://github.com/ziyixi/todofy/actions/runs/39777372400)
+and [same-SHA production release](https://github.com/ziyixi/todofy/actions/runs/39779693261). Watch and Recall deployed
+before MCP, then Home. The authenticated existing MCP connection returns the exact SHA and `stage: work_memory`;
+its old accepted delivery records remain intact. The private plugin skill is `1.2.0`, read back against source with
+the App identity, OAuth connection, presentation and sharing unchanged. There is no new service, database resource,
+model API or scheduler. Budgets, operating switches, browser extensions and real user content remain unchanged.
+
+Local checks include 64 MCP unit tests, seven workerd cases and the source apps' checks; full CI also verified all
+repository gates. Worker/version identities and the uncompleted client checks are in
+[work-memory verification](docs/work-memory-verification.md). The earlier Tasks interface release and its 135
+browser cases remain in [the dated record](docs/history/handoff-2026-10-22.md#approved-tasks-interface) and
+[visual review](tasks/design-qa.md).
 
 ## Open from earlier releases
 
@@ -58,6 +53,15 @@ The shared checkout remains untouched; implementation and acceptance ran in the 
 - Owner: remove Todoist Plus from `chrome://extensions` (its variable, releases and merged branches are gone).
 
 ## Open acceptance
+
+### Work-memory real client
+
+The owner has already authorized implementation/deployment and was asked to unlock the Mac because the native
+browser tool refused while it was locked. Once unlocked, refresh tools on the existing Personal Cloud Manage page,
+verify the 34-tool/six-event catalog and exercise a synthetic Work with native event receipt and continuation.
+Verify a real public-fixture Recall image, then create/reuse the native hourly overall review and save its actual
+ID. These steps remain unverified; do not substitute a Codex heartbeat or a local fake callback. No hourly review
+or new Work/Watch subscription has been created. Existing user Watches and all old stopped automations stay as they are.
 
 The two scheduler observations the owner stopped on October 17 (email models, website daily sync) are kept
 in [the October 18 archive](docs/history/handoff-2026-10-18.md#stopped-scheduler-observations); do not restart them.
