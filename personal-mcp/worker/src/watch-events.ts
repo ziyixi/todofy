@@ -33,12 +33,13 @@ export class WorkWatchSource {
   }
 
   /** Establish the starting point before creating a new Watch, not after its first change. */
-  async initialize(): Promise<void> {
-    if (this.row()?.state) return;
+  async initialize(reset = false): Promise<void> {
+    const previous = this.row();
+    if (previous?.state && this.hasLinks() && !reset) return;
     const baseline = await this.client.pollWatchEvents({ baseline: true, cursor: '', pageSize: 20 });
     this.storage.sql.exec(`INSERT INTO event_sources VALUES (?,?,?,NULL) ON CONFLICT(name)
-      DO UPDATE SET state=excluded.state,checked_at=excluded.checked_at,error_code=NULL WHERE state=''`,
-    WATCH_SOURCE_NAME, baseline.cursor, Date.now());
+      DO UPDATE SET state=excluded.state,checked_at=excluded.checked_at,error_code=NULL WHERE state=?`,
+    WATCH_SOURCE_NAME, baseline.cursor, Date.now(), previous?.state ?? '');
   }
 
   async refresh(): Promise<void> {

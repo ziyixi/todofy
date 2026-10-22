@@ -203,7 +203,11 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     const expiresAt = params.ttlMs === null ? null : now + (params.ttlMs ?? DEFAULT_LIFETIME_MS);
     let baseline: SourceState | undefined;
     if (params.name === WORK_EVENT_NAME) {
-      if (this.workWatches.hasLinks()) await this.initializeWorkSources();
+      if (this.workWatches.hasLinks()) {
+        // Like the other sources, explicitly recreating a stopped subscription can establish a new baseline.
+        const reset = !this.hasWorkSubscription() && this.workWatches.status().error_code === 'watch_cursor_expired';
+        await this.workWatches.initialize(reset);
+      }
       await this.ctx.storage.setAlarm(Date.now() + 1000);
     } else if (params.name !== TEST_EVENT_NAME && !this.activeSources().includes(params.name)) {
       const previous = this.source(params.name);

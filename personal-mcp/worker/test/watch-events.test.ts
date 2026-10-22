@@ -184,3 +184,30 @@ it('makes first-baseline failures visible and throttles retries before establish
   expect(f.cursor()?.state).toBe('recovered-40');
   expect(f.store.get({ work_id: work.id }).pending_reports).toEqual([]);
 });
+
+it('rebases after old Watch work closes and requires explicit recovery while linked work remains open', async () => {
+  let generation = 0;
+  const f = fixture(query => query.get('baseline') === 'true'
+    ? { cursor: `head-${String(++generation)}` } : expired());
+  const old = f.create(60);
+  await f.source.initialize();
+  expect(f.cursor()?.state).toBe('head-1');
+  f.store.checkpoint({ work_id: old.id, etag: old.etag, request_id: uuid(61),
+    changes: { state: 'done', result: 'The previous synthetic monitoring work is finished.' } });
+  expect(f.source.hasLinks()).toBe(false);
+  await f.source.initialize();
+  expect(f.cursor()?.state).toBe('head-2');
+  const current = f.create(62);
+  advance();
+  await f.source.refresh();
+  expect(f.source.status().error_code).toBe('watch_cursor_expired');
+  await f.source.initialize();
+  expect(f.cursor()?.state).toBe('head-2');
+  expect(generation).toBe(2);
+  await f.source.initialize(true);
+  expect(f.cursor()?.state).toBe('head-3');
+  expect(f.source.status().error_code).toBeNull();
+  expect(f.calls.map(call => call.baseline)).toEqual([true, true, false, true]);
+  expect(f.store.get({ work_id: current.id }).pending_reports).toEqual([]);
+  expect(f.attention).toEqual([]);
+});

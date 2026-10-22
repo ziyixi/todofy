@@ -10,7 +10,7 @@ export function bindingTransport(binding: Fetcher, origin: string): HttpSend {
 }
 
 const REASON_MESSAGES: Readonly<Record<string, string>> = {
-  ETAG_MISMATCH: 'The Mail entry changed. Read mail_list again and review the requested collection before retrying.',
+  ETAG_MISMATCH: 'The source changed. Read its current state and review the requested change before retrying.',
   NOT_FOUND: 'The requested record is no longer available.',
   QUERY_NOT_SEARCHABLE: 'Use a searchable phrase; one Chinese, Japanese or Korean character alone is not enough.',
   SEARCH_OVER_BUDGET: 'Recall has reached its daily read budget. Search is available after the next UTC midnight.',

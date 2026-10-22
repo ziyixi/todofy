@@ -104,6 +104,8 @@ when `work_context`/`work_get` is read, at most once per minute. Stopping the su
 polling; an authorized native hourly review can still refresh it through those read tools.
 
 `work_context` and `work_get` expose the latest Watch source check and error. `watch_cursor_expired` preserves
-the old position and requires reviewing the linked Watch changes; it never silently skips missing history.
-Automatic history recovery is outside this release. Native hourly review creation and actual Dots continuation
+the old position. Review the linked Watch changes and save the relevant facts first, then explicitly stop all
+`work.attention` subscriptions and recreate the intended subscription to establish a current baseline. This
+skips missing history; polling itself never performs that reset. When no open Work has a Watch link, the next
+attachment starts fresh. Native hourly review creation and actual Dots continuation
 must be recorded separately from the server deployment. See [work-memory verification](../../docs/work-memory-verification.md).
