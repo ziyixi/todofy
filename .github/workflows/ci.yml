@@ -286,7 +286,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.tasks_check == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # A hosted runner spent 8m18s fetching Chromium's Ubuntu libraries. Keep all browser checks;
+    # the extra wall time covers downloads, without changing any application performance budget.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

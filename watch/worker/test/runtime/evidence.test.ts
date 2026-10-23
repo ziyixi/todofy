@@ -30,6 +30,7 @@ beforeAll(async () => {
     import { extractCapture } from './src/evidence-extract.ts';
     import { encodeSnapshot } from './src/snapshot.ts';
     import { obtain } from './src/obtain.ts';
+    import { PreviewCache, preview } from './src/preview.ts';
     import { readConfig } from './src/config.ts';
     import { HostLocks } from './src/host-locks.ts';
     import { create } from '@ziyixi/proto/protobuf';
@@ -49,6 +50,26 @@ beforeAll(async () => {
         const url = new URL(request.url);
         if (url.pathname === '/read') return Response.json(toWire(SnapshotSchema, await readEvidence(this.store, this.env.EVIDENCE_STORE, url.searchParams.get('name'))));
         if (url.pathname === '/image') return Response.json(toWire(SnapshotImageSchema, await readEvidenceImage(this.store, this.env.EVIDENCE_STORE, url.searchParams.get('name'))));
+        if (url.pathname === '/preview-cache') {
+          const input = await request.json();
+          const config = readConfig(create(WatchSchema,{displayName:'Synthetic preview',uri:'https://synthetic.example.com/page'}),{selectorOk:()=>true,browserEnabled:true});
+          if (typeof config === 'string') throw new Error('synthetic_config_invalid');
+          const body = new TextEncoder().encode(input.html);
+          const extracted = await extractCapture({body,contentType:'text/html',finalUrl:config.uri});
+          const evidence = {...extracted,markdown:'UNMASKED_READING_MARKER'+'m'.repeat(64*1024),accessibilityJson:'AX_CACHE_MARKER',
+            screenshot:{bytes:new Uint8Array(64*1024).fill(127),width:1280,height:960,mimeType:'image/jpeg'}};
+          const cache = new PreviewCache(this.store);
+          await cache.put(config,{at:input.now,obtained:{kind:'answer',status:200,finalUrl:config.uri,redirects:0,
+            robotsAllowed:true,fetched:true,fetchedAt:input.now,contentType:'text/html',etag:'stable',lastModified:null,body,evidence}});
+          const row = this.store.one('SELECT meta FROM previews WHERE key=?',PreviewCache.key(config));
+          const cached = await cache.get(config,input.now+1000);
+          const response = await preview({store:this.store,browser:null,hosts:new HostLocks(),timeoutMs:1000,now:()=>input.now+1000,
+            fetch:async()=>{throw new Error('unexpected_synthetic_fetch')},sleep:async()=>undefined},cache,config,false,null);
+          return Response.json({hasEvidence:Object.hasOwn(JSON.parse(row.meta),'evidence'),metadataBytes:new TextEncoder().encode(row.meta).length,
+            containsReadingText:row.meta.includes('UNMASKED_READING_MARKER'),containsStructure:row.meta.includes('AX_CACHE_MARKER'),
+            cachedBody:new TextDecoder().decode(cached.obtained.body),cached:response.fetch.cached,
+            extractedLines:response.extractedLines,failure:response.failure});
+        }
         if (url.pathname === '/session') {
           const input = await request.json();
           const config = readConfig(create(WatchSchema,{displayName:'Synthetic session',uri:input.uri,fetcher:Watch_Fetcher.BROWSER}),{selectorOk:()=>true,browserEnabled:true});
@@ -138,6 +159,24 @@ async function image(fixture: string, name: string) {
 }
 
 describe('real SQLite and R2 capture storage', () => {
+  it('keeps rich capture payloads out of SQLite preview metadata while reusing the cached page', async () => {
+    const html = HTML.replace('Details</a>', 'Details about this synthetic item, including its stable release notes and complete descriptive preview text.</a>');
+    const response = await mf.dispatchFetch('https://probe.invalid/preview-cache?fixture=preview-cache', {
+      method: 'POST', body: JSON.stringify({ now: T0, html }),
+    });
+    expect(response.status).toBe(200);
+    const cached = await response.json() as { hasEvidence: boolean; metadataBytes: number; containsReadingText: boolean;
+      containsStructure: boolean; cachedBody: string; cached: boolean; extractedLines: string[]; failure: number };
+    expect(cached.hasEvidence).toBe(false);
+    expect(cached.metadataBytes).toBeLessThan(2048);
+    expect(cached.containsReadingText).toBe(false);
+    expect(cached.containsStructure).toBe(false);
+    expect(cached.cachedBody).toBe(html);
+    expect(cached.cached).toBe(true);
+    expect(cached.failure).toBe(0);
+    expect(cached.extractedLines).toContain('Version 123');
+  });
+
   it('defers a different-host session until the existing 20-second slot without exhausting the day', async () => {
     const session = async (now: number, uri: string) => {
       const response = await mf.dispatchFetch('https://probe.invalid/session?fixture=session-spacing', {

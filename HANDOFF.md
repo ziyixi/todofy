@@ -32,6 +32,9 @@ before activating the app. Legacy validators allow one initial rich capture; mis
 remains explicitly absent instead of being replaced with a later capture.
 Browser Sessions use the existing global slot at the provider's 20-second Free acquisition interval, including
 manual previews; the old 10-second Quick Actions value does not apply to the new transport.
+Preview metadata excludes reading evidence, retaining the existing cached HTML without copying JPEG bytes into
+SQLite. Its reproduced regression and seven existing preview cases pass. Tasks CI gets a 25-minute wall-clock
+limit after an 8m18s Ubuntu download consumed most of its old 15-minute window; test/performance budgets stay fixed.
 
 ## Latest verified release
 

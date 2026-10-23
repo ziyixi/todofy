@@ -40,6 +40,9 @@ Completed on 2026-10-23 using synthetic pages and local bindings:
   charge or false daily-exhaustion state while deferred.
   The provider's [current limits](https://developers.cloudflare.com/browser-run/limits/) and
   [Free allowance](https://developers.cloudflare.com/browser-run/pricing/) were checked on the release day.
+- The existing preview cache excludes the new reading-evidence object from its SQLite metadata. A regression
+  reproduced a JPEG becoming a large numeric JSON object; after the one-line fix, metadata stays below 2 KiB,
+  the cached HTML round-trips exactly, and the seven existing preview runtime cases pass.
 - MCP's 71 unit and seven workerd cases passed, including real polling/callback transport, Unicode text windows,
   image content blocks and evidence-only source events. These tests do not prove native Dots image viewing.
 - Watch UI's 33 tests, TypeScript, lint and build passed. Its JS gzip size is 53.5 KiB under the unchanged 56 KiB
@@ -62,6 +65,8 @@ native Dots images and the complete source-event continuation are deployment acc
 3. Implementation `8af198951b5cd1fe9d61a8fe4c20beac680878b6` passed the full
    [application branch gate 39944068633](https://github.com/ziyixi/todofy/actions/runs/39944068633).
    Pending: the small follow-up gate, same-SHA main release, verified Worker/deployment identities and Home read-back.
+   A later Tasks check hit its 15-minute job limit after Ubuntu dependency downloads took 8m18s. The CI job limit
+   is now 25 minutes; test cases and application CPU/SQL budgets are unchanged.
 4. Pending: update the existing private plugin skill without changing its App, OAuth connection or sharing;
    refresh the native tool catalog and verify saved text, a real screenshot and a source event in Dots.
 

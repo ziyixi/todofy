@@ -83,7 +83,7 @@ export class PreviewCache {
     const { obtained } = entry;
     const body = obtained.kind === 'answer' ? await gzip(obtained.body) : null;
     if (body !== null && body.byteLength > CACHE_BODY_MAX) return;
-    const meta = obtained.kind === 'answer' ? { ...obtained, body: undefined } : obtained;
+    const meta = obtained.kind === 'answer' ? { ...obtained, body: undefined, evidence: undefined } : obtained;
     this.store.run('INSERT OR REPLACE INTO previews (key, at, meta, body) VALUES (?, ?, ?, ?)', PreviewCache.key(config), entry.at, JSON.stringify(meta), body === null ? null : body.slice().buffer);
     this.store.run('DELETE FROM previews WHERE key NOT IN (SELECT key FROM previews ORDER BY at DESC, rowid DESC LIMIT ?)', PREVIEW_CACHE_ENTRIES);
   }
