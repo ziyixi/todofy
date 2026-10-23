@@ -83,12 +83,26 @@ schedule ID, retained in the owner's Dot rather than this public repository. It 
 and necessary sources, checks the current executor before delegating, preserves each Work's authorized scope,
 and stays quiet on unchanged/non-actionable state. Only meaningful progress, failure or an owner decision may
 notify. It uses silent checkpoints and is shared (`owned: false` when linked); no extra supervisory Work was
-created. The saved rule implies a first run at 10:20 UTC, but the host returned `next_run_time: null`, so neither
-that exact time nor a natural execution is claimed as verified. No Codex heartbeat was created.
+created. The saved rule is hourly with `timing_mode: exact_schedule`, enabled, and a first DTSTART of 10:20 UTC.
+The host returned `next_run_time: null`, so neither that exact firing time nor a natural execution is claimed as
+verified. A later read was not attempted through the host's unfiltered schedule list. No Codex heartbeat was created.
 
-### Remaining image acceptance
+### Actual image read
 
-The exact newly opened public test-page lookup still returns `NOT_FOUND`. No private browsing record was
-read to work around the absent fixture. Real-image Dots viewing remains unverified; the local image transport
-tests and base64 metadata do not replace it. Creating an hourly schedule likewise does not establish its first
-natural execution. Existing user Watches and the earlier owner-stopped email/website observations are untouched.
+The new public test page still returned `NOT_FOUND`; the native window tool could not activate it for a fresh
+capture (`noWindowsAvailable`). Its new-capture acceptance is not claimed. The existing, explicitly known public
+diagnostic page `https://example.org/?recall-diagnostic=1` was found with a single bounded example-domain search.
+No private browsing record was read.
+
+The root connection read public snapshot
+`pages/b3c9548ac873154e3d233ec152d82512/documents/e6a17313-b330-4df6-80de-5e8aa50ed416`:
+capture time `2026-10-13T04:56:14.881Z`, 883 × 1920, archived text and no content error. The Dot then called
+`recall_view` on that exact snapshot. It received real MCP image content with `image_available: true` and no
+tool error, and described the visible dark page, book icon, multilingual example-domain text and purple
+underlined Learn more link. This is actual image viewing of an older public fixture, not a base64/metadata
+check or evidence of today's capture. The response did not identify the screenshot's backing store, so a live
+Dropbox cold image read is not separately proven by the archived-text flag.
+
+The remaining timed observation is the hourly review's first natural execution. Existing user Watches and
+the earlier owner-stopped email/website observations are untouched. No new extension acceptance or production
+webpage-change candidate is claimed by these checks.

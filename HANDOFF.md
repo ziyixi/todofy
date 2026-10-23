@@ -12,18 +12,23 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-The existing App now shows 34 tools and six events. The owner-authorized Dot Reboot refreshed its stale catalog;
-the same Dot created/read a synthetic Work and dedicated Watch, received the scoped native `work.attention`
-event and silently acknowledged report sequence 3. Independent connection status confirms the exact event
-and no pending reports. Test cleanup passed: no subscription, open Work or pending reports/deliveries remain.
-One shared native hourly Work review was created and read back; its first natural execution is not yet verified.
-Recall's newly opened public fixture is still absent, so actual image viewing remains unverified. No credentials
-or App identity changed. Tasks' nested project branches default open when there is no saved choice; manual
-collapse remains persistent. The two-file change passes six Sidebar cases, TypeScript and lint locally and is
-being released through branch CI and same-SHA main Actions.
-The isolated worktree is `/private/tmp/todofy-tasks-design`, branch `codex/personal-work-memory`; shared checkout untouched.
+Work-memory native-client acceptance passed: the existing Dot received and handled its scoped event, then
+viewed a real MCP image of a specified public Recall diagnostic snapshot. Test resources are stopped and the
+synthetic Work is done. One shared native hourly review is saved; its first natural execution remains unverified.
+Tasks' project branches now default open and the owner's existing browser choice is expanded after reload.
+Evidence is in [work-memory verification](docs/work-memory-verification.md). The delivery worktree is
+`/private/tmp/todofy-tasks-design`, branch `codex/personal-work-memory`; the shared checkout is untouched.
+No credentials or App identity changed.
 
 ## Latest verified release
+
+Tasks' sidebar change (`56662a46`) passed the complete [branch gate](https://github.com/ziyixi/todofy/actions/runs/39931674226)
+and [same-SHA production release](https://github.com/ziyixi/todofy/actions/runs/39933099264). The verified deployment
+is `7274991045`, Worker version `01b39f19-8e70-48b2-b837-77af3a61e2a5`. Only Tasks deployed. Without a saved
+branch choice, nested projects default expanded, including when the catalog arrives asynchronously; manual
+collapse remains persistent. Six local Sidebar cases, TypeScript and lint passed. The owner's current project
+branches were expanded through their existing controls and stayed open after reloading the deployed app.
+Only browser navigation preferences changed; no real tasks or catalog records were modified.
 
 Personal work memory (`84183945`) passed the complete [branch CI](https://github.com/ziyixi/todofy/actions/runs/39777372400)
 and [same-SHA production release](https://github.com/ziyixi/todofy/actions/runs/39779693261). Watch and Recall deployed
@@ -33,7 +38,7 @@ the App identity, OAuth connection, presentation and sharing unchanged. There is
 model API or scheduler. Budgets, operating switches, browser extensions and real user content remain unchanged.
 
 Local checks include 64 MCP unit tests, seven workerd cases and the source apps' checks; full CI also verified all
-repository gates. Worker/version identities and the uncompleted client checks are in
+repository gates. Worker/version identities and the native-client results are in
 [work-memory verification](docs/work-memory-verification.md). The earlier Tasks interface release and its 135
 browser cases remain in [the dated record](docs/history/handoff-2026-10-22.md#approved-tasks-interface) and
 [visual review](tasks/design-qa.md).
@@ -61,13 +66,14 @@ browser cases remain in [the dated record](docs/history/handoff-2026-10-22.md#ap
 
 ## Open acceptance
 
-### Work-memory real client
+### Native hourly Work review
 
 Catalog refresh and native Work event continuation passed in the owner's existing Dot; see
 [the actual-client evidence](docs/work-memory-verification.md#native-dots-acceptance-2026-10-23-utc).
 The scoped synthetic subscription is stopped, its dedicated Watch paused, and its Work done after source
 read-back. The shared native hourly review is saved, but its first natural run is unverified (the host's next-run
-field is null). The public Recall fixture still needs an actual image read. Do not substitute a Codex heartbeat,
+field is null). Recall image viewing passed on the known older public diagnostic snapshot; today's new capture
+did not arrive and was not used. Do not substitute a Codex heartbeat,
 accepted delivery count or local fake callback for client execution. Existing user Watches and all old stopped
 automations stay as they are.
 
