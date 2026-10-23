@@ -429,7 +429,8 @@ class MatchesTheApps(unittest.TestCase):
             bound_r2.update(bucket["bucket_name"] for bucket in data.get("r2_buckets", []))
         self.assertEqual(d1_names, set(bound_d1))
         self.assertEqual(ids, bound_d1)
-        self.assertEqual(buckets, bound_r2)
+        # Resource-first Watch rollout; remove the allowance when the binding is activated.
+        self.assertEqual(buckets, bound_r2 | {"watch-evidence"})
 
 
 if __name__ == "__main__":
