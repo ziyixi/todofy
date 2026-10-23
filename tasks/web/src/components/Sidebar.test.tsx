@@ -139,7 +139,7 @@ it("collapses My projects using its real button and remembers the choice after r
   expect(screen.getByRole("link", { name: project.title })).toBeTruthy();
 });
 
-it("keeps favorite shortcuts and nested projects reachable while remembering branch expansion", () => {
+it("expands asynchronously loaded project branches by default and remembers manual collapse", () => {
   const nestedCatalog = {
     ...catalog,
     projects: [
@@ -158,28 +158,52 @@ it("keeps favorite shortcuts and nested projects reachable while remembering bra
       }),
     ],
   };
-  const view = sidebar(nestedCatalog);
-  expect(
-    screen.getAllByRole("link", { name: "Synthetic research" }),
-  ).toHaveLength(1);
-  expect(
-    screen.queryByRole("link", { name: "Synthetic research notes" }),
-  ).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Expand Synthetic work" }));
-  expect(
-    screen.getAllByRole("link", { name: "Synthetic research" }),
-  ).toHaveLength(2);
-  fireEvent.click(screen.getByRole("button", { name: "Expand Synthetic research" }));
-  expect(
-    screen.getByRole("link", { name: "Synthetic research notes" }),
-  ).toBeTruthy();
-  view.unmount();
-  sidebar(nestedCatalog);
+  const view = sidebar();
+  view.rerender(
+    <Sidebar
+      route={{ page: "inbox", id: "" }}
+      catalog={nestedCatalog}
+      onAddTask={vi.fn()}
+      onAddProject={vi.fn()}
+      onEditCatalog={vi.fn()}
+      onCatalogSaved={async () => {}}
+      onError={vi.fn()}
+    />,
+  );
   expect(
     screen
       .getByRole("button", { name: "Collapse Synthetic work" })
       .getAttribute("aria-expanded"),
   ).toBe("true");
+  expect(
+    screen.getAllByRole("link", { name: "Synthetic research" }),
+  ).toHaveLength(2);
+  expect(
+    screen.getByRole("link", { name: "Synthetic research notes" }),
+  ).toBeTruthy();
+  expect(browserStorage.getItem("tasks.expanded-projects")).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Collapse Synthetic research" }),
+  );
+  expect(
+    screen.queryByRole("link", { name: "Synthetic research notes" }),
+  ).toBeNull();
+  view.unmount();
+  const reloaded = sidebar(nestedCatalog);
+  expect(
+    screen
+      .getByRole("button", { name: "Collapse Synthetic work" })
+      .getAttribute("aria-expanded"),
+  ).toBe("true");
+  expect(
+    screen
+      .getByRole("button", { name: "Expand Synthetic research" })
+      .getAttribute("aria-expanded"),
+  ).toBe("false");
+  expect(
+    screen.queryByRole("link", { name: "Synthetic research notes" }),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Expand Synthetic research" }));
   expect(
     screen.getByRole("link", { name: "Synthetic research notes" }),
   ).toBeTruthy();
@@ -187,6 +211,16 @@ it("keeps favorite shortcuts and nested projects reachable while remembering bra
   expect(
     screen.getAllByRole("link", { name: "Synthetic research" }),
   ).toHaveLength(1);
+  reloaded.unmount();
+  sidebar(nestedCatalog);
+  expect(
+    screen
+      .getByRole("button", { name: "Expand Synthetic work" })
+      .getAttribute("aria-expanded"),
+  ).toBe("false");
+  expect(
+    screen.queryByRole("link", { name: "Synthetic research notes" }),
+  ).toBeNull();
 });
 
 it("opens archived browsing from the footer even when My projects is collapsed", () => {

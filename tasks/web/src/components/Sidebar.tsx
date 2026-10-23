@@ -69,18 +69,18 @@ export function Sidebar({
       return true;
     }
   });
-  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => {
+  const [expandedProjects, setExpandedProjects] = useState<Set<string> | null>(() => {
     try {
-      const saved: unknown = JSON.parse(
-        localStorage.getItem("tasks.expanded-projects") ?? "[]",
-      );
+      const stored = localStorage.getItem("tasks.expanded-projects");
+      if (stored === null) return null;
+      const saved: unknown = JSON.parse(stored);
       return new Set(
         Array.isArray(saved)
           ? saved.filter((id): id is string => typeof id === "string")
           : [],
       );
     } catch {
-      return new Set();
+      return null;
     }
   });
   function toggleProjects() {
@@ -93,7 +93,9 @@ export function Sidebar({
     }
   }
   function toggleProject(id: string) {
-    const next = new Set(expandedProjects);
+    const next = new Set(
+      expandedProjects ?? catalog.projects.map((project) => project.id),
+    );
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setExpandedProjects(next);
@@ -134,7 +136,7 @@ export function Sidebar({
       (project) => {
         const hasChildren =
           !showArchived && depth < 8 && projectChildren.has(project.id);
-        const expanded = expandedProjects.has(project.id);
+        const expanded = expandedProjects?.has(project.id) ?? true;
         const Icon = depth === 0 ? Folder : Hash;
         return (
           <div key={project.id}>

@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-22 UTC. Active work, open acceptance and dated compatibility only; move completed rollout detail to
+Updated 2026-10-23 UTC. Active work, open acceptance and dated compatibility only; move completed rollout detail to
 a dated record and link it here. Rules are in [AGENTS](AGENTS.md); entry points in [README](README.md). Never put
 private content, credentials or raw production output here.
 
@@ -12,9 +12,16 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-No application implementation is in flight. Work-memory real-client acceptance waits for the owner to unlock the
-Mac; see Open acceptance below. The isolated worktree is `/private/tmp/todofy-tasks-design`, branch
-`codex/personal-work-memory`; the shared checkout remains untouched.
+The existing App now shows 34 tools and six events. The owner-authorized Dot Reboot refreshed its stale catalog;
+the same Dot created/read a synthetic Work and dedicated Watch, received the scoped native `work.attention`
+event and silently acknowledged report sequence 3. Independent connection status confirms the exact event
+and no pending reports. Test cleanup passed: no subscription, open Work or pending reports/deliveries remain.
+One shared native hourly Work review was created and read back; its first natural execution is not yet verified.
+Recall's newly opened public fixture is still absent, so actual image viewing remains unverified. No credentials
+or App identity changed. Tasks' nested project branches default open when there is no saved choice; manual
+collapse remains persistent. The two-file change passes six Sidebar cases, TypeScript and lint locally and is
+being released through branch CI and same-SHA main Actions.
+The isolated worktree is `/private/tmp/todofy-tasks-design`, branch `codex/personal-work-memory`; shared checkout untouched.
 
 ## Latest verified release
 
@@ -56,12 +63,13 @@ browser cases remain in [the dated record](docs/history/handoff-2026-10-22.md#ap
 
 ### Work-memory real client
 
-The owner has already authorized implementation/deployment and was asked to unlock the Mac because the native
-browser tool refused while it was locked. Once unlocked, refresh tools on the existing Personal Cloud Manage page,
-verify the 34-tool/six-event catalog and exercise a synthetic Work with native event receipt and continuation.
-Verify a real public-fixture Recall image, then create/reuse the native hourly overall review and save its actual
-ID. These steps remain unverified; do not substitute a Codex heartbeat or a local fake callback. No hourly review
-or new Work/Watch subscription has been created. Existing user Watches and all old stopped automations stay as they are.
+Catalog refresh and native Work event continuation passed in the owner's existing Dot; see
+[the actual-client evidence](docs/work-memory-verification.md#native-dots-acceptance-2026-10-23-utc).
+The scoped synthetic subscription is stopped, its dedicated Watch paused, and its Work done after source
+read-back. The shared native hourly review is saved, but its first natural run is unverified (the host's next-run
+field is null). The public Recall fixture still needs an actual image read. Do not substitute a Codex heartbeat,
+accepted delivery count or local fake callback for client execution. Existing user Watches and all old stopped
+automations stay as they are.
 
 The two scheduler observations the owner stopped on October 17 (email models, website daily sync) are kept
 in [the October 18 archive](docs/history/handoff-2026-10-18.md#stopped-scheduler-observations); do not restart them.

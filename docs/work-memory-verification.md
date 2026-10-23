@@ -46,24 +46,49 @@ operating switches were not changed. Work state remains in the existing SQLite D
 production Work, Watch or Task. A public document at this exact code revision was opened for Recall QA; its
 exact page lookup returned `NOT_FOUND`, so no image acceptance is claimed. Private browsing history was not read.
 
-## Real-client acceptance still pending
+## Native Dots acceptance, 2026-10-23 UTC
 
-Local workerd discovery verifies 34 tools and six events. The existing account's imported tool catalog still
-needs **Refresh tools** on the Personal Cloud Manage page. The browser reached that page, but native computer
-use then reported that the Mac was locked. The owner was asked only to unlock it; no alternate login or credential
-route was attempted.
+The existing App's **Refresh tools** completed. Its detail page showed 14 write tools, 20 read tools and six
+events, including `work.attention`; the App identity and OAuth connection stayed unchanged. The existing Dot
+still had its old 18-tool catalog. A fresh ordinary conversation could not display its responses and supplies
+no acceptance evidence. The owner then explicitly authorized **Reboot** of the existing Dot. Its confirmation
+said conversations, memories and scheduled tasks are kept; after Restart, the same Dot could call Work/Watch.
+No credential or application-code change was needed for that catalog refresh.
 
-After unlocking:
+Only synthetic Work `cad1bde4-35b6-4003-ab4e-b97a7d3b9eed` and dedicated Watch
+`watches/w-7c622935-2f25-46e3-b911-ab32378fa046` were created. The Watch targets the public example domain,
+uses `NONE`, and its `owned` link was read back. Preview returned HTTP 200. The source was still awaiting its
+first scheduled fetch when the report was handled: this does not prove a real webpage-change candidate.
 
-1. Refresh the existing App's tool catalog and verify the same App/connection, 34 tools and six events.
-2. Use only a clearly marked synthetic Work to verify a native `work.attention` subscription, source report,
-   payload-specific Dots continuation and handled-through checkpoint. Stop the test subscription afterward.
-3. Preview and create a dedicated synthetic Watch with `NONE`, inspect its real health and source evidence,
-   then pause it and confirm the owned link before closing the Work. Do not change an existing Watch.
-4. Read one newly recorded public test page through `recall_view` and verify an actual visible MCP image.
-   No real browsing record has been read for this acceptance.
-5. Create or reuse the agreed native hourly overall Work review, recording its real schedule identity only
-   after creation. Keep unchanged reviews quiet. It has not been created by this rollout; `review_at` is not a timer.
+The native subscription tool required `schedule` and `timing_mode` even for events. The inspected tool's
+documented event form, `schedule: ""` and `timing_mode: "condition_watch"`, created an unscheduled webhook
+(`X-UNSCHEDULED:1`, no next run), scoped to this Work. No Cron substitute was used. The native response did
+not supply an independent subscription ID; none was invented.
 
-Do not count an uploaded Worker, a local receiver, a returned base64 string or callback acceptance as actual Dots
-continuation, image viewing or native scheduled execution. No such live checks are claimed yet.
+The Dot submitted stable report `qa:c10d368c-a924-4bd0-8798-0b59bb487f83`, then received the native
+`mcp_event` with event ID `work_cad1bde4-35b6-4003-ab4e-b97a7d3b9eed_3`. Its continuation matched the exact
+synthetic marker, Work ID, report ID and sequence 3, and read the actual Watch. It silently checkpointed
+`handled_through_report_seq=3` and read back an empty pending-report list. It did not report an acknowledgment
+back into the event stream. An independent `connection_status` read confirmed that exact accepted event,
+one webhook attempt, no pending deliveries and no pending Work reports. Both the native continuation and its
+read-back are observed; the accepted count alone is not the evidence.
+
+Cleanup was read back in the Dot: the scoped subscription stopped, the dedicated Watch is `paused` with an
+observed `owned` link of `stopped`, and the Work is `done` with report sequence 3 handled and no pending reports.
+An independent connection read confirms zero subscriptions, zero open Work and zero pending deliveries/reports;
+the accepted event remains in the ledger. Other subscriptions and real Watches were not modified.
+
+One native **Work 总体回顾** responsibility was checked by name, created and read back enabled with a real
+schedule ID, retained in the owner's Dot rather than this public repository. It runs hourly, reads open/due Work
+and necessary sources, checks the current executor before delegating, preserves each Work's authorized scope,
+and stays quiet on unchanged/non-actionable state. Only meaningful progress, failure or an owner decision may
+notify. It uses silent checkpoints and is shared (`owned: false` when linked); no extra supervisory Work was
+created. The saved rule implies a first run at 10:20 UTC, but the host returned `next_run_time: null`, so neither
+that exact time nor a natural execution is claimed as verified. No Codex heartbeat was created.
+
+### Remaining image acceptance
+
+The exact newly opened public test-page lookup still returns `NOT_FOUND`. No private browsing record was
+read to work around the absent fixture. Real-image Dots viewing remains unverified; the local image transport
+tests and base64 metadata do not replace it. Creating an hourly schedule likewise does not establish its first
+natural execution. Existing user Watches and the earlier owner-stopped email/website observations are untouched.
