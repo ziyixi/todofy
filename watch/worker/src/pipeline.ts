@@ -1,3 +1,5 @@
+import { saveEvidence, type EvidencePair } from './evidence.ts';
+import { extractCapture } from './evidence-extract.ts';
 /**
  * One scheduled check of one watch (../../docs/design.md §5): the deterministic noise pipeline from the fetch to the
  * recorded change, in order.
@@ -51,6 +53,7 @@ export interface CheckDeps extends ObtainDeps {
   readonly transact: <T>(fn: () => T) => T;
   /** The AI judge (null in v1). */
   readonly judge: ChangeJudge | null;
+  readonly evidenceStore?: R2Bucket | undefined;
 }
 
 export type CheckOutcome = 'missing' | 'deferred' | 'stale' | 'failed' | 'not_modified' | 'unchanged' | 'changed';
@@ -203,6 +206,8 @@ function changeRow(row: WatchRow, now: number, evaluation: Evaluation, state: Ch
     after_context: JSON.stringify(evaluation.afterContext),
     context_available: 1,
     context_truncated: evaluation.contextTruncated ? 1 : 0,
+    before_evidence: row.evidence_before ?? '',
+    after_evidence: row.evidence_after ?? '',
   };
 }
 
@@ -237,10 +242,11 @@ export async function runCheck(deps: CheckDeps, id: string, now: number, budget:
   const obtained = await obtain(deps, config, budget, conditional);
 
   // The request counts for the URL's 15 minutes at once, whatever follows (an error below, the owner's edit meanwhile).
-  const current = deps.store.watch(id);
-  if (current !== undefined && obtained.fetchedAt !== null && sameUri(current, row)) deps.store.updateWatch(id, { last_fetch_at: obtained.fetchedAt });
+  const fetchedCurrent = deps.store.watch(id);
+  if (fetchedCurrent !== undefined && obtained.fetchedAt !== null && sameUri(fetchedCurrent, row)) deps.store.updateWatch(id, { last_fetch_at: obtained.fetchedAt });
   // The owner may have changed or deleted the watch while it was fetched: their write wins.
-  if (current?.check_hash !== row.check_hash) return 'stale';
+  if (!fetchedCurrent || fetchedCurrent.check_hash !== row.check_hash) return 'stale';
+  let current: WatchRow = fetchedCurrent;
   const at: Scheduling = { now, fetchedAt: obtained.fetchedAt };
 
   if (obtained.kind === 'deferred') {
@@ -251,6 +257,23 @@ export async function runCheck(deps: CheckDeps, id: string, now: number, budget:
   if (obtained.kind === 'failed') {
     applyFailure(deps, current, config, at, obtained.failure, obtained.status, obtained.retryAfter);
     return 'failed';
+  }
+
+  // Reading evidence precedes text/raw-byte short-circuits: images and controls may change alone.
+  let capture: EvidencePair | null = null;
+  if (obtained.kind === 'answer' && deps.evidenceStore) {
+    try {
+      const document = obtained.evidence ?? await extractCapture({ body: obtained.body, contentType: obtained.contentType, finalUrl: obtained.finalUrl, source: config.source });
+      capture = await saveEvidence(deps.store, deps.evidenceStore, id, current.read_hash, now, document);
+      const refreshed = deps.store.watch(id);
+      if (!capture || !refreshed || refreshed.check_hash !== current.check_hash) return 'stale';
+      current = { ...refreshed, evidence_before: capture.before, evidence_after: capture.after };
+    } catch {
+      const refreshed = deps.store.watch(id);
+      if (!refreshed || refreshed.check_hash !== current.check_hash) return 'stale';
+      applyFailure(deps, refreshed, config, at, 'EVIDENCE_UNAVAILABLE', obtained.status, null);
+      return 'failed';
+    }
   }
 
   // Stage 1: the short-circuit.
@@ -283,7 +306,10 @@ export async function runCheck(deps: CheckDeps, id: string, now: number, budget:
       return 'not_modified';
     }
     // Stages 2 and 3.
-    const extraction = await extract({ source: config.source, contentType: obtained.contentType, body: obtained.body, url: obtained.finalUrl, blocks: false });
+    let extraction = await extract({ source: config.source, contentType: obtained.contentType, body: obtained.body, url: obtained.finalUrl, blocks: false });
+    if (!extraction.ok && extraction.failure === 'TOO_SHORT' && config.source.kind === 'html' && obtained.evidence?.screenshot) {
+      extraction = { ok: true, page: { lines: [], items: null, availability: null, truncated: false }, info: extraction.info };
+    }
     if (!extraction.ok) {
       applyFailure(deps, current, config, at, extraction.failure, obtained.status, null);
       return 'failed';
@@ -298,7 +324,7 @@ export async function runCheck(deps: CheckDeps, id: string, now: number, budget:
   }
   const masked = !sameBytes && sha === current.seen_sha && current.seen_check_hash === current.check_hash ? 1 : 0;
   const seen = { seen_sha: sha, seen_check_hash: current.check_hash, ...validators };
-  const insert = (encoded: { bytes: Uint8Array; lines: number }) => deps.store.insertSnapshot(id, now, sha, encoded.lines, encoded.bytes);
+  const insert = (encoded: { bytes: Uint8Array; lines: number }) => deps.store.insertSnapshot(id, now, sha, encoded.lines, encoded.bytes, capture?.after ?? '');
 
   // No notified state yet, or what is read changed: this text becomes the notified state, without a change. A change
   // still pending was found with the old settings and cannot be confirmed against the new ones: it is confirmed as
@@ -364,6 +390,8 @@ export async function runCheck(deps: CheckDeps, id: string, now: number, budget:
         after_context: JSON.stringify(evaluation.afterContext),
         context_available: 1,
         context_truncated: evaluation.contextTruncated ? 1 : 0,
+        before_evidence: baselineRow.evidence_ref ?? pending.before_evidence ?? '',
+        after_evidence: capture?.after ?? pending.after_evidence ?? '',
       };
     };
     if (shaOfView === candidateSha) {
@@ -427,6 +455,7 @@ export async function runCheck(deps: CheckDeps, id: string, now: number, budget:
     deps.store.updateWatch(id, { ...successFields(current, config, at, 'unchanged', obtained.status, null), ...seen, masked_count: current.masked_count + masked });
     return 'unchanged';
   }
+  if (baselineRow.evidence_ref) current = { ...current, evidence_before: baselineRow.evidence_ref };
   const previous = await textOf(current.seen_snapshot_id);
   // Back at the notified state (but for ignored lines): nothing to record, and it is the previous check's text from now on.
   if (shaOfView === baselineSha) {

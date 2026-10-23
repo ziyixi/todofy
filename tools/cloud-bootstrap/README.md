@@ -142,3 +142,14 @@ python3 tools/cloud-bootstrap/bootstrap.py plan --mode adopt \
 运行 `cloud --mode extend`。已有资源的更新、删除、替换仍被拒绝；没有原 state 也会停止。不会生成或读取
 VPS 的 connector 材料，不修改其他应用的秘密。新应用的 Worker 继续保持 CI check-only，直到记录了真实
 数据库和 Access 身份，并完成自己的发布准备。
+
+Watch 的页面证据桶沿用同一流程。现有账户的私有输入保留原认证和 `infra_values`，仅将
+`create_addresses` 设为 `["cloudflare_r2_bucket.app[\"watch-evidence\"]"]`，然后依次运行：
+
+```sh
+python3 tools/cloud-bootstrap/bootstrap.py plan --mode extend --private-file <现有私有输入文件>
+python3 tools/cloud-bootstrap/bootstrap.py cloud --mode extend --private-file <同一个私有输入文件>
+```
+
+先核对计划只有这一个桶的创建，再运行 `cloud`。它创建私有桶、保留既有资源；不启用 R2 计费、
+不升级 Workers 方案。桶已创建并验证后，才让 Watch 的 CI 发布绑定它；`BROWSER` 由同次 Worker 发布绑定。

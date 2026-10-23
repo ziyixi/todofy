@@ -17,9 +17,11 @@ export interface Env {
   readonly WATCH: DurableObjectNamespace<WatchState>;
   /** The UI's static files (web/dist). */
   readonly ASSETS: Fetcher;
+  /** Private saved text and screenshots; managed by the Watch snapshot index. */
+  readonly EVIDENCE_STORE?: R2Bucket;
   /**
-   * The browser renderer for FETCHER_BROWSER watches (browser.ts). Absent in v1: the production config has no
-   * browser binding, so such watches are refused (BROWSER_NOT_AVAILABLE). The workerd tests bind a fake one.
+   * Browser Run for rendered page evidence (browser.ts). Production uses the official Puppeteer transport;
+   * local manual tests inject their synthetic renderer.
    */
   readonly BROWSER?: Fetcher;
   /**

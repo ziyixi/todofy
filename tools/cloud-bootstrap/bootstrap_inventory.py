@@ -60,7 +60,7 @@ def known_imports(resources: dict, values: dict, extra: dict | None = None) -> d
             if name == "mail-hero-backup":
                 address += "[0]"
             imports[address] = account + "/" + resources["standalone_access_app_ids"][name]
-    for name in ("mail-hero-store", "mail-hero-backups", "todofy-backups"):
+    for name in ("mail-hero-store", "mail-hero-backups", "todofy-backups", "watch-evidence"):
         imports['cloudflare_r2_bucket.app[' + json.dumps(name) + ']'] = account + "/" + name
     for address, identifier in {**resources.get("managed_ids", {}), **(extra or {})}.items():
         if address not in MANAGED_ADDRESSES or not isinstance(identifier, str) or (re.fullmatch(r"[0-9a-f]{32}", identifier) is None and UUID.fullmatch(identifier) is None):

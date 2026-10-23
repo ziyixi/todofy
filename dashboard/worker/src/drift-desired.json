@@ -1093,6 +1093,11 @@
           "source": "config"
         },
         {
+          "name": "BROWSER",
+          "type": "browser",
+          "source": "config"
+        },
+        {
           "name": "BUILD_SHA",
           "type": "plain_text",
           "source": "deploy"
@@ -1101,6 +1106,11 @@
           "name": "CSRF_SIGNING_KEY",
           "type": "secret_text",
           "source": "deploy"
+        },
+        {
+          "name": "EVIDENCE_STORE",
+          "type": "r2_bucket",
+          "source": "config"
         },
         {
           "name": "PUBLIC_HOST",

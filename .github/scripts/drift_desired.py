@@ -152,6 +152,8 @@ def config_bindings(worker: str, config: dict) -> list[dict]:
             found += [_binding(item["binding"], "service", "config") for item in value]
         elif key == "analytics_engine_datasets":
             found += [_binding(item["binding"], "analytics_engine", "config") for item in value]
+        elif key == "browser":
+            found.append(_binding(value["binding"], "browser", "config"))
         elif key == "ai":
             found.append(_binding(value["binding"], "ai", "config"))
         else:

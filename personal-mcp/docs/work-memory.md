@@ -66,7 +66,7 @@ an action already underway or confirmed.
 
 Subscribe through Dots' native event lifecycle. `work.attention` accepts an optional `work_id` UUID; omitting it
 selects all open Works. Its payload identifies the Work, report sequence, kind, source and timestamp. Read
-`work_get` for the report and the current Work before reading source evidence. Watch candidates enter through
+`work_get` for the report and the current Work before reading source evidence. Watch evidence changes enter through
 this same report path; do not add a second `watch.changed` subscription. Subscribe only for the already
 authorized responsibility and reuse an existing suitable subscription.
 
@@ -96,11 +96,13 @@ Work's links with `owned: false`, preserving other links.
 
 | Operation | Inputs and limits |
 | --- | --- |
-| `watch_preview` | Required `display_name`, HTTPS `uri` and `intent` (up to 200 characters); optional `source`, `trigger`, `check_interval_minutes`, existing `name` and `refresh` |
-| `watch_create` | `work_id`, request UUID and the same settings; creates a dedicated HTTP Watch and its owned Work link |
+| `watch_preview` | Required `display_name`, HTTPS `uri` and `intent` (up to 200 characters); optional `source`, `trigger`, `fetcher` (`http` or `browser`), `check_interval_minutes`, existing `name` and `refresh` |
+| `watch_create` | `work_id`, request UUID and the same settings; creates a dedicated Watch and its owned Work link, defaulting to HTTP |
 | `watch_update` | `name`, request UUID, current Watch `etag` and `changes` containing only authorized setting changes; existing notification policy is preserved |
 | `watch_control` | `name`, `action` (`pause`, `resume`, `check`) and request UUID; pause/resume also require the current Watch etag |
 | `watch_changes` | A specific change `name`, or a `parent` Watch with `page_size` and `page_token`; `watches/-` reads across Watches |
+| `watch_read` | A stored `snapshot` ref; `representation` (`markdown` by default, or `structure`), `offset` (default 0) and `limit` (default 12,000, maximum 24,000 characters) |
+| `watch_view` | A stored `snapshot` ref; returns an actual MCP image when its screenshot is available |
 
 Use selectors or structured source paths only after previewing their extracted evidence. Read the preview's
 `fetch.fetch_time`, `cached`, `next_fetch_time`, extracted/normalized lines and truncation indicators before
@@ -110,8 +112,16 @@ resume clears it. Pause/resume read the current source state after the mutation;
 cannot confirm that the Watch is still stopped. Shared references remain shared. Reuse the same request ID and
 input after an uncertain write.
 
-Watch's rules select candidate changes. After a candidate Work report, read the current Work goal, the Watch
-health and the bounded before/after evidence from `watch_changes`. Use a silent `work_checkpoint` entry with
+`fetcher` uses the native Watch modes. Browser availability, minimum intervals and account budgets still apply;
+an unavailable browser or exhausted quota is an explicit source error. Selecting browser does not enable a new
+binding, increase a budget or guarantee that a screenshot was captured.
+
+Work reports use captured evidence changes independently of Watch's business triggers, suppressed candidates and
+notification policy. A later confirmation of the same captured evidence does not create a second source report.
+After an evidence Work report, read the current Work goal, the Watch health and the stored before/after snapshots.
+The report summary preserves both exact snapshot refs, and `evidence_ref` identifies the after snapshot.
+`watch_get.latest_snapshot` selects the current capture; `watch_changes` exposes frozen `before_snapshot` and
+`after_snapshot` refs for recorded candidates. Use a silent `work_checkpoint` entry with
 `kind: "watch_review"`, its required `summary` and `review: {change_ref, verdict, reason}` to record the Dot's
 decision:
 
@@ -122,11 +132,25 @@ decision:
 - `uncertain`: the evidence is incomplete, truncated, unavailable or does not resolve the goal. Save what is
   missing and keep the Work open; request user input only when that gap blocks the authorized next step.
 
-Use the real change identity as `change_ref` and explain how the evidence relates to the Work goal in `reason`.
+Use the real snapshot ref from the evidence report as `change_ref`, or the change ref when reviewing a recorded
+candidate. This existing field accepts either source identity. Explain the evidence's relation to the Work goal in `reason`.
 Read `before_context` and `after_context` as the evidence frozen with that candidate. `context_available: false`
 means no comparison context is available, including for older changes; `context_truncated: true` means it is
 incomplete. Each side is bounded to at most 40 lines and 8 KiB. A current preview cannot replace the historical
 comparison when deciding what that candidate meant.
+
+Use `watch_read` to read the stored Markdown and, when needed, structure JSON with links and metadata. Follow
+`next_offset` with the same snapshot and representation until the required text has been read; offsets count
+Unicode characters. A null `next_offset` means the stored representation is fully read, while
+`content_truncated: true` still means the capture itself lost content. `content_available` and `content_error`
+keep old or failed captures explicit. Source content is limited to 256 KiB of Markdown and 64 KiB of structure.
+These reads never re-fetch the page.
+
+For visual evidence, use `watch_view(snapshot)` and inspect the actual MCP image content. The text reply contains
+image status and dimensions without base64 bytes. Check the matching snapshot's capture time and image status
+from `watch_read`. An absent or failed screenshot cannot establish visual facts; the tool does not substitute a
+different capture. Judge visual facts from what is visible in that image. Missing, truncated or unread evidence needed
+for the decision leaves the verdict uncertain.
 
 The decision belongs to this Work. Do not change Watch's comparison baseline or add a permanent ignored line to
 encode an irrelevant candidate. A failed fetch means the current state is unknown. A truncated comparison cannot

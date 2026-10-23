@@ -13,6 +13,7 @@ import { clone, create, type MessageInitShape } from '@ziyixi/proto/protobuf'
 import { EmptySchema, timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import { Code, errorDetail, RpcError } from '@ziyixi/proto/rpc-status'
 import { Change_State, ChangeSchema, type Change } from '@ziyixi/proto/watch/ui/v1/change_pb'
+import { SnapshotSchema, SnapshotImageSchema, type Snapshot, type SnapshotImage } from '@ziyixi/proto/watch/ui/v1/snapshot_pb'
 import { Watch_State, WatchHealthSchema, WatchSchema, type Watch } from '@ziyixi/proto/watch/ui/v1/watch_pb'
 import {
   ListChangesResponseSchema,
@@ -76,6 +77,8 @@ export class FakeServer {
   readonly calls: Call[] = []
   readonly watches = new Map<string, Watch>()
   readonly changes: Change[] = []
+  readonly snapshots = new Map<string, Snapshot>()
+  readonly images = new Map<string, SnapshotImage>()
   /** What PreviewWatch answers (a function of the request's watch). */
   preview: (watch: Watch) => PreviewWatchResponse = () => create(PreviewWatchResponseSchema, {})
   /** The next request whose path (before the query) ends with this is handled, and its response lost. */
@@ -114,6 +117,8 @@ export class FakeServer {
 
   private handlersOf(server: FakeServer): ServiceHandlers<ShapeOf<typeof WatchUiService>, undefined> {
     return {
+      getSnapshot: (request) => Promise.resolve(clone(SnapshotSchema, server.snapshots.get(request.name) ?? fail(Code.NOT_FOUND, 'NOT_FOUND'))),
+      getSnapshotImage: (request) => Promise.resolve(clone(SnapshotImageSchema, server.images.get(request.name) ?? fail(Code.NOT_FOUND, 'NOT_FOUND'))),
       pollWatchEvents: () => fail(Code.PERMISSION_DENIED, 'FORBIDDEN'),
       getWatch: (request) => Promise.resolve(clone(WatchSchema, server.existing(request.name))),
       listWatches: () => Promise.resolve(create(ListWatchesResponseSchema, { watches: [...server.watches.values()] })),
@@ -143,7 +148,8 @@ export class FakeServer {
             if (head === undefined || head === 'etag') continue
             const parent = { ...(wire[head] as Record<string, unknown> | undefined) }
             const value = child === undefined ? update[head] : (update[head] as Record<string, unknown> | undefined)?.[child]
-            if (child === undefined) wire[head] = value
+            if (child === undefined && value === undefined) Reflect.deleteProperty(wire, head)
+            else if (child === undefined) wire[head] = value
             else if (value === undefined) Reflect.deleteProperty(parent, child)
             else parent[child] = value
             if (child !== undefined) wire[head] = parent

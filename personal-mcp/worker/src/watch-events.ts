@@ -36,7 +36,7 @@ export class WorkWatchSource {
   async initialize(reset = false): Promise<void> {
     const previous = this.row();
     if (previous?.state && this.hasLinks() && !reset) return;
-    const baseline = await this.client.pollWatchEvents({ baseline: true, cursor: '', pageSize: 20 });
+    const baseline = await this.client.pollWatchEvents({ baseline: true, cursor: '', pageSize: 20, filter: 'evidence' });
     this.storage.sql.exec(`INSERT INTO event_sources VALUES (?,?,?,NULL) ON CONFLICT(name)
       DO UPDATE SET state=excluded.state,checked_at=excluded.checked_at,error_code=NULL WHERE state=?`,
     WATCH_SOURCE_NAME, baseline.cursor, Date.now(), previous?.state ?? '');
@@ -59,17 +59,19 @@ export class WorkWatchSource {
       await this.initialize();
       const row = this.row();
       if (!row || Date.now() - row.checked_at < WATCH_POLL_INTERVAL_MS) return;
-      const page = await this.client.pollWatchEvents({ cursor: row.state, baseline: false, pageSize: 20 });
+      const page = await this.client.pollWatchEvents({ cursor: row.state, baseline: false, pageSize: 20, filter: 'evidence' });
       for (const event of page.events) {
-        const confirmed = event.kind === WatchEvent_Kind.CHANGE_CONFIRMED;
+        const changed = event.kind === WatchEvent_Kind.EVIDENCE_CHANGED;
+        // Confirmation is a separate business-rule transition of evidence already reported to the Work.
+        if (!changed && event.kind !== WatchEvent_Kind.WATCH_BROKEN && event.kind !== WatchEvent_Kind.WATCH_PAUSED) continue;
         const wire = toWire(WatchEventSchema, event);
         for (const workId of this.work.linkedWorkIds('watch', event.watch)) this.work.report({
-          work_id: workId, report_id: `watch:${event.sequence}`, kind: confirmed ? 'progress' : 'blocked',
+          work_id: workId, report_id: `watch:${event.sequence}`, kind: changed ? 'progress' : 'blocked',
           source: { type: 'watch', ref: event.watch },
-          summary: confirmed ? 'Watch confirmed a change. Review its evidence against the work goal.'
+          summary: changed ? `Watch captured changed page evidence. Before snapshot: ${event.beforeSnapshot || 'unavailable'}. After snapshot: ${event.afterSnapshot || 'unavailable'}. Review it against the work goal.`
             : event.kind === WatchEvent_Kind.WATCH_BROKEN ? 'Watch checks are failing. Read its health before relying on this watch.'
               : 'Watch was paused after prolonged failures. Review its health and decide whether to resume.',
-          ...(typeof wire['create_time'] === 'string' ? { observed_at: wire['create_time'] } : {}), evidence_ref: event.change,
+          ...(typeof wire['create_time'] === 'string' ? { observed_at: wire['create_time'] } : {}), evidence_ref: changed ? event.afterSnapshot : '',
         });
       }
       // Re-reading a page after a restart is safe: each report and its callback share a transaction,

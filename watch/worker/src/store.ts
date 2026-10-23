@@ -34,7 +34,7 @@ import {
 } from './limits.ts';
 
 /** Bump with every schema change; `migrate` runs the steps above the stored version. */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const SCHEMA_V1 = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -185,6 +185,9 @@ export interface WatchEventRow extends Record<string, SqlStorageValue> {
   watch_id: string;
   change_id: string | null;
   created_at: number;
+  evidence_only?: number;
+  before_evidence?: string;
+  after_evidence?: string;
 }
 
 /** The global tables are pruned at most this often (meta `pruned_at`). */
@@ -227,6 +230,9 @@ export interface WatchRow {
   baseline_id: number | null;
   baseline_read_hash: string | null;
   pending_change: string | null;
+  /** Reading refs attached to this check in memory, never written to watches. */
+  evidence_before?: string;
+  evidence_after?: string;
 }
 
 export interface ChangeRow {
@@ -252,6 +258,8 @@ export interface ChangeRow {
   /** A pending change: the text before it (its edge's start, for a third version). */
   before_snapshot_id: number | null;
   attempts: number;
+  before_evidence?: string;
+  after_evidence?: string;
   before_context: string;
   after_context: string;
   context_available: number;
@@ -265,6 +273,7 @@ export interface SnapshotRow {
   sha: string;
   line_count: number;
   body: ArrayBuffer;
+  evidence_ref?: string;
 }
 
 export interface HostRow {
@@ -308,6 +317,23 @@ export class Store {
       const columns = new Set(this.sql.exec<{ name: string }>(`PRAGMA table_info(changes)`).toArray().map(row => row.name));
       for (const [name, declaration] of Object.entries(SCHEMA_V4)) {
         if (!columns.has(name)) this.sql.exec(`ALTER TABLE changes ADD COLUMN ${name} ${declaration}`);
+      }
+    }
+    if (version < 5) {
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS evidence_snapshots (
+        id TEXT PRIMARY KEY, watch_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+        sha TEXT NOT NULL, object_key TEXT NOT NULL, image_key TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0)`);
+      this.sql.exec(`CREATE INDEX IF NOT EXISTS evidence_watch ON evidence_snapshots(watch_id, id)`);
+      this.sql.exec(`CREATE INDEX IF NOT EXISTS evidence_images ON evidence_snapshots(image_key)`);
+      this.sql.exec(`CREATE INDEX IF NOT EXISTS evidence_incomplete ON evidence_snapshots(id) WHERE ready=0`);
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS evidence_deletions (key TEXT PRIMARY KEY)`);
+      for (const [table, declarations] of Object.entries({
+        notifications: { evidence_only: 'INTEGER NOT NULL DEFAULT 0', before_evidence: "TEXT NOT NULL DEFAULT ''", after_evidence: "TEXT NOT NULL DEFAULT ''" },
+        changes: { before_evidence: "TEXT NOT NULL DEFAULT ''", after_evidence: "TEXT NOT NULL DEFAULT ''" },
+        snapshots: { evidence_ref: "TEXT NOT NULL DEFAULT ''" },
+      })) {
+        const columns = new Set(this.sql.exec<{name: string}>(`PRAGMA table_info(${table})`).toArray().map(row => row.name));
+        for (const [name, declaration] of Object.entries(declarations)) if (!columns.has(name)) this.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${declaration}`);
       }
     }
     if (version < SCHEMA_VERSION) this.sql.exec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)`, String(SCHEMA_VERSION));
@@ -429,6 +455,9 @@ export class Store {
   }
 
   deleteWatch(id: string): void {
+    this.run(`INSERT OR IGNORE INTO evidence_deletions SELECT object_key FROM evidence_snapshots WHERE watch_id = ?`, id);
+    this.run(`INSERT OR IGNORE INTO evidence_deletions SELECT image_key FROM evidence_snapshots WHERE watch_id = ? AND image_key != ''`, id);
+    this.run(`DELETE FROM evidence_snapshots WHERE watch_id = ?`, id);
     this.run(`DELETE FROM watches WHERE id = ?`, id);
     this.run(`DELETE FROM snapshots WHERE watch_id = ?`, id);
     this.run(`DELETE FROM changes WHERE watch_id = ?`, id);
@@ -437,8 +466,8 @@ export class Store {
 
   // ---- snapshots ---------------------------------------------------------------------------------------------------
 
-  insertSnapshot(watchId: string, now: number, sha: string, lineCount: number, body: Uint8Array): number {
-    this.run(`INSERT INTO snapshots (watch_id, created_at, sha, line_count, body) VALUES (?, ?, ?, ?, ?)`, watchId, now, sha, lineCount, body.slice().buffer);
+  insertSnapshot(watchId: string, now: number, sha: string, lineCount: number, body: Uint8Array, evidenceRef = ''): number {
+    this.run(`INSERT INTO snapshots (watch_id, created_at, sha, line_count, body, evidence_ref) VALUES (?, ?, ?, ?, ?, ?)`, watchId, now, sha, lineCount, body.slice().buffer, evidenceRef);
     return this.one<{ id: number }>(`SELECT last_insert_rowid() AS id`)?.id ?? 0;
   }
 
@@ -584,8 +613,14 @@ export class Store {
     return first === undefined ? this.eventHead() : first.id - 1;
   }
 
-  watchEvents(after: number, limit: number): WatchEventRow[] {
-    return this.all<WatchEventRow>(`SELECT id, kind, watch_id, change_id, created_at FROM notifications WHERE id > ? ORDER BY id LIMIT ?`, after, limit);
+  watchEvents(after: number, limit: number, evidence = false): WatchEventRow[] {
+    return this.all<WatchEventRow>(`SELECT id, kind, watch_id, change_id, created_at, evidence_only, before_evidence, after_evidence
+      FROM notifications WHERE id > ? AND (evidence_only = ? OR kind IN ('watch_broken','watch_paused')) ORDER BY id LIMIT ?`, after, evidence ? 1 : 0, limit);
+  }
+
+  enqueueEvidence(watchId: string, before: string, after: string, now: number): void {
+    this.run(`INSERT INTO notifications (kind, watch_id, policy, created_at, delivered_at, evidence_only, before_evidence, after_evidence)
+      VALUES ('change_confirmed', ?, 'digest', ?, ?, 1, ?, ?)`, watchId, now, now, before, after);
   }
 
   // ---- bounds --------------------------------------------------------------------------------------------------------

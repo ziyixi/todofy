@@ -25,7 +25,8 @@ export type FailureCode =
   | 'PARSE_ERROR'
   | 'VALUE_MISSING'
   | 'BROWSER_UNAVAILABLE'
-  | 'INTERNAL_ERROR';
+  | 'INTERNAL_ERROR'
+  | 'EVIDENCE_UNAVAILABLE';
 
 /**
  * Text that only bot challenges and block pages carry (Cloudflare, Akamai, Imperva, PerimeterX, DataDome, AWS WAF, a

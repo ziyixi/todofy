@@ -12,16 +12,17 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-`codex/watch-evidence` implements richer page evidence for Dots: structured unmasked text, fixed-viewport JPEG,
+`codex/watch-evidence-app` implements richer page evidence for Dots: structured unmasked text, fixed-viewport JPEG,
 real Browser Run through the official Puppeteer package, stored capture reads and evidence-only Work events.
 Watch's normal typed rules and Tasks notifications remain separate. A private `watch-evidence` R2 bucket and
 browser binding are declared through IaC; neither has been applied in production yet. No model API or new scheduler.
 The isolated worktree is `/private/tmp/todofy-tasks-design`; Claude's shared checkout is untouched.
-Local checks passed: Watch 127 unit and 123 workerd runtime cases (including CPU/rows), MCP 71 unit cases and
-UI 32 cases. Resource declaration is released first: review Infra drift, gated apply of the one new private bucket,
-then release the app bindings and evidence implementation from a separately green SHA. Remaining: branch CI,
-resource apply, application release, plugin refresh and actual Browser Run/Dots acceptance. Production apps
-still run the prior release.
+Local checks passed: Watch 127 unit and 127 workerd runtime cases (including CPU/rows), the additional baseline
+retention case, MCP 71 unit and seven workerd cases, UI 33 cases, and Home 279 unit cases. The resource declaration
+`43f6c31d` passed full [branch CI](https://github.com/ziyixi/todofy/actions/runs/39941151337) and reached main first.
+Review Infra drift and gated apply of the one new private bucket before app activation. Remaining: application
+branch CI, resource apply, application release, plugin refresh and actual Browser Run/Dots acceptance. Production
+apps still run the prior release. Details are in [Watch evidence verification](docs/watch-evidence-verification.md).
 
 ## Latest verified release
 

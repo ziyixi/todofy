@@ -291,6 +291,44 @@ class Cloud(unittest.TestCase):
         previous = {"account_id": ACCOUNT, "zone_id": ZONE, "d1_databases": {}, "durable_objects": {}}
         self.assertNotIn("synthetic-hidden", json.dumps(inventory.exported_resources(previous, plan, fresh=True)))
 
+    def test_watch_evidence_bucket_is_adopted_by_exact_name(self):
+        imports = inventory.known_imports({"account_id": ACCOUNT, "zone_id": ZONE}, {})
+        self.assertEqual(imports['cloudflare_r2_bucket.app["watch-evidence"]'], ACCOUNT + "/watch-evidence")
+
+    def test_watch_evidence_extension_plans_a_create_without_importing_the_new_bucket(self):
+        address = 'cloudflare_r2_bucket.app["watch-evidence"]'
+        plan = {"resource_changes": [{"mode": "managed", "type": "cloudflare_r2_bucket",
+                "address": address, "change": {"actions": ["create"]}}]}
+
+        class Session:
+            def __init__(self, **kwargs):
+                imports = (kwargs["directory"] / "imports.tf").read_text()
+                assert 'app["watch-evidence"]' not in imports
+                assert 'app["mail-hero-store"]' in imports
+                self.tofu = SimpleNamespace(init=lambda environment: None)
+
+            def s3(self, method, key):
+                return 200, b""
+
+            def plan_full(self, name):
+                return 2, {"rows": [("create", address)]}, "", plan
+
+            def cleanup(self):
+                pass
+
+        values = {"account_id": ACCOUNT, "access_owner_emails": ["owner"], "access_github_owner_emails": ["owner"],
+                  "access_allowed_idp_ids": ["idp"], "access_github_idp_id": "idp"}
+        private = {"infra_values": values, "cloudflare_api_token": "synthetic",
+                   "infra_state_passphrase": "synthetic-passphrase", "create_addresses": [address]}
+        resources = {"account_id": ACCOUNT, "zone_id": ZONE}
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(tofu_bootstrap, "verify_target"), \
+                mock.patch.object(tofu_bootstrap, "prepare"), mock.patch.object(tofu_bootstrap, "ensure_workers_subdomain"), \
+                mock.patch.object(tofu_bootstrap, "refuse_conflicts"):
+            report, credentials = tofu_bootstrap.run(private, {"zone": "example.invalid", "workers_dev_subdomain": "desired"},
+                                                     resources, "extend", Path(directory), session_factory=Session, check_only=True)
+        self.assertEqual(report["creates"], [address])
+        self.assertFalse(credentials)
+
     def test_fresh_and_adopt_inventory_exclude_only_non_worker_audiences(self):
         audiences = {"links": "worker-audience", "mail-hero": "mail-audience",
                      "mail-hero-backup": "legacy-audience", "unexpected": "unexpected-audience"}

@@ -7,6 +7,7 @@ import type { WorkCreateInput } from '../src/work-model.ts';
 
 const WATCH = 'watches/synthetic-watch';
 const CHANGE = `${WATCH}/changes/0000000000000001`;
+const SNAPSHOT = `${WATCH}/snapshots/0000000000000001`;
 const AT = '2026-10-22T12:00:00Z';
 const settings = { display_name: 'Synthetic registration', uri: 'https://example.org/synthetic',
   intent: 'Tell the owner when synthetic registration opens',
@@ -20,7 +21,7 @@ afterEach(async () => {
 
 function uuid(value: number) { return `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`; }
 function watch(overrides: Record<string, unknown> = {}) {
-  return { ...settings, name: WATCH, etag: 'revision-one', state: 'active', notify_policy: 'digest', ...overrides };
+  return { ...settings, name: WATCH, etag: 'revision-one', state: 'active', notify_policy: 'digest', latest_snapshot: SNAPSHOT, ...overrides };
 }
 interface NativeRequest {
   method: string;
@@ -99,7 +100,7 @@ it('reads source-owned watches through generated list and get routes without cha
   const list = await client.call('watch_list', { filter: 'registration', page_size: 2, page_token: 'previous' });
   expect(list.result?.structuredContent).toMatchObject({ watches: [{ name: WATCH, notify_policy: 'digest' }], next_page_token: 'more' });
   const read = await client.call('watch_get', { name: WATCH });
-  expect(read.result?.structuredContent).toMatchObject({ name: WATCH, state: 'broken', notify_policy: 'urgent' });
+  expect(read.result?.structuredContent).toMatchObject({ name: WATCH, state: 'broken', notify_policy: 'urgent', latest_snapshot: SNAPSHOT });
   expect(client.seen.map(call => [call.method, call.path, Object.fromEntries(call.query)])).toEqual([
     ['GET', '/api/v1/watches', { page_size: '2', page_token: 'previous', filter: 'registration' }],
     ['GET', '/api/v1/watches/synthetic-watch', {}],
@@ -232,16 +233,90 @@ it('reads frozen change evidence by name or collection and keeps missing or trun
     ? { name: CHANGE, state: 'confirmed', summary: 'Synthetic historical change', context_available: false }
     : { changes: [{ name: `${WATCH}/changes/0000000000000002`, state: 'confirmed',
       before_context: ['Registration is closed'], after_context: ['Registration is open'],
+      before_snapshot: SNAPSHOT, after_snapshot: `${WATCH}/snapshots/0000000000000002`,
       context_available: true, context_truncated: true }], next_page_token: 'more' }));
   const old = await client.call('watch_changes', { name: CHANGE });
   expect(old.result?.structuredContent).toMatchObject({ name: CHANGE, context_available: false,
     context_truncated: false, before_context: [], after_context: [] });
   const list = await client.call('watch_changes', { parent: 'watches/-', page_size: 2, page_token: 'previous' });
   expect(list.result?.structuredContent).toMatchObject({ changes: [{ context_available: true, context_truncated: true,
-    before_context: ['Registration is closed'], after_context: ['Registration is open'] }], next_page_token: 'more' });
+    before_context: ['Registration is closed'], after_context: ['Registration is open'],
+    before_snapshot: SNAPSHOT, after_snapshot: `${WATCH}/snapshots/0000000000000002` }], next_page_token: 'more' });
   expect(client.seen.map(call => [call.method, call.path, Object.fromEntries(call.query)])).toEqual([
     ['GET', '/api/v1/watches/synthetic-watch/changes/0000000000000001', {}],
     ['GET', '/api/v1/watches/-/changes', { page_size: '2', page_token: 'previous' }],
   ]);
   expect(client.work.list().works).toEqual([]);
+});
+
+it.each(['http', 'browser'])('passes the native %s fetcher through preview, create and selected updates', async fetcher => {
+  const client = tools(request => Response.json(request.path.endsWith(':preview')
+    ? { extracted_lines: ['Synthetic evidence'] }
+    : watch({ ...request.body, name: `watches/w-${uuid(51)}` })));
+  const work = createWork(client.work, 50);
+  const config = { ...settings, fetcher, check_interval_minutes: 360 };
+  await client.call('watch_preview', config);
+  await client.call('watch_create', { ...config, work_id: work.id, request_id: uuid(51) });
+  await client.call('watch_update', { name: WATCH, request_id: uuid(52), etag: 'revision-one', changes: { fetcher } });
+  expect(client.seen.map(call => call.path.endsWith(':preview') ? (call.body.watch as Record<string, unknown>).fetcher : call.body.fetcher))
+    .toEqual([fetcher, fetcher, fetcher]);
+  expect(client.seen[2]?.query.get('update_mask')).toBe('fetcher,etag');
+});
+
+it('reads stored snapshot windows with source completeness and metadata while keeping representations separate', async () => {
+  const client = tools(request => {
+    expect([request.method, request.path]).toEqual(['GET', '/api/v1/watches/synthetic-watch/snapshots/0000000000000001']);
+    return Response.json({ name: SNAPSHOT, create_time: AT, uri: 'https://example.org/synthetic', title: 'Synthetic page',
+      markdown: 'A😀BC', structure_json: '{"synthetic":true}', links: [{ text: 'Synthetic link', url: 'https://example.org/item' }],
+      metadata: [{ name: 'description', content: 'Synthetic metadata' }], content_available: true, content_truncated: true,
+      image_available: false, image_error: 'not_captured' });
+  });
+  const first = await client.call('watch_read', { snapshot: SNAPSHOT, limit: 2 });
+  expect(first.result?.structuredContent).toMatchObject({ name: SNAPSHOT, create_time: AT, title: 'Synthetic page',
+    markdown: 'A😀', representation: 'markdown', offset: 0, next_offset: 2, total_characters: 4,
+    content_available: true, content_truncated: true, image_available: false, image_error: 'not_captured',
+    links: [{ text: 'Synthetic link' }], metadata: [{ name: 'description' }] });
+  expect(first.result?.structuredContent).not.toHaveProperty('structure_json');
+  const rest = await client.call('watch_read', { snapshot: SNAPSHOT, offset: 2, limit: 2 });
+  expect(rest.result?.structuredContent).toMatchObject({ markdown: 'BC', next_offset: null, content_truncated: true });
+  const structure = await client.call('watch_read', { snapshot: SNAPSHOT, representation: 'structure' });
+  expect(structure.result?.structuredContent).toMatchObject({ structure_json: '{"synthetic":true}', next_offset: null });
+  expect(structure.result?.structuredContent).not.toHaveProperty('markdown');
+  expect(client.preparations()).toBe(0);
+  expect(client.work.list().works).toEqual([]);
+});
+
+it('keeps old or unavailable snapshot content explicit and rejects unbounded windows before a source call', async () => {
+  const client = tools(() => Response.json({ name: SNAPSHOT, content_error: 'historical_evidence_unavailable',
+    image_error: 'not_captured', content_truncated: true }));
+  const read = await client.call('watch_read', { snapshot: SNAPSHOT });
+  expect(read.result?.structuredContent).toMatchObject({ markdown: '', content_available: false,
+    content_truncated: true, content_error: 'historical_evidence_unavailable', image_available: false, next_offset: null });
+  for (const input of [{ snapshot: CHANGE }, { snapshot: SNAPSHOT, limit: 24001 }, { snapshot: SNAPSHOT, offset: -1 }]) {
+    expect((await client.call('watch_read', input)).result?.isError).toBe(true);
+  }
+  expect(client.seen).toHaveLength(1);
+});
+
+it('returns a stored screenshot as an actual MCP image without leaking base64 into text', async () => {
+  const bytes = btoa('synthetic-jpeg-bytes');
+  const client = tools(request => {
+    expect([request.method, request.path]).toEqual(['GET', '/api/v1/watches/synthetic-watch/snapshots/0000000000000001/image']);
+    return Response.json({ name: `${SNAPSHOT}/image`, available: true, jpeg_base64: bytes, width: 800, height: 600 });
+  });
+  const reply = await client.call('watch_view', { snapshot: SNAPSHOT });
+  expect(reply.result?.structuredContent).toMatchObject({ snapshot: SNAPSHOT, image_available: true,
+    image: { name: `${SNAPSHOT}/image`, available: true, width: 800, height: 600 } });
+  expect(reply.result?.content).toContainEqual({ type: 'image', data: bytes, mimeType: 'image/jpeg' });
+  expect(JSON.stringify(reply.result?.structuredContent)).not.toContain(bytes);
+  expect(reply.result?.content.filter(item => item.type === 'text').map(item => item.text).join('')).not.toContain(bytes);
+  expect(client.preparations()).toBe(0);
+});
+
+it('keeps missing screenshots and source errors explicit without reading another snapshot or fetching a page', async () => {
+  const client = tools(() => Response.json({ name: `${SNAPSHOT}/image`, available: false, error: 'image_pruned' }));
+  const reply = await client.call('watch_view', { snapshot: SNAPSHOT });
+  expect(reply.result?.structuredContent).toMatchObject({ snapshot: SNAPSHOT, image_available: false, reason: 'image_pruned' });
+  expect(reply.result?.content.some(item => item.type === 'image')).toBe(false);
+  expect(client.seen).toHaveLength(1);
 });

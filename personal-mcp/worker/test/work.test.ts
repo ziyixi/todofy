@@ -208,6 +208,19 @@ it('pages filtered lists and history, binds tokens to selectors and keeps review
   expect(attention).toEqual([]);
 });
 
+it('preserves a snapshot evidence ref in a silent Work review without changing the source', () => {
+  const { store, attention } = fixture();
+  const work = create(store, 64, { links: [{ type: 'watch', ref: 'watches/synthetic' }] }).work;
+  const snapshot = 'watches/synthetic/snapshots/0000000000000001';
+  store.checkpoint({ work_id: work.id, etag: work.etag, request_id: uuid(65), changes: {},
+    entry: { kind: 'watch_review', summary: 'Reviewed the captured synthetic evidence',
+      review: { change_ref: snapshot, verdict: 'uncertain', reason: 'The stored capture is incomplete.' } } });
+  expect(store.get({ work_id: work.id }).entries[0]?.review).toEqual({
+    change_ref: snapshot, verdict: 'uncertain', reason: 'The stored capture is incomplete.',
+  });
+  expect(attention).toEqual([]);
+});
+
 it('preserves Unicode link selectors across list page tokens', () => {
   const { store } = fixture();
   const ref = '/tmp/合成报告.pdf';

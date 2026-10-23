@@ -16,6 +16,7 @@
 //   node ../deploy/bundle-size.mjs "$RUNNER_TEMP/watch-bundle"     (from worker/, after the dry run's --outdir)
 import { checkWorkerBundle, isMain } from '../../tools/bundle-size/bundle-size.mjs'
 
-export const BUDGET_GZIP_BYTES = 140 * 1024
+// 2026-10-23: official Puppeteer preserves navigation interception for real screenshots; measured ~274 KiB.
+export const BUDGET_GZIP_BYTES = 300 * 1024
 
 if (isMain(import.meta.url)) process.exitCode = checkWorkerBundle('The watch app', process.argv[2], BUDGET_GZIP_BYTES)

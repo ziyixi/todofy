@@ -10,6 +10,7 @@
 import { Change_State, DiffLine_Kind, type Change } from '@ziyixi/proto/watch/ui/v1/change_pb'
 import { api, errorMessage, newRequestId, withRetry } from '../api.ts'
 import { button, el, toast } from '../dom.ts'
+import { changeEvidence } from '../evidence.ts'
 import { CHANGE_STATES, relative, SUPPRESSION, TRIGGERS, values, watchIdOf } from '../format.ts'
 import type { ViewContext } from '../app.ts'
 
@@ -136,6 +137,7 @@ export function changeCard(ctx: ViewContext, change: Change, options: CardOption
     valueText === '' ? null : el('p', { class: 'values' }, valueText),
     lines,
     change.diffTruncated ? el('p', { class: 'hint' }, '变化行太多，只保留了前 200 行。') : null,
+    changeEvidence(change),
     actions.childElementCount > 0 ? actions : null,
   )
 }

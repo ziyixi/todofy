@@ -130,6 +130,11 @@ message Watch {
   // What the owner wants to learn from these changes, at most 200 characters. Read by Dots; the Worker
   // never calls a model. Updating this field leaves the comparison baseline and trigger unchanged.
   string intent = 23 [(google.api.field_behavior) = OPTIONAL];
+  // Latest saved reading evidence, empty before the first capture.
+  string latest_snapshot = 24 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Snapshot"
+  ];
 }
 
 // What a watch reads from the response: exactly one field is set (none: an HtmlSource without selectors).
@@ -380,4 +385,6 @@ enum FailureReason {
   // The check stopped on an unexpected error after its fetch (a bug, or a storage error): it counts toward BROKEN
   // like any failure and is retried with a growing delay, never sooner than 15 minutes after the fetch.
   FAILURE_REASON_INTERNAL_ERROR = 17;
+  // Reading evidence could not be saved to its private storage.
+  FAILURE_REASON_EVIDENCE_UNAVAILABLE = 18;
 }

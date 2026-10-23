@@ -21,6 +21,7 @@
     "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8791 --local-upstream 127.0.0.1:8791"
   },
   "dependencies": {
+    "@cloudflare/puppeteer": "1.1.0",
     "@ziyixi/edge-auth": "file:../../packages/edge-auth",
     "@ziyixi/proto": "file:../../proto/ts"
   },

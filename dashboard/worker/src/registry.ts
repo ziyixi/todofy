@@ -334,6 +334,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'recall-store', kind: 'r2', name: 'recall 正文存储', entry: 'recall', match: 'recall-store' },
   // Tasks' own weekly backups (tasks/wrangler.toml BACKUPS), created by "Infra apply" before Tasks bound it.
   { id: 'tasks-backups', kind: 'r2', name: 'Tasks 备份', entry: 'tasks', match: 'tasks-backups' },
+  // Watch's private captured page text and screenshots (watch/wrangler.toml EVIDENCE_STORE).
+  { id: 'watch-evidence', kind: 'r2', name: 'Watch 页面证据与截图', entry: 'watch', match: 'watch-evidence' },
   // The self-hosted servers' backups (~790 MB on 2026-09-30), outside this repository.
   { id: 'vps-backup', kind: 'r2', name: 'VPS 备份', entry: 'self-hosted', match: 'vultr-backup' },
 ];

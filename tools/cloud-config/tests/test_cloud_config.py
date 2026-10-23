@@ -50,6 +50,7 @@ CONFIG = '''# Synthetic unrelated settings must stay byte-identical.
 name = "demo"
 account_id = "dddddddddddddddddddddddddddddddd" # retained comment
 main = "src/index.ts"
+compatibility_flags = ["nodejs_compat"]
 workers_dev = false
 routes = [{ pattern = "demo.example.test", custom_domain = true }]
 [[d1_databases]]
@@ -60,6 +61,8 @@ migrations_dir = "migrations"
 [[r2_buckets]]
 binding = "ARCHIVE"
 bucket_name = "demo-archive"
+[browser]
+binding = "BROWSER"
 [vars]
 PUBLIC_HOST = "demo.example.test"
 ACCESS_ISSUER = "https://old.cloudflareaccess.com"

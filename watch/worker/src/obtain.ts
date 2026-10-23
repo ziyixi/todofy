@@ -33,6 +33,7 @@ import type { HostLocks } from './host-locks.ts';
 import { BROWSER_SPACING_MS, FETCH_MAX_BYTES, MAX_REDIRECTS, ROBOTS_ERROR_TTL_MS, ROBOTS_MAX_BYTES, ROBOTS_TTL_MS } from './limits.ts';
 import { robotsAllows, robotsFromAnswer, type RobotsVerdict } from './robots.ts';
 import type { HostRow, Store } from './store.ts';
+import type { CaptureDocument } from './evidence-extract.ts';
 import { checkUri } from './url-policy.ts';
 
 /** The robots.txt requests one check may make, over every host its redirects reach (each with its own redirects). */
@@ -73,7 +74,7 @@ export interface AnswerMeta {
 }
 
 export type Obtained =
-  | (AnswerMeta & { readonly kind: 'answer'; readonly contentType: string | null; readonly etag: string | null; readonly lastModified: string | null; readonly body: Uint8Array })
+  | (AnswerMeta & { readonly kind: 'answer'; readonly contentType: string | null; readonly etag: string | null; readonly lastModified: string | null; readonly body: Uint8Array; readonly evidence?: CaptureDocument })
   | (AnswerMeta & { readonly kind: 'not_modified' })
   | (AnswerMeta & { readonly kind: 'failed'; readonly failure: FailureCode; readonly retryAfter: number | null })
   /** A host on the way was busy (spacing) or backing off: try again at `until`. Not a failure of the page. */
@@ -288,6 +289,7 @@ export async function obtain(
 async function render(deps: ObtainDeps, config: WatchConfig, budget: Budget, failed: (failure: FailureCode, meta?: Partial<AnswerMeta>, retryAfter?: number | null) => Obtained): Promise<Obtained> {
   if (deps.browser === null) return failed('BROWSER_UNAVAILABLE');
   if (!browserAllowed(deps.store.ledger(utcDay(deps.now())))) return failed('JS_QUOTA_EXHAUSTED');
+  if (deps.browser.navigationGate === true) return renderNavigation(deps, config, budget, failed);
   const url = new URL(config.uri);
   const host = url.hostname.toLowerCase();
   const busy = hostRefusal(deps.store.host(host), deps.now());
@@ -316,7 +318,15 @@ async function render(deps: ObtainDeps, config: WatchConfig, budget: Budget, fai
     }
     // Every render that reached the binding is charged, a failed one too.
     deps.store.addLedger(day, 0, rendered.browserMs);
-    if (rendered.kind === 'failed') return failed(rendered.failure, sent);
+    if (rendered.kind === 'refused') {
+      if (rendered.refusal.kind === 'robots') return failed('ROBOTS_DISALLOWED', { ...sent, robotsAllowed: false });
+      if (rendered.refusal.kind === 'budget') return failed('REDIRECT_REFUSED', sent);
+      return { ...blankAnswer(sent), kind: 'deferred', until: rendered.refusal.until };
+    }
+    if (rendered.kind === 'failed') {
+      if (rendered.error) throw rendered.error;
+      return failed(rendered.failure, sent);
+    }
     budget.bytes += rendered.html.byteLength;
     recordAnswer(deps.store, host, now, rendered.status, null);
     const finalUrl = rendered.finalUrl ?? config.uri;
@@ -326,10 +336,66 @@ async function render(deps: ObtainDeps, config: WatchConfig, budget: Budget, fai
     const failure = statusFailure(rendered.status);
     if (isChallenge(rendered.status, new Headers(), rendered.html)) return failed('CHALLENGE_PAGE', meta);
     if (failure !== null) return failed(failure, meta);
-    return { ...blankAnswer(meta), kind: 'answer', contentType: 'text/html; charset=utf-8', etag: null, lastModified: null, body: rendered.html };
+    return { ...blankAnswer(meta), kind: 'answer', contentType: 'text/html; charset=utf-8', etag: null, lastModified: null, body: rendered.html, ...(rendered.evidence ? { evidence: rendered.evidence } : {}) };
   } finally {
     release();
   }
+}
+
+/** Real browser navigation shares the HTTP gate, including robots, host locks, budget and Retry-After. */
+async function renderNavigation(deps: ObtainDeps, config: WatchConfig, budget: Budget, failed: (failure: FailureCode, meta?: Partial<AnswerMeta>, retryAfter?: number | null) => Obtained): Promise<Obtained> {
+  const browser = deps.browser;
+  if (browser === null) return failed('BROWSER_UNAVAILABLE');
+  // Check the initial host before allocating a metered browser. Navigation checks it again under the shared lock.
+  const target = new URL(config.uri);
+  const busy = hostRefusal(deps.store.host(target.hostname.toLowerCase()), deps.now());
+  if (busy?.kind === 'host') return { ...blankAnswer({ finalUrl: config.uri }), kind: 'deferred', until: busy.until };
+  if (!config.ignoreRobots) {
+    const verdict = await robotsVerdict(deps, target, config, budget, { left: ROBOTS_REQUESTS_PER_CHECK });
+    if (verdict === null || !robotsAllows(verdict, `${target.pathname}${target.search}`)) return failed('ROBOTS_DISALLOWED', { robotsAllowed: false });
+  }
+  const state: GateState = { robotsAllowed: true, firstAt: null, starts: new Map() };
+  const page = pageGate(deps, config, budget, state);
+  const gate: HopGate = {
+    async enter(url, hop, previous) {
+      if (budget.requests <= 0) return { kind: 'budget' };
+      const denied = await page.enter(url, hop, previous);
+      if (denied !== null) return denied;
+      if (budget.requests <= 0) { page.leave(url, 0, null); return { kind: 'budget' }; }
+      budget.requests--;
+      budget.used++;
+      return null;
+    },
+    leave: (url, status, headers) => { page.leave(url, status, headers); },
+  };
+  const started = deps.now();
+  deps.store.setMeta('browser_next_at', String(started + BROWSER_SPACING_MS));
+  const rendered = await browser.render({ url: config.uri, locale: config.locale, timeoutMs: deps.timeoutMs,
+    allowHttp: config.allowHttp, source: config.source, gate });
+  const sent: Partial<AnswerMeta> = { robotsAllowed: state.robotsAllowed, fetched: state.firstAt !== null, fetchedAt: state.firstAt };
+  if (rendered.kind === 'quota') {
+    deps.store.addLedger(utcDay(started), 0, 0, true);
+    return failed('JS_QUOTA_EXHAUSTED', sent, nextUtcMidnight(started) - started);
+  }
+  deps.store.addLedger(utcDay(started), 0, rendered.browserMs);
+  if (rendered.kind === 'failed') {
+    if (rendered.error) throw rendered.error;
+    return failed(rendered.failure, sent);
+  }
+  if (rendered.kind === 'refused') {
+    if (rendered.refusal.kind === 'robots') return failed('ROBOTS_DISALLOWED', sent);
+    if (rendered.refusal.kind === 'budget') return failed('REDIRECT_REFUSED', sent);
+    return { ...blankAnswer(sent), kind: 'deferred', until: rendered.refusal.until };
+  }
+  budget.bytes += rendered.html.byteLength + (rendered.evidence?.screenshot?.bytes.byteLength ?? 0);
+  const meta = { ...sent, status: rendered.status, finalUrl: rendered.finalUrl ?? '', redirects: rendered.redirects ?? 0 };
+  if (rendered.finalUrl === null || checkUri(rendered.finalUrl, { allowHttp: config.allowHttp }) === null) return failed('REDIRECT_REFUSED', meta);
+  const headers = rendered.headers ?? new Headers();
+  if (isChallenge(rendered.status, headers, rendered.html)) return failed('CHALLENGE_PAGE', meta);
+  const failure = statusFailure(rendered.status);
+  if (failure !== null) return failed(failure, meta, failure === 'RATE_LIMITED' ? retryAfterMs(headers.get('retry-after'), state.firstAt ?? started) : null);
+  return { ...blankAnswer(meta), kind: 'answer', contentType: 'text/html; charset=utf-8', etag: null, lastModified: null,
+    body: rendered.html, ...(rendered.evidence ? { evidence: rendered.evidence } : {}) };
 }
 
 function blankAnswer(meta: Partial<AnswerMeta>): AnswerMeta {

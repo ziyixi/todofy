@@ -63,11 +63,11 @@ function workerBundle(entry = 'src/index.ts'): Promise<string> {
     entryPoints: [join(ROOT, entry)],
     bundle: true,
     format: 'esm',
-    platform: 'neutral',
+    platform: 'browser',
     target: 'es2024',
-    mainFields: ['module', 'main'],
+    mainFields: ['browser', 'module', 'main'],
     conditions: ['workerd', 'worker', 'import'],
-    external: ['cloudflare:workers'],
+    external: ['cloudflare:workers', 'node:buffer'],
     write: false,
     logLevel: 'silent',
   }).then((result) => {
@@ -90,6 +90,8 @@ export interface FakeBrowser {
 }
 
 export interface HarnessOptions {
+  /** Bind a local private R2 bucket for captured evidence. */
+  readonly evidence?: boolean;
   readonly bindings?: Record<string, string>;
   /** Bind a fake BROWSER (Browser Run's content action). */
   readonly browser?: boolean;
@@ -179,6 +181,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           modules: true,
           script,
           compatibilityDate: '2026-09-08',
+          compatibilityFlags: ['nodejs_compat'],
+          ...(options.evidence === true ? { r2Buckets: ['EVIDENCE_STORE'] } : {}),
           durableObjects: { WATCH: { className: 'WatchState', useSQLite: true, ...(options.splitObject === true ? { scriptName: OBJECT_WORKER } : {}) } },
           serviceBindings: {
             ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
@@ -197,6 +201,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
                 modules: true,
                 script,
                 compatibilityDate: '2026-09-08',
+                compatibilityFlags: ['nodejs_compat'],
+                ...(options.evidence === true ? { r2Buckets: ['EVIDENCE_STORE'] } : {}),
                 durableObjects: { WATCH: { className: 'WatchState', useSQLite: true } },
                 serviceBindings: { ASSETS: () => new Response('', { status: 404 }) },
                 bindings,

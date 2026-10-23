@@ -300,12 +300,14 @@ it('connects Watch facts to filtered durable work notifications, with silent che
   const options: RuntimeOptions = { watch(request) {
     const url = new URL(request.url);
     expect([request.method, url.pathname]).toEqual(['GET', '/api/v1/watchEvents:poll']);
+    expect(url.searchParams.get('filter')).toBe('evidence');
     const baseline = url.searchParams.get('baseline') === 'true';
     if (baseline) baselines++;
     else polls++;
     return Response.json({ cursor: String(head), events: !baseline && Number(url.searchParams.get('cursor')) < head
-      ? [{ sequence: String(head), kind: 'change_confirmed', watch: watched,
-        change: `${watched}/changes/synthetic-change`, create_time: '2026-10-22T12:00:00Z' }] : [] });
+      ? [{ sequence: String(head), kind: 'evidence_changed', watch: watched,
+        before_snapshot: `${watched}/snapshots/0000000000000010`,
+        after_snapshot: `${watched}/snapshots/0000000000000011`, create_time: '2026-10-22T12:00:00Z' }] : [] });
   }, tasks() { throw new Error('Work changes must not create Tasks'); } };
   const id = '00000000-0000-4000-8000-000000000081';
   const other = '00000000-0000-4000-8000-000000000082';
@@ -351,10 +353,11 @@ it('connects Watch facts to filtered durable work notifications, with silent che
   expect(polls).toBe(1);
   expect(baselines).toBe(1);
   const read = await tool<{ work: { etag: string }; handled_through_candidate: number;
-    pending_reports: { report_id: string; evidence_ref: string }[]; sources: { watch: { error_code: null } } }>(second, 'work_get', { work_id: id });
+    pending_reports: { report_id: string; evidence_ref: string; summary: string }[]; sources: { watch: { error_code: null } } }>(second, 'work_get', { work_id: id });
   expect(read.work.etag).toBe('2');
   expect(read.pending_reports.map(item => item.report_id)).toEqual(['synthetic-linked-report', 'watch:11']);
-  expect(read.pending_reports[1]?.evidence_ref).toBe(`${watched}/changes/synthetic-change`);
+  expect(read.pending_reports[1]?.evidence_ref).toBe(`${watched}/snapshots/0000000000000011`);
+  expect(read.pending_reports[1]?.summary).toContain(`${watched}/snapshots/0000000000000010`);
   expect(read.sources.watch.error_code).toBeNull();
   await tool(second, 'work_checkpoint', { work_id: id, request_id: crypto.randomUUID(), etag: read.work.etag,
     handled_through_report_seq: read.handled_through_candidate, changes: { state: 'done', result: 'Synthetic observation accepted' } });
@@ -376,9 +379,9 @@ it('discovers tools/events and preserves the subscription across a restart, then
     'personal_cloud.test', 'task.changed', 'task.must_start', 'mail.ready', 'service.attention', 'work.attention',
   ]);
   const tools = await call<{ tools: { name: string }[] }>(first, 'tools/list');
-  expect(tools.tools).toHaveLength(34);
+  expect(tools.tools).toHaveLength(36);
   expect(tools.tools.map(tool => tool.name)).toEqual(expect.arrayContaining([
-    'work_context', 'work_get', 'work_checkpoint', 'work_report', 'watch_preview', 'watch_create', 'watch_control', 'recall_activity', 'recall_view',
+    'work_context', 'work_get', 'work_checkpoint', 'work_report', 'watch_preview', 'watch_create', 'watch_control', 'watch_read', 'watch_view', 'recall_activity', 'recall_view',
   ]));
   const catalogStatus = await call<ToolReply>(first, 'tools/call', { name: 'connection_status', arguments: {} });
   expect(catalogStatus.structuredContent.status?.last_subscription_request).toBeNull();

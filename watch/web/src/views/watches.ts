@@ -4,7 +4,7 @@
  * AIP-160 filter, the text as one quoted literal).
  */
 import { quoteLiteral } from '@ziyixi/proto/filter'
-import { WatchHealth_Outcome, type Watch } from '@ziyixi/proto/watch/ui/v1/watch_pb'
+import { WatchHealth_Outcome, Watch_Fetcher, type Watch } from '@ziyixi/proto/watch/ui/v1/watch_pb'
 import { api, errorMessage, listAllWatches, newRequestId, withRetry } from '../api.ts'
 import { button, el, toast } from '../dom.ts'
 import { failureText, hostOf, relative, watchIdOf, watchState } from '../format.ts'
@@ -16,7 +16,8 @@ export function lastCheck(watch: Watch, now: number): string {
   if (health?.lastCheckTime === undefined) return '尚未检查'
   if (health.lastOutcome === WatchHealth_Outcome.FAILED) return `${relative(health.lastCheckTime, now)}：${failureText(health.lastFailure, health.lastHttpStatus)}`
   const outcome = health.lastOutcome === WatchHealth_Outcome.CHANGED ? '有变化' : health.lastOutcome === WatchHealth_Outcome.NOT_MODIFIED ? '未修改（304）' : '无变化'
-  return `${relative(health.lastCheckTime, now)}检查：${outcome}`
+  const subject = watch.fetcher === Watch_Fetcher.BROWSER ? '正文比较' : '检查'
+  return `${relative(health.lastCheckTime, now)}${subject}：${outcome}`
 }
 
 export function watchRow(ctx: ViewContext, watch: Watch, onChange: () => void): HTMLElement {

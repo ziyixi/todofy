@@ -30,5 +30,5 @@ it('adds evidence columns without losing legacy changes and tolerates rollback t
   expect(changeMessage(legacy, 'Synthetic').contextAvailable).toBe(false);
   target.run(`UPDATE meta SET value = '3' WHERE key = 'schema_version'`);
   expect(() => { target.migrate(); }).not.toThrow();
-  expect(target.getMeta('schema_version')).toBe('4');
+  expect(target.getMeta('schema_version')).toBe('5');
 });

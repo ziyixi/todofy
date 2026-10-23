@@ -26,6 +26,7 @@ import {
   StabilitySchema,
   TextTriggerSchema,
   TriggerSchema,
+  Watch_Fetcher,
   Watch_NotifyPolicy,
   Watch_PauseReason,
   Watch_State,
@@ -48,6 +49,7 @@ export const SAVE_MASK: readonly string[] = [
   'check_interval_minutes',
   'notify_policy',
   'request_locale',
+  'fetcher',
   'fetch_policy',
   'shadow_mode',
   'etag',
@@ -62,6 +64,7 @@ export interface Draft {
   displayName: string
   uri: string
   source: SourceKind
+  fetcher: 'http' | 'browser'
   include: string[]
   exclude: string[]
   keepLinks: boolean
@@ -98,6 +101,7 @@ export function emptyDraft(uri = ''): Draft {
     displayName: '',
     uri,
     source: 'html',
+    fetcher: 'http',
     include: [],
     exclude: [],
     keepLinks: false,
@@ -137,6 +141,7 @@ export function draftOf(watch: Watch): Draft {
     name: watch.name,
     etag: watch.etag,
     displayName: watch.displayName,
+    fetcher: watch.fetcher === Watch_Fetcher.BROWSER ? 'browser' : 'http',
     source: source?.feed !== undefined ? 'feed' : source?.json !== undefined ? 'json' : source?.embedded !== undefined ? 'embedded' : 'html',
     include: [...(source?.html?.includeSelectors ?? [])],
     exclude: [...(source?.html?.excludeSelectors ?? [])],
@@ -217,12 +222,14 @@ export function watchOf(draft: Draft): Watch {
   out.checkIntervalMinutes = draft.interval
   out.notifyPolicy = draft.urgent ? Watch_NotifyPolicy.URGENT : draft.base?.notifyPolicy === Watch_NotifyPolicy.NONE ? Watch_NotifyPolicy.NONE : Watch_NotifyPolicy.DIGEST
   out.requestLocale = draft.locale.trim()
+  out.fetcher = draft.fetcher === 'browser' ? Watch_Fetcher.BROWSER : Watch_Fetcher.HTTP
   out.fetchPolicy = Object.assign(out.fetchPolicy ?? create(FetchPolicySchema), { allowHttp: draft.allowHttp, ignoreRobots: draft.ignoreRobots })
   out.shadowMode = draft.shadow
   // What the Worker sets is not sent back (the transcoder would clear it anyway).
   out.state = Watch_State.UNSPECIFIED
   out.pauseReason = Watch_PauseReason.UNSPECIFIED
   out.health = undefined
+  out.latestSnapshot = ''
   out.shadowEndTime = undefined
   out.createTime = undefined
   out.updateTime = undefined
@@ -280,6 +287,10 @@ export function settingsForm(draft: Draft, onInput: () => void, options: FormOpt
     }
     const input = (field: Field, attributes: Record<string, string> = {}) => bind(draft, field, el('input', attributes), onInput)
     const box = (field: Field) => bind(draft, field, el('input', { type: 'checkbox' }), changed)
+    const fetcherSelect = bind(draft, 'fetcher', select([['http', 'HTTP（文字）'], ['browser', '浏览器（文字和截图）']]), () => {
+      if (draft.fetcher === 'browser' && draft.interval < 360) draft.interval = 360
+      changed()
+    })
     const sourceSelect = bind(draft, 'source', select([['html', '网页文字'], ['feed', '订阅源（RSS / Atom / JSON Feed）'], ['json', 'JSON 接口'], ['embedded', '网页内嵌数据（JSON-LD / Next.js）']]), changed)
     const triggerSelect = bind(
       draft,
@@ -325,11 +336,12 @@ export function settingsForm(draft: Draft, onInput: () => void, options: FormOpt
     fill(
       form,
       labelled('名称', input('displayName', { name: 'displayName', maxlength: '80', placeholder: '例如 水壶价格' }), '会出现在 Tasks 任务里；不要填网址'),
+      labelled('抓取方式', fetcherSelect, draft.fetcher === 'browser' ? '运行页面 JavaScript 并保存截图；检查间隔至少 6 小时，共用每日 480 秒浏览器额度' : '直接读取网页或数据，不运行 JavaScript'),
       labelled('数据来源', sourceSelect),
       ...sourceFields,
       labelled('提醒条件', triggerSelect),
       ...triggerFields,
-      labelled('检查频率', bind(draft, 'interval', select(INTERVALS), onInput)),
+      labelled('检查频率', bind(draft, 'interval', select(draft.fetcher === 'browser' ? INTERVALS.filter(([minutes]) => minutes >= 360) : INTERVALS), onInput)),
       draft.source === 'html' ? check('不等待二次确认', box('skipConfirmation'), '默认约 15 分钟后再抓一次，确认变化不是一闪而过') : null,
       check('紧急提醒（不进每日摘要）', box('urgent')),
       ...(draft.base?.notifyPolicy === Watch_NotifyPolicy.NONE && !draft.urgent ? [el('p', { class: 'hint' }, '此监视由 Dots 处理变化，不创建 Tasks 提醒。')] : []),

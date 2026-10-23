@@ -16,9 +16,11 @@ afterEach(() => { vi.useRealTimers(); for (const database of databases.splice(0)
 
 function uuid(value: number) { return `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`; }
 function advance() { vi.setSystemTime(Date.now() + WATCH_POLL_INTERVAL_MS); }
-function event(sequence: number, kind = 'change_confirmed', watch = WATCH) {
+function event(sequence: number, kind = 'evidence_changed', watch = WATCH) {
   return { sequence: String(sequence), kind, watch,
-    change: kind === 'change_confirmed' ? `${watch}/changes/synthetic-${String(sequence)}` : '', create_time: AT };
+    change: kind === 'change_confirmed' ? `${watch}/changes/synthetic-${String(sequence)}` : '',
+    ...(kind === 'evidence_changed' ? { before_snapshot: `${watch}/snapshots/${String(sequence - 1).padStart(16, '0')}`,
+      after_snapshot: `${watch}/snapshots/${String(sequence).padStart(16, '0')}` } : {}), create_time: AT };
 }
 function expired() {
   return Response.json({ error: { code: 400, status: 'OUT_OF_RANGE', message: 'Synthetic event cursor expired',
@@ -51,6 +53,7 @@ function fixture(read: (query: URLSearchParams) => Record<string, unknown> | Res
     expect(request.method).toBe('GET');
     expect(url.pathname).toBe('/api/v1/watchEvents:poll');
     expect(url.searchParams.get('page_size')).toBe('20');
+    expect(url.searchParams.get('filter')).toBe('evidence');
     calls.push({ path: url.pathname, baseline: url.searchParams.get('baseline') === 'true', cursor: url.searchParams.get('cursor') ?? '' });
     const result = read(url.searchParams);
     return Promise.resolve(result instanceof Response ? result : Response.json(result));
@@ -87,9 +90,9 @@ it('skips history at the native baseline and polls only while open work has Watc
   expect(f.calls).toHaveLength(2);
 });
 
-it('routes confirmed silent-watch candidates only to linked open work through work.attention', async () => {
+it('routes captured evidence changes only to linked open work without repeating business confirmation', async () => {
   const f = fixture(query => query.get('baseline') === 'true' ? { cursor: '40' }
-    : { cursor: '42', events: [event(41), event(42, 'change_confirmed', 'watches/unlinked')] });
+    : { cursor: '43', events: [event(41), event(42, 'evidence_changed', 'watches/unlinked'), event(43, 'change_confirmed')] });
   const active = f.create(10, { links: [{ type: 'watch', ref: WATCH, owned: true }] });
   const waiting = f.create(11, { state: 'waiting', waiting_for: 'A synthetic release', links: [{ type: 'watch', ref: WATCH }] });
   const done = f.create(12, { state: 'done', result: 'Already reviewed.' });
@@ -103,14 +106,17 @@ it('routes confirmed silent-watch candidates only to linked open work through wo
     const read = f.store.get({ work_id: work.id });
     expect(read.pending_reports).toHaveLength(1);
     expect(read.pending_reports[0]).toMatchObject({ report_id: 'watch:41', kind: 'progress',
-      source: { type: 'watch', ref: WATCH }, evidence_ref: `${WATCH}/changes/synthetic-41` });
+      source: { type: 'watch', ref: WATCH }, evidence_ref: `${WATCH}/snapshots/0000000000000041` });
+    expect(read.pending_reports[0]?.summary).toContain('captured changed page evidence');
+    expect(read.pending_reports[0]?.summary).toContain(`Before snapshot: ${WATCH}/snapshots/0000000000000040`);
+    expect(read.pending_reports[0]?.summary).toContain(`After snapshot: ${WATCH}/snapshots/0000000000000041`);
     expect(read.work.state).toBe(work.state);
   }
   for (const work of [done, cancelled, unrelated]) expect(f.store.get({ work_id: work.id }).pending_reports).toEqual([]);
   // The source reads the metadata feed regardless of NONE; no Tasks call or second Watch subscription is used.
   expect(f.calls.every(call => call.path === '/api/v1/watchEvents:poll')).toBe(true);
   expect(EVENT_NAMES.filter(name => name === WORK_EVENT_NAME || name.includes('watch'))).toEqual([WORK_EVENT_NAME]);
-  expect(JSON.stringify(f.attention)).not.toContain('synthetic-41');
+  expect(JSON.stringify(f.attention)).not.toContain('snapshots');
 });
 
 it('reuses stable report IDs when a restart rereads a page before its cursor update was saved', async () => {

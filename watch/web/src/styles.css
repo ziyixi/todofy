@@ -478,3 +478,50 @@ ul.ignored li {
 ul.ignored .text {
   overflow-wrap: anywhere;
 }
+
+.evidence {
+  margin-top: 0.75rem;
+}
+
+.evidence > summary,
+.evidence-source > summary {
+  cursor: pointer;
+  padding: 0.5rem 0;
+}
+
+.snapshot {
+  min-width: 0;
+}
+
+.snapshot h3,
+.snapshot h4 {
+  font-size: 0.95rem;
+  margin: 0.75rem 0 0.4rem;
+}
+
+.evidence-text {
+  max-height: 30rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  background: var(--panel);
+  font: 0.85rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.evidence-uri {
+  overflow-wrap: anywhere;
+}
+
+.evidence-image {
+  margin: 0;
+}
+
+.evidence-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+}

@@ -121,5 +121,7 @@ export function changeMessage(row: ChangeRow, displayName: string): Change {
     afterContext: JSON.parse(row.after_context) as string[],
     contextAvailable: row.context_available === 1,
     contextTruncated: row.context_truncated === 1,
+    beforeSnapshot: row.before_evidence ?? '',
+    afterSnapshot: row.after_evidence ?? '',
   });
 }

@@ -1,0 +1,100 @@
+// Stored page evidence, read independently of Watch's rule evaluation.
+syntax = "proto3";
+
+package watch.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "SnapshotProto";
+option java_package = "science.ziyixi.watch.ui.v1";
+
+// One bounded capture. Text is unmasked reading evidence, never executable HTML.
+message Snapshot {
+  option (google.api.resource) = {
+    type: "watch.ziyixi.science/Snapshot"
+    pattern: "watches/{watch}/snapshots/{snapshot}"
+    singular: "snapshot"
+    plural: "snapshots"
+  };
+  // The source watch and a 16-character lowercase alphanumeric capture ID.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // When this evidence was captured, not when it was read.
+  google.protobuf.Timestamp create_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The final captured URL.
+  string uri = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The page's supplied title.
+  string title = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Structured readable text, at most 256 KiB of UTF-8.
+  string markdown = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Optional browser accessibility tree as bounded JSON, at most 64 KiB.
+  string structure_json = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most 200 source links, with their visible labels.
+  repeated SnapshotLink links = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most 50 page-supplied metadata entries, never model-generated claims.
+  repeated SnapshotMetadata metadata = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether saved reading evidence was available for this read.
+  bool content_available = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A text, structure or extraction limit omitted content.
+  bool content_truncated = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Empty on success, otherwise a safe code such as unavailable or expired.
+  string content_error = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether this capture saved a screenshot; image retrieval may still fail.
+  bool image_available = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Empty when an image was saved; otherwise not_recorded, screenshot_failed or too_large.
+  string image_error = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Screenshot width in pixels, zero if absent.
+  int32 image_width = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Screenshot height in pixels, zero if absent.
+  int32 image_height = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // image/jpeg when a screenshot was saved.
+  string image_mime_type = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // SHA-256 of reading content, excluding capture time.
+  string content_sha256 = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // SHA-256 of screenshot bytes, empty if absent.
+  string image_sha256 = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A page link retained as evidence; reading it does not follow the link.
+message SnapshotLink {
+  // The visible label.
+  string text = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The resolved source URL.
+  string url = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One page-supplied metadata value.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: an unaddressed page metadata pair is not a resource. --)
+message SnapshotMetadata {
+  // The metadata name or property.
+  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its original bounded value.
+  string content = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The screenshot singleton belonging to one capture.
+message SnapshotImage {
+  option (google.api.resource) = {
+    type: "watch.ziyixi.science/SnapshotImage"
+    pattern: "watches/{watch}/snapshots/{snapshot}/image"
+    singular: "snapshotImage"
+    plural: "snapshotImages"
+  };
+  // The snapshot name followed by /image.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Saved JPEG bytes encoded as base64; never included in change notifications.
+  // (-- api-linter: core::0140::base64=disabled
+  //     aip.dev/not-precedent: the wire profile exposes image transport as a string, like Recall. --)
+  string jpeg_base64 = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // True only when saved image bytes were read successfully.
+  bool available = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Empty on success, otherwise not_recorded, expired, unavailable or screenshot_failed.
+  string error = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Image width in pixels.
+  int32 width = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Image height in pixels.
+  int32 height = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

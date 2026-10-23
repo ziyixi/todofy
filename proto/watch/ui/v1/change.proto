@@ -130,6 +130,20 @@ message Change {
   // An extraction, snapshot or context limit cut evidence, or the historical snapshot's completeness is
   // unknown. A semantic reader must not treat this as complete evidence of an irrelevant change.
   bool context_truncated = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Prior reading evidence, empty for older records; may expire.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: before/after identify the two stored evidence versions. --)
+  string before_snapshot = 23 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Snapshot"
+  ];
+  // New reading evidence, empty for older records; may expire.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: before/after identify the two stored evidence versions. --)
+  string after_snapshot = 24 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Snapshot"
+  ];
 }
 
 // One line of a change's difference.

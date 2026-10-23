@@ -40,6 +40,7 @@
     "recall-store",
     "tasks-backups",
     "todofy-backups",
-    "vultr-backup"
+    "vultr-backup",
+    "watch-evidence"
   ]
 }

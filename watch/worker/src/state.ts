@@ -1,3 +1,4 @@
+import { cleanEvidence } from './evidence.ts';
 /**
  * WatchState (../../docs/design.md §6): the single SQLite-backed Durable Object "watch-v1". It holds every watch,
  * snapshot and change, schedules itself with setAlarm (no cron trigger), makes every request to a watched site, and
@@ -17,7 +18,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { HttpTranscoder } from '@ziyixi/proto/http-transcoder';
 import { WatchUiService } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { handlers, type ApiContext } from './api.ts';
-import { quickActionRenderer, type BrowserRenderer } from './browser.ts';
+import { quickActionRenderer, puppeteerRenderer, type BrowserRenderer } from './browser.ts';
 import { buildSha, devFetch, publicHost, PRIVATE_API_HEADER, REQUEST_ID_HEADER, type Env } from './env.ts';
 import { supportedSelector } from './extract/html.ts';
 import type { FetchFn } from './fetcher.ts';
@@ -88,7 +89,9 @@ export class WatchState extends DurableObject<Env> {
   }
 
   private browser(): BrowserRenderer | null {
-    return this.env.BROWSER === undefined ? null : quickActionRenderer(this.env.BROWSER, FETCH_MAX_BYTES);
+    if (this.env.BROWSER === undefined) return null;
+    if (this.manual() && this.env.DEV_AUTH_BYPASS === 'true') return quickActionRenderer(this.env.BROWSER, FETCH_MAX_BYTES);
+    return puppeteerRenderer(this.env.BROWSER, FETCH_MAX_BYTES);
   }
 
   private transact = <T>(fn: () => T): T => this.ctx.storage.transactionSync(fn);
@@ -129,6 +132,10 @@ export class WatchState extends DurableObject<Env> {
       let result: AlarmResult | { next: number; error: string };
       if (this.manual()) this.passClock = now;
       try {
+        if (this.env.EVIDENCE_STORE) {
+          try { await cleanEvidence(this.store, this.env.EVIDENCE_STORE); }
+          catch { console.warn(JSON.stringify({ event: 'evidence_cleanup', error_code: 'UNAVAILABLE' })); }
+        }
         result = await runAlarm(
           {
             store: this.store,
@@ -139,6 +146,7 @@ export class WatchState extends DurableObject<Env> {
             hosts: this.hosts,
             transact: this.transact,
             judge: NO_JUDGE,
+            evidenceStore: this.env.EVIDENCE_STORE,
             sink: this.sink(),
             elapsed: () => performance.now(),
           },
@@ -214,6 +222,7 @@ export class WatchState extends DurableObject<Env> {
     const now = this.now();
     const ctx: ApiContext = {
       privateApi: request.headers.get(PRIVATE_API_HEADER) === 'true',
+      evidenceStore: this.env.EVIDENCE_STORE,
       store: this.store,
       now,
       configEnv: { selectorOk: supportedSelector, browserEnabled: this.env.BROWSER !== undefined },

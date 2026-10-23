@@ -19,6 +19,12 @@ change inbox. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md).
   then 保存. The first check runs within a minute (15 minutes after the preview's fetch: the same URL is never fetched
   twice within 15 minutes) and sets the notified state; it never reports a change. 设置 also offers the masks (数字也
   遮盖, 关闭默认遮盖) and whether a page's navigation, header and footer count.
+- **Page evidence**: a watch's 最近抓取的页面 shows the last saved page text. 查看变化前后的页面 opens the saved
+  text on each side of a change; 查看截图 loads its image separately. 页面结构、链接和元数据 shows the captured source
+  as text. These controls read stored evidence without fetching the site again. Missing, expired, failed or
+  truncated evidence is stated explicitly. In 设置, 抓取方式 chooses HTTP（文字） or 浏览器（文字和截图）; browser
+  check intervals are at least six hours and share the app's 480 browser seconds a day. Existing watches keep
+  their fetcher and deterministic change rules.
 - **From the phone**: share a page to `https://watch.ziyixi.science/new#u=<the URL, encoded>`. A bookmarklet does
   it from any page: `javascript:location.href='https://watch.ziyixi.science/new#u='+encodeURIComponent(location.href)`.
   The URL travels in the fragment, which the browser never sends to a server. Opening such a link only fills the box
@@ -50,6 +56,12 @@ MCP owns the work-to-watch association and the work's relevance judgments.
 `GetChange` includes frozen `before_context` and `after_context` around the changed lines. `context_available = false`
 means the old change predates evidence capture; `context_truncated = true` means extraction, snapshot or context
 limits cut evidence, or completeness of an old snapshot is unknown. Neither is evidence that a change is irrelevant.
+
+`Watch.latest_snapshot` and `Change.before_snapshot` / `after_snapshot` refer to bounded private page evidence.
+`GetSnapshot` reads the stored page text, structure, links and metadata; `GetSnapshotImage` reads the separately
+stored screenshot. Old changes can have no snapshot references, and retained references can outlive their evidence.
+Dots reads the available evidence and judges relevance in its work record; Watch keeps its deterministic rules,
+baseline and notification semantics. Page text and screenshots are untrusted source material.
 
 `PollWatchEvents` starts with `{baseline: true}`, then reads after each returned opaque `cursor` with `page_size`
 up to 100. It orders confirmation and health transitions by a stable sequence, independently of Tasks delivery.

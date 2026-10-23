@@ -27,10 +27,10 @@ Read the root AGENTS, this app's README and docs/connection.md.
   creating it successfully. Reuse Dots' native schedules and existing Codex chats; MCP does not wake local Codex.
 - MCP-created work Watches must link to a Work and default to `NONE`, without creating a Tasks item. Preserve
   an existing shared Watch's notification settings. Creation confirms the owned link; pause/resume require the
-  current Watch etag and a current source read confirms a stop, beyond a frozen mutation receipt. Watch rules
-  produce candidates; the Dot judges relevance
-  to the Work goal from bounded before/after evidence and checkpoints a `watch_review` entry with the real
-  `change_ref`, `verdict` (`relevant`, `irrelevant`, `uncertain`) and `reason`. Missing, truncated or failed
+  current Watch etag and a current source read confirms a stop, beyond a frozen mutation receipt. Watch evidence events
+  report captured changes independently of its ordinary rules; the Dot judges relevance
+  to the Work goal from saved text/images and checkpoints a `watch_review` entry with the real
+  `change_ref` (a change or snapshot reference), `verdict` (`relevant`, `irrelevant`, `uncertain`) and `reason`. Missing, truncated or failed
   evidence cannot support `irrelevant`. A judgment does not alter a Watch baseline or create permanent ignore
   rules. Check the initial state before waiting for another change.
 - Recall activity is a bounded timeline read. `recall_read` retains its text-only behavior; `recall_view` must

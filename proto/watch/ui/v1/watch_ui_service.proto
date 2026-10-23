@@ -45,6 +45,7 @@ import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 import "watch/ui/v1/change.proto";
+import "watch/ui/v1/snapshot.proto";
 import "watch/ui/v1/watch.proto";
 
 option java_multiple_files = true;
@@ -53,7 +54,24 @@ option java_package = "science.ziyixi.watch.ui.v1";
 
 // The owner's web watches: add one from a preview of the page, see their health, read the changes they
 // found (and the ones the rules suppressed), and acknowledge them.
+// (-- api-linter: core::0121::resource-must-support-list=disabled
+//     aip.dev/not-precedent: snapshots are read by references from a watch or change. --)
 service WatchUiService {
+  // Reads saved evidence without fetching the watched website.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetSnapshot(GetSnapshotRequest) returns (Snapshot) {
+    option (google.api.http) = {get: "/api/v1/{name=watches/*/snapshots/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Reads the saved screenshot singleton.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetSnapshotImage(GetSnapshotImageRequest) returns (SnapshotImage) {
+    option (google.api.http) = {get: "/api/v1/{name=watches/*/snapshots/*/image}"};
+    option (google.api.method_signature) = "name";
+  }
+
   option (google.api.default_host) = "watch.ziyixi.science";
 
   // A watch (AIP-131).
@@ -559,6 +577,8 @@ message PollWatchEventsRequest {
   bool baseline = 2 [(google.api.field_behavior) = OPTIONAL];
   // Default and maximum 100; values above 100 are read as 100.
   int32 page_size = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Empty: confirmed changes and health. "evidence": evidence changes and health.
+  string filter = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // An immutable transition record, addressed through its watch and optional change.
@@ -575,6 +595,8 @@ message WatchEvent {
     KIND_WATCH_BROKEN = 2;
     // The scheduler paused a watch after fourteen days of failures.
     KIND_WATCH_PAUSED = 3;
+    // Reading evidence changed; no business relevance was evaluated.
+    KIND_EVIDENCE_CHANGED = 4;
   }
   // Monotonic event sequence, encoded as decimal text; stable across Tasks delivery and object restarts.
   string sequence = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -592,6 +614,20 @@ message WatchEvent {
   ];
   // When the transition was recorded.
   google.protobuf.Timestamp create_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Prior evidence snapshot, empty on first capture.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: before/after identify the two stored evidence versions. --)
+  string before_snapshot = 6 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Snapshot"
+  ];
+  // New evidence snapshot.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: before/after identify the two stored evidence versions. --)
+  string after_snapshot = 7 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Snapshot"
+  ];
 }
 
 // One page; cursor stays present even when no events are returned.
@@ -602,4 +638,21 @@ message PollWatchEventsResponse {
   string cursor = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // More events can be read immediately with this cursor.
   bool has_more = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetSnapshot.
+message GetSnapshotRequest {
+  // The saved snapshot name.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "watch.ziyixi.science/Snapshot"
+  ];
+}
+// Input of GetSnapshotImage.
+message GetSnapshotImageRequest {
+  // The saved snapshot image name.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "watch.ziyixi.science/SnapshotImage"
+  ];
 }

@@ -1,8 +1,8 @@
 # The watch app: design
 
 The owner's web watches: a page, a feed or a JSON API checked on a schedule, a deterministic pipeline that decides
-whether a difference is a change worth the owner's attention, and an inbox of those changes. One Worker `watch`, one
-SQLite Durable Object `WatchState`, a Chinese mobile-first UI, on Workers Free at $0. The owner approved this design
+whether a difference meets an ordinary watch rule, and saved evidence for Dots to judge against a Work goal.
+One Worker `watch`, one SQLite Durable Object `WatchState`, one private evidence R2 bucket, a Chinese mobile-first UI, on Workers Free at $0. The owner approved this design
 on 2026-10-01 with every recommended default (the research report the lead keeps); this document is how it is built.
 
 W1 built and checked it; W2 deploys it on `watch.ziyixi.science` and W3 adds the notifications and ops-v1 (§11).
@@ -11,7 +11,7 @@ W1 built and checked it; W2 deploys it on `watch.ziyixi.science` and W3 adds the
 
 - One owner, at most 50 watches (`WATCHES_MAX`), checked every 6 hours by default (1 hour to 7 days).
 - Pages that render on the server, RSS/Atom/JSON feeds, JSON APIs and data embedded in pages (JSON-LD, Next.js).
-  Pages that need JavaScript use a browser renderer that v1 keeps behind a flag (§4).
+  Pages that need JavaScript or screenshots use the metered browser renderer (§4).
 - Not in v1: the AI judge. Deployment and Access came with W2; notifications (W3, §7) are one daily digest task and
   urgent changes, created in Tasks through its create-only `TaskInbox` (Todofy's task intents until 2026-10-21), and
   ops-v1 counts for the dashboard.
@@ -40,7 +40,8 @@ browser ──Access──▶ Worker "watch" (fetch)
   that doubles from 5 minutes up to the regular interval, never sooner than 15 minutes after its request. Every API
   call arms an alarm when none is set (the fallback for a lost alarm), and writes that need a check soon bring it
   forward to a second from now.
-- All data lives in the object's SQLite: zero D1 writes, no R2, no KV.
+- Configuration, rule state and evidence indexes live in the object's SQLite. Bounded reading captures and
+  screenshots live in private R2 (§Page evidence); there is no D1 or KV.
 
 ## 3. A watch
 
@@ -91,19 +92,15 @@ Tiers, cheapest first:
    encodings: a UTF-16 body (a BOM or the header) is decoded and handed on as UTF-8, and a meta that says utf-16 is
    read as UTF-8 (the HTML rule). An omitted `</head>` is closed by the first element that cannot be in `head`. The
    U+FFFD ratio gates mojibake; a body no parser can read is `PARSE_ERROR`, never an exception.
-3. **Browser** (`FETCHER_BROWSER`): Browser Run's `content` quick action through a Fetcher, one render per check,
-   images, media and fonts not loaded; never `/json`, `/crawl`, screenshots, PDFs or a kept-alive session. Browser
-   Run gives the whole account 10 minutes a day, so the app keeps its own ledger of 480 s a day (a render starts only
-   with 15 s left, and every render that reached the binding is charged, a failed one too: the time the renderer
-   reports or the 15 s reserve) and a 429 marks the day exhausted: such checks fail as `JS_QUOTA_EXHAUSTED` until
-   00:00 UTC, shown as "今日 JS 配额已用完", never as "no change". Renders are 10 s apart, each counts as a request of
-   the alarm's budget, the rendered HTML is read through the 2 MiB cap (never buffered whole), robots.txt and the
-   host's spacing apply to the watched URL, and a render that reports ending on a URL a watch may not fetch is
-   `REDIRECT_REFUSED`. **Behind a flag in v1**: the production config binds no browser, so such watches are refused
-   (`BROWSER_NOT_AVAILABLE`) and the tier runs only in the workerd tests against a fake binding. Wiring the real
-   Browser Run binding is a later step that needs its own check against the live service, and Browser Run's `content`
-   action does not report where the page ended: that step must limit the render to the watch's host (request
-   interception) or obtain the final URL, so the browser cannot follow a page to an IP literal or the owner's hosts.
+3. **Browser** (`FETCHER_BROWSER`): the official `@cloudflare/puppeteer` package opens one Browser Run session
+   per check. Main-frame navigations pass the same async robots/host/redirect gate as HTTP; HTTP(S) subresources
+   follow the URL policy too. Images, fonts and public frames may render; frame documents are not recursively
+   extracted. The same page supplies its rendered HTML,
+   native meaningful accessibility tree and a fixed 1280 × 960 JPEG (quality 65, at most 1 MiB). The screenshot is
+   a viewport, not the full page. The session closes after capture, including failure. Text remains available when
+   only the screenshot or accessibility capture fails, with explicit source error codes.
+   The app retains its 480-second daily ledger under the account's shared allowance. Budget exhaustion is
+   `JS_QUOTA_EXHAUSTED`, never no change. Browser checks retain their existing six-hour minimum interval.
 
 Etiquette (`worker/src/etiquette.ts`, `obtain.ts`, `fetcher.ts`, `scheduler.ts`):
 
@@ -478,7 +475,8 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
   1. Resources: the Access application "watch" for the whole host `watch.ziyixi.science` (an `owner_apps` entry in
      `infra/access.tf`, session 24h as for the other owner apps, created by "Infra apply" before this commit:
      `infra/README.md` "Adding an app"), its AUD committed as `ACCESS_AUDIENCE`; the `production` GitHub secret `WATCH_CSRF_SIGNING_KEY` (64 hex); the owner inputs come from
-     the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`. No D1 database and no R2 bucket.
+     the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`. W2 needed no D1 or R2;
+     the later page-evidence release adds the private `watch-evidence` bucket.
   2. `wrangler.toml`: `routes = [{ pattern = "watch.ziyixi.science", custom_domain = true }]`.
   3. `.github/scripts/test_wrangler_configs.py`: `watch` from `UNDEPLOYED` to `PRODUCTION` and `WRAPPERS`, its
      `WATCH_ACCESS_OWNER*` in `PERSONAL_INPUTS` and `SHARED_SECRETS`, and a routed Worker in
@@ -523,3 +521,30 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
      Contracts job like the other apps'; the dashboard registry's ops binding for it.
   4. Logs stay IDs and counts: a task intent carries the watch's display name, the trigger type and a count (the
      owner decided against the change's summary: it is page text), never the page's text or URL.
+
+## Page evidence (2026-10-23)
+
+Reading evidence is captured before the raw-HTML and normalized-text short circuits. The HTTP extractor retains
+unmasked Markdown headings, lists, tables, labels/links and page metadata. Rendered captures additionally keep the
+native accessibility tree (at most 64 KiB) and JPEG. This representation is independent of the small normalized
+`Content` used by existing typed rules. No model, OCR or semantic judge runs in Watch.
+
+SQLite's `evidence_snapshots` indexes immutable text object addresses and content/image hashes; private
+`EVIDENCE_STORE` (`watch-evidence`) holds bounded JSON documents and JPEGs. Image hashes reuse exact image bytes;
+an entirely identical capture reuses the latest ready snapshot. Capture times do not enter the hash. A changed
+text, structure, URL metadata or image creates a candidate even when an ordinary rule would suppress it. The
+private feed's `filter=evidence` returns only those candidates and health, excluding ordinary rule confirmations.
+Legacy callers retain confirmed-rule transitions and health. Both views share the monotonic cursor. Notifications
+carry refs only; the paired snapshots are read through the authenticated API, not refetched from today's page.
+
+The latest 20 reading captures per watch and the rule baseline/previous/pending references are retained.
+Normal pruning/deletion queues private object cleanup for the
+existing Alarm; image objects still referenced by a retained capture stay. Interrupted uploads remain indexed and
+are reclaimed at the serialized scheduler boundary. R2 failure does not become an unchanged check. Historical
+reading refs may expire; existing frozen short text context remains. `GetSnapshot` and `GetSnapshotImage` report
+unavailable/expired evidence explicitly and do not reconstruct an old page from a new request.
+
+MCP `watch_read` returns one Unicode-safe Markdown/structure window plus metadata; `watch_view` returns the saved
+JPEG as real MCP image content. Dots judges relevance, records its decision in Work and decides subsequent action.
+The UI lazily reads current and before/after evidence in existing watch/change details. Historical records without
+capture refs remain readable using their original frozen context.

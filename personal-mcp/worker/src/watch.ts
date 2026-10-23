@@ -7,6 +7,7 @@ import {
 } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { WatchSchema, Watch_State } from '@ziyixi/proto/watch/ui/v1/watch_pb';
 import { ChangeSchema, type Change } from '@ziyixi/proto/watch/ui/v1/change_pb';
+import { SnapshotSchema, SnapshotImageSchema } from '@ziyixi/proto/watch/ui/v1/snapshot_pb';
 import { answer, bindingTransport } from './source-tools.ts';
 import { workIdSchema, workError } from './work-model.ts';
 import type { WorkStore } from './work-store.ts';
@@ -18,6 +19,7 @@ export function createWatchClient(env: WatchToolEnv) {
 
 const name = z.string().regex(/^watches\/[a-z][a-z0-9-]{0,39}$/);
 const changeName = z.string().regex(/^watches\/[a-z][a-z0-9-]{0,39}\/changes\/[a-zA-Z0-9-]+$/);
+const snapshotName = z.string().regex(/^watches\/[a-z][a-z0-9-]{0,39}\/snapshots\/[a-z0-9]{16}$/);
 const selector = z.string().min(1).max(200);
 const source = z.union([
   z.strictObject({ html: z.strictObject({ include_selectors: z.array(selector).max(10).optional(),
@@ -40,14 +42,16 @@ const trigger = z.union([
 const settings = {
   display_name: z.string().trim().min(1).max(80), uri: z.url({ protocol: /^https$/ }).max(2048),
   intent: z.string().trim().min(1).max(200), source: source.optional(), trigger: trigger.optional(),
-  check_interval_minutes: z.number().int().min(60).max(10080).optional(),
+  fetcher: z.enum(['http', 'browser']).describe('HTTP reads text; browser also renders JavaScript and saves a viewport screenshot, subject to Watch availability and its daily browser budget.').optional(),
+  check_interval_minutes: z.number().int().min(60).max(10080).describe('Minimum 60 for HTTP or 360 for browser; omitted uses the source default.').optional(),
 };
 const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 const write = { ...readOnly, readOnlyHint: false };
 
 function changeEvidence(change: Change) {
   return { ...toWire(ChangeSchema, change), before_context: change.beforeContext, after_context: change.afterContext,
-    context_available: change.contextAvailable, context_truncated: change.contextTruncated };
+    context_available: change.contextAvailable, context_truncated: change.contextTruncated,
+    before_snapshot: change.beforeSnapshot, after_snapshot: change.afterSnapshot };
 }
 
 export function registerWatchTools(server: McpServer, env: WatchToolEnv, work: WorkStore, beforeCreate: () => Promise<void>): void {
@@ -76,7 +80,7 @@ export function registerWatchTools(server: McpServer, env: WatchToolEnv, work: W
   }));
 
   server.registerTool('watch_create', {
-    title: 'Create a watch for work', description: 'Create a dedicated HTTP watch and attach it to an open work record. Preview first. It checks with existing free deterministic rules; Dots judges relevance from frozen evidence. Notifications go only through work.attention, never create Tasks. Retry with the same request_id and settings.',
+    title: 'Create a watch for work', description: 'Create a dedicated watch and attach it to an open work record. Preview first. HTTP is the default; browser uses Watch’s existing availability and quota limits. Captured evidence changes reach Dots independently of business triggers; Dots judges relevance. Notifications go through work.attention without creating Tasks. Retry with the same request_id and settings.',
     inputSchema: z.strictObject({ work_id: workIdSchema, request_id: z.uuid(), ...settings }), annotations: write,
   }, input => answer('WATCH', async () => {
     let current = work.get({ work_id: input.work_id }).work;
@@ -145,7 +149,7 @@ export function registerWatchTools(server: McpServer, env: WatchToolEnv, work: W
   }));
 
   server.registerTool('watch_changes', {
-    title: 'Read watch change evidence', description: 'Read one change by name, or one page of changes for a watch. Compare before_context and after_context with the work goal. Save relevant/irrelevant/uncertain and the reason in a work_checkpoint watch_review entry. Missing or truncated evidence can require an uncertain verdict; do not add automatic ignore rules.',
+    title: 'Read watch change evidence', description: 'Read one change by name, or one page of changes for a watch. before_context and after_context are bounded frozen excerpts; before_snapshot and after_snapshot can be read with watch_read and viewed with watch_view. Judge relevance against the work goal and checkpoint the verdict and reason. Missing or truncated evidence cannot prove irrelevance.',
     inputSchema: z.strictObject({ name: changeName.optional(), parent: z.union([name, z.literal('watches/-')]).default('watches/-'),
       page_size: z.number().int().min(1).max(50).default(20), page_token: z.string().max(4096).default('') }), annotations: readOnly,
   }, input => answer('WATCH', async () => {
@@ -155,4 +159,43 @@ export function registerWatchTools(server: McpServer, env: WatchToolEnv, work: W
     const page = await client.listChanges({ parent: input.parent, pageSize: input.page_size, pageToken: input.page_token });
     return { ...toWire(ListChangesResponseSchema, page), changes: page.changes.map(changeEvidence) };
   }));
+
+  server.registerTool('watch_read', {
+    title: 'Read a Watch snapshot',
+    description: 'Read a bounded window of stored page Markdown or structure JSON with capture metadata, links, completeness and image status. Use latest_snapshot from watch_get or frozen before_snapshot/after_snapshot refs. Follow next_offset using the same snapshot and representation. content_truncated describes capture loss; next_offset describes unread stored text. This never fetches a page or calls a model.',
+    inputSchema: z.strictObject({ snapshot: snapshotName, representation: z.enum(['markdown', 'structure']).default('markdown'),
+      offset: z.number().int().min(0).max(262144).default(0), limit: z.number().int().min(1).max(24000).default(12000) }),
+    annotations: readOnly,
+  }, input => answer('WATCH', async () => {
+    const snapshot = await client.getSnapshot({ name: input.snapshot });
+    const metadata = toWire(SnapshotSchema, snapshot);
+    delete metadata['markdown'];
+    delete metadata['structure_json'];
+    const characters = Array.from(input.representation === 'markdown' ? snapshot.markdown : snapshot.structureJson);
+    const end = Math.min(characters.length, input.offset + input.limit);
+    return { ...metadata, content_available: snapshot.contentAvailable, content_truncated: snapshot.contentTruncated,
+      content_error: snapshot.contentError, image_available: snapshot.imageAvailable, image_error: snapshot.imageError,
+      representation: input.representation, offset: input.offset, total_characters: characters.length,
+      next_offset: end < characters.length ? end : null,
+      [input.representation === 'markdown' ? 'markdown' : 'structure_json']: characters.slice(input.offset, end).join('') };
+  }));
+
+  server.registerTool('watch_view', {
+    title: 'View a Watch screenshot',
+    description: 'Return the stored snapshot screenshot as actual MCP image content. Use watch_read for capture time and completeness. Missing images and capture errors stay explicit. This never fetches the current page or substitutes another snapshot; base64 text alone is not a viewed image.',
+    inputSchema: z.strictObject({ snapshot: snapshotName }), annotations: readOnly,
+  }, async input => {
+    let screenshot: string | undefined;
+    const reply = await answer('WATCH', async () => {
+      const image = await client.getSnapshotImage({ name: `${input.snapshot}/image` });
+      if (image.available && image.jpegBase64) screenshot = image.jpegBase64;
+      const metadata = toWire(SnapshotImageSchema, image);
+      delete metadata['jpeg_base64'];
+      return { snapshot: input.snapshot, image: metadata, image_available: screenshot !== undefined,
+        ...(screenshot ? {} : { reason: image.error || 'no_screenshot' }) };
+    });
+    return screenshot && !reply.isError
+      ? { ...reply, content: [...reply.content, { type: 'image' as const, data: screenshot, mimeType: 'image/jpeg' }] }
+      : reply;
+  });
 }

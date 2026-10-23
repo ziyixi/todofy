@@ -69,7 +69,7 @@ private Ops entrypoint before Home begins monitoring it.
 After the business Worker release:
 
 1. Open the existing Personal Cloud plugin's **Manage** page and choose **Refresh tools**. Keep the existing
-   account and OAuth connection; do not register a second App. The work-memory release exposes 34 tools and six
+   account and OAuth connection; do not register a second App. The Watch-evidence catalog exposes 36 tools and six
    event types. Verify the actual catalog; the original 18 tools remain available.
 2. Verify a temporary synthetic Inbox task, Steps, exact request replay, read-back and soft-delete. Do not test
    completion against real tasks or use real mail/browsing contents as fixtures.
@@ -98,8 +98,10 @@ OAuth audience is needed. `work.attention` accepts `{work_id}` or `{}` for all o
 the real callback private and emits only report identity and source refs. A later subscription also discovers
 already pending reports in its scope.
 
-Before creating or attaching a Watch, MCP establishes its source cursor. Confirmed candidates and broken/paused
-transitions become durable work reports. Source checking runs while a work subscription uses Watch links, or
+Before creating or attaching a Watch, MCP establishes its source cursor. The evidence filter selects captured
+page evidence changes and broken/paused transitions; business-rule confirmation of the same evidence does not
+create another Work report. Ordinary Watch consumers keep the legacy confirmed-change feed by default.
+Source checking runs while a work subscription uses Watch links, or
 when `work_context`/`work_get` is read, at most once per minute. Stopping the subscription stops background
 polling; an authorized native hourly review can still refresh it through those read tools.
 
@@ -109,3 +111,9 @@ the old position. Review the linked Watch changes and save the relevant facts fi
 skips missing history; polling itself never performs that reset. When no open Work has a Watch link, the next
 attachment starts fresh. Native hourly review creation and actual Dots continuation
 must be recorded separately from the server deployment. See [work-memory verification](../../docs/work-memory-verification.md).
+
+`watch_read` reads stored Markdown or structure windows with source completeness, capture metadata and snapshot
+refs. `watch_view` returns a stored JPEG as an MCP image block, or an explicit missing/error result. Neither tool
+fetches a current page or calls a model. Browser selection uses Watch's existing availability and budget rules;
+exposing that setting does not enable a production browser binding. Refresh the existing App's tools after the
+authorized Worker release. Verify actual image delivery and Dots' relevance review separately from local tests.

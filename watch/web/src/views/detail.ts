@@ -10,6 +10,7 @@ import { Watch_State, type Watch } from '@ziyixi/proto/watch/ui/v1/watch_pb'
 import { api, ApiError, errorMessage, newRequestId, withRetry } from '../api.ts'
 import { button, el, fill, toast } from '../dom.ts'
 import { failureText, relative, watchState, when } from '../format.ts'
+import { currentEvidence } from '../evidence.ts'
 import { draftOf, SAVE_MASK, settingsForm, watchOf } from '../settings.ts'
 import type { ViewContext } from '../app.ts'
 import { changeCard, setIgnored } from './changes.ts'
@@ -26,10 +27,11 @@ export async function renderDetail(ctx: ViewContext, id = ''): Promise<void> {
   const name = `watches/${id}`
   let filter = ''
   const head = el('div', {})
+  const evidence = el('section', { 'aria-label': '最近抓取的页面' })
   const changes = el('section', { class: 'list', 'aria-label': '变化' })
   const tabs = el('div', { class: 'row filters' })
   const settings = el('details', { class: 'more-settings' }, el('summary', {}, '设置'))
-  ctx.main.replaceChildren(head, settings, el('h2', {}, '变化'), tabs, changes)
+  ctx.main.replaceChildren(head, evidence, settings, el('h2', {}, '变化'), tabs, changes)
 
   let ignoredLines: readonly string[] = []
   const loadChanges = async () => {
@@ -139,6 +141,7 @@ export async function renderDetail(ctx: ViewContext, id = ''): Promise<void> {
       ignoredLines = watch.normalize?.ignoredLines ?? []
       renderHead(watch)
       renderSettings(watch)
+      evidence.replaceChildren(currentEvidence(watch.latestSnapshot))
       await loadChanges()
     } catch (error) {
       head.replaceChildren(el('p', { class: 'status' }, errorMessage(error)))

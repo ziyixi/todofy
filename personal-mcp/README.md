@@ -8,7 +8,7 @@ Object; Cloudflare Access handles OAuth. Business data stays in its existing app
 | Area | Tools | Behavior |
 | --- | --- | --- |
 | Work | `work_context`, `work_list`, `work_get`, `work_create`, `work_checkpoint`, `work_report`, `work_export` | Persistent continuation facts and source refs; checkpoints are silent, reports can notify |
-| Watch | `watch_preview`, `watch_create`, `watch_update`, `watch_control`, `watch_list`, `watch_get`, `watch_changes` | Native Watch settings and bounded change evidence; dedicated Work Watches default to `NONE` |
+| Watch | `watch_preview`, `watch_create`, `watch_update`, `watch_control`, `watch_list`, `watch_get`, `watch_changes`, `watch_read`, `watch_view` | Native Watch settings, stored page evidence and actual screenshot images; dedicated Work Watches default to `NONE` |
 | Tasks | `tasks_list`, `tasks_get`, `tasks_create_inbox`, `tasks_add_steps`, `tasks_update`, `tasks_complete`, `tasks_delete` | Native Tasks fields, receipts and etags; deletion is soft |
 | Plan / Focus | `plan_get`, `plan_arrange`, `focus_get` | Native planning facts and daily queues; arranging preserves task dates and deadlines; timer is read-only |
 | Mail | `mail_list`, `mail_read`, `mail_collect` | Mail stays in Mail until explicitly collected into Inbox |
@@ -32,12 +32,15 @@ action and record its receipt or observed result afterward. A checkpoint is sile
 needs observed evidence. Finish or cancellation must also stop real dedicated follow-up resources when they are
 no longer needed; a state change cannot stop them. Shared Watches and schedules keep their existing settings.
 
-Watch rules produce candidates. The Dot reads bounded before/after evidence and judges each candidate against
-the Work goal, logging `relevant`, `irrelevant` or `uncertain`. Missing or truncated evidence leaves it uncertain.
-This judgment does not alter the Watch baseline or permanently ignore a line. Check current conditions before
-waiting for a later change. New dedicated Watches must link to a Work and default to `NONE`, so they do not
-create a separate Tasks item. Creation automatically adds the owned link. Preview requires a display name, HTTPS
-URI and an intent; pause/resume require the current Watch etag. Lifecycle controls expose pause, resume and check.
+Captured page evidence changes reach the linked Work independently of Watch's business triggers. The Dot reads
+the stored before/after snapshots and judges relevance against the Work goal, logging `relevant`, `irrelevant` or
+`uncertain`. Read Markdown or structure in bounded windows with `watch_read`; use `watch_view` for the actual
+stored screenshot when available. Incomplete or failed evidence cannot prove irrelevance. This judgment does
+not alter the Watch baseline or permanently ignore a line. Check current conditions before waiting for a later
+change. New dedicated Watches must link to a Work and default to `NONE`, so they do not create a separate Tasks
+item. Creation automatically adds the owned link. Preview requires a display name, HTTPS URI and an intent;
+HTTP is the default fetcher, with browser availability and quotas enforced by Watch. Pause/resume require the
+current Watch etag. Lifecycle controls expose pause, resume and check.
 
 `review_at` does not schedule a wakeup. Use Dots' native schedules for timed follow-up and save the ID only after
 successful creation. One hourly overall review can cover outstanding Works; reuse it and keep unchanged reviews
@@ -56,10 +59,10 @@ issues are not replayed. Read Work context for reports already pending when a su
 | `task.must_start` | Task IDs newly entering the window | Tasks' native Must start calculation, including date-only changes |
 | `mail.ready` | Mail event ID and ready time | Successfully summarized, pending Mail; excludes canaries and imports |
 | `service.attention` | Home occurrence sequence, source and code | Current undismissed issue episodes; excludes this MCP's own failures |
-| `work.attention` | Work ID, report sequence, kind, source and timestamp | Explicit reports from linked sources, including Watch candidates; checkpoint writes stay silent |
+| `work.attention` | Work ID, report sequence, kind, source and timestamp | Explicit reports from linked sources, including Watch evidence changes; checkpoint writes stay silent |
 
-`work.attention` accepts `{work_id}` to select one Work; omitting it subscribes to all open Works. Watch candidates
-become linked Work reports, so there is no separate public `watch.changed` subscription. Read `work_get` and the
+`work.attention` accepts `{work_id}` to select one Work; omitting it subscribes to all open Works. Watch evidence
+changes become linked Work reports, so there is no separate public `watch.changed` subscription. Read `work_get` and the
 relevant source before acting, then silently checkpoint the handled report sequence.
 
 The existing DO Alarm checks subscribed sources at most once per minute. Cursor/state progress and frozen delivery

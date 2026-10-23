@@ -158,6 +158,11 @@ class DesiredState(unittest.TestCase):
         self.assertNotIn("TASKS_WORKER_SECRETS", bindings)
         self.assertNotIn("tasks", drift_desired.MANUAL_SECRETS)
 
+    def test_watch_registers_browser_and_private_evidence_bindings(self):
+        bindings = {binding["name"]: binding for binding in self.state["workers"]["watch"]["bindings"]}
+        self.assertEqual(bindings["BROWSER"], {"name": "BROWSER", "type": "browser", "source": "config"})
+        self.assertEqual(bindings["EVIDENCE_STORE"], {"name": "EVIDENCE_STORE", "type": "r2_bucket", "source": "config"})
+
     def test_the_generator_refuses_an_unknown_binding_section(self):
         with self.assertRaises(drift_desired.GeneratorError):
             drift_desired.config_bindings("x", {"name": "x", "kv_namespaces": [{"binding": "KV"}]})

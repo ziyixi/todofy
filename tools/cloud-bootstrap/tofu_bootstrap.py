@@ -102,6 +102,10 @@ def run(private: dict, profile: dict, resources: dict, mode: str, parent: Path,
         (config / Path(relative).name).write_text(text)
     shutil.copyfile(infra_state.INFRA / ".terraform.lock.hcl", config / ".terraform.lock.hcl")
     imports = known_imports(resources, values, private.get("adopt_ids")) if mode in ("adopt", "extend") else {}
+    # Explicitly requested creates must not be imported during extension.
+    if mode == "extend":
+        for address in creates:
+            imports.pop(address, None)
     if imports:
         (config / "imports.tf").write_text(import_hcl(imports))
     session = None

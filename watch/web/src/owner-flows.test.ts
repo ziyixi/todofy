@@ -6,7 +6,7 @@
  */
 import { create } from '@ziyixi/proto/protobuf'
 import { Change_State, Change_SuppressionReason } from '@ziyixi/proto/watch/ui/v1/change_pb'
-import { Watch_NotifyPolicy, WatchSchema } from '@ziyixi/proto/watch/ui/v1/watch_pb'
+import { Watch_Fetcher, Watch_NotifyPolicy, WatchSchema } from '@ziyixi/proto/watch/ui/v1/watch_pb'
 import { PreviewWatchResponseSchema } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb'
 import { mountApp } from './app.ts'
 import { draftOf, watchOf } from './settings.ts'
@@ -88,6 +88,31 @@ describe('the settings form', () => {
     const saved = watchOf(draft)
     expect(saved.intent).toBe(stored.intent)
     expect(saved.notifyPolicy).toBe(Watch_NotifyPolicy.NONE)
+  })
+
+  it('keeps browser capture selected through an unrelated settings save', () => {
+    const stored = watch('browser', { fetcher: Watch_Fetcher.BROWSER })
+    const draft = draftOf(stored)
+    draft.displayName = 'Release page'
+    expect(watchOf(draft).fetcher).toBe(Watch_Fetcher.BROWSER)
+  })
+
+  it('saves one browser capture choice with an allowed interval', async () => {
+    const server = new FakeServer([watch('news', { checkIntervalMinutes: 60 })])
+    const root = await mount(server, '/watches/news')
+    const capture = root.querySelector('option[value="browser"]')?.parentElement
+    if (!(capture instanceof HTMLSelectElement)) throw new Error('no capture method')
+    capture.value = 'browser'
+    capture.dispatchEvent(new Event('change'))
+    const interval = [...root.querySelectorAll('label.field')].find((field) => field.querySelector('.label')?.textContent === '检查频率')?.querySelector('select')
+    expect(interval?.value).toBe('360')
+    expect([...interval?.options ?? []].every((option) => Number(option.value) >= 360)).toBe(true)
+    button(root, '保存设置').click()
+    await until(() => server.mutations().length === 1)
+    const [save] = server.mutations()
+    expect(save?.path).toContain('fetcher')
+    expect(save?.body).toMatchObject({ fetcher: 'browser', check_interval_minutes: 360 })
+    await until(() => server.watches.get('watches/news')?.fetcher === Watch_Fetcher.BROWSER)
   })
 
   const stored = create(WatchSchema, {
