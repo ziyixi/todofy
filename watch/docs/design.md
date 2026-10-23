@@ -212,8 +212,9 @@ not memory.
 
 ## 6. WatchState's storage
 
-`worker/src/store.ts`; every table is bounded (schema v3 adds the sink's `intents` and a partial index of the
-undelivered events; v4 adds frozen context to each change). After an alarm the watches whose checks may have added rows are pruned
+`worker/src/store.ts`; regular history is pruned, while an undelivered outbox row stays until Tasks accepts it.
+Schema v3 adds the sink's `intents` and a partial index of undelivered events; v4 adds frozen change context;
+v5 adds private reading-evidence indexes. After an alarm the watches whose checks may have added rows are pruned
 (`pruneWatches`, through the `(watch_id, state, id)` index: only that watch's rows are read); the global tables at
 most once an hour and every watch once per UTC day (`pruneGlobal`).
 
@@ -227,7 +228,9 @@ most once an hour and every watch once per UTC day (`pruneGlobal`).
 | `requests` | AIP-155 request IDs with their first response | 24 hours |
 | `previews` | PreviewWatch's stored fetches | 4 rows, 15 minutes |
 | `url_fetches` | when each URL was last requested (a check or a preview) | 15 minutes |
-| `notifications` | the outbox (§7) | 30 days, 500 rows |
+| `notifications` | ordinary outbox and evidence feed | settled history: 30 days, at most 500 rows; undelivered Tasks notifications retained until handoff |
+| `evidence_snapshots` | private R2 capture addresses and hashes | 20 recent captures per watch, plus current rule references |
+| `evidence_deletions` | private object keys awaiting cleanup | drained in batches of 20 by the existing Alarm |
 | `intents` | the sink's inbox (§7): each row's ID, kind, day, state, attempts, code; its frozen request until Tasks created it | 30 days (at most 10 a day) |
 
 A check that finds nothing new writes a few rows (the watch, its host, the URL's fetch time); the day's request count
@@ -236,7 +239,8 @@ is written once per alarm. The schema has a version in `meta`; a change adds a m
 
 ## 7. Bindings, notifications
 
-Bindings (`wrangler.toml`, `worker/src/env.ts`): `WATCH` (the object), `ASSETS`, `TASKS` (Tasks' `TaskInbox`
+Bindings (`wrangler.toml`, `worker/src/env.ts`): `WATCH` (the object), `ASSETS`, `EVIDENCE_STORE` (private R2),
+`TASKS` (Tasks' `TaskInbox`
 entrypoint with `props = { source = "watch" }`: it creates tasks of this source only, and never reads, changes or
 deletes one; the notification sink); vars `PUBLIC_HOST`
 (`watch.ziyixi.science`, the CSRF origin), `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, and `BUILD_SHA` at deploy; secrets

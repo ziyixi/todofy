@@ -10,9 +10,9 @@ import { fromWire } from '@ziyixi/proto/wire-json';
 import { SnapshotSchema, SnapshotImageSchema } from '@ziyixi/proto/watch/ui/v1/snapshot_pb';
 import { WatchUiService, WatchEvent_Kind } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { Change_State } from '@ziyixi/proto/watch/ui/v1/change_pb';
-import { Watch_NotifyPolicy } from '@ziyixi/proto/watch/ui/v1/watch_pb';
+import { Watch_NotifyPolicy, WatchHealth_Outcome } from '@ziyixi/proto/watch/ui/v1/watch_pb';
 import { page } from '../fake-sites.ts';
-import { HOUR, op, startHarness, T0, type Harness } from './harness.ts';
+import { HOUR, MINUTE, op, startHarness, T0, type Harness } from './harness.ts';
 
 let mf: Miniflare;
 let persistence: string;
@@ -313,4 +313,66 @@ describe('normal Watch pipeline evidence feed', () => {
     expect(await h.sql("SELECT count(*) AS n FROM evidence_snapshots WHERE watch_id LIKE 'unrelated-%'"))
       .toEqual([{ n: 1000 }]);
   });
+  it('captures an existing HTTP watch once before reusing its legacy validators', async () => {
+    const now = T0 + 8 * HOUR;
+    await h.clock(now);
+    const id = 'legacy-validators';
+    const name = `watches/${id}`;
+    const uri = 'https://legacy-validators.example.com/page';
+    const modified = 'Thu, 01 Oct 2026 00:00:00 GMT';
+    h.sites.set(uri, request => request.headers.get('if-none-match') === '"stable"' || request.headers.get('if-modified-since') === modified
+      ? { status: 304 }
+      : { headers: { 'content-type': 'text/html', etag: '"stable"', 'last-modified': modified },
+        body: page('Synthetic legacy page', '<h1>Stable release</h1><p>Registration is closed.</p>') });
+    await h.api.createWatch({ watchId: id, requestId: op(), watch: {
+      displayName: 'Synthetic legacy page', uri, notifyPolicy: Watch_NotifyPolicy.NONE,
+      checkIntervalMinutes: 60, stability: { skipConfirmation: true },
+    } });
+    await h.run(now);
+    // Keep the old normalized baseline/validators, with the empty evidence references of a pre-upgrade watch.
+    await h.sql('DELETE FROM evidence_snapshots WHERE watch_id=?', id);
+    await h.sql("UPDATE snapshots SET evidence_ref='' WHERE watch_id=?", id);
+    const [original] = await h.sql<{ baseline_id: number }>('SELECT baseline_id FROM watches WHERE id=?', id);
+    expect((await h.api.getWatch({ name })).latestSnapshot).toBe('');
+    const client = createHttpClient(WatchUiService, call => h.serviceFetch(call.url, {
+      method: call.httpMethod, ...(call.body === undefined ? {} : { body: call.body, headers: { 'content-type': 'application/json' } }),
+    }));
+    const baseline = await client.pollWatchEvents({ baseline: true, filter: 'evidence' });
+
+    // Enrichment does not bypass the existing minimum spacing, even for an owner-requested check.
+    await h.clock(now + 10 * MINUTE);
+    await h.api.checkWatch({ name, requestId: op() });
+    await h.step(now + 10 * MINUTE);
+    expect(h.sites.requestsTo(uri)).toHaveLength(1);
+    await h.clock(now + 2 * HOUR);
+    await h.run(now + 2 * HOUR);
+    const enriched = await h.api.getWatch({ name });
+    expect(h.sites.requestsTo(uri).at(-1)?.headers['if-none-match']).toBeUndefined();
+    expect(h.sites.requestsTo(uri).at(-1)?.headers['if-modified-since']).toBeUndefined();
+    expect(enriched.latestSnapshot).toMatch(/^watches\/legacy-validators\/snapshots\/[a-z0-9]{16}$/);
+    expect((await client.getSnapshot({ name: enriched.latestSnapshot })).markdown).toContain('# Stable release');
+    expect(await h.sql('SELECT baseline_id FROM watches WHERE id=?', id)).toEqual([original]);
+    expect((await client.pollWatchEvents({ cursor: baseline.cursor, filter: 'evidence' })).events.filter(event => event.watch === name)).toEqual([]);
+
+    await h.clock(now + 4 * HOUR);
+    await h.run(now + 4 * HOUR);
+    expect(h.sites.requestsTo(uri).at(-1)?.headers['if-none-match']).toBe('"stable"');
+    expect(h.sites.requestsTo(uri).at(-1)?.headers['if-modified-since']).toBe(modified);
+    const unchanged = await h.api.getWatch({ name });
+    expect(unchanged.latestSnapshot).toBe(enriched.latestSnapshot);
+    expect(unchanged.health?.lastOutcome).toBe(WatchHealth_Outcome.NOT_MODIFIED);
+    expect((await h.api.listChanges({ parent: name })).changes).toEqual([]);
+
+    h.sites.html(uri, page('Synthetic legacy page', '<h1>New release</h1><p>Registration is closed.</p>'), { etag: '"updated"' });
+    await h.clock(now + 6 * HOUR);
+    await h.run(now + 6 * HOUR);
+    const changed = await h.api.getWatch({ name });
+    expect(changed.latestSnapshot).not.toBe(enriched.latestSnapshot);
+    const changes = (await h.api.listChanges({ parent: name })).changes;
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ beforeSnapshot: '', afterSnapshot: changed.latestSnapshot });
+    expect((await client.getSnapshot({ name: changed.latestSnapshot })).markdown).toContain('# New release');
+    await h.api.pauseWatch({ name, requestId: op() });
+  });
+
 });

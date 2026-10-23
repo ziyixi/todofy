@@ -643,8 +643,9 @@ export class Store {
     const cut = this.one<{ id: number }>(`SELECT id FROM notifications ORDER BY id DESC LIMIT 1 OFFSET ?`, NOTIFICATIONS_MAX)?.id ?? 0;
     const floor = Math.max(expired, cut);
     if (floor > 0) {
+      // Feed positions expire even while an older outbox row still waits for the Tasks handoff.
       this.setMeta('watch_events_floor', String(Math.max(floor, this.eventFloor())));
-      deleted += this.run(`DELETE FROM notifications WHERE id <= ?`, floor);
+      deleted += this.run(`DELETE FROM notifications WHERE id <= ? AND delivered_at IS NOT NULL`, floor);
     }
     deleted += this.run(`DELETE FROM intents WHERE created_at <= ? AND state <> 'open'`, now - INTENTS_KEPT_MS);
     deleted += this.run(`DELETE FROM hosts WHERE host NOT IN (SELECT host FROM watches) AND next_at <= ? AND coalesce(backoff_until, 0) <= ?`, now, now);

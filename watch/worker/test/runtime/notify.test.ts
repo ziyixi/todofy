@@ -7,9 +7,12 @@
  * is retried with the same bytes and makes one task; a task never holds the watched URL or the page's text.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { createHttpClient } from '@ziyixi/proto/http-client';
+import { WatchUiService } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { Watch_NotifyPolicy } from '@ziyixi/proto/watch/ui/v1/watch_pb';
+import { NOTIFICATIONS_MAX } from '../../src/limits.ts';
 import { page } from '../fake-sites.ts';
-import { DAY, HOUR, MINUTE, op, PUBLIC_HOST, resetWatches, startHarness, T0, type Harness } from './harness.ts';
+import { DAY, HOUR, MINUTE, op, PUBLIC_HOST, reasonOf, rejection, resetWatches, startHarness, T0, type Harness } from './harness.ts';
 
 let h: Harness;
 let day = T0;
@@ -109,6 +112,50 @@ describe('the Tasks sink', () => {
     ]);
     // The logs: row IDs, kinds, counts and codes.
     expect(h.logs.filter((line) => line.includes('"event":"task"')).join('\n')).not.toMatch(/example\.com|合成/);
+  });
+
+  it('keeps an undelivered digest through evidence feed pruning, then hands it to Tasks', async () => {
+    day = T0 + 12 * DAY;
+    const uri = 'https://retained-digest.example.com/page';
+    const id = 'retained-digest';
+    await watchAt(day + HOUR, id, uri, Watch_NotifyPolicy.DIGEST, 24 * 60);
+    h.sites.html(uri, secret(1));
+    await h.clock(day + 3 * HOUR);
+    await h.api.checkWatch({ name: `watches/${id}`, requestId: op() });
+    await h.run(day + 3 * HOUR);
+    await h.api.pauseWatch({ name: `watches/${id}`, requestId: op() });
+    expect(await pending()).toBe(1);
+    const [notification] = await h.sql<{ id: number }>('SELECT id FROM notifications WHERE delivered_at IS NULL');
+    expect(notification).toBeDefined();
+    const client = createHttpClient(WatchUiService, call => h.serviceFetch(call.url, {
+      method: call.httpMethod, ...(call.body === undefined ? {} : { body: call.body, headers: { 'content-type': 'application/json' } }),
+    }));
+    const baseline = await client.pollWatchEvents({ baseline: true, filter: 'evidence' });
+    await h.sql(`WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i<?)
+      INSERT INTO notifications (kind, watch_id, policy, created_at, delivered_at, evidence_only)
+      SELECT 'change_confirmed', ?, 'digest', ?, ?, 1 FROM n`, NOTIFICATIONS_MAX, id, day + 3 * HOUR, day + 3 * HOUR);
+    await h.rows();
+    await h.step(day + 4 * HOUR);
+    const pruned = await h.rows();
+    expect(await pending()).toBe(1);
+    expect(await h.sql('SELECT id FROM notifications WHERE delivered_at IS NULL')).toEqual([notification]);
+    expect(await h.sql('SELECT count(*) AS n FROM notifications WHERE evidence_only=1')).toEqual([{ n: NOTIFICATIONS_MAX }]);
+    const [floor] = await h.sql<{ value: string }>("SELECT value FROM meta WHERE key='watch_events_floor'");
+    expect(Number(floor?.value)).toBeGreaterThan(notification?.id ?? 0);
+    // A retained outbox row below the expired prefix must not make either filtered cursor look valid.
+    expect(reasonOf(await rejection(client.pollWatchEvents({ cursor: baseline.cursor, filter: 'evidence' })))).toBe('CURSOR_EXPIRED');
+    expect(reasonOf(await rejection(client.pollWatchEvents({ cursor: baseline.cursor })))).toBe('CURSOR_EXPIRED');
+    expect(pruned.read).toBeLessThan(1500);
+    expect(pruned.written).toBeLessThan(40);
+    expect((await h.tasksState()).calls).toEqual([]);
+
+    await h.step(day + 14 * HOUR);
+    const state = await h.tasksState();
+    expect(state.calls).toHaveLength(1);
+    const digest = state.tasks.find(task => task.request_id === state.calls[0]);
+    expect(digest?.subtasks).toEqual([{ title: `合成：${id} · 任何变化 1 次变化`, description: link(id) }]);
+    expect(await pending()).toBe(0);
+    expect((await rows()).filter(row => row.kind === 'digest')).toMatchObject([{ state: 'recorded', last_code: 'created' }]);
   });
 
   it('never sends a name that holds the watched URL or host: the task says 监视 <id>', async () => {

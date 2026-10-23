@@ -1,4 +1,4 @@
-import { saveEvidence, type EvidencePair } from './evidence.ts';
+import { latestEvidence, saveEvidence, type EvidencePair } from './evidence.ts';
 import { extractCapture } from './evidence-extract.ts';
 /**
  * One scheduled check of one watch (../../docs/design.md §5): the deterministic noise pipeline from the fetch to the
@@ -238,7 +238,10 @@ export async function runCheck(deps: CheckDeps, id: string, now: number, budget:
   }
 
   const sameSettings = row.raw_check_hash === row.check_hash;
-  const conditional = sameSettings && (row.http_etag !== null || row.http_last_modified !== null) ? { etag: row.http_etag, lastModified: row.http_last_modified } : null;
+  // A pre-upgrade watch needs one full response before validators can reuse its richer reading evidence.
+  const conditional = sameSettings && (row.http_etag !== null || row.http_last_modified !== null)
+    && (!deps.evidenceStore || latestEvidence(deps.store, id) !== '')
+    ? { etag: row.http_etag, lastModified: row.http_last_modified } : null;
   const obtained = await obtain(deps, config, budget, conditional);
 
   // The request counts for the URL's 15 minutes at once, whatever follows (an error below, the owner's edit meanwhile).
@@ -455,7 +458,7 @@ export async function runCheck(deps: CheckDeps, id: string, now: number, budget:
     deps.store.updateWatch(id, { ...successFields(current, config, at, 'unchanged', obtained.status, null), ...seen, masked_count: current.masked_count + masked });
     return 'unchanged';
   }
-  if (baselineRow.evidence_ref) current = { ...current, evidence_before: baselineRow.evidence_ref };
+  current = { ...current, evidence_before: baselineRow.evidence_ref ?? '' };
   const previous = await textOf(current.seen_snapshot_id);
   // Back at the notified state (but for ignored lines): nothing to record, and it is the previous check's text from now on.
   if (shaOfView === baselineSha) {

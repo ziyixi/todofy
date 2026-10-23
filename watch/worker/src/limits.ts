@@ -170,7 +170,7 @@ export const PREVIEW_TEXT_MAX = 300;
 
 // ---- notifications (docs/design.md §7: the outbox and the Tasks sink) ----------------------------------------------
 
-/** Notification outbox rows are kept this long (delivered or not) and at most this many. */
+/** Settled feed history keeps this window/cap; undelivered Tasks outbox rows wait for handoff. */
 export const NOTIFICATIONS_KEPT_MS = 30 * DAY;
 export const NOTIFICATIONS_MAX = 500;
 /** The daily digest is frozen at the first alarm at or after this UTC hour (07:00 in California, 22:00 in Beijing). */
