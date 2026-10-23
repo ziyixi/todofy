@@ -12,13 +12,16 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-Work-memory native-client acceptance passed: the existing Dot received and handled its scoped event, then
-viewed a real MCP image of a specified public Recall diagnostic snapshot. Test resources are stopped and the
-synthetic Work is done. One shared native hourly review is saved; its first natural execution remains unverified.
-Tasks' project branches now default open and the owner's existing browser choice is expanded after reload.
-Evidence is in [work-memory verification](docs/work-memory-verification.md). The delivery worktree is
-`/private/tmp/todofy-tasks-design`, branch `codex/personal-work-memory`; the shared checkout is untouched.
-No credentials or App identity changed.
+`codex/watch-evidence` implements richer page evidence for Dots: structured unmasked text, fixed-viewport JPEG,
+real Browser Run through the official Puppeteer package, stored capture reads and evidence-only Work events.
+Watch's normal typed rules and Tasks notifications remain separate. A private `watch-evidence` R2 bucket and
+browser binding are declared through IaC; neither has been applied in production yet. No model API or new scheduler.
+The isolated worktree is `/private/tmp/todofy-tasks-design`; Claude's shared checkout is untouched.
+Local checks passed: Watch 127 unit and 123 workerd runtime cases (including CPU/rows), MCP 71 unit cases and
+UI 32 cases. Resource declaration is released first: review Infra drift, gated apply of the one new private bucket,
+then release the app bindings and evidence implementation from a separately green SHA. Remaining: branch CI,
+resource apply, application release, plugin refresh and actual Browser Run/Dots acceptance. Production apps
+still run the prior release.
 
 ## Latest verified release
 

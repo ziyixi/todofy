@@ -72,10 +72,10 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (38 objects)
+### Managed here (39 objects)
 
-This is the maximum declared count. Fresh bootstrap creates 34 objects before the first Worker release,
-then adds its exact mail rule (35). An adopted account retains the frozen legacy backup app (36).
+This is the maximum declared count. Fresh bootstrap creates 35 objects before the first Worker release,
+then adds its exact mail rule (36). An adopted account retains the frozen legacy backup app (37).
 Objects being retired ([Retiring an app](#retiring-an-app)) are not counted: [`retired.tf`](retired.tf) moves them
 out of the managed addresses (a retired Access policy instead leaves with its resource block) so that the next apply
 deletes them.
@@ -113,7 +113,7 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_dns_record.platform["runtime"]` | Runtime CNAME | Only this exact platform host; existing Worker and mailbox DNS remain with their current owners |
 | `cloudflare_zero_trust_access_application.mail_hero_backup` | Access app "Mail Hero backup API" | `mail-hero.ziyixi.science/api/internal/backup/*`. Used by the backup collector's machine identity (mail-hero/AGENTS.md §7). **Frozen**: an apply refuses any write to it ([Apply](#apply-p4)) |
 | `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "links" \| "tasks"]` | D1 databases | Existence only |
-| `cloudflare_r2_bucket.app["mail-hero-store" \| "mail-hero-backups" \| "todofy-backups" \| "recall-store" \| "tasks-backups"]` | R2 buckets | Existence only. `recall-store` was **created** here before recall's first deploy, and `tasks-backups` was created here before Tasks bound it for its own weekly backup |
+| `cloudflare_r2_bucket.app["mail-hero-store" \| "mail-hero-backups" \| "todofy-backups" \| "recall-store" \| "tasks-backups" \| "watch-evidence"]` | R2 buckets | Existence only. `recall-store` was **created** here before recall's first deploy, and `tasks-backups` was created here before Tasks bound it for its own weekly backup. `watch-evidence` stores Watch's private page evidence and screenshots |
 
 **Never edit these objects in the Cloudflare dashboard** (the links app's application included). A
 hand edit is drift: the next "Infra apply" reverts it, and before the first apply it would even turn an import into

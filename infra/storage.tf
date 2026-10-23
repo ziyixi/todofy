@@ -20,6 +20,7 @@ locals {
     "todofy-backups"    = "todofy-core (BACKUPS)"
     "recall-store"      = "recall (STORE)"
     "tasks-backups"     = "tasks (BACKUPS)"
+    "watch-evidence"    = "watch (EVIDENCE_STORE)"
   }
 }
 
