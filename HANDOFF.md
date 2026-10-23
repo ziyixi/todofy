@@ -12,31 +12,29 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-`codex/watch-evidence-app` implements richer page evidence for Dots: structured unmasked text, fixed-viewport JPEG,
-real Browser Run through the official Puppeteer package, stored capture reads and evidence-only Work events.
-Watch's normal typed rules and Tasks notifications remain separate. A private `watch-evidence` R2 bucket and
-browser binding are declared through IaC; the private bucket is now created, while app activation is pending.
-No model API or new scheduler.
-The isolated worktree is `/private/tmp/todofy-tasks-design`; Claude's shared checkout is untouched.
-Local checks passed: Watch 127 unit and 127 workerd runtime cases (including CPU/rows), the additional baseline
-retention case, MCP 71 unit and seven workerd cases, UI 33 cases, and Home 279 unit cases. The resource declaration
-`43f6c31d` passed full [branch CI](https://github.com/ziyixi/todofy/actions/runs/39941151337) and reached main first.
-The scoped [Infra apply](https://github.com/ziyixi/todofy/actions/runs/39943941218) created only that bucket and
-verified a clean 39-object plan. Implementation `8af19895` passed full
-[branch CI](https://github.com/ziyixi/todofy/actions/runs/39944068633). Remaining: the small follow-up branch gate,
-application release, plugin refresh and actual Browser Run/Dots acceptance. Production
-apps still run the prior release. Details are in [Watch evidence verification](docs/watch-evidence-verification.md).
-Final review also fixed shared feed retention so evidence events cannot evict ordinary notifications still waiting
-for Tasks; a reproduced regression and the affected 16 runtime cases pass. The follow-up branch gate is required
-before activating the app. Legacy validators allow one initial rich capture; missing historical reading evidence
-remains explicitly absent instead of being replaced with a later capture.
-Browser Sessions use the existing global slot at the provider's 20-second Free acquisition interval, including
-manual previews; the old 10-second Quick Actions value does not apply to the new transport.
-Preview metadata excludes reading evidence, retaining the existing cached HTML without copying JPEG bytes into
-SQLite. Its reproduced regression and seven existing preview cases pass. Tasks CI gets a 25-minute wall-clock
-limit after an 8m18s Ubuntu download consumed most of its old 15-minute window; test/performance budgets stay fixed.
+The Watch evidence implementation and native Dots acceptance are complete; the verification record is in
+[Watch evidence verification](docs/watch-evidence-verification.md). Its temporary subscription is stopped,
+dedicated Watch paused and synthetic Work done. Existing hourly Work review remains unchanged.
+Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's shared source checkout is untouched.
 
 ## Latest verified release
+
+Watch page evidence (`f7942fb6`) passed the complete
+[branch gate](https://github.com/ziyixi/todofy/actions/runs/39950244799) and
+[same-SHA production release](https://github.com/ziyixi/todofy/actions/runs/39952782780). Watch, Personal MCP and
+Home deployed; their exact provider versions and successful Deployment IDs are in
+[the verification record](docs/watch-evidence-verification.md). The private evidence bucket is managed by IaC;
+[final drift](https://github.com/ziyixi/todofy/actions/runs/39952857265) has 39 no-ops and no changes. Home lists the
+bucket under Watch. Private Personal Cloud skill 1.3.0 matches source, preserves its App/OAuth connection and
+shows 36 tools plus the existing six events. The same Dot sees the new tools without a Reboot. No model API,
+periodic scheduler, new secret or paid upgrade was introduced; ordinary Watch notifications remain independent.
+
+Real Browser Run saved Markdown, native structure and a 1280 × 960 JPEG. The existing Dot actually read the images
+and resumed on source event `watch:1`, handled sequence 9 and saved a structured relevance review against the frozen
+after snapshot. The live fixture changed source-URL metadata; automated real-storage tests cover visual-only
+changes. Scoped cleanup completed at 2026-10-23 13:04:27.673 UTC: subscription count, open Works and pending reports
+all returned to zero. The verification record distinguishes the initial fact checkpoint from the structured
+review added after clarifying the existing snapshot-reference contract.
 
 Tasks' sidebar change (`56662a46`) passed the complete [branch gate](https://github.com/ziyixi/todofy/actions/runs/39931674226)
 and [same-SHA production release](https://github.com/ziyixi/todofy/actions/runs/39933099264). The verified deployment
@@ -120,7 +118,7 @@ Answered in chat; do not re-ask.
 ### Remaining observations and separate follow-ups
 
 - `5134232` removed the direct `vars` expressions from the release composites. Todofy and Home uploaded through them
-  in [run 38469896460](https://github.com/ziyixi/todofy/actions/runs/38469896460); the Mail Hero, Brief, Links, Watch,
+  in [run 38469896460](https://github.com/ziyixi/todofy/actions/runs/38469896460); the Mail Hero, Brief, Links,
   Fleet and website-relay composites have not been loaded by a real upload since the `dd7a6e8` refactor. Check the
   first natural release of each; a preflight/no-op does not load the skipped composite.
 - Brief still needs archive-day acceptance of source coverage, editorial quality and actual model cost (local checks
