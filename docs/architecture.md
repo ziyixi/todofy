@@ -38,6 +38,7 @@ flowchart LR
   MCP -->|private TasksApi| Tasks
   MCP -->|private read-only Mail| Todo
   MCP -->|private RecallApi| Recall
+  MCP -->|private WatchApi and stored page evidence| Watch
   MCP -->|private cached HomeApi| Home
   Home -->|private Ops| MCP
 ```
@@ -102,7 +103,7 @@ Namespace, image repository and resource allowlists come from the daemon's mount
 See the [runtime contract](../contracts/platform-runtime-v1/README.md).
 
 Personal MCP's `/mcp` is the external MCP 2.0 protocol, handled by the official SDK after Access's managed OAuth
-and owner verification. Its private bindings reuse generated Tasks/Mail/Recall HTTP clients and the typed
+and owner verification. Its private bindings reuse generated Tasks/Mail/Recall/Watch HTTP clients and the typed
 `dashboard.mcp.v1.HomeService`; they do not pass through browser login or introduce public source routes.
 The existing SQLite subscription DO checks only subscribed event sources each minute and stores metadata,
 cursor progress and frozen deliveries. It does not own business content or call a model. Home observes its
@@ -204,7 +205,9 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
 - **Links:** public short links and an owner launcher under `/_/`. A redirect does one primary-key D1 read,
   zero writes/logs, and uses 302 only. A private key and a nonexistent key give anonymous callers the same
   response. Only `/_` and `/_/*` are behind Access. See [AGENTS](../links/AGENTS.md).
-- **Watch:** one SQLite DO, no D1/R2 and no cron. Its exact fetch/redirect/robots/size/time budgets and URL
+- **Watch:** one SQLite DO, private R2 for bounded reading captures and screenshots, no D1 and no cron.
+  The optional Browser Run binding captures rendered pages within its existing daily ledger. Dots reads stored
+  before/after evidence through MCP and judges relevance; Watch does not call a model. Its exact fetch/redirect/robots/size/time budgets and URL
   refusals are in [AGENTS](../watch/AGENTS.md). Tests use synthetic sites. Notifications freeze TaskInbox requests,
   include only owner-created names, trigger types/counts and app links, and never include page text or watched
   URLs. One digest after 14:00 UTC plus at most nine urgent tasks keep to its own budget of ten a day (TaskInbox

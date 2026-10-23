@@ -34,6 +34,12 @@ Completed on 2026-10-23 using synthetic pages and local bindings:
   Last-Modified. The legacy regression preserves source spacing and the normalized baseline, then verifies normal
   304 reuse and a later real change. Its unavailable historical `before_snapshot` stays empty. All 11 evidence
   runtime cases passed after the final fix; evidence plus the ordinary pipeline had already passed 43 cases.
+- Browser Sessions reuse the existing slot with the Free plan's 20-second acquisition interval, including manual
+  previews. This replaces the old Quick Actions 10-second value; no additional state or retry loop is introduced.
+  A focused real-SQLite regression verifies deferral before 20 seconds, a launch at the boundary, and no ledger
+  charge or false daily-exhaustion state while deferred.
+  The provider's [current limits](https://developers.cloudflare.com/browser-run/limits/) and
+  [Free allowance](https://developers.cloudflare.com/browser-run/pricing/) were checked on the release day.
 - MCP's 71 unit and seven workerd cases passed, including real polling/callback transport, Unicode text windows,
   image content blocks and evidence-only source events. These tests do not prove native Dots image viewing.
 - Watch UI's 33 tests, TypeScript, lint and build passed. Its JS gzip size is 53.5 KiB under the unchanged 56 KiB

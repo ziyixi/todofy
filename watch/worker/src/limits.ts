@@ -144,8 +144,8 @@ export const CONFIRMED_KEPT = 50;
 export const BROWSER_DAILY_MS = 480 * SECOND;
 /** What one render is assumed to cost before it reports its time (a render is not started without it left). */
 export const BROWSER_RESERVE_MS = 15 * SECOND;
-/** Browser Run allows one quick action per 10 seconds. */
-export const BROWSER_SPACING_MS = 10 * SECOND;
+/** Workers Free Browser Sessions allow one new browser every 20 seconds. */
+export const BROWSER_SPACING_MS = 20 * SECOND;
 
 // ---- the owner API -----------------------------------------------------------------------------------------------
 

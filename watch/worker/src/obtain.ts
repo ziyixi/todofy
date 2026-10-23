@@ -369,6 +369,8 @@ async function renderNavigation(deps: ObtainDeps, config: WatchConfig, budget: B
     leave: (url, status, headers) => { page.leave(url, status, headers); },
   };
   const started = deps.now();
+  const availableAt = browserNextAt(deps.store);
+  if (availableAt > started) return { ...blankAnswer({ finalUrl: config.uri }), kind: 'deferred', until: availableAt };
   deps.store.setMeta('browser_next_at', String(started + BROWSER_SPACING_MS));
   const rendered = await browser.render({ url: config.uri, locale: config.locale, timeoutMs: deps.timeoutMs,
     allowHttp: config.allowHttp, source: config.source, gate });

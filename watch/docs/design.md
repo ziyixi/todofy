@@ -100,7 +100,8 @@ Tiers, cheapest first:
    a viewport, not the full page. The session closes after capture, including failure. Text remains available when
    only the screenshot or accessibility capture fails, with explicit source error codes.
    The app retains its 480-second daily ledger under the account's shared allowance. Budget exhaustion is
-   `JS_QUOTA_EXHAUSTED`, never no change. Browser checks retain their existing six-hour minimum interval.
+   `JS_QUOTA_EXHAUSTED`, never no change. The existing browser slot spaces new sessions at least 20 seconds
+   apart, including manual previews. Browser checks retain their existing six-hour minimum interval.
 
 Etiquette (`worker/src/etiquette.ts`, `obtain.ts`, `fetcher.ts`, `scheduler.ts`):
 

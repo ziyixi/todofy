@@ -30,6 +30,8 @@ Final review also fixed shared feed retention so evidence events cannot evict or
 for Tasks; a reproduced regression and the affected 16 runtime cases pass. The follow-up branch gate is required
 before activating the app. Legacy validators allow one initial rich capture; missing historical reading evidence
 remains explicitly absent instead of being replaced with a later capture.
+Browser Sessions use the existing global slot at the provider's 20-second Free acquisition interval, including
+manual previews; the old 10-second Quick Actions value does not apply to the new transport.
 
 ## Latest verified release
 

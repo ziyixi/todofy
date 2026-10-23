@@ -29,6 +29,11 @@ beforeAll(async () => {
     import { saveEvidence, latestEvidence, readEvidence, readEvidenceImage, cleanEvidence } from './src/evidence.ts';
     import { extractCapture } from './src/evidence-extract.ts';
     import { encodeSnapshot } from './src/snapshot.ts';
+    import { obtain } from './src/obtain.ts';
+    import { readConfig } from './src/config.ts';
+    import { HostLocks } from './src/host-locks.ts';
+    import { create } from '@ziyixi/proto/protobuf';
+    import { WatchSchema, Watch_Fetcher } from '@ziyixi/proto/watch/ui/v1/watch_pb';
     import { SnapshotSchema, SnapshotImageSchema } from '@ziyixi/proto/watch/ui/v1/snapshot_pb';
     import { toWire } from '@ziyixi/proto/wire-json';
     export class EvidenceProbe extends DurableObject {
@@ -44,6 +49,22 @@ beforeAll(async () => {
         const url = new URL(request.url);
         if (url.pathname === '/read') return Response.json(toWire(SnapshotSchema, await readEvidence(this.store, this.env.EVIDENCE_STORE, url.searchParams.get('name'))));
         if (url.pathname === '/image') return Response.json(toWire(SnapshotImageSchema, await readEvidenceImage(this.store, this.env.EVIDENCE_STORE, url.searchParams.get('name'))));
+        if (url.pathname === '/session') {
+          const input = await request.json();
+          const config = readConfig(create(WatchSchema,{displayName:'Synthetic session',uri:input.uri,fetcher:Watch_Fetcher.BROWSER}),{selectorOk:()=>true,browserEnabled:true});
+          if (typeof config === 'string') throw new Error('synthetic_config_invalid');
+          const browser = { navigationGate:true, render:async request => {
+            this.store.setMeta('synthetic_launches',String(Number(this.store.getMeta('synthetic_launches') ?? 0)+1));
+            const target = new URL(request.url);
+            const refusal = await request.gate.enter(target,0,null);
+            if (refusal) return {kind:'refused',refusal,browserMs:1000};
+            request.gate.leave(target,200,new Headers());
+            return {kind:'rendered',status:200,html:new TextEncoder().encode('<p>Synthetic rendered page</p>'),browserMs:1000,finalUrl:request.url};
+          }};
+          const result = await obtain({store:this.store,browser,hosts:new HostLocks(),timeoutMs:1000,now:()=>input.now,
+            fetch:async () => new Response(null,{status:404})},config,{requests:40,used:0,bytes:0},null);
+          return Response.json({result,launches:Number(this.store.getMeta('synthetic_launches') ?? 0),ledger:this.store.ledger(new Date(input.now).toISOString().slice(0,10))});
+        }
         if (url.pathname !== '/capture') return new Response(null, {status:404});
         const input = await request.json();
         const extracted = await extractCapture({ body:new TextEncoder().encode(input.html), contentType:'text/html', finalUrl:'https://synthetic.example.com/page' });
@@ -73,11 +94,12 @@ beforeAll(async () => {
     }
     export default {fetch(request,env) { return env.PROBE.getByName(new URL(request.url).searchParams.get('fixture')).fetch(request); }};
   ` }, bundle: true, format: 'esm', platform: 'browser', target: 'es2024', write: false,
-  external: ['cloudflare:workers'], logLevel: 'silent' });
+  mainFields: ['browser','module','main'], external: ['cloudflare:workers','node:buffer'], logLevel: 'silent' });
   const script = bundle.outputFiles[0]?.text;
   if (!script) throw new Error('Missing evidence persistence probe bundle');
   mf = new Miniflare(convertV4MiniflareOptions({ resourcePersistencePath: persistence, workers: [{
     name: 'evidence-probe', modules: true, script, compatibilityDate: '2026-09-08',
+    compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PROBE: { className: 'EvidenceProbe', useSQLite: true } }, r2Buckets: ['EVIDENCE_STORE'],
     outboundService: () => new Response('synthetic_only', { status: 502 }),
   }] }));
@@ -116,6 +138,23 @@ async function image(fixture: string, name: string) {
 }
 
 describe('real SQLite and R2 capture storage', () => {
+  it('defers a different-host session until the existing 20-second slot without exhausting the day', async () => {
+    const session = async (now: number, uri: string) => {
+      const response = await mf.dispatchFetch('https://probe.invalid/session?fixture=session-spacing', {
+        method: 'POST', body: JSON.stringify({ now, uri }),
+      });
+      expect(response.status).toBe(200);
+      return await response.json() as { result: { kind: string; until?: number; fetched: boolean }; launches: number; ledger: { browser_ms: number; browser_exhausted: number } };
+    };
+    const first = await session(T0, 'https://first-session.example.com/page');
+    expect(first).toMatchObject({ result: { kind: 'answer' }, launches: 1, ledger: { browser_ms: 1000, browser_exhausted: 0 } });
+    const second = await session(T0 + 19_999, 'https://second-session.example.com/page');
+    expect(second).toMatchObject({ result: { kind: 'deferred', until: T0 + 20_000, fetched: false }, launches: 1,
+      ledger: { browser_ms: 1000, browser_exhausted: 0 } });
+    const ready = await session(T0 + 20_000, 'https://second-session.example.com/page');
+    expect(ready).toMatchObject({ result: { kind: 'answer' }, launches: 2, ledger: { browser_ms: 2000, browser_exhausted: 0 } });
+  });
+
   it('reads captured Markdown, metadata and exact JPEG bytes, and reuses unchanged content', async () => {
     const saved = await capture('reuse', T0, { image: JPEG });
     const snapshot = await read('reuse', saved.latest);
