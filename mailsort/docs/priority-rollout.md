@@ -19,7 +19,7 @@ only the existing Gmail write grant. It does not delete messages, read their bod
 
 ## Explicit unread batch
 
-After setup, the owner can choose **处理全部未读**. This explicitly authorizes the deployed app to process private
+After setup, open **分级** and choose **开始整理** under **整理当前未读邮件**. This explicitly authorizes the deployed app to process private
 unread mail of any age, including archived mail, using the existing masked model path. Ordinary new-mail processing
 keeps its receipt cutoff. No private content or model request belongs in rollout evidence, logs or fixtures.
 
@@ -31,7 +31,7 @@ Inbox; ordinary undo restores its original Inbox position. Mail is never deleted
 
 Modes, write caps and neuron budgets stay unchanged. Clef-flash begins at 70%; exhausted daily model quota or write
 allowance waits until the next UTC day. A paused mode leaves the batch waiting. Check applied, skipped, failed and
-pending/deferred counts in the overview: a completed batch may include skips and failures. The newest batch's IDs,
+pending/deferred counts in that card; **刷新进度** reads current status. A completed batch may include skips and failures. The newest batch's IDs,
 state, ledger links and scan progress contain no mail content and remain until the next batch or deletion of app data.
 Production batch results must be recorded separately from the initializer and synthetic checks below.
 

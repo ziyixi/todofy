@@ -157,7 +157,7 @@ with assertions that those paths really ran. A setup-required early return is no
 Overview is the default route. The three visible tabs are 概览, 分级, 设置. Four fixed rows state the reading cadence
 and Inbox/archive behavior; examples load only when expanded. The setup card states exactly which old labels and
 learning are removed and that existing mail remains. It makes a bounded owner RPC per click, without polling.
-Overview also offers 处理全部未读 and shows scanning, pending/deferred, applied, skipped and failed counts. A completed
+The 分级 page also offers 整理当前未读邮件 with 开始整理 and 刷新进度, showing scanning, pending/deferred, applied, skipped and failed counts. A completed
 batch can include skips or failures. Settings keeps modes, ordinary undo, read-only replay and budget information.
 Legacy outcomes are readable as history without presenting old topic names as active priorities.
 

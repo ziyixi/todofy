@@ -22,7 +22,7 @@ for the next UTC day. Neither creates a priority judgment. Each new reply is jud
 still deduplicate delivery. A new reply carrying an earlier priority can replace it without changing other
 labels, unread or starred state. Normal processing keeps its new-mail receipt cutoff.
 
-The owner can explicitly choose **处理全部未读** (`StartUnreadClassification`). It first collects unread message
+On **分级**, the owner can choose **开始整理** under **整理当前未读邮件** (`StartUnreadClassification`). It first collects unread message
 IDs across all ages and folders, including archived mail, then processes that batch through the existing Alarm
 and pending queue. Spam, Trash and the normal incoming-mail exclusions are skipped, as are messages already
 carrying P1-P4 or no longer unread. Only this batch bypasses the new-mail cutoff and may replace a message's
@@ -40,9 +40,9 @@ handling is unchanged. Financial notices get a reading priority from their conte
 
 ## UI
 
-- **概览**: mode, Gmail grant, freshness, today's flow, per-priority counts, the model budget and the explicit
+- **概览**: mode, Gmail grant, freshness, today's flow, per-priority counts and the model budget.
+- **分级**: four fixed rows, their Inbox/archive behavior, learned examples loaded only on expansion, and the explicit
   unread-batch action and progress.
-- **分级**: four fixed rows, their Inbox/archive behavior and learned examples loaded only on expansion.
 - **设置**: owner mode, existing undo and the read-only classification-effect check. Gmail corrections teach the
   priority model. Uncertain mail does not require a separate review; the old `/review` path remains readable.
 
