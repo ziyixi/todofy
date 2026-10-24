@@ -117,6 +117,7 @@ export async function renderOverview(ctx: ViewContext): Promise<void> {
         kpi('P1', todayRank(true), sevenDays(weekRank(true))),
         kpi('P2、P3、P4', todayRank(false), sevenDays(weekRank(false))),
       ),
+      el('p', { class: 'hint' }, '大字与流程图为今日累计处理记录；7 天小字及下表按最新判断计数。重判保留历史处理记录。'),
       card('今天的流程', graph.total === 0 ? '' : `共 ${String(graph.total)} 封`, sankeyChart(graph), graph.total === 0 ? el('p', { class: 'hint' }, '今天还没有邮件') : null),
       el('div', { class: 'two' }, labelTable(week, labels), budget(status)),
     )

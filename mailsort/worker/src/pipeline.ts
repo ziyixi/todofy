@@ -42,7 +42,7 @@ import { replayStep } from './replay.ts';
 import { Budget, noteGoogleError, noteTokenOk, openSession, writeScope } from './session.ts';
 import { effectiveMode, readSettings, tripBreaker, type SettingsValue } from './settings.ts';
 import { utcDay, type Store } from './store.ts';
-import { fallbackP1, finishUnread, isUnreadPending, scanUnread, unreadRechecksFallback } from './unread.ts';
+import { decisionForRecheck, fallbackP1, finishUnread, isUnreadPending, scanUnread, unreadRechecksFallback, unreadRechecksInitial100 } from './unread.ts';
 import { executeWrites, intend, type WriteContext, type WriteGate } from './writes.ts';
 
 /** Labels Gmail puts on mail that is not the owner's incoming mail: never decided. */
@@ -291,6 +291,7 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
   const { store, gmail } = ctx;
   const unread = isUnreadPending(store, messageId);
   const recheckFallback = unread && unreadRechecksFallback(store);
+  const recheckInitial100 = unread && unreadRechecksInitial100(store);
   if (unread) {
     // This batch promises actual Gmail labels. A pause or reached write cap must leave it queued.
     const at = ctx.now();
@@ -313,17 +314,22 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
     ctx.transact(() => { recordSkip(store, messageId, messageId, 0, now, 'unreadable'); });
     return 'skipped';
   }
-  if ((unread ? !read.labelIds.includes('UNREAD') : !read.labelIds.includes('INBOX')) || read.labelIds.some((label) => SKIP_LABELS.has(label))) {
+  if ((!recheckInitial100 && (unread ? !read.labelIds.includes('UNREAD') : !read.labelIds.includes('INBOX'))) || read.labelIds.some((label) => SKIP_LABELS.has(label))) {
     ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'not_inbox'); });
     return 'skipped';
   }
   const priorityIds = priorityGmailIds(store);
   const currentPriorities = read.labelIds.filter(id => priorityIds.has(id));
+  const priorPriority = recheckInitial100 ? decisionForRecheck(store, messageId)?.label_id : recheckFallback ? P1_ID : null;
+  if (recheckInitial100 && (priorPriority == null || currentPriorities.length !== 1 || currentPriorities[0] !== store.label(priorPriority)?.gmail_id)) {
+    ctx.transact(() => { finishPending(store, messageId); });
+    return 'skipped';
+  }
   if (recheckFallback && (!fallbackP1(store, messageId) || currentPriorities.length !== 1 || currentPriorities[0] !== store.label(P1_ID)?.gmail_id)) {
     ctx.transact(() => { finishPending(store, messageId); });
     return 'skipped';
   }
-  if (unread && !recheckFallback && currentPriorities.length > 0) {
+  if (unread && !recheckFallback && !recheckInitial100 && currentPriorities.length > 0) {
     ctx.transact(() => { finishPending(store, messageId); });
     return 'skipped';
   }
@@ -376,24 +382,24 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
   // gate's, right before the write: a write it refuses stays recorded, like any failed write), else only recorded.
   const labels = store.labels();
   const label = decision.kind === 'label' ? labels.find((item) => item.id === decision.label) : undefined;
-  const unchangedP1 = recheckFallback && label?.id === P1_ID;
+  const unchangedPriority = (recheckFallback || recheckInitial100) && label !== undefined && label.id === priorPriority;
   // A label missing from Gmail, or whose path names a Gmail label not its own, writes nothing until the owner acts.
-  const apply = !unchangedP1 && label !== undefined && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1 && writesLive(store, ctx.ceiling);
+  const apply = !unchangedPriority && label !== undefined && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1 && writesLive(store, ctx.ceiling);
   // Fixed cadence: P1 remains visible in Inbox, P2-P4 are archived.
   const archive = label?.id !== P1_ID;
   const intent: { id: string | null } = { id: null };
   ctx.transact(() => {
     // Valid uncertain/none model answers already became P1 in judge; failures do not create mandatory review.
     const shown = false;
-    const outcome = decision.kind === 'label' ? (apply || unchangedP1 ? 'applied' : 'suggested') : decision.kind === 'none' ? 'none' : 'unsure';
+    const outcome = decision.kind === 'label' ? (apply || unchangedPriority ? 'applied' : 'suggested') : decision.kind === 'none' ? 'none' : 'unsure';
     recordDecision(store, read, g, now, { outcome, decision, modelDecision: judgement.modelDecision, view1, view2, model, versions: judgement.versions, shown });
     store.addUsage(utcDay(now), 'decided', 1);
     if (decision.kind === 'unsure') store.addUsage(utcDay(now), 'unsure', 1);
-    if (unchangedP1) setCurrentLabels(store, read.id, [P1_ID]);
+    if (unchangedPriority) setCurrentLabels(store, read.id, [label.id]);
     else countFlow(store, now, stageOf(model), flowOutcome(decision, apply, archive, shown), decision.kind === 'label' ? decision.label : null);
     if (apply) intent.id = intend(store, read.id, label, archive, 'auto', now, read.labelIds);
     if (unread && intent.id !== null) store.run(`UPDATE unread_batch SET ledger_id = ? WHERE message_id = ?`, intent.id, read.id);
-    finishPending(store, read.id, unchangedP1 ? 'skipped' : 'failed');
+    finishPending(store, read.id, unchangedPriority ? 'skipped' : 'failed');
   });
   const ledgerId = intent.id;
   if (ledgerId !== null) {

@@ -170,7 +170,7 @@ message ServiceStatus {
   UnreadClassification unread_classification = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// One batch of current unread messages. Counts contain no mail content.
+// One owner-requested classification batch; the resource keeps its original name. Counts contain no mail content.
 message UnreadClassification {
   option (google.api.resource) = {
     type: "sort.ziyixi.science/UnreadClassification"
@@ -182,7 +182,7 @@ message UnreadClassification {
   enum State {
     // Never written.
     STATE_UNSPECIFIED = 0;
-    // Enumerating unread IDs; classification starts after the last page.
+    // Enumerating the selected IDs; classification starts after the last page.
     STATE_SCANNING = 1;
     // Waiting for classification or a persisted Gmail write.
     STATE_RUNNING = 2;
@@ -196,13 +196,13 @@ message UnreadClassification {
   State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The owner's request time.
   google.protobuf.Timestamp started_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Unique unread IDs collected; provisional while scanning.
+  // Unique IDs selected by the requested scope; provisional while scanning.
   int32 total_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Messages waiting for classification or an intended Gmail write.
   int32 pending_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Gmail writes confirmed applied, including a later ordinary undo.
   int32 applied_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Already graded, no longer unread, gone, or excluded by the normal incoming-mail rules.
+  // Ineligible, owner-adjusted, unchanged on recheck, gone or excluded messages.
   int32 skipped_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Messages with a terminal read/model/write failure; never counted as successful classification.
   int32 failed_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];

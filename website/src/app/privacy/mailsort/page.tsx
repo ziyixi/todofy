@@ -88,6 +88,14 @@ export default function MailsortPrivacyPage() {
             unnecessary. A result of P2, P3 or P4 replaces P1 and archives through the same ledger.
           </li>
           <li>
+            The owner can explicitly recheck the first 100 messages automatically graded under the
+            current P1-P4 setup, including read and archived mail. The original classification
+            ledger fixes this group; later arrivals do not replace its members. Messages the owner
+            has confirmed or relabeled are skipped. The app preserves read state, stars and
+            unrelated labels. An unchanged priority only refreshes the model evidence. Existing
+            quotas and write limits still apply.
+          </li>
+          <li>
             The owner can explicitly start a one-time switch from the old categories to P1–P4. This
             deletes only the old Gmail labels managed by mailsort, including its old grouping labels
             where eligible. It keeps every message, its inbox position, read or unread state and

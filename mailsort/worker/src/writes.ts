@@ -30,7 +30,7 @@
  */
 import { effectiveLedgerRow } from './label-identity.ts';
 import { migrationActive } from './label-merge.ts';
-import { P1_ID, priorityGmailIds, PRIORITY_IDS } from './priority.ts';
+import { priorityGmailIds, PRIORITY_IDS } from './priority.ts';
 import { setCurrentLabels } from './feedback.ts';
 import { countFlow, stageOf } from './flow.ts';
 import { GmailRefused, GoogleError, isUserLabelId, type GmailClient, type GmailLabel } from './gmail.ts';
@@ -38,7 +38,7 @@ import { WRITE_ATTEMPTS_MAX } from './limits.ts';
 import { ownerPath } from './paths.ts';
 import { noteGoogleError } from './session.ts';
 import { timeId } from './ids.ts';
-import { unreadRechecksFallback } from './unread.ts';
+import { unreadRechecksFallback, unreadRechecksInitial100 } from './unread.ts';
 import { utcDay, type LabelRow, type LedgerRow, type Store } from './store.ts';
 import type { Budget } from './session.ts';
 
@@ -318,9 +318,9 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
         const now = ctx.now();
         ctx.transact(() => {
           store.run(`UPDATE ledger SET state = 'applied', apply_time = ?, last_code = NULL WHERE id = ?`, now, row.id);
-          if (row.label_id !== P1_ID && unreadRechecksFallback(store) && store.one(`SELECT 1 AS x FROM unread_batch WHERE message_id = ? AND ledger_id = ?`, row.message_id, row.id) !== undefined) {
-            // The new priority now owns undo; an earlier P1 undo could otherwise change its Inbox position.
-            store.run(`UPDATE ledger SET superseded = 1 WHERE message_id = ? AND label_id = ? AND state = 'applied' AND id != ?`, row.message_id, P1_ID, row.id);
+          if ((unreadRechecksInitial100(store) || unreadRechecksFallback(store)) && store.one(`SELECT 1 AS x FROM unread_batch WHERE message_id = ? AND ledger_id = ?`, row.message_id, row.id) !== undefined) {
+            // Only the successful replacement owns undo; the earlier priority's history remains read-only.
+            store.run(`UPDATE ledger SET superseded = 1 WHERE message_id = ? AND origin = 'auto' AND label_id IN ('p1', 'p2', 'p3', 'p4') AND state = 'applied' AND id != ?`, row.message_id, row.id);
           }
           const decision = store.decision(row.message_id);
           if (decision !== undefined) setCurrentLabels(store, row.message_id, [

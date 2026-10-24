@@ -17,7 +17,7 @@ async function ready(): Promise<void> {
 }
 
 const mail = (id: number, labels = ['INBOX', 'UNREAD']): SyntheticMail => ({ ...MAILS.bankEn, id: `abc${id.toString(16).padStart(13, '0')}`, labels });
-const start = (requestId = op(), recheckFallback = false) => h.api.startUnreadClassification({ name: 'unreadClassification', requestId, recheckFallback });
+const start = (requestId = op(), recheckFallback = false, recheckInitial100 = false) => h.api.startUnreadClassification({ name: 'unreadClassification', requestId, recheckFallback, recheckInitial100 });
 const progress = async () => (await h.api.getServiceStatus({ name: 'serviceStatus' })).unreadClassification;
 
 async function storedFallback(message: SyntheticMail, reason = 'low_confidence', at = T0 + MINUTE): Promise<void> {
@@ -285,4 +285,127 @@ it('skips a collected fallback when the owner reads it, changes its priority or 
   expect(clefCalls(h)).toHaveLength(0);
   expect(modifies(h)).toHaveLength(0);
   expect(messages.map(message => gmailLabels(h, message.id))).toEqual(before);
+});
+
+it('rechecks the original 100 successful identities without substituting a later 101st message after evidence refresh or undo', async () => {
+  await ready();
+  const p4 = h.up.gmail.labelIdByName('P4') ?? '';
+  const originals = Array.from({ length: 100 }, (_, index) => mail(800 + index, ['UNREAD', p4]));
+  const later = mail(900, ['UNREAD', p4]);
+  for (const [index, message] of [...originals, later].entries()) {
+    deliver(h, message, T0 - DAY);
+    await h.sql(`INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, top_label, decider, current_labels)
+      VALUES (?, ?, ?, ?, 'applied', 'p4', 'p4', 'clef', '["p4"]')`, message.id, message.id, T0 - DAY, T0 + (102 - index) * MINUTE);
+    await h.sql(`INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time, apply_time)
+      VALUES (?, ?, 'p4', ?, 1, 'auto', ?, ?, ?)`, `original-${String(index)}`, message.id, p4, index === 0 ? 'undone' : 'applied', T0 + index, T0 + index);
+  }
+  await h.sql(`INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time, apply_time)
+    VALUES ('later-reapply', ?, 'p4', ?, 1, 'auto', 'applied', ?, ?)`, originals[0]?.id ?? '', p4, T0 + DAY, T0 + DAY);
+  h.up.ai.choiceOverride = () => ({ p4: 0.92, none: 0.08 });
+  await start(op(), false, true);
+  const selected = await h.sql(`SELECT message_id FROM unread_batch ORDER BY message_id`);
+  expect(selected).toEqual(originals.map(message => ({ message_id: message.id })));
+  await setMode(h, Mode.SHADOW);
+  await h.step(T0 + MINUTE);
+  expect(await progress()).toMatchObject({ totalCount: 100, pendingCount: 100, appliedCount: 0 });
+  expect(clefCalls(h)).toHaveLength(0);
+  await setMode(h, Mode.LIVE);
+  for (let pass = 6; pass <= 23; pass++) await h.step(T0 + pass * MINUTE);
+  expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 100, skippedCount: 100, appliedCount: 0, failedCount: 0 });
+  expect(clefCalls(h)).toHaveLength(200);
+  expect(modifies(h)).toHaveLength(0);
+  expect(h.up.gmail.calls.filter(call => new URL(call.url).pathname.endsWith('/messages'))).toHaveLength(0);
+  await start(op(), false, true);
+  expect(await h.sql(`SELECT message_id FROM unread_batch ORDER BY message_id`)).toEqual(selected);
+  expect(await h.sql(`SELECT message_id FROM unread_batch WHERE message_id = ?`, later.id)).toEqual([]);
+});
+
+it('rejects conflicting recheck scopes without consuming the request ID or starting a batch', async () => {
+  await ready();
+  const id = op();
+  await expect(start(id, true, true)).rejects.toThrow();
+  expect(await progress()).toBeUndefined();
+  expect(await h.sql(`SELECT message_id FROM unread_batch`)).toEqual([]);
+  const initial = await start(id, false, true);
+  expect(initial).toMatchObject({ state: State.COMPLETED, totalCount: 0 });
+  expect(await start(id, false, true)).toEqual(initial);
+  await expect(start(id)).rejects.toThrow();
+  expect(modifies(h)).toHaveLength(0);
+});
+
+it('refreshes a same-P4 result without undoing the owner read or Inbox position and without another Gmail intent', async () => {
+  await ready();
+  const other = h.up.gmail.createUserLabel('Personal');
+  const message = mail(911, ['INBOX', 'UNREAD', 'STARRED', other]);
+  deliver(h, message, T0 + MINUTE);
+  h.up.ai.choiceOverride = () => ({ p4: 0.92, none: 0.08 });
+  await h.step(T0 + 2 * MINUTE);
+  h.up.gmail.ownerModify(message.id, ['INBOX'], ['UNREAD']);
+  const before = gmailLabels(h, message.id);
+  const ledger = await h.sql(`SELECT id, state, superseded FROM ledger WHERE message_id = ?`, message.id);
+  await start(op(), false, true);
+  await h.step(T0 + 3 * MINUTE);
+  expect(await progress()).toMatchObject({ totalCount: 1, skippedCount: 1, appliedCount: 0, failedCount: 0 });
+  expect(await decision(h, message.id)).toMatchObject({ label_id: 'p4', outcome: 'applied', current_labels: '["p4"]', decided_at: T0 + 3 * MINUTE });
+  expect(await h.sql(`SELECT id, state, superseded FROM ledger WHERE message_id = ?`, message.id)).toEqual(ledger);
+  expect(gmailLabels(h, message.id)).toEqual(before);
+  expect(modifies(h)).toHaveLength(1);
+});
+
+it('rechecks read mail but skips owner priority changes, explicit verdicts, Spam and Trash in the original cohort', async () => {
+  await ready();
+  const p4 = h.up.gmail.labelIdByName('P4') ?? '';
+  const p3 = h.up.gmail.labelIdByName('P3') ?? '';
+  const messages = Array.from({ length: 6 }, (_, index) => mail(921 + index));
+  for (const message of messages) deliver(h, message, T0 + MINUTE);
+  h.up.ai.choiceOverride = () => ({ p4: 0.92, none: 0.08 });
+  await h.step(T0 + 2 * MINUTE);
+  expect(modifies(h)).toHaveLength(6);
+  h.up.gmail.ownerModify(mail(921).id, [], ['UNREAD']);
+  h.up.gmail.ownerModify(mail(922).id, [p3], [p4]);
+  h.up.gmail.ownerModify(mail(923).id, [p3], []);
+  await h.sql(`UPDATE decisions SET verdict = 'confirmed', verdict_source = 'review', verdict_label = 'p4' WHERE message_id = ?`, mail(924).id);
+  h.up.gmail.ownerModify(mail(925).id, ['SPAM'], []);
+  h.up.gmail.ownerModify(mail(926).id, ['TRASH'], []);
+  const unchanged = messages.slice(1).map(message => gmailLabels(h, message.id));
+  const calls = h.up.ai.calls.length;
+  h.up.ai.choiceOverride = () => ({ p2: 0.92, none: 0.08 });
+  await start(op(), false, true);
+  await h.step(T0 + 3 * MINUTE);
+  expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 6, appliedCount: 1, skippedCount: 5, failedCount: 0 });
+  expect(clefCalls(h, calls)).toHaveLength(2);
+  expect(gmailLabels(h, mail(921).id)).toEqual([h.up.gmail.labelIdByName('P2') ?? '']);
+  expect(messages.slice(1).map(message => gmailLabels(h, message.id))).toEqual(unchanged);
+});
+
+it.each([['p2', true, false], ['p1', false, true]] as const)('replaces P4 with %s while preserving read state and latest undo, unread=%s retry=%s', async (target, unread, retry) => {
+  await ready();
+  const p4 = h.up.gmail.labelIdByName('P4') ?? '';
+  const other = h.up.gmail.createUserLabel('Personal');
+  const message = mail(931, ['INBOX', 'UNREAD', 'STARRED', other]);
+  deliver(h, message, T0 + MINUTE);
+  h.up.ai.choiceOverride = () => ({ p4: 0.92, none: 0.08 });
+  await h.step(T0 + 2 * MINUTE);
+  if (!unread) h.up.gmail.ownerModify(message.id, [], ['UNREAD']);
+  const before = gmailLabels(h, message.id);
+  const old = (await h.api.listLedgerEntries({})).ledgerEntries[0];
+  expect(old?.undoable).toBe(true);
+  h.up.ai.choiceOverride = () => ({ [target]: 0.92, none: 0.08 });
+  const failing = retry ? failModifies(h, 503) : null;
+  await start(op(), false, true);
+  await h.step(T0 + 3 * MINUTE);
+  if (failing !== null) {
+    expect((await h.api.getLedgerEntry({ name: old?.name ?? '' })).undoable).toBe(true);
+    expect(gmailLabels(h, message.id)).toEqual(before);
+    failing.off();
+    await h.step(T0 + 4 * MINUTE);
+  }
+  const targetId = h.up.gmail.labelIdByName(target.toUpperCase()) ?? '';
+  expect(gmailLabels(h, message.id)).toEqual(['STARRED', other, targetId, ...(unread ? ['UNREAD'] : []), ...(target === 'p1' ? ['INBOX'] : [])].sort());
+  expect((await h.api.getLedgerEntry({ name: old?.name ?? '' })).undoable).toBe(false);
+  const latest = (await h.api.listLedgerEntries({})).ledgerEntries.find(row => row.name !== old?.name);
+  expect(latest?.undoable).toBe(true);
+  await h.api.undoLedgerEntry({ name: latest?.name ?? '', requestId: op() });
+  expect(gmailLabels(h, message.id)).toEqual(before);
+  expect(gmailLabels(h, message.id)).toContain(p4);
 });

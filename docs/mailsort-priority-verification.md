@@ -133,3 +133,28 @@ These are in-sample results with one pair per model/case, including one conserva
 They establish regressions for this sample, not production accuracy. Numeric captures are committed beside the
 synthetic fixtures and replayed through the real `judge()` path. Unit checks now pass 153 cases and the targeted
 pipeline/CPU workerd checks pass 16 cases. Release and the requested production recheck are still pending.
+
+### Original 100-message repair entrypoint
+
+The owner requested reanalysis of the previously classified 100 messages. The prepared `recheck_initial100` option
+uses the earliest successful automatic P1-P4 ledger identity per message, frozen at start; later arrivals and changed
+decision timestamps do not replace members. Read or archived messages are eligible; later owner choices are skipped.
+Same-priority results only refresh evidence, while a changed-priority write retains the existing ledger and quota gates.
+
+A read-only production aggregate confirmed this original cohort is 100 messages: 99 from the prior unread batch and
+one ordinary arrival, with 81 P1, 19 P4 and zero recorded owner confirmations/corrections. No message content or IDs
+were exported. The root stated this original-cohort interpretation before preparing the operation; it is distinct from
+selecting the newest 100 messages in the mailbox.
+
+The integrated local checks passed 153 unit, 91 workerd and 82 UI cases, Worker/UI lint and typechecks, UI build,
+the full local Wrangler smoke (62 closed-table fake Google requests), proto lint/API lint and breaking checks.
+These do not mean the production batch has run. Final branch gate, same-SHA release of the bounded repair entrypoint
+and actual batch results remain pending.
+
+### Calibrated core deployed
+
+The calibrated core passed [branch gate 40063013920](https://github.com/ziyixi/todofy/actions/runs/40063013920), then
+the same `725db27df907c0d31245990afc420d4b1a831ee1` passed [main release 40063783779](https://github.com/ziyixi/todofy/actions/runs/40063783779).
+Only Mailsort and its privacy page deployed. The verified app record is Deployment `7294197010`, Worker version
+`27a7ba8f-eee5-4c1c-bd88-78e4faf97dad`, with the original DO namespace unchanged. The refreshed production UI shows
+direct P1 0, fallback P1 82 and 4,392/9,500 estimated daily model use. No repair batch had started at this check.

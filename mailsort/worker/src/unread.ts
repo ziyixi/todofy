@@ -3,14 +3,15 @@ import { UnreadClassification_State, UnreadClassificationSchema, type UnreadClas
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import type { GmailClient } from './gmail.ts';
-import { P1_ID, priorityStartedAt } from './priority.ts';
-import type { Store } from './store.ts';
+import { P1_ID, PRIORITY_IDS, priorityStartedAt } from './priority.ts';
+import type { DecisionRow, Store } from './store.ts';
 
 interface UnreadScan {
   readonly startedAt: number;
   readonly listed: boolean;
   readonly pageToken?: string;
   readonly recheckFallback: boolean;
+  readonly recheckInitial100: boolean;
 }
 
 function scanOf(store: Store): UnreadScan | null {
@@ -47,24 +48,41 @@ export function unreadProgress(store: Store, now: number): UnreadClassification 
 }
 
 /** An active batch keeps its IDs and progress, including when another request_id is used. Transactional. */
-export function startUnread(store: Store, now: number, recheckFallback = false): void {
+export function startUnread(store: Store, now: number, recheckFallback = false, recheckInitial100 = false): void {
   const previous = unreadProgress(store, now);
   if (previous !== undefined && previous.state !== UnreadClassification_State.COMPLETED) return;
   store.run(`DELETE FROM unread_batch`);
-  store.setMeta('unread_scan', JSON.stringify({ startedAt: now, listed: false, recheckFallback } satisfies UnreadScan));
+  store.setMeta('unread_scan', JSON.stringify({ startedAt: now, listed: recheckInitial100, recheckFallback, recheckInitial100 } satisfies UnreadScan));
+  if (recheckInitial100) {
+    // Original successful writes are immutable, including after a later recheck or undo.
+    store.run(`INSERT INTO unread_batch (message_id)
+      SELECT message_id FROM ledger WHERE origin = 'auto' AND label_id IN ('p1', 'p2', 'p3', 'p4') AND apply_time IS NOT NULL AND create_time >= ?
+      GROUP BY message_id ORDER BY min(create_time), message_id LIMIT 100`, priorityStartedAt(store));
+    store.run(`INSERT OR IGNORE INTO pending (message_id, added_at) SELECT message_id, ? FROM unread_batch`, now);
+  }
+}
+
+/** The current assigned priority, excluding decisions explicitly confirmed or corrected by the owner. */
+export function decisionForRecheck(store: Store, messageId: string): DecisionRow | undefined {
+  const row = store.decision(messageId);
+  if (row === undefined || row.label_id === null || !PRIORITY_IDS.has(row.label_id) || row.decided_at < priorityStartedAt(store) ||
+    ((row.verdict === 'confirmed' || row.verdict === 'corrected') && (row.verdict_source === 'gmail' || row.verdict_source === 'review'))) return undefined;
+  return row;
 }
 
 /** A current-era P1 chosen by the uncertainty policy, without an owner's confirmed or corrected verdict. */
 export function fallbackP1(store: Store, messageId: string): boolean {
-  const row = store.decision(messageId);
-  return row !== undefined && row.label_id === P1_ID && row.decided_at >= priorityStartedAt(store) &&
-    ['low_confidence', 'views_disagree', 'no_match'].includes(row.unsure_reason) &&
-    !((row.verdict === 'confirmed' || row.verdict === 'corrected') && (row.verdict_source === 'gmail' || row.verdict_source === 'review'));
+  const row = decisionForRecheck(store, messageId);
+  return row?.label_id === P1_ID && ['low_confidence', 'views_disagree', 'no_match'].includes(row.unsure_reason);
 }
 
 /** The batch's explicit narrow retry option; older saved batches retain normal unread behavior. */
 export function unreadRechecksFallback(store: Store): boolean {
   return scanOf(store)?.recheckFallback === true;
+}
+
+export function unreadRechecksInitial100(store: Store): boolean {
+  return scanOf(store)?.recheckInitial100 === true;
 }
 
 /** One read-only page per alarm. No batch writes start until the complete ID set has been collected. */

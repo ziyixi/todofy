@@ -87,6 +87,14 @@ label; ordinary exclusions still apply. Already-read, relabeled or owner-answere
 updates decision evidence without another Gmail intent or write and counts as skipped. A P2-P4 result uses the
 existing ledger and archive behavior. This option shares the ordinary batch's queue, mode gates, budgets and caps.
 
+`recheck_initial100=true` is mutually exclusive with the fallback option. It freezes the earliest 100 unique messages
+with a successful current-era automatic P1-P4 ledger, ordered by each message's earliest ledger `create_time` and ID.
+Historical success remains eligible after undo; refreshed decision times and later arrivals cannot change cohort
+membership. The existing batch table is seeded directly, without a Gmail list operation. Read and archived members
+can be rejudged, while owner verdicts or a changed Gmail priority cause a skip. Same-priority results refresh evidence
+without a new write. After an actual changed-priority write succeeds, prior applied automatic priority ledgers are
+marked superseded in the same transaction; the newest undo restores its original label and Inbox preimage.
+
 Clef receives only current-priority examples/history, receipt time and the judgment's local date/week. It answers
 one priority question. The second view reorders the most likely options and runs when the first top probability
 is at least 0.4. Agreement and a 0.55 combined probability accept a later priority. The threshold was selected from
@@ -171,7 +179,7 @@ with assertions that those paths really ran. A setup-required early return is no
 Overview is the default route. The three visible tabs are 概览, 分级, 设置. Four fixed rows state the reading cadence
 and Inbox/archive behavior; examples load only when expanded. The setup card states exactly which old labels and
 learning are removed and that existing mail remains. It makes a bounded owner RPC per click, without polling.
-The 分级 page also offers 整理当前未读邮件 with 开始整理, 重判保底 P1 and 刷新进度, showing scanning, pending/deferred,
+The 分级 page offers 批量分级 with 整理当前未读, 重判保底 P1, 重判原100封 and 刷新进度, showing scanning, pending/deferred,
 applied, skipped and failed counts. A completed batch can include skips or failures. The last-seven-day overview
 separates direct P1 decisions from fallback P1 assignments; assigned P1 alone is not evidence of urgent mail.
 Settings keeps modes, ordinary undo, read-only replay and budget information.

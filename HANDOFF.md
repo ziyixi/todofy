@@ -19,12 +19,21 @@ P1 counts in the UI and adds a narrow retry for unread fallback P1. Original mai
 are retained. Actual synthetic Clef calibration is complete (96 calls, about 949 estimated neurons); the temporary
 Read token was revoked after use. The candidate adopts 0.55 while retaining the 0.4 first-view gate and two-view
 agreement. Captured responses give Clef 16/16 and Flash 13/16, including conservative P1 outcomes; this is not mailbox
-accuracy. The owner requested a 100-message recheck; original cohort versus latest mailbox scope is awaiting their
-answer. No candidate release or mailbox recheck has been performed yet.
+accuracy. The owner requested reanalysis of the previously classified 100 messages. Implementation prepares the
+original first-100 successful automatic-ledger cohort, including read/archived mail and checking existing owner choices;
+this is the root's stated interpretation of that request. The calibrated core is deployed; the 100-message repair
+entrypoint and mailbox operation remain pending.
 Local checks passed: 151 unit, 83 workerd, 79 UI, full local Wrangler smoke and 26 deployment-script tests. Proto
 lint/API lint, breaking, schema and TypeScript checks passed, plus 459 TypeScript and 110 Python contract tests.
-Full branch gate [40060474945](https://github.com/ziyixi/todofy/actions/runs/40060474945) passed on `8bcac93d`, before
-the calibrated threshold. Final implementation and any bounded 100-message operation still need a green branch SHA.
+Full branch gate [40063013920](https://github.com/ziyixi/todofy/actions/runs/40063013920) and same-SHA main
+[40063783779](https://github.com/ziyixi/todofy/actions/runs/40063783779) passed on `725db27d`. Mailsort's verified
+Deployment is `7294197010`, Worker version `27a7ba8f-eee5-4c1c-bd88-78e4faf97dad`; only Mailsort and privacy deployed.
+Live UI shows direct P1 0 and fallback P1 82 before the repair batch. Final 100-message code still needs its green SHA.
+Original-100 metadata was checked read-only: 99 previous unread-batch members plus one ordinary arrival, with 81 P1
+and 19 P4, and zero recorded owner verdicts. Integrated local checks passed 153 unit, 91 workerd, 82 UI cases,
+Worker/UI lint/typechecks, UI build, local Wrangler smoke and proto lint/API lint/breaking checks. No production recheck yet.
+Concurrent Gmail editing during model evaluation is outside this personal batch tool's scope. Processing keeps one
+initial label check and the pre-existing retry behavior; do not restore post-model guards or a concurrency test matrix.
 
 The Watch evidence implementation and native Dots acceptance are complete; the verification record is in
 [Watch evidence verification](docs/watch-evidence-verification.md). Its temporary subscription is stopped,

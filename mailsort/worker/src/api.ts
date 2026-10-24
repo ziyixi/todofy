@@ -496,12 +496,15 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
 
   async startUnreadClassification(request, ctx) {
     if (request.name !== 'unreadClassification') notFound();
-    const scope = request.recheckFallback ? `${request.name}:fallback` : request.name;
+    if (request.recheckFallback && request.recheckInitial100) bad('请选择一种重判范围。');
+    let scope = request.name;
+    if (request.recheckInitial100) scope += ':initial100';
+    else if (request.recheckFallback) scope += ':fallback';
     const answer = once(ctx, request.requestId, 'StartUnreadClassification', scope, UnreadClassificationSchema, () => {
       if (priorityStartedAt(ctx.store) === 0) bad('请先完成 P1–P4 分级设置。');
       if (!ownerWritesAllowed(ctx)) bad('请先恢复正式模式及 Gmail 写入授权。');
       if (ctx.consolidationBusy()) bad('邮件正在处理，请稍后再开始整理。');
-      startUnread(ctx.store, ctx.now, request.recheckFallback);
+      startUnread(ctx.store, ctx.now, request.recheckFallback, request.recheckInitial100);
       return unreadProgress(ctx.store, ctx.now) ?? notFound();
     });
     await ctx.wake();

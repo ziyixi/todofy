@@ -37,6 +37,12 @@ fallback P1 decisions without an explicit owner confirmation or correction. Befo
 and skips mail that is now read or no longer carries only P1. A result that remains P1 updates model evidence
 without another Gmail write and counts as skipped; a P2-P4 result uses the existing write ledger and archives.
 
+**重判原100封** selects the first 100 distinct messages successfully auto-graded under the current P1-P4 setup,
+including read and archived mail. Original ledger order freezes this cohort even after later arrivals or rechecks;
+it does not mean the newest 100 messages in Gmail. Owner-adjusted mail is skipped. An unchanged priority refreshes
+evidence without a Gmail write; a changed priority uses the normal ledger and preserves read state, stars and
+unrelated labels. The latest undo restores the pre-recheck labels and Inbox position.
+
 The existing modes, write caps and model budget apply. At 70% of the daily neuron budget the model switches to
 Clef-flash; exhaustion defers work to the next UTC day. A paused mode or a reached write cap leaves batch work
 waiting. Progress distinguishes applied, skipped, failed and pending messages; completion does not mean every

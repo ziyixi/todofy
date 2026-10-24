@@ -92,7 +92,8 @@ service MailsortUiService {
     option (google.api.method_signature) = "";
   }
 
-  // Classifies current unread messages, including archived mail, with the existing budget and write limits.
+  // Starts an owner-requested classification batch with the existing budget and write limits.
+  // The default selects unread messages; recheck options are explicit bounded exceptions.
   // Repeating a request or starting while a batch is active returns the existing batch.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
@@ -408,8 +409,12 @@ message StartUnreadClassificationRequest {
     (google.api.field_info).format = UUID4
   ];
   // Rejudge only existing unread fallback-P1 decisions, excluding explicit owner verdicts.
-  // False keeps the ordinary batch behavior: already graded messages are skipped.
+  // With neither recheck option, already graded messages are skipped.
   bool recheck_fallback = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Rejudge the first 100 distinct messages successfully auto-graded in the current priority era,
+  // including read or archived mail. Later owner label changes are skipped.
+  // Mutually exclusive with recheck_fallback; the selected IDs are frozen before processing.
+  bool recheck_initial100 = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Input of GetLabel.
