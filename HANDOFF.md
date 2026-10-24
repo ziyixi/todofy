@@ -28,7 +28,8 @@ informational signal; saved decisions remain in the write ledger. Production cur
 150-write cap exhausted and the old daily-limit breaker; the owner has been asked whether to raise the cap
 temporarily or wait for the next UTC day. Do not change the limit without that answer. CI for `69c70a29`
 passed the new Mailsort/runner/Platform/Website checks; its only failure was a Home runtime registry assertion
-missing the new hidden runner, now corrected. A full final branch gate remains required before main.
+missing the new hidden runner, now corrected. Home guard assertions and the CI contract-import map now also
+reflect the retired Mailsort guard. A full final branch gate remains required before main.
 The older five unstarted original-100 rechecks below were cancelled in the preceding authorized read-only audit;
 the production batch then reported applied 45, skipped 55, pending 0. Do not resume those cancelled requests.
 
