@@ -72,7 +72,7 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (39 objects)
+### Managed here (41 objects)
 
 This is the maximum declared count. Fresh bootstrap creates 35 objects before the first Worker release,
 then adds its exact mail rule (36). An adopted account retains the frozen legacy backup app (37).

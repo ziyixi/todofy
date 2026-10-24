@@ -107,3 +107,10 @@ Domain reasons come from [`ErrorReason`](../../proto/platform/runtime/v1/errors.
 `Release.error_code` is a separate bounded fixed diagnostic alias on persisted failed/held state,
 not an HTTP status or a raw exception. Adapter implementations document their aliases; consumers display
 an unfamiliar safe alias without treating it as ready or automatically resuming the operation.
+
+For the fixed `mailsort-runner`, `process_state=stopped` and
+`release.observation_scope=template` qualify the installed CronJob evidence. Its actual source, image
+digest and request identity come from the installed template; its observed generation is the installed
+CronJob metadata generation. This makes no claim about a running container or a completed classification.
+The release client never starts a real-mail Job for verification. Mailsort Ops reports accepted batch
+results independently. An absent observation scope preserves the existing process semantics.

@@ -5,10 +5,11 @@ import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { Label_GmailState, LabelSchema } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
 import { Example_Origin } from '@ziyixi/proto/mailsort/ui/v2/review_pb';
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
+import { Priority } from '@ziyixi/proto/mailsort/runner/v1/mailsort_runner_service_pb';
 import { Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { MAILS } from '../fakes/fixtures.ts';
 import { DAY, MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
-import { checkGoogleCalls, decision, deliver, gmailLabels, modifies, setMode } from './helpers.ts';
+import { checkGoogleCalls, classifyUnread, decision, deliver, gmailLabels, modifies, setMode } from './helpers.ts';
 
 describe('fixed priority labels and owner corrections', () => {
   let h: Harness;
@@ -24,9 +25,11 @@ describe('fixed priority labels and owner corrections', () => {
   afterEach(() => { checkGoogleCalls(h); });
 
   async function classified(id: string, priority: string, labels?: string[]): Promise<void> {
-    h.up.ai.choiceOverride = () => ({ [priority]: 0.92, none: 0.08 });
     deliver(h, { ...MAILS.bankEn, id, ...(labels === undefined ? {} : { labels }) }, now + MINUTE);
     now += 5 * MINUTE;
+    await h.clock(now);
+    if (labels !== undefined) await h.api.startUnreadClassification({ name: 'unreadClassification', requestId: op(), recheckAllUnread: true });
+    await classifyUnread(h, ({ p1: Priority.P1, p2: Priority.P2, p3: Priority.P3, p4: Priority.P4 } as Record<string, Priority>)[priority] ?? Priority.P2);
     await h.step(now);
     expect(await decision(h, id)).toMatchObject({ outcome: 'applied', label_id: priority, shown: 0 });
   }
@@ -86,7 +89,7 @@ describe('fixed priority labels and owner corrections', () => {
     expect(gmailLabels(h, id)).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
   });
 
-  it('replaces inherited priority on a new reply and undo restores its original label', async () => {
+  it('replaces an existing priority only in an explicit unread recheck and undo restores its original label', async () => {
     const id = 'abc0000000000203';
     const p3 = h.up.gmail.labelIdByName('P3') ?? '';
     await classified(id, 'p1', ['INBOX', 'UNREAD', p3]);
@@ -110,7 +113,7 @@ describe('fixed priority labels and owner corrections', () => {
     expect((await h.api.listExamples({ label: 'labels/p3' })).examples).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'labels/p3', origin: Example_Origin.CORRECTION })]));
     expect((await h.api.getLabel({ name: 'labels/p3' })).trustedDomains).toEqual([]);
     const flow = await h.api.getMailFlow({ name: 'mailFlows/today' });
-    expect(flow.counts.find((row) => row.stage === MailFlow_Stage.CLEF && row.outcome === MailFlow_Outcome.CORRECTED && row.label === 'labels/p2')?.mailCount).toBeGreaterThan(0);
+    expect(flow.counts.find((row) => row.stage === MailFlow_Stage.CODEX && row.outcome === MailFlow_Outcome.CORRECTED && row.label === 'labels/p2')?.mailCount).toBeGreaterThan(0);
     const report = await h.api.getLabelReport({ name: 'labelReport' });
     expect(report.labels.find((row) => row.label === 'labels/p2')?.gmailCorrectionCount).toBeGreaterThan(0);
     // Returning to the applied label withdraws this correction and its example.

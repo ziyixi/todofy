@@ -22,7 +22,7 @@ import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, R
 import { senderHash } from './mask.ts';
 import { PRIORITY_LABELS } from './priority.ts';
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -431,6 +431,19 @@ export const SCHEMA_V8: readonly string[] = [
   )`,
 ];
 
+/** Version 10: bounded machine-run inputs and accepted results, reusing pending and the Gmail ledger. */
+export const SCHEMA_V10: readonly string[] = [
+  `ALTER TABLE decisions ADD COLUMN runner_effort TEXT`,
+  `ALTER TABLE decisions ADD COLUMN runner_prompt_sha TEXT`,
+  `ALTER TABLE decisions ADD COLUMN runner_reason TEXT`,
+  `CREATE TABLE classification_items (
+    run_id TEXT NOT NULL, message_id TEXT NOT NULL, input_json TEXT, base_labels TEXT NOT NULL,
+    selected_at INTEGER NOT NULL, priority TEXT, reason TEXT, ledger_id TEXT,
+    PRIMARY KEY (run_id, message_id)
+  )`,
+  `CREATE INDEX classification_item_ledger ON classification_items (ledger_id)`,
+];
+
 export type Value = string | number | null | ArrayBuffer;
 
 export interface RowMeter {
@@ -617,6 +630,7 @@ export class Store {
           }
         }
       }
+      if (version < 10) for (const statement of SCHEMA_V10) this.sql.exec(statement);
       if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
     });
   }
@@ -884,7 +898,7 @@ export class Store {
   prune(now: number): void {
     const content = now - CONTENT_KEPT_MS;
     this.run(
-      `UPDATE decisions SET subject = NULL, sender = NULL, summary = NULL, sender_domain = NULL, content_cleared = 1 WHERE content_cleared = 0 AND decided_at < ?`,
+      `UPDATE decisions SET subject = NULL, sender = NULL, summary = NULL, sender_domain = NULL, content_cleared = 1, runner_reason = NULL WHERE content_cleared = 0 AND decided_at < ?`,
       content,
     );
     // A mail queued late (a deferral, a backoff) still loses its content 14 days after it came.
@@ -897,6 +911,8 @@ export class Store {
     // A retired ID is free again once neither the decisions nor the flow counters can still name it.
     this.run(`DELETE FROM retired_labels WHERE retire_time < ?`, now - Math.max(DECISIONS_KEPT_MS, (FLOW_KEPT_DAYS + 1) * DAY));
     this.run(`DELETE FROM requests WHERE at < ?`, now - REQUEST_ID_TTL_MS);
+    this.run(`UPDATE classification_items SET input_json = NULL, reason = NULL WHERE selected_at < ?`, now - CONTENT_KEPT_MS);
+    this.run(`DELETE FROM classification_items WHERE selected_at < ?`, records);
     this.run(`DELETE FROM replay WHERE create_time < ?`, now - REPLAY_KEPT_MS);
   }
 }

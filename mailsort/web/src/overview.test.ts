@@ -2,7 +2,7 @@
  * 概览 against the fake API (test/fakeServer.ts, the shared transcoder): the status line, today's four numbers with
  * their last 7 days, the flow diagram (its graph with 都不是 and 拿不准 split by 待审, hues, size, tooltip and theme
  * tokens, the zero skeleton on a day without mail, and its start on a phone), the table of the last 7 days per label
- * and the model budget's meter; no error box.
+ * and the hourly runner evidence.
  */
 import { mountApp, type Host } from './app.ts'
 import { clamp, flowGraph, sankeyChart, skeletonGraph } from './flowchart.ts'
@@ -42,11 +42,11 @@ function server(): FakeServer {
 }
 
 describe('the flow diagram', () => {
-  it('builds the graph: every mail once (延后 holds only mail still waiting), no correction, priorities retain their order and individual colors', () => {
+  it('keeps historical counters readable and counts every mail once, excluding corrections', () => {
     const s = server()
     const graph = flowGraph(s.flow, s.labels)
     expect(graph.total).toBe(20)
-    expect(graph.nodes.map((node) => node.name)).toEqual(['新邮件', '跳过', 'Clef 27B', 'Clef-flash', '延后（额度）', 'P1', 'P2', 'P4', '旧记录：未确认', '影子建议（未写入）'])
+    expect(graph.nodes.map((node) => node.name)).toEqual(['新邮件', '跳过', 'Clef 27B', 'Clef-flash', '等待处理', 'P1', 'P2', 'P4', '旧记录：未确认', '影子建议（未写入）'])
     expect(graph.nodes.find((node) => node.id === 'skipped')?.detail).toEqual(['对话已分拣 3', '已发送、草稿或垃圾邮件 1'])
     // Each priority has its own stable color.
     expect(graph.groups).toEqual([
@@ -55,6 +55,25 @@ describe('the flow diagram', () => {
       { name: 'P3', slot: 3 },
       { name: 'P4', slot: 4 },
     ])
+  })
+
+  it('shows Codex classifications and their actual Gmail outcomes without old model stages', () => {
+    const s = server()
+    const graph = flowGraph([
+      flowCount(MailFlow_Stage.CODEX, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/p1', 2),
+      flowCount(MailFlow_Stage.CODEX, MailFlow_Outcome.ARCHIVED, 'labels/p2', 5),
+      flowCount(MailFlow_Stage.CODEX, MailFlow_Outcome.SUGGESTED, 'labels/p3', 1),
+      flowCount(MailFlow_Stage.DEFERRED, MailFlow_Outcome.DEFERRED, '', 3),
+    ], s.labels)
+    expect(graph.total).toBe(11)
+    expect(graph.nodes.map((node) => node.name)).toEqual(['新邮件', '6.1 Sol', '等待处理', 'P1', 'P2', '影子建议（未写入）'])
+    expect(graph.links).toContainEqual({ source: 'new', target: 'codex', value: 8 })
+    expect(graph.links).toContainEqual({ source: 'codex', target: 'label:labels/p1', value: 2 })
+    expect(graph.links).toContainEqual({ source: 'codex', target: 'label:labels/p2', value: 5 })
+    expect(graph.links).toContainEqual({ source: 'codex', target: 'suggested', value: 1 })
+    const box = sankeyChart(graph)
+    expect([...box.querySelectorAll('.flow-node')].map((node) => node.getAttribute('aria-label'))).toContain('6.1 Sol：8 封，占 73%')
+    expect(box.textContent).not.toMatch(/Clef|未确认|未调用模型/)
   })
 
   it('borrows unused color slots for later flat labels, keeping stable colors for earlier labels', () => {
@@ -153,20 +172,20 @@ describe('the flow diagram', () => {
 
   it('draws the whole skeleton at zero on a day without mail: muted nodes, hairline links, every count 0', () => {
     const skeleton = skeletonGraph()
-    expect(skeleton.nodes.map((node) => node.name)).toEqual(['新邮件', '跳过', 'Clef 27B', 'Clef-flash', '未调用模型', '延后（额度）', 'P1', 'P2', 'P3', 'P4', '影子建议（未写入）'])
+    expect(skeleton.nodes.map((node) => node.name)).toEqual(['新邮件', '跳过', '6.1 Sol', '等待处理', 'P1', 'P2', 'P3', 'P4', '影子建议（未写入）'])
     const box = sankeyChart(flowGraph([], []))
     const svg = box.querySelector('svg')
     expect(svg?.getAttribute('aria-label')).toBe('邮件流程：还没有邮件')
     const nodes = [...box.querySelectorAll<SVGGElement>('.flow-node')]
-    expect(nodes.length).toBe(11)
+    expect(nodes.length).toBe(9)
     expect(nodes.every((node) => node.classList.contains('zero') && node.querySelector('.flow-count')?.textContent === '0')).toBe(true)
     expect(nodes.every((node) => node.querySelector('rect')?.getAttribute('fill') === 'var(--flow-zero)')).toBe(true)
-    // Named, but not eleven Tab stops that each say 0.
+    // Zero counts have names without adding Tab stops.
     expect(nodes.every((node) => node.getAttribute('tabindex') === '-1')).toBe(true)
     // Every rect has a real size (laid out as one mail per path), none is NaN.
     expect(nodes.every((node) => Number(node.querySelector('rect')?.getAttribute('height')) > 0)).toBe(true)
     const links = [...box.querySelectorAll('.flow-link')]
-    expect(links.length).toBe(15)
+    expect(links.length).toBe(8)
     expect(links.every((link) => link.classList.contains('zero') && link.getAttribute('stroke-width') === '1')).toBe(true)
     expect(nodes[0]?.getAttribute('aria-label')).toBe('新邮件：0 封')
     nodes[0]?.dispatchEvent(new FocusEvent('focus'))
@@ -203,7 +222,7 @@ describe('概览', () => {
     if (fallbackCount === undefined) expect(report?.textContent).not.toContain('明确 P1')
   })
 
-  it('shows the status line, today’s four numbers with their 7 days, the flow, the week per label and the budget, and no error box', async () => {
+  it('shows the status, daily and weekly counts, flow and hourly runner evidence', async () => {
     const s = server()
     s.flow.push(flowCount(MailFlow_Stage.CLEF, MailFlow_Outcome.NO_LABEL, '', 3), flowCount(MailFlow_Stage.CLEF, MailFlow_Outcome.UNSURE_SHOWN, '', 1))
     s.report = [
@@ -234,10 +253,9 @@ describe('概览', () => {
     ])
     expect(root.textContent).toContain('各分级 · 最近 7 天')
     expect(root.textContent).not.toContain('准确率')
-    const budget = root.querySelector('[role="meter"]')
-    expect(budget?.getAttribute('aria-valuenow')).toBe('523')
-    expect(budget?.getAttribute('aria-valuemax')).toBe('7000')
-    expect(root.textContent).toContain('523 / 7000')
+    expect(root.querySelector('[role="meter"]')).toBeNull()
+    expect(root.textContent).toContain('等待首次小时检查')
+    expect(root.textContent).not.toContain('523 / 7000')
     // A transient error code (the fake reports gmail_429) never stays on the page.
     expect(root.textContent).not.toContain('gmail_429')
     // Wide enough for the diagram: it is not scrolled.
@@ -258,7 +276,7 @@ describe('概览', () => {
     s.status = { recentErrorCodes: [], neuronsToday: 6000, decisionModel: 'clef-flash', deferredCount: 4 }
     const root = await open(s, '/overview')
     expect(root.querySelector('svg.flow-svg')?.getAttribute('aria-label')).toBe('邮件流程：还没有邮件')
-    expect(root.querySelectorAll('.flow-node.zero').length).toBe(11)
+    expect(root.querySelectorAll('.flow-node.zero').length).toBe(9)
     expect(root.textContent).toContain('今天还没有邮件')
     expect([...root.querySelectorAll('.kpi-value')].map((node) => node.textContent)).toEqual(['0', '0', '0', '0'])
     expect(root.querySelector('table.report')).toBeNull()
@@ -267,9 +285,9 @@ describe('概览', () => {
     s.reportDecidedCount = 0
     const quiet = await open(s, '/overview')
     expect(quiet.querySelector('.empty strong')?.textContent).toBe('最近 7 天还没有邮件')
-    // Past 70 % of the budget: the warning tone and why.
-    expect(root.querySelector('[role="meter"]')?.classList.contains('warn')).toBe(true)
-    expect(root.textContent).toContain('已过 70%，今天改用 Clef-flash；4 封暂缓，后台按额度或重试时间继续')
+    expect(root.querySelector('[role="meter"]')).toBeNull()
+    expect(root.textContent).not.toContain('Clef-flash')
+    expect(root.textContent).toContain('等待首次小时检查')
   })
   it('says in the status line when 正式 cannot write yet: the grant is read-only', async () => {
     const s = new FakeServer()

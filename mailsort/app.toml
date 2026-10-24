@@ -5,7 +5,7 @@ target = "cloudflare"
 [[workers]]
 config = "mailsort/wrangler.toml"
 personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"]
-manual_secrets = []
+manual_secrets = ["CLASSIFICATION_TOKEN_SHA256"]
 optional_secrets = ["ACCESS_OWNER_ALIASES"]
 # The owner's Gmail grant, put from the owner's machine with deploy/mint-token.mjs (`wrangler secret put`) and kept by
 # every deploy. Owner-machine secrets are not part of the GitHub map MAILSORT_WORKER_SECRETS
@@ -21,7 +21,7 @@ position = 12
 [[entries]]
 id = "mailsort"
 name = "邮件分拣"
-description = "Gmail 自动打标签、归档与待审"
+description = "每小时邮件优先级分类与归档"
 group = "apps"
 icon = "mail"
 accent = "teal"
@@ -38,7 +38,7 @@ binding = "MAILSORT"
 guard = true
 [entries.tile_metric]
 kind = "counter"
-name = "review_pending"
+name = "pending"
 
 [[access]]
 key = "mailsort"

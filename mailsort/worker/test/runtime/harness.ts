@@ -8,6 +8,7 @@
  * DEV_MANUAL_ALARMS=true: no alarm is ever armed and the tests drive the passes with explicit clocks; the owner is
  * signed in over loopback http by the dev bypass. All data is synthetic.
  */
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -29,6 +30,7 @@ export const T0 = Date.parse('2026-10-01T00:00:00Z');
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
 export const DAY = 24 * HOUR;
+export const CLASSIFICATION_TOKEN = 'synthetic-classification-token-for-tests';
 export const REFRESH_TOKEN = 'synthetic-refresh-token';
 export const SCOPE_MODIFY = 'https://www.googleapis.com/auth/gmail.modify';
 export const SCOPE_READONLY = 'https://www.googleapis.com/auth/gmail.readonly';
@@ -37,6 +39,7 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
   PUBLIC_HOST,
   ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com',
   ACCESS_AUDIENCE: 'b'.repeat(64),
+  CLASSIFICATION_TOKEN_SHA256: createHash('sha256').update(CLASSIFICATION_TOKEN).digest('hex'),
   BUILD_SHA: 'test',
   MODE: 'live',
   ACCESS_OWNER: 'owner@example.com',

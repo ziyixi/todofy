@@ -81,6 +81,7 @@ describe('操作与记录', () => {
       '个人控制台',
       '自托管服务器',
       '平台运行时',
+      '邮件分类任务',
     ])
     expect(rows[1]).toHaveTextContent('ops-v1 状态接口')
     // The links app: a probe of a path its own Worker answers outside Access.

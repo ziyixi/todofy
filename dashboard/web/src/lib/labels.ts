@@ -161,6 +161,9 @@ const SIGNALS: Readonly<Record<string, string>> = {
   breaker_tripped: '写入超限，已退回影子模式（只记录）',
   sync_stale: 'Gmail 同步已停止',
   ai_quota_exhausted: 'Workers AI 今日额度已用完，邮件顺延到明天',
+  batch_not_configured: '小时分类尚未连接，请完成 Runner 安装和专用口令配置',
+  batch_stale: '超过两小时没有完整邮件检查，请检查 VPS 的 mailsort-runner',
+  batch_failed: '小时分类失败，请在邮件分拣概览查看原因和下一步操作',
   // recall
   device_stale: '有浏览器超过 24 小时未上传',
   archive_not_connected: '浏览记录还没连上 Dropbox 备份',
@@ -441,6 +444,12 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   neurons_today: { label: '今日 neurons', kind: 'count' },
   neuron_budget: { label: 'neuron 预算', kind: 'count' },
   last_sync_minutes: { label: '距上次同步（分钟）', kind: 'count' },
+  selected_count: { label: '本轮选中', kind: 'count' },
+  judged_count: { label: '本轮判断已保存', kind: 'count' },
+  pending_write_count: { label: '待写入 Gmail', kind: 'count' },
+  last_batch_minutes: { label: '距完整分类检查（分钟）', kind: 'count' },
+  batch_input_tokens: { label: '本轮输入 token', kind: 'count' },
+  batch_output_tokens: { label: '本轮输出 token', kind: 'count' },
   // recall
   visits_today: { label: '今日访问', kind: 'count' },
   texts_today: { label: '今日正文', kind: 'count' },

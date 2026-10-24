@@ -67,19 +67,19 @@ option (common.wire.v1.formats) = {
   description: "Fixed public runtime alias, never an arbitrary Kubernetes resource."
 };
 
-// Source and physical image identity of a desired or independently verified actual release.
+// Source and image identity of a desired release or an observation qualified by observation_scope.
 message ReleaseTarget {
   // Stable public workload alias.
   string workload_key = 1 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "WorkloadKey"
   ];
-  // Source identity from the release target, or verified running-image provenance for actual.
+  // Source identity from the target, running-image provenance, or the installed CronJob template.
   string source_sha = 2 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "SourceSha"
   ];
-  // Immutable target digest, or independently observed physical running digest for actual.
+  // Immutable target digest, physical running digest, or the installed CronJob template digest.
   string image_digest = 3 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "ImageDigest"
@@ -112,8 +112,8 @@ message ReleaseStatus {
   ];
   // Configuration-selected desired release. Null when no trustworthy target is available.
   optional ReleaseTarget desired = 2 [(google.api.field_behavior) = REQUIRED];
-  // Actual identity, only after physical digest and running-image build provenance are verified.
-  // Null on missing, stale or inconsistent evidence. Never copied from desired spec or annotations.
+  // Actual observed identity. Process observations require physical digest and running-image provenance.
+  // Template observations verify the installed CronJob template, without claiming any execution.
   optional ReleaseTarget actual = 3 [(google.api.field_behavior) = REQUIRED];
   // Time this daemon observed or attempted to observe the release.
   // (-- api-linter: core::0140::prepositions=disabled
@@ -124,8 +124,15 @@ message ReleaseStatus {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).non_null = true
   ];
-  // Kubernetes status.observedGeneration, absent when missing, malformed or unavailable.
+  // Deployment status.observedGeneration, or installed metadata generation for template observations.
   optional int32 observed_generation = 5 [(common.wire.v1.field).minimum = 1];
+  // Template proves only installed scheduling configuration. Absent retains legacy process semantics.
+  optional string observation_scope = 6 [(common.wire.v1.field) = {
+    allowed: [
+      "process",
+      "template"
+    ]
+  }];
 }
 
 // One configured workload's process, admission and health observations are independent dimensions.
@@ -291,7 +298,7 @@ message Release {
   ];
 }
 
-// A content-free comparison of the ten supported manifests with the current accepted release.
+// A content-free comparison of the fixed supported manifests with the current accepted release.
 message ReconcilePlan {
   option (google.api.resource) = {
     type: "platform.ziyixi.science/ReconcilePlan"
@@ -342,6 +349,39 @@ message ReconcilePlan {
   ];
   // Safe reason why comparison/repair needs attention, independent of business health.
   optional string reason_code = 8 [(common.wire.v1.field).format = "ReleaseErrorCode"];
+  // Additional fixed runner resources; absent in older observations. Legacy changes retain their original bounds.
+  repeated RunnerTemplateChange template_changes = 9 [(common.wire.v1.field).max_items = 3];
+}
+
+// One of the hourly runner's three fixed resources; separate from the legacy runtime resource aliases.
+message RunnerTemplateChange {
+  // Fixed runner alias, without provider object names supplied by the caller.
+  string resource_key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "mailsort-runner",
+        "mailsort-runner-release",
+        "mailsort-runner-config"
+      ]
+    }
+  ];
+  // Create/update are ordinary repair; conflict requires explicit owner action.
+  string action = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      allowed: [
+        "create",
+        "update",
+        "conflict"
+      ]
+    }
+  ];
+  // Safe fixed reason, without provider errors or content.
+  string reason_code = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ReleaseErrorCode"
+  ];
 }
 
 // One declared runtime object whose bounded fields differ or cannot safely be adopted.

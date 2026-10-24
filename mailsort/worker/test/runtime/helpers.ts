@@ -4,12 +4,14 @@
  * (../fakes/table.ts). All data is synthetic (../fakes/fixtures.ts).
  */
 import { expect } from 'vitest';
+import { createHttpClient } from '@ziyixi/proto/http-client';
+import { MailsortRunnerService, Priority, RunStatus } from '@ziyixi/proto/mailsort/runner/v1/mailsort_runner_service_pb';
 import { create } from '@ziyixi/proto/protobuf';
 import { LabelSchema } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { LABELS, message, type SyntheticMail } from '../fakes/fixtures.ts';
 import { allowedOperation, FORBIDDEN_LABELS } from '../fakes/table.ts';
-import { op, type Harness } from './harness.ts';
+import { CLASSIFICATION_TOKEN, op, type Harness } from './harness.ts';
 
 export function checkGoogleCalls(h: Harness): void {
   // Owned: the leaf labels mailsort created and the ones a test made for it to adopt; never another of the owner's.
@@ -17,7 +19,7 @@ export function checkGoogleCalls(h: Harness): void {
   for (const call of h.up.gmail.calls) {
     // Names, retirement IDs and ledger rows are captured from the store when each request leaves.
     const planned = new Set(call.planned ?? []);
-    const ledger = (_message: string, labelId: string) => call.ledgerRows?.find(row => row.labelId === labelId) ?? null;
+    const ledger = (_message: string, labelId: string) => call.ledgerRows?.find(row => row.labelId === labelId && (row.state === 'intended' || row.state === 'undo_intended')) ?? null;
     expect(allowedOperation(call.method, call.url, call.body, { owned, planned, ledger, priorityDeletes: new Set(call.priorityDeletes ?? []) }), `${call.method} ${call.url} ${call.body}`).not.toBeNull();
     for (const label of FORBIDDEN_LABELS) expect(call.body).not.toContain(`"${label}"`);
   }
@@ -85,4 +87,23 @@ export function failModifies(h: Harness, status: number): { off: () => void } {
       on = false;
     },
   };
+}
+
+/** Submit deterministic synthetic model results through the real machine API; no model is called in tests. */
+export async function classifyUnread(h: Harness, priority: Priority = Priority.P2): Promise<number> {
+  const api = createHttpClient(MailsortRunnerService, call => h.fetch(call.url, { method: call.httpMethod,
+    headers: { authorization: `Bearer ${CLASSIFICATION_TOKEN}`, 'content-type': 'application/json' },
+    ...(call.body === undefined ? {} : { body: call.body }),
+  }));
+  let runId = op();
+  let pageToken = '';
+  const results: { messageId: string; priority: Priority; reason: string }[] = [];
+  do {
+    const page = await api.claimClassification({ runId, pageToken });
+    runId = page.runId; pageToken = page.nextPageToken;
+    for (const message of page.messages) results.push({ messageId: message.messageId, priority, reason: '合成结果。' });
+  } while (pageToken !== '');
+  await api.reportClassification({ runId, requestId: op(), results, model: 'gpt-6.1-sol', effort: 'medium', promptSha: 'a'.repeat(64),
+    inputTokens: 10, outputTokens: results.length * 10, status: RunStatus.COMPLETED });
+  return results.length;
 }

@@ -415,6 +415,9 @@ message StartUnreadClassificationRequest {
   // including read or archived mail. Later owner label changes are skipped.
   // Mutually exclusive with recheck_fallback; the selected IDs are frozen before processing.
   bool recheck_initial100 = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Explicitly rejudge all currently unread mail, including existing P1-P4 assignments.
+  // Mutually exclusive with both other recheck options; read state and unrelated labels are preserved.
+  bool recheck_all_unread = 5 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Input of GetLabel.

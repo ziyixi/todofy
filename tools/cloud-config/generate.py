@@ -251,6 +251,11 @@ def generated_files(root: Path) -> dict[str, str]:
     require(used_databases == set(resources["d1_databases"]), "D1 identity coverage")
     outputs[IDENTITY_MODULE] = identity_module(profile, resources)
     outputs[PLATFORM_IDENTITY] = platform_identity(profile, resources)
+    runner = root / "platform/k3s/newsletter/mailsort-runner.yaml"
+    if runner.is_file():
+        outputs["platform/k3s/newsletter/mailsort-runner.yaml"] = re.sub(
+            r"(?m)^(  MAILSORT_URL: )https://[^\n]+$",
+            lambda match: match.group(1) + "https://sort." + profile["zone"], runner.read_text())
     if (root / "tools/cloud-config").is_dir():
         outputs["tools/cloud-config/worker-secrets.json"] = json.dumps(worker_secret_specs(root), indent=2, sort_keys=True) + "\n"
     outputs.update(application_files(root, profile))

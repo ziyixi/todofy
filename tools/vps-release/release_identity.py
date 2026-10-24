@@ -39,9 +39,12 @@ def reconcile_id(repository: str, run_id: str, attempt: str) -> str:
 def verified_images(
     root: Path, sha: str, images: dict[str, str]
 ) -> tuple[dict, dict[str, str]]:
-    """Accept only this profile owner's two fixed published images, both pinned by full SHA256."""
+    """Accept only this profile owner's fixed published images, all pinned by full SHA256."""
     profile = release_profile(root, sha)
-    if set(images) != {"newsletter", "platform"}:
+    if set(images) not in (
+        {"newsletter", "platform"},
+        {"newsletter", "platform", "mailsort-runner"},
+    ):
         raise ValueError("Invalid release images")
     repositories = image_repositories(profile)
     digests = {}

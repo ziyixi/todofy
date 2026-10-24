@@ -48,7 +48,7 @@ function statusParts(status: ServiceStatus, now: number): HTMLElement[] {
     status.authState === ServiceStatus_AuthState.OK
       ? el('span', {}, `Gmail ✓ ${status.writeScope ? '可写' : '只读'}`)
       : el('span', { class: 'problem' }, status.authState === ServiceStatus_AuthState.FAILED ? 'Gmail 授权失效' : status.authState === ServiceStatus_AuthState.NOT_CONFIGURED ? 'Gmail 未授权' : 'Gmail 未连接')
-  const next = status.nextAlarmTime === undefined ? null : el('span', {}, `下次运行 ${relative(status.nextAlarmTime, now)}`)
+  const next = status.nextAlarmTime === undefined ? null : el('span', {}, `下次维护 ${relative(status.nextAlarmTime, now)}`)
   return [badge, gmail, ...(next === null ? [] : [next])]
 }
 

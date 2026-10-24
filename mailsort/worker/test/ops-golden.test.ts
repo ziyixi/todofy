@@ -25,7 +25,7 @@ const NOW = Date.parse('2026-10-06T14:00:00.000Z');
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const GRANT = { GMAIL_CLIENT_ID: 'synthetic.apps.googleusercontent.com', GMAIL_CLIENT_SECRET: 'synthetic', GMAIL_REFRESH_TOKEN: 'synthetic' };
-const env = { PUBLIC_HOST: 'sort.example.com', MODE: 'live', ...GRANT };
+const env = { CLASSIFICATION_TOKEN_SHA256: 'a'.repeat(64), PUBLIC_HOST: 'sort.example.com', MODE: 'live', ...GRANT };
 
 function sqlStorage(): SqlStorage {
   const db = new DatabaseSync(':memory:');
@@ -85,7 +85,7 @@ function cases(): Record<string, unknown> {
     'status/ok': sortStatus(ok, env, NOW),
     'status/forced-shadow': sortStatus(ok, { ...env, MODE: 'shadow' }, NOW),
     'status/degraded': sortStatus(degraded, env, NOW),
-    'status/not-configured': sortStatus(unconfigured, { PUBLIC_HOST: 'sort.example.com', MODE: 'shadow' }, NOW),
+    'status/not-configured': sortStatus(unconfigured, { PUBLIC_HOST: 'sort.example.com', MODE: 'shadow', CLASSIFICATION_TOKEN_SHA256: 'a'.repeat(64) }, NOW),
     'status/off': sortStatus(unconfigured, { PUBLIC_HOST: 'sort.example.com', MODE: 'off' }, NOW),
     'status/sync-stale': sortStatus(stale, env, NOW),
     'status/unavailable': sortStatus(broken, env, NOW),

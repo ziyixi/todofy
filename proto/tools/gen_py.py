@@ -59,6 +59,7 @@ PYTHON_PACKAGES = {
     "todofy.ui.v1": True,
     "todofy.mail.v1": True,
     "platform.runtime.v1": True,
+    "mailsort.runner.v1": True,
     "fleet.telemetry.v1": True,
     "common.errors.v1": True,
     "prototest.v1": False,

@@ -110,7 +110,7 @@ def identifiers(value: object, field: str, pattern: str) -> dict[str, str]:
 
 
 def image_repositories(profile: dict) -> dict[str, str]:
-    return {app: "ghcr.io/" + profile["repository"] + "-" + app for app in ("newsletter", "platform")}
+    return {app: "ghcr.io/" + profile["repository"] + "-" + app for app in ("newsletter", "platform", "mailsort-runner")}
 
 
 def deployment_urls(profile: dict) -> dict[str, str]:

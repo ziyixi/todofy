@@ -148,8 +148,9 @@ test("the owner's Gmail grant never enters a secrets file: a MAILSORT_WORKER_SEC
     assert.throws(() => generateSecrets(env), (error) => error instanceof SettingError && error.setting === 'MAILSORT_WORKER_SECRETS', name)
   }
   // A complete map without the grant is accepted (a cold bootstrap's), the personal inputs taking precedence.
-  const map = { ...environment(), MAILSORT_WORKER_SECRETS: JSON.stringify({ CSRF_SIGNING_KEY: 'e'.repeat(64), ACCESS_OWNER: 'other@example.org' }) }
+  const map = { ...environment(), MAILSORT_WORKER_SECRETS: JSON.stringify({ CSRF_SIGNING_KEY: 'e'.repeat(64), ACCESS_OWNER: 'other@example.org', CLASSIFICATION_TOKEN_SHA256: 'a'.repeat(64) }) }
   assert.equal(generateSecrets(map).CSRF_SIGNING_KEY, 'd'.repeat(64))
+  assert.equal(generateSecrets(map).CLASSIFICATION_TOKEN_SHA256, 'a'.repeat(64))
 })
 
 test('the public GitHub secrets spec leaves the Gmail grant out; app.toml declares it owner-machine only', () => {

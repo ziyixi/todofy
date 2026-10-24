@@ -4,8 +4,8 @@ import { create } from '@ziyixi/proto/protobuf';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { PRIORITY_LABELS } from '../../src/priority.ts';
 import { MAILS } from '../fakes/fixtures.ts';
-import { DAY, MINUTE, op, startHarness, T0, type Harness } from './harness.ts';
-import { checkGoogleCalls, decision, deliver, failModifies, gmailLabels, modifies, setMode } from './helpers.ts';
+import { MINUTE, op, startHarness, T0, type Harness } from './harness.ts';
+import { checkGoogleCalls, classifyUnread, decision, deliver, failModifies, gmailLabels, modifies, setMode } from './helpers.ts';
 
 let h: Harness;
 let now = T0;
@@ -21,7 +21,7 @@ async function setup(bindings: Record<string, string> = {}): Promise<void> {
   await h.step(now);
   await setMode(h, Mode.LIVE);
 }
-async function step(): Promise<void> { now += 5 * MINUTE; await h.step(now); }
+async function step(): Promise<void> { now += 5 * MINUTE; await h.clock(now); await classifyUnread(h); await h.step(now); }
 async function ledger(id: string): Promise<unknown> { return h.sql(`SELECT state, last_code FROM ledger WHERE message_id = ? ORDER BY id`, id); }
 async function intended(id: string): Promise<void> {
   const failing = failModifies(h, 503);
@@ -43,7 +43,7 @@ describe('write gates and retries', () => {
     expect(await h.sql(`SELECT count(*) AS n FROM ledger WHERE message_id = ?`, id)).toEqual([{ n: 1 }]);
   });
 
-  it.each(['shadow', 'breaker'])('refuses a retry after %s stops live writes', async (reason) => {
+  it.each(['shadow', 'breaker'])('holds a retry while %s pauses live writes', async (reason) => {
     await setup();
     const id = 'abc0000000000102';
     await intended(id);
@@ -52,8 +52,8 @@ describe('write gates and retries', () => {
     const count = modifies(h).length;
     await step();
     expect(modifies(h)).toHaveLength(count);
-    expect(await ledger(id)).toEqual([{ state: 'failed', last_code: 'mode_changed' }]);
-    expect(await decision(h, id)).toMatchObject({ outcome: 'suggested', label_id: 'p2' });
+    expect(await ledger(id)).toEqual([{ state: 'intended', last_code: 'message_modify_503' }]);
+    expect(await decision(h, id)).toMatchObject({ outcome: 'applied', label_id: 'p2' });
     expect(gmailLabels(h, id)).toContain('INBOX');
   });
 
@@ -104,21 +104,20 @@ describe('write gates and retries', () => {
     const count = modifies(h).length;
     await step();
     expect(modifies(h).length - count).toBe(1);
-    expect(await ledger(first)).toEqual([{ state: 'applied', last_code: null }]);
-    expect(await ledger(second)).toEqual([{ state: 'failed', last_code: 'run_limit' }]);
-    expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ breakerTripped: true, breakerReason: 'run_limit', effectiveMode: Mode.SHADOW });
+    expect(await h.sql(`SELECT state, count(*) AS n FROM ledger WHERE message_id IN (?, ?) GROUP BY state ORDER BY state`, first, second)).toEqual([{ state: 'applied', n: 1 }, { state: 'intended', n: 1 }]);
+    expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ breakerTripped: false, breakerReason: '', effectiveMode: Mode.LIVE });
   });
 
-  it('keeps the daily write cap and requires choosing the mode again to clear its breaker', async () => {
+  it('holds writes at the daily cap and resumes without tripping the breaker', async () => {
     await setup();
     await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyWriteLimit: 1 }), updateMask: { paths: ['daily_write_limit'] }, requestId: op() });
     await h.sql(`INSERT INTO usage (day, applied) VALUES ('2026-10-01', 1) ON CONFLICT (day) DO UPDATE SET applied = 1`);
     deliver(h, { ...MAILS.bankEn, id: 'abc0000000000108' }, now + MINUTE);
     await step();
-    expect(await ledger('abc0000000000108')).toEqual([{ state: 'failed', last_code: 'daily_limit' }]);
+    expect(await ledger('abc0000000000108')).toEqual([{ state: 'intended', last_code: null }]);
     expect(modifies(h)).toEqual([]);
     const kept = await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyWriteLimit: 150 }), updateMask: { paths: ['daily_write_limit'] }, requestId: op() });
-    expect(kept.breakerReason).toBe('daily_limit');
+    expect(kept.breakerReason).toBe('');
     await setMode(h, Mode.LIVE);
     expect((await h.api.getSettings({ name: 'settings' })).breakerTripped).toBe(false);
   });
@@ -132,146 +131,6 @@ describe('write gates and retries', () => {
     await h.sql(`INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time) VALUES ('leftover', ?, 'p2', ?, 1, 'auto', 'intended', ?)`, id, gmailId, now);
     await step();
     expect(modifies(h)).toEqual([]);
-    expect(await ledger(id)).toEqual([{ state: 'failed', last_code: 'mode_changed' }]);
-  });
-});
-
-describe('read and model recovery', () => {
-  it('skips a malformed/unreadable 400 and decides the message behind it', async () => {
-    await setup();
-    const poison = 'abc0000000000110';
-    h.up.gmail.failWhen = (method, url) => method === 'GET' && url.pathname.endsWith(`/messages/${poison}`) ? 400 : null;
-    deliver(h, { ...MAILS.bankEn, id: poison }, now + MINUTE);
-    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000111' }, now + 2 * MINUTE);
-    await step();
-    expect(await decision(h, poison)).toMatchObject({ outcome: 'skipped', unsure_reason: 'unreadable' });
-    expect(await decision(h, 'abc0000000000111')).toMatchObject({ label_id: 'p2' });
-  });
-
-  it('backs off a persistent 500 per message and stops after the existing seven tries', async () => {
-    await setup();
-    const poison = 'abc0000000000112';
-    h.up.gmail.failWhen = (method, url) => method === 'GET' && url.pathname.endsWith(`/messages/${poison}`) ? 500 : null;
-    deliver(h, { ...MAILS.bankEn, id: poison }, now + MINUTE);
-    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000113' }, now + 2 * MINUTE);
-    await step();
-    expect(await h.sql(`SELECT attempts, not_before FROM pending WHERE message_id = ?`, poison)).toEqual([{ attempts: 1, not_before: now + 5 * MINUTE }]);
-    now += 30_000;
-    await h.step(now);
-    expect(await decision(h, 'abc0000000000113')).toMatchObject({ label_id: 'p2' });
-    for (let i = 0; i < 10 && await decision(h, poison) === undefined; i++) {
-      const [row] = await h.sql<{ not_before: number }>(`SELECT not_before FROM pending WHERE message_id = ?`, poison);
-      now = Math.max(now + MINUTE, row?.not_before ?? 0);
-      await h.step(now);
-    }
-    expect(await decision(h, poison)).toMatchObject({ outcome: 'skipped', unsure_reason: 'unreadable' });
-    expect(h.up.gmail.calls.filter((call) => call.url.includes(`/messages/${poison}`))).toHaveLength(7);
-  });
-
-  it('never queues Gmail message IDs refused by the closed table', async () => {
-    await setup();
-    deliver(h, { ...MAILS.bankEn, id: 'invalid-gmail-id' }, now + MINUTE);
-    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000114' }, now + MINUTE);
-    await step();
-    expect(await decision(h, 'abc0000000000114')).toMatchObject({ label_id: 'p2' });
-    expect(h.up.gmail.calls.some((call) => call.url.includes('invalid-gmail-id'))).toBe(false);
-  });
-
-  it('defers quota exhaustion to the next UTC day with no fabricated P1 decision', async () => {
-    await setup();
-    h.up.ai.quota = true;
-    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000115' }, now + MINUTE);
-    await step();
-    expect(await decision(h, 'abc0000000000115')).toBeUndefined();
-    expect(await h.sql(`SELECT attempts, not_before FROM pending`)).toEqual([{ attempts: 0, not_before: T0 + DAY }]);
-    expect(modifies(h)).toEqual([]);
-    expect(await h.sql(`SELECT quota_exhausted FROM usage WHERE day = '2026-10-01'`)).toEqual([{ quota_exhausted: 1 }]);
-  });
-
-  it('makes no more AI calls after a known quota refusal, then resumes mail and embeddings next UTC day', async () => {
-    await setup();
-    const first = 'abc0000000000121';
-    const later = 'abc0000000000122';
-    h.up.ai.quota = true;
-    deliver(h, { ...MAILS.bankEn, id: first }, now + MINUTE);
-    await step();
-    expect(h.up.ai.calls).toHaveLength(1);
-    expect(await h.sql(`SELECT quota_exhausted FROM usage WHERE day = '2026-10-01'`)).toEqual([{ quota_exhausted: 1 }]);
-    await h.sql(`INSERT INTO examples (id, label_id, summary, origin, create_time) VALUES ('quota-example', 'p2', 'Synthetic brokerage statement', 'confirmation', ?)`, now);
-
-    // The upstream is healthy again. Our recorded refusal must still stop both idle embedding retries and new mail.
-    h.up.ai.quota = false;
-    await step();
-    expect(h.up.ai.calls).toHaveLength(1);
-    expect(await h.sql(`SELECT embedding IS NULL AS pending FROM examples WHERE id = 'quota-example'`)).toEqual([{ pending: 1 }]);
-    deliver(h, { ...MAILS.bankEn, id: later }, now + MINUTE);
-    await step();
-    expect(h.up.ai.calls).toHaveLength(1);
-    expect(modifies(h)).toEqual([]);
-    expect(await h.sql(`SELECT message_id, attempts, not_before FROM pending ORDER BY message_id`)).toEqual([
-      { message_id: first, attempts: 0, not_before: T0 + DAY },
-      { message_id: later, attempts: 0, not_before: T0 + DAY },
-    ]);
-
-    now = T0 + DAY + MINUTE;
-    await h.step(now);
-    expect(await decision(h, first)).toMatchObject({ outcome: 'applied', label_id: 'p2' });
-    expect(await decision(h, later)).toMatchObject({ outcome: 'applied', label_id: 'p2' });
-    expect(await h.sql(`SELECT message_id FROM pending`)).toEqual([]);
-    expect(await h.sql(`SELECT embedding IS NOT NULL AS embedded FROM examples WHERE id = 'quota-example'`)).toEqual([{ embedded: 1 }]);
-    expect(h.up.ai.calls.slice(1).map(call => call.model)).toEqual([
-      '@cf/cloudflare/clef', '@cf/cloudflare/clef', '@cf/cloudflare/clef', '@cf/cloudflare/clef', '@cf/baai/bge-m3',
-    ]);
-    expect(await h.sql(`SELECT quota_exhausted, ai_calls FROM usage WHERE day = '2026-10-02'`)).toEqual([{ quota_exhausted: 0, ai_calls: 5 }]);
-  });
-
-  it('retries invalid model answers three times and records failure without a priority write or mandatory review', async () => {
-    await setup();
-    h.up.ai.choiceOverride = () => ({ p2: 1, none: 1 });
-    const id = 'abc0000000000116';
-    deliver(h, { ...MAILS.bankEn, id }, now + MINUTE);
-    for (let i = 0; i < 3; i++) {
-      await step();
-      const row = (await h.sql<{ not_before: number }>(`SELECT not_before FROM pending WHERE message_id = ?`, id))[0];
-      if (row !== undefined) now = row.not_before - 5 * MINUTE;
-    }
-    expect(await decision(h, id)).toMatchObject({ outcome: 'unsure', unsure_reason: 'model_unavailable', label_id: null, shown: 0 });
-    expect(modifies(h)).toEqual([]);
-    expect(await h.sql(`SELECT id FROM review`)).toEqual([]);
-  });
-
-  it('keeps the resync cursor-first order and skips pre-cutover mail', async () => {
-    await setup();
-    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000117' }, T0 - MINUTE);
-    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000118' }, now + MINUTE);
-    let injected = false;
-    h.up.gmail.afterCall = (method, url) => {
-      if (!injected && method === 'GET' && url.pathname.endsWith('/messages') && url.searchParams.get('labelIds') === 'INBOX') {
-        injected = true;
-        deliver(h, { ...MAILS.bankEn, id: 'abc0000000000119' }, now);
-      }
-    };
-    h.up.gmail.oldestHistoryId = h.up.gmail.historyId + 1;
-    await step();
-    h.up.gmail.oldestHistoryId = 0;
-    await step();
-    expect(injected).toBe(true);
-    expect(await decision(h, 'abc0000000000117')).toMatchObject({ outcome: 'skipped', unsure_reason: 'before_install' });
-    expect(await decision(h, 'abc0000000000118')).toMatchObject({ label_id: 'p2' });
-    expect(await decision(h, 'abc0000000000119')).toMatchObject({ label_id: 'p2' });
-  });
-
-  it('clears 14-day content while off without contacting Gmail', async () => {
-    await setup();
-    const id = 'abc0000000000120';
-    deliver(h, { ...MAILS.bankEn, id }, now + MINUTE);
-    await step();
-    const hash = (await decision(h, id))?.['sender_hash'];
-    await setMode(h, Mode.OFF);
-    const before = h.up.gmail.calls.length;
-    const pass = await h.step(T0 + 20 * DAY);
-    expect(pass.code).toBe('off');
-    expect(h.up.gmail.calls).toHaveLength(before);
-    expect(await decision(h, id)).toMatchObject({ content_cleared: 1, sender_hash: hash, subject: null, sender: null, summary: null, sender_domain: null });
+    expect(await ledger(id)).toEqual([{ state: 'intended', last_code: null }]);
   });
 });

@@ -42,6 +42,8 @@ message MailFlow {
     STAGE_DEFERRED = 4;
     // No model answer: no label to offer it, or the model unavailable after every retry.
     STAGE_NO_MODEL = 5;
+    // Hourly VPS Codex classification, using the actual model recorded with each run.
+    STAGE_CODEX = 6;
   }
 
   // What became of the mail.

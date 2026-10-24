@@ -16,6 +16,7 @@ from ..deployment.kubernetes import (
 )
 from .adapters import Business, local_process, newsletter
 from .config import Configuration, Workload
+from .cronjob import cronjob
 from .evidence import timestamp, workload
 
 MONITOR_URL = "http://newsletter:8080/internal/monitoring/status"
@@ -144,6 +145,14 @@ class Reader:
     ) -> tuple[pb.WorkloadStatus, bool]:
         try:
             target = self._optional("ConfigMap", item.release_configmap, deadline)
+            if item.adapter == "mailsort-runner":
+                scheduled = self._optional("CronJob", item.deployment, deadline)
+                if (
+                    self._optional("ConfigMap", item.release_configmap, deadline)
+                    != target
+                ):
+                    raise ReadError()
+                return cronjob(item, target, scheduled, self.clock()), False
             deployment = self._optional("Deployment", item.deployment, deadline)
             pods = self._optional("Pod", item.deployment, deadline)
             business = Business(admission="unsupported", health="unsupported")

@@ -4,13 +4,13 @@
  * Nothing reaches Google or Cloudflare: DEV_FAKE_UPSTREAM sends every Google request and every model call to the fake,
  * and every request the fake receives is checked against the independent table (../fakes/table.ts).
  *
- * It exercises fixed P1-P4 setup through the generated owner HTTP API, CSRF rejection, shadow/live sorting,
- * conservative P1 fallback, inherited-priority replacement, undo, Gmail corrections, read-only replay, neuron budget,
- * quota recovery and authentication stop. Every mail and credential is synthetic. Run after the UI build:
+ * It exercises fixed P1-P4 setup, owner CSRF, separate machine auth, bounded claims/reports, persistent Gmail writes,
+ * idempotency, failed-run recovery, explicit all-unread rechecking and authentication stop. Every mail and credential is synthetic. Run after the UI build:
  *
  *   npm run test:smoke
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -19,10 +19,9 @@ import { join } from 'node:path';
 import { createHttpClient, type HttpCall } from '@ziyixi/proto/http-client';
 import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
-import { ReplayEvaluation_State } from '@ziyixi/proto/mailsort/ui/v2/replay_pb';
+import { MailsortRunnerService, Priority, RunStatus, type ClassificationMessage } from '@ziyixi/proto/mailsort/runner/v1/mailsort_runner_service_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { create } from '@ziyixi/proto/protobuf';
-import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { MAILS, message, type SyntheticMail } from '../fakes/fixtures.ts';
 import type { RecordedLedger } from '../fakes/fake-gmail.ts';
 import { allowedOperation, FORBIDDEN_LABELS } from '../fakes/table.ts';
@@ -33,6 +32,7 @@ const WORKER = decodeURIComponent(new URL('../../', import.meta.url).pathname);
 const T0 = Date.parse('2026-10-01T00:00:00Z');
 const MINUTE = 60_000;
 const REFRESH_TOKEN = DEV_REFRESH_TOKEN;
+const MACHINE_TOKEN = 'synthetic-classification-smoke-token';
 
 function check(condition: unknown, what: string): void {
   if (!condition) throw new Error(`smoke: ${what}`);
@@ -61,6 +61,7 @@ async function main(): Promise<void> {
   const persist = mkdtempSync(join(tmpdir(), 'mailsort-smoke-'));
   const vars: Record<string, string> = {
     BUILD_SHA: 'dev',
+    CLASSIFICATION_TOKEN_SHA256: createHash('sha256').update(MACHINE_TOKEN).digest('hex'),
     MODE: 'live',
     DEV_AUTH_BYPASS: 'true',
     DEV_MANUAL_ALARMS: 'true',
@@ -165,25 +166,33 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
     if (value === undefined) throw new Error(`smoke: missing synthetic ${priority} label`);
     return value;
   };
-  const force = (priority: string) => { up.ai.choiceOverride = () => ({ [priority]: 0.92, ...(priority === 'none' ? { p1: 0.08 } : { none: 0.08 }) }); };
   const deliver = (mail: SyntheticMail, priority?: string, replaceLabels: readonly string[] = []) => {
-    if (priority !== undefined) expected.set(mail.id, { labelId: gmailId(priority), state: 'intended', archived: priority !== 'p1', replaceLabels });
+    if (priority !== undefined) expected.set(mail.id, { labelId: gmailId(priority), state: 'intended', archived: priority !== 'p1', baseInbox: mail.labels?.includes('INBOX') ?? true, replaceLabels });
     up.gmail.deliver(message({ ...mail, receivedAt: now }));
   };
-  const labelsOf = (messageId: string) => [...(up.gmail.messages.get(messageId)?.labelIds ?? [])];
+  const labelsOf = (messageId: string) => [...(up.gmail.messages.get(messageId)?.labelIds ?? [])].sort();
   const modifies = () => up.gmail.calls.filter(call => call.url.endsWith('/modify')).length;
   const checkPriority = (messageId: string, priority: string, inbox = priority === 'p1') => {
     const labels = labelsOf(messageId);
     const priorities = ['p1', 'p2', 'p3', 'p4'].map(gmailId).filter(label => labels.includes(label));
     return priorities.length === 1 && priorities[0] === gmailId(priority) && labels.includes('UNREAD') && labels.includes('INBOX') === inbox;
   };
-  const undo = async (messageId: string) => {
-    const entry = (await api.listLedgerEntries({})).ledgerEntries.find(item => item.messageId === messageId);
-    const row = expected.get(messageId);
-    if (entry === undefined || row === undefined) throw new Error('smoke: expected undoable synthetic write');
-    expected.set(messageId, { ...row, state: 'undo_intended' });
-    await api.undoLedgerEntry({ name: entry.name, requestId: id() });
+  const machine = createHttpClient(MailsortRunnerService, call => fetch(`${origin}${call.url}`, {
+    method: call.httpMethod, headers: { authorization: `Bearer ${MACHINE_TOKEN}`, 'content-type': 'application/json' },
+    ...(call.body === undefined ? {} : { body: call.body }),
+  }));
+  const claim = async () => {
+    let runId = id(); let pageToken = '';
+    const messages: ClassificationMessage[] = [];
+    do {
+      const page = await machine.claimClassification({ runId, pageToken });
+      runId = page.runId; pageToken = page.nextPageToken;
+      if (page.messages.length > 10) throw new Error('smoke: unbounded machine page');
+      messages.push(...page.messages);
+    } while (pageToken !== '');
+    return { runId, messages };
   };
+  const metadata = { model: 'gpt-6.1-sol', effort: 'medium', promptSha: 'a'.repeat(64), inputTokens: 1200, outputTokens: 250 };
 
   check((await fetch(`${origin}/health`)).ok, 'the local Worker answers /health');
   const page = await fetch(origin);
@@ -199,91 +208,67 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   check(up.gmail.calls.every(call => call.method !== 'DELETE'), 'fresh setup removes no Gmail labels or messages');
   check((await step(0)).code === 'ok', 'the initialized pipeline starts from its setup cursor');
   const initialSettings = await api.getSettings({ name: 'settings' });
-  check(initialSettings.mode === Mode.SHADOW && initialSettings.dailyNeuronBudget === 9500, 'setup preserves the shadow default and daily neuron budget');
-
-  force('p3');
-  const before = up.ai.calls.length;
-  deliver(MAILS.newsletterEn);
-  await step();
-  const views = up.ai.calls.slice(before).filter(call => call.model.includes('clef'));
-  check(views.length === 2 && (await api.listReviewItems({})).reviewItems.length === 0 && modifies() === 0 && labelsOf(MAILS.newsletterEn.id).includes('INBOX'), 'shadow records two model views without writing a label or mandatory review');
-
+  check(initialSettings.mode === Mode.SHADOW, 'setup preserves the shadow default');
+  const missingMachine = await fetch(`${origin}/api/machine/v1/classification:claim`, { method: 'POST', body: '{bad' });
+  check(missingMachine.status === 401, 'machine authentication rejects a missing token before JSON decoding');
   await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.LIVE }), updateMask: { paths: ['mode'] }, requestId: id() });
-  const priorityMessages = new Map<string, string>();
-  for (const [index, priority] of ['p1', 'p2', 'p3', 'p4'].entries()) {
-    force(priority);
+  const personal = up.gmail.createUserLabel('Personal');
+  const priorities = [Priority.P1, Priority.P2, Priority.P3, Priority.P4];
+  const priorityMessages = priorities.map((priority, index) => {
     const messageId = `a11000000000000${String(index)}`;
-    priorityMessages.set(priority, messageId);
-    deliver({ ...MAILS.bankEn, id: messageId, threadId: 'synthetic-priority-thread', dmarc: 'fail' }, priority);
-    await step();
-    check(checkPriority(messageId, priority), `${priority.toUpperCase()} is the only priority; UNREAD stays unchanged and only P1 keeps Inbox`);
+    deliver({ ...MAILS.bankEn, id: messageId, threadId: 'synthetic-priority-thread', labels: ['INBOX', 'UNREAD', 'STARRED', personal] }, `p${String(priority)}`);
+    return messageId;
+  });
+  const already = 'a110000000000020';
+  const read = 'a110000000000021';
+  deliver({ ...MAILS.bankEn, id: already, labels: ['UNREAD', 'STARRED', personal, gmailId('p2')] });
+  deliver({ ...MAILS.bankEn, id: read, labels: ['INBOX', 'STARRED', personal, gmailId('p1')] });
+  const readBefore = labelsOf(read).join();
+  const batch = await claim();
+  check(batch.messages.map(item => item.messageId).sort().join() === [...priorityMessages].sort().join(), 'the claim selects ungraded unread mail and skips read or already classified mail');
+  const request = { runId: batch.runId, requestId: id(), results: priorityMessages.map((messageId, index) => ({ messageId, priority: priorities[index] ?? Priority.P4, reason: '合成阅读时效判断。' })), status: RunStatus.COMPLETED, ...metadata };
+  const accepted = await machine.reportClassification(request);
+  const duplicate = await machine.reportClassification(request);
+  check(accepted.acceptedCount === 4 && accepted.pendingWriteCount === 4 && duplicate.acceptedCount === 4 && modifies() === 0, 'the report persists all four decisions once before any Gmail write');
+  await step();
+  for (const [index, messageId] of priorityMessages.entries()) {
+    check(checkPriority(messageId, `p${String(index + 1)}`) && labelsOf(messageId).includes('STARRED') && labelsOf(messageId).includes(personal), `P${String(index + 1)} preserves UNREAD, STARRED and unrelated labels; only P1 keeps Inbox`);
   }
-  force('none');
-  const fallback = 'a110000000000010';
-  deliver({ ...MAILS.unsure, id: fallback }, 'p1');
+  const applied = modifies();
+  await machine.reportClassification(request);
   await step();
-  check(checkPriority(fallback, 'p1') && (await api.listReviewItems({})).reviewItems.length === 0, 'a valid none answer becomes P1 in Inbox without mandatory review');
+  check(applied === 4 && modifies() === applied, 'repeated reports and alarms do not repeat Gmail modifications');
+  const empty = await claim();
+  check(empty.messages.length === 0, 'ordinary hourly claims skip already reported and already classified mail');
+  await machine.reportClassification({ runId: empty.runId, requestId: id(), status: RunStatus.COMPLETED, ...metadata });
 
-  // A Gmail correction supplies current priority feedback and one replay sample.
-  const corrected = priorityMessages.get('p3') ?? '';
-  up.gmail.ownerModify(corrected, [gmailId('p2')], [gmailId('p3')]);
+  const failedId = 'a110000000000030';
+  deliver({ ...MAILS.unsure, id: failedId, labels: ['INBOX', 'UNREAD', 'STARRED', personal] }, 'p3');
+  const failed = await claim();
+  check(failed.messages.map(item => item.messageId).join() === failedId, 'a new unread arrival is claimed independently');
+  await machine.reportClassification({ runId: failed.runId, requestId: id(), status: RunStatus.FAILED, errorCode: 'codex_failed', usagePartial: true, ...metadata });
   await step();
-  const examples = (await api.listExamples({ label: 'labels/p2' })).examples;
-  check(examples.length === 1 && examples[0]?.embedded, 'a Gmail P3-to-P2 correction becomes an embedded priority example');
-  force('p2');
-  const writesBeforeReplay = modifies();
-  const examplesBeforeReplay = examples.map(example => example.name).sort().join();
-  const replay = await api.startReplayEvaluation({ name: 'replayEvaluation', requestId: id() });
+  check(labelsOf(failedId).join() === ['INBOX', 'UNREAD', 'STARRED', personal].sort().join() && modifies() === applied, 'model failure leaves mail unclassified without assigning fallback P1');
+  const retry = await claim();
+  check(retry.messages.map(item => item.messageId).join() === failedId, 'the next hourly run can claim a previous model failure');
+  await machine.reportClassification({ runId: retry.runId, requestId: id(), results: [{ messageId: failedId, priority: Priority.P3, reason: '周末集中查看。' }], status: RunStatus.COMPLETED, ...metadata });
   await step();
-  const summary = await api.getReplayEvaluation({ name: 'replayEvaluation' });
-  check(replay.totalCount === 1 && summary.state === ReplayEvaluation_State.SUCCEEDED && summary.evaluatedCount === 1 && summary.autoMatchCount === 1 && modifies() === writesBeforeReplay && (await api.listExamples({ label: 'labels/p2' })).examples.map(example => example.name).sort().join() === examplesBeforeReplay, 'replay checks current priority feedback without Gmail writes or new examples');
+  check(checkPriority(failedId, 'p3'), 'a later successful report follows the ordinary Gmail ledger');
 
-  const p2Message = priorityMessages.get('p2') ?? '';
-  await undo(p2Message);
-  check(labelsOf(p2Message).includes('INBOX') && labelsOf(p2Message).includes('UNREAD') && !labelsOf(p2Message).includes(gmailId('p2')), 'ordinary undo removes the assigned priority and restores Inbox');
-  force('p1');
-  const reply = 'a110000000000011';
-  deliver({ ...MAILS.bankEn, id: reply, threadId: 'synthetic-priority-thread', subject: 'Synthetic urgent reply', labels: ['INBOX', 'UNREAD', gmailId('p3')] }, 'p1', [gmailId('p3')]);
-  await step();
-  check(checkPriority(reply, 'p1'), 'a new reply replaces inherited P3 with one P1 label');
-  await undo(reply);
-  check(checkPriority(reply, 'p3', true), 'undo restores the inherited P3 and preserves Inbox and UNREAD');
-
-  const p4Message = priorityMessages.get('p4') ?? '';
-  const p4Expected = expected.get(p4Message);
-  if (p4Expected === undefined) throw new Error('smoke: missing expected P4 write');
-  expected.set(p4Message, { ...p4Expected, state: 'undo_intended' });
-  const range = await api.undoLedgerEntries({ startTime: timestampFromMs(T0), endTime: timestampFromMs(now + MINUTE), label: 'labels/p4', requestId: id() });
-  check(range.undoneCount === 1 && labelsOf(p4Message).includes('INBOX') && !labelsOf(p4Message).includes(gmailId('p4')) && checkPriority(corrected, 'p2'), 'range undo affects only P4 while the corrected P2 mail stays archived');
-
-  await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyNeuronBudget: 3000 }), updateMask: { paths: ['daily_neuron_budget'] }, requestId: id() });
-  up.ai.tokensPerCall = 16_000;
-  force('p2');
-  for (let i = 0; i < 5; i++) deliver({ ...MAILS.receiptZh, id: `f00000000000f00${String(i)}` }, 'p2');
-  await step();
-  const budget = await api.getServiceStatus({ name: 'serviceStatus' });
-  check(up.ai.calls.some(call => call.model === '@cf/cloudflare/clef-flash') && budget.decisionModel === 'clef-flash', 'the existing 70 percent threshold switches decisions to Clef-flash');
-  up.ai.tokensPerCall = 2000;
-  await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyNeuronBudget: 10000 }), updateMask: { paths: ['daily_neuron_budget'] }, requestId: id() });
-
-  up.ai.quota = true;
-  const deferredMessage = 'f10000000000f101';
-  deliver({ ...MAILS.travelZh, id: deferredMessage }, 'p2');
-  const deferred = await step();
-  const quota = await api.getServiceStatus({ name: 'serviceStatus' });
-  check(deferred.code === 'deferred' && quota.deferredCount >= 1 && quota.aiQuotaExhausted && labelsOf(deferredMessage).includes('INBOX'), 'exhausted Workers AI quota defers mail without assigning P1');
-  const callsAtQuota = up.ai.calls.length;
-  const writesAtQuota = modifies();
-  await step();
+  await api.startUnreadClassification({ name: 'unreadClassification', requestId: id(), recheckAllUnread: true });
+  const recheck = await claim();
+  const unreadIds = [...priorityMessages, already, failedId];
+  check(recheck.messages.map(item => item.messageId).sort().join() === unreadIds.sort().join(), 'explicit all-unread recheck includes existing priorities and excludes read mail');
+  for (const messageId of unreadIds) {
+    const replaceLabels = ['p1', 'p3', 'p4'].map(gmailId).filter(label => labelsOf(messageId).includes(label));
+    expected.set(messageId, { labelId: gmailId('p2'), state: 'intended', archived: true, baseInbox: labelsOf(messageId).includes('INBOX'), replaceLabels });
+  }
+  await machine.reportClassification({ runId: recheck.runId, requestId: id(), results: unreadIds.map(messageId => ({ messageId, priority: Priority.P2, reason: '两三天内查看。' })), status: RunStatus.COMPLETED, ...metadata });
+  await step(); await step();
+  check(unreadIds.every(messageId => checkPriority(messageId, 'p2') && labelsOf(messageId).includes('STARRED') && labelsOf(messageId).includes(personal)) && labelsOf(read).join() === readBefore, 'recheck replaces only priority and Inbox labels while preserving read mail and other state');
   const flow = await api.getMailFlow({ name: 'mailFlows/today' });
-  const waiting = (await api.getServiceStatus({ name: 'serviceStatus' })).deferredCount;
-  const counted = (stage: MailFlow_Stage, outcome: MailFlow_Outcome, label: string) => flow.counts.some(item => item.stage === stage && item.outcome === outcome && item.label === label && item.mailCount >= 1);
-  check(up.ai.calls.length === callsAtQuota, `known quota exhaustion stops repeated model calls (${String(callsAtQuota)} to ${String(up.ai.calls.length)})`);
-  check(modifies() === writesAtQuota && waiting >= 1, 'quota waits without Gmail writes');
-  check(flow.counts.filter(item => item.stage === MailFlow_Stage.DEFERRED).reduce((sum, item) => sum + item.mailCount, 0) === waiting && counted(MailFlow_Stage.CLEF, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/p1') && counted(MailFlow_Stage.CLEF, MailFlow_Outcome.ARCHIVED, 'labels/p2'), 'flow counts deferred mail once alongside P1 and archived priorities');
-  up.ai.quota = false;
-  await step(T0 + 24 * 60 * MINUTE + MINUTE - now);
-  check(checkPriority(deferredMessage, 'p2') && !(await api.getServiceStatus({ name: 'serviceStatus' })).aiQuotaExhausted, 'the next UTC day resumes deferred mail with the existing budget');
+  check(flow.counts.some(item => item.stage === MailFlow_Stage.CODEX && item.outcome === MailFlow_Outcome.KEPT_IN_INBOX && item.label === 'labels/p1') && flow.counts.some(item => item.stage === MailFlow_Stage.CODEX && item.outcome === MailFlow_Outcome.ARCHIVED && item.label === 'labels/p2'), 'the real flow counters record Codex Inbox and archived outcomes');
+  check(up.ai.calls.length === 0, 'claim, report, failure recovery and alarms never call Workers AI');
 
   const old = await fetch(`${origin}/api/v1/labels`);
   check(old.status === 410 && (await old.text()).includes('RELOAD_REQUIRED'), 'the old /api/v1 paths answer 410 RELOAD_REQUIRED');

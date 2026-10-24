@@ -1,0 +1,184 @@
+// Mailsort's hourly private runner. Independent bearer authentication precedes body decoding.
+// The Worker only authenticates and forwards; the existing SQLite Durable Object prepares bounded masked pages
+// and records decisions through the existing Gmail ledger. Claiming is not a successful run; even an empty run
+// finishes with a COMPLETED report. The runner has no owner API permission.
+// (-- api-linter: core::0127::resource-name-extraction=disabled
+//     aip.dev/not-precedent: This private machine command acts on the singleton classification pipeline. --)
+// (-- api-linter: core::0158::request-page-size-field=disabled
+//     aip.dev/not-precedent: Claim uses a fixed ten-message page to bound Workers Free work. --)
+// (-- api-linter: core::0142::time-field-names=disabled
+//     aip.dev/not-precedent: The private batch contract uses evaluated_at and received_at. --)
+// (-- api-linter: core::0140::prepositions=disabled
+//     aip.dev/not-precedent: The private batch contract retains evaluated_at, received_at and its masked to_code hint. --)
+// (-- api-linter: core::0216::synonyms=disabled
+//     aip.dev/not-precedent: RunStatus names the runner process report separately from the Gmail ledger state. --)
+syntax = "proto3";
+
+package mailsort.runner.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "MailsortRunnerServiceProto";
+option java_package = "science.ziyixi.mailsort.runner.v1";
+
+// The VPS runner's two commands; neither grants access to the owner API.
+service MailsortRunnerService {
+  option (google.api.default_host) = "sort.ziyixi.science";
+  // Starts or resumes one run, returning at most ten masked messages per page and one hundred per run.
+  rpc ClaimClassification(ClaimClassificationRequest) returns (ClaimClassificationResponse) {
+    option (google.api.http) = {
+      post: "/api/machine/v1/classification:claim"
+      body: "*"
+    };
+  }
+  // Persists fixed-priority results, then lets the existing Alarm resume Gmail writes.
+  rpc ReportClassification(ReportClassificationRequest) returns (ReportClassificationResponse) {
+    option (google.api.http) = {
+      post: "/api/machine/v1/classification:report"
+      body: "*"
+    };
+  }
+}
+
+// A caller-generated run ID and a continuation from its previous claim.
+message ClaimClassificationRequest {
+  // A lower-case UUID identifying this hourly invocation. Retries keep the same ID.
+  string run_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4
+  ];
+  // Opaque continuation from the previous response; empty starts or resumes the run.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// One bounded page; run_id may identify an incomplete run resumed by this invocation.
+message ClaimClassificationResponse {
+  // Masked inputs, at most ten. An empty page can still have a continuation while IDs are enumerated.
+  repeated ClassificationMessage messages = 1 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).max_items = 10
+  ];
+  // The actual run whose messages were returned.
+  string run_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Frozen current time for the whole model input.
+  google.protobuf.Timestamp evaluated_at = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Empty only when this run has no more model inputs.
+  string next_page_token = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Untrusted email data, never instructions. Attachments are not fetched.
+message ClassificationMessage {
+  // Gmail message identity; a reply is independently classified.
+  string message_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Gmail thread identity for relationships within the batch.
+  string thread_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Original receipt time.
+  google.protobuf.Timestamp received_at = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Masked subject.
+  string subject = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Masked display name and sender domain.
+  string sender = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Masked Gmail snippet.
+  string snippet = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Visible text, HTML stripped before masking and truncating to 12,000 code points.
+  string body = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stable masked recipient hint.
+  string to_code = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Gmail's ordinary category, when present.
+  string category = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Existing owner mail timezone used to interpret relative dates.
+  string time_zone = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The cleaned, masked body exceeded the 12,000-character input budget.
+  bool body_truncated = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One result. Its message must have been selected by this run.
+message ClassificationResult {
+  // The claimed Gmail message.
+  string message_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Fixed P1-P4 choice, without a probability threshold or fallback classifier.
+  Priority priority = 2 [(google.api.field_behavior) = REQUIRED];
+  // Short masked reason, at most 300 characters.
+  string reason = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Results and safe runtime metadata. Token counts are cumulative for this run, never additive on retries.
+message ReportClassificationRequest {
+  // The actual run ID returned by ClaimClassification.
+  string run_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4
+  ];
+  // UUID for deduplicating this exact report.
+  string request_id = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+  // At most one hundred results; reports never repeat a Gmail mutation.
+  repeated ClassificationResult results = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (common.wire.v1.field).max_items = 100
+  ];
+  // Actual model returned by the SDK, expected gpt-6.1-sol.
+  string model = 4 [(google.api.field_behavior) = REQUIRED];
+  // Actual reasoning effort, expected medium.
+  string effort = 5 [(google.api.field_behavior) = REQUIRED];
+  // SHA-256 of the exact classification instructions.
+  string prompt_sha = 6 [(google.api.field_behavior) = REQUIRED];
+  // Cumulative input tokens reported by the SDK.
+  optional int32 input_tokens = 7 [
+    (google.api.field_behavior) = OPTIONAL,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Cumulative output tokens reported by the SDK.
+  optional int32 output_tokens = 8 [
+    (google.api.field_behavior) = OPTIONAL,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Explicit process state; claiming alone is never completion.
+  RunStatus status = 9 [(google.api.field_behavior) = REQUIRED];
+  // Safe lower-case code for a failed run. Never an exception's text or email content.
+  string error_code = 10 [(google.api.field_behavior) = OPTIONAL];
+  // SDK usage came from an incomplete turn.
+  bool usage_partial = 11 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Durable acceptance, distinct from Gmail application.
+message ReportClassificationResponse {
+  // New decisions accepted by this report. Repeated decisions do not count again.
+  int32 accepted_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // All valid persisted Gmail write intents, including earlier runs waiting for their write allowance.
+  int32 pending_write_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Exactly one fixed priority.
+enum Priority {
+  // Invalid input.
+  PRIORITY_UNSPECIFIED = 0;
+  // Needs timely attention; preserve in Inbox.
+  PRIORITY_P1 = 1;
+  // Important follow-up that can wait two or three days; archive.
+  PRIORITY_P2 = 2;
+  // Optional substantive reading for later; archive.
+  PRIORITY_P3 = 3;
+  // Routine notice with no important follow-up; archive.
+  PRIORITY_P4 = 4;
+}
+
+// Progress of the runner process, separate from queued Gmail writes.
+enum RunStatus {
+  // Invalid input.
+  RUN_STATUS_UNSPECIFIED = 0;
+  // The process is still evaluating or reporting results.
+  RUN_STATUS_RUNNING = 1;
+  // All model inputs were classified, including the successful empty batch.
+  RUN_STATUS_COMPLETED = 2;
+  // Model or runner failed. Unreported messages remain pending for a later run.
+  RUN_STATUS_FAILED = 3;
+}

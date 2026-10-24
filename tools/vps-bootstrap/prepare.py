@@ -1,4 +1,4 @@
-"""Render public bootstrap resources from one verified commit and two immutable images."""
+"""Render public bootstrap resources from one verified commit and three immutable images."""
 
 import argparse
 import ast
@@ -95,7 +95,10 @@ def prepare(root, sha, images, output):
     require(not output.exists(), "OUTPUT_ALREADY_EXISTS")
     runtime = render(root, sha, images)
     for item in runtime["items"]:
-        if item["kind"] == "CronJob" and item["metadata"]["name"] == "newsletter-daily":
+        if item["kind"] == "CronJob" and item["metadata"]["name"] in {
+            "newsletter-daily",
+            "mailsort-runner",
+        }:
             item["spec"]["suspend"] = True
     output.mkdir(parents=True)
     (output / "units").mkdir()
@@ -206,13 +209,18 @@ def main():
     parser.add_argument("--sha", required=True)
     parser.add_argument("--newsletter-image", required=True)
     parser.add_argument("--platform-image", required=True)
+    parser.add_argument("--mailsort-runner-image", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         prepare(
             ROOT,
             args.sha,
-            {"newsletter": args.newsletter_image, "platform": args.platform_image},
+            {
+                "newsletter": args.newsletter_image,
+                "platform": args.platform_image,
+                "mailsort-runner": args.mailsort_runner_image,
+            },
             args.output,
         )
     except (BootstrapError, OSError, ValueError, KeyError):

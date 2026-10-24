@@ -11,8 +11,7 @@ export function unreadClassificationCard(ctx: ViewContext, initialStatus: Servic
   const progress = el('div', { class: 'unread-progress', role: 'status', 'aria-live': 'polite' })
   const feedback = el('p', { class: 'hint warn', role: 'status', hidden: true })
   const start = button('整理当前未读', () => void begin(), { class: 'primary' })
-  const recheck = button('重判保底 P1', () => void begin('fallback'))
-  const recheckInitial = button('重判原100封', () => void begin('initial100'))
+  const recheck = button('重新判断全部未读', () => void begin(true))
   const refresh = button('刷新进度', () => void load())
 
   const paint = () => {
@@ -23,17 +22,15 @@ export function unreadClassificationCard(ctx: ViewContext, initialStatus: Servic
     if (status === null) hold = '状态读取失败，请刷新进度后再开始。'
     else if (active && status.effectiveMode !== Mode.LIVE) hold = '等待切到正式模式后继续整理。当前模式保持不变。'
     else if (active && (status.authState !== ServiceStatus_AuthState.OK || !status.writeScope)) hold = '等待 Gmail 写入授权恢复后继续整理。'
-    else if (active && status.aiQuotaExhausted) hold = '今日模型配额已用完，等待下一个 UTC 日继续。'
-    else if (active && status.dailyNeuronBudget > 0 && status.neuronsToday >= status.dailyNeuronBudget) hold = '今日模型预算已用完，等待下一个 UTC 日继续。'
+    else if (active && status.batchStatus?.errorCode) hold = '小时批处理尚未完成，请在概览查看错误和下一步操作。'
     else if (active && (batch?.deferredCount ?? 0) > 0) hold = '部分邮件暂缓，后台会按既有重试时间继续。'
     fill(progress,
-      batch === undefined ? el('p', { class: 'hint' }, '尚未开始整理。') : el('p', { class: 'hint' }, scanning ? `正在收集本轮邮件，已找到 ${String(batch.totalCount)} 封；总数尚未确定。` : completed ? '本轮整理已结束。' : '后台分批整理中。'),
+      batch === undefined ? el('p', { class: 'hint' }, '尚未开始整理。') : el('p', { class: 'hint' }, scanning ? `正在收集本轮邮件，已找到 ${String(batch.totalCount)} 封；总数尚未确定。` : completed ? '本轮整理已结束。' : '已加入小时批处理；判断完成后分批写入 Gmail。'),
       batch === undefined ? null : el('p', { class: 'hint' }, `总数 ${String(batch.totalCount)} · 待处理 ${String(batch.pendingCount)} · 已应用 ${String(batch.appliedCount)} · 已跳过 ${String(batch.skippedCount)} · 失败 ${String(batch.failedCount)} · 暂缓 ${String(batch.deferredCount)}`),
       hold === null ? null : el('p', { class: 'hint warn' }, hold),
     )
     start.disabled = busy || active || status === null
     recheck.disabled = start.disabled
-    recheckInitial.disabled = start.disabled
     refresh.disabled = busy
   }
 
@@ -59,14 +56,14 @@ export function unreadClassificationCard(ctx: ViewContext, initialStatus: Servic
     paint()
   }
 
-  const begin = async (recheckMode?: 'fallback' | 'initial100') => {
+  const begin = async (recheckAll = false) => {
     if (start.disabled) return
     busy = true
     feedback.hidden = true
     paint()
     const requestId = newRequestId()
     try {
-      batch = await withRetry(() => api.startUnreadClassification({ name: 'unreadClassification', requestId, ...(recheckMode === 'fallback' ? { recheckFallback: true } : {}), ...(recheckMode === 'initial100' ? { recheckInitial100: true } : {}) }))
+      batch = await withRetry(() => api.startUnreadClassification({ name: 'unreadClassification', requestId, ...(recheckAll ? { recheckAllUnread: true } : {}) }))
       ctx.refreshStatus()
     } catch (error) {
       failure(error)
@@ -78,12 +75,11 @@ export function unreadClassificationCard(ctx: ViewContext, initialStatus: Servic
   const box = el('section', { class: 'card unread-classification', 'aria-label': '批量分级' },
     el('h2', {}, '批量分级'),
     el('p', { class: 'hint' }, '整理当前所有未读邮件，包括已归档邮件，排除垃圾邮件和回收站。P1 留在收件箱，P2–P4 归档；保留邮件、未读状态、星标和其他标签。'),
-    el('p', { class: 'hint' }, '重判保底 P1 只处理当前未读邮件；已读和已手动调整的邮件不动。'),
-    el('p', { class: 'hint' }, '重判原100封会重新判断新分级启用后最早自动分级的100封，包括已读和已归档邮件；跳过已手动调整的邮件，保留已读状态。'),
-    el('p', { class: 'hint' }, '使用现有模型预算；模型额度用完后等待下一个 UTC 日继续。重判后级别未变时只更新判断证据，计入已跳过，不写入 Gmail。已应用只统计 Gmail 已确认的修改。'),
+    el('p', { class: 'hint' }, '“整理当前未读”只处理没有 P1–P4 的邮件。“重新判断全部未读”也会重判已有 P1–P4 的未读邮件。已读邮件不处理。'),
+    el('p', { class: 'hint' }, '每小时整点用 6.1 Sol 批量判断；已分级的邮件不会自动重判。模型失败保持未分类，下一小时继续；判断已保存但未写入的邮件不重复调用模型。已应用只统计 Gmail 已确认的修改。'),
     progress,
     feedback,
-    el('div', { class: 'actions' }, start, recheck, recheckInitial, refresh),
+    el('div', { class: 'actions' }, start, recheck, refresh),
   )
   paint()
   return box

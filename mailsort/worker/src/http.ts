@@ -1,7 +1,9 @@
 /**
  * The Worker's HTTP surface (../../docs/design.md §9). The whole host is behind Cloudflare Access, and the Worker verifies
- * the owner's Access JWT itself on every path but /health:
+ * the owner's Access JWT on owner paths. The two machine commands use an independent bearer digest:
  *
+ * - POST /api/machine/v1/classification:claim and :report: independent CLASSIFICATION_TOKEN_SHA256 bearer check,
+ *   then one object call; this token never authenticates an owner API path;
  * - /api/v2/*: MailsortUiService (proto/mailsort/ui/v2). Every method but GET, HEAD and OPTIONS needs the same-origin
  *   Origin and the signed double-submit CSRF token, checked here before the body is read; the request then goes to
  *   MailsortState (state.ts), whose transcoder answers it. This handler stays thin (Workers Free: 10 ms of CPU): the
@@ -55,8 +57,7 @@ async function forward(request: Request, env: Env, requestId: string): Promise<R
   const headers = new Headers(request.headers);
   headers.set(REQUEST_ID_HEADER, requestId);
   const stub = env.MAILSORT.get(env.MAILSORT.idFromName(MAILSORT_OBJECT));
-  const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
-  return stub.fetch(new Request(request.url, { method: request.method, headers, ...(hasBody ? { body: await request.arrayBuffer() } : {}) }));
+  return stub.fetch(new Request(request, { headers }));
 }
 
 /**
@@ -84,6 +85,22 @@ async function route(request: Request, env: Env, url: URL, requestId: string): P
   if (url.pathname === '/health') {
     if (request.method !== 'GET' && !head) return fail(methodNotAllowed('GET, HEAD'));
     return { response: Response.json({ service: 'mailsort', status: 'ok', build: buildSha(env) }), asset: false };
+  }
+  if (url.pathname === '/api/machine/v1/classification:claim' || url.pathname === '/api/machine/v1/classification:report') {
+    if (request.method !== 'POST') return fail(methodNotAllowed('POST'));
+    const expected = env.CLASSIFICATION_TOKEN_SHA256 ?? '';
+    const bearer = /^Bearer ([A-Za-z0-9_-]{32,256})$/.exec(request.headers.get('authorization') ?? '')?.[1];
+    if (!/^[a-f0-9]{64}$/.test(expected)) return fail(sortError('NOT_CONFIGURED'));
+    if (bearer === undefined) return fail(sortError('UNAUTHORIZED'));
+    const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(bearer)));
+    const digest = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    let difference = 0;
+    for (let i = 0; i < digest.length; i++) difference |= digest.charCodeAt(i) ^ expected.charCodeAt(i);
+    if (difference !== 0) return fail(sortError('UNAUTHORIZED'));
+    const length = Number(request.headers.get('content-length') ?? '0');
+    if (Number.isFinite(length) && length > 131_072) return fail(sortError('BAD_REQUEST'));
+    try { return { response: await forward(request, env, requestId), asset: false }; }
+    catch { return fail(sortError('UNAVAILABLE')); }
   }
   const auth = await authenticate(request, env);
   if (!auth.ok) {

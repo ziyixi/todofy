@@ -19,6 +19,7 @@ import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
 import { modeCeiling, publicHost, type Env } from './env.ts';
 import { ALARM_IDLE_MS, MINUTE } from './limits.ts';
 import { authState } from './session.ts';
+import { batchStatus, runnerState } from './runner.ts';
 import { effectiveMode, readSettings } from './settings.ts';
 import { utcDay, type Store } from './store.ts';
 
@@ -103,7 +104,7 @@ export function uiUrl(host: string | null): string | undefined {
   return formatMatches(file_ops_v1_ops, 'HttpsUrl', url) ? url : undefined;
 }
 
-type StatusEnv = Pick<Env, 'PUBLIC_HOST' | 'MODE' | 'GMAIL_CLIENT_ID' | 'GMAIL_CLIENT_SECRET' | 'GMAIL_REFRESH_TOKEN'>;
+type StatusEnv = Pick<Env, 'PUBLIC_HOST' | 'MODE' | 'GMAIL_CLIENT_ID' | 'GMAIL_CLIENT_SECRET' | 'GMAIL_REFRESH_TOKEN' | 'CLASSIFICATION_TOKEN_SHA256'>;
 
 /** status(): a few indexed counts and meta rows. */
 export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsStatus {
@@ -122,6 +123,18 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
     const review = store.count(`SELECT count(*) AS n FROM review WHERE state = 'pending'`);
 
     const signals: Signal[] = [];
+    const batch = batchStatus(store);
+    const run = runnerState(store);
+    if (mode !== 'off') {
+      if (!/^[a-f0-9]{64}$/.test(env.CLASSIFICATION_TOKEN_SHA256 ?? '')) signals.push(signal('batch_not_configured', Severity.WARNING, {}));
+      else {
+        const completed = run?.completedAt ?? 0;
+        const started = run?.startedAt ?? Number(store.getMeta('installed_at') ?? now);
+        const since = completed > 0 ? completed : started;
+        if (now - since > 2 * 60 * MINUTE) signals.push(signal('batch_stale', Severity.WARNING, { minutes: Math.floor((now - since) / MINUTE) }, since));
+        if (run?.state === 'failed') signals.push(signal('batch_failed', Severity.WARNING, {}));
+      }
+    }
     if (mode !== 'off') {
       if (auth === 'failed') signals.push(signal('gmail_auth_failed', Severity.CRITICAL, { failures: Number(store.getMeta('auth_failures') ?? '0') }));
       if (auth === 'not_configured') signals.push(signal('gmail_not_configured', Severity.WARNING, {}));
@@ -145,6 +158,10 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
       gmail_calls_today: usage.gmail_calls,
       neurons_today: Math.round(usage.neurons),
       neuron_budget: settings.dailyNeuronBudget,
+      ...(batch === undefined ? {} : { selected_count: batch.selectedCount, judged_count: batch.judgedCount, pending_write_count: batch.pendingWriteCount }),
+      ...(batch?.inputTokens === undefined ? {} : { batch_input_tokens: batch.inputTokens }),
+      ...(batch?.outputTokens === undefined ? {} : { batch_output_tokens: batch.outputTokens }),
+      ...(run === null || run.completedAt === 0 ? {} : { last_batch_minutes: Math.floor((now - run.completedAt) / MINUTE) }),
     };
     if (synced !== null) counters['last_sync_minutes'] = Math.floor((now - synced) / MINUTE);
     return toWire(

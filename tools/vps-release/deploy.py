@@ -40,16 +40,20 @@ def verified_snapshot(
     ):
         return False
     statuses = {item.workload_key: item for item in node.workloads}
-    if len(statuses) != len(node.workloads) or set(statuses) != {
+    if len(statuses) != len(node.workloads) or not {
         target.workload_key for target in targets
-    }:
+    } <= set(statuses):
         return False
     for target in targets:
         item = statuses.get(target.workload_key)
         if (
             item is None
             or item.name != "workloads/" + target.workload_key
-            or item.process_state != "running"
+            or item.process_state
+            != ("stopped" if target.workload_key == "mailsort-runner" else "running")
+            or item.release is None
+            or (item.release.observation_scope == "template")
+            != (target.workload_key == "mailsort-runner")
             or item.admission_state not in {"accepting", "unsupported"}
             or (
                 item.health_state not in {"healthy", "unsupported"}
@@ -138,7 +142,14 @@ class Deployment:
             raise ReleaseFailure("INVALID_DEPLOYMENT_TIMEOUT")
         if (resume and digests is not None) or (
             not resume
-            and (digests is None or set(digests) != {"newsletter", "platform-runtime"})
+            and (
+                digests is None
+                or set(digests)
+                not in (
+                    {"newsletter", "platform-runtime"},
+                    {"newsletter", "platform-runtime", "mailsort-runner"},
+                )
+            )
         ):
             raise ReleaseFailure("INVALID_DEPLOYMENT_IMAGES")
         deadline = self.monotonic() + timeout
@@ -198,6 +209,14 @@ class Deployment:
                         item.workload_key: {
                             "health_state": item.health_state,
                             **(
+                                {
+                                    "process_state": item.process_state,
+                                    "observation_scope": "template",
+                                }
+                                if item.release.observation_scope == "template"
+                                else {}
+                            ),
+                            **(
                                 {"unknown_count": item.unknown_count}
                                 if item.unknown_count is not None
                                 else {}
@@ -249,9 +268,12 @@ class Deployment:
         identity = release_id(sha)
         targets = release.targets
         if (
-            len(targets) != 2
+            len({target.workload_key for target in targets}) != len(targets)
             or {target.workload_key for target in targets}
-            != {"newsletter", "platform-runtime"}
+            not in (
+                {"newsletter", "platform-runtime"},
+                {"newsletter", "platform-runtime", "mailsort-runner"},
+            )
             or any(
                 target.source_sha != sha
                 or target.request_id != identity
@@ -291,6 +313,7 @@ def main() -> int:
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--newsletter-image")
     parser.add_argument("--platform-image")
+    parser.add_argument("--mailsort-runner-image")
     parser.add_argument(
         "--resume",
         action="store_true",
@@ -300,13 +323,19 @@ def main() -> int:
     parser.add_argument("--evidence-file", type=Path)
     args = parser.parse_args()
     if args.resume and (
-        args.newsletter_image is not None or args.platform_image is not None
+        args.newsletter_image is not None
+        or args.platform_image is not None
+        or args.mailsort_runner_image is not None
     ):
         parser.error(
             "--resume reads the original frozen images; do not supply new images"
         )
-    if not args.resume and (not args.newsletter_image or not args.platform_image):
-        parser.error("a new release requires both verified images")
+    if not args.resume and (
+        not args.newsletter_image
+        or not args.platform_image
+        or not args.mailsort_runner_image
+    ):
+        parser.error("a new release requires all three verified images")
     transport = None
     try:
         if args.resume:
@@ -315,7 +344,11 @@ def main() -> int:
             profile, digests = verified_images(
                 ROOT,
                 args.source_sha,
-                {"newsletter": args.newsletter_image, "platform": args.platform_image},
+                {
+                    "newsletter": args.newsletter_image,
+                    "platform": args.platform_image,
+                    "mailsort-runner": args.mailsort_runner_image,
+                },
             )
         credentials = {
             name: os.environ.get(name, "")

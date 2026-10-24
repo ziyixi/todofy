@@ -62,8 +62,8 @@ class Controller:
     def create(self, request):
         targets = request.release.targets
         if (
-            len(targets) != 2
-            or {target.workload_key for target in targets} != self.keys
+            {target.workload_key for target in targets} != self.keys
+            or len({target.workload_key for target in targets}) != len(targets)
             or len({target.source_sha for target in targets}) != 1
             or any(
                 target.request_id != request.request_id or target.generation is not None
@@ -73,7 +73,7 @@ class Controller:
             raise _error(
                 "INVALID_ARGUMENT",
                 CommonReason.BAD_REQUEST,
-                "The release must select both configured workloads with one source and creation identity.",
+                "The release must select the configured workloads with one source and creation identity.",
             )
         body = {
             "request_id": request.request_id,
@@ -222,7 +222,9 @@ class Controller:
                 pass
             if not observed:
                 try:
-                    observed = self._observations(self._snapshot())
+                    observed = self._observations(
+                        self._snapshot(), self.release(record).targets
+                    )
                 except Exception:  # noqa: BLE001 — a failed observation stays absent, never becomes "frozen".
                     observed = ()
         self.store.checkpoint(
@@ -241,11 +243,10 @@ class Controller:
         self.reads.cache.invalidate()
         return self.reads.snapshot()
 
-    def _observations(self, snapshot):
+    def _observations(self, snapshot, targets=()):
+        keys = {target.workload_key for target in targets} if targets else self.keys
         return tuple(
-            to_wire(value)
-            for value in snapshot.workloads
-            if value.workload_key in self.keys
+            to_wire(value) for value in snapshot.workloads if value.workload_key in keys
         )
 
     def _verified(self, snapshot, targets, *, resumed=False):
@@ -254,7 +255,7 @@ class Controller:
             for value in snapshot.workloads
             if value.workload_key in self.keys
         }
-        if set(observed) != self.keys:
+        if not {target.workload_key for target in targets} <= set(observed):
             return False
         for wanted in targets:
             value = observed[wanted.workload_key]
@@ -281,7 +282,12 @@ class Controller:
                     wanted.generation is not None
                     and actual.generation != wanted.generation
                 )
-                or value.process_state != "running"
+                or value.process_state
+                != (
+                    "stopped" if wanted.workload_key == "mailsort-runner" else "running"
+                )
+                or (value.release.observation_scope == "template")
+                != (wanted.workload_key == "mailsort-runner")
                 or value.health_state not in {"healthy", "unsupported", "degraded"}
             ):
                 return False
@@ -434,6 +440,7 @@ class Controller:
                 if item["kind"] == "ConfigMap" and item["metadata"]["name"] in {
                     newsletter.release_configmap,
                     platform.release_configmap,
+                    "mailsort-runner-release",
                 }:
                     self.kube.patch(
                         "ConfigMap",
@@ -459,14 +466,19 @@ class Controller:
                     self._hold(
                         record,
                         ErrorReason.RELEASE_HELD,
-                        observed=self._observations(snapshot),
+                        observed=self._observations(snapshot, targets),
                     )
                 return False
             self._next(
-                record, "verifying", "activate", observed=self._observations(snapshot)
+                record,
+                "verifying",
+                "activate",
+                observed=self._observations(snapshot, targets),
             )
         elif checkpoint == "activate":
-            for item in (newsletter, platform):
+            for item in self.workloads.values():
+                if item.key not in {target.workload_key for target in targets}:
+                    continue
                 self.kube.patch(
                     "ConfigMap",
                     item.release_configmap,
@@ -486,10 +498,12 @@ class Controller:
                     self._hold(
                         record,
                         ErrorReason.RELEASE_HELD,
-                        observed=self._observations(snapshot),
+                        observed=self._observations(snapshot, targets),
                     )
                 return False
-            self._next(record, "ready", "done", observed=self._observations(snapshot))
+            self._next(
+                record, "ready", "done", observed=self._observations(snapshot, targets)
+            )
         else:
             raise ValueError("invalid_release_checkpoint")
         return True

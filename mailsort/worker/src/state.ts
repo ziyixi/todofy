@@ -1,9 +1,9 @@
 /**
  * MailsortState (../../docs/design.md §3): the single SQLite-backed Durable Object "mailsort-v1". It holds every label,
  * decision, example and ledger entry, schedules itself with setAlarm (no cron trigger), makes every request to
- * Gmail (gmail.ts) and Workers AI, and serves the owner API (api.ts) through the shared transcoder: the Worker (http.ts)
+ * Gmail (gmail.ts), and serves the owner API (api.ts) and private runner API (runner.ts) through the shared transcoder: the Worker (http.ts)
  * authenticates the owner and checks CSRF, then forwards /api/v2/* here, so the Worker's own request stays far below
- * Workers Free's 10 ms of CPU, and the Gmail and model calls get the object's 30 s.
+ * Workers Free's 10 ms of CPU, and Gmail calls and input preparation get the object's 30 s.
  *
  * Scheduling: `alarm()` runs one pass (pipeline.ts) and arms the next alarm (soon while a backlog waits, else five
  * minutes); an error is caught, logged as a code and re-armed after ALARM_ERROR_RETRY_MS. Every API call and every
@@ -15,12 +15,14 @@
  */
 import { DurableObject } from 'cloudflare:workers';
 import { HttpTranscoder } from '@ziyixi/proto/http-transcoder';
+import { MailsortRunnerService } from '@ziyixi/proto/mailsort/runner/v1/mailsort_runner_service_pb';
+import { runnerHandlers } from './runner.ts';
 import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
 import type * as opsWire from '@ziyixi/proto/ops/v1/ops_wire';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { handlers, type ApiContext } from './api.ts';
-import { aiRunner, buildSha, modeCeiling, REQUEST_ID_HEADER, upstreamFetch, type Env } from './env.ts';
-import type { AccessToken } from './gmail.ts';
+import { buildSha, modeCeiling, REQUEST_ID_HEADER, upstreamFetch, type Env } from './env.ts';
+import { GoogleError, type AccessToken } from './gmail.ts';
 import { ALARM_ERROR_RETRY_MS, ALARM_SUBREQUESTS, MAX_BODY_BYTES, WAKE_MS } from './limits.ts';
 import { activeShed, setGuard, sortStatus, type GuardOutcome } from './ops-status.ts';
 import { runPass, type PassResult } from './pipeline.ts';
@@ -42,6 +44,11 @@ const api = new HttpTranscoder(MailsortUiService, handlers, {
   authorize,
   localize,
   onUnexpected: () => new RpcError(REASONS.INTERNAL.code, 'INTERNAL', REASONS.INTERNAL.message),
+});
+
+const runnerApi = new HttpTranscoder(MailsortRunnerService, runnerHandlers, {
+  domain: API_DOMAIN, maxBodyBytes: 131_072, authorize, localize,
+  onUnexpected: (error) => error instanceof GoogleError ? new RpcError(REASONS.DEPENDENCY_UNAVAILABLE.code, 'DEPENDENCY_UNAVAILABLE', REASONS.DEPENDENCY_UNAVAILABLE.message) : new RpcError(REASONS.INTERNAL.code, 'INTERNAL', REASONS.INTERNAL.message),
 });
 
 export class MailsortState extends DurableObject<Env> {
@@ -105,14 +112,12 @@ export class MailsortState extends DurableObject<Env> {
             store: this.store,
             env: this.env,
             fetch: upstreamFetch(this.env),
-            ai: aiRunner(this.env),
             now: () => this.now(),
             transact: this.transact,
             token: this.token,
             saveToken: (token) => {
               this.token = token;
             },
-            shed: activeShed(this.store, this.now()) !== null,
           });
           // Counts and codes only: never a subject, a sender or a label name.
           console.log(JSON.stringify({ event: 'alarm', mode: pass.mode, synced: pass.synced, decided: pass.decided, applied: pass.applied, deferred: pass.deferred, code: pass.code }));
@@ -204,7 +209,7 @@ export class MailsortState extends DurableObject<Env> {
     if (mutation) this.mutationsInFlight++;
     let result;
     try {
-      result = await api.handle(request, ctx, requestId);
+      result = await (new URL(request.url).pathname.startsWith('/api/machine/v1/') ? runnerApi : api).handle(request, ctx, requestId);
     } finally {
       if (mutation) this.mutationsInFlight--;
     }

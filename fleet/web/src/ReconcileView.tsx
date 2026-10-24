@@ -17,6 +17,7 @@ const REASONS: Readonly<Record<string, string>> = {
 };
 
 export function ReconcileView({ plan }: { plan: ReconcilePlan | null | undefined }) {
+  const changes = plan ? [...plan.changes, ...(plan.template_changes ?? [])] : [];
   return (
     <article aria-label="配置对账">
       <h3>配置对账</h3>
@@ -24,7 +25,7 @@ export function ReconcileView({ plan }: { plan: ReconcilePlan | null | undefined
         <p>{STATES[plan.state]} · 检查时间：{time(plan.observed_at)}</p>
         {plan.base_release && <p>核对发布：<code>{plan.base_release}</code></p>}
         {plan.reason_code && <p>{REASONS[plan.reason_code] ?? plan.reason_code}</p>}
-        {plan.changes.length > 0 && <ul>{plan.changes.map((change) => (
+        {changes.length > 0 && <ul>{changes.map((change) => (
           <li key={change.resource_key}><code>{change.resource_key}</code>：{REASONS[change.reason_code] ?? change.reason_code}</li>
         ))}</ul>}
         {plan.state === 'clean' && <p>当前无需修复，不会重启服务。</p>}

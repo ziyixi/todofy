@@ -1,8 +1,6 @@
-# Worker "mailsort": the owner's Gmail sorting (sort.ziyixi.science, docs/design.md): new INBOX mail read through the
-# Gmail API, decided by rules, nearest examples and the Workers AI decision model Clef, labelled (its own Gmail labels,
-# named by their paths) and archived (never marked read) in live mode. The production configuration and its single source of truth: top level =
-# production, never [env.*] or keep_vars. Every static value is committed here (the repository is public: nothing
-# personal, no secret).
+# Worker "mailsort": Gmail access, fixed P1-P4 decisions, owner UI and the write ledger.
+# An independent VPS CronJob classifies masked unread mail hourly through Codex; this Worker never calls a model.
+# P1 stays in Inbox, P2-P4 archive; mail is never marked read or deleted. Top level is production.
 #
 # Deployed only by CI ("Mailsort deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which appends
 # --var BUILD_SHA (the commit) and --var MODE (the GitHub variable MAILSORT_MODE: the highest mode the deployment allows)
@@ -62,11 +60,8 @@ class_name = "MailsortState"
 tag = "v1"
 new_sqlite_classes = ["MailsortState"]
 
-# Workers AI (Free: 10,000 neurons a day for the whole account): @cf/cloudflare/clef, @cf/cloudflare/clef-flash and
-# @cf/baai/bge-m3, called directly (no AI Gateway: it would log the request bodies). Settings.daily_neuron_budget bounds
-# mailsort's own share.
-[ai]
-binding = "AI"
+# Classification runs hourly in the independent VPS runner. This Worker keeps Gmail access, decisions and writes;
+# no Workers AI binding is needed. The machine bearer digest is a deployed secret, never a public var.
 
 [vars]
 # The app's host: the only origin a mutation may come from (CSRF).

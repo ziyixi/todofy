@@ -102,6 +102,48 @@ class Clock:
 
 
 class ActionDeployment(unittest.TestCase):
+    def test_runner_requires_inactive_template_evidence_and_legacy_targets_stay_readable(
+        self,
+    ):
+        target = pb.ReleaseTarget(
+            workload_key="mailsort-runner",
+            source_sha=SHA,
+            image_digest="sha256:" + "d" * 64,
+            request_id=IDENTITY,
+        )
+        evidence = replace(target, generation=4)
+        runner = pb.WorkloadStatus(
+            name="workloads/mailsort-runner",
+            workload_key="mailsort-runner",
+            process_state="stopped",
+            admission_state="unsupported",
+            health_state="unsupported",
+            observed_at=TIME,
+            release=pb.ReleaseStatus(
+                state="ready",
+                desired=evidence,
+                actual=evidence,
+                observed_at=TIME,
+                observed_generation=4,
+                observation_scope="template",
+            ),
+        )
+        observed = replace(node(), workloads=(runner, *node().workloads))
+        self.assertTrue(verified_snapshot(observed, (*TARGETS, target), NAME, NOW))
+        self.assertTrue(verified_snapshot(observed, TARGETS, NAME, NOW))
+        for changed in (
+            replace(runner, process_state="running"),
+            replace(runner, release=replace(runner.release, observation_scope=None)),
+        ):
+            self.assertFalse(
+                verified_snapshot(
+                    replace(observed, workloads=(changed, *node().workloads)),
+                    (*TARGETS, target),
+                    NAME,
+                    NOW,
+                )
+            )
+
     def client(self, handler, *, clock=None):
         transport = Transport(
             "platform-runtime.example.test",

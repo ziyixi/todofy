@@ -12,6 +12,20 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+`codex/mailsort-codex-batch` implements the owner-approved hourly Codex replacement: GPT-6.1 Sol medium,
+an independent VPS CronJob, Mailsort machine claim/report endpoints, and current batch status in Mailsort/Home.
+The owner explicitly approved one initial reclassification of **all currently unread** mail, including existing
+P1-P4; routine hourly runs select only unread mail without a priority. No messages are deleted or marked read.
+The local same-prompt 100-message comparison completed on SDK 0.163.0 (medium/high/max); private input and
+per-message trial results stay outside Git. Production cutover and the first natural hourly run remain unverified.
+The isolated checkout preserves Claude's shared source. Local checks include 153 Worker unit, 65 workerd
+(including CPU), 75 UI, 26 deploy tests and the full 67-request synthetic Wrangler smoke; CI/image and
+production verification remain pending. The new independent Codex login awaits the owner's Passkey verification
+in Chrome; do not switch credentials or copy Newsletter auth to bypass it. VPS SSH works but sudo -n is unavailable,
+so the fixed foundation bundle will need one owner sudo command.
+The older five unstarted original-100 rechecks below were cancelled in the preceding authorized read-only audit;
+the production batch then reported applied 45, skipped 55, pending 0. Do not resume those cancelled requests.
+
 Mailsort's calibrated priority correction and original-100 entrypoint are deployed at `eb3e21dc` after full
 [branch gate 40064835511](https://github.com/ziyixi/todofy/actions/runs/40064835511) and
 [same-SHA main release 40065406437](https://github.com/ziyixi/todofy/actions/runs/40065406437). Only Mailsort and
@@ -25,14 +39,10 @@ token was revoked. Acceptance is now 0.55 with the existing 0.4 first-view gate 
 Clef results are 16/16 and Flash 13/16; these are sample regressions, not mailbox accuracy. Existing operating
 modes, model budgets, write limits and Gmail credentials remain unchanged.
 
-The authorized original-100 batch was started once through production UI. Its frozen cohort
-contains 99 previous unread-batch members and one ordinary arrival; before recheck it had 81 P1, 19 P4 and no
-recorded owner verdicts. It includes read/archived mail and excludes later arrivals. At 2026-10-24 05:28 UTC,
-95 were reanalyzed: 45 actual Gmail changes, 50 unchanged results and zero failures. Five remain queued until
-`2026-10-25T00:00:00Z` because the existing daily write limit reached 150/150; model use is about 7,622/9,500,
-not quota-exhausted. Mode is live, breaker clear. The existing Alarm resumes them; no setting was changed.
-Completed decisions are P1: 37 (all fallback), P2: 0, P3: 7, P4: 51. This is not mailbox accuracy. Verify this
-existing batch after its retry time; do not start another one. Acceptance docs are on `codex/mailsort-priority-verified`.
+The earlier original-100 batch ended after the owner asked to leave its mail unchanged: 45 actual Gmail
+changes, 55 skipped, pending 0 and failed 0. The five not-yet-started rechecks were cancelled; do not resume
+or recreate them. The new owner-approved Codex task below separately authorizes reclassifying all **currently
+unread** mail after the new release. Historical metrics are not mailbox accuracy.
 
 The owner rejected a new post-model Gmail metadata check for concurrent manual edits. That request, its exact-label
 guard and three tests were removed, along with one redundant P1 condition. Keep the ordinary initial label check
@@ -49,8 +59,7 @@ Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's sha
 ## Latest verified release
 
 Mailsort's calibrated priority correction and simplified original-100 entrypoint are live at `eb3e21dc`, as recorded
-above. Its earlier P1-P4 switch and 99-message unread batch completed at `d1295e7d`; the current recheck is a
-separate operation with five pending members. P1 keeps Inbox, P2-P4 archive, uncertainty becomes P1, and the
+above. Its earlier P1-P4 switch and 99-message unread batch completed at `d1295e7d`; the old recheck has no pending members. P1 keeps Inbox, P2-P4 archive, uncertainty becomes P1, and the
 scam/trust gates are removed. Original mail and history remain. The isolated checkout left Claude's shared tree
 untouched. Provider identity, tests and privacy-safe evidence are in
 [priority verification](docs/mailsort-priority-verification.md); actions are in [priority rollout](mailsort/docs/priority-rollout.md).

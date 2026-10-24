@@ -1,4 +1,4 @@
-/** Settings keeps the existing mode, range undo and replay evaluation. */
+/** Settings keeps the owner's mode and Gmail range undo. */
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
@@ -8,7 +8,6 @@ import { card, segmented } from '../components.ts'
 import { button, el, toast } from '../dom.ts'
 import { BREAKER_REASONS, labelText, MODE_HINTS, MODE_NAMES, ms } from '../format.ts'
 import type { Host, ViewContext } from '../app.ts'
-import { replayCard } from './replay.ts'
 import { act, allLabels, frame, labelSelect } from './common.ts'
 
 const MODES: readonly (readonly [Mode, string])[] = [Mode.OFF, Mode.SHADOW, Mode.LIVE].map((mode) => [mode, MODE_NAMES[mode] ?? ''] as const)
@@ -201,6 +200,6 @@ export async function renderSettings(ctx: ViewContext): Promise<void> {
   const reload: () => Promise<void> = await frame(ctx.main, '设置', async (body) => {
     // The header's status (its grant) only adds a line: without it the page still works.
     const [settings, labels, status] = await Promise.all([api.getSettings({ name: 'settings' }), allLabels(), ctx.status().catch(() => null)])
-    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), undoCard(labels, ctx.host), await replayCard(labels))
+    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), undoCard(labels, ctx.host))
   })
 }

@@ -266,3 +266,39 @@ moved {
   from = cloudflare_zero_trust_access_application.mail_hero_backup
   to   = cloudflare_zero_trust_access_application.mail_hero_backup[0]
 }
+
+# Only these two machine POST routes bypass interactive login. The Worker verifies
+# CLASSIFICATION_TOKEN_SHA256 before reading a body; the owner application keeps its policies.
+resource "cloudflare_zero_trust_access_policy" "mailsort_machine" {
+  account_id = var.account_id
+  name       = "mailsort classification routes only"
+  decision   = "bypass"
+  include    = [{ everyone = {} }]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "cloudflare_zero_trust_access_application" "mailsort_machine" {
+  account_id = var.account_id
+  name       = "mailsort machine classification"
+  type       = "self_hosted"
+  domain     = "${local.owner_apps["mailsort"].domain}/api/machine/v1/classification:claim"
+  destinations = [
+    { type = "public", uri = "${local.owner_apps["mailsort"].domain}/api/machine/v1/classification:claim" },
+    { type = "public", uri = "${local.owner_apps["mailsort"].domain}/api/machine/v1/classification:report" },
+  ]
+  allow_authenticate_via_warp = false
+  app_launcher_visible        = false
+  auto_redirect_to_identity   = false
+  enable_binding_cookie       = false
+  http_only_cookie_attribute  = true
+  options_preflight_bypass    = false
+  session_duration            = "24h"
+  policies                    = [{ id = cloudflare_zero_trust_access_policy.mailsort_machine.id, precedence = 1 }]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}

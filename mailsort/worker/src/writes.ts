@@ -38,7 +38,7 @@ import { WRITE_ATTEMPTS_MAX } from './limits.ts';
 import { ownerPath } from './paths.ts';
 import { noteGoogleError } from './session.ts';
 import { timeId } from './ids.ts';
-import { unreadRechecksFallback, unreadRechecksInitial100 } from './unread.ts';
+import { unreadRechecksAll, unreadRechecksFallback, unreadRechecksInitial100 } from './unread.ts';
 import { utcDay, type LabelRow, type LedgerRow, type Store } from './store.ts';
 import type { Budget } from './session.ts';
 
@@ -318,7 +318,7 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
         const now = ctx.now();
         ctx.transact(() => {
           store.run(`UPDATE ledger SET state = 'applied', apply_time = ?, last_code = NULL WHERE id = ?`, now, row.id);
-          if ((unreadRechecksInitial100(store) || unreadRechecksFallback(store)) && store.one(`SELECT 1 AS x FROM unread_batch WHERE message_id = ? AND ledger_id = ?`, row.message_id, row.id) !== undefined) {
+          if ((unreadRechecksAll(store) || unreadRechecksInitial100(store) || unreadRechecksFallback(store)) && store.one(`SELECT 1 AS x FROM unread_batch WHERE message_id = ? AND ledger_id = ?`, row.message_id, row.id) !== undefined) {
             // Only the successful replacement owns undo; the earlier priority's history remains read-only.
             store.run(`UPDATE ledger SET superseded = 1 WHERE message_id = ? AND origin = 'auto' AND label_id IN ('p1', 'p2', 'p3', 'p4') AND state = 'applied' AND id != ?`, row.message_id, row.id);
           }

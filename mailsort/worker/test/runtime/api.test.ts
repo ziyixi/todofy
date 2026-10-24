@@ -162,7 +162,7 @@ describe('the owner API', () => {
     await h.api.deleteLabel({ name: inbox.name, requestId: op() });
   });
 
-  it('uncertain new priority decisions go to P1 without mandatory review', async () => {
+  it('Alarm leaves classification to the runner without manufacturing P1 or review items', async () => {
     await h.api.initializePriorities({ requestId: op() });
     h.up.ai.confidence = 0.5;
     h.up.gmail.deliver(message({ ...MAILS.newsletterEn, receivedAt: T0 + HOUR }));
@@ -171,10 +171,10 @@ describe('the owner API', () => {
     const pass = await h.step(T0 + HOUR);
     h.up.ai.confidence = 0.92;
     const { reviewItems } = await h.api.listReviewItems({});
-    expect(pass.decided).toBe(2);
+    expect(pass.decided).toBe(0);
     expect(reviewItems).toEqual([]);
     expect(await h.sql(`SELECT outcome, label_id FROM decisions WHERE message_id IN (?, ?) ORDER BY message_id`, MAILS.newsletterEn.id, MAILS.receiptEn.id))
-      .toEqual([{ outcome: 'suggested', label_id: 'p1' }, { outcome: 'suggested', label_id: 'p1' }]);
+      .toEqual([]);
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).reviewCount).toBe(0);
     expect(h.up.gmail.calls.filter((call) => call.url.endsWith('/modify'))).toEqual([]);
   });

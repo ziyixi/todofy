@@ -1,4 +1,4 @@
-"""Bounded server-side apply comparison of this image's ten declared runtime resources."""
+"""Bounded server-side apply comparison of this image's fixed declared runtime resources."""
 
 import hashlib
 import json
@@ -23,6 +23,9 @@ RESOURCE_KEYS = {
     ("ConfigMap", "newsletter-release"): "newsletter-release",
     ("ConfigMap", "platform-release"): "platform-release",
     ("ConfigMap", "platform-runtime-config"): "platform-runtime-config",
+    ("CronJob", "mailsort-runner"): "mailsort-runner",
+    ("ConfigMap", "mailsort-runner-release"): "mailsort-runner-release",
+    ("ConfigMap", "mailsort-runner-config"): "mailsort-runner-config",
 }
 
 
@@ -83,7 +86,16 @@ class Planner:
             raise DependencyUnavailable()
         return min(5, remaining)
 
-    def _plan(self, record, *, state, changes=(), reason=None, fingerprint=None):
+    def _plan(
+        self,
+        record,
+        *,
+        state,
+        changes=(),
+        template_changes=(),
+        reason=None,
+        fingerprint=None,
+    ):
         value = pb.ReconcilePlan(
             name="reconcilePlan",
             state=state,
@@ -93,6 +105,7 @@ class Planner:
             base_release="releases/" + record.identity if record else None,
             base_etag=record.etag if record else None,
             changes=tuple(changes),
+            template_changes=tuple(template_changes),
             reason_code=reason,
             fingerprint=fingerprint,
         )
@@ -106,7 +119,7 @@ class Planner:
             return self._plan(
                 record, state="manual_required", reason="RELEASE_IN_PROGRESS"
             )
-        changes, live = [], []
+        changes, template_changes, live = [], [], []
         deadline = self.monotonic() + PLAN_SECONDS
         try:
             targets = tuple(
@@ -126,14 +139,31 @@ class Planner:
                 targets, record.identity, gate_key=record.gate_key or None
             )
             daily = None
-            for source, desired in zip(
-                self.renderer.asset["items"], resources, strict=True
+            aliases = {}
+            for adapter, fixed in (
+                ("newsletter", "newsletter"),
+                ("personal-cloud", "platform-runtime"),
+                ("mailsort-runner", "mailsort-runner"),
             ):
-                key = RESOURCE_KEYS[(source["kind"], source["metadata"]["name"])]
+                workload = self.renderer.workloads.get(adapter)
+                if workload is not None:
+                    aliases[("Deployment", workload.deployment)] = fixed
+                    aliases[("ConfigMap", workload.release_configmap)] = (
+                        "platform-release"
+                        if adapter == "personal-cloud"
+                        else fixed + "-release"
+                    )
+            for desired in resources:
+                kind, name = desired["kind"], desired["metadata"]["name"]
+                key = RESOURCE_KEYS[(kind, aliases.get((kind, name), name))]
                 change, fields, actual = self._compare(desired, key, deadline)
                 live.append((key, fields))
                 if change is not None:
-                    changes.append(change)
+                    (
+                        template_changes
+                        if key.startswith("mailsort-runner")
+                        else changes
+                    ).append(change)
                 if key == "newsletter-daily":
                     daily = actual
             admission = self.admission.call(
@@ -147,13 +177,17 @@ class Planner:
                     record,
                     state="manual_required",
                     changes=changes,
+                    template_changes=template_changes,
                     reason="BUSINESS_PAUSED",
                 )
-            if any(change.action == "conflict" for change in changes):
+            if any(
+                change.action == "conflict" for change in (*changes, *template_changes)
+            ):
                 return self._plan(
                     record,
                     state="manual_required",
                     changes=changes,
+                    template_changes=template_changes,
                     reason="RUNTIME_OWNERSHIP_CONFLICT",
                 )
             encoded = json.dumps(
@@ -170,8 +204,9 @@ class Planner:
             ).encode()
             return self._plan(
                 record,
-                state="repairable" if changes else "clean",
+                state="repairable" if changes or template_changes else "clean",
                 changes=changes,
+                template_changes=template_changes,
                 fingerprint=hashlib.sha256(encoded).hexdigest(),
             )
         except (DependencyUnavailable, AdmissionUnavailable):
@@ -179,10 +214,16 @@ class Planner:
                 record,
                 state="unavailable",
                 changes=changes,
+                template_changes=template_changes,
                 reason="RUNTIME_COMPARISON_UNAVAILABLE",
             )
 
     def _compare(self, desired, key, deadline):
+        change_type = (
+            pb.RunnerTemplateChange
+            if key.startswith("mailsort-runner")
+            else pb.ReconcileChange
+        )
         try:
             actual = self.kube.get(
                 desired["kind"],
@@ -199,7 +240,7 @@ class Planner:
             if not error.conflict:
                 raise
             return (
-                pb.ReconcileChange(
+                change_type(
                     resource_key=key,
                     action="conflict",
                     reason_code="RUNTIME_OWNERSHIP_CONFLICT",
@@ -212,13 +253,13 @@ class Planner:
             declared_view(applied, desired),
         )
         if actual is None:
-            change = pb.ReconcileChange(
+            change = change_type(
                 resource_key=key,
                 action="create",
                 reason_code="RUNTIME_RESOURCE_MISSING",
             )
         elif live_fields != wanted_fields:
-            change = pb.ReconcileChange(
+            change = change_type(
                 resource_key=key, action="update", reason_code="RUNTIME_FIELDS_CHANGED"
             )
         else:

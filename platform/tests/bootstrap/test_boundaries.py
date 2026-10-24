@@ -34,6 +34,7 @@ class BootstrapBoundaries(unittest.TestCase):
         allowed = {
             ("apps", "deployments"),
             ("batch", "cronjobs"),
+            ("batch", "jobs"),
             ("", "services"),
             ("", "configmaps"),
             ("", "pods"),
@@ -46,7 +47,7 @@ class BootstrapBoundaries(unittest.TestCase):
                     actual.add((group, resource))
                     verbs = (
                         {"get", "list"}
-                        if resource == "pods"
+                        if resource in {"pods", "jobs"}
                         else {
                             "get",
                             "list",
@@ -142,9 +143,10 @@ class BootstrapBoundaries(unittest.TestCase):
             "newsletter-data": "newsletter/data",
             "newsletter-auth": "newsletter/auth",
             "newsletter-config": "newsletter/config",
+            "mailsort-runner-auth": "mailsort-runner/auth",
         }
         self.assertEqual(set(claims), set(expected))
-        self.assertEqual(len(volumes), 5)
+        self.assertEqual(len(volumes), 6)
         for name, directory in expected.items():
             claim = claims[name]
             volume = volumes[claim["spec"]["volumeName"]]

@@ -18,7 +18,7 @@ export interface Env {
   readonly MAILSORT: DurableObjectNamespace<MailsortState>;
   /** The UI's static files (web/dist). */
   readonly ASSETS: Fetcher;
-  /** Workers AI: the decision models (Clef, Clef-flash) and the embedding model. Absent in tests and local development. */
+  /** Deprecated Workers AI binding, retained for historical pure-code fixtures; Alarm never calls it. */
   readonly AI?: AiRunner;
 
   // vars (committed in ../../wrangler.toml; BUILD_SHA and MODE added at deploy by deploy/deploy-vars.mjs)
@@ -38,6 +38,8 @@ export interface Env {
   readonly ACCESS_OWNER_ALIASES?: string;
   /** 64 hex characters: HMAC key of the mailsort_csrf tokens. */
   readonly CSRF_SIGNING_KEY?: string;
+  /** SHA-256 hex digest of the independent private classification runner bearer token. */
+  readonly CLASSIFICATION_TOKEN_SHA256?: string;
 
   // secrets the owner puts with `wrangler secret put` from their own machine (deploy/mint-token.mjs); never in GitHub,
   // never sent or removed by a deploy (--secrets-file keeps the secrets it does not name).

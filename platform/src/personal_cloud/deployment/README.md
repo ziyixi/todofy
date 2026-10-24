@@ -2,10 +2,12 @@
 
 The daemon accepts the generated `platform.runtime.v1` Create/Get/ResumeRelease API. It renders the
 baked Kustomize List rather than receiving manifests, shell commands, logs or provider credentials.
-The initial deployment profile supports Newsletter and Platform: both targets have one source SHA
+The fixed deployment profile supports Newsletter, Platform and Mailsort runner: all targets have one source SHA
 and creation UUID, with separate immutable image digests. Callers cannot supply generation; it is
 observed from Kubernetes. Repository images are restricted to the configured owner's
-`todofy-newsletter` and `todofy-platform` packages.
+`todofy-newsletter`, `todofy-platform` and `todofy-mailsort-runner` packages.
+The runner is an hourly CronJob with Forbid concurrency, no retries and a 900-second deadline;
+its writable Codex auth PVC and machine-token Secret belong to the root foundation, not the daemon.
 
 FastAPI authorizes the independent release bearer before consuming request bytes. Cloudflare Access
 protects the external machine transport. Actions holds neither SSH nor Kubernetes credentials. The
@@ -68,3 +70,10 @@ including bootstrap co-ownership, legacy operational ownership and conflicts fro
 They also cover authenticated typed requests, conflict/retry/resume, self replacement, template provenance,
 real-evidence requirements, unknown work and a lost resume response. They do not prove a real K3s
 rollout, Access transport, container-runtime imageID format or business success.
+
+Mailsort runner verification uses `process_state=stopped` and
+`release.observation_scope=template`. Its actual identity comes from the installed CronJob template's
+image and source/request annotations, with the installed metadata generation. This proves scheduling
+configuration only. Releases never create a Job to classify real mail as a health check. The next natural
+hour's accepted report and Gmail outcome are verified through Mailsort Ops separately.
+Old two-target ledger records remain readable and resumable; their manifests do not invent a runner digest.

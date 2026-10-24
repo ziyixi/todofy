@@ -29,6 +29,10 @@ inputs:
     description: "source sha"
     required: false
     default: ''
+  mailsort-runner-image:
+    description: "mailsort runner image"
+    required: false
+    default: ''
 runs:
   using: composite
   steps:
@@ -54,6 +58,7 @@ runs:
         PLATFORM_DEPLOY_TOKEN: ${{ inputs.platform-deploy-token }}
         NEWSLETTER_IMAGE: ${{ inputs.newsletter-image }}
         PLATFORM_IMAGE: ${{ inputs.platform-image }}
+        MAILSORT_RUNNER_IMAGE: ${{ inputs.mailsort-runner-image }}
         RESUME_RELEASE: ${{ inputs.resume-release }}
         RELEASE_SOURCE_SHA: ${{ inputs.source-sha }}
       working-directory: .
@@ -63,7 +68,7 @@ runs:
         if [ "$RESUME_RELEASE" = true ]; then
           args+=(--resume)
         else
-          args+=(--newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE")
+          args+=(--newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE" --mailsort-runner-image "$MAILSORT_RUNNER_IMAGE")
         fi
         uv run --project platform --locked python tools/vps-release/deploy.py \
           --source-sha "$RELEASE_SOURCE_SHA" --evidence-file "$RUNNER_TEMP/vps-release-evidence.json" "${args[@]}"
