@@ -8,6 +8,7 @@
  *   profile        GET   /gmail/v1/users/me/profile?fields=historyId        the install-time cursor (no address read)
  *   history        GET   /gmail/v1/users/me/history                         messageAdded, labelAdded, labelRemoved
  *   messages_list  GET   /gmail/v1/users/me/messages?labelIds=INBOX&q=newer_than:2d   the resync after a lost cursor
+ *   unread_list    GET   /gmail/v1/users/me/messages?labelIds=UNREAD&maxResults=100  current unread, Spam/Trash excluded
  *   message_get    GET   /gmail/v1/users/me/messages/{id}                   format=full or metadata, fixed fields
  *   labels_list    GET   /gmail/v1/users/me/labels
  *   labels_create  POST  /gmail/v1/users/me/labels                          an exact planned single English name
@@ -18,10 +19,9 @@
  *   merge_metadata GET   /gmail/v1/users/me/messages/{registered id}       labels and history identity only
  *   labels_hide    PATCH /gmail/v1/users/me/labels/{verified empty id}     hide visibility, never delete
  *   message_modify POST  /gmail/v1/users/me/messages/{id}/modify            ledger shapes or an approved consolidation swap:
- *     classify: addLabelIds = [one owned label], removeLabelIds = the ledger's original fixed priorities, plus INBOX
- *               exactly when its `intended` or `applied` row archived;
- *     undo:     removeLabelIds = [that owned label], addLabelIds = those original priorities, plus INBOX exactly when
- *               its `undo_intended` row archived;
+ *     classify: add one owned label, remove the ledger's original priorities, and change INBOX only when its
+ *               original position differs from the intended Inbox/archive position;
+ *     undo:     remove that owned label, restore the original priorities and the original INBOX position;
  *     merge:    add one owned target and remove one owned source, for the persisted private migration intent.
  *
  * So there is no path to trash, untrash, message deletion, batchDelete, batchModify, send, drafts, filters, settings or
@@ -76,12 +76,14 @@ export function hasControl(text: string): boolean {
   return false;
 }
 
-export type GmailOp = 'token' | 'profile' | 'history' | 'messages_list' | 'message_get' | 'labels_list' | 'labels_create' | 'labels_patch' | 'labels_delete' | 'message_modify' | 'merge_list' | 'merge_metadata' | 'merge_modify' | 'labels_hide';
+export type GmailOp = 'token' | 'profile' | 'history' | 'messages_list' | 'unread_list' | 'message_get' | 'labels_list' | 'labels_create' | 'labels_patch' | 'labels_delete' | 'message_modify' | 'merge_list' | 'merge_metadata' | 'merge_modify' | 'labels_hide';
 
 /** A ledger row as the guard needs it (store.ts LedgerState). */
 export interface LedgerView {
   readonly state: 'intended' | 'applied' | 'failed' | 'undo_intended' | 'undone';
   readonly archived: boolean;
+  /** Original Inbox position; omitted legacy rows and callers originated in Inbox. */
+  readonly baseInbox?: boolean;
   /** Original fixed priority labels this classification replaces, frozen in the ledger's base labels. */
   readonly replaceLabels?: readonly string[];
 }
@@ -180,7 +182,6 @@ function owned(labelId: string, ownership: Ownership): void {
 
 /** Both classify and undo must use exactly the original priority labels frozen by the ledger. */
 function checkReplacements(chosen: string, labels: string[], row: LedgerView, ownership: Ownership): void {
-  if (row.archived !== labels.includes('INBOX')) refuse('archive_mismatch');
   const expected = labelList(row.replaceLabels);
   for (const id of expected) {
     owned(id, ownership);
@@ -203,21 +204,27 @@ function checkModify(messageId: string, body: string | undefined, ownership: Own
     if (source !== target && ownership.mergeSwap?.(messageId, source, target) === true) return;
   }
 
-  if (remove.length === 1) {
-    const label = remove[0] ?? '';
+  const undoLabels = remove.filter(id => id !== 'INBOX');
+  if (undoLabels.length === 1) {
+    const label = undoLabels[0] ?? '';
     const row = ownership.ledger(messageId, label);
     if (row?.state === 'undo_intended') {
       owned(label, ownership);
+      const originalInbox = row.baseInbox ?? true;
+      if (add.includes('INBOX') !== (row.archived && originalInbox) || remove.includes('INBOX') !== (!row.archived && !originalInbox)) refuse('archive_mismatch');
       checkReplacements(label, add, row, ownership);
       return;
     }
   }
-  if (add.length === 1 && add[0] !== 'INBOX') {
+  const classifyLabels = add.filter(id => id !== 'INBOX');
+  if (classifyLabels.length === 1) {
     // classify
-    const label = add[0] ?? '';
+    const label = classifyLabels[0] ?? '';
     owned(label, ownership);
     const row = ownership.ledger(messageId, label);
     if (row !== null && (row.state === 'intended' || row.state === 'applied')) {
+      const originalInbox = row.baseInbox ?? true;
+      if (remove.includes('INBOX') !== (row.archived && originalInbox) || add.includes('INBOX') !== (!row.archived && !originalInbox)) refuse('archive_mismatch');
       checkReplacements(label, remove, row, ownership);
       return;
     }
@@ -279,7 +286,13 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
     return 'history';
   }
   if (method === 'GET' && rest.length === 1 && rest[0] === 'messages') {
-
+    if (url.searchParams.get('labelIds') === 'UNREAD') {
+      const params = query(url, ['labelIds', 'maxResults', 'pageToken']);
+      const token = single(params, 'pageToken');
+      if (single(params, 'labelIds') !== 'UNREAD' || single(params, 'maxResults') !== '100' || request.body !== undefined) refuse('unread_list');
+      if (token !== undefined && !PAGE_TOKEN.test(token)) refuse('page_token');
+      return 'unread_list';
+    }
     if (url.searchParams.get('fields') === 'messages/id,nextPageToken,resultSizeEstimate') {
       const params = query(url, ['labelIds', 'maxResults', 'fields', 'includeSpamTrash']);
       const label = single(params, 'labelIds') ?? '';
@@ -596,6 +609,19 @@ export class GmailClient {
     });
   }
 
+  /** One bounded page of all unread message IDs; Gmail's default excludes Spam and Trash. */
+  async unreadPage(pageToken?: string): Promise<{ ids: string[]; nextPageToken?: string }> {
+    const params = new URLSearchParams({ labelIds: 'UNREAD', maxResults: '100' });
+    if (pageToken !== undefined) params.set('pageToken', pageToken);
+    const value = assertObject(await this.getJson('unread_list', `${GMAIL_BASE}/messages?${params.toString()}`));
+    const messages = value['messages'] === undefined ? [] : value['messages'];
+    const nextPageToken = value['nextPageToken'];
+    if (!Array.isArray(messages) || messages.length > 100 || (nextPageToken !== undefined && (typeof nextPageToken !== 'string' || !PAGE_TOKEN.test(nextPageToken)))) throw new GoogleError('bad_answer', 'unread_list_bad_answer');
+    const ids = messages.map((item: unknown) => assertObject(item)['id']);
+    if (!ids.every(isMessageId) || new Set(ids).size !== ids.length || (ids.length === 0 && nextPageToken !== undefined)) throw new GoogleError('bad_answer', 'unread_list_bad_answer');
+    return { ids, ...(nextPageToken === undefined ? {} : { nextPageToken }) };
+  }
+
   /**
    * A message with its first body parts (format=full), or with headers and snippet only (format=metadata) when the full
    * answer is larger than MESSAGE_MAX_BYTES. A deleted message is `not_found`.
@@ -684,15 +710,17 @@ export class GmailClient {
     await this.write('labels_hide', 'PATCH', `${GMAIL_BASE}/labels/${labelId}`, { labelListVisibility: 'labelHide', messageListVisibility: 'hide' });
   }
 
-  /** Adds an owned label (and removes INBOX when `archive`): the ledger row must be `intended` or `applied`. */
-  async classify(messageId: string, labelId: string, archive: boolean, replaceLabels: readonly string[] = []): Promise<void> {
-    const remove = [...replaceLabels, ...(archive ? ['INBOX'] : [])];
-    await this.write('message_modify', 'POST', `${GMAIL_BASE}/messages/${messageId}/modify`, { addLabelIds: [labelId], ...(remove.length === 0 ? {} : { removeLabelIds: remove }) });
+  /** Applies the intended priority and Inbox position; the ledger row must be `intended` or `applied`. */
+  async classify(messageId: string, labelId: string, archive: boolean, replaceLabels: readonly string[] = [], baseInbox = true): Promise<void> {
+    const add = [labelId, ...(!archive && !baseInbox ? ['INBOX'] : [])];
+    const remove = [...replaceLabels, ...(archive && baseInbox ? ['INBOX'] : [])];
+    await this.write('message_modify', 'POST', `${GMAIL_BASE}/messages/${messageId}/modify`, { addLabelIds: add, ...(remove.length === 0 ? {} : { removeLabelIds: remove }) });
   }
 
-  /** Removes an owned label (and adds INBOX back when the row archived): the ledger row must be `undo_intended`. */
-  async undo(messageId: string, labelId: string, archived: boolean, replaceLabels: readonly string[] = []): Promise<void> {
-    const add = [...replaceLabels, ...(archived ? ['INBOX'] : [])];
-    await this.write('message_modify', 'POST', `${GMAIL_BASE}/messages/${messageId}/modify`, { removeLabelIds: [labelId], ...(add.length === 0 ? {} : { addLabelIds: add }) });
+  /** Restores the original priority labels and Inbox position; the ledger row must be `undo_intended`. */
+  async undo(messageId: string, labelId: string, archived: boolean, replaceLabels: readonly string[] = [], baseInbox = true): Promise<void> {
+    const add = [...replaceLabels, ...(archived && baseInbox ? ['INBOX'] : [])];
+    const remove = [labelId, ...(!archived && !baseInbox ? ['INBOX'] : [])];
+    await this.write('message_modify', 'POST', `${GMAIL_BASE}/messages/${messageId}/modify`, { removeLabelIds: remove, ...(add.length === 0 ? {} : { addLabelIds: add }) });
   }
 }

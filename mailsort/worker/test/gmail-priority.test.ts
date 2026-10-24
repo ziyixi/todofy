@@ -132,6 +132,29 @@ describe('replacing an inherited priority on a new message', () => {
     }
   });
 
+  it.each([false, true])('restores an archived unread message after classify and undo, archive=%s', async archive => {
+    const gmail = new FakeGmail();
+    const chosen = gmail.createUserLabel(archive ? 'P2' : 'P1', true);
+    const previous = gmail.createUserLabel('P3', true);
+    const other = gmail.createUserLabel('Owner label');
+    const original = ['UNREAD', 'STARRED', 'IMPORTANT', 'CATEGORY_UPDATES', previous, other];
+    gmail.deliver(message({ ...MAILS.newsletterEn, labels: original }));
+    let row: LedgerView = { state: 'intended', archived: archive, baseInbox: false, replaceLabels: [previous] };
+    const own = ownership([chosen, previous], new Set(), (id, label) => id === MESSAGE && label === chosen ? row : null);
+    const client = clientFor(gmail, own, new Set());
+
+    await client.classify(MESSAGE, chosen, archive, [previous], false);
+    expect([...(gmail.messages.get(MESSAGE)?.labelIds ?? [])].sort()).toEqual([...original.filter(label => label !== previous), chosen, ...(archive ? [] : ['INBOX'])].sort());
+    row = { ...row, state: 'undo_intended' };
+    await client.undo(MESSAGE, chosen, archive, [previous], false);
+    expect([...(gmail.messages.get(MESSAGE)?.labelIds ?? [])].sort()).toEqual([...original].sort());
+    for (const call of gmail.calls.filter(call => call.url.endsWith('/modify'))) {
+      const value = JSON.parse(call.body) as { removeLabelIds: string[] };
+      const undo = value.removeLabelIds.includes(chosen);
+      expect(allowedOperation(call.method, call.url, call.body, { owned: own.ownedLabelIds(), planned: new Set(), ledger: () => ({ ...row, state: undo ? 'undo_intended' : 'intended' }) })).toBe(undo ? 'undo' : 'classify');
+    }
+  });
+
   it('refuses replacement or restoration beyond the original owned priority IDs', () => {
     const chosen = 'Label_1';
     const previous = 'Label_3';

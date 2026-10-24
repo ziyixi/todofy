@@ -21,7 +21,7 @@ import { newEtag } from './ids.ts';
 import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, REPLAY_KEPT_MS, REQUEST_ID_TTL_MS, TRUSTED_DOMAINS_PER_LABEL_MAX } from './limits.ts';
 import { senderHash } from './mask.ts';
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -420,6 +420,16 @@ export const SCHEMA_V7: readonly string[] = [
   `CREATE TABLE label_merge_hides (job_id TEXT NOT NULL, gmail_id TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', PRIMARY KEY(job_id, gmail_id))`,
 ];
 
+/** Version 8: one owner-requested unread batch, and each write's original Inbox position. */
+export const SCHEMA_V8: readonly string[] = [
+  `ALTER TABLE ledger ADD COLUMN base_inbox INTEGER NOT NULL DEFAULT 1`,
+  `CREATE TABLE unread_batch (
+    message_id TEXT PRIMARY KEY,
+    state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'skipped', 'failed')),
+    ledger_id TEXT
+  )`,
+];
+
 export type Value = string | number | null | ArrayBuffer;
 
 export interface RowMeter {
@@ -544,6 +554,8 @@ export interface LedgerRow extends Record<string, SqlStorageValue> {
   undo_time: number | null;
   /** JSON array of the mail's user label IDs when the intent was recorded. */
   base_labels: string;
+  /** Original Inbox position; old writes always started in Inbox. */
+  base_inbox: number;
 }
 
 export interface UsageRow extends Record<string, SqlStorageValue> {
@@ -595,6 +607,7 @@ export class Store {
       }
       if (version < 6) for (const statement of SCHEMA_V6) this.sql.exec(statement);
       if (version < 7) for (const statement of SCHEMA_V7) this.sql.exec(statement);
+      if (version < 8) for (const statement of SCHEMA_V8) this.sql.exec(statement);
       if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
     });
   }

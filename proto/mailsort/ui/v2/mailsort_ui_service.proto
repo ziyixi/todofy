@@ -92,6 +92,18 @@ service MailsortUiService {
     option (google.api.method_signature) = "";
   }
 
+  // Classifies current unread messages, including archived mail, with the existing budget and write limits.
+  // Repeating a request or starting while a batch is active returns the existing batch.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc StartUnreadClassification(StartUnreadClassificationRequest) returns (UnreadClassification) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=unreadClassification}:start"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
   // Creates a label (AIP-133). It is created in Gmail (named display_name) before the first live write that
   // needs it, or at once when the mode is live and the grant allows writes. A label Gmail already has under that
   // name is never taken over: the label stays out of Gmail (Label.GmailState.GMAIL_STATE_NAME_TAKEN).
@@ -381,6 +393,20 @@ message InitializePrioritiesResponse {
 
   // Old Gmail labels removed by this setup; mail itself is never deleted.
   int32 removed_label_count = 3;
+}
+
+// Input of StartUnreadClassification.
+message StartUnreadClassificationRequest {
+  // Always `unreadClassification`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/UnreadClassification"
+  ];
+  // A UUID for request deduplication (AIP-155).
+  string request_id = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
 }
 
 // Input of GetLabel.

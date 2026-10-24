@@ -125,6 +125,33 @@ describe('the closed table refuses everything outside it', () => {
     expect(refused('POST', url, JSON.stringify({ removeLabelIds: [OWNED] }), ownership({ [`${MESSAGE}:${OWNED}`]: { state: 'undo_intended', archived: true } }))).toBe('archive_mismatch');
   });
 
+  it.each([false, true])('requires the recorded Inbox delta for an originally archived message, archive=%s', archive => {
+    const url = `${BASE}/messages/${MESSAGE}/modify`;
+    let row: LedgerView = { state: 'intended', archived: archive, baseInbox: false };
+    const own = ownership({ [`${MESSAGE}:${OWNED}`]: row });
+    const ctx = { owned: new Set([OWNED]), planned: PLANNED, ledger: () => row };
+    const classify = JSON.stringify({ addLabelIds: [OWNED, ...(archive ? [] : ['INBOX'])] });
+    expect(refused('POST', url, classify, own)).toBe('accepted');
+    expect(allowedOperation('POST', url, classify, ctx)).toBe('classify');
+    const wrongClassify = JSON.stringify({ addLabelIds: [OWNED, ...(archive ? ['INBOX'] : [])] });
+    expect(refused('POST', url, wrongClassify, own)).toBe('archive_mismatch');
+    expect(allowedOperation('POST', url, wrongClassify, ctx)).toBeNull();
+
+    row = { ...row, state: 'undo_intended' };
+    own.rows[`${MESSAGE}:${OWNED}`] = row;
+    const undo = JSON.stringify({ removeLabelIds: [OWNED, ...(archive ? [] : ['INBOX'])] });
+    expect(refused('POST', url, undo, own)).toBe('accepted');
+    expect(allowedOperation('POST', url, undo, ctx)).toBe('undo');
+    for (const wrongUndo of [
+      JSON.stringify({ removeLabelIds: [OWNED], addLabelIds: ['INBOX'] }),
+      JSON.stringify({ removeLabelIds: [OWNED, ...(archive ? ['INBOX'] : [])] }),
+      JSON.stringify({ removeLabelIds: [OWNED, 'UNREAD'] }),
+    ]) {
+      expect(refused('POST', url, wrongUndo, own)).not.toBe('accepted');
+      expect(allowedOperation('POST', url, wrongUndo, ctx)).toBeNull();
+    }
+  });
+
   it('creates only exact planned single-level English names', () => {
     const create = (name: string) => JSON.stringify({ name, labelListVisibility: 'labelShow', messageListVisibility: 'show' });
     const ctx = { owned: new Set([OWNED]), planned: PLANNED, ledger: () => null };
@@ -175,6 +202,28 @@ describe('the closed table refuses everything outside it', () => {
     expect(refused('GET', `${BASE}/messages/${MESSAGE}?format=full`)).toBe('message_fields');
     expect(refused('GET', `${BASE}/labels`)).toBe('accepted');
   });
+
+  it('allows only the bounded unread query without a search or Spam/Trash override', () => {
+    const ctx = { owned: new Set([OWNED]), planned: PLANNED, ledger: () => null };
+    const query = 'labelIds=UNREAD&maxResults=100';
+    for (const suffix of ['', '&pageToken=next_100-A']) {
+      const url = `${BASE}/messages?${query}${suffix}`;
+      expect(checkRequest({ method: 'GET', url }, ownership())).toBe('unread_list');
+      expect(allowedOperation('GET', url, '', ctx)).toBe('unread_list');
+    }
+    for (const badQuery of [
+      'labelIds=UNREAD', 'labelIds=UNREAD&maxResults=0', 'labelIds=UNREAD&maxResults=99',
+      'labelIds=UNREAD&maxResults=101', 'labelIds=UNREAD&maxResults=0100', 'labelIds=UNREAD&maxResults=100.0',
+      `${query}&labelIds=INBOX`, `${query}&maxResults=100`, `${query}&q=is%3Aunread`,
+      `${query}&includeSpamTrash=true`, `${query}&includeSpamTrash=false`, `${query}&fields=messages%2Fid`,
+      `${query}&pageToken=`, `${query}&pageToken=a%20b`, `${query}&pageToken=a&pageToken=b`, `${query}&pageToken=${'a'.repeat(257)}`,
+    ]) {
+      const url = `${BASE}/messages?${badQuery}`;
+      expect(refused('GET', url), badQuery).not.toBe('accepted');
+      expect(allowedOperation('GET', url, '', ctx), badQuery).toBeNull();
+    }
+    for (const body of ['', '{}']) expect(refused('GET', `${BASE}/messages?${query}`, body)).not.toBe('accepted');
+  });
 });
 
 describe('every request the client makes is in the table', () => {
@@ -202,6 +251,8 @@ describe('every request the client makes is in the table', () => {
     await client.history('42', null, 100);
     await client.history('42', '7', 100);
     await client.recentInbox(100);
+    await client.unreadPage();
+    await client.unreadPage('next_100-A');
     await client.message(MESSAGE);
     expect(await client.labelIdsOf(MESSAGE)).toEqual(['INBOX']);
     await client.labels();
@@ -224,7 +275,7 @@ describe('every request the client makes is in the table', () => {
       expect(call.op, `${call.method} ${call.url}`).not.toBeNull();
       for (const label of FORBIDDEN_LABELS) expect(call.body).not.toContain(`"${label}"`);
     }
-    expect(new Set(calls)).toEqual(new Set(['token', 'profile', 'history', 'messages_list', 'message_get', 'labels_list', 'labels_create', 'labels_patch', 'message_modify']));
+    expect(new Set(calls)).toEqual(new Set(['token', 'profile', 'history', 'messages_list', 'unread_list', 'message_get', 'labels_list', 'labels_create', 'labels_patch', 'message_modify']));
   });
 });
 
@@ -253,7 +304,7 @@ describe('fuzz: random operations never pass the guard unless the independent ta
         'profile', 'history', 'messages', `messages/${MESSAGE}`, `messages/${MESSAGE}/modify`, `messages/${MESSAGE}/trash`, 'messages/batchModify', 'messages/batchDelete',
         'messages/send', 'drafts', 'labels', `labels/${OWNED}`, 'labels/Label_8', 'labels/UNREAD', 'settings/filters', 'threads/abc/modify', 'token',
       ]);
-      const query = pick(random, ['', '?fields=historyId', '?startHistoryId=5&historyTypes=messageAdded&maxResults=10', '?labelIds=INBOX&q=newer_than%3A2d&maxResults=5', `?format=full&fields=${encodeURIComponent(MESSAGE_FIELDS)}`, '?format=raw', '?q=in%3Aspam']);
+      const query = pick(random, ['', '?fields=historyId', '?startHistoryId=5&historyTypes=messageAdded&maxResults=10', '?labelIds=INBOX&q=newer_than%3A2d&maxResults=5', '?labelIds=UNREAD&maxResults=100', '?labelIds=UNREAD&maxResults=100&pageToken=next_100', '?labelIds=UNREAD&maxResults=100&includeSpamTrash=true', `?format=full&fields=${encodeURIComponent(MESSAGE_FIELDS)}`, '?format=raw', '?q=in%3Aspam']);
       const url = host === 'oauth2.googleapis.com' ? `https://${host}/${tail}` : `https://${host}/gmail/v1/users/me/${tail}${query}`;
       const addSize = Math.floor(random() * 3);
       const removeSize = Math.floor(random() * 3);
@@ -271,7 +322,7 @@ describe('fuzz: random operations never pass the guard unless the independent ta
               : undefined;
       // Now and then the same body with one key written twice (a different value first): never accepted.
       const body = plain !== undefined && plain.startsWith('{"') && random() < 0.2 ? `{"${pick(random, ['addLabelIds', 'removeLabelIds', 'name'])}":["UNREAD"],${plain.slice(1)}` : plain;
-      const row = random() < 0.7 ? { state: pick(random, states), archived: random() < 0.5 } : null;
+      const row = random() < 0.7 ? { state: pick(random, states), archived: random() < 0.5, baseInbox: random() < 0.5 } : null;
       const priorityDeletes = random() < 0.5 ? new Set([OWNED]) : new Set<string>();
       const own: Ownership = { ...ownership(), priorityDelete: id => priorityDeletes.has(id), ledger: (m, l) => (m === MESSAGE && l === OWNED ? row : null) };
       let passed = true;

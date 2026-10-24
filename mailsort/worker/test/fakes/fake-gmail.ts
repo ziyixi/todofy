@@ -37,6 +37,7 @@ export interface RecordedLedger {
   readonly labelId: string;
   readonly state: string;
   readonly archived: boolean;
+  readonly baseInbox?: boolean;
   readonly replaceLabels: readonly string[];
 }
 
@@ -197,8 +198,11 @@ export class FakeGmail {
       const since = this.clock() - 2 * 86_400_000;
       const label = url.searchParams.get('labelIds') ?? 'INBOX';
       const migration = url.searchParams.has('fields');
-      const ids = [...this.messages.values()].filter((m) => m.labelIds.has(label) && (migration || m.internalDate >= since)).map((m) => ({ id: m.id, ...(migration ? {} : { threadId: m.threadId }) }));
-      return json({ messages: ids.slice(0, Number(url.searchParams.get('maxResults') ?? '100')), resultSizeEstimate: ids.length });
+      const includeSpamTrash = url.searchParams.get('includeSpamTrash') === 'true';
+      const ids = [...this.messages.values()].filter((m) => m.labelIds.has(label) && (migration || label === 'UNREAD' || m.internalDate >= since) && (includeSpamTrash || (!m.labelIds.has('SPAM') && !m.labelIds.has('TRASH')))).map((m) => ({ id: m.id, ...(migration ? {} : { threadId: m.threadId }) }));
+      const offset = Number(url.searchParams.get('pageToken') ?? '0');
+      const max = Number(url.searchParams.get('maxResults') ?? '100');
+      return json({ messages: ids.slice(offset, offset + max), resultSizeEstimate: ids.length, ...(offset + max < ids.length ? { nextPageToken: String(offset + max) } : {}) });
     }
     if (method === 'GET' && parts[0] === 'messages' && parts.length === 2) {
       const message = this.messages.get(parts[1] ?? '');

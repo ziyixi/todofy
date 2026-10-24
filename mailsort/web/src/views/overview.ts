@@ -77,12 +77,12 @@ function budget(status: ServiceStatus): HTMLElement {
   const max = status.dailyNeuronBudget
   const share = max <= 0 ? 0 : used / max
   const tone = status.aiQuotaExhausted || share >= 1 ? 'danger' : share >= FLASH_SHARE ? 'warn' : ''
-  const note = status.aiQuotaExhausted
-    ? '今天的额度用完了，剩下的明天处理'
+  const note = status.aiQuotaExhausted || share >= 1
+    ? '今天的额度用完了，剩余邮件等下一个 UTC 日继续'
     : status.decisionModel === 'clef-flash'
       ? '已过 70%，今天改用 Clef-flash'
       : ''
-  const waiting = status.deferredCount > 0 ? `${String(status.deferredCount)} 封等明天的额度` : ''
+  const waiting = status.deferredCount > 0 ? `${String(status.deferredCount)} 封暂缓，后台按额度或重试时间继续` : ''
   return card(
     '模型额度',
     `${String(Math.round(used))} / ${String(max)}`,

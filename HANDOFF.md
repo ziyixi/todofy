@@ -12,14 +12,21 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+`codex/mailsort-unread-priorities` is the active follow-up in the isolated checkout. The owner confirmed the P1-P4
+cutover and additionally requested classification of all currently unread messages within the existing allowance.
+Production InitializePriorities completed successfully on 2026-10-24 UTC; reloading shows four linked priority rows,
+no setup card, live mode and Gmail write scope. Mail was preserved. The follow-up adds an explicit unread-ID batch
+using the existing Alarm, queue, models and budgets; archived unread is included, Spam/Trash excluded, and only this
+explicit batch bypasses the ordinary new-mail cutoff. Implementation and production batch acceptance are pending.
+
 `codex/mailsort-priority-verification` records the released implementation; `a70ff257` replaces topic sorting with four real Gmail labels: P1 keeps Inbox, P2-P4 archive;
 valid uncertainty becomes P1 without mandatory review. The scam/trust-domain model and gates are removed.
 Code/UI and the bounded owner initializer are implemented in `/private/tmp/todofy-tasks-design`;
 Claude's shared checkout is untouched. Local lint/types, 124 Worker unit tests, 69 real-SQLite runtime tests (including CPU), 62 UI cases, 26 deploy checks
 and the real local Wrangler smoke passed. The complete branch gate 40051440933 and same-SHA main release 40052652580 passed on a70ff257.
-Production code is live; the browser is at the explicit initializer awaiting action-time confirmation of
-permanent old-label/learning removal. No production label mutation has run yet.
-Production still has the old 12 topic labels; neither Gmail labels nor real mail have been modified yet.
+Production code and the explicitly confirmed label cutover are live. Old managed topic labels were replaced;
+messages and their original read/Inbox state were preserved during setup. The requested unread batch will apply
+the new priority filing policy afterward.
 The owner initializer removes only known old labels/learning and preserves mail/read/Inbox state, then starts
 fresh priority learning at its cutover cursor. Current acceptance: [priority verification](docs/mailsort-priority-verification.md); operator steps: [priority rollout](mailsort/docs/priority-rollout.md).
 

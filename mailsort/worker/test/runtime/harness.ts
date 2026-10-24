@@ -184,8 +184,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   up.ledgerRows = async (messageId) => {
     const priorities = await probe('sql', ["SELECT gmail_id FROM labels WHERE id IN ('p1', 'p2', 'p3', 'p4') AND gmail_id IS NOT NULL"]) as { gmail_id: string }[];
     const ids = new Set(priorities.map(row => row.gmail_id));
-    const rows = await probe('sql', ['SELECT gmail_label_id, state, archived, base_labels FROM ledger WHERE message_id = ?', messageId]) as { gmail_label_id: string; state: string; archived: number; base_labels: string }[];
-    return rows.map(row => ({ labelId: row.gmail_label_id, state: row.state, archived: row.archived === 1, replaceLabels: (JSON.parse(row.base_labels) as string[]).filter(id => id !== row.gmail_label_id && ids.has(id)) }));
+    const rows = await probe('sql', ['SELECT gmail_label_id, state, archived, base_labels, base_inbox FROM ledger WHERE message_id = ?', messageId]) as { gmail_label_id: string; state: string; archived: number; base_labels: string; base_inbox: number }[];
+    return rows.map(row => ({ labelId: row.gmail_label_id, state: row.state, archived: row.archived === 1, baseInbox: row.base_inbox === 1, replaceLabels: (JSON.parse(row.base_labels) as string[]).filter(id => id !== row.gmail_label_id && ids.has(id)) }));
   };
   const fetchSort = (path: string, init?: RequestInit) => mf.dispatchFetch(`${ORIGIN}${path}`, { redirect: 'manual', ...init } as never) as unknown as Promise<Response>;
   let csrf: { token: string; cookie: string } | undefined;

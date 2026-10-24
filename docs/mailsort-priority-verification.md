@@ -36,13 +36,33 @@ October 23, 2026 date in Chrome; its Limited Use statement is intact.
 
 ## Production cutover
 
-Pending the browser tool's action-time confirmation for permanent removal of the old managed labels and learning.
-The code is released; the owner initializer has not been clicked in production. The four rows truthfully show
-等待初始化. No real message body was read for acceptance and no mail/label/model/budget mutation was made by the
-agent before that final confirmation. New mail may register as pending while setup is incomplete.
+The owner explicitly confirmed the cutover and preservation of mail. `InitializePriorities` was executed in the
+authenticated production UI on 2026-10-24 UTC. It returned completed; the page showed
+“P1、P2、P3、P4 已启用。邮件及原有未读状态保持不变。” Reloading showed exactly four active priority rows, no setup
+card, the existing 正式 mode and writable Gmail grant. The action removed only frozen managed labels/learning;
+no message deletion operation exists in the Gmail guard. No real message body was read by the agent for acceptance.
 
 The initializer itself deletes only frozen old managed label IDs, verifies the four new actual Gmail IDs/names,
 and preserves every message, unread/star state and Inbox position. Old decisions/ledgers remain historical;
 learning and future classification start from the recorded cutoff without advancing an existing Gmail cursor.
-Record actual source read-back after the authorized initializer completes. Synthetic tests do not establish the
-result of a later real incoming mail.
+Synthetic tests do not establish the result of a later real incoming mail.
+
+## Explicit unread batch
+
+After confirming the cutover, the owner requested all currently unread mail be classified within the existing
+allowance. The follow-up branch `codex/mailsort-unread-priorities` adds one explicit owner action and counts-only
+progress. It includes old and archived unread mail, excludes Spam/Trash and normal incoming-mail exclusions, and
+skips messages already graded or read before processing. Only this batch bypasses the ordinary new-mail cutoff.
+P1 restores Inbox for originally archived mail; P2-P4 archive. Read/star/unrelated labels and existing budgets stay
+unchanged. The existing queue/Alarm handles remaining work; quota exhaustion waits until the next UTC day.
+
+Local Worker lint/types, 149 unit tests and 76 real-SQLite/workerd cases passed, including CPU. Seven new runtime
+cases exercise 103 messages across multiple pages and a resumed list failure, old/archived mail, original-position
+undo, skips without AI cost, daily write caps, shadow pause, the flash threshold, quota deferral and real write
+success/failure counts. The independent Google guard/fake checks every request. Proto lint, API lint, generated
+schema and additive compatibility against `88ab95ba` passed. UI lint/types, 73 cases and build passed; JavaScript
+is 58.0 KiB gzip under the unchanged 67 KiB cap. The real Wrangler smoke passed with all 62 synthetic Google
+requests inside the independent closed table, and all 26 deploy/credential-preservation cases passed. The pause
+regression also covers a persisted Gmail 503 intent across Shadow and a reached daily cap before next-day success.
+Worker gzip is 139.1 KiB against the unchanged 140 KiB budget. Release and actual owner batch acceptance remain
+pending at this checkpoint.

@@ -29,7 +29,7 @@ import {
 } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
 import { ReplayEvaluationSchema } from '@ziyixi/proto/mailsort/ui/v2/replay_pb';
 import { LedgerEntrySchema, ReviewItemSchema } from '@ziyixi/proto/mailsort/ui/v2/review_pb';
-import { LabelCountSchema, LabelReportSchema, ServiceStatus_AuthState, ServiceStatusSchema, SettingsSchema, type Settings } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
+import { LabelCountSchema, LabelReportSchema, ServiceStatus_AuthState, ServiceStatusSchema, SettingsSchema, UnreadClassificationSchema, type Settings } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { decodePageToken, encodePageToken, PageTokenError, type PageParameters } from '@ziyixi/proto/page-token';
 import { create, type DescMessage, type JsonValue, type MessageShape } from '@ziyixi/proto/protobuf';
 import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobuf/wkt';
@@ -70,6 +70,7 @@ import { prioritySetup, priorityStartedAt } from './priority.ts';
 import { authState, type Budget, writeScope } from './session.ts';
 import { effectiveMode, readSettings, writeSettings, type SettingsValue } from './settings.ts';
 import { utcDay, type DecisionRow, type LabelRow, type LedgerRow, type ReviewRow, type Store } from './store.ts';
+import { startUnread, unreadProgress } from './unread.ts';
 import { ensureGmailLabel, executeWrites, hasSublabels, intend, intendUndo, linkGmailLabel, setNameTaken, undoable, userLabelsByName, type WriteContext } from './writes.ts';
 
 /** What every handler gets from MailsortState. */
@@ -486,6 +487,19 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         throw gmailError(error);
       }
     });
+  },
+
+  async startUnreadClassification(request, ctx) {
+    if (request.name !== 'unreadClassification') notFound();
+    const answer = once(ctx, request.requestId, 'StartUnreadClassification', request.name, UnreadClassificationSchema, () => {
+      if (priorityStartedAt(ctx.store) === 0) bad('请先完成 P1–P4 分级设置。');
+      if (!ownerWritesAllowed(ctx)) bad('请先恢复正式模式及 Gmail 写入授权。');
+      if (ctx.consolidationBusy()) bad('邮件正在处理，请稍后再开始整理。');
+      startUnread(ctx.store, ctx.now);
+      return unreadProgress(ctx.store, ctx.now) ?? notFound();
+    });
+    await ctx.wake();
+    return answer;
   },
 
   listLabels(request, ctx) {
@@ -963,6 +977,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     return create(ServiceStatusSchema, {
       name: 'serviceStatus',
       prioritiesInitialized: priorityStartedAt(store) > 0,
+      unreadClassification: unreadProgress(store, ctx.now),
       effectiveMode: MODES[effectiveMode(settings, ctx.ceiling)],
       authState: auth === 'not_configured' ? ServiceStatus_AuthState.NOT_CONFIGURED : auth === 'failed' ? ServiceStatus_AuthState.FAILED : ServiceStatus_AuthState.OK,
       writeScope: writeScope(store),

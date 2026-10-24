@@ -7,11 +7,11 @@
  * An `intended` row is written only if the caller's gate allows it at that moment: the row may be from an earlier
  * pass, and since then the owner may have chosen shadow, the breaker may have tripped or the label may have been
  * disabled. A refused row fails (`mode_changed`, ...) and its decision stays only recorded (`suggested`); the mail is
- * left in the inbox as it is. Undo rows are never gated: they only give the mail back to the inbox.
+ * left as it is. Undo rows are never gated: they restore the original priority labels and Inbox position.
  *
  * An automatic row left by an earlier pass (a 503, a pass cut short) is also checked against the mail as it is now,
- * one metadata read before the write: if the owner has meanwhile archived it or filed it under a label of their own,
- * mailsort's label would be a second label on mail no longer in the inbox, so the row fails (`mail_changed`).
+ * one metadata read before the write: if the owner has meanwhile changed its Inbox position or added another user
+ * label, the row fails (`mail_changed`). Its own completed write is allowed after a lost answer.
  *
  * Labels are created in Gmail by their single English name just before the first write that needs them. A
  * write never takes over a Gmail label this app did not make: when Gmail already has a label of a label's exact path,
@@ -25,8 +25,8 @@
  *
  * An applied label keeps its mail in the inbox when the ledger row says so (`archived` = 0: the label's keep-in-inbox;
  * before 2026-10-11 also a mail that asked the owner to act soon); the guard checks the modify against that flag, and
- * the undo then gives nothing back to the inbox. A row recorded to archive keeps instead when its label keeps its mail
- * by the time it goes out (keepIfLabelKeeps).
+ * the undo restores the position recorded in `base_inbox`. A row recorded to archive keeps instead when its label
+ * keeps its mail by the time it goes out (keepIfLabelKeeps).
  */
 import { effectiveLedgerRow } from './label-identity.ts';
 import { migrationActive } from './label-merge.ts';
@@ -42,7 +42,7 @@ import { utcDay, type LabelRow, type LedgerRow, type Store } from './store.ts';
 import type { Budget } from './session.ts';
 
 /**
- * Asked right before an `intended` row is written: null to write it, or the code it fails with. It reads the mode,
+ * Asked right before an `intended` row is written: null to write, `wait` to keep queued, or a failure code. It reads the mode,
  * the label and the limits as they are now, and may count the write (the alarm's caps).
  */
 export type WriteGate = (row: LedgerRow, label: LabelRow) => string | null;
@@ -60,10 +60,10 @@ export interface WriteContext {
  * Records the intent to add `label` to `messageId` (and archive it). `labelIds` are the labels the mail carries as the
  * decision read it; its user labels are kept for the later-pass check (mailChanged). Run inside the caller's transaction.
  */
-export function intend(store: Store, messageId: string, label: LabelRow, archive: boolean, origin: 'auto' | 'owner', now: number, labelIds: readonly string[] = []): string {
+export function intend(store: Store, messageId: string, label: LabelRow, archive: boolean, origin: 'auto' | 'owner', now: number, labelIds?: readonly string[]): string {
   const id = timeId(now);
   store.run(
-    `INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time, base_labels) VALUES (?, ?, ?, ?, ?, ?, 'intended', ?, ?)`,
+    `INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time, base_labels, base_inbox) VALUES (?, ?, ?, ?, ?, ?, 'intended', ?, ?, ?)`,
     id,
     messageId,
     label.id,
@@ -71,18 +71,21 @@ export function intend(store: Store, messageId: string, label: LabelRow, archive
     archive ? 1 : 0,
     origin,
     now,
-    JSON.stringify(labelIds.filter(isUserLabelId)),
+    JSON.stringify((labelIds ?? []).filter(isUserLabelId)),
+    labelIds === undefined || labelIds.includes('INBOX') ? 1 : 0,
   );
   return id;
 }
 
 /**
- * Whether the mail changed since `row`'s intent in a way that makes the write wrong: it left the inbox, or it carries a
+ * Whether the mail changed since `row`'s intent in a way that makes the write wrong: its Inbox position changed, or it carries a
  * user label it did not have then (the owner's own, or another of this app's), other than the row's own label (a write
  * that reached Gmail before its answer was lost).
  */
 export function mailChanged(row: LedgerRow, labelIds: readonly string[]): boolean {
-  if (!labelIds.includes('INBOX')) return true;
+  const inbox = labelIds.includes('INBOX');
+  const ownWrite = row.gmail_label_id !== null && labelIds.includes(row.gmail_label_id) && inbox === (row.archived !== 1);
+  if (inbox !== (row.base_inbox === 1) && !ownWrite) return true;
   const base = new Set(JSON.parse(row.base_labels) as string[]);
   return labelIds.some((id) => isUserLabelId(id) && id !== row.gmail_label_id && !base.has(id));
 }
@@ -102,7 +105,7 @@ export function undoable(row: LedgerRow, owned: ReadonlySet<string>): boolean {
   return (row.state === 'applied' || row.state === 'undo_intended') && row.superseded === 0 && row.gmail_label_id !== null && owned.has(row.gmail_label_id);
 }
 
-/** Marks an applied row for undo (the next execute removes the label, and adds INBOX back if it archived). */
+/** Marks an applied row for undo, restoring the original priority labels and Inbox position. */
 export function intendUndo(store: Store, row: LedgerRow): void {
   store.run(`UPDATE ledger SET state = 'undo_intended', attempts = 0 WHERE id = ? AND state = 'applied'`, row.id);
 }
@@ -287,12 +290,12 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
         // The gate runs before anything reaches Gmail, label creation included.
         const refused = ctx.transact(() => {
           const code = ctx.gate(row, label);
-          if (code !== null) fail(store, row, code);
-          else row = keepIfLabelKeeps(store, row);
+          if (code === null) row = keepIfLabelKeeps(store, row);
+          else if (code !== 'wait') fail(store, row, code);
           return code;
         });
         if (refused !== null) {
-          failed++;
+          if (refused !== 'wait') failed++;
           continue;
         }
         const gmailId = row.gmail_label_id ?? (await ensureGmailLabel(ctx, label));
@@ -310,7 +313,7 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
           ctx.transact(() => store.run(`UPDATE ledger SET gmail_label_id = ? WHERE id = ?`, gmailId, row.id));
           row = { ...row, gmail_label_id: gmailId };
         }
-        await ctx.gmail.classify(row.message_id, gmailId, row.archived === 1, replacedPriorities(store, row));
+        await ctx.gmail.classify(row.message_id, gmailId, row.archived === 1, replacedPriorities(store, row), row.base_inbox === 1);
         const now = ctx.now();
         ctx.transact(() => {
           store.run(`UPDATE ledger SET state = 'applied', apply_time = ?, last_code = NULL WHERE id = ?`, now, row.id);
@@ -332,7 +335,7 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
           continue;
         }
         const replaced = replacedPriorities(store, row);
-        await ctx.gmail.undo(row.message_id, row.gmail_label_id, row.archived === 1, replaced);
+        await ctx.gmail.undo(row.message_id, row.gmail_label_id, row.archived === 1, replaced, row.base_inbox === 1);
         const now = ctx.now();
         ctx.transact(() => {
           store.run(`UPDATE ledger SET state = 'undone', undo_time = ?, last_code = NULL WHERE id = ?`, now, row.id);

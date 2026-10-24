@@ -241,7 +241,7 @@ describe('概览', () => {
     expect(quiet.querySelector('.empty strong')?.textContent).toBe('最近 7 天还没有邮件')
     // Past 70 % of the budget: the warning tone and why.
     expect(root.querySelector('[role="meter"]')?.classList.contains('warn')).toBe(true)
-    expect(root.textContent).toContain('已过 70%，今天改用 Clef-flash；4 封等明天的额度')
+    expect(root.textContent).toContain('已过 70%，今天改用 Clef-flash；4 封暂缓，后台按额度或重试时间继续')
   })
   it('says in the status line when 正式 cannot write yet: the grant is read-only', async () => {
     const s = new FakeServer()

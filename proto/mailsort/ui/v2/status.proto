@@ -157,6 +157,51 @@ message ServiceStatus {
   string build = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
   // All four Gmail identities were verified and new priority classification is enabled.
   bool priorities_initialized = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The most recent owner-requested unread batch; absent until one is requested.
+  // Embedded with service status so progress needs no extra owner request or high-frequency polling.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: This singleton is a bounded status projection for the same owner UI. --)
+  UnreadClassification unread_classification = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One batch of current unread messages. Counts contain no mail content.
+message UnreadClassification {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/UnreadClassification"
+    pattern: "unreadClassification"
+    singular: "unreadClassification"
+    plural: "unreadClassifications"
+  };
+  // The batch's progress. Completed does not imply every message was written.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Enumerating unread IDs; classification starts after the last page.
+    STATE_SCANNING = 1;
+    // Waiting for classification or a persisted Gmail write.
+    STATE_RUNNING = 2;
+    // No work remains; inspect skipped_count and failed_count as well.
+    STATE_COMPLETED = 3;
+  }
+
+  // Always `unreadClassification`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Current progress.
+  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The owner's request time.
+  google.protobuf.Timestamp started_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Unique unread IDs collected; provisional while scanning.
+  int32 total_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Messages waiting for classification or an intended Gmail write.
+  int32 pending_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Gmail writes confirmed applied, including a later ordinary undo.
+  int32 applied_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Already graded, no longer unread, gone, or excluded by the normal incoming-mail rules.
+  int32 skipped_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Messages with a terminal read/model/write failure; never counted as successful classification.
+  int32 failed_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Pending messages waiting for their next eligible time, including daily quota deferral.
+  int32 deferred_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // What the pipeline may do.

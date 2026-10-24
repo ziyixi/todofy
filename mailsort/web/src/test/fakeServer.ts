@@ -32,9 +32,12 @@ import {
   ServiceStatus_AuthState,
   ServiceStatusSchema,
   SettingsSchema,
+  UnreadClassification_State,
+  UnreadClassificationSchema,
   type LabelCount,
   type ServiceStatus,
   type Settings,
+  type UnreadClassification,
 } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { resetClientForTests } from '../api.ts'
 
@@ -119,6 +122,10 @@ export class FakeServer {
   initializeIncompleteRounds = 0
   initializeFails = false
   private readonly initializationRequests = new Map<string, InitializePrioritiesResponse>()
+  unreadClassification: UnreadClassification | undefined
+  unreadStartFails = false
+  statusFails = false
+  private readonly unreadStarts = new Map<string, UnreadClassification>()
   replay: ReplayEvaluation | null = null
   replayFails = false
   replayStartFails = false
@@ -142,6 +149,16 @@ export class FakeServer {
         const answer = create(InitializePrioritiesResponseSchema, { labels: completed ? this.labels : [], completed, removedLabelCount })
         this.initializationRequests.set(request.requestId, answer)
         return Promise.resolve(answer)
+      },
+      startUnreadClassification: (request) => {
+        if (this.unreadStartFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', '未读整理暂不可用')
+        const previous = this.unreadStarts.get(request.requestId)
+        if (previous !== undefined) return Promise.resolve(previous)
+        if (this.unreadClassification?.state !== UnreadClassification_State.SCANNING && this.unreadClassification?.state !== UnreadClassification_State.RUNNING) {
+          this.unreadClassification = create(UnreadClassificationSchema, { name: 'unreadClassification', state: UnreadClassification_State.SCANNING, startedTime: timestampFromMs(NOW) })
+        }
+        this.unreadStarts.set(request.requestId, this.unreadClassification)
+        return Promise.resolve(this.unreadClassification)
       },
       listExamples: (request) => {
         const examples = request.label === '' ? this.examples : this.examples.filter((item) => item.label === request.label)
@@ -209,8 +226,9 @@ export class FakeServer {
         this.replayStarts.set(request.requestId, this.replay)
         return Promise.resolve(this.replay)
       },
-      getServiceStatus: () =>
-        Promise.resolve(
+      getServiceStatus: () => {
+        if (this.statusFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', '状态读取失败')
+        return Promise.resolve(
           Object.assign(create(ServiceStatusSchema, {
             name: 'serviceStatus',
             effectiveMode: this.settings.effectiveMode,
@@ -221,6 +239,7 @@ export class FakeServer {
             pendingCount: 2,
             reviewCount: this.reviewItems.filter((item) => item.state === ReviewItem_State.PENDING).length,
             prioritiesInitialized: this.initializationCompleted,
+            unreadClassification: this.unreadClassification,
             decidedTodayCount: 12,
             neuronsToday: 523.4,
             dailyNeuronBudget: 7000,
@@ -228,7 +247,8 @@ export class FakeServer {
             recentErrorCodes: ['gmail_429'],
             build: 'test',
           }), this.status),
-        ),
+        )
+      },
       getSettings: () => Promise.resolve(this.settings),
       updateSettings: (request) => {
         if (request.settings === undefined) throw new RpcError(Code.INVALID_ARGUMENT, 'BAD_REQUEST', 'settings')

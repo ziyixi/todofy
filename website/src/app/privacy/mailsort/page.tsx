@@ -68,8 +68,16 @@ export default function MailsortPrivacyPage() {
             It never sends, deletes or trashes mail and never marks mail read or unread. A new
             classification adds one priority label and replaces any earlier P1–P4 labels on that
             message. Other message labels remain unchanged. An undo removes the new label, restores
-            the priority labels it replaced and returns the message to the inbox if that write
-            archived it.
+            the priority labels it replaced and its original inbox position, including when the
+            message was already archived before classification.
+          </li>
+          <li>
+            The owner can explicitly request classification of all current unread mail, including
+            older and archived messages. The app collects their identifiers before processing that
+            batch. Spam, Trash and other messages outside its normal incoming-mail rules are
+            excluded; messages already carrying P1–P4 or no longer unread are skipped. P1 brings an
+            archived message into the inbox. The same models, modes and quotas apply, and the app
+            preserves read or unread state, stars and unrelated labels throughout.
           </li>
           <li>
             The owner can explicitly start a one-time switch from the old categories to P1–P4. This
@@ -77,8 +85,10 @@ export default function MailsortPrivacyPage() {
             where eligible. It keeps every message, its inbox position, read or unread state and
             other labels. It also clears the old examples, trusted sender domains, review queue and
             replay results. Older decisions and write ledgers remain under the retention periods
-            below, but do not feed the new priority learning or evaluation. Writes under removed
-            labels can no longer be undone through mailsort.
+            below, but do not feed the new priority learning or evaluation. An explicit unread batch
+            may replace a selected message&apos;s latest decision with its new priority decision;
+            older write ledgers remain. Writes under removed labels can no longer be undone through
+            mailsort.
           </li>
           <li>
             Every change it makes to a message is recorded in its ledger first and, while the entry
@@ -110,7 +120,11 @@ export default function MailsortPrivacyPage() {
           The model also receives the message&apos;s receipt time, the current local time in
           America/Los_Angeles and the current Monday-to-Sunday week. Replay uses the original
           decision&apos;s clock. Sender history and examples come only from the P1–P4 system. Each
-          new message is assessed on its own content and timing.
+          message is assessed on its own content and timing. Normal processing handles new mail;
+          processing older unread mail requires the owner&apos;s explicit batch request. At 70% of
+          the daily model budget it switches to Clef-flash. Exhausted daily model or write quotas
+          leave batch work waiting for the next UTC day. Progress distinguishes applied labels,
+          skipped messages and failures.
         </p>
 
         <h2>What is stored, and for how long</h2>
@@ -147,6 +161,11 @@ export default function MailsortPrivacyPage() {
           <li>
             Answers to the owner&apos;s own changes in the dashboard, kept so that a retried request
             is not applied twice (they can hold a masked subject and sender): 1 day.
+          </li>
+          <li>
+            The latest unread batch&apos;s message identifiers, state, write-ledger links and scan
+            progress, without mail content: until replaced by the next batch or the owner deletes
+            the app&apos;s stored data.
           </li>
           <li>Daily counters without content: 400 days.</li>
         </ul>

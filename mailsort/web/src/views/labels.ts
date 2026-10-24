@@ -6,6 +6,7 @@ import type { ViewContext } from '../app.ts'
 import { PRIORITIES } from '../priorities.ts'
 import { allLabels, frame } from './common.ts'
 import { labelDetail } from './label-detail.ts'
+import { unreadClassificationCard } from './unread-classification.ts'
 
 const GMAIL_STATE: Readonly<Partial<Record<Label_GmailState, string>>> = {
   [Label_GmailState.PENDING]: '等待创建 Gmail 标签',
@@ -49,10 +50,12 @@ export async function renderLabels(ctx: ViewContext): Promise<void> {
     const setup = el('section', { class: 'card priority-setup', 'aria-label': '启用分级' })
     const result = el('p', { class: 'hint', role: 'status', hidden: true })
     const start = button('启用 P1–P4 分级', () => void initialize(), { class: 'primary' })
+    const unread = unreadClassificationCard(ctx, status)
     const list = el('ul', { class: 'label-list', 'aria-label': '分级' })
     const counts = new Map((report?.labels ?? []).map((row) => [row.label, row.autoCount]))
     const paint = () => {
       setup.hidden = ready
+      unread.hidden = !ready
       start.textContent = continuing ? '继续设置' : '启用 P1–P4 分级'
       fill(list, ...PRIORITIES.map((priority) => {
         const label = labels.find((item) => item.name === `labels/${priority.id}`)
@@ -91,6 +94,7 @@ export async function renderLabels(ctx: ViewContext): Promise<void> {
       el('p', { class: 'hint lead' }, '新邮件使用 P1、P2、P3、P4 四个 Gmail 标签。拿不准时归 P1；分类保持原有未读状态。'),
       setup,
       result,
+      unread,
       el('div', { class: 'label-list-box' },
         el('div', { class: 'label-list-head' }, el('span', {}, '4 个优先级'), el('span', {}, '最近 7 天')),
         list,

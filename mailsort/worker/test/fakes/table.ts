@@ -12,7 +12,7 @@ export interface TableContext {
    */
   readonly planned: ReadonlySet<string>;
   /** The ledger row's state and archive flag for (message, Gmail label), or null. */
-  readonly ledger: (messageId: string, labelId: string) => { state: string; archived: boolean; replaceLabels?: readonly string[] } | null;
+  readonly ledger: (messageId: string, labelId: string) => { state: string; archived: boolean; baseInbox?: boolean; replaceLabels?: readonly string[] } | null;
   /** Independent test fixture's explicit migration scope, never inferred from a request. */
   readonly merge?: { readonly labels: ReadonlySet<string>; readonly messages: ReadonlySet<string>; readonly swaps: ReadonlySet<string>; readonly hidden: ReadonlySet<string>; readonly names: ReadonlySet<string>; readonly createNames?: ReadonlySet<string> };
   /** Explicit frozen owned retirement set from priority setup, never inferred from the requested label. */
@@ -74,6 +74,10 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
       : null;
   }
   if (method === 'GET' && path.join('/') === 'messages') {
+    if (url.searchParams.get('labelIds') === 'UNREAD') {
+      const token = url.searchParams.get('pageToken');
+      return only('labelIds', 'maxResults', 'pageToken') && url.searchParams.getAll('labelIds').length === 1 && url.searchParams.getAll('maxResults').length === 1 && url.searchParams.getAll('pageToken').length <= 1 && url.searchParams.get('maxResults') === '100' && (token === null || /^[0-9A-Za-z_-]{1,256}$/.test(token)) && body === '' ? 'unread_list' : null;
+    }
     if (url.searchParams.get('fields') === 'messages/id,nextPageToken,resultSizeEstimate') return only('labelIds', 'fields', 'maxResults', 'includeSpamTrash') && ctx.merge?.labels.has(url.searchParams.get('labelIds') ?? '') === true && url.searchParams.get('includeSpamTrash') === 'true' && Number(url.searchParams.get('maxResults')) <= 10 ? 'merge_list' : null;
     return only('labelIds', 'q', 'maxResults', 'pageToken') && url.searchParams.get('labelIds') === 'INBOX' && url.searchParams.get('q') === 'newer_than:2d' ? 'messages_list' : null;
   }
@@ -105,21 +109,32 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
     if (value === null) return null;
     const add = value.addLabelIds ?? [];
     const remove = value.removeLabelIds ?? [];
+    if (!Array.isArray(add) || !Array.isArray(remove) || !add.every(label => typeof label === 'string') || !remove.every(label => typeof label === 'string') || new Set(add).size !== add.length || new Set(remove).size !== remove.length) return null;
     if (Object.keys(value).some((key) => key !== 'addLabelIds' && key !== 'removeLabelIds')) return null;
     if (add.length === 1 && remove.length === 1 && add[0] !== remove[0] && ctx.owned.has(add[0] ?? '') && ctx.owned.has(remove[0] ?? '') && ctx.merge?.swaps.has(`${id}:${remove[0] ?? ''}:${add[0] ?? ''}`) === true) return 'merge_modify';
-    const replacementsMatch = (chosen: string, labels: string[], row: { archived: boolean; replaceLabels?: readonly string[] }) => {
+    const replacementsMatch = (chosen: string, labels: string[], row: { replaceLabels?: readonly string[] }) => {
       const replacements = row.replaceLabels ?? [];
       const actual = labels.filter((label) => label !== 'INBOX');
-      return row.archived === labels.includes('INBOX') && new Set(labels).size === labels.length && new Set(replacements).size === replacements.length &&
+      return new Set(replacements).size === replacements.length &&
         replacements.every((label) => /^Label_[0-9]{1,24}$/.test(label) && ctx.owned.has(label) && label !== chosen) && actual.length === replacements.length && actual.every((label) => replacements.includes(label));
     };
-    if (remove.length === 1 && ctx.owned.has(remove[0] ?? '')) {
-      const row = ctx.ledger(id, remove[0] ?? '');
-      if (row?.state === 'undo_intended') return replacementsMatch(remove[0] ?? '', add, row) ? 'undo' : null;
+    const undoLabels = remove.filter(label => label !== 'INBOX');
+    if (undoLabels.length === 1 && ctx.owned.has(undoLabels[0] ?? '')) {
+      const chosen = undoLabels[0] ?? '';
+      const row = ctx.ledger(id, chosen);
+      if (row?.state === 'undo_intended') {
+        const originalInbox = row.baseInbox ?? true;
+        return add.includes('INBOX') === (row.archived && originalInbox) && remove.includes('INBOX') === (!row.archived && !originalInbox) && replacementsMatch(chosen, add, row) ? 'undo' : null;
+      }
     }
-    if (add.length === 1 && ctx.owned.has(add[0] ?? '')) {
-      const row = ctx.ledger(id, add[0] ?? '');
-      if (row !== null && ['intended', 'applied'].includes(row.state)) return replacementsMatch(add[0] ?? '', remove, row) ? 'classify' : null;
+    const classifyLabels = add.filter(label => label !== 'INBOX');
+    if (classifyLabels.length === 1 && ctx.owned.has(classifyLabels[0] ?? '')) {
+      const chosen = classifyLabels[0] ?? '';
+      const row = ctx.ledger(id, chosen);
+      if (row !== null && ['intended', 'applied'].includes(row.state)) {
+        const originalInbox = row.baseInbox ?? true;
+        return remove.includes('INBOX') === (row.archived && originalInbox) && add.includes('INBOX') === (!row.archived && !originalInbox) && replacementsMatch(chosen, remove, row) ? 'classify' : null;
+      }
     }
     return null;
   }

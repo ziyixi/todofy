@@ -37,11 +37,12 @@ import {
   WEAK_EXAMPLES_BELOW,
 } from './limits.ts';
 import { readMessage } from './mime.ts';
-import { P1_ID, PRIORITY_IDS, priorityStartedAt } from './priority.ts';
+import { P1_ID, PRIORITY_IDS, priorityGmailIds, priorityStartedAt } from './priority.ts';
 import { replayStep } from './replay.ts';
 import { Budget, noteGoogleError, noteTokenOk, openSession, writeScope } from './session.ts';
 import { effectiveMode, readSettings, tripBreaker, type SettingsValue } from './settings.ts';
 import { utcDay, type Store } from './store.ts';
+import { finishUnread, isUnreadPending, scanUnread } from './unread.ts';
 import { executeWrites, intend, type WriteContext, type WriteGate } from './writes.ts';
 
 /** Labels Gmail puts on mail that is not the owner's incoming mail: never decided. */
@@ -210,6 +211,12 @@ export function writesLive(store: Store, ceiling: ModeName): boolean {
  */
 export function alarmGate(store: Store, ceiling: ModeName, counter: { runWrites: number }, now: () => number): WriteGate {
   return (row, label) => {
+    const unread = store.one(`SELECT 1 AS x FROM unread_batch WHERE ledger_id = ?`, row.id) !== undefined;
+    if (unread) {
+      const settings = readSettings(store);
+      const full = store.usage(utcDay(now())).applied + mergeWritesToday(store, utcDay(now())) >= settings.dailyWriteLimit;
+      if (!writesLive(store, ceiling) || full || counter.runWrites >= settings.runWriteLimit) return 'wait';
+    }
     if (!writesLive(store, ceiling)) return 'mode_changed';
     if (row.origin === 'owner') return null;
     if (label.enabled !== 1) return 'label_disabled';
@@ -259,10 +266,11 @@ function readFailed(ctx: MailContext, messageId: string, attempts: number, error
  * deferral; it leaves that count now, in the transaction that counts where it went (a decision or a skip), so every
  * mail is in the flow exactly once. Run inside a transaction.
  */
-function finishPending(store: Store, messageId: string): void {
+function finishPending(store: Store, messageId: string, unreadState: 'skipped' | 'failed' = 'skipped'): void {
   const deferredAt = store.one<{ deferred: number }>(`SELECT deferred FROM pending WHERE message_id = ?`, messageId)?.deferred ?? 0;
   if (deferredAt > 0) countFlow(store, deferredAt, 'deferred', 'deferred', null, -1);
   store.run(`DELETE FROM pending WHERE message_id = ?`, messageId);
+  finishUnread(store, messageId, unreadState);
 }
 
 /** Records a skipped mail (and counts it once in the flow). Run inside a transaction. */
@@ -276,11 +284,22 @@ function recordSkip(store: Store, id: string, threadId: string, receivedAt: numb
     reason,
   );
   if (recorded > 0) countFlow(store, now, 'skipped', skipOutcome(reason), null);
-  finishPending(store, id);
+  finishPending(store, id, reason === 'unreadable' ? 'failed' : 'skipped');
 }
 
 async function decideMail(ctx: MailContext, messageId: string, attempts: number): Promise<MailOutcome> {
   const { store, gmail } = ctx;
+  const unread = isUnreadPending(store, messageId);
+  if (unread) {
+    // This batch promises actual Gmail labels. A pause or reached write cap must leave it queued.
+    const at = ctx.now();
+    const settings = readSettings(store);
+    const dayFull = store.usage(utcDay(at)).applied + mergeWritesToday(store, utcDay(at)) >= settings.dailyWriteLimit;
+    if (!writesLive(store, ctx.ceiling) || dayFull || ctx.counter.runWrites >= settings.runWriteLimit) {
+      ctx.transact(() => store.run(`UPDATE pending SET not_before = ? WHERE message_id = ?`, dayFull ? nextUtcMidnight(at) : at + ALARM_IDLE_MS, messageId));
+      return 'later';
+    }
+  }
   let read;
   try {
     const { message } = await gmail.message(messageId);
@@ -293,17 +312,21 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
     ctx.transact(() => { recordSkip(store, messageId, messageId, 0, now, 'unreadable'); });
     return 'skipped';
   }
-  if (!read.labelIds.includes('INBOX') || read.labelIds.some((label) => SKIP_LABELS.has(label))) {
+  if ((unread ? !read.labelIds.includes('UNREAD') : !read.labelIds.includes('INBOX')) || read.labelIds.some((label) => SKIP_LABELS.has(label))) {
     ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'not_inbox'); });
+    return 'skipped';
+  }
+  if (unread && read.labelIds.some(id => priorityGmailIds(store).has(id))) {
+    ctx.transact(() => { finishPending(store, messageId); });
     return 'skipped';
   }
   // No backfill: a lost cursor's resync lists the inbox of the last two days, which may reach back before the install.
   const installedAt = Number(store.getMeta('installed_at') ?? '0');
-  if (read.receivedAt > 0 && read.receivedAt < priorityStartedAt(store)) {
+  if (!unread && read.receivedAt > 0 && read.receivedAt < priorityStartedAt(store)) {
     ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'before_install'); });
     return 'skipped';
   }
-  if (installedAt > 0 && read.receivedAt > 0 && read.receivedAt < installedAt - INSTALL_GRACE_MS) {
+  if (!unread && installedAt > 0 && read.receivedAt > 0 && read.receivedAt < installedAt - INSTALL_GRACE_MS) {
     ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'before_install'); });
     return 'skipped';
   }
@@ -360,7 +383,8 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
     if (decision.kind === 'unsure') store.addUsage(utcDay(now), 'unsure', 1);
     countFlow(store, now, stageOf(model), flowOutcome(decision, apply, archive, shown), decision.kind === 'label' ? decision.label : null);
     if (apply) intent.id = intend(store, read.id, label, archive, 'auto', now, read.labelIds);
-    finishPending(store, read.id);
+    if (unread && intent.id !== null) store.run(`UPDATE unread_batch SET ledger_id = ? WHERE message_id = ?`, intent.id, read.id);
+    finishPending(store, read.id, 'failed');
   });
   const ledgerId = intent.id;
   if (ledgerId !== null) {
@@ -544,6 +568,10 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
       return { next: read.more ? deps.now() + ALARM_BACKLOG_MS : idle, mode, synced, decided: 0, applied: 0, deferred: 0, code: 'priority_setup_required' };
     }
 
+    if (budget.has(1) && await scanUnread(store, gmail, deps.now(), transact)) {
+      return { next: deps.now() + ALARM_BACKLOG_MS, mode, synced, decided: 0, applied: 0, deferred: 0, code: 'unread_scanning' };
+    }
+
     const owned = new Map(store.labels().filter((label) => PRIORITY_IDS.has(label.id)).flatMap((label) => (label.gmail_state === 'linked' && label.gmail_id !== null ? [[label.gmail_id, label.id] as const] : [])));
     transact(() => applyFeedback(store, owned, deps.now()));
 
@@ -607,7 +635,12 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
     }
     // The replay evaluation last, with what the live pipeline left of the pass (not while shed: it can wait).
     if (deps.ai !== null && !deps.shed) backlog = (await replayStep({ store, gmail, ai: deps.ai, budget, now: deps.now, transact, settings })) || backlog;
-    if (store.count(`SELECT count(*) AS n FROM ledger WHERE state IN ('intended', 'undo_intended')`) > 0) backlog = true;
+    if (store.count(`SELECT count(*) AS n FROM ledger WHERE state IN ('intended', 'undo_intended')`) > 0) {
+      const current = readSettings(store);
+      const canWrite = writesLive(store, ceiling) && store.usage(utcDay(deps.now())).applied + mergeWritesToday(store, utcDay(deps.now())) < current.dailyWriteLimit;
+      // Paused/capped batch intents remain persistent without making an idle Alarm busy every 30 seconds.
+      if (canWrite || store.count(`SELECT count(*) AS n FROM ledger WHERE state = 'undo_intended'`) > 0) backlog = true;
+    }
   } catch (error) {
     if (!(error instanceof Error && error.message === 'stopped')) {
       transact(() => noteGoogleError(store, error));

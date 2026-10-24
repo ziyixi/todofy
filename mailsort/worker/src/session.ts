@@ -88,7 +88,7 @@ export async function openSession(options: SessionOptions): Promise<{ client: Gm
       if (row === undefined) return null;
       const priorities = priorityGmailIds(store);
       const base = JSON.parse(row.base_labels) as string[];
-      return { state: row.state, archived: row.archived === 1, replaceLabels: base.filter(id => id !== labelId && priorities.has(id)) };
+      return { state: row.state, archived: row.archived === 1, baseInbox: row.base_inbox === 1, replaceLabels: base.filter(id => id !== labelId && priorities.has(id)) };
     },
   };
   const client = new GmailClient({

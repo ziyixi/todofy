@@ -17,23 +17,39 @@ back into Inbox later or create tasks. Tasks' Mail categories and task prioritie
 
 Workers AI Clef judges when it is safe to read the masked message, using receipt time, local date/week and current
 priority examples. A confident result needs the existing two-view agreement and threshold; valid uncertainty or
-`none` becomes P1. A provider error or exhausted budget stays pending rather than becoming a judgment. Each new
-reply is judged independently; message IDs still deduplicate delivery. A new reply carrying an earlier priority
-can replace it without changing other labels, unread or starred state.
+`none` becomes P1. Provider errors use the existing backoff and can fail after retries; quota exhaustion waits
+for the next UTC day. Neither creates a priority judgment. Each new reply is judged independently; message IDs
+still deduplicate delivery. A new reply carrying an earlier priority can replace it without changing other
+labels, unread or starred state. Normal processing keeps its new-mail receipt cutoff.
+
+The owner can explicitly choose **处理全部未读** (`StartUnreadClassification`). It first collects unread message
+IDs across all ages and folders, including archived mail, then processes that batch through the existing Alarm
+and pending queue. Spam, Trash and the normal incoming-mail exclusions are skipped, as are messages already
+carrying P1-P4 or no longer unread. Only this batch bypasses the new-mail cutoff and may replace a message's
+latest stored decision; old Gmail write ledgers remain. P1 puts an archived message in Inbox; ordinary undo restores
+its original Inbox position. Read/unread, stars and unrelated labels are preserved.
+
+The existing modes, write caps and model budget apply. At 70% of the daily neuron budget the model switches to
+Clef-flash; exhaustion defers work to the next UTC day. A paused mode or a reached write cap leaves batch work
+waiting. Progress distinguishes applied, skipped, failed and pending messages; completion does not mean every
+message received a label. Only the latest batch's IDs, state, ledger links and scan progress are kept until the
+next batch replaces them or the app's data is deleted; this progress stores no mail content.
 
 There is no model phishing/scam question, suspicious-score gate or trusted-domain requirement. Gmail's own spam
 handling is unchanged. Financial notices get a reading priority from their contents, without sender-brand rules.
 
 ## UI
 
-- **概览**: mode, Gmail grant, freshness, today's flow, per-priority counts and the model budget.
+- **概览**: mode, Gmail grant, freshness, today's flow, per-priority counts, the model budget and the explicit
+  unread-batch action and progress.
 - **分级**: four fixed rows, their Inbox/archive behavior and learned examples loaded only on expansion.
 - **设置**: owner mode, existing undo and the read-only classification-effect check. Gmail corrections teach the
   priority model. Uncertain mail does not require a separate review; the old `/review` path remains readable.
 
 The initial **启用 P1–P4 分级** action replaces this app's old topic labels and learning. It deletes the old managed
 Gmail labels, including known retired identities, while retaining every message and its existing Inbox/unread
-state. Other labels stay untouched. Old decisions and ledgers remain history, excluded from new learning.
+state. Other labels stay untouched. Old decisions and ledgers remain history, excluded from new learning;
+an explicit unread batch may later replace the selected messages' latest decisions.
 A bounded step can be continued with the same stored setup; there is no background migration service.
 See [priority setup and verification](docs/priority-rollout.md).
 

@@ -9,13 +9,31 @@ P1 is a real label and stays in Inbox; P2-P4 are real labels and archive. Valid 
 2. Open 分级 and choose 启用 P1–P4 分级. The explanation identifies old managed Gmail labels and old learning as the
    removal scope; existing mail, read/unread, star and Inbox positions remain. Review that scope before acting.
 3. If a bounded step is incomplete, use 继续设置. A failed call preserves progress; an uncertain response can retry
-   the same request identity. Do not start a second migration or manually reclassify history.
+   the same request identity. Do not start a second migration.
 4. Verify P1-P4 all linked by actual Gmail IDs with the fixed policies, then verify the preserved owner mode/budgets.
 5. Natural new mail uses the new scheme. Old archived mail remains searchable in All Mail without topic labels;
    it is not automatically placed in new priorities or sent back to Inbox.
 
 The API is `InitializePriorities` (`POST /api/v2/labels:initializePriorities`) on the existing owner API. It needs
 only the existing Gmail write grant. It does not delete messages, read their bodies or call a model.
+
+## Explicit unread batch
+
+After setup, the owner can choose **处理全部未读**. This explicitly authorizes the deployed app to process private
+unread mail of any age, including archived mail, using the existing masked model path. Ordinary new-mail processing
+keeps its receipt cutoff. No private content or model request belongs in rollout evidence, logs or fixtures.
+
+`StartUnreadClassification` (`POST /api/v2/unreadClassification:start`) first collects unread IDs across folders,
+excluding Spam/Trash, before classification begins. The existing Alarm continues the same batch after interruptions.
+Already P1-P4-graded, no-longer-unread, gone and other normal incoming-mail exclusions are skipped. Only these batch
+members may replace their latest stored decision; earlier Gmail write ledgers remain. P1 puts an archived message in
+Inbox; ordinary undo restores its original Inbox position. Mail is never deleted or marked read.
+
+Modes, write caps and neuron budgets stay unchanged. Clef-flash begins at 70%; exhausted daily model quota or write
+allowance waits until the next UTC day. A paused mode leaves the batch waiting. Check applied, skipped, failed and
+pending/deferred counts in the overview: a completed batch may include skips and failures. The newest batch's IDs,
+state, ledger links and scan progress contain no mail content and remain until the next batch or deletion of app data.
+Production batch results must be recorded separately from the initializer and synthetic checks below.
 
 ## Local verification (2026-10-24 UTC)
 
