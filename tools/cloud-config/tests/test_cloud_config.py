@@ -87,17 +87,6 @@ class CloudConfigurationTests(unittest.TestCase):
         (root / "demo/wrangler.toml").write_text(CONFIG)
         return root
 
-    def test_runner_machine_url_and_image_follow_the_public_profile(self):
-        root = self.fixture()
-        relative = "platform/k3s/newsletter/mailsort-runner.yaml"
-        target = root / relative
-        target.parent.mkdir(parents=True)
-        target.write_text("data:\n  MAILSORT_URL: https://sort.old.test\n")
-        outputs = generate.generated_files(root)
-        self.assertEqual(outputs[relative], "data:\n  MAILSORT_URL: https://sort.example.test\n")
-        self.assertEqual(cloud_profile.image_repositories(cloud_profile.load_profile(root))["mailsort-runner"],
-                         "ghcr.io/example/personal-cloud-mailsort-runner")
-
     def test_generate_only_declared_identity_fields_and_preserve_comments(self):
         root = self.fixture()
         outputs = generate.generated_files(root)

@@ -3,20 +3,27 @@
  * built only from MailsortState's own SQLite, with counts and codes only: never a subject, sender, address or label
  * name.
  *
- * Classification runs on the fixed hourly Codex runner. This app advertises no load-shedding capability;
- * old Workers AI quota and guard state do not describe its current work.
+ * Signals: `gmail_auth_failed` (critical: Google refused the grant and the Worker stopped calling it; it reaches Home's
+ * attention and so the daily digest), `gmail_not_configured`, `breaker_tripped` and `sync_stale` (warnings), and
+ * `ai_quota_exhausted` and `guard_shed` (information).
+ *
+ * The guard (Home's 80 % rule) defers what can wait while it lasts: the large decision model (Clef-flash only), the
+ * replay evaluation (an owner's check before going live) and embedding rebuilds. New mail is still read, decided and
+ * sorted.
  */
 import { create } from '@ziyixi/proto/protobuf';
-import { file_ops_v1_ops, GuardLevel, GuardStateSchema, Health, OpsService, OpsStatusSchema, Severity, SignalSchema, type Signal } from '@ziyixi/proto/ops/v1/ops_pb';
+import { file_ops_v1_ops, GuardLevel, GuardStateSchema, Health, OpsService, OpsStatusSchema, Severity, SignalSchema, type GuardState, type Signal } from '@ziyixi/proto/ops/v1/ops_pb';
 import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
 import { fieldRules, formatMatches, fromWireArguments, toWire, WireJsonError } from '@ziyixi/proto/wire-json';
+import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
 import { modeCeiling, publicHost, type Env } from './env.ts';
-import { ALARM_IDLE_MS, DAY, MINUTE } from './limits.ts';
+import { ALARM_IDLE_MS, MINUTE } from './limits.ts';
 import { authState } from './session.ts';
-import { batchStatus, pendingWrites, runnerState } from './runner.ts';
 import { effectiveMode, readSettings } from './settings.ts';
 import { utcDay, type Store } from './store.ts';
 
+/** The jobs a shed defers (GuardState.deferred). */
+export const DEFERRED_JOBS = ['full_model', 'replay', 'embedding_rebuild'] as const;
 /** No complete sync for this long, while the mode reads Gmail and the grant works, raises `sync_stale`. */
 export const SYNC_STALE_MS = 6 * ALARM_IDLE_MS;
 
@@ -33,15 +40,35 @@ function rank(severity: Severity): number {
 
 // ---- the guard ------------------------------------------------------------------------------------------------------
 
-/** The required legacy wire field remains normal; the retired model jobs are never advertised. */
-export function guardState(): wire.GuardState {
-  return toWire(GuardStateSchema, create(GuardStateSchema, { level: GuardLevel.NORMAL }));
+export interface Shed {
+  readonly reason: string;
+  readonly until: number;
+  readonly setAt: number;
+}
+
+/** The shed in force at `now`, or null (a stored shed whose `until` passed reads as normal). */
+export function activeShed(store: Store, now: number): Shed | null {
+  const until = Number(store.getMeta('guard_until') ?? '');
+  const setAt = Number(store.getMeta('guard_set_at') ?? '');
+  const reason = store.getMeta('guard_reason');
+  if (reason === null || !Number.isFinite(until) || !Number.isFinite(setAt) || until <= now) return null;
+  return { reason, until, setAt };
+}
+
+function guardMessage(store: Store, now: number): GuardState {
+  const shed = activeShed(store, now);
+  if (shed === null) return create(GuardStateSchema, { level: GuardLevel.NORMAL });
+  return create(GuardStateSchema, { level: GuardLevel.SHED, reason: shed.reason, until: iso(shed.until), setAt: iso(shed.setAt), deferred: [...DEFERRED_JOBS] });
+}
+
+export function guardState(store: Store, now: number): wire.GuardState {
+  return toWire(GuardStateSchema, guardMessage(store, now));
 }
 
 export type GuardOutcome = { readonly ok: wire.GuardState } | { readonly error: 'invalid_input' };
 
-/** Strictly validate the existing wire request. Fixed Codex classification cannot be shed. */
-export function setGuard(store: Store, input: unknown): GuardOutcome {
+/** setGuard: the contract's rules, then `until` in (now, now + 36 h]; the same shed as stored keeps its set_at. */
+export function setGuard(store: Store, input: unknown, now: number): GuardOutcome {
   let value;
   try {
     value = fromWireArguments(OpsService.method.setGuard, [input]);
@@ -49,9 +76,19 @@ export function setGuard(store: Store, input: unknown): GuardOutcome {
     if (error instanceof WireJsonError) return { error: 'invalid_input' };
     throw error;
   }
-  if (value.level === GuardLevel.SHED) return { error: 'invalid_input' };
-  store.deleteMeta('guard_reason', 'guard_until', 'guard_set_at');
-  return { ok: guardState() };
+  if (value.level === GuardLevel.SHED) {
+    const until = Date.parse(value.until ?? '');
+    if (!Number.isFinite(until) || until <= now || until - now > OPS_LIMITS.guardMaxAheadSeconds * 1000) return { error: 'invalid_input' };
+    const stored = activeShed(store, now);
+    if (!(stored !== null && stored.reason === value.reason && stored.until === until)) {
+      store.setMeta('guard_reason', value.reason);
+      store.setMeta('guard_until', String(until));
+      store.setMeta('guard_set_at', String(now));
+    }
+  } else {
+    store.deleteMeta('guard_reason', 'guard_until', 'guard_set_at');
+  }
+  return { ok: guardState(store, now) };
 }
 
 // ---- status ---------------------------------------------------------------------------------------------------------
@@ -66,17 +103,17 @@ export function uiUrl(host: string | null): string | undefined {
   return formatMatches(file_ops_v1_ops, 'HttpsUrl', url) ? url : undefined;
 }
 
-type StatusEnv = Pick<Env, 'PUBLIC_HOST' | 'MODE' | 'GMAIL_CLIENT_ID' | 'GMAIL_CLIENT_SECRET' | 'GMAIL_REFRESH_TOKEN' | 'CLASSIFICATION_TOKEN_SHA256'>;
+type StatusEnv = Pick<Env, 'PUBLIC_HOST' | 'MODE' | 'GMAIL_CLIENT_ID' | 'GMAIL_CLIENT_SECRET' | 'GMAIL_REFRESH_TOKEN'>;
 
 /** status(): a few indexed counts and meta rows. */
 export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsStatus {
   const url = uiUrl(publicHost(env));
   const ceiling = modeCeiling(env);
-  const base = { version: 'ops-v1', app: 'mailsort', generatedAt: iso(now), ...(url === undefined ? {} : { uiUrl: url }), capabilities: [] };
+  const base = { version: 'ops-v1', app: 'mailsort', generatedAt: iso(now), ...(url === undefined ? {} : { uiUrl: url }), capabilities: ['guard'] };
   try {
     const settings = readSettings(store);
     const mode = effectiveMode(settings, ceiling);
-    const guard = create(GuardStateSchema, { level: GuardLevel.NORMAL });
+    const guard = guardMessage(store, now);
     const usage = store.usage(utcDay(now));
     const auth = authState(store, env);
     const lastSync = Number(store.getMeta('last_sync_at') ?? '');
@@ -85,18 +122,6 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
     const review = store.count(`SELECT count(*) AS n FROM review WHERE state = 'pending'`);
 
     const signals: Signal[] = [];
-    const batch = batchStatus(store);
-    const run = runnerState(store);
-    if (mode !== 'off') {
-      if (!/^[a-f0-9]{64}$/.test(env.CLASSIFICATION_TOKEN_SHA256 ?? '')) signals.push(signal('batch_not_configured', Severity.WARNING, {}));
-      else {
-        const completed = run?.completedAt ?? 0;
-        const started = run?.startedAt ?? Number(store.getMeta('installed_at') ?? now);
-        const since = completed > 0 ? completed : started;
-        if (now - since > 2 * 60 * MINUTE) signals.push(signal('batch_stale', Severity.WARNING, { minutes: Math.floor((now - since) / MINUTE) }, since));
-        if (run?.state === 'failed') signals.push(signal('batch_failed', Severity.WARNING, {}));
-      }
-    }
     if (mode !== 'off') {
       if (auth === 'failed') signals.push(signal('gmail_auth_failed', Severity.CRITICAL, { failures: Number(store.getMeta('auth_failures') ?? '0') }));
       if (auth === 'not_configured') signals.push(signal('gmail_not_configured', Severity.WARNING, {}));
@@ -105,10 +130,9 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
       }
     }
     if (settings.breaker !== '' && settings.mode === 'live') signals.push(signal('breaker_tripped', Severity.WARNING, { applied_today: usage.applied }));
-    const waitingWrites = pendingWrites(store);
-    if (mode === 'live' && waitingWrites > 0 && usage.applied >= settings.dailyWriteLimit) {
-      signals.push(signal('gmail_write_limit_wait', Severity.INFO,
-        { applied_today: usage.applied, daily_write_limit: settings.dailyWriteLimit, pending_writes: waitingWrites }, Math.floor(now / DAY) * DAY));
+    if (usage.quota_exhausted === 1) signals.push(signal('ai_quota_exhausted', Severity.INFO, { deferred: store.count(`SELECT count(*) AS n FROM pending WHERE not_before > ?`, now) }));
+    if (guard.level === GuardLevel.SHED && guard.until !== undefined) {
+      signals.push(signal('guard_shed', Severity.INFO, { seconds_left: Math.max(0, Math.round((Date.parse(guard.until) - now) / 1000)) }));
     }
     signals.sort((a, b) => rank(a.severity) - rank(b.severity) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
 
@@ -119,10 +143,8 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
       review_pending: review,
       pending,
       gmail_calls_today: usage.gmail_calls,
-      ...(batch === undefined ? {} : { selected_count: batch.selectedCount, judged_count: batch.judgedCount, pending_write_count: batch.pendingWriteCount }),
-      ...(batch?.inputTokens === undefined ? {} : { batch_input_tokens: batch.inputTokens }),
-      ...(batch?.outputTokens === undefined ? {} : { batch_output_tokens: batch.outputTokens }),
-      ...(run === null || run.completedAt === 0 ? {} : { last_batch_minutes: Math.floor((now - run.completedAt) / MINUTE) }),
+      neurons_today: Math.round(usage.neurons),
+      neuron_budget: settings.dailyNeuronBudget,
     };
     if (synced !== null) counters['last_sync_minutes'] = Math.floor((now - synced) / MINUTE);
     return toWire(

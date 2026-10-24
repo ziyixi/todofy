@@ -67,8 +67,8 @@ export const SUBJECT_CHARS = 200;
 export const SENDER_CHARS = 120;
 export const SNIPPET_CHARS = 300;
 export const BODY_CHARS = 2000;
-/** Decode the bounded Gmail response before stripping HTML and selecting 12,000 visible characters. */
-export const BODY_BASE64_MAX = MESSAGE_MAX_BYTES;
+/** Base64 characters of a body part decoded at most (about 24 KiB of text, far more than BODY_CHARS needs). */
+export const BODY_BASE64_MAX = 32 * 1024;
 /** MIME parts visited at most, and the deepest nesting. */
 export const MIME_PARTS_MAX = 60;
 export const MIME_DEPTH_MAX = 6;

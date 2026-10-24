@@ -89,9 +89,6 @@ export function applyFeedback(store: Store, owned: ReadonlyMap<string, string>, 
     const row = store.decision(event.message_id);
     if (!PRIORITY_IDS.has(label) || row === undefined || row.outcome === 'skipped' || (row.label_id !== null && !PRIORITY_IDS.has(row.label_id)) || row.decided_at < priorityStartedAt(store)) continue;
     const labels = new Set(labelsOf(canonicalDecision(store, row)));
-    // Own writes already updated current_labels. Repeated history cannot become a fresh owner verdict,
-    // including history from the previous automatic priority after an immediate recheck.
-    if ((event.change === 'added') === labels.has(label)) continue;
     if (event.change === 'added') labels.add(label);
     else labels.delete(label);
     setCurrentLabels(store, row.message_id, [...labels]);

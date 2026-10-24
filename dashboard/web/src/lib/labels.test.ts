@@ -56,10 +56,6 @@ describe('labels', () => {
     expect(signalLabel('newsletter_delivery_overdue')).toBe('Newsletter 每日投递逾期')
   })
 
-  it('explains that Gmail write limits preserve the batch decisions', () => {
-    expect(signalLabel('gmail_write_limit_wait')).toBe('今日 Gmail 写入已达上限，判断已保存，剩余标签等待明天写入')
-  })
-
   it('shows the GTD counters in their units', () => {
     expect(counterInfo('inbox_oldest_days')).toEqual({ label: '收件箱最老', kind: 'days' })
     expect(counterValue('review_age_days', 12)).toBe('12 天')

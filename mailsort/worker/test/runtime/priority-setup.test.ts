@@ -122,8 +122,9 @@ it('keeps an established history cursor so mail arriving during setup is classif
   expect((await h.api.initializePriorities({ requestId: op() })).completed).toBe(true);
   expect(await h.sql(`SELECT value FROM meta WHERE key = 'history_cursor'`)).toEqual(baseline);
   const pass = await h.step(T0 + 2000);
-  expect(pass.decided).toBe(0);
-  expect(await h.sql(`SELECT message_id FROM pending WHERE message_id = 'ab000001'`)).toHaveLength(1);
+  expect(pass.decided).toBe(1);
   const rows = await h.sql<{ label_id: string; outcome: string }>(`SELECT label_id, outcome FROM decisions WHERE message_id = 'ab000001'`);
-  expect(rows).toEqual([]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.outcome).toBe('applied');
+  expect(['p1', 'p2', 'p3', 'p4']).toContain(rows[0]?.label_id);
 });

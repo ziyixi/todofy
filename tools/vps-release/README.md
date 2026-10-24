@@ -23,11 +23,10 @@ After the proto generation and locked platform environment are ready:
 uv run --project platform --frozen python tools/vps-release/deploy.py \
   --source-sha VERIFIED_FULL_SHA \
   --newsletter-image ghcr.io/OWNER/todofy-newsletter@sha256:FULL_DIGEST \
-  --platform-image ghcr.io/OWNER/todofy-platform@sha256:FULL_DIGEST \
-  --mailsort-runner-image ghcr.io/OWNER/todofy-mailsort-runner@sha256:FULL_DIGEST
+  --platform-image ghcr.io/OWNER/todofy-platform@sha256:FULL_DIGEST
 ```
 
-All three repositories must belong to the configured owner; mutable tags and partial digests are refused.
+Both repositories must belong to the configured owner; mutable tags and partial digests are refused.
 The same SHA derives the same release/request UUID4. A transport retry repeats the identical frozen body.
 Changing images under that existing identity is a conflict, not an excuse to silently create a new release.
 The daemon acknowledges persistence first; the client polls the exact resource. Success additionally
@@ -41,7 +40,7 @@ still cannot pass deployment verification.
 Held/failed operations stop the client immediately. Only an explicit approved main dispatch for `platform`
 or `newsletter` sets `resume_vps_release=true` and supplies `resume_source_sha`, the original release's full
 source SHA. The checkout commit runs current source/contract checks, but no image is built, saved, uploaded
-or published. The client uses the original source SHA to fetch the authenticated release, validates its frozen
+or published. The client uses the original source SHA to fetch the authenticated release, validates its two
 configured aliases, source/request identity and strict digest fields, and retains those frozen targets.
 Digests alone contain no repository: the daemon maps the fixed aliases to the profile owner's allowlisted
 repositories. Resume accepts no replacement image input. It reads the current etag and derives a stable
@@ -54,7 +53,7 @@ uv run --project platform --frozen python tools/vps-release/deploy.py \
   --source-sha ORIGINAL_HELD_FULL_SHA --resume
 ```
 
-Without explicit resume, `resume_source_sha` is forbidden and a new release still requires all three images
+Without explicit resume, `resume_source_sha` is forbidden and a new release still requires both images
 from the same tested artifact/source SHA. Missing or mismatched existing releases fail rather than being
 created or replaced by the resume path.
 The one overall timeout starts before Create/Get/Resume. Temporary network/429/5xx failures, including a
@@ -73,8 +72,3 @@ uv run --project platform --frozen ruff check tools/vps-release
 The tests cover lost acknowledgements, identical retries, explicit etag continuation, redirect/size/JSON
 guards, wrong image provenance, unknown generations and a ready acknowledgement with stale observations.
 They do not prove live credentials, Tunnel connectivity or a production rollout.
-
-The fixed runner is verified with an inactive process, with `observation_scope=template`. The installed
-CronJob source, digest, request identity and generation must agree with its release target.
-This check does not run classification or claim that a Job executed. The next natural hourly
-report is checked in Mailsort Ops. Legacy two-target releases retain their frozen identities.

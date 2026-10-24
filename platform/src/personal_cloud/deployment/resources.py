@@ -19,12 +19,7 @@ NAMES = {
     ("ConfigMap", "newsletter-release"),
     ("ConfigMap", "platform-release"),
     ("ConfigMap", "platform-runtime-config"),
-    ("CronJob", "mailsort-runner"),
-    ("ConfigMap", "mailsort-runner-release"),
-    ("ConfigMap", "mailsort-runner-config"),
 }
-
-LEGACY_NAMES = {item for item in NAMES if not item[1].startswith("mailsort-runner")}
 
 
 def load() -> dict:
@@ -69,11 +64,7 @@ def configuration_wire(config: Configuration) -> dict:
 
 
 def image(config: Configuration, adapter: str, digest: str) -> str:
-    suffix = {
-        "newsletter": "newsletter",
-        "personal-cloud": "platform",
-        "mailsort-runner": "mailsort-runner",
-    }[adapter]
+    suffix = {"newsletter": "newsletter", "personal-cloud": "platform"}[adapter]
     return (
         "ghcr.io/"
         + config.repository.split("/", 1)[0].lower()
@@ -92,27 +83,24 @@ class Renderer:
         self.workloads = {
             item.adapter: item
             for item in config.workloads
-            if item.adapter in {"newsletter", "personal-cloud", "mailsort-runner"}
+            if item.adapter in {"newsletter", "personal-cloud"}
         }
         selected = [
             item
             for item in config.workloads
-            if item.adapter in {"newsletter", "personal-cloud", "mailsort-runner"}
+            if item.adapter in {"newsletter", "personal-cloud"}
         ]
         if (
-            not {"newsletter", "personal-cloud"} <= set(self.workloads)
-            or len({item.adapter for item in selected}) != len(selected)
-            or len({item.deployment for item in selected}) != len(selected)
-            or len({item.release_configmap for item in selected}) != len(selected)
+            set(self.workloads) != {"newsletter", "personal-cloud"}
+            or len(selected) != 2
+            or len({item.deployment for item in selected}) != 2
+            or len({item.release_configmap for item in selected}) != 2
         ):
             raise ValueError("unsupported_release_profile")
         self.asset = load() if asset is None else deepcopy(asset)
-        actual = {
+        if {
             (item["kind"], item["metadata"]["name"]) for item in self.asset["items"]
-        }
-        if actual not in (NAMES, LEGACY_NAMES) or len(self.asset["items"]) != len(
-            actual
-        ):
+        } != NAMES or len(self.asset["items"]) != len(NAMES):
             raise ValueError("invalid_resource_asset")
 
     def render(
@@ -127,18 +115,7 @@ class Renderer:
         for source in self.asset["items"]:
             item = deepcopy(source)
             kind, name = item["kind"], item["metadata"]["name"]
-            adapter = (
-                "mailsort-runner"
-                if name.startswith("mailsort-runner")
-                else "personal-cloud"
-                if name.startswith("platform-")
-                else "newsletter"
-            )
-            if (
-                adapter not in self.workloads
-                or self.workloads[adapter].key not in selected
-            ):
-                continue
+            adapter = "personal-cloud" if name.startswith("platform-") else "newsletter"
             workload = self.workloads[adapter]
             target = selected[workload.key]
             item["metadata"]["namespace"] = self.config.namespace
@@ -150,9 +127,7 @@ class Renderer:
             }
             item["metadata"]["name"] = replacements.get(name, name)
             if kind == "ConfigMap":
-                if name == "mailsort-runner-config":
-                    pass
-                elif name == "platform-runtime-config":
+                if name == "platform-runtime-config":
                     item["data"] = {
                         "runtime.json": json.dumps(
                             configuration_wire(self.config),
@@ -173,17 +148,7 @@ class Renderer:
                     item["spec"].pop("suspend", None)
                 else:
                     item["spec"]["suspend"] = False
-                template = item["spec"]["jobTemplate"]["spec"]["template"]
-                if adapter == "mailsort-runner":
-                    template.setdefault("metadata", {}).setdefault(
-                        "annotations", {}
-                    ).update(
-                        {
-                            "personal-cloud/source-sha": target.source_sha,
-                            "personal-cloud/request-id": target.request_id,
-                        }
-                    )
-                pod = template["spec"]
+                pod = item["spec"]["jobTemplate"]["spec"]["template"]["spec"]
                 for container in (*pod.get("initContainers", []), *pod["containers"]):
                     container["image"] = image(
                         self.config, adapter, target.image_digest

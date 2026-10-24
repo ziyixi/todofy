@@ -77,7 +77,6 @@ def workloads(text: str) -> tuple[Workload, ...]:
             "newsletter",
             "personal-cloud",
             "deployment",
-            "mailsort-runner",
         }:
             raise ValueError("invalid_configuration")
         result.append(
@@ -120,30 +119,10 @@ def configuration(text: str) -> Configuration:
         or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value["repository"])
     ):
         raise ValueError("invalid_configuration")
-    configured = workloads(json.dumps(value["workloads"]))
-    if {item.adapter for item in configured} >= {
-        "newsletter",
-        "personal-cloud",
-    } and not any(item.adapter == "mailsort-runner" for item in configured):
-        configured = tuple(
-            sorted(
-                (
-                    *configured,
-                    Workload(
-                        "mailsort-runner",
-                        "mailsort-runner",
-                        "mailsort-runner",
-                        "mailsort-runner-release",
-                        "mailsort-runner",
-                    ),
-                ),
-                key=lambda item: item.key,
-            )
-        )
     return Configuration(
         value["node_key"],
         value["namespace"],
-        configured,
+        workloads(json.dumps(value["workloads"])),
         value["repository"],
         expected_daemons(value.get("expected_daemons", list(DAEMON_ALIASES))),
     )

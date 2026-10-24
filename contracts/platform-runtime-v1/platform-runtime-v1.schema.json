@@ -163,12 +163,6 @@
         "observed_generation": {
           "type": "integer",
           "minimum": 1
-        },
-        "observation_scope": {
-          "enum": [
-            "process",
-            "template"
-          ]
         }
       },
       "additionalProperties": false
@@ -334,41 +328,6 @@
           "items": {
             "$ref": "#/$defs/ReconcileChange"
           }
-        },
-        "reason_code": {
-          "$ref": "#/$defs/ReleaseErrorCode"
-        },
-        "template_changes": {
-          "type": "array",
-          "maxItems": 3,
-          "items": {
-            "$ref": "#/$defs/RunnerTemplateChange"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "RunnerTemplateChange": {
-      "type": "object",
-      "required": [
-        "resource_key",
-        "action",
-        "reason_code"
-      ],
-      "properties": {
-        "resource_key": {
-          "enum": [
-            "mailsort-runner",
-            "mailsort-runner-release",
-            "mailsort-runner-config"
-          ]
-        },
-        "action": {
-          "enum": [
-            "create",
-            "update",
-            "conflict"
-          ]
         },
         "reason_code": {
           "$ref": "#/$defs/ReleaseErrorCode"

@@ -25,9 +25,7 @@ export function releaseReady(item: WorkloadStatus): boolean {
     && desired.generation != null
     && actual.generation === desired.generation
     && release.observed_generation === desired.generation
-    && (release.observation_scope === 'template'
-      ? item.workload_key === 'mailsort-runner' && item.process_state === 'stopped'
-      : item.process_state === 'running')
+    && item.process_state === 'running'
     && ['accepting', 'unsupported'].includes(item.admission_state)
     && runtimeHealthReady(item);
 }

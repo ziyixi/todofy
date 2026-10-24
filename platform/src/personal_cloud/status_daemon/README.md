@@ -54,7 +54,7 @@ through the application lifespan. Status and release authorization remain separa
 }
 ```
 
-The current daemon starts its deployment controller with the process workloads above and the fixed hourly Mailsort runner. Bootstrap generates
+The current daemon starts its deployment controller with both workloads above. Bootstrap generates
 this profile from public configuration; the fixed application resource names and private service URLs
 remain part of the supported deployment boundary.
 

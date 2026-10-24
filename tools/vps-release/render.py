@@ -14,10 +14,10 @@ def render(root: Path, sha: str, images: dict[str, str]) -> dict:
     """Only public identity fields change; resource definitions remain reviewable YAML."""
     profile = tomllib.loads((root / "config/cloud.toml").read_text())
     repository = profile["repository"].lower()
-    if not re.fullmatch(r"[0-9a-f]{40}", sha) or set(images) not in (
-        {"newsletter", "platform"},
-        {"newsletter", "platform", "mailsort-runner"},
-    ):
+    if not re.fullmatch(r"[0-9a-f]{40}", sha) or set(images) != {
+        "newsletter",
+        "platform",
+    }:
         raise ValueError("Invalid release identity")
     for service, image in images.items():
         expected = rf"ghcr\.io/{re.escape(repository)}-{service}@sha256:[0-9a-f]{{64}}"
@@ -39,33 +39,18 @@ def render(root: Path, sha: str, images: dict[str, str]) -> dict:
         ("ConfigMap", "newsletter-release"),
         ("ConfigMap", "platform-release"),
         ("ConfigMap", "platform-runtime-config"),
-        ("CronJob", "mailsort-runner"),
-        ("ConfigMap", "mailsort-runner-release"),
-        ("ConfigMap", "mailsort-runner-config"),
     }
     actual = {(item["kind"], item["metadata"]["name"]) for item in items}
     if actual != expected_names or len(items) != len(expected_names):
         raise ValueError("Unexpected runtime resources")
     identity = release_id(sha)
-    if "mailsort-runner" not in images:
-        items = [
-            item
-            for item in items
-            if not item["metadata"]["name"].startswith("mailsort-runner")
-        ]
     for resource in items:
         resource["metadata"]["namespace"] = profile["vps"]["namespace"]
         name = resource["metadata"]["name"]
         if resource["kind"] == "ConfigMap":
             resource["data"] = _config_map(name, profile, sha, images, identity)
         elif resource["kind"] in {"Deployment", "CronJob"}:
-            service = (
-                "mailsort-runner"
-                if name.startswith("mailsort-runner")
-                else "platform"
-                if name.startswith("platform-")
-                else "newsletter"
-            )
+            service = "platform" if name.startswith("platform-") else "newsletter"
             template = resource["spec"]
             if resource["kind"] == "CronJob":
                 template = template["jobTemplate"]["spec"]
@@ -118,16 +103,8 @@ def _variables(variables: list, profile: dict, sha: str, identity: str) -> None:
 def _config_map(
     name: str, profile: dict, sha: str, images: dict, identity: str
 ) -> dict:
-    if name == "mailsort-runner-config":
-        return {"MAILSORT_URL": "https://sort." + profile["zone"]}
     if name != "platform-runtime-config":
-        service = (
-            "mailsort-runner"
-            if name == "mailsort-runner-release"
-            else "platform"
-            if name == "platform-release"
-            else "newsletter"
-        )
+        service = "platform" if name == "platform-release" else "newsletter"
         return {
             "request_id": identity,
             "source_sha": sha,
@@ -141,13 +118,6 @@ def _config_map(
         "repository": profile["repository"],
         "expected_daemons": profile["vps"]["expected_daemons"],
         "workloads": [
-            {
-                "workload_key": "mailsort-runner",
-                "deployment": "mailsort-runner",
-                "container": "mailsort-runner",
-                "release_configmap": "mailsort-runner-release",
-                "adapter": "mailsort-runner",
-            },
             {
                 "workload_key": "newsletter",
                 "deployment": "newsletter",
@@ -164,8 +134,4 @@ def _config_map(
             },
         ],
     }
-    if "mailsort-runner" not in images:
-        config["workloads"] = [
-            item for item in config["workloads"] if item["adapter"] != "mailsort-runner"
-        ]
     return {"runtime.json": json.dumps(config, sort_keys=True, indent=2)}

@@ -29,11 +29,10 @@ message Settings {
   // The mode in force: the owner's, lowered by the deployment's MAILSORT_MODE switch (off or shadow) or by the
   // breaker (shadow).
   Mode effective_mode = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // At most this many Gmail writes per alarm run (retries included), 1 to 10. Remaining intents wait.
+  // At most this many Gmail writes per alarm run (retries included), 1 to 10. Passing it trips the breaker.
   int32 run_write_limit = 4 [(google.api.field_behavior) = OPTIONAL];
-  // At most this many Gmail writes per UTC day, 1 to 500. Remaining intents wait for the next day.
+  // At most this many Gmail writes per UTC day, 1 to 500. Passing it trips the breaker.
   int32 daily_write_limit = 5 [(google.api.field_behavior) = OPTIONAL];
-  // Deprecated: retained legacy Workers AI budget; the hourly runner does not use neurons.
   // The Workers AI neurons mailsort may use per UTC day (estimated), 500 to 10000. Past 70 % of it the rest
   // of the day uses Clef-flash.
   int32 daily_neuron_budget = 6 [(google.api.field_behavior) = OPTIONAL];
@@ -146,17 +145,17 @@ message ServiceStatus {
   int32 unsure_today_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Requests to Google today.
   int32 gmail_call_today_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Deprecated: historical Workers AI calls today.
+  // Workers AI calls today.
   int32 ai_call_today_count = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Deprecated: historical Workers AI usage. The neurons used today, estimated from the reported input tokens and the models' prices.
+  // The neurons used today, estimated from the reported input tokens and the models' prices.
   double neurons_today = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The daily neuron budget (Settings.daily_neuron_budget).
   int32 daily_neuron_budget = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The latest actual runner model; empty before its first report.
+  // The decision model in use now: `clef` or `clef-flash`.
   string decision_model = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Deprecated: historical Workers AI quota state. Workers AI refused for quota today: the remaining mails wait for the next UTC day.
+  // Workers AI refused for quota today: the remaining mails wait for the next UTC day.
   bool ai_quota_exhausted = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Deprecated: historical examples without an embedding; embeddings no longer run.
+  // Examples without an embedding yet.
   int32 unembedded_example_count = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The last few error codes (newest first, at most 8), e.g. `gmail_429`, `ai_unavailable`.
   repeated string recent_error_codes = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -169,8 +168,6 @@ message ServiceStatus {
   // (-- api-linter: core::0122::embedded-resource=disabled
   //     aip.dev/not-precedent: This singleton is a bounded status projection for the same owner UI. --)
   UnreadClassification unread_classification = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Latest hourly runner status, with no email content.
-  ClassificationBatchStatus batch_status = 24 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One owner-requested classification batch; the resource keeps its original name. Counts contain no mail content.
@@ -211,38 +208,6 @@ message UnreadClassification {
   int32 failed_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Pending messages waiting for their next eligible time, including daily quota deferral.
   int32 deferred_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// Latest machine runner invocation. Gmail application can continue after the runner completed.
-message ClassificationBatchStatus {
-  // Actual run identity.
-  string run_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Running, completed or failed.
-  string state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Claim start time; never treated as a successful completion.
-  google.protobuf.Timestamp started_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Most recent successful completion, even when the latest invocation failed.
-  google.protobuf.Timestamp completed_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Safe last runner error code.
-  string error_code = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Actual model reported by the SDK.
-  string model = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Actual reasoning effort.
-  string effort = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // SHA-256 prompt identity.
-  string prompt_sha = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Selected model inputs.
-  int32 selected_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Decisions durably accepted.
-  int32 judged_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // All valid persisted Gmail write intents, including earlier runs waiting for their write allowance.
-  int32 pending_write_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Cumulative SDK input tokens.
-  optional int32 input_tokens = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Cumulative SDK output tokens.
-  optional int32 output_tokens = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Usage came from an incomplete model turn.
-  bool usage_partial = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // What the pipeline may do.

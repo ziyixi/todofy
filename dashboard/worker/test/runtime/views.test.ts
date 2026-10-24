@@ -105,10 +105,7 @@ describe('GetRegistry', () => {
     const first = await h.view<Registry>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(VIEW_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'mailsort-runner', 'tasks', 'personal-mcp', 'self-hosted']);
-    expect(first.body?.entries.find((entry) => entry.id === 'mailsort-runner')).toMatchObject({
-      group: 'hidden', status_type: 'none', scripts: [],
-    });
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'tasks', 'personal-mcp', 'self-hosted']);
     expect(first.body?.entries.find((entry) => entry.id === 'personal-mcp')).toMatchObject({
       group: 'services', access: true, status_type: 'ops_v1', scripts: ['personal-mcp'],
     });
@@ -265,7 +262,7 @@ describe('GetCloudflareView and RefreshCloudflareView', () => {
     expect(cf.workers_truncated).toBe(false);
     expect(cf.resources.map((r) => r.kind)).toEqual(['d1', 'd1', 'do', 'do', 'do', 'r2', 'r2']);
     expect(cf.resources.find((r) => r.id === 'mail-hero-store')).toMatchObject({ resource: 'mail-hero-store', entry: 'mail-hero' });
-    expect(Object.keys(cf.guard.apps).sort()).toEqual(['brief', 'mail-hero', 'todofy', 'watch']);
+    expect(Object.keys(cf.guard.apps).sort()).toEqual(['brief', 'mail-hero', 'mailsort', 'todofy', 'watch']);
     if (count >= 5) {
       expect(cf.workers.find((w) => w.script === 'todofy-core')).toMatchObject({ entry: 'todofy', requests: 96, do_requests: 632, cpu_p99_us: 6207 });
       // Errors first, then requests.

@@ -1,55 +1,80 @@
 # mailsort
 
-Personal Gmail reading queues at `sort.ziyixi.science`. A VPS job checks once an hour and uses
-GPT-6.1 Sol medium to classify unread mail that has no P1–P4 label. The UI is Chinese; Gmail labels are English.
+Personal Gmail reading priorities at `sort.ziyixi.science`. New incoming messages get one of four real Gmail labels.
+The UI uses Chinese; Gmail labels are `P1`, `P2`, `P3`, `P4`.
 
 | Label | When to read | Gmail action |
 | --- | --- | --- |
-| P1 | Timely attention; waiting two or three days would miss a concrete matter | Label and keep in Inbox |
-| P2 | Important contact or follow-up within two or three days | Label and archive |
-| P3 | Personal life/account review or selected reading for the weekend | Label and archive |
-| P4 | Routine information and promotions, kept for later lookup | Label and archive |
+| P1 | Promptly, or the model cannot confidently choose a later time | Add P1; keep in Inbox |
+| P2 | Important information or required follow-up that can wait two or three days | Add P2; archive |
+| P3 | Substantive optional reading for a weekend session | Add P3; archive |
+| P4 | Routine FYI, receipts or promotions without meaningful follow-up or substantial reading | Add P4; archive |
 
-Read state, stars and other labels stay unchanged. Mailsort never sends, deletes or trashes mail.
-Gmail's Spam handling stays unchanged. No sender-brand rules or probability thresholds decide a priority.
+Mail is never marked read, sent, trashed or deleted. Reading cadence is not a timer: the app does not move mail
+back into Inbox later or create tasks. Tasks' Mail categories and task priorities are independent.
 
-## Daily use
+## Classification
 
-- **概览** shows recent classifications, actual Gmail writes and the latest hourly batch: completion, model,
-  prompt version, token usage and failures. A successful check with no work is separate from an unreachable job.
-- **分级** shows P1–P4. **整理当前未读** selects only ungraded unread messages, including archived ones.
-  **重新判断全部未读** explicitly includes unread messages already carrying a priority; read mail is excluded.
-  Both join the next hourly job, rather than starting a second classifier.
-- **设置** keeps off/shadow/live, the existing daily Gmail write cap and undo controls. Shadow records decisions without writes;
-  off stops Gmail reads and classification. Existing write limits still apply.
+Workers AI Clef judges when it is safe to read the masked message, using receipt time, local date/week and current
+priority examples. A confident result needs the existing two-view agreement and threshold; valid uncertainty or
+`none` becomes P1. The original model result and fallback reason remain separate from that assigned label.
+Fallback P1 does not teach sender history or daily weak learning without an explicit owner verdict. Real synthetic
+captures set the combined threshold to 0.55; both views must still agree and the first-view gate remains 0.4.
+Provider errors use the existing backoff and can fail
+after retries; quota exhaustion waits for the next UTC day. Neither creates a priority judgment. Each new reply is
+judged independently; message IDs still deduplicate delivery. A new reply carrying an earlier priority can replace it without changing other
+labels, unread or starred state. Normal processing keeps its new-mail receipt cutoff.
 
-Routine runs do not reclassify already graded messages, including after a prompt update. Every reply has its own
-message identity. A model failure leaves mail unclassified for the next hour; no fallback classifier assigns P1.
-Persisted decisions waiting for Gmail writes resume through the existing ledger without calling Codex again.
-If an explicit recheck exceeds 100 messages, its remaining members continue next hour. Once all were judged,
-new mail can be checked while previous Gmail writes wait for their daily allowance.
+On **分级**, the owner can choose **开始整理** under **整理当前未读邮件** (`StartUnreadClassification`). It first collects unread message
+IDs across all ages and folders, including archived mail, then processes that batch through the existing Alarm
+and pending queue. Spam, Trash and the normal incoming-mail exclusions are skipped, as are messages already
+carrying P1-P4 or no longer unread. Only this batch bypasses the new-mail cutoff and may replace a message's
+latest stored decision; old Gmail write ledgers remain. P1 puts an archived message in Inbox; ordinary undo restores
+its original Inbox position. Read/unread, stars and unrelated labels are preserved.
 
-## Components
+**重判保底 P1** uses the same request with `recheck_fallback=true`. It selects only current-priority unread
+fallback P1 decisions without an explicit owner confirmation or correction. Before judging, the app rereads Gmail
+and skips mail that is now read or no longer carries only P1. A result that remains P1 updates model evidence
+without another Gmail write and counts as skipped; a P2-P4 result uses the existing write ledger and archives.
 
-- `mailsort/`: Cloudflare Worker, existing SQLite `MailsortState` DO and owner UI. It owns the Gmail grant,
-  message preparation, classification records, write ledger, retention and Home's private Ops binding.
-- [`mailsort-runner/`](../mailsort-runner/README.md): independent image and hourly k3s CronJob. It claims masked
-  inputs, makes one Codex turn for at most 100 messages, reports the results and exits. No VPS HTTP port is added.
-- [`proto/mailsort/runner/v1`](../proto/mailsort/runner/v1/mailsort_runner_service.proto): the two typed machine
-  endpoints, `classification:claim` and `classification:report`. They use a separate Bearer; owner APIs keep
-  Access JWT, Origin and CSRF checks. The VPS has no Gmail credential.
+**重判原100封** selects the first 100 distinct messages successfully auto-graded under the current P1-P4 setup,
+including read and archived mail. Original ledger order freezes this cohort even after later arrivals or rechecks;
+it does not mean the newest 100 messages in Gmail. Owner-adjusted mail is skipped. An unchanged priority refreshes
+evidence without a Gmail write; a changed priority uses the normal ledger and preserves read state, stars and
+unrelated labels. The latest undo restores the pre-recheck labels and Inbox position.
 
-The Alarm maintains Gmail history, owner corrections, retention and pending Gmail writes. It no longer calls
-Clef, embeddings or replay evaluation. Historical decisions and ledgers remain readable. The Worker no longer
-has a Workers AI binding.
+The existing modes, write caps and model budget apply. At 70% of the daily neuron budget the model switches to
+Clef-flash; exhaustion defers work to the next UTC day. A paused mode or a reached write cap leaves batch work
+waiting. Progress distinguishes applied, skipped, failed and pending messages; completion does not mean every
+message received a label. Only the latest batch's IDs, state, ledger links and scan progress are kept until the
+next batch replaces them or the app's data is deleted; this progress stores no mail content.
 
-The maintained instructions are [`prompt.txt`](../mailsort-runner/src/mailsort_runner/prompt.txt). Change that file,
-pass branch CI and publish the same SHA through main. The prompt hash travels with every batch. No new database,
-queue or model-provider framework is involved.
+There is no model phishing/scam question, suspicious-score gate or trusted-domain requirement. Gmail's own spam
+handling is unchanged. Financial notices get a reading priority from their contents, without sender-brand rules.
 
-## Development
+## UI
 
-Node 26, from `worker/`:
+- **概览**: mode, Gmail grant, freshness, today's flow, per-priority counts and the model budget. The last-seven-day
+  P1 count distinguishes direct P1 decisions from conservative fallback assignments.
+- **分级**: four fixed rows, their Inbox/archive behavior, learned examples loaded only on expansion, and the explicit
+  unread-batch action and progress.
+- **设置**: owner mode, existing undo and the read-only classification-effect check. Gmail corrections teach the
+  priority model. Uncertain mail does not require a separate review; the old `/review` path remains readable.
+
+The initial **启用 P1–P4 分级** action replaces this app's old topic labels and learning. It deletes the old managed
+Gmail labels, including known retired identities, while retaining every message and its existing Inbox/unread
+state. Other labels stay untouched. Old decisions and ledgers remain history, excluded from new learning;
+an explicit unread batch may later replace the selected messages' latest decisions.
+A bounded step can be continued with the same stored setup; there is no background migration service.
+See [priority setup and verification](docs/priority-rollout.md).
+
+## Architecture and development
+
+One Worker, the existing SQLite `MailsortState` DO and its Alarm, plus static UI assets. No added database,
+scheduler, model provider or secret. Production Gmail calls go only through `worker/src/gmail.ts` and its closed
+operation table. Model, daily neuron budget, mode ceiling and request/write limits retain their existing values.
+
+From `worker/`, with Node 26:
 
 ```sh
 npm ci
@@ -60,20 +85,17 @@ npm run test:smoke
 node --test ../deploy/test/*.test.mjs
 ```
 
-UI checks run in `web/`. Runner checks and image build instructions are in its README. Workerd and the real local
-Wrangler smoke use synthetic mail, fake Gmail and submitted synthetic model results; they make no live model call.
-The runtime checks cover actual local SQLite/HTTP writes and Worker/DO CPU limits. They do not measure model quality.
+The runtime and smoke tests use local workerd/SQLite, fake Gmail and fake Workers AI. They never call Google or
+read personal mail. UI checks run in `web/`: `npm run lint && npm run typecheck && npm test && npm run build`.
+Design, storage bounds and retention are in [design](docs/design.md); collaboration rules in [AGENTS](AGENTS.md).
 
-## Deployment and credentials
+## Release and credentials
 
-Pass the complete branch CI gate, then publish that exact SHA through main. Mailsort's wrapper injects build,
-mode and secrets; it preserves the owner's Gmail grant. Never deploy with plain Wrangler or place Gmail tokens
-in GitHub. `CLASSIFICATION_TOKEN_SHA256` is the machine token's digest in `MAILSORT_WORKER_SECRETS`; the raw token
-is only in the runner's private Kubernetes Secret. Only the two exact machine paths bypass interactive Access.
+Pass the complete branch CI gate, then release the exact same SHA through main's `Mailsort deploy`. The existing
+wrapper injects `BUILD_SHA`, the `MAILSORT_MODE` ceiling and Access/CSRF material. It preserves Gmail credentials.
+Do not use a plain `wrangler deploy` or put Gmail credentials in GitHub. Only the owner initializes those through
+`deploy/mint-token.mjs` on their own machine.
 
-First installation uses the fixed CI bundle's [runner foundation](../tools/vps-bootstrap/README.md)
-for its independent auth volume and Secret. Complete the runner's own official Codex login; do not share
-Newsletter's auth volume. Subsequent updates use the existing deployment daemon and GitHub Actions.
-A verified CronJob template does not prove that a natural batch ran or that Gmail accepted its labels.
-
-See [design](docs/design.md), [collaboration rules](AGENTS.md) and the root [rebuild guide](../docs/rebuild.md).
+The dashboard mode is lowered by the deployment ceiling and existing breaker. Initialization does not change
+mode or budgets. Off stops normal Gmail processing; retention still runs. Home reads only the standard private
+Ops binding. See the root [rebuild guide](../docs/rebuild.md) for a new account.

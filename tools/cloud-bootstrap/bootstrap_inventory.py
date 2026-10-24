@@ -17,11 +17,9 @@ TABLES = {
 POLICY_KEYS = {
     "github-owner": "github_owner", "fleet-receipt": "fleet_receipt",
     "brief-feedback": "brief_feedback", "recall-machine": "recall_machine",
-    "mailsort-machine": "mailsort_machine",
 }
 STANDALONE = {
     "fleet-receipt": "cloudflare_zero_trust_access_application.fleet_receipt",
-    "mailsort-machine": "cloudflare_zero_trust_access_application.mailsort_machine",
     "mail-hero-backup": "cloudflare_zero_trust_access_application.mail_hero_backup",
 }
 PLATFORM_ADDRESSES = {

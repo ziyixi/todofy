@@ -27,6 +27,7 @@ import {
   UndoLedgerEntriesResponseSchema,
   type MailsortUiService,
 } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
+import { ReplayEvaluationSchema } from '@ziyixi/proto/mailsort/ui/v2/replay_pb';
 import { LedgerEntrySchema, ReviewItemSchema } from '@ziyixi/proto/mailsort/ui/v2/review_pb';
 import { LabelCountSchema, LabelReportSchema, ServiceStatus_AuthState, ServiceStatusSchema, SettingsSchema, UnreadClassificationSchema, type Settings } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { decodePageToken, encodePageToken, PageTokenError, type PageParameters } from '@ziyixi/proto/page-token';
@@ -43,9 +44,12 @@ import { newEtag, shortId } from './ids.ts';
 import { createLabelMerge, labelMergeSummary, migrationActive, MergeError, resumeLabelMerge, type MergePlanItem, type MergeSummary } from './label-merge.ts';
 import { canonicalDecision, canonicalReview, effectiveLedgerRow } from './label-identity.ts';
 import {
+  CLEF,
+  CLEF_FLASH,
   DAILY_WRITE_LIMIT_MAX,
   DAY,
   DESCRIPTION_MAX,
+  FLASH_SWITCH_SHARE,
   ID_PATTERN,
   LABEL_ID_PATTERN,
   LABELS_MAX,
@@ -60,8 +64,7 @@ import {
 import { exampleMessage, flowMessage, labelMessage, labelName, ledgerMessage, MODES, modeName, replayMessage, reviewMessage } from './model.ts';
 import { labelIdFor, ownerPath, pathOfGmailName, treeConflict } from './paths.ts';
 import { REASONS, sortError } from './reasons.ts';
-import { replaySummary } from './replay.ts';
-import { batchStatus } from './runner.ts';
+import { replaySummary, startReplay } from './replay.ts';
 import { initializePriorities } from './priority-setup.ts';
 import { prioritySetup, priorityStartedAt } from './priority.ts';
 import { authState, type Budget, writeScope } from './session.ts';
@@ -85,6 +88,7 @@ export interface ApiContext {
   /** A Gmail client for this request, or why there is none. */
   readonly gmail: () => Promise<GmailClient | 'not_configured' | 'stopped'>;
   readonly budget: Budget;
+  readonly shed: boolean;
   /** Existing alarm or owner mutation must finish before accepting a consolidation. */
   readonly consolidationBusy: () => boolean;
 }
@@ -492,16 +496,15 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
 
   async startUnreadClassification(request, ctx) {
     if (request.name !== 'unreadClassification') notFound();
-    if ([request.recheckFallback, request.recheckInitial100, request.recheckAllUnread].filter(Boolean).length > 1) bad('请选择一种重判范围。');
+    if (request.recheckFallback && request.recheckInitial100) bad('请选择一种重判范围。');
     let scope = request.name;
-    if (request.recheckAllUnread) scope += ':all-unread';
-    else if (request.recheckInitial100) scope += ':initial100';
+    if (request.recheckInitial100) scope += ':initial100';
     else if (request.recheckFallback) scope += ':fallback';
     const answer = once(ctx, request.requestId, 'StartUnreadClassification', scope, UnreadClassificationSchema, () => {
       if (priorityStartedAt(ctx.store) === 0) bad('请先完成 P1–P4 分级设置。');
       if (!ownerWritesAllowed(ctx)) bad('请先恢复正式模式及 Gmail 写入授权。');
       if (ctx.consolidationBusy()) bad('邮件正在处理，请稍后再开始整理。');
-      startUnread(ctx.store, ctx.now, request.recheckFallback, request.recheckInitial100, request.recheckAllUnread);
+      startUnread(ctx.store, ctx.now, request.recheckFallback, request.recheckInitial100);
       return unreadProgress(ctx.store, ctx.now) ?? notFound();
     });
     await ctx.wake();
@@ -958,8 +961,15 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     return Promise.resolve(replayMessage(summary ?? notFound()));
   },
 
-  startReplayEvaluation() {
-    throw new RpcError(REASONS.BAD_REQUEST.code, 'BAD_REQUEST', 'Replay is no longer supported by the hourly runner.');
+  async startReplayEvaluation(request, ctx) {
+    if (request.name !== 'replayEvaluation') notFound();
+    const answer = once(ctx, request.requestId, 'StartReplayEvaluation', 'replayEvaluation', ReplayEvaluationSchema, () => {
+      if (replaySummary(ctx.store)?.state === 'running') throw sortError('REPLAY_ACTIVE');
+      startReplay(ctx.store, ctx.now);
+      return replayMessage(replaySummary(ctx.store) ?? notFound());
+    });
+    await ctx.wake();
+    return answer;
   },
 
   async getServiceStatus(request, ctx) {
@@ -972,13 +982,11 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const alarm = await ctx.alarmAt();
     const pending = store.count(`SELECT count(*) AS n FROM pending WHERE not_before <= ?`, ctx.now);
     const deferred = store.count(`SELECT count(*) AS n FROM pending WHERE not_before > ?`, ctx.now);
-    const batch = batchStatus(store);
-    const model = batch?.model ?? '';
+    const model = ctx.shed || usage.neurons >= FLASH_SWITCH_SHARE * settings.dailyNeuronBudget ? CLEF_FLASH : CLEF;
     return create(ServiceStatusSchema, {
       name: 'serviceStatus',
       prioritiesInitialized: priorityStartedAt(store) > 0,
       unreadClassification: unreadProgress(store, ctx.now),
-      batchStatus: batch,
       effectiveMode: MODES[effectiveMode(settings, ctx.ceiling)],
       authState: auth === 'not_configured' ? ServiceStatus_AuthState.NOT_CONFIGURED : auth === 'failed' ? ServiceStatus_AuthState.FAILED : ServiceStatus_AuthState.OK,
       writeScope: writeScope(store),
@@ -994,7 +1002,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       aiCallTodayCount: usage.ai_calls,
       neuronsToday: Math.round(usage.neurons * 10) / 10,
       dailyNeuronBudget: settings.dailyNeuronBudget,
-      decisionModel: model,
+      decisionModel: model === CLEF_FLASH ? 'clef-flash' : 'clef',
       aiQuotaExhausted: usage.quota_exhausted === 1,
       unembeddedExampleCount: store.count(`SELECT count(*) AS n FROM examples WHERE embedding IS NULL`),
       recentErrorCodes: store.errors(),

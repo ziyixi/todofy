@@ -144,7 +144,6 @@ KEYS = (
     "newsletter_check",
     "fleet_check",
     "platform_check",
-    "mailsort_runner_check",
     "mailsort_check",
     "recall_check",
     "brief_check",
@@ -164,7 +163,6 @@ KEYS = (
     "newsletter_deploy",
     "fleet_deploy",
     "platform_publish",
-    "mailsort_runner_deploy",
     "platform_deploy",
     "mailsort_deploy",
     "recall_deploy",
@@ -185,7 +183,6 @@ DISPATCH = {
     "newsletter": ("newsletter",),
     "fleet": ("fleet",),
     "platform": ("platform",),
-    "mailsort-runner": ("mailsort-runner",),
     "mailsort": ("mailsort",),
     "recall": ("recall",),
     "brief": ("brief",),
@@ -198,7 +195,7 @@ RELAY = "website/relay/"
 # Release (recall_extension_publish).
 EXTENSION = ("recall/extension/", "recall/shared/")
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"links", "newsletter", "mailsort-runner"}
+NO_CONTRACTS = {"links", "newsletter"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")
@@ -214,7 +211,6 @@ CLOUD_CONFIG = {"config/cloud.toml", "config/resources.toml", "config/account-re
 APP_TEST_DIRECTORIES = (
     "newsletter/tests/",
     "platform/tests/",
-    "mailsort-runner/tests/",
     "todofy/tests/",
     "todofy/gateway/test/",
     "mail-hero/cloudflare/test/",
@@ -245,7 +241,6 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "watch": ("ts",),
     "fleet": ("ts",),
     "platform": ("python",),
-    "mailsort-runner": ("python",),
     "website": ("ts",),
     "mailsort": ("ts",),
     "recall": ("ts",),
@@ -285,7 +280,6 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/watch/ui/": ("watch", "personal-mcp"),
     # mailsort's owner API (mailsort.ui.v2, after v1): its Worker serves it, its UI calls it.
     "proto/mailsort/ui/": ("mailsort",),
-    "proto/mailsort/runner/": ("mailsort", "mailsort-runner"),
     "proto/fleet/ui/": ("fleet",),
     "proto/fleet/telemetry/": ("fleet", "platform"),
     "proto/platform/runtime/": ("fleet", "platform"),
@@ -351,7 +345,7 @@ PROTO_NOT_BUNDLED = (
 # (PROTO_PACKAGES).
 # test_ci_changes.py checks this map against the Workers' imports.
 BUNDLED_BY = {
-    "contracts/ops-v1/ops-v1.ts": ("mail-hero", "dashboard", "watch", "brief"),
+    "contracts/ops-v1/ops-v1.ts": ("mail-hero", "dashboard", "watch", "mailsort", "brief"),
 }
 
 # Outputs that describe a reused branch run (strings, one line each).
@@ -371,7 +365,6 @@ CHECK_JOBS = {
     "newsletter_check": ("Newsletter checks", "Newsletter image checks"),
     "fleet_check": ("Fleet checks",),
     "platform_check": ("Platform checks",),
-    "mailsort_runner_check": ("Mailsort runner checks",),
     "mailsort_check": ("Mailsort checks",),
     "recall_check": ("Recall checks",),
     "brief_check": ("Brief checks",),
@@ -405,11 +398,11 @@ def outputs(
     extension: bool = False,
 ) -> dict[str, bool]:
     checked, deployed = set(checked), set(deployed)
-    # This release profile takes three independently tested images of the same source SHA. Any publication/VPS
-    # deployment input therefore publishes all three; metadata-only inputs still check without publishing.
-    if deployed & {"newsletter", "platform", "mailsort-runner"}:
-        checked.update({"newsletter", "platform", "mailsort-runner"})
-        deployed.update({"newsletter", "platform", "mailsort-runner"})
+    # This release profile takes two independently tested images of the same source SHA. Any publication/VPS
+    # deployment input therefore publishes both; metadata-only inputs still check without publishing.
+    if deployed & {"newsletter", "platform"}:
+        checked.update({"newsletter", "platform"})
+        deployed.update({"newsletter", "platform"})
     result = {
         "contracts": contracts,
         "packages": packages,
@@ -477,10 +470,10 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     # Catalog metadata and reviewed test directories are checked, but are not production inputs.
     direct_deploys = {app for app in apps if any(path.startswith(f"{app}/") and path != f"{app}/app.toml"
                        and not path.startswith(APP_TEST_DIRECTORIES)
-                       and not (app in {"newsletter", "platform", "mailsort-runner"} and path.endswith(".md")) for path in paths)}
+                       and not (app in {"newsletter", "platform"} and path.endswith(".md")) for path in paths)}
     if "newsletter" in direct_deploys:
         direct_deploys.add("platform")
-    # This shared promotion tool owns the fixed tested-image publications. Its executable changes need fresh tested
+    # This shared promotion tool owns both tested-image publications. Its executable changes need fresh tested
     # images and the gated VPS release; its Markdown remains ordinary tooling documentation (checks only).
     if any(path.startswith(("tools/container-release/", "tools/platform-build/", "tools/vps-release/")) and not path.endswith(".md") for path in paths):
         direct_deploys.update({"newsletter", "platform"})
@@ -640,8 +633,6 @@ def find_reusable(
                 tested_artifacts.append(f"newsletter-image-{sha}")
             if result["platform_publish"]:
                 tested_artifacts.append(f"platform-image-{sha}")
-            if result["mailsort_runner_deploy"]:
-                tested_artifacts.append(f"mailsort-runner-image-{sha}")
             if result["recall_extension_publish"]:
                 tested_artifacts.extend([f"recall-extension-{sha}", f"recall-orion-{sha}"])
             if tested_artifacts:

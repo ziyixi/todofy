@@ -22,7 +22,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, mailsort-runner, mailsort, recall, brief, tasks, personal-mcp]
+        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, mailsort, recall, brief, tasks, personal-mcp]
         default: both
       resume_vps_release:
         description: Explicitly resume a held VPS release after investigating its safe error
@@ -63,7 +63,6 @@ jobs:
       newsletter_check: ${{ steps.decide.outputs.newsletter_check }}
       fleet_check: ${{ steps.decide.outputs.fleet_check }}
       platform_check: ${{ steps.decide.outputs.platform_check }}
-      mailsort_runner_check: ${{ steps.decide.outputs.mailsort_runner_check }}
       mailsort_check: ${{ steps.decide.outputs.mailsort_check }}
       recall_check: ${{ steps.decide.outputs.recall_check }}
       brief_check: ${{ steps.decide.outputs.brief_check }}
@@ -85,7 +84,6 @@ jobs:
       newsletter_deploy: ${{ steps.decide.outputs.newsletter_deploy }}
       fleet_deploy: ${{ steps.decide.outputs.fleet_deploy }}
       platform_publish: ${{ steps.decide.outputs.platform_publish }}
-      mailsort_runner_deploy: ${{ steps.decide.outputs.mailsort_runner_deploy }}
       platform_deploy: ${{ steps.decide.outputs.platform_deploy }}
       mailsort_deploy: ${{ steps.decide.outputs.mailsort_deploy }}
       recall_deploy: ${{ steps.decide.outputs.recall_deploy }}
@@ -606,21 +604,9 @@ jobs:
         with:
           build-image: ${{ !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release) }}
 
-  mailsort-runner-checks:
-    name: Mailsort runner checks
-    needs: changes
-    if: needs.changes.outputs.mailsort_runner_check == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/check-mailsort-runner
-
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, mailsort-runner-checks, personal-mcp-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, personal-mcp-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -646,7 +632,6 @@ jobs:
           NEWSLETTER: ${{ needs.newsletter-checks.result }}
           NEWSLETTER_IMAGE: ${{ needs.newsletter-image.result }}
           PLATFORM: ${{ needs.platform-checks.result }}
-          MAILSORT_RUNNER: ${{ needs.mailsort-runner-checks.result }}
           CONTRACTS: ${{ needs.contracts.result }}
           INFRA: ${{ needs.infra-checks.result }}
           PROTO: ${{ needs.proto-checks.result }}
@@ -666,7 +651,7 @@ jobs:
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
             "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" "Mailsort checks=$MAILSORT" \
             "Tasks checks=$TASKS" "Recall checks=$RECALL" "Brief checks=$BRIEF" "Personal MCP checks=$PERSONAL_MCP" \
-            "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" "Mailsort runner checks=$MAILSORT_RUNNER" \
+            "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
             case "${pair#*=}" in
@@ -748,48 +733,14 @@ jobs:
         with:
           artifact-run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
 
-  mailsort-runner-image:
-    name: Mailsort runner image
-    needs: [changes, mailsort-runner-checks, gate]
-    if: >-
-      ${{ !cancelled()
-      && needs.changes.result == 'success'
-      && (needs.mailsort-runner-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.mailsort-runner-checks.result == 'skipped'))
-      && needs.gate.result == 'success'
-      && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-      && !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
-      && needs.changes.outputs.mailsort_runner_deploy == 'true' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      actions: read
-      packages: write
-    environment: production
-    concurrency:
-      group: mailsort-runner-image-production
-      cancel-in-progress: false
-    outputs:
-      image: ${{ steps.publish.outputs.image }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run publish-mailsort-runner steps
-        id: publish
-        uses: ./.github/actions/publish-mailsort-runner
-        with:
-          artifact-run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
-
   vps-bootstrap-bundle:
     name: VPS bootstrap bundle
-    needs: [changes, newsletter-deploy, platform-image, mailsort-runner-image, gate]
+    needs: [changes, newsletter-deploy, platform-image, gate]
     if: >-
       ${{ !cancelled() && needs.gate.result == 'success'
       && needs.changes.result == 'success'
       && github.ref == 'refs/heads/main'
-      && needs.newsletter-deploy.result == 'success' && needs.platform-image.result == 'success' && needs.mailsort-runner-image.result == 'success' }}
+      && needs.newsletter-deploy.result == 'success' && needs.platform-image.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -803,20 +754,19 @@ jobs:
         with:
           newsletter-image: ${{ needs.newsletter-deploy.outputs.image }}
           platform-image: ${{ needs.platform-image.outputs.image }}
-          mailsort-runner-image: ${{ needs.mailsort-runner-image.outputs.image }}
 
   vps-deploy:
     name: VPS deploy
-    needs: [changes, platform-checks, newsletter-deploy, platform-image, mailsort-runner-image, vps-bootstrap-bundle, fleet-deploy, gate]
+    needs: [changes, platform-checks, newsletter-deploy, platform-image, vps-bootstrap-bundle, fleet-deploy, gate]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.platform-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.platform-checks.result == 'skipped'))
       && ((github.event_name == 'workflow_dispatch' && inputs.resume_vps_release
-          && needs.newsletter-deploy.result == 'skipped' && needs.platform-image.result == 'skipped' && needs.mailsort-runner-image.result == 'skipped'
+          && needs.newsletter-deploy.result == 'skipped' && needs.platform-image.result == 'skipped'
           && needs.vps-bootstrap-bundle.result == 'skipped')
         || (!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
-          && needs.newsletter-deploy.result == 'success' && needs.platform-image.result == 'success' && needs.mailsort-runner-image.result == 'success'
+          && needs.newsletter-deploy.result == 'success' && needs.platform-image.result == 'success'
           && needs.vps-bootstrap-bundle.result == 'success'))
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
       && needs.gate.result == 'success'
@@ -845,7 +795,6 @@ jobs:
           platform-deploy-token: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
           newsletter-image: ${{ needs.newsletter-deploy.outputs.image }}
           platform-image: ${{ needs.platform-image.outputs.image }}
-          mailsort-runner-image: ${{ needs.mailsort-runner-image.outputs.image }}
           resume-release: ${{ inputs.resume_vps_release && 'true' || 'false' }}
           source-sha: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}
 

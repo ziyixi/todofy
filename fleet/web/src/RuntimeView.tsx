@@ -26,20 +26,15 @@ export function RuntimeView({ runtime }: { runtime: NodeStatus | null | undefine
       {runtime.workloads.map((item) => (
         <article key={item.workload_key}>
           <h3>{item.workload_key}</h3>
-          {item.release.observation_scope !== 'template' && (
-            <p>
-              进程：{label(item.process_state)} · 接收任务：{label(item.admission_state)} ·
-              健康：{label(item.health_state)}
-            </p>
-          )}
+          <p>
+            进程：{label(item.process_state)} · 接收任务：{label(item.admission_state)} ·
+            健康：{label(item.health_state)}
+          </p>
           <p>发布状态：{label(item.release.state)}</p>
-          {item.release.observation_scope === 'template' && (
-            <p>已核验小时任务模板，当前无需持续运行进程。执行结果以 Mailsort 的批次状态为准。</p>
-          )}
           <p>目标提交：<code>{item.release.desired?.source_sha ?? '未知'}</code></p>
-          <p>{item.release.observation_scope === 'template' ? '模板提交' : '实际提交'}：<code>{item.release.actual?.source_sha ?? '未知'}</code></p>
+          <p>实际提交：<code>{item.release.actual?.source_sha ?? '未知'}</code></p>
           <p>目标镜像：<code>{item.release.desired?.image_digest ?? '未知'}</code></p>
-          <p>{item.release.observation_scope === 'template' ? '模板镜像' : '实际镜像'}：<code>{item.release.actual?.image_digest ?? '未知'}</code></p>
+          <p>实际镜像：<code>{item.release.actual?.image_digest ?? '未知'}</code></p>
           <p>目标请求：<code>{item.release.desired?.request_id ?? '未知'}</code></p>
           <p>实际请求：<code>{item.release.actual?.request_id ?? '未知'}</code></p>
           <p>
@@ -50,7 +45,7 @@ export function RuntimeView({ runtime }: { runtime: NodeStatus | null | undefine
         </article>
       ))}
       {!runtime.workloads.length && <p>暂无已配置的 workload</p>}
-      <p>就绪要求目标、观测和发布回执一致；后台服务还需恢复进程，小时任务的实际结果见邮件分拣。</p>
+      <p>就绪要求目标提交、实际镜像、最新发布回执一致，并且后台进程已恢复。</p>
     </>
   );
 }

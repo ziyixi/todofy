@@ -9,4 +9,3 @@ resources:
   - daily.yaml
   - release.yaml
   - observer.yaml
-  - mailsort-runner.yaml

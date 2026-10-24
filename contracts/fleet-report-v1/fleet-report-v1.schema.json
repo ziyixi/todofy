@@ -336,12 +336,12 @@
                                 "pattern": "^(?:[a-z][a-z0-9-]{0,31})$(?!\\n)"
                               },
                               "source_sha": {
-                                "description": "Source identity from the target, running-image provenance, or the installed CronJob template.",
+                                "description": "Source identity from the release target, or verified running-image provenance for actual.",
                                 "type": "string",
                                 "pattern": "^(?:[0-9a-f]{40})$(?!\\n)"
                               },
                               "image_digest": {
-                                "description": "Immutable target digest, physical running digest, or the installed CronJob template digest.",
+                                "description": "Immutable target digest, or independently observed physical running digest for actual.",
                                 "type": "string",
                                 "pattern": "^(?:sha256:[0-9a-f]{64})$(?!\\n)"
                               },
@@ -364,7 +364,7 @@
                         ]
                       },
                       "actual": {
-                        "description": "Actual observed identity. Process observations require physical digest and running-image provenance. Template observations verify the installed CronJob template, without claiming any execution.",
+                        "description": "Actual identity, only after physical digest and running-image build provenance are verified. Null on missing, stale or inconsistent evidence. Never copied from desired spec or annotations.",
                         "oneOf": [
                           {
                             "type": "object",
@@ -381,12 +381,12 @@
                                 "pattern": "^(?:[a-z][a-z0-9-]{0,31})$(?!\\n)"
                               },
                               "source_sha": {
-                                "description": "Source identity from the target, running-image provenance, or the installed CronJob template.",
+                                "description": "Source identity from the release target, or verified running-image provenance for actual.",
                                 "type": "string",
                                 "pattern": "^(?:[0-9a-f]{40})$(?!\\n)"
                               },
                               "image_digest": {
-                                "description": "Immutable target digest, physical running digest, or the installed CronJob template digest.",
+                                "description": "Immutable target digest, or independently observed physical running digest for actual.",
                                 "type": "string",
                                 "pattern": "^(?:sha256:[0-9a-f]{64})$(?!\\n)"
                               },
@@ -413,16 +413,9 @@
                         "type": "string"
                       },
                       "observed_generation": {
-                        "description": "Deployment status.observedGeneration, or installed metadata generation for template observations.",
+                        "description": "Kubernetes status.observedGeneration, absent when missing, malformed or unavailable.",
                         "type": "integer",
                         "minimum": 1
-                      },
-                      "observation_scope": {
-                        "description": "Template proves only installed scheduling configuration. Absent retains legacy process semantics.",
-                        "enum": [
-                          "process",
-                          "template"
-                        ]
                       }
                     },
                     "additionalProperties": false
@@ -582,43 +575,6 @@
                   "description": "Safe reason why comparison/repair needs attention, independent of business health.",
                   "type": "string",
                   "pattern": "^(?:[A-Z][A-Z0-9_]{0,63})$(?!\\n)"
-                },
-                "template_changes": {
-                  "description": "Additional fixed runner resources; absent in older observations. Legacy changes retain their original bounds.",
-                  "type": "array",
-                  "maxItems": 3,
-                  "items": {
-                    "type": "object",
-                    "required": [
-                      "resource_key",
-                      "action",
-                      "reason_code"
-                    ],
-                    "properties": {
-                      "resource_key": {
-                        "description": "Fixed runner alias, without provider object names supplied by the caller.",
-                        "enum": [
-                          "mailsort-runner",
-                          "mailsort-runner-release",
-                          "mailsort-runner-config"
-                        ]
-                      },
-                      "action": {
-                        "description": "Create/update are ordinary repair; conflict requires explicit owner action.",
-                        "enum": [
-                          "create",
-                          "update",
-                          "conflict"
-                        ]
-                      },
-                      "reason_code": {
-                        "description": "Safe fixed reason, without provider errors or content.",
-                        "type": "string",
-                        "pattern": "^(?:[A-Z][A-Z0-9_]{0,63})$(?!\\n)"
-                      }
-                    },
-                    "additionalProperties": false
-                  }
                 }
               },
               "additionalProperties": false

@@ -4,6 +4,7 @@ import { relative } from './format.ts'
 import { FakeServer, flowCount, label, ledgerEntry, NOW, reviewItem, settle } from './test/fakeServer.ts'
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
 import { CandidateSchema } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
+import { ReplayEvaluation_State, ReplayEvaluationSchema } from '@ziyixi/proto/mailsort/ui/v2/replay_pb'
 import { Mode, ServiceStatus_AuthState } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
@@ -38,11 +39,12 @@ function press(key: string): void {
 const rows = (root: HTMLElement) => [...root.querySelectorAll<HTMLLIElement>('ul.rows > li')]
 
 describe('the shell', () => {
-  it('uses P1-P4 names in review, charts, reports and undo options', async () => {
+  it('uses P1-P4 names in review, charts, reports, undo options and replay results', async () => {
     const server = new FakeServer()
     server.labels = [label('p1', 'P1'), label('p2', 'P2'), label('p3', 'P3'), label('p4', 'P4')]
     server.reviewItems = [reviewItem('a')]
     server.flow = [flowCount(MailFlow_Stage.CLEF, MailFlow_Outcome.ARCHIVED, 'labels/p2', 2)]
+    server.replay = create(ReplayEvaluationSchema, { name: 'replayEvaluation', state: ReplayEvaluation_State.SUCCEEDED, totalCount: 1, evaluatedCount: 1, autoCount: 1, mismatches: [{ decidedLabel: 'labels/p2', ownerLabel: 'labels/p3', mailCount: 1 }] })
     const root = await open(server, '/review')
     expect(root.querySelector('.answers')?.textContent).toContain('P2')
     const navigate = async (path: string) => {
@@ -55,7 +57,7 @@ describe('the shell', () => {
     expect(root.querySelector('.report')?.textContent).toContain('P3')
     await navigate('/settings')
     expect([...root.querySelectorAll('select[aria-label="分级"] option')].map((node) => node.textContent)).toEqual(['全部分级', 'P1', 'P2', 'P3', 'P4'])
-    expect(root.querySelector('.replay-mismatches')).toBeNull()
+    expect(root.querySelector('.replay-mismatches')?.textContent).toContain('P2 → 你的回答：P3')
     await navigate('/labels')
     expect([...root.querySelectorAll('.leaf-name')].map((node) => node.textContent)).toEqual(['P1', 'P2', 'P3', 'P4'])
   })
@@ -77,7 +79,7 @@ describe('the shell', () => {
     expect(tabs.map((a) => a.getAttribute('href'))).toEqual(['/overview', '/labels', '/settings'])
     expect(root.querySelector('.tabs .chip')).toBeNull()
     const line = root.querySelector('.status-line')
-    expect([...(line?.children ?? [])].map((part) => part.textContent)).toEqual(['影子', 'Gmail ✓ 只读', '下次维护 5 分钟后'])
+    expect([...(line?.children ?? [])].map((part) => part.textContent)).toEqual(['影子', 'Gmail ✓ 只读', '下次运行 5 分钟后'])
     expect(root.textContent).toContain('找不到这个页面')
   })
 
@@ -318,16 +320,13 @@ describe('待审', () => {
 })
 
 describe('设置', () => {
-  it('shows mode and undo without old model budgets or replay controls', async () => {
-    const server = new FakeServer()
-    const root = await open(server, '/settings')
-    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', 'Gmail 写入', '撤销'])
+  it('has the mode, undo and replay evaluation', async () => {
+    const root = await open(new FakeServer(), '/settings')
+    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '撤销', '检查分类效果'])
     expect(root.querySelectorAll('input[type="number"]').length).toBe(0)
     expect(root.querySelector('[aria-label="模式"] [aria-pressed="true"]')?.textContent).toBe('影子')
     expect(root.textContent).toContain('只判断和记录，不改 Gmail')
     expect(root.textContent).not.toContain('导出过滤器')
-    expect(root.textContent).not.toMatch(/Clef|神经元|模型预算|检查分类效果|回放/)
-    expect(server.calls.some((call) => call.path.includes('replayEvaluation'))).toBe(false)
   })
 
   it('changes the mode with only mode and the etag in the mask, after asking for 正式', async () => {
@@ -347,32 +346,6 @@ describe('设置', () => {
     buttonNamed(root, '正式').click()
     await settle()
     expect(server.calls.filter((call) => call.method === 'PATCH').length).toBe(1)
-  })
-
-  it('edits the existing daily Gmail cap only on request, without changing mode or the run cap', async () => {
-    const server = new FakeServer()
-    Object.assign(server.settings, { mode: Mode.LIVE, effectiveMode: Mode.LIVE, dailyWriteLimit: 150, runWriteLimit: 10 })
-    server.status = { appliedTodayCount: 150 }
-    const root = await open(server, '/settings')
-    expect(root.textContent).toContain('今日 150 / 150')
-    expect(root.querySelector('input[type="number"]')).toBeNull()
-    buttonNamed(root, '调整每日上限').click()
-    const input = root.querySelector<HTMLInputElement>('[aria-label="每日 Gmail 写入上限"]')
-    if (input === null) throw new Error('no daily limit input')
-    input.value = '0'
-    buttonNamed(root, '保存上限').click()
-    expect(server.calls.filter((call) => call.method === 'PATCH')).toHaveLength(0)
-    input.value = '300'
-    buttonNamed(root, '保存上限').click()
-    buttonNamed(root, '保存上限').click()
-    await settle()
-    const calls = server.calls.filter((call) => call.method === 'PATCH')
-    expect(calls).toHaveLength(1)
-    expect(decodeURIComponent(calls[0]?.path ?? '')).toContain('update_mask=daily_write_limit,etag')
-    expect(calls[0]?.body).toMatchObject({ daily_write_limit: 300, etag: 's1' })
-    expect(server.settings).toMatchObject({ dailyWriteLimit: 300, runWriteLimit: 10, mode: Mode.LIVE })
-    expect(root.textContent).toContain('今日 150 / 300')
-    expect(root.querySelector('input[type="number"]')).toBeNull()
   })
 
   it('says when 正式 cannot write yet: the grant is read-only', async () => {

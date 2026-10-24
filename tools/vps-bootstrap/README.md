@@ -13,7 +13,7 @@ in K3s**, without a host Python service, executable, extra user or timer.
 ## Prepare locally
 
 Use the development Python environment with PyYAML and a local `kubectl` for
-**offline** Kustomize rendering. Select all three immutable digests from the successful
+**offline** Kustomize rendering. Select both immutable digests from the successful
 Actions run for the exact commit; this tool rejects a mutable tag or foreign owner.
 
 ```sh
@@ -21,7 +21,6 @@ platform/.venv/bin/python tools/vps-bootstrap/prepare.py \
   --sha <verified-40-character-source-sha> \
   --newsletter-image ghcr.io/<owner>/<repository>-newsletter@sha256:<digest> \
   --platform-image ghcr.io/<owner>/<repository>-platform@sha256:<digest> \
-  --mailsort-runner-image ghcr.io/<owner>/<repository>-mailsort-runner@sha256:<digest> \
   --output <new-public-bundle-directory>
 ```
 
@@ -30,8 +29,7 @@ setting names, standard K3s/Tunnel units and stdlib installer modules. Each file
 has a checksum; these establish bundle consistency, not an independent signature.
 Initial Newsletter admission holds `release-<source_sha>` with new work disabled;
 the initial gate is usually `draining`, not a verified `frozen` receipt. Its daily CronJob
-is suspended. The runner CronJob also stays suspended until its dedicated foundation step and
-first normal API release. The observer CronJob remains active every five minutes, with Forbid
+is suspended. The observer CronJob remains active every five minutes, with Forbid
 concurrency and its own persistent sequence/pending-receipt PVC.
 The first API release must use that same bootstrap source SHA. Keep normal VPS
 deployment disabled and avoid advancing the first-release commit until it is verified;
@@ -212,33 +210,3 @@ command reports the actual expiry without printing the token. Renewal uses the
 same explicit reader operation; deleting its RoleBinding revokes namespace access.
 Deployment remains the daemon API's responsibility. Host service installation,
 firewall changes and disaster recovery still require administrator privileges.
-
-## Add the hourly Mailsort runner to the existing host
-
-Use the `vps-bootstrap-<SHA>` artifact from the same green main run that published all three
-images. First apply the two exact Mailsort machine Access paths through the reviewed Infra apply.
-Provision one private machine token; its raw value stays in the VPS Secret and its SHA-256 digest
-is supplied as the Worker `CLASSIFICATION_TOKEN_SHA256` secret through the existing private
-Worker bootstrap/deploy input. This does not change Gmail credentials. Prepare a separate,
-mode-0600 Codex `auth.json` through the owner's normal login flow. Neither file goes into GitHub
-artifacts or the repository.
-
-The existing unprivileged daemon cannot create a Secret, PV, PVC or Role. On the host, the owner
-runs one command against the reviewed downloaded bundle and private files:
-
-```sh
-sudo python3 <bundle>/installer/mailsort_foundation.py \
-  --bundle <bundle> --source-sha <verified-main-SHA> \
-  --token-file <private-token-file> --codex-auth-file <private-auth.json>
-```
-
-This creates only the runner's retained auth PV/PVC, private directory and Secret, updates the
-existing controller Role with read-only Job access, and installs that bundle's tested Platform
-Deployment. It preserves the release ledger and Newsletter resources. The daemon update is needed
-once because the previous daemon accepts only two release targets. The script retains an existing
-runner auth file on retry. It prints only a status and fixed error code.
-
-Rerun the same main Actions VPS deploy after this step. The routine daemon release installs the
-hourly CronJob and its public URL/release ConfigMaps; it has no Secret/PVC permissions and does not
-start a synthetic classification Job. Check the first natural hour's report in Mailsort Ops.
-Template installation, process execution and accepted classification remain separate checks.

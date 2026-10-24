@@ -47,8 +47,3 @@ first verified API release. See [rebuild](../docs/rebuild.md) for configuration,
 Synthetic tests do not prove Codex login, external providers or a live new server.
 The legacy editorial config-sync process downloads validated content bundles; it does not reconcile
 infrastructure or choose executable releases. System installation and disaster recovery remain privileged.
-
-Mailsort runner uses a fixed hourly K3s CronJob, with its own immutable image, token Secret and
-writable auth PVC. The daemon verifies the installed template with an inactive process; classification results
-come from the Mailsort Worker report. First-time foundation setup is documented in
-[the bootstrap runbook](../tools/vps-bootstrap/README.md#add-the-hourly-mailsort-runner-to-the-existing-host).

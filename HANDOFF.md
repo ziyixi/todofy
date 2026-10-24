@@ -12,26 +12,13 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-`codex/mailsort-codex-batch` implements the owner-approved hourly Codex replacement: GPT-6.1 Sol medium,
-an independent VPS CronJob, Mailsort machine claim/report endpoints, and current batch status in Mailsort/Home.
-The owner explicitly approved one initial reclassification of **all currently unread** mail, including existing
-P1-P4; routine hourly runs select only unread mail without a priority. No messages are deleted or marked read.
-The local same-prompt 100-message comparison completed on SDK 0.163.0 (medium/high/max); private input and
-per-message trial results stay outside Git. Production cutover and the first natural hourly run remain unverified.
-The isolated checkout preserves Claude's shared source. Local checks include 154 Worker unit, 65 workerd
-(including CPU), 76 UI, 26 deploy tests and the full 67-request synthetic Wrangler smoke; CI/image and
-production verification remain pending. The new independent Codex login awaits the owner's Passkey verification
-in Chrome; do not switch credentials or copy Newsletter auth to bypass it. VPS SSH works but sudo -n is unavailable,
-so the fixed foundation bundle will need one owner sudo command.
-Mailsort Ops no longer advertises retired Workers AI quotas or load shedding. Gmail daily-cap waiting is an
-informational signal; saved decisions remain in the write ledger. Production currently reports the existing
-150-write cap exhausted and the old daily-limit breaker; the owner has been asked whether to raise the cap
-temporarily or wait for the next UTC day. Do not change the limit without that answer. CI for `69c70a29`
-passed the new Mailsort/runner/Platform/Website checks; its only failure was a Home runtime registry assertion
-missing the new hidden runner, now corrected. Home guard assertions and the CI contract-import map now also
-reflect the retired Mailsort guard. A full final branch gate remains required before main.
-The older five unstarted original-100 rechecks below were cancelled in the preceding authorized read-only audit;
-the production batch then reported applied 45, skipped 55, pending 0. Do not resume those cancelled requests.
+The owner cancelled the unshipped Codex/VPS Mailsort batch implementation on October 24. All of that branch's
+application, proto, CI, platform and infrastructure changes have been removed; only the unchanged prompt remains
+at `mailsort/prompts/priority-classification.txt` (SHA-256 `0c7ab3aa1ccf61a96cb85c1ffb08e1e62c0ec55b18fa909c0bd2b7d675c8c5c5`).
+No main push, production deployment, GitHub secret/variable update or VPS installation occurred. Do not resume
+the cancelled runner setup. Current work is a Claude API comparison using that prompt, not a production cutover.
+Private email snapshots, API credentials and per-message results stay outside Git. A temporary evaluation key
+and the masked-email transfer to Anthropic await the owner's specific confirmation.
 
 Mailsort's calibrated priority correction and original-100 entrypoint are deployed at `eb3e21dc` after full
 [branch gate 40064835511](https://github.com/ziyixi/todofy/actions/runs/40064835511) and
@@ -46,10 +33,10 @@ token was revoked. Acceptance is now 0.55 with the existing 0.4 first-view gate 
 Clef results are 16/16 and Flash 13/16; these are sample regressions, not mailbox accuracy. Existing operating
 modes, model budgets, write limits and Gmail credentials remain unchanged.
 
-The earlier original-100 batch ended after the owner asked to leave its mail unchanged: 45 actual Gmail
-changes, 55 skipped, pending 0 and failed 0. The five not-yet-started rechecks were cancelled; do not resume
-or recreate them. The new owner-approved Codex task below separately authorizes reclassifying all **currently
-unread** mail after the new release. Historical metrics are not mailbox accuracy.
+The earlier original-100 batch ended after the owner asked to leave that mail unchanged: 45 actual Gmail
+changes, 55 skipped and no pending members. Its five unstarted rechecks were cancelled in the authorized audit;
+do not resume them. The later authorization to reclassify all currently unread mail has not been executed.
+No new reclassification is part of the current API comparison; production modes, limits and credentials remain.
 
 The owner rejected a new post-model Gmail metadata check for concurrent manual edits. That request, its exact-label
 guard and three tests were removed, along with one redundant P1 condition. Keep the ordinary initial label check
@@ -66,7 +53,8 @@ Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's sha
 ## Latest verified release
 
 Mailsort's calibrated priority correction and simplified original-100 entrypoint are live at `eb3e21dc`, as recorded
-above. Its earlier P1-P4 switch and 99-message unread batch completed at `d1295e7d`; the old recheck has no pending members. P1 keeps Inbox, P2-P4 archive, uncertainty becomes P1, and the
+above. Its earlier P1-P4 switch and 99-message unread batch completed at `d1295e7d`; the current recheck is a
+separate operation with five pending members. P1 keeps Inbox, P2-P4 archive, uncertainty becomes P1, and the
 scam/trust gates are removed. Original mail and history remain. The isolated checkout left Claude's shared tree
 untouched. Provider identity, tests and privacy-safe evidence are in
 [priority verification](docs/mailsort-priority-verification.md); actions are in [priority rollout](mailsort/docs/priority-rollout.md).

@@ -50,8 +50,6 @@ def expect(
     fleet_check=False,
     fleet_deploy=False,
     platform_check=False,
-    mailsort_runner_check=False,
-    mailsort_runner_deploy=False,
     platform_publish=False,
     platform_deploy=False,
     mailsort_check=False,
@@ -70,8 +68,6 @@ def expect(
     # binds is one. Mailsort was CHECK_ONLY until its Access application existed (mailsort/docs/design.md §12), recall
     # until its Access applications and bucket existed (recall/docs/design.md §11), the brief until its Access
     # applications existed (brief/docs/design.md §18).
-    if newsletter_deploy or platform_deploy or mailsort_runner_deploy:
-        mailsort_runner_check = mailsort_runner_deploy = True
     if "personal-mcp" in ci_changes.CHECK_ONLY:
         personal_mcp_deploy = False
     if "tasks" in ci_changes.CHECK_ONLY:
@@ -94,8 +90,6 @@ def expect(
         "newsletter_check": newsletter_check,
         "fleet_check": fleet_check,
         "platform_check": platform_check,
-        "mailsort_runner_check": mailsort_runner_check,
-        "mailsort_runner_deploy": mailsort_runner_deploy,
         "mailsort_check": mailsort_check,
         "recall_check": recall_check,
         "brief_check": brief_check,
@@ -128,7 +122,7 @@ def expect(
 # Every app checked (a contracts/ or .github/ change, the links app and the watch app included); the dashboard
 # checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero plus
 # EDGE_AUTH; every app with the website Worker (the relay Worker is added where a test expects it).
-ALL_CHECKED = {"mailsort_runner_check": True, "dashboard_check": True, "website_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "brief_check": True, "tasks_check": True, "personal_mcp_check": True}
+ALL_CHECKED = {"dashboard_check": True, "website_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "brief_check": True, "tasks_check": True, "personal_mcp_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 LINKS = {"links_check": True, "links_deploy": True}
 WATCH = {"watch_check": True, "watch_deploy": True}
@@ -152,19 +146,6 @@ def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
 
 
 class Classify(unittest.TestCase):
-    def test_runner_runtime_and_machine_contract_reach_the_fixed_release_profile(self):
-        result = push(["mailsort-runner/src/mailsort_runner/runner.py"])
-        for key in ("mailsort_runner_check", "mailsort_runner_deploy", "newsletter_deploy", "platform_publish", "platform_deploy"):
-            self.assertTrue(result[key], key)
-        self.assertFalse(result["mailsort_deploy"])
-        contract = push(["proto/mailsort/runner/v1/runner_service.proto"])
-        self.assertTrue(contract["mailsort_deploy"])
-        self.assertTrue(contract["mailsort_runner_deploy"])
-        docs = push(["mailsort-runner/tests/test_runner.py"])
-        self.assertTrue(docs["mailsort_runner_check"])
-        self.assertFalse(docs["platform_deploy"])
-        self.assertFalse(push(["mailsort-runner/README.md"])["platform_deploy"])
-
     def test_reviewed_test_directories_keep_checks_without_any_publication(self):
         for directory in ci_changes.APP_TEST_DIRECTORIES:
             app = directory.split("/", 1)[0]
@@ -496,7 +477,7 @@ class Classify(unittest.TestCase):
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside the Workers that import them, so a change must redeploy each."""
-        bundled = expect(T, T, T, F, T, **ALL, website_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_runner_check=T, mailsort_check=T, recall_check=T, **BRIEF, proto=T, tasks_check=T, personal_mcp_check=T)
+        bundled = expect(T, T, T, F, T, **ALL, website_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, **MAILSORT, recall_check=T, **BRIEF, proto=T, tasks_check=T, personal_mcp_check=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
         self.assertEqual(
             push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), {**bundled, "todofy_deploy": True}
@@ -516,7 +497,6 @@ class Classify(unittest.TestCase):
             "newsletter": [REPO / "newsletter" / "src"],
             "fleet": [REPO / "fleet" / "worker" / "src", REPO / "fleet" / "web" / "src"],
             "platform": [REPO / "platform" / "src"],
-            "mailsort-runner": [REPO / "mailsort-runner" / "src"],
             "mailsort": [REPO / "mailsort" / "worker" / "src", REPO / "mailsort" / "web" / "src"],
             "recall": [REPO / "recall" / "worker" / "src", REPO / "recall" / "web" / "src", REPO / "recall" / "shared"],
             "brief": [REPO / "brief" / "worker" / "src", REPO / "brief" / "web" / "src"],
@@ -587,7 +567,6 @@ class Classify(unittest.TestCase):
                 "watch": ("ts",),
                 "fleet": ("ts",),
                 "platform": ("python",),
-                "mailsort-runner": ("python",),
                 "website": ("ts",),
                 "mailsort": ("ts",),
                 "recall": ("ts",),
@@ -598,7 +577,7 @@ class Classify(unittest.TestCase):
         )
         # Todofy is both: todofy-core vendors the Python package, its gateway and UI bundle the TypeScript
         # (todofy.ui.v1).
-        ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"}, {"todofy", "platform", "mailsort-runner"}
+        ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"}, {"todofy", "platform"}
         every, none = ts | python, set()
         cases = {
             # recommendation-v1 and summary-v1: todofy-core builds the reports, Todofy's gateway and UI read them in
@@ -620,7 +599,6 @@ class Classify(unittest.TestCase):
             "proto/website/sync/v1/sync.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"},
             # mailsort's owner API: its Worker serves it, its UI calls it.
             "proto/mailsort/ui/v2/mailsort_ui_service.proto": {"mailsort"},
-            "proto/mailsort/runner/v1/classification.proto": {"mailsort", "mailsort-runner"},
             # recall's owner API, the extension's upload and the archive feed: its Worker serves all three.
             "proto/recall/ui/v1/recall_ui_service.proto": {"recall", "personal-mcp"},
             "proto/recall/ingest/v1/ingest.proto": {"recall", "personal-mcp"},
@@ -705,12 +683,10 @@ class Classify(unittest.TestCase):
                 fleet_check=T,
                 fleet_deploy="fleet" in deployed,
                 platform_check=T,
-                mailsort_runner_check=T,
-                mailsort_runner_deploy="mailsort-runner" in deployed,
-                platform_publish=bool({"platform", "mailsort-runner"} & deployed),
-                platform_deploy=bool({"platform", "mailsort-runner"} & deployed),
-                newsletter_check=bool({"platform", "mailsort-runner"} & deployed),
-                newsletter_deploy=bool({"platform", "mailsort-runner"} & deployed),
+                platform_publish="platform" in deployed,
+                platform_deploy="platform" in deployed,
+                newsletter_check="platform" in deployed,
+                newsletter_deploy="platform" in deployed,
                 mailsort_check=T,
                 mailsort_deploy="mailsort" in deployed,
                 recall_check=T,
@@ -846,7 +822,7 @@ class Classify(unittest.TestCase):
         ]
         self.assertEqual(
             push(paths),
-            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_runner_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T, personal_mcp_check=T),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T, personal_mcp_check=T),
         )
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
@@ -1052,7 +1028,6 @@ class Dispatch(unittest.TestCase):
     def test_resume_checks_the_client_without_publishing_different_images(self):
         expected = expect(F, F, T, F, F, packages=T, proto=T,
                           newsletter_check=T, platform_check=T, platform_deploy=T)
-        expected.update(mailsort_runner_check=False, mailsort_runner_deploy=False)
         for app in ("platform", "newsletter"):
             with self.subTest(app=app):
                 self.assertEqual(self.dispatch(app, resume=True), expected)
@@ -1147,7 +1122,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false", tasks_check="false", tasks_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false", personal_mcp_check="false", personal_mcp_deploy="false")
-        expected.update(links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false", fleet_check="false", fleet_deploy="false", platform_check="false", platform_publish="false", platform_deploy="false", mailsort_runner_check="false", mailsort_runner_deploy="false", mailsort_check="false", mailsort_deploy="false", recall_check="false", recall_deploy="false", recall_extension_publish="false", brief_check="false", brief_deploy="false")
+        expected.update(links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false", fleet_check="false", fleet_deploy="false", platform_check="false", platform_publish="false", platform_deploy="false", mailsort_check="false", mailsort_deploy="false", recall_check="false", recall_deploy="false", recall_extension_publish="false", brief_check="false", brief_deploy="false")
         self.assertEqual(outputs, expected)
 
     def test_a_failed_package_run_on_main_deploys_both_apps_next_time(self):
@@ -1155,7 +1130,7 @@ class RealGit(unittest.TestCase):
         self.commit("packages/edge-auth/src/access.ts")
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
-        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy", "mailsort_runner_check", "mailsort_runner_deploy", "platform_check", "platform_publish", "platform_deploy", "recall_extension_publish"}
+        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy", "platform_check", "platform_publish", "platform_deploy", "recall_extension_publish"}
         # An app that compiles edge-auth in but is CHECK_ONLY does not deploy (none now), nor Home while it binds one.
         bootstrap = {f"{ci_changes.PREFIX[app]}_deploy" for app in ci_changes.CHECK_ONLY & set(ci_changes.PACKAGE_USERS["edge-auth"])}
         if ci_changes.HOME_BOUND & ci_changes.CHECK_ONLY:
@@ -1405,7 +1380,6 @@ class DeployConditions(unittest.TestCase):
         "newsletter-image",
         "fleet-checks",
         "platform-checks",
-        "mailsort-runner-checks",
         "mailsort-checks",
         "recall-checks",
         "brief-checks",
@@ -1445,7 +1419,6 @@ class DeployConditions(unittest.TestCase):
                 "brief-deploy",
                 "personal-mcp-deploy",
                 "platform-image",
-                "mailsort-runner-image",
                 "vps-deploy",
                 "vps-bootstrap-bundle",
             },
@@ -1468,7 +1441,7 @@ class DeployConditions(unittest.TestCase):
                         self.assertEqual(condition.count(f"needs.{need}.result == 'skipped'"), 1)
                     else:
                         self.assertIn(f"needs.{need}.result == 'success'", condition)
-                        if name == "vps-deploy" and need in {"newsletter-deploy", "platform-image", "mailsort-runner-image", "vps-bootstrap-bundle"}:
+                        if name == "vps-deploy" and need in {"newsletter-deploy", "platform-image", "vps-bootstrap-bundle"}:
                             self.assertIn(f"needs.{need}.result == 'skipped'", condition)
                             self.assertIn("github.event_name == 'workflow_dispatch' && inputs.resume_vps_release", condition)
                             self.assertIn("!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)", condition)
@@ -1479,7 +1452,7 @@ class DeployConditions(unittest.TestCase):
     def test_resume_skips_build_artifacts_and_publication_but_keeps_source_checks(self):
         jobs = self.jobs()
         guard = "!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)"
-        for name in ("newsletter-image", "newsletter-deploy", "platform-image", "mailsort-runner-image"):
+        for name in ("newsletter-image", "newsletter-deploy", "platform-image"):
             with self.subTest(job=name):
                 self.assertIn(guard, self.condition(jobs[name]))
         platform = jobs["platform-checks"]
@@ -1487,7 +1460,7 @@ class DeployConditions(unittest.TestCase):
         self.assertIn("pytest platform/tests tools/platform-build/tests tools/vps-release/tests", platform)
         release = jobs["vps-deploy"]
         self.assertIn('if [ "$RESUME_RELEASE" = true ]; then\n            args+=(--resume)\n          else', release)
-        self.assertIn('args+=(--newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE" --mailsort-runner-image "$MAILSORT_RUNNER_IMAGE")', release)
+        self.assertIn('args+=(--newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE")', release)
         self.assertIn("RELEASE_SOURCE_SHA: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}", release)
         self.assertIn('--source-sha "$RELEASE_SOURCE_SHA" --evidence-file "$RUNNER_TEMP/vps-release-evidence.json" "${args[@]}"', release)
 
@@ -1539,7 +1512,6 @@ class DeployConditions(unittest.TestCase):
                 "brief-deploy": "brief-production",
                 "personal-mcp-deploy": "personal-mcp-production",
                 "platform-image": "platform-image-production",
-                "mailsort-runner-image": "mailsort-runner-image-production",
                 "vps-deploy": "vps-production",
             },
         )
@@ -2674,7 +2646,7 @@ def fake_github(runs, jobs_by_run, artifacts_by_run=None):
             return {"total_count": len(jobs), "jobs": jobs}
         match = re.fullmatch(rf"/repos/{re.escape(REPOSITORY)}/actions/runs/(\d+)/artifacts\?per_page=100", path)
         if match:
-            artifacts = (artifacts_by_run or {}).get(int(match.group(1)), [{"name": f"{prefix}-{SHA}", "expired": False} for prefix in ("newsletter-image", "platform-image", "mailsort-runner-image", "recall-extension", "recall-orion")])
+            artifacts = (artifacts_by_run or {}).get(int(match.group(1)), [{"name": f"{prefix}-{SHA}", "expired": False} for prefix in ("newsletter-image", "platform-image", "recall-extension", "recall-orion")])
             return {"artifacts": artifacts}
         raise AssertionError(f"unexpected read {path}")
 
@@ -2784,7 +2756,7 @@ class Reuse(unittest.TestCase):
                                   ([{"name": "newsletter-image-other", "expired": False}], False),
                                   ([{"name": f"newsletter-image-{SHA}", "expired": False}], True)):
             with self.subTest(artifacts=artifacts):
-                get = fake_github([branch_run()], {800: green_jobs("Newsletter checks", "Newsletter image checks", "Platform checks", "Mailsort runner checks", "Contracts")}, {800: [*artifacts, {"name": f"platform-image-{SHA}", "expired": False}, {"name": f"mailsort-runner-image-{SHA}", "expired": False}]})
+                get = fake_github([branch_run()], {800: green_jobs("Newsletter checks", "Newsletter image checks", "Platform checks", "Contracts")}, {800: [*artifacts, {"name": f"platform-image-{SHA}", "expired": False}]})
                 result, extra, _ = ci_changes.try_reuse("push", MAIN, SHA, needed, ENV, get)
                 self.assertEqual(extra["checks_reused"], str(reused).lower())
                 self.assertEqual(result["newsletter_check"], not reused)
@@ -2795,7 +2767,7 @@ class Reuse(unittest.TestCase):
         needed = push(["platform/src/personal_cloud/status_daemon/server.py"])
         for artifacts, reused in (([], False), ([{"name": f"platform-image-{SHA}", "expired": True}], False), ([{"name": "platform-image-other", "expired": False}], False), ([{"name": f"platform-image-{SHA}", "expired": False}], True)):
             with self.subTest(artifacts=artifacts):
-                get = fake_github([branch_run()], {800: green_jobs("Newsletter checks", "Newsletter image checks", "Platform checks", "Mailsort runner checks", "Contracts")}, {800: [*artifacts, {"name": f"newsletter-image-{SHA}", "expired": False}, {"name": f"mailsort-runner-image-{SHA}", "expired": False}]})
+                get = fake_github([branch_run()], {800: green_jobs("Newsletter checks", "Newsletter image checks", "Platform checks", "Contracts")}, {800: [*artifacts, {"name": f"newsletter-image-{SHA}", "expired": False}]})
                 result, extra, _ = ci_changes.try_reuse("push", MAIN, SHA, needed, ENV, get)
                 self.assertEqual(extra["checks_reused"], str(reused).lower())
                 self.assertEqual(result["platform_check"], not reused)
@@ -2836,7 +2808,6 @@ class Reuse(unittest.TestCase):
             "Tasks checks",
             "Personal MCP checks",
             "Platform checks",
-            "Mailsort runner checks",
             "Newsletter checks",
             "Newsletter image checks",
             "Contracts",

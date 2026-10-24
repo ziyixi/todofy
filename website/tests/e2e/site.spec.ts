@@ -260,11 +260,7 @@ test.describe("public site", () => {
     await expect(
       page.getByRole("link", { name: "https://myaccount.google.com/permissions" }),
     ).toHaveAttribute("href", "https://myaccount.google.com/permissions");
-    await expect(page.locator("main time")).toHaveAttribute("datetime", /^\d{4}-\d{2}-\d{2}$/);
-    await expect(page.locator("main")).toContainText("official Codex SDK");
-    await expect(page.locator("main")).toContainText(
-      "The VPS does not receive the Gmail credential.",
-    );
+    await expect(page.locator("main time")).toHaveAttribute("datetime", "2026-10-23");
     const navigation = page.getByRole("navigation", { name: "Primary" });
     await expect(navigation.locator('a[href^="/privacy"]')).toHaveCount(0);
     await expect(navigation.locator("a[aria-current]")).toHaveCount(0);

@@ -1,15 +1,17 @@
-/** Overview shows classifications, Gmail outcomes and the latest hourly runner evidence. */
+/** Overview shows classification counts, the flow, corrections by priority and the unchanged model budget. */
 import { MailFlow_Outcome, MailFlow_Stage, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { Mode, ServiceStatus_AuthState, type LabelReport, type ServiceStatus } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { api } from '../api.ts'
-import { card, emptyState, kpi } from '../components.ts'
+import { card, emptyState, kpi, meter } from '../components.ts'
 import { el, fill } from '../dom.ts'
 import { flowGraph, sankeyChart } from '../flowchart.ts'
 import { labelText, MODE_HINTS, MODE_NAMES, relative } from '../format.ts'
 import type { ViewContext } from '../app.ts'
 import { allLabels, frame } from './common.ts'
-import { batchStatusCard } from './batch-status.ts'
+
+/** Past this share of the budget the rest of the UTC day uses Clef-flash (../../docs/design.md §4.1). */
+const FLASH_SHARE = 0.7
 
 /** One period's decided mail by what became of it. */
 export interface Tally {
@@ -76,6 +78,26 @@ function labelTable(answer: LabelReport, labels: readonly Label[]): HTMLElement 
   )
 }
 
+/** Today's estimated neurons against the budget, with what it means when it is high. */
+function budget(status: ServiceStatus): HTMLElement {
+  const used = status.neuronsToday
+  const max = status.dailyNeuronBudget
+  const share = max <= 0 ? 0 : used / max
+  const tone = status.aiQuotaExhausted || share >= 1 ? 'danger' : share >= FLASH_SHARE ? 'warn' : ''
+  const note = status.aiQuotaExhausted || share >= 1
+    ? '今天的额度用完了，剩余邮件等下一个 UTC 日继续'
+    : status.decisionModel === 'clef-flash'
+      ? '已过 70%，今天改用 Clef-flash'
+      : ''
+  const waiting = status.deferredCount > 0 ? `${String(status.deferredCount)} 封暂缓，后台按额度或重试时间继续` : ''
+  return card(
+    '模型额度',
+    `${String(Math.round(used))} / ${String(max)}`,
+    meter(used, max, '今天的模型额度', tone),
+    note === '' && waiting === '' ? null : el('p', { class: 'hint' }, [note, waiting].filter((text) => text !== '').join('；')),
+  )
+}
+
 export async function renderOverview(ctx: ViewContext): Promise<void> {
   await frame(ctx.main, '概览', async (body) => {
     const [status, flow, labels, week] = await Promise.all([ctx.status(), api.getMailFlow({ name: 'mailFlows/today' }), allLabels(), api.getLabelReport({ name: 'labelReport' })])
@@ -97,7 +119,7 @@ export async function renderOverview(ctx: ViewContext): Promise<void> {
       ),
       el('p', { class: 'hint' }, '大字与流程图为今日累计处理记录；7 天小字及下表按最新判断计数。重判保留历史处理记录。'),
       card('今天的流程', graph.total === 0 ? '' : `共 ${String(graph.total)} 封`, sankeyChart(graph), graph.total === 0 ? el('p', { class: 'hint' }, '今天还没有邮件') : null),
-      el('div', { class: 'two' }, labelTable(week, labels), batchStatusCard(status, ctx.host.now())),
+      el('div', { class: 'two' }, labelTable(week, labels), budget(status)),
     )
     // Where the diagram is wider than its box (a phone), it starts at its right end: the labels, 都不是, 拿不准.
     const scroll = body.querySelector('.flow-scroll')

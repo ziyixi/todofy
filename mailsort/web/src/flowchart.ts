@@ -39,11 +39,10 @@ export interface FlowGraph {
 
 const STAGES: readonly (readonly [MailFlow_Stage, string, string])[] = [
   [MailFlow_Stage.SKIPPED, 'skipped', '跳过'],
-  [MailFlow_Stage.CODEX, 'codex', '6.1 Sol'],
   [MailFlow_Stage.CLEF, 'clef', 'Clef 27B'],
   [MailFlow_Stage.CLEF_FLASH, 'clef-flash', 'Clef-flash'],
   [MailFlow_Stage.NO_MODEL, 'no_model', '未调用模型'],
-  [MailFlow_Stage.DEFERRED, 'deferred', '等待处理'],
+  [MailFlow_Stage.DEFERRED, 'deferred', '延后（额度）'],
 ]
 
 const SKIP_REASONS: Readonly<Record<number, string>> = {
@@ -142,7 +141,7 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
       kind: terminal ? 'terminal' : 'stage',
       slot: 0,
       ...(id === 'skipped' ? { detail: [...skipped].map(([reason, n]) => `${reason} ${String(n)}`) } : {}),
-      ...(id === 'deferred' ? { detail: ['等待下一次处理；判断完成后计入分类步骤'] } : {}),
+      ...(id === 'deferred' ? { detail: ['仍在等次日的模型额度；判断后计入处理它的那一步'] } : {}),
     })
   }
   // Label nodes in the labels' order (deleted labels last), then the outcomes without a label.
@@ -170,16 +169,14 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
 
 /** An empty day still shows the four priorities, with zero counts. */
 export function skeletonGraph(): FlowGraph {
-  const current = STAGES.filter(([, id]) => ['skipped', 'codex', 'deferred'].includes(id))
   const stage = ([, id, name]: (typeof STAGES)[number]): FlowNodeData => ({ id, name, kind: id === 'skipped' || id === 'deferred' ? 'terminal' : 'stage', slot: 0 })
   const ranks: FlowNodeData[] = PRIORITIES.map((priority, index) => ({ id: `label:labels/${priority.id}`, name: priority.title, kind: 'label', slot: index + 1, group: priority.title, detail: [priority.policy] }))
   return {
     total: 0,
-    nodes: [{ id: 'new', name: '新邮件', kind: 'source', slot: 0 }, ...current.map(stage), ...ranks, ...OUTCOMES.filter((node) => node.id === 'suggested')],
+    nodes: [{ id: 'new', name: '新邮件', kind: 'source', slot: 0 }, ...STAGES.map(stage), ...ranks, ...OUTCOMES.filter((node) => node.id === 'suggested')],
     links: [
-      ...current.map(([, id]) => ({ source: 'new', target: id, value: 0 })),
-      ...ranks.map((rank) => ({ source: 'codex', target: rank.id, value: 0 })),
-      { source: 'codex', target: 'suggested', value: 0 },
+      ...STAGES.map(([, id]) => ({ source: 'new', target: id, value: 0 })),
+      ...['clef', 'clef-flash'].flatMap((id) => [...ranks.map((rank) => ({ source: id, target: rank.id, value: 0 })), { source: id, target: 'suggested', value: 0 }]),
     ],
     groups: PRIORITIES.map((priority, index) => ({ name: priority.title, slot: index + 1 })),
   }

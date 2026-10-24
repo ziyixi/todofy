@@ -1,4 +1,4 @@
-/** Settings keeps the owner's mode and Gmail range undo. */
+/** Settings keeps the existing mode, range undo and replay evaluation. */
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
@@ -8,6 +8,7 @@ import { card, segmented } from '../components.ts'
 import { button, el, toast } from '../dom.ts'
 import { BREAKER_REASONS, labelText, MODE_HINTS, MODE_NAMES, ms } from '../format.ts'
 import type { Host, ViewContext } from '../app.ts'
+import { replayCard } from './replay.ts'
 import { act, allLabels, frame, labelSelect } from './common.ts'
 
 const MODES: readonly (readonly [Mode, string])[] = [Mode.OFF, Mode.SHADOW, Mode.LIVE].map((mode) => [mode, MODE_NAMES[mode] ?? ''] as const)
@@ -76,30 +77,6 @@ function modeCard(settings: Settings, status: ServiceStatus | null, ctx: ViewCon
     segmented('模式', MODES, settings.mode, choose),
     el('p', { class: warn ? 'hint warn' : 'hint' }, line),
     settings.breakerTripped ? el('div', { class: 'actions' }, button('解除熔断', resetBreaker)) : null,
-  )
-}
-
-/** Existing Gmail write caps; edit only when the owner opens the control. */
-function writeLimitCard(settings: Settings, status: ServiceStatus | null, ctx: ViewContext, reload: () => Promise<void>): HTMLElement {
-  const editor = el('div', { class: 'actions' })
-  const change = button('调整每日上限', () => {
-    const input = el('input', { type: 'number', min: '1', max: '500', value: String(settings.dailyWriteLimit), 'aria-label': '每日 Gmail 写入上限' })
-    const save = button('保存上限', () => {
-      const value = Number(input.value)
-      if (!Number.isInteger(value) || value < 1 || value > 500) { toast('每日上限请输入 1–500'); return }
-      save.disabled = true
-      void act((requestId) => api.updateSettings({
-        settings: create(SettingsSchema, { name: 'settings', dailyWriteLimit: value, etag: settings.etag }),
-        updateMask: { paths: ['daily_write_limit', 'etag'] }, requestId,
-      }), '每日写入上限已更新', async () => { ctx.refreshStatus(); await reload() }).finally(() => { save.disabled = false })
-    }, { class: 'primary' })
-    editor.replaceChildren(input, save, button('取消', () => editor.replaceChildren(change)))
-    input.focus()
-  })
-  editor.append(change)
-  return card('Gmail 写入', status === null ? '今日写入未提供' : `今日 ${String(status.appliedTodayCount)} / ${String(settings.dailyWriteLimit)}`,
-    el('p', { class: 'hint' }, `每轮最多 ${String(settings.runWriteLimit)} 次。达到每日上限后保留判断，次日继续写入，不重复调用模型。此限制不是模型额度。`),
-    editor,
   )
 }
 
@@ -224,6 +201,6 @@ export async function renderSettings(ctx: ViewContext): Promise<void> {
   const reload: () => Promise<void> = await frame(ctx.main, '设置', async (body) => {
     // The header's status (its grant) only adds a line: without it the page still works.
     const [settings, labels, status] = await Promise.all([api.getSettings({ name: 'settings' }), allLabels(), ctx.status().catch(() => null)])
-    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), writeLimitCard(settings, status, ctx, () => reload()), undoCard(labels, ctx.host))
+    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), undoCard(labels, ctx.host), await replayCard(labels))
   })
 }

@@ -84,7 +84,7 @@ def main() -> None:
     parser.add_argument("--sha", required=True)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--image")
-    parser.add_argument("--service", choices=("newsletter", "platform", "mailsort-runner"), default="newsletter")
+    parser.add_argument("--service", choices=("newsletter", "platform"), default="newsletter")
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--github-output", action="store_true")
     args = parser.parse_args()

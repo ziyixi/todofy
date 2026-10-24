@@ -84,6 +84,7 @@ describe('label consolidation owner API', () => {
       () => h.api.deleteLabel({ name: first.name, requestId: op() }),
       () => h.api.resolveReviewItem({ name: 'reviewItems/synthetic-item', label: first.name, requestId: op() }),
       () => h.api.skipReviewItem({ name: 'reviewItems/synthetic-item', requestId: op() }),
+      () => h.api.startReplayEvaluation({ name: 'replayEvaluation', requestId: op() }),
     ];
     const callsBefore = h.up.gmail.calls.length;
     for (const call of blocked) expect(reasonOf(await rejection(call()))).toBe('CONSOLIDATION_ACTIVE');
@@ -111,7 +112,7 @@ describe('label consolidation owner API', () => {
   it('preserves a running replay instead of replacing it or changing its label inputs', async () => {
     await h.sql(`INSERT INTO replay (job_id, message_id, state, create_time) VALUES ('existing-replay', '', 'running', ?)`, T0);
     const before = await h.sql(`SELECT * FROM replay`);
-    expect(reasonOf(await rejection(h.api.startReplayEvaluation({ name: 'replayEvaluation', requestId: op() })))).toBe('BAD_REQUEST');
+    expect(reasonOf(await rejection(h.api.startReplayEvaluation({ name: 'replayEvaluation', requestId: op() })))).toBe('REPLAY_ACTIVE');
     expect(reasonOf(await rejection(h.api.startLabelConsolidation({ name: NAME, groups: [group()], requestId: op() })))).toBe('REPLAY_ACTIVE');
     expect(await h.sql(`SELECT * FROM replay`)).toEqual(before);
   });

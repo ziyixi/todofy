@@ -147,34 +147,3 @@ spec:
   resources:
     requests:
       storage: 1Gi
-
----
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: personal-cloud-mailsort-runner-auth
-spec:
-  capacity:
-    storage: 1Gi
-  accessModes: [ReadWriteOnce]
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: ''
-  claimRef:
-    name: mailsort-runner-auth
-    namespace: personal-cloud
-  hostPath:
-    path: /srv/todofy/mailsort-runner/auth
-    type: Directory
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: mailsort-runner-auth
-  namespace: personal-cloud
-spec:
-  accessModes: [ReadWriteOnce]
-  storageClassName: ''
-  volumeName: personal-cloud-mailsort-runner-auth
-  resources:
-    requests:
-      storage: 1Gi

@@ -434,20 +434,3 @@ class MatchesTheApps(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class MailsortMachineAccess(unittest.TestCase):
-    def test_only_the_two_classification_actions_bypass_owner_access(self):
-        code = (INFRA / "access.tf").read_text()
-        application = re.search(r'resource "cloudflare_zero_trust_access_application" "mailsort_machine" \{(.*?)^\}',
-                                code, re.MULTILINE | re.DOTALL).group(1)
-        policy = re.search(r'resource "cloudflare_zero_trust_access_policy" "mailsort_machine" \{(.*?)^\}',
-                           code, re.MULTILINE | re.DOTALL).group(1)
-        self.assertIn('decision   = "bypass"', policy)
-        self.assertIn('include    = [{ everyone = {} }]', policy)
-        paths = re.findall(r'/api/machine/v1/classification:(claim|report)', application)
-        self.assertEqual(paths, ["claim", "claim", "report"])
-        self.assertNotIn("*", application)
-        self.assertIn('cloudflare_zero_trust_access_policy.mailsort_machine.id', application)
-        self.assertNotIn('allowed_idps', application)
-        self.assertIn('local.owner_apps["mailsort"].domain', application)

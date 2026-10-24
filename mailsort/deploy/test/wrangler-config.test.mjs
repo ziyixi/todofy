@@ -16,7 +16,7 @@ const config = read(CONFIG)
 const values = readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.trimStart().startsWith('#')).join('\n')
 
 // Every key the Worker "mailsort" uses; a new one must be added here on purpose (and checked below).
-const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'observability', 'assets', 'durable_objects', 'migrations', 'vars']
+const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'observability', 'assets', 'durable_objects', 'migrations', 'ai', 'vars']
 
 test('the top level is the production Worker: known keys only, no cron, no workers.dev or preview URL, one Custom Domain', () => {
   assert.deepEqual(Object.keys(config).sort(), [...KEYS].sort())
@@ -38,10 +38,10 @@ test('every request reaches the Worker first (Access, private headers)', () => {
   assert.deepEqual(config.assets, { directory: 'web/dist', binding: 'ASSETS', run_worker_first: true, not_found_handling: 'single-page-application' })
 })
 
-test('one SQLite Durable Object, MailsortState; no model or extra storage binding', () => {
+test('one SQLite Durable Object, MailsortState, and Workers AI; no D1, R2, KV, queue, browser or service binding', () => {
   assert.deepEqual(config.durable_objects, { bindings: [{ name: 'MAILSORT', class_name: 'MailsortState' }] })
   assert.deepEqual(config.migrations, [{ tag: 'v1', new_sqlite_classes: ['MailsortState'] }])
-  assert.equal(config.ai, undefined)
+  assert.deepEqual(config.ai, { binding: 'AI' })
   for (const key of ['d1_databases', 'r2_buckets', 'kv_namespaces', 'queues', 'browser', 'services']) assert.equal(config[key], undefined, key)
 })
 

@@ -30,11 +30,11 @@ def receipt(path):
     ):
         raise ReleaseError("RELEASE_EVIDENCE_INVALID")
     targets = value["targets"]
-    if not isinstance(targets, list) or len(targets) not in {2, 3}:
+    if not isinstance(targets, list) or len(targets) != 2:
         raise ReleaseError("RELEASE_EVIDENCE_INVALID")
     if {
         target.get("workload_key") for target in targets if isinstance(target, dict)
-    } not in ({"newsletter", "platform-runtime"}, {"newsletter", "platform-runtime", "mailsort-runner"}):
+    } != {"newsletter", "platform-runtime"}:
         raise ReleaseError("RELEASE_EVIDENCE_INVALID")
     for target in targets:
         if set(target) != {"workload_key", "image_digest", "source_sha", "request_id"}:

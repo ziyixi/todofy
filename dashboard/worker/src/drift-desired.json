@@ -541,6 +541,11 @@
           "source": "deploy"
         },
         {
+          "name": "AI",
+          "type": "ai",
+          "source": "config"
+        },
+        {
           "name": "ASSETS",
           "type": "assets",
           "source": "config"
@@ -549,11 +554,6 @@
           "name": "BUILD_SHA",
           "type": "plain_text",
           "source": "deploy"
-        },
-        {
-          "name": "CLASSIFICATION_TOKEN_SHA256",
-          "type": "secret_text",
-          "source": "manual"
         },
         {
           "name": "CSRF_SIGNING_KEY",

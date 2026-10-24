@@ -108,7 +108,7 @@ def execute(
                 "action": x.action,
                 "reason_code": x.reason_code,
             }
-            for x in (*plan.changes, *plan.template_changes)
+            for x in plan.changes
         ],
     }
     if plan.base_release:

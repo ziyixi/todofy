@@ -12,7 +12,6 @@ interface UnreadScan {
   readonly pageToken?: string;
   readonly recheckFallback: boolean;
   readonly recheckInitial100: boolean;
-  readonly recheckAllUnread?: boolean;
 }
 
 function scanOf(store: Store): UnreadScan | null {
@@ -48,15 +47,12 @@ export function unreadProgress(store: Store, now: number): UnreadClassification 
   });
 }
 
-/** Freeze a cohort until every member has a judgement; independent Gmail intents may outlive it. Transactional. */
-export function startUnread(store: Store, now: number, recheckFallback = false, recheckInitial100 = false, recheckAllUnread = false): void {
+/** An active batch keeps its IDs and progress, including when another request_id is used. Transactional. */
+export function startUnread(store: Store, now: number, recheckFallback = false, recheckInitial100 = false): void {
   const previous = unreadProgress(store, now);
-  const awaitingJudgement = unreadScanning(store) || store.one(`SELECT 1 AS x FROM unread_batch WHERE state = 'pending' AND ledger_id IS NULL LIMIT 1`) !== undefined;
-  if (previous !== undefined && previous.state !== UnreadClassification_State.COMPLETED && awaitingJudgement && !recheckAllUnread) return;
-  // An explicit all-unread request supersedes an older unfinished selection, preserving existing write intents.
-  if (recheckAllUnread) store.run(`DELETE FROM pending WHERE message_id IN (SELECT message_id FROM unread_batch WHERE ledger_id IS NULL)`);
+  if (previous !== undefined && previous.state !== UnreadClassification_State.COMPLETED) return;
   store.run(`DELETE FROM unread_batch`);
-  store.setMeta('unread_scan', JSON.stringify({ startedAt: now, listed: recheckInitial100, recheckFallback, recheckInitial100, recheckAllUnread } satisfies UnreadScan));
+  store.setMeta('unread_scan', JSON.stringify({ startedAt: now, listed: recheckInitial100, recheckFallback, recheckInitial100 } satisfies UnreadScan));
   if (recheckInitial100) {
     // Original successful writes are immutable, including after a later recheck or undo.
     store.run(`INSERT INTO unread_batch (message_id)
@@ -101,9 +97,7 @@ export async function scanUnread(store: Store, gmail: GmailClient, now: number, 
     store.setMeta('unread_scan', JSON.stringify({ ...scan, listed: page.nextPageToken === undefined, pageToken: page.nextPageToken }));
     if (page.nextPageToken === undefined) {
       // Explicit backfill includes older decisions; ordinary new-mail enqueue retains its original deduplication.
-      store.run(`UPDATE unread_batch SET ledger_id = (SELECT l.id FROM ledger l WHERE l.message_id = unread_batch.message_id AND l.state = 'intended' ORDER BY l.id DESC LIMIT 1)
-        WHERE state = 'pending' AND ledger_id IS NULL AND EXISTS (SELECT 1 FROM ledger l WHERE l.message_id = unread_batch.message_id AND l.state = 'intended')`);
-      store.run(`INSERT OR IGNORE INTO pending (message_id, added_at) SELECT message_id, ? FROM unread_batch WHERE state = 'pending' AND ledger_id IS NULL`, now);
+      store.run(`INSERT OR IGNORE INTO pending (message_id, added_at) SELECT message_id, ? FROM unread_batch WHERE state = 'pending'`, now);
     }
   });
   return page.nextPageToken !== undefined;
@@ -117,15 +111,4 @@ export function isUnreadPending(store: Store, messageId: string): boolean {
 /** A skip or failure without a Gmail intent must not look like an applied classification. Transactional. */
 export function finishUnread(store: Store, messageId: string, state: 'skipped' | 'failed'): void {
   store.run(`UPDATE unread_batch SET state = ? WHERE message_id = ? AND ledger_id IS NULL`, state, messageId);
-}
-
-/** Explicit owner approval to replace existing unread priorities. */
-export function unreadRechecksAll(store: Store): boolean {
-  return scanOf(store)?.recheckAllUnread === true;
-}
-
-/** Whether the frozen batch is still listing Gmail IDs. */
-export function unreadScanning(store: Store): boolean {
-  const scan = scanOf(store);
-  return scan !== null && !scan.listed;
 }
