@@ -12,46 +12,38 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-The owner cancelled the unshipped Codex/VPS Mailsort batch implementation on October 24. All of that branch's
-application, proto, CI, platform and infrastructure changes have been removed; only the unchanged prompt remains
-at `mailsort/prompts/priority-classification.txt` (SHA-256 `0c7ab3aa1ccf61a96cb85c1ffb08e1e62c0ec55b18fa909c0bd2b7d675c8c5c5`).
-No main push, production deployment, GitHub secret/variable update or VPS installation occurred for that cancelled path.
-Do not resume the runner setup. Six private Claude comparisons cost $3.514105 at list prices before credits;
-Opus 5.5 medium is the selected model. The temporary evaluation key is disabled and its local file removed;
-the existing Brief key is unchanged. See [Claude comparison](docs/mailsort-claude-comparison.md).
+The cancelled Codex/VPS Mailsort runner was removed before release and must not be resumed. The six-condition
+Claude comparison used [the original benchmark prompt](https://github.com/ziyixi/todofy/blob/511ec5063ecc1cd3602020aa2544f6cf975090f1/mailsort/prompts/priority-classification.txt)
+and cost $3.514105 at list prices before credits. Its temporary evaluation key is disabled and its local file removed.
+The maintained prompt now clarifies personal periodic reports; the benchmark remains a record of its earlier
+version. See [Claude comparison](docs/mailsort-claude-comparison.md).
 
-The owner now authorizes the Claude implementation and rollout on `codex/mailsort-claude-api`:
-reuse the existing Worker, SQLite DO/Alarm and Gmail write ledger; roughly hourly bounded batches of unread,
-unclassified mail; one Opus 5.5 medium request and the maintained prompt; native $20/month Mailsort workspace
-limit, with an owner-written Worker API key excluded from GitHub. No VPS changes or automatic reclassification
-of existing P1-P4 mail. Implementation SHA `a28e24ab` passed full branch CI `40132337773`; the owner-confirmed key is configured and
-one real five-synthetic-message API check passed ($0.01684). Main run `40140567311` stopped before upload because
-the planned old `AI` binding removal was not yet in the release retirement list. The scoped release-helper fix
-is in progress; no Claude production cutover has occurred. Evidence: [Claude rollout](docs/mailsort-claude-verification.md). Work stays in `/private/tmp/todofy-tasks-design`, outside Claude's shared source checkout.
+Mailsort's Claude implementation and release are complete at `ff4b3532b1f15eef3b61520b0a4fb2f29dd8fdb1`, after
+[branch CI 40140845410](https://github.com/ziyixi/todofy/actions/runs/40140845410) and
+[main release 40141649309](https://github.com/ziyixi/todofy/actions/runs/40141649309). It reuses the existing Worker,
+SQLite DO/Alarm and Gmail ledger, with roughly hourly Opus 5.5 medium batches and a dedicated $20/month workspace.
+The owner-confirmed key is only in Worker secrets; Gmail credentials and the Brief key remain unchanged.
+Mailsort Deployment `7305900543` verifies Worker `081e7f5a-2ca1-437c-9bab-5c1f00ce8ea5`; Home Deployment
+`7305911514` verifies `56885555-268c-4dcf-9ac5-af92d5db64a8`. The exact retirement-list fix allowed only the planned
+Mailsort `AI` removal after the first preflight stopped before upload.
 
-Mailsort's calibrated priority correction and original-100 entrypoint are deployed at `eb3e21dc` after full
-[branch gate 40064835511](https://github.com/ziyixi/todofy/actions/runs/40064835511) and
-[same-SHA main release 40065406437](https://github.com/ziyixi/todofy/actions/runs/40065406437). Only Mailsort and
-its required privacy page deployed. Verified Deployment `7294420109` reports Worker version
-`e3f237e1-ec0d-4394-8a1a-d161c2aeb67b`, with the existing DO namespace unchanged.
-
-The original 81 P1 assignments were all uncertainty fallbacks; 19 P4 passed the old policy. The deployed fix
-preserves model evidence, excludes unconfirmed fallback assignments from automatic learning and separates P1
-counts in the UI. Actual synthetic calibration used 96 calls, about 949 estimated neurons; its temporary Read
-token was revoked. Acceptance is now 0.55 with the existing 0.4 first-view gate and two-view agreement. Captured
-Clef results are 16/16 and Flash 13/16; these are sample regressions, not mailbox accuracy. Existing operating
-modes, model budgets, write limits and Gmail credentials remain unchanged.
+The built client passed one real five-synthetic-message request ($0.01684); app-recorded usage remains zero at the
+runtime check. The owner cleared the old daily-write-limit breaker and the fresh UI confirms live mode, writable
+Gmail, Opus 5.5 medium and the $20 limit. Natural hourly inference and real Gmail writes were not used as acceptance
+evidence. Home refreshed at `2026-10-24T23:41:23.022Z` and reports Mailsort `ok`, zero pending and no signals;
+the old warning disappeared without dismissal. The public privacy
+page names Anthropic and the monthly limit. Full evidence: [Claude rollout](docs/mailsort-claude-verification.md).
+Work stays in `/private/tmp/todofy-tasks-design`, outside Claude's shared source checkout.
 
 The earlier original-100 batch ended after the owner asked to leave that mail unchanged: 45 actual Gmail
 changes, 55 skipped and no pending members. Its five unstarted rechecks were cancelled in the authorized audit;
 do not resume them. The later authorization to reclassify all currently unread mail has not been executed.
-No new reclassification is part of the current API comparison; production modes, limits and credentials remain.
+This rollout starts no original-100 or all-unread reclassification and does not automatically recheck existing P1-P4 mail.
 
 The owner rejected a new post-model Gmail metadata check for concurrent manual edits. That request, its exact-label
 guard and three tests were removed, along with one redundant P1 condition. Keep the ordinary initial label check
-and pre-existing retry/ledger behavior; do not restore concurrency machinery or a test matrix. The affected runtime
-checks passed all 51 cases after removal. Integrated checks also covered 153 unit, 91 workerd and 82 UI cases,
-lint/types/build, the full local Wrangler smoke and proto lint/API lint/breaking checks. Full evidence is in
+and pre-existing retry/ledger behavior; do not restore concurrency machinery or a test matrix. Earlier Clef
+calibration, release checks and the cancelled original-100 batch are in
 [priority verification](docs/mailsort-priority-verification.md).
 
 The Watch evidence implementation and native Dots acceptance are complete; the verification record is in
@@ -61,12 +53,10 @@ Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's sha
 
 ## Latest verified release
 
-Mailsort's calibrated priority correction and simplified original-100 entrypoint are live at `eb3e21dc`, as recorded
-above. Its earlier P1-P4 switch and 99-message unread batch completed at `d1295e7d`; the current recheck is a
-separate operation with five pending members. P1 keeps Inbox, P2-P4 archive, uncertainty becomes P1, and the
-scam/trust gates are removed. Original mail and history remain. The isolated checkout left Claude's shared tree
-untouched. Provider identity, tests and privacy-safe evidence are in
-[priority verification](docs/mailsort-priority-verification.md); actions are in [priority rollout](mailsort/docs/priority-rollout.md).
+Mailsort and Home run `ff4b3532` after the successful main release linked above. The classifier uses Opus 5.5
+medium and an independent $20 monthly workspace limit; live mode is confirmed. The earlier Clef release and
+cancelled original-100 batch are historical records in [priority verification](docs/mailsort-priority-verification.md).
+No five-member recheck remains pending. See [Claude rollout](docs/mailsort-claude-verification.md) for provider identities.
 
 Watch page evidence (`f7942fb6`) passed the complete
 [branch gate](https://github.com/ziyixi/todofy/actions/runs/39950244799) and
@@ -110,8 +100,9 @@ browser cases remain in [the dated record](docs/history/handoff-2026-10-22.md#ap
 
 - Boundary B ([archive](docs/history/handoff-2026-10-21.md#boundary-b-released-claudeboundary-b)): after the
   2026-10-25 Sunday backup, Todofy's health page shows it complete with no `tasks` section. In the next push that
-  deploys them anyway, empty `RETIRED_SERVICE_BINDINGS` (Todofy) and reword `proto/buf.yaml`'s header comment, which
+  deploys them anyway, remove only the completed Todofy entry from `RETIRED_BINDINGS` and reword `proto/buf.yaml`'s header comment, which
   still names the retired `todofy/taskintent/v1` (a change to that file alone deploys every app and the VPS).
+  Mailsort's separate `AI` retirement entry stays until its production removal is verified.
 - Owner UI, read-only, for Boundary B: Tasks › Mail lists mail and its categories; Plan's weekly review shows the
   pending-mail count; Tasks › GTD shows the copied trend; Mail Hero's 提醒 card names Home's digest task.
 - Owner, blocked secret operations: delete todofy-core's Worker secrets `TODOIST_API_KEY`,
@@ -156,8 +147,6 @@ Answered in chat; do not re-ask.
 
 ### Waiting for the owner
 
-- Mailsort's write limit tripped on 2026-10-21 at 04:00 UTC and it fell back to shadow mode (Home: 待审 6 封).
-  The owner decides whether to switch it back to live and whether to raise the per-run limit.
 - Install Recall Orion `2026.1015.451` on the phone; renewed phone acceptance follows it.
 - Brief's sender `onboarding@resend.dev` delivers only to the Resend account's own address; change it before sending.
 - Check the Claude Console workspace spend limit against Brief's stored $80 budget (unverified; $50 was suggested).

@@ -179,15 +179,22 @@ The existing authenticated owner UI started the original-100 action once. At the
 95 messages had been reanalyzed: 45 confirmed Gmail changes and 50 unchanged results, with zero failures.
 The 50 unchanged results refreshed decision evidence without another Gmail write. The completed 95 decisions
 were P1: 37 (all conservative fallback), P2: 0, P3: 7 and P4: 51. These counts describe model output, not owner-
-confirmed classification accuracy. The original 100 currently total P1: 40, P2: 0, P3: 7 and P4: 53, including
+confirmed classification accuracy. At that checkpoint, the original 100 totaled P1: 40, P2: 0, P3: 7 and P4: 53, including
 five members whose old decisions have not yet been reanalyzed.
 
 The remaining five reached the existing daily Gmail-write limit: total daily successful writes were 150/150.
 App-estimated model use was about 7,622/9,500 and `quota_exhausted` remained false. The owner mode stayed live
-and its breaker remained clear. All five persisted pending entries have their normal next attempt at
-`2026-10-25T00:00:00Z` (October 24, 17:00 Los Angeles time); the existing Alarm will resume them without another
-start request. No limit, mode, usage counter or credential was changed. The batch is not yet complete.
+and its breaker remained clear. The five persisted pending entries then had their next attempt scheduled for
+`2026-10-25T00:00:00Z` (October 24, 17:00 Los Angeles time). No limit, mode, usage counter or credential was changed
+at that checkpoint; the batch was not yet complete.
 
 Only aggregate labels, batch states, allowance counters and retry times were read. No real mail body, subject,
-sender or message ID was exported. The UI retained the same batch and counts after a full reload. The next check
-should inspect this existing batch's completion and final distribution; do not replace its cohort with a new run.
+sender or message ID was exported. The UI retained the same batch and counts after a full reload.
+
+### Later cancellation, 2026-10-24 UTC
+
+The owner subsequently asked to leave the original cohort unchanged. The five unstarted rechecks were cancelled
+in the authorized audit, closing the batch with 45 actual Gmail changes, 55 skipped and zero pending members.
+The scheduled continuation described above was cancelled and must not resume. The later authorization to classify
+all currently unread mail has not been executed. The [Claude rollout](mailsort-claude-verification.md) does not
+start either reclassification.
