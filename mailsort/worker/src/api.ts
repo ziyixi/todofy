@@ -18,6 +18,7 @@ import {
 import { LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
 import {
   ListExamplesResponseSchema,
+  InitializePrioritiesResponseSchema,
   ListLabelsResponseSchema,
   ListLedgerEntriesResponseSchema,
   ListReviewItemsResponseSchema,
@@ -34,7 +35,6 @@ import { create, type DescMessage, type JsonValue, type MessageShape } from '@zi
 import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobuf/wkt';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
-import { teachableDomain } from './decide.ts';
 import type { ModeName } from './env.ts';
 import { deleteExample, deleteExamplesOfLabel, dropEmbeddings } from './examples.ts';
 import { setVerdict } from './feedback.ts';
@@ -65,6 +65,8 @@ import { exampleMessage, flowMessage, labelMessage, labelName, ledgerMessage, MO
 import { labelIdFor, ownerPath, pathOfGmailName, treeConflict } from './paths.ts';
 import { REASONS, sortError } from './reasons.ts';
 import { replaySummary, startReplay } from './replay.ts';
+import { initializePriorities } from './priority-setup.ts';
+import { prioritySetup, priorityStartedAt } from './priority.ts';
 import { authState, type Budget, writeScope } from './session.ts';
 import { effectiveMode, readSettings, writeSettings, type SettingsValue } from './settings.ts';
 import { utcDay, type DecisionRow, type LabelRow, type LedgerRow, type ReviewRow, type Store } from './store.ts';
@@ -161,6 +163,17 @@ async function onceAsync<Desc extends DescMessage>(ctx: ApiContext, requestId: s
 
 /** A frozen consolidation owns label/decision writes until it succeeds; settings still allow an emergency off. */
 function checkConsolidationMutation(ctx: ApiContext, rpc: string): void {
+  if (rpc === 'InitializePriorities') {
+    if (migrationActive(ctx.store)) throw sortError('CONSOLIDATION_ACTIVE');
+    return;
+  }
+  if (rpc !== 'UpdateSettings' && prioritySetup(ctx.store) !== null && priorityStartedAt(ctx.store) === 0) {
+    bad('P1–P4 分级正在设置，请先完成设置。');
+  }
+  if (priorityStartedAt(ctx.store) > 0 && ['CreateLabel', 'UpdateLabel', 'DeleteLabel', 'SyncLabels',
+    'StartLabelConsolidation', 'ResumeLabelConsolidation', 'RemoveTrustedDomain'].includes(rpc)) {
+    bad('当前使用固定的 P1–P4 分级，请刷新页面。');
+  }
   if (rpc === 'UpdateSettings' || rpc === 'StartLabelConsolidation' || rpc === 'ResumeLabelConsolidation') return;
   if (migrationActive(ctx.store)) throw sortError('CONSOLIDATION_ACTIVE');
 }
@@ -344,14 +357,9 @@ function standing(ctx: ApiContext, decision: DecisionRow): LedgerRow | undefined
   return effective.superseded === 1 ? undefined : effective;
 }
 
-/** The From domain a trust label's answer to `decision` would teach (decide.ts teachableDomain), or ''. */
-function teachable(decision: Pick<DecisionRow, 'dmarc' | 'sender_domain' | 'suspicious'> | undefined): string {
-  return decision === undefined ? '' : teachableDomain({ authenticated: decision.dmarc === 1, domain: decision.sender_domain, suspicious: decision.suspicious });
-}
-
-/** A review item as the API answers it, with the domain a trust label's answer would teach while it is pending. */
+/** A legacy review item remains readable; priority corrections never teach trusted domains. */
 function reviewOut(ctx: ApiContext, row: ReviewRow): ReturnType<typeof reviewMessage> {
-  return reviewMessage(canonicalReview(ctx.store, row), row.state === 'pending' ? teachable(ctx.store.decision(row.message_id)) : '');
+  return reviewMessage(canonicalReview(ctx.store, row));
 }
 
 /**
@@ -365,9 +373,6 @@ function choose(ctx: ApiContext, item: ReviewRow, decision: DecisionRow, chosen:
   setVerdict(store, decision, chosen, 'review', ctx.now);
   // setVerdict resolves the item through pendingReviewOf; this item is the one asked about.
   store.run(`UPDATE review SET state = ?, resolved_label = ?, resolve_time = ? WHERE id = ?`, item.suggested_label === chosen ? 'confirmed' : 'corrected', chosen, ctx.now, item.id);
-  const chosenLabel = chosen === null ? undefined : store.label(chosen);
-  const domain = teachable(decision);
-  if (chosenLabel?.trust === 1 && domain !== '' && store.addTrustedDomain(chosenLabel.id, domain, ctx.now)) store.touchLabel(chosenLabel.id, ctx.now);
   if (!ownerWritesAllowed(ctx)) return [];
   const ids: string[] = [];
   const current = standing(ctx, decision);
@@ -471,6 +476,17 @@ function labelReport(ctx: ApiContext): ReturnType<typeof create<typeof LabelRepo
 
 export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiContext> = {
   // labels
+
+  async initializePriorities(request, ctx) {
+    return onceAsync(ctx, request.requestId, 'InitializePriorities', 'labels', InitializePrioritiesResponseSchema, async () => {
+      try {
+        const result = await initializePriorities(ctx);
+        return create(InitializePrioritiesResponseSchema, { ...result, labels: result.completed ? labelsOut(ctx.store, ctx.store.labels()) : [] });
+      } catch (error) {
+        throw gmailError(error);
+      }
+    });
+  },
 
   listLabels(request, ctx) {
     const size = pageSize(request.pageSize, PAGE);
@@ -737,7 +753,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const last = page[page.length - 1];
     return Promise.resolve(
       create(ListReviewItemsResponseSchema, {
-        reviewItems: page.map((row) => reviewMessage(canonicalReview(ctx.store, row), row.dmarc === null ? '' : teachable({ dmarc: row.dmarc, sender_domain: row.sender_domain, suspicious: row.suspicious }))),
+        reviewItems: page.map((row) => reviewMessage(canonicalReview(ctx.store, row))),
         nextPageToken: rows.length > size && last !== undefined ? encodePageToken(last.id, {}) : '',
       }),
     );
@@ -946,6 +962,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const model = ctx.shed || usage.neurons >= FLASH_SWITCH_SHARE * settings.dailyNeuronBudget ? CLEF_FLASH : CLEF;
     return create(ServiceStatusSchema, {
       name: 'serviceStatus',
+      prioritiesInitialized: priorityStartedAt(store) > 0,
       effectiveMode: MODES[effectiveMode(settings, ctx.ceiling)],
       authState: auth === 'not_configured' ? ServiceStatus_AuthState.NOT_CONFIGURED : auth === 'failed' ? ServiceStatus_AuthState.FAILED : ServiceStatus_AuthState.OK,
       writeScope: writeScope(store),

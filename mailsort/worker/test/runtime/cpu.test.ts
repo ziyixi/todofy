@@ -29,6 +29,7 @@ import {
 } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
 import { DRAIN_MAX, EXAMPLES_MAX, LABELS_MAX, REPLAY_BATCH, REPLAY_CASES_MAX, REPLAY_ITEMS_MAX, SENDER_HISTORY_ROWS, TRUSTED_DOMAINS_PER_LABEL_MAX } from '../../src/limits.ts';
 import { senderHash } from '../../src/mask.ts';
+import { PRIORITY_LABELS } from '../../src/priority.ts';
 import { MAILS, message } from '../fakes/fixtures.ts';
 import { accessClaims, testIssuer } from '../jwt.ts';
 import { MINUTE, OBJECT_WORKER, op, PUBLIC_HOST, startHarness, SYNTHETIC_BINDINGS, T0, type Harness } from './harness.ts';
@@ -104,6 +105,12 @@ async function seed(h: Harness): Promise<void> {
       T0,
     );
   }
+  for (const [i, label] of PRIORITY_LABELS.entries()) {
+    const gmailId = h.up.gmail.createUserLabel(label.displayName, true);
+    await h.sql(`INSERT INTO labels (id, seq, display_name, description, enabled, gmail_id, gmail_state, keep_in_inbox, create_time, update_time, etag)
+      VALUES (?, ?, ?, ?, 1, ?, 'linked', ?, ?, ?, 'e')`, label.id, 100 + i, label.displayName, label.description, gmailId, label.keepInInbox ? 1 : 0, T0, T0);
+  }
+  await h.sql(`INSERT INTO meta (key, value) VALUES ('priority_started_at', ?)`, String(T0 - 86_400_000));
   await h.sql(
     `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
      INSERT INTO trusted_domains (label_id, domain, origin, create_time) SELECT 'label-' || (i % ?), printf('d%04d.example.com', i), 'owner', ? FROM n`,
@@ -114,10 +121,10 @@ async function seed(h: Harness): Promise<void> {
   await h.sql(
     `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
      INSERT INTO examples (id, label_id, summary, origin, message_id, embedding, create_time)
-     SELECT printf('ex%06d', i), 'label-' || (i % ?), printf('示例邮件 %d · Weekly digest · Sender <example.com> · 本周订阅内容摘要', i), 'correction', printf('ffff%012d', i), randomblob(4096), ?
+     SELECT printf('ex%06d', i), printf('p%d', 1 + i % ?), printf('示例邮件 %d · Weekly digest · Sender <example.com> · 本周订阅内容摘要', i), 'correction', printf('ffff%012d', i), randomblob(4096), ?
      FROM n`,
     EXAMPLES_MAX - 1,
-    LABELS_MAX,
+    PRIORITY_LABELS.length,
     T0,
   );
   // 2,000 decisions of the last week, the first SENDER_HISTORY_ROWS from the sender of the mails the alarm decides.
@@ -126,15 +133,15 @@ async function seed(h: Harness): Promise<void> {
     `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 1999)
      INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, top_label, decider, shown, verdict, verdict_label, verdict_source, verdict_at, sender_hash, subject, sender, summary)
      SELECT printf('dddd%012d', i), printf('tddd%012d', i), ?, ? - i * 1000, CASE i % 4 WHEN 0 THEN 'applied' WHEN 1 THEN 'suggested' WHEN 2 THEN 'unsure' ELSE 'none' END,
-            CASE WHEN i % 4 < 2 THEN 'label-' || (i % ?) END, 'label-' || (i % ?), 'clef', i % 8 = 2,
-            CASE WHEN i % 5 = 0 THEN 'corrected' ELSE 'confirmed' END, 'label-' || (i % ?), CASE WHEN i % 2 = 0 THEN 'gmail' ELSE 'review' END, ?,
+            CASE WHEN i % 4 < 2 THEN printf('p%d', 1 + i % ?) END, printf('p%d', 1 + i % ?), 'clef', i % 8 = 2,
+            CASE WHEN i % 5 = 0 THEN 'corrected' ELSE 'confirmed' END, printf('p%d', 1 + i % ?), CASE WHEN i % 2 = 0 THEN 'gmail' ELSE 'review' END, ?,
             CASE WHEN i < ? THEN ? ELSE printf('%016x', i) END, '主题', '发件人', '摘要'
      FROM n`,
     T0,
     T0,
-    LABELS_MAX,
-    LABELS_MAX,
-    LABELS_MAX,
+    PRIORITY_LABELS.length,
+    PRIORITY_LABELS.length,
+    PRIORITY_LABELS.length,
     T0 - 1000,
     SENDER_HISTORY_ROWS,
     hash,
@@ -230,7 +237,7 @@ async function session({ h, meter: worker, object }: SortIsolate, index: number)
   let clock = T0;
   await h.step(clock);
   await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', '{"mode":"live"}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
-  for (let i = 0; i < DRAIN_MAX; i++) h.up.gmail.deliver(message({ ...MAILS.newsletterZh, id: `cc00000000000${String(i).padStart(3, '0')}`, receivedAt: T0 }));
+  for (let i = 0; i < DRAIN_MAX; i++) h.up.gmail.deliver(message({ ...MAILS.newsletterZh, text: '合成阅读材料，但可以安全地等两三天。', id: `cc00000000000${String(i).padStart(3, '0')}`, receivedAt: T0 }));
   for (let i = 0; i < 300 - DRAIN_MAX; i++) h.up.gmail.ownerModify(`cc00000000000${String(i % DRAIN_MAX).padStart(3, '0')}`, i % 2 === 0 ? ['STARRED'] : [], i % 2 === 0 ? [] : ['STARRED']);
   clock += 5 * MINUTE;
   let decided = 0;
@@ -240,11 +247,15 @@ async function session({ h, meter: worker, object }: SortIsolate, index: number)
     }),
   ]);
   expect(decided).toBe(DRAIN_MAX);
+  expect(await h.sql(`SELECT count(*) AS n FROM decisions WHERE message_id LIKE 'cc%' AND probabilities2 != '{}'`)).toEqual([{ n: DRAIN_MAX }]);
+  expect(await h.sql(`SELECT count(*) AS n FROM examples WHERE embedding IS NOT NULL AND label_id IN ('p1', 'p2', 'p3', 'p4')`)).toEqual([{ n: EXAMPLES_MAX }]);
+  // All six messages actually embed and run both views; a setup/none shortcut would fail this bound check.
+  expect(await h.sql(`SELECT ai_calls FROM usage WHERE day = '2026-10-01'`)).toEqual([{ ai_calls: 3 * DRAIN_MAX }]);
   // The replay evaluation of the mails just decided: a pass with nothing else to do decides REPLAY_BATCH of them again.
   await h.sql(`DELETE FROM replay`);
   await h.sql(`INSERT INTO replay (job_id, message_id, state, create_time) VALUES ('job1', '', 'running', ?)`, clock);
   for (let i = 0; i < REPLAY_BATCH; i++) {
-    await h.sql(`INSERT INTO replay (job_id, message_id, state, owner_label, as_of, create_time) VALUES ('job1', ?, 'pending', 'label-1', ?, ?)`, `cc00000000000${String(i).padStart(3, '0')}`, clock, clock);
+    await h.sql(`INSERT INTO replay (job_id, message_id, state, owner_label, as_of, create_time) VALUES ('job1', ?, 'pending', 'p1', ?, ?)`, `cc00000000000${String(i).padStart(3, '0')}`, clock, clock);
   }
   clock += 5 * MINUTE;
   const replay = summarize(REPLAY, [await object.cpu(async () => { await h.step(clock); })]);

@@ -1,6 +1,5 @@
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
-import { LabelConsolidation_State, LabelConsolidationSchema } from '@ziyixi/proto/mailsort/ui/v2/consolidation_pb'
 import { ReplayEvaluation_State, ReplayEvaluationSchema } from '@ziyixi/proto/mailsort/ui/v2/replay_pb'
 import { Mode, ServiceStatus_AuthState } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { FakeServer, NOW, settle } from './test/fakeServer.ts'
@@ -48,11 +47,11 @@ describe('replay evaluation', () => {
 
   it('shows matched, mismatched, uncertain and unreadable counts separately and refreshes completion', async () => {
     const server = new FakeServer()
-    server.replay = create(ReplayEvaluationSchema, { name: 'replayEvaluation', state: ReplayEvaluation_State.RUNNING, totalCount: 12, evaluatedCount: 9, skippedCount: 1, autoCount: 5, autoMatchCount: 4, noLabelCount: 2, noLabelMatchCount: 1, unsureCount: 2, mismatches: [{ decidedLabel: 'labels/newsletter', ownerLabel: 'labels/receipt', mailCount: 1 }], reasonCounts: { model_unavailable: 1 }, createTime: timestampFromMs(NOW) })
+    server.replay = create(ReplayEvaluationSchema, { name: 'replayEvaluation', state: ReplayEvaluation_State.RUNNING, totalCount: 12, evaluatedCount: 9, skippedCount: 1, autoCount: 5, autoMatchCount: 4, noLabelCount: 2, noLabelMatchCount: 1, unsureCount: 2, mismatches: [{ decidedLabel: 'labels/p2', ownerLabel: 'labels/p3', mailCount: 1 }], reasonCounts: { model_unavailable: 1 }, createTime: timestampFromMs(NOW) })
     const card = await open(server)
     expect(card.textContent).toContain('进行中：10 / 12 封')
     expect([...card.querySelectorAll('.kpi')].map((node) => node.textContent)).toEqual(['样本12', '已判断9', '与回答一致5', '不一致2', '拿不准2', '无法读取1'])
-    expect(card.textContent).toContain('订阅 → 你的回答：收据（1 封）')
+    expect(card.textContent).toContain('P2 → 你的回答：P3（1 封）')
     expect(card.textContent).toContain('1 封因模型未能回答而记为拿不准')
     server.replay.state = ReplayEvaluation_State.SUCCEEDED
     server.replay.evaluatedCount = 11
@@ -77,12 +76,10 @@ describe('replay evaluation', () => {
     expect(server.calls.some((call) => call.path.endsWith(':start'))).toBe(false)
   })
 
-  it('holds replay during a label consolidation and shows failed reads as failed observations', async () => {
+  it('shows failed reads as failed observations without requesting old consolidation state', async () => {
     const server = new FakeServer()
-    server.consolidation = create(LabelConsolidationSchema, { state: LabelConsolidation_State.RUNNING })
     const card = await open(server)
-    expect(card.textContent).toContain('标签正在整理，回放暂停')
-    expect(button(card, '检查分类效果').disabled).toBe(true)
+    expect(server.calls.some((call) => call.path.includes('labelConsolidation'))).toBe(false)
     server.replayFails = true
     button(card, '刷新状态').click()
     await settle()

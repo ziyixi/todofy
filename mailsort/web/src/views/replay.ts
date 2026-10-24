@@ -1,5 +1,4 @@
 /** Settings' replay reads only corrected samples; no mail content or Gmail mutations. */
-import { LabelConsolidation_State } from '@ziyixi/proto/mailsort/ui/v2/consolidation_pb'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { ReplayEvaluation_State, type ReplayEvaluation } from '@ziyixi/proto/mailsort/ui/v2/replay_pb'
 import { Mode, ServiceStatus_AuthState, type ServiceStatus } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
@@ -33,19 +32,18 @@ function results(replay: ReplayEvaluation, labels: readonly Label[]): HTMLElemen
       el('div', { class: 'kpis replay-counts' }, kpi('样本', replay.totalCount), kpi('已判断', replay.evaluatedCount), kpi('与回答一致', matched), kpi('不一致', mismatchCount), kpi('拿不准', replay.unsureCount), kpi('无法读取', replay.skippedCount)),
       el('p', { class: 'hint' }, '一致与不一致只统计有把握的判断；拿不准和无法读取单独列出。'),
     ]),
-    ...(replay.mismatches.length === 0 ? [] : [el('ul', { class: 'replay-mismatches', 'aria-label': '不一致的标签' }, ...replay.mismatches.map((item) => el('li', {}, `${labelText(item.decidedLabel, labels)} → 你的回答：${labelText(item.ownerLabel, labels)}（${String(item.mailCount)} 封）`)))]),
+    ...(replay.mismatches.length === 0 ? [] : [el('ul', { class: 'replay-mismatches', 'aria-label': '不一致的分级' }, ...replay.mismatches.map((item) => el('li', {}, `${labelText(item.decidedLabel, labels)} → 你的回答：${labelText(item.ownerLabel, labels)}（${String(item.mailCount)} 封）`)))]),
     (replay.reasonCounts['model_unavailable'] ?? 0) > 0 ? el('p', { class: 'hint warn' }, `${String(replay.reasonCounts['model_unavailable'])} 封因模型未能回答而记为拿不准`) : null,
     el('p', { class: 'meta' }, `开始 ${when(replay.createTime)}${replay.completeTime === undefined ? '' : ` · 完成 ${when(replay.completeTime)}`}`),
   ].filter((node): node is HTMLElement => node !== null)
 }
 
 export async function replayCard(labels: readonly Label[]): Promise<HTMLElement> {
-  const box = card('检查分类效果', '', el('p', { class: 'hint' }, '最近 14 天你已回答的待审邮件，最多 200 封。使用现有模型预算，正常分拣优先；不改 Gmail，也不代表整个邮箱的准确率。'))
+  const box = card('检查分类效果', '', el('p', { class: 'hint' }, '最近 14 天的已确认样本，最多 200 封。使用现有模型预算，正常分拣优先；不改 Gmail，也不代表整个邮箱的准确率。'))
   const content = el('div', { class: 'replay-results' })
   const feedback = el('p', { class: 'hint warn', role: 'status', hidden: true })
   let replay: ReplayEvaluation | null = null
   let status: ServiceStatus | null = null
-  let migrationHold: string | null = null
   let busy = false
   let readable = false
   let pendingRequestId: string | null = null
@@ -55,7 +53,7 @@ export async function replayCard(labels: readonly Label[]): Promise<HTMLElement>
 
   const paint = () => {
     const running = replay?.state === ReplayEvaluation_State.RUNNING
-    const hold = migrationHold ?? replayHold(status)
+    const hold = replayHold(status)
     fill(content, ...(readable ? replay === null ? [el('p', { class: 'hint' }, '尚未检查分类效果')] : results(replay, labels) : []), hold === null ? null : el('p', { class: 'hint warn' }, hold), running && hold === null ? el('p', { class: 'hint' }, '等待后台分批检查；正常分拣、退避或临时降载可能推迟进度。可刷新查看。') : null)
     start.textContent = busy ? '请求中…' : running ? '检查进行中' : pendingRequestId !== null ? '重试本次启动' : replay === null ? '检查分类效果' : '重新检查'
     start.disabled = busy || running || !readable || hold !== null
@@ -73,7 +71,6 @@ export async function replayCard(labels: readonly Label[]): Promise<HTMLElement>
     paint()
     feedback.hidden = true
     const statusPromise = api.getServiceStatus({ name: 'serviceStatus' }).catch(() => null)
-    const migrationPromise = api.getLabelConsolidation({ name: 'labelConsolidation' }).then((job) => job.state === LabelConsolidation_State.SUCCEEDED ? null : '标签正在整理，回放暂停；到整理标签查看进度').catch((error: unknown) => error instanceof ApiError && error.reason === 'NOT_FOUND' ? null : '整理状态读取失败；刷新状态后再开始')
     try {
       replay = await api.getReplayEvaluation({ name: 'replayEvaluation' }).catch((error: unknown) => {
         if (error instanceof ApiError && error.reason === 'NOT_FOUND') return null
@@ -86,7 +83,6 @@ export async function replayCard(labels: readonly Label[]): Promise<HTMLElement>
       failure(error)
     }
     status = await statusPromise
-    migrationHold = await migrationPromise
     busy = false
     paint()
   }

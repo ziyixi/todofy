@@ -1,18 +1,4 @@
-/**
- * 待审 (`/`): the few uncertain mails a day the model asks about (at most a daily quota, ../../docs/design.md §5), newest
- * first, one compact row each: the masked subject and sender (kept 14 days), why the model was uncertain in plain
- * words, and the answers as one-tap buttons: the model's most likely options with their probabilities (the first
- * always, and primary; the others from 5 %), 都不是 among them or after them, 其他… (the searchable picker over every
- * label) and 跳过. A label or 都不是 is ResolveReviewItem; 跳过 is SkipReviewItem. An answer leaves the list at once
- * and the next row takes the focus.
- *
- * Keyboard: j / k move between rows, 1 to 4 choose that answer, Enter the first (or 其他… when the model gave none), c
- * opens 其他…, s skips. A suspected phishing mail, or a trust label for a sender not trusted yet, says so in a warning
- * line; then no answer is primary and a label asks first. Any answer that would teach a trust label a domain
- * (ReviewItem.teachable_domain, ../../docs/design.md §3.2) asks first too, naming the domain, whatever the reason, and
- * is never primary: one tap must not trust a sender. A mail the model gave no answer for has no primary answer either.
- */
-import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
+/** Legacy review entries can still be corrected; new uncertain mail goes directly to P1. */
 import type { ReviewItem } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
 import { api, listAll } from '../api.ts'
 import { emptyState, picker, type PickerOption } from '../components.ts'
@@ -20,12 +6,6 @@ import { button, el, fill } from '../dom.ts'
 import { labelText, percent, UNSURE_REASONS, when } from '../format.ts'
 import type { ViewContext } from '../app.ts'
 import { act, allLabels, frame } from './common.ts'
-
-/** Reasons where the pipeline held the label back on purpose: one tap must not file such a mail under it. */
-const CAUTION: Readonly<Record<string, string>> = {
-  suspicious: '疑似钓鱼：先在 Gmail 里核对发件人和链接',
-  untrusted_sender: '发件人还不可信：先在 Gmail 里核对发件人',
-}
 
 /** The page with nothing to answer. */
 const QUIET = '没有需要你确认的邮件'
@@ -75,7 +55,7 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       }, 4),
       allLabels(),
     ])
-    const quiet = () => emptyState(QUIET, '只有模型拿不准的少数邮件会来这里')
+    const quiet = () => emptyState(QUIET, '拿不准的邮件已归 P1，并留在收件箱。')
     if (items.length === 0) {
       fill(body, quiet())
       return
@@ -104,7 +84,6 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
     }
 
     const build = (item: ReviewItem): Row => {
-      const caution = CAUTION[item.reason]
       const answers = choices(item)
       const first = item.candidates[0]?.label
       // Without the model's options there is nothing to suggest: no primary answer, and Enter opens 其他….
@@ -124,11 +103,6 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       }
       const resolve = (label: string) => {
         const name = labelText(label, labels)
-        const teaching = teaches(label, item, labels)
-        if (label !== '' && (caution !== undefined || teaching !== '')) {
-          const question = caution === undefined ? `选“${name}”？${teaching}` : `${caution}。仍然选“${name}”？${teaching}`
-          if (!ctx.host.confirm(question)) return
-        }
         void run((requestId) => api.resolveReviewItem({ name: item.name, label, requestId }), `${unanswered ? '已选' : label === first ? '已确认' : '已改为'}：${name}`)
       }
       const skip = () => void run((requestId) => api.skipReviewItem({ name: item.name, requestId }), '已跳过')
@@ -162,7 +136,7 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       }
       const answerButton = ({ label, probability }: Choice, index: number) => {
         const name = labelText(label, labels)
-        const primary = index === 0 && caution === undefined && !unanswered && teaches(label, item, labels) === ''
+        const primary = index === 0 && !unanswered
         const answer = button(name, () => {
           resolve(label)
         }, { ...(primary ? { class: 'primary' } : {}), 'aria-label': probability === undefined ? name : `${name}，${percent(probability)}` })
@@ -170,13 +144,12 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
         if (probability !== undefined) answer.append(el('span', { class: 'odds', 'aria-hidden': 'true' }, percent(probability)))
         return answer
       }
-      const reason = unanswered ? `${UNSURE_REASONS[item.reason] ?? item.reason}：可用 其他… 选标签` : (UNSURE_REASONS[item.reason] ?? item.reason)
+      const reason = unanswered ? `${UNSURE_REASONS[item.reason] ?? item.reason}：可用 其他… 选分级` : (UNSURE_REASONS[item.reason] ?? item.reason)
       fill(
         node,
         el('div', { class: 'row-head' }, el('span', { class: 'row-title' }, subject), el('span', { class: 'meta' }, when(item.receiveTime))),
         el('div', { class: 'row-sub' }, item.sender),
-        // A warning line says why for the reasons that need care; the others in a quiet word.
-        caution === undefined ? (reason === '' ? null : el('p', { class: 'hint' }, reason)) : el('p', { class: 'hint warn', role: 'note' }, caution),
+        reason === '' ? null : el('p', { class: 'hint' }, reason),
         el('div', { class: 'actions answers' }, ...answers.map(answerButton), otherButton, button('跳过', skip, { class: 'quiet skip' })),
         slot,
       )
@@ -233,15 +206,4 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
     })
     fill(body, list, keys())
   })
-}
-
-/**
- * What choosing `label` would teach (../../docs/design.md §3.2), for the question before it: the item's teachable
- * domain for a trust label that does not list it yet; '' for any other answer.
- */
-function teaches(label: string, item: ReviewItem, labels: readonly Label[]): string {
-  const domain = item.teachableDomain
-  const chosen = labels.find((candidate) => candidate.name === label)
-  if (domain === '' || chosen?.trustImplying !== true || chosen.trustedDomains.includes(domain)) return ''
-  return `这会把 ${domain} 记为“${chosen.displayName}”的可信域名，以后这个域名的邮件可以自动打上它。`
 }

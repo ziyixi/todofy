@@ -1,673 +1,277 @@
-/**
- * The pipeline when things go wrong, in workerd with a real SQLite MailsortState and the fakes
- * (../../../docs/design.md §3, §4, §7): a write left for a retry never goes out once live is no longer in force (the
- * owner's shadow, the breaker, the MODE ceiling, the label's switch) or its trust label's sender is no longer trusted,
- * retries count against the run cap, a breaker
- * tripped by a pass's own write stops the rest of that pass, one unreadable mail never holds up the queue, a deleted
- * label's entries are refused before any intent, the resync's read order, a model outage backs off per mail, one
- * label per conversation follows the labels a thread carries now, a resync never sorts mail from before the install,
- * a retry never labels mail the owner filed in the meantime, the 14-day content cleanup runs while the mode is off,
- * and the owner's own Gmail labels are never taken over (a write never adopts one, a sync never adopts a parent, a
- * label already on a mail is never written, so its undo cannot take it off). After every test, every request Google
- * got is checked against the independent table.
- */
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+/** Retry gates and bounded recovery, with fixed priorities and only synthetic upstreams. */
+import { afterEach, describe, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
-import { Label_GmailState, LabelSchema } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
-import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
-import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
-import { DAY, HOUR, MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
-import { addLabels, checkGoogleCalls, decision, deliver, failModifies, gmailLabels, modifies, roomInReview, setLabelEnabled, setMode } from './helpers.ts';
+import { PRIORITY_LABELS } from '../../src/priority.ts';
+import { MAILS } from '../fakes/fixtures.ts';
+import { DAY, MINUTE, op, startHarness, T0, type Harness } from './harness.ts';
+import { checkGoogleCalls, decision, deliver, failModifies, gmailLabels, modifies, setMode } from './helpers.ts';
 
-async function ledgerOf(h: Harness, id: string): Promise<Record<string, unknown>[]> {
-  return h.sql(`SELECT state, origin, last_code FROM ledger WHERE message_id = ? ORDER BY id`, id);
-}
-
-async function pendingReview(h: Harness, id: string): Promise<Record<string, unknown>[]> {
-  return h.sql(`SELECT kind, suggested_label FROM review WHERE message_id = ? AND state = 'pending'`, id);
-}
-
-describe('a write left for a retry goes out only while live is in force', () => {
-  let h: Harness;
-  let now = T0;
-  beforeAll(async () => {
-    h = await startHarness();
-    await addLabels(h);
-    await setMode(h, Mode.LIVE);
-    await h.step(now);
-  });
-  afterAll(async () => {
-    await h.dispose();
-  });
-  afterEach(() => {
-    checkGoogleCalls(h);
-  });
-
-  /** A live decision whose modify Gmail answered 503: its ledger row stays `intended` for the next pass. */
-  async function leaveIntended(id: string): Promise<void> {
-    const failing = failModifies(h, 503);
-    deliver(h, { ...MAILS.newsletterEn, id, subject: `Weekly digest ${id}` }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    failing.off();
-    expect(await ledgerOf(h, id)).toEqual([{ state: 'intended', origin: 'auto', last_code: 'message_modify_503' }]);
+let h: Harness;
+let now = T0;
+async function setup(bindings: Record<string, string> = {}): Promise<void> {
+  h = await startHarness({ bindings });
+  now = T0;
+  for (const [i, label] of PRIORITY_LABELS.entries()) {
+    const gmailId = h.up.gmail.createUserLabel(label.displayName, true);
+    await h.sql(`INSERT INTO labels (id, seq, display_name, description, enabled, gmail_id, gmail_state, keep_in_inbox, create_time, update_time, etag) VALUES (?, ?, ?, ?, 1, ?, 'linked', ?, ?, ?, 'e')`, label.id, i + 1, label.displayName, label.description, gmailId, label.keepInInbox ? 1 : 0, T0, T0);
   }
+  await h.sql(`INSERT INTO meta (key, value) VALUES ('priority_started_at', ?)`, String(T0));
+  h.up.ai.choiceOverride = () => ({ p2: 0.92, none: 0.08 });
+  await h.step(now);
+  await setMode(h, Mode.LIVE);
+}
+async function step(): Promise<void> { now += 5 * MINUTE; await h.step(now); }
+async function ledger(id: string): Promise<unknown> { return h.sql(`SELECT state, last_code FROM ledger WHERE message_id = ? ORDER BY id`, id); }
+async function intended(id: string): Promise<void> {
+  const failing = failModifies(h, 503);
+  deliver(h, { ...MAILS.bankEn, id }, now + MINUTE);
+  await step();
+  failing.off();
+  expect(await ledger(id)).toEqual([{ state: 'intended', last_code: 'message_modify_503' }]);
+}
+afterEach(async () => { checkGoogleCalls(h); await h.dispose(); });
 
-  /** The next pass sends no modify: the row fails with `code`, and the decision stays only recorded (not shown). */
-  async function nextPassWritesNothing(id: string, code: string): Promise<void> {
-    const before = modifies(h).length;
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(modifies(h).length).toBe(before);
-    expect(gmailLabels(h, id)).toContain('INBOX');
-    expect(await ledgerOf(h, id)).toEqual([{ state: 'failed', origin: 'auto', last_code: code }]);
-    expect(await decision(h, id)).toMatchObject({ outcome: 'suggested', label_id: 'newsletter', shown: 0 });
-    expect(await pendingReview(h, id)).toEqual([]);
-  }
-
-  it('the owner chose shadow', async () => {
-    await leaveIntended('a1000000000000a1');
-    await setMode(h, Mode.SHADOW);
-    await nextPassWritesNothing('a1000000000000a1', 'mode_changed');
-    await setMode(h, Mode.LIVE);
+describe('write gates and retries', () => {
+  it('retries the same ledger row after a 503, preserving UNREAD', async () => {
+    await setup();
+    const id = 'abc0000000000101';
+    await intended(id);
+    await step();
+    expect(await ledger(id)).toEqual([{ state: 'applied', last_code: null }]);
+    expect(gmailLabels(h, id)).toEqual(['CATEGORY_UPDATES', 'UNREAD', h.up.gmail.labelIdByName('P2')].sort());
+    expect(await h.sql(`SELECT count(*) AS n FROM ledger WHERE message_id = ?`, id)).toEqual([{ n: 1 }]);
   });
 
-  it('the breaker tripped', async () => {
-    await leaveIntended('a1000000000000a2');
-    await h.sql(`UPDATE meta SET value = json_set(value, '$.breaker', 'label_share') WHERE key = 'settings'`);
-    await nextPassWritesNothing('a1000000000000a2', 'mode_changed');
-    await setMode(h, Mode.LIVE);
-  });
-
-  it('the label was disabled', async () => {
-    await leaveIntended('a1000000000000a3');
-    await setLabelEnabled(h, 'newsletter', false);
-    await nextPassWritesNothing('a1000000000000a3', 'label_disabled');
-    await setLabelEnabled(h, 'newsletter', true);
-  });
-
-  it('the owner took the trust label\'s domain off meanwhile: the retry writes nothing', async () => {
-    const id = 'a1000000000000a9';
-    await h.sql(`INSERT INTO trusted_domains (label_id, domain, origin, create_time) VALUES ('bank', 'bank.example.com', 'owner', ?)`, now - MINUTE);
-    const failing = failModifies(h, 503);
-    deliver(h, { ...MAILS.bankEn, id, subject: `Your monthly bank statement ${id}` }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    failing.off();
-    expect(await ledgerOf(h, id)).toEqual([{ state: 'intended', origin: 'auto', last_code: 'message_modify_503' }]);
-    const label = await h.api.getLabel({ name: 'labels/bank' });
-    await h.api.removeTrustedDomain({ name: label.name, domain: 'bank.example.com', etag: label.etag, requestId: op() });
-    const before = modifies(h).length;
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(modifies(h).length).toBe(before);
-    expect(gmailLabels(h, id)).toContain('INBOX');
-    expect(await ledgerOf(h, id)).toEqual([{ state: 'failed', origin: 'auto', last_code: 'untrusted_sender' }]);
-    expect(await decision(h, id)).toMatchObject({ outcome: 'suggested', label_id: 'bank', shown: 0 });
-  });
-
-  /** The retry's modifies and label reads after `before` calls. */
-  const callsSince = (before: number) => h.up.gmail.calls.slice(before).map((call) => `${call.method} ${new URL(call.url).pathname.split('/').slice(-2).join('/')}`);
-
-  it('the owner archived the mail and filed it under a label of their own meanwhile: the retry writes nothing', async () => {
-    const id = 'a1000000000000a4';
-    await leaveIntended(id);
-    const work = h.up.gmail.createUserLabel('Work');
-    h.up.gmail.ownerModify(id, [work], ['INBOX']);
-    const before = h.up.gmail.calls.length;
-    now += 5 * MINUTE;
-    await h.step(now);
-    // One metadata read of the mail, and no modify.
-    expect(callsSince(before).filter((call) => call.includes(id))).toEqual([`GET messages/${id}`]);
-    expect(gmailLabels(h, id)).toEqual([work, 'CATEGORY_UPDATES', 'UNREAD'].sort());
-    expect(await ledgerOf(h, id)).toEqual([{ state: 'failed', origin: 'auto', last_code: 'mail_changed' }]);
-    expect(await decision(h, id)).toMatchObject({ outcome: 'suggested', label_id: 'newsletter' });
-  });
-
-  it('the owner only archived it: the retry writes nothing', async () => {
-    const id = 'a1000000000000a5';
-    await leaveIntended(id);
-    h.up.gmail.ownerModify(id, [], ['INBOX']);
-    const before = modifies(h).length;
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(modifies(h).length).toBe(before);
-    expect(gmailLabels(h, id)).not.toContain('INBOX');
-    expect(await ledgerOf(h, id)).toEqual([{ state: 'failed', origin: 'auto', last_code: 'mail_changed' }]);
-  });
-
-  it('a user label the mail already had when it was decided does not stop the retry', async () => {
-    const id = 'a1000000000000a6';
-    const filtered = h.up.gmail.createUserLabel('From a filter');
-    const failing = failModifies(h, 503);
-    deliver(h, { ...MAILS.newsletterEn, id, subject: `Weekly digest ${id}`, labels: ['INBOX', 'UNREAD', 'CATEGORY_UPDATES', filtered] }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    failing.off();
-    expect(await ledgerOf(h, id)).toEqual([{ state: 'intended', origin: 'auto', last_code: 'message_modify_503' }]);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await ledgerOf(h, id)).toEqual([{ state: 'applied', origin: 'auto', last_code: null }]);
-    const labels = gmailLabels(h, id);
-    expect(labels).toContain(filtered);
-    expect(labels).toContain('UNREAD');
-    expect(labels).not.toContain('INBOX');
-  });
-
-  it('the owner turned the label’s 归档 off meanwhile: the retry only adds the label (QA D5)', async () => {
-    const id = 'a1000000000000a7';
-    await leaveIntended(id);
-    expect(await h.sql(`SELECT archived FROM ledger WHERE message_id = ?`, id)).toEqual([{ archived: 1 }]);
-    const flowOf = async (outcome: string) => Number((await h.sql(`SELECT coalesce(sum(n), 0) AS n FROM flow WHERE label = 'newsletter' AND outcome = ?`, outcome))[0]?.['n'] ?? 0);
-    const [archivedBefore, keptBefore] = [await flowOf('archived'), await flowOf('kept_in_inbox')];
-    const keep = async (on: boolean) => {
-      const label = await h.api.getLabel({ name: 'labels/newsletter' });
-      await h.api.updateLabel({ label: { ...label, keepInInbox: on }, updateMask: { paths: ['keep_in_inbox'] }, requestId: op() });
-    };
-    await keep(true);
-    now += 5 * MINUTE;
-    await h.step(now);
-    const labels = gmailLabels(h, id);
-    expect(labels).toContain('INBOX');
-    expect(labels).toContain('UNREAD');
-    expect(labels.some((item) => item.startsWith('Label_'))).toBe(true);
-    expect(await h.sql(`SELECT state, archived FROM ledger WHERE message_id = ?`, id)).toEqual([{ state: 'applied', archived: 0 }]);
-    // The flow counts the write as kept in the inbox now, not archived.
-    expect([await flowOf('archived'), await flowOf('kept_in_inbox')]).toEqual([archivedBefore - 1, keptBefore + 1]);
-    // An undo then gives nothing back to the inbox (it never left).
-    const [entry] = (await h.api.listLedgerEntries({ label: 'labels/newsletter' })).ledgerEntries.filter((item) => item.messageId === id);
-    expect(entry).toMatchObject({ archived: false });
-    await keep(false);
-  });
-
-  it('a row that keeps never starts archiving when the label’s 归档 is turned on', async () => {
-    const id = 'a1000000000000a8';
-    const label = await h.api.getLabel({ name: 'labels/newsletter' });
-    await h.api.updateLabel({ label: { ...label, keepInInbox: true }, updateMask: { paths: ['keep_in_inbox'] }, requestId: op() });
-    const failing = failModifies(h, 503);
-    deliver(h, { ...MAILS.newsletterEn, id, subject: `Weekly digest ${id}` }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    failing.off();
-    expect(await h.sql(`SELECT state, archived FROM ledger WHERE message_id = ?`, id)).toEqual([{ state: 'intended', archived: 0 }]);
-    const again = await h.api.getLabel({ name: 'labels/newsletter' });
-    await h.api.updateLabel({ label: { ...again, keepInInbox: false }, updateMask: { paths: ['keep_in_inbox'] }, requestId: op() });
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await h.sql(`SELECT state, archived FROM ledger WHERE message_id = ?`, id)).toEqual([{ state: 'applied', archived: 0 }]);
+  it.each(['shadow', 'breaker'])('refuses a retry after %s stops live writes', async (reason) => {
+    await setup();
+    const id = 'abc0000000000102';
+    await intended(id);
+    if (reason === 'shadow') await setMode(h, Mode.SHADOW);
+    else await h.sql(`UPDATE meta SET value = json_set(value, '$.breaker', 'label_share') WHERE key = 'settings'`);
+    const count = modifies(h).length;
+    await step();
+    expect(modifies(h)).toHaveLength(count);
+    expect(await ledger(id)).toEqual([{ state: 'failed', last_code: 'mode_changed' }]);
+    expect(await decision(h, id)).toMatchObject({ outcome: 'suggested', label_id: 'p2' });
     expect(gmailLabels(h, id)).toContain('INBOX');
   });
 
-  it('a retry counts against the run cap like a new write', async () => {
+  it('checks label enablement again before retry', async () => {
+    await setup();
+    const id = 'abc0000000000103';
+    await intended(id);
+    await h.sql(`UPDATE labels SET enabled = 0 WHERE id = 'p2'`);
+    const count = modifies(h).length;
+    await step();
+    expect(modifies(h)).toHaveLength(count);
+    expect(await ledger(id)).toEqual([{ state: 'failed', last_code: 'label_disabled' }]);
+  });
+
+  it('does not apply retired auth/trust conditions to a retry', async () => {
+    await setup();
+    const id = 'abc0000000000104';
+    await intended(id);
+    await h.sql(`UPDATE labels SET trust = 1 WHERE id = 'p2'`);
+    await h.sql(`UPDATE decisions SET dmarc = 0 WHERE message_id = ?`, id);
+    await step();
+    expect(await ledger(id)).toEqual([{ state: 'applied', last_code: null }]);
+  });
+
+  it('leaves mail the owner archived under another label alone', async () => {
+    await setup();
+    const id = 'abc0000000000105';
+    await intended(id);
+    const own = h.up.gmail.createUserLabel('Owner work');
+    h.up.gmail.ownerModify(id, [own], ['INBOX']);
+    const count = modifies(h).length;
+    await step();
+    expect(modifies(h)).toHaveLength(count);
+    expect(await ledger(id)).toEqual([{ state: 'failed', last_code: 'mail_changed' }]);
+    expect(gmailLabels(h, id)).toEqual(['CATEGORY_UPDATES', 'UNREAD', own].sort());
+  });
+
+  it('counts a retry against the same run cap as new mail', async () => {
+    await setup();
     await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', runWriteLimit: 1 }), updateMask: { paths: ['run_write_limit'] }, requestId: op() });
+    const first = 'abc0000000000106';
+    const second = 'abc0000000000107';
     const failing = failModifies(h, 503);
-    deliver(h, { ...MAILS.newsletterEn, id: 'a1000000000000b1', subject: 'Weekly digest b1' }, now);
-    deliver(h, { ...MAILS.newsletterEn, id: 'a1000000000000b2', subject: 'Weekly digest b2' }, now);
-    now += 5 * MINUTE;
-    // The 503 stops the pass: b1 is left intended, b2 still pending.
-    await h.step(now);
+    deliver(h, { ...MAILS.bankEn, id: first }, now + MINUTE);
+    deliver(h, { ...MAILS.bankEn, id: second }, now + 2 * MINUTE);
+    await step();
     failing.off();
-    const before = modifies(h).length;
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(modifies(h).length - before).toBe(1);
-    expect(await ledgerOf(h, 'a1000000000000b1')).toEqual([{ state: 'applied', origin: 'auto', last_code: null }]);
-    expect(await ledgerOf(h, 'a1000000000000b2')).toEqual([{ state: 'failed', origin: 'auto', last_code: 'run_limit' }]);
-    expect(gmailLabels(h, 'a1000000000000b2')).toContain('INBOX');
+    const count = modifies(h).length;
+    await step();
+    expect(modifies(h).length - count).toBe(1);
+    expect(await ledger(first)).toEqual([{ state: 'applied', last_code: null }]);
+    expect(await ledger(second)).toEqual([{ state: 'failed', last_code: 'run_limit' }]);
     expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ breakerTripped: true, breakerReason: 'run_limit', effectiveMode: Mode.SHADOW });
   });
 
-  it('a non-mode save keeps the breaker; choosing the mode again clears it', async () => {
-    const kept = await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', runWriteLimit: 10 }), updateMask: { paths: ['run_write_limit'] }, requestId: op() });
-    expect(kept).toMatchObject({ breakerTripped: true, breakerReason: 'run_limit', effectiveMode: Mode.SHADOW, runWriteLimit: 10 });
-    const cleared = await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.LIVE }), updateMask: { paths: ['mode'] }, requestId: op() });
-    expect(cleared).toMatchObject({ breakerTripped: false, effectiveMode: Mode.LIVE });
-  });
-});
-
-describe('the MODE ceiling stops a write left for a retry', () => {
-  let h: Harness;
-  beforeAll(async () => {
-    h = await startHarness({ bindings: { MODE: 'shadow' } });
-  });
-  afterAll(async () => {
-    await h.dispose();
-  });
-  afterEach(() => {
-    checkGoogleCalls(h);
-  });
-
-  it('MAILSORT_MODE=shadow: the owner’s live is lowered, and no leftover row reaches Gmail', async () => {
-    await addLabels(h);
-    await setMode(h, Mode.LIVE);
-    await h.step(T0);
-    const gmailId = h.up.gmail.createUserLabel('Digests', true);
-    await h.api.syncLabels({ requestId: op() });
-    deliver(h, MAILS.newsletterEn, T0);
-    await h.step(T0 + 5 * MINUTE);
-    expect(await decision(h, MAILS.newsletterEn.id)).toMatchObject({ outcome: 'suggested' });
-    // A row an earlier deployment (with MODE=live) left intended.
-    await h.sql(`UPDATE decisions SET outcome = 'applied' WHERE message_id = ?`, MAILS.newsletterEn.id);
-    await h.sql(`DELETE FROM review`);
-    await h.sql(
-      `INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time) VALUES ('t0000000000-leftover', ?, 'newsletter', ?, 1, 'auto', 'intended', ?)`,
-      MAILS.newsletterEn.id,
-      gmailId,
-      T0,
-    );
-    await h.step(T0 + 10 * MINUTE);
+  it('keeps the daily write cap and requires choosing the mode again to clear its breaker', async () => {
+    await setup();
+    await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyWriteLimit: 1 }), updateMask: { paths: ['daily_write_limit'] }, requestId: op() });
+    await h.sql(`INSERT INTO usage (day, applied) VALUES ('2026-10-01', 1) ON CONFLICT (day) DO UPDATE SET applied = 1`);
+    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000108' }, now + MINUTE);
+    await step();
+    expect(await ledger('abc0000000000108')).toEqual([{ state: 'failed', last_code: 'daily_limit' }]);
     expect(modifies(h)).toEqual([]);
-    expect(await ledgerOf(h, MAILS.newsletterEn.id)).toEqual([{ state: 'failed', origin: 'auto', last_code: 'mode_changed' }]);
-    expect(await decision(h, MAILS.newsletterEn.id)).toMatchObject({ outcome: 'suggested' });
-    expect(await pendingReview(h, MAILS.newsletterEn.id)).toEqual([]);
-  });
-});
-
-describe('a breaker tripped by a pass’s own write stops the rest of that pass', () => {
-  let h: Harness;
-  beforeAll(async () => {
-    h = await startHarness();
-  });
-  afterAll(async () => {
-    await h.dispose();
-  });
-  afterEach(() => {
-    checkGoogleCalls(h);
-  });
-
-  it('the label-share rule trips on the first write; the next mails of the pass stay in the inbox', async () => {
-    await addLabels(h);
+    const kept = await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyWriteLimit: 150 }), updateMask: { paths: ['daily_write_limit'] }, requestId: op() });
+    expect(kept.breakerReason).toBe('daily_limit');
     await setMode(h, Mode.LIVE);
-    await h.step(T0);
-    // A week of writes to another label, and 14 newsletter writes today: the next newsletter write makes 15.
-    for (let i = 0; i < 30; i++) {
-      await h.sql(`INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, decider) VALUES (?, ?, 0, ?, 'applied', 'receipt', 'clef')`, `w${String(i)}`, `tw${String(i)}`, T0 - 2 * DAY);
-    }
-    for (let i = 0; i < 14; i++) {
-      await h.sql(`INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, decider) VALUES (?, ?, 0, ?, 'applied', 'newsletter', 'clef')`, `d${String(i)}`, `td${String(i)}`, T0 + MINUTE);
-    }
-    const ids = ['a2000000000000a1', 'a2000000000000a2', 'a2000000000000a3'];
-    for (const id of ids) deliver(h, { ...MAILS.newsletterEn, id, subject: `Weekly digest ${id}` }, T0 + 2 * MINUTE);
-    await h.step(T0 + 5 * MINUTE);
-    expect(modifies(h).length).toBe(1);
-    expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ breakerTripped: true, breakerReason: 'label_share' });
-    expect(await decision(h, ids[0] ?? '')).toMatchObject({ outcome: 'applied' });
-    for (const id of ids.slice(1)) {
-      expect(await decision(h, id)).toMatchObject({ outcome: 'suggested' });
-      expect(gmailLabels(h, id)).toContain('INBOX');
-    }
+    expect((await h.api.getSettings({ name: 'settings' })).breakerTripped).toBe(false);
+  });
+
+  it('keeps the deployment mode ceiling above all owner write requests', async () => {
+    await setup({ MODE: 'shadow' });
+    const id = 'abc0000000000109';
+    deliver(h, { ...MAILS.bankEn, id }, now + MINUTE);
+    await step();
+    const gmailId = h.up.gmail.labelIdByName('P2') ?? '';
+    await h.sql(`INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time) VALUES ('leftover', ?, 'p2', ?, 1, 'auto', 'intended', ?)`, id, gmailId, now);
+    await step();
+    expect(modifies(h)).toEqual([]);
+    expect(await ledger(id)).toEqual([{ state: 'failed', last_code: 'mode_changed' }]);
   });
 });
 
-describe('one unreadable mail never holds up the queue', () => {
-  let h: Harness;
-  let now = T0;
-  beforeAll(async () => {
-    h = await startHarness();
-    await addLabels(h);
-    await h.step(now);
-  });
-  afterAll(async () => {
-    await h.dispose();
-  });
-  afterEach(() => {
-    h.up.gmail.failWhen = null;
-    checkGoogleCalls(h);
+describe('read and model recovery', () => {
+  it('skips a malformed/unreadable 400 and decides the message behind it', async () => {
+    await setup();
+    const poison = 'abc0000000000110';
+    h.up.gmail.failWhen = (method, url) => method === 'GET' && url.pathname.endsWith(`/messages/${poison}`) ? 400 : null;
+    deliver(h, { ...MAILS.bankEn, id: poison }, now + MINUTE);
+    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000111' }, now + 2 * MINUTE);
+    await step();
+    expect(await decision(h, poison)).toMatchObject({ outcome: 'skipped', unsure_reason: 'unreadable' });
+    expect(await decision(h, 'abc0000000000111')).toMatchObject({ label_id: 'p2' });
   });
 
-  const failRead = (id: string, status: number) => {
-    h.up.gmail.failWhen = (method, url) => (method === 'GET' && url.pathname.endsWith(`/messages/${id}`) ? status : null);
-  };
-
-  it('a 400 skips the mail at once and decides the one behind it', async () => {
-    failRead('b0000000000000b1', 400);
-    deliver(h, { ...MAILS.unsure, id: 'b0000000000000b1' }, now);
-    deliver(h, { ...MAILS.receiptEn, id: 'b0000000000000b2' }, now + 1000);
-    now += 5 * MINUTE;
-    const pass = await h.step(now);
-    expect(pass.code).toBe('ok');
-    expect(await decision(h, 'b0000000000000b1')).toMatchObject({ outcome: 'skipped', unsure_reason: 'unreadable' });
-    expect(await decision(h, 'b0000000000000b2')).toMatchObject({ label_id: 'receipt' });
-  });
-
-  it('a lasting 500 backs the mail off, decides the next one, and skips it after its tries', async () => {
-    const poison = 'b1000000000000b1';
-    failRead(poison, 500);
-    deliver(h, { ...MAILS.unsure, id: poison }, now);
-    deliver(h, { ...MAILS.travelZh, id: 'b1000000000000b2' }, now + 1000);
-    now += 5 * MINUTE;
-    expect((await h.step(now)).code).toBe('message_get_500');
+  it('backs off a persistent 500 per message and stops after the existing seven tries', async () => {
+    await setup();
+    const poison = 'abc0000000000112';
+    h.up.gmail.failWhen = (method, url) => method === 'GET' && url.pathname.endsWith(`/messages/${poison}`) ? 500 : null;
+    deliver(h, { ...MAILS.bankEn, id: poison }, now + MINUTE);
+    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000113' }, now + 2 * MINUTE);
+    await step();
     expect(await h.sql(`SELECT attempts, not_before FROM pending WHERE message_id = ?`, poison)).toEqual([{ attempts: 1, not_before: now + 5 * MINUTE }]);
     now += 30_000;
     await h.step(now);
-    expect(await decision(h, 'b1000000000000b2')).toMatchObject({ label_id: 'travel' });
-    for (let i = 0; i < 12 && (await decision(h, poison)) === undefined; i++) {
+    expect(await decision(h, 'abc0000000000113')).toMatchObject({ label_id: 'p2' });
+    for (let i = 0; i < 10 && await decision(h, poison) === undefined; i++) {
       const [row] = await h.sql<{ not_before: number }>(`SELECT not_before FROM pending WHERE message_id = ?`, poison);
-      now = Math.max(now + 5 * MINUTE, row?.not_before ?? 0);
+      now = Math.max(now + MINUTE, row?.not_before ?? 0);
       await h.step(now);
     }
     expect(await decision(h, poison)).toMatchObject({ outcome: 'skipped', unsure_reason: 'unreadable' });
-    expect(h.up.gmail.calls.filter((call) => call.url.includes(`/messages/${poison}`)).length).toBe(7);
+    expect(h.up.gmail.calls.filter((call) => call.url.includes(`/messages/${poison}`))).toHaveLength(7);
   });
 
-  it('a history record with an ID the guard would refuse is never queued', async () => {
-    deliver(h, { ...MAILS.unsure, id: 'not-a-gmail-id' }, now);
-    deliver(h, { ...MAILS.receiptZh, id: 'b2000000000000b2' }, now);
-    now += 5 * MINUTE;
-    expect((await h.step(now)).code).toBe('ok');
+  it('never queues Gmail message IDs refused by the closed table', async () => {
+    await setup();
+    deliver(h, { ...MAILS.bankEn, id: 'invalid-gmail-id' }, now + MINUTE);
+    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000114' }, now + MINUTE);
+    await step();
+    expect(await decision(h, 'abc0000000000114')).toMatchObject({ label_id: 'p2' });
+    expect(h.up.gmail.calls.some((call) => call.url.includes('invalid-gmail-id'))).toBe(false);
+  });
+
+  it('defers quota exhaustion to the next UTC day with no fabricated P1 decision', async () => {
+    await setup();
+    h.up.ai.quota = true;
+    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000115' }, now + MINUTE);
+    await step();
+    expect(await decision(h, 'abc0000000000115')).toBeUndefined();
+    expect(await h.sql(`SELECT attempts, not_before FROM pending`)).toEqual([{ attempts: 0, not_before: T0 + DAY }]);
+    expect(modifies(h)).toEqual([]);
+    expect(await h.sql(`SELECT quota_exhausted FROM usage WHERE day = '2026-10-01'`)).toEqual([{ quota_exhausted: 1 }]);
+  });
+
+  it('makes no more AI calls after a known quota refusal, then resumes mail and embeddings next UTC day', async () => {
+    await setup();
+    const first = 'abc0000000000121';
+    const later = 'abc0000000000122';
+    h.up.ai.quota = true;
+    deliver(h, { ...MAILS.bankEn, id: first }, now + MINUTE);
+    await step();
+    expect(h.up.ai.calls).toHaveLength(1);
+    expect(await h.sql(`SELECT quota_exhausted FROM usage WHERE day = '2026-10-01'`)).toEqual([{ quota_exhausted: 1 }]);
+    await h.sql(`INSERT INTO examples (id, label_id, summary, origin, create_time) VALUES ('quota-example', 'p2', 'Synthetic brokerage statement', 'confirmation', ?)`, now);
+
+    // The upstream is healthy again. Our recorded refusal must still stop both idle embedding retries and new mail.
+    h.up.ai.quota = false;
+    await step();
+    expect(h.up.ai.calls).toHaveLength(1);
+    expect(await h.sql(`SELECT embedding IS NULL AS pending FROM examples WHERE id = 'quota-example'`)).toEqual([{ pending: 1 }]);
+    deliver(h, { ...MAILS.bankEn, id: later }, now + MINUTE);
+    await step();
+    expect(h.up.ai.calls).toHaveLength(1);
+    expect(modifies(h)).toEqual([]);
+    expect(await h.sql(`SELECT message_id, attempts, not_before FROM pending ORDER BY message_id`)).toEqual([
+      { message_id: first, attempts: 0, not_before: T0 + DAY },
+      { message_id: later, attempts: 0, not_before: T0 + DAY },
+    ]);
+
+    now = T0 + DAY + MINUTE;
+    await h.step(now);
+    expect(await decision(h, first)).toMatchObject({ outcome: 'applied', label_id: 'p2' });
+    expect(await decision(h, later)).toMatchObject({ outcome: 'applied', label_id: 'p2' });
     expect(await h.sql(`SELECT message_id FROM pending`)).toEqual([]);
-    expect(await decision(h, 'b2000000000000b2')).toMatchObject({ label_id: 'receipt' });
-    expect(h.up.gmail.calls.some((call) => call.url.includes('not-a-gmail-id'))).toBe(false);
-  });
-});
-
-describe('ledger entries whose label is no longer owned', () => {
-  let h: Harness;
-  let now = T0;
-  beforeAll(async () => {
-    h = await startHarness();
-    await addLabels(h);
-    await setMode(h, Mode.LIVE);
-    await h.step(now);
-  });
-  afterAll(async () => {
-    await h.dispose();
-  });
-  afterEach(() => {
-    checkGoogleCalls(h);
+    expect(await h.sql(`SELECT embedding IS NOT NULL AS embedded FROM examples WHERE id = 'quota-example'`)).toEqual([{ embedded: 1 }]);
+    expect(h.up.ai.calls.slice(1).map(call => call.model)).toEqual([
+      '@cf/cloudflare/clef', '@cf/cloudflare/clef', '@cf/cloudflare/clef', '@cf/cloudflare/clef', '@cf/baai/bge-m3',
+    ]);
+    expect(await h.sql(`SELECT quota_exhausted, ai_calls FROM usage WHERE day = '2026-10-02'`)).toEqual([{ quota_exhausted: 0, ai_calls: 5 }]);
   });
 
-  it('a deleted label: its entries are refused before any intent, and the pipeline goes on', async () => {
-    deliver(h, MAILS.newsletterEn, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    const [entry] = (await h.api.listLedgerEntries({})).ledgerEntries;
-    expect(entry).toMatchObject({ undoable: true, subject: 'Your weekly digest: 5 new posts', sender: 'Weekly Digest <news.example.com>' });
-    const label = await h.api.getLabel({ name: 'labels/newsletter' });
-    await h.api.deleteLabel({ name: 'labels/newsletter', etag: label.etag, requestId: op() });
-    expect((await h.api.listLedgerEntries({})).ledgerEntries[0]).toMatchObject({ undoable: false });
-    expect(reasonOf(await rejection(h.api.undoLedgerEntry({ name: entry?.name ?? '', requestId: op() })))).toBe('NOT_UNDOABLE');
-    expect(await ledgerOf(h, MAILS.newsletterEn.id)).toEqual([{ state: 'applied', origin: 'auto', last_code: null }]);
-    const range = await h.api.undoLedgerEntries({ startTime: timestampFromMs(T0 - DAY), endTime: timestampFromMs(T0 + DAY), requestId: op() });
-    expect(range).toMatchObject({ undoneCount: 0, remainingCount: 0 });
-    deliver(h, MAILS.unsure, now);
-    now += 5 * MINUTE;
-    const pass = await h.step(now);
-    expect(pass).toMatchObject({ code: 'ok', decided: 1 });
+  it('retries invalid model answers three times and records failure without a priority write or mandatory review', async () => {
+    await setup();
+    h.up.ai.choiceOverride = () => ({ p2: 1, none: 1 });
+    const id = 'abc0000000000116';
+    deliver(h, { ...MAILS.bankEn, id }, now + MINUTE);
+    for (let i = 0; i < 3; i++) {
+      await step();
+      const row = (await h.sql<{ not_before: number }>(`SELECT not_before FROM pending WHERE message_id = ?`, id))[0];
+      if (row !== undefined) now = row.not_before - 5 * MINUTE;
+    }
+    expect(await decision(h, id)).toMatchObject({ outcome: 'unsure', unsure_reason: 'model_unavailable', label_id: null, shown: 0 });
+    expect(modifies(h)).toEqual([]);
+    expect(await h.sql(`SELECT id FROM review`)).toEqual([]);
   });
 
-  it('an undo the guard refuses (the label went missing) is permanent for that row only', async () => {
-    deliver(h, MAILS.receiptEn, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await ledgerOf(h, MAILS.receiptEn.id)).toEqual([{ state: 'applied', origin: 'auto', last_code: null }]);
-    await h.sql(`UPDATE ledger SET state = 'undo_intended' WHERE message_id = ?`, MAILS.receiptEn.id);
-    await h.sql(`UPDATE labels SET gmail_state = 'missing' WHERE id = 'receipt'`);
-    const before = modifies(h).length;
-    // A mail no label fits: decided, nothing to write.
-    deliver(h, { ...MAILS.unsure, id: 'a3000000000000a1' }, now);
-    now += 5 * MINUTE;
-    const pass = await h.step(now);
-    expect(pass).toMatchObject({ code: 'ok', decided: 1 });
-    expect(modifies(h).length).toBe(before);
-    expect(await ledgerOf(h, MAILS.receiptEn.id)).toEqual([{ state: 'applied', origin: 'auto', last_code: 'guard_refused' }]);
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).recentErrorCodes).toContain('gmail_guard_refused');
-  });
-});
-
-describe('sync, the model and conversations', () => {
-  let h: Harness;
-  let now = T0;
-  beforeAll(async () => {
-    h = await startHarness();
-    await addLabels(h);
-    deliver(h, { ...MAILS.receiptEn, id: 'c0000000000000c0', subject: 'Receipt from before the install' }, T0 - HOUR);
-    await h.step(now);
-  });
-  afterAll(async () => {
-    await h.dispose();
-  });
-  afterEach(() => {
-    h.up.gmail.afterCall = null;
-    h.up.gmail.oldestHistoryId = 0;
-    h.up.ai.broken = false;
-    checkGoogleCalls(h);
-  });
-
-  it('a lost cursor’s resync never sorts mail from before the install', async () => {
-    deliver(h, { ...MAILS.travelZh, id: 'c0000000000000c1' }, now);
-    h.up.gmail.oldestHistoryId = h.up.gmail.historyId + 1;
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await decision(h, 'c0000000000000c0')).toMatchObject({ outcome: 'skipped', unsure_reason: 'before_install' });
-    expect(await decision(h, 'c0000000000000c1')).toMatchObject({ label_id: 'travel' });
-    expect(JSON.stringify(h.up.ai.calls)).not.toContain('Receipt from before the install');
-  });
-
-  it('a mail that arrives between the resync’s two reads is still sorted', async () => {
+  it('keeps the resync cursor-first order and skips pre-cutover mail', async () => {
+    await setup();
+    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000117' }, T0 - MINUTE);
+    deliver(h, { ...MAILS.bankEn, id: 'abc0000000000118' }, now + MINUTE);
     let injected = false;
     h.up.gmail.afterCall = (method, url) => {
       if (!injected && method === 'GET' && url.pathname.endsWith('/messages') && url.searchParams.get('labelIds') === 'INBOX') {
         injected = true;
-        deliver(h, { ...MAILS.travelZh, id: 'c1000000000000c2' }, now);
+        deliver(h, { ...MAILS.bankEn, id: 'abc0000000000119' }, now);
       }
     };
-    deliver(h, { ...MAILS.receiptZh, id: 'c1000000000000c1' }, now);
     h.up.gmail.oldestHistoryId = h.up.gmail.historyId + 1;
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(injected).toBe(true);
+    await step();
     h.up.gmail.oldestHistoryId = 0;
-    for (let i = 0; i < 2; i++) {
-      now += 5 * MINUTE;
-      await h.step(now);
-    }
-    expect(await decision(h, 'c1000000000000c1')).toMatchObject({ label_id: 'receipt' });
-    expect(await decision(h, 'c1000000000000c2')).toMatchObject({ label_id: 'travel' });
+    await step();
+    expect(injected).toBe(true);
+    expect(await decision(h, 'abc0000000000117')).toMatchObject({ outcome: 'skipped', unsure_reason: 'before_install' });
+    expect(await decision(h, 'abc0000000000118')).toMatchObject({ label_id: 'p2' });
+    expect(await decision(h, 'abc0000000000119')).toMatchObject({ label_id: 'p2' });
   });
 
-  it('a model outage backs each mail off instead of deciding it unsure', async () => {
-    h.up.ai.broken = true;
-    deliver(h, { ...MAILS.receiptEn, id: 'c2000000000000c1' }, now);
-    deliver(h, { ...MAILS.travelZh, id: 'c2000000000000c2' }, now);
-    now += 5 * MINUTE;
-    for (let i = 0; i < 4; i++) {
-      const pass = await h.step(now);
-      now = pass.next;
-    }
-    // Before the fix, the third pass (60 s in) had decided both unsure for good.
-    expect(await h.sql(`SELECT message_id FROM decisions WHERE message_id LIKE 'c2%'`)).toEqual([]);
-    const pending = await h.sql<{ attempts: number; not_before: number }>(`SELECT attempts, not_before FROM pending ORDER BY message_id`);
-    expect(pending.length).toBe(2);
-    for (const row of pending) {
-      expect(row.attempts).toBeGreaterThanOrEqual(1);
-      expect(row.attempts).toBeLessThanOrEqual(2);
-      expect(row.not_before).toBeGreaterThan(now);
-    }
-    h.up.ai.broken = false;
-    now = Math.max(now, ...pending.map((row) => row.not_before));
-    await h.step(now);
-    expect(await decision(h, 'c2000000000000c1')).toMatchObject({ label_id: 'receipt' });
-    expect(await decision(h, 'c2000000000000c2')).toMatchObject({ label_id: 'travel' });
-  });
-
-  it('shadow: a review verdict (nothing written) does not hide the rest of its conversation', async () => {
-    const first = { ...MAILS.receiptEn, id: 'c3000000000000c1', threadId: 'c3000000000000c1' } satisfies SyntheticMail;
-    // An uncertain first mail (the model's 0.5), shown and answered.
-    await roomInReview(h, now);
-    h.up.ai.confidence = 0.5;
-    deliver(h, first, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    h.up.ai.confidence = 0.92;
-    const [item] = await h.sql<{ id: string }>(`SELECT id FROM review WHERE message_id = ? AND state = 'pending'`, first.id);
-    await h.api.resolveReviewItem({ name: `reviewItems/${item?.id ?? ''}`, label: 'labels/receipt', requestId: op() });
-    deliver(h, { ...first, id: 'c3000000000000c2', subject: 'Re: Receipt' }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await decision(h, 'c3000000000000c2')).toMatchObject({ outcome: 'suggested', label_id: 'receipt' });
-  });
-
-  it('live: after the owner undoes mailsort’s label, the next mail of the conversation is decided again', async () => {
-    await setMode(h, Mode.LIVE);
-    const first = { ...MAILS.receiptEn, id: 'c4000000000000c1', threadId: 'c4000000000000c1' } satisfies SyntheticMail;
-    deliver(h, first, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await decision(h, first.id)).toMatchObject({ outcome: 'applied' });
-    // While the label stands, the conversation keeps it.
-    deliver(h, { ...first, id: 'c4000000000000c2', subject: 'Re: Receipt (1)' }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await decision(h, 'c4000000000000c2')).toMatchObject({ outcome: 'skipped', unsure_reason: 'thread_sorted' });
-    const entry = (await h.api.listLedgerEntries({})).ledgerEntries.find((item) => item.messageId === first.id);
-    await h.api.undoLedgerEntry({ name: entry?.name ?? '', requestId: op() });
-    deliver(h, { ...first, id: 'c4000000000000c3', subject: 'Re: Receipt (2)' }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await decision(h, 'c4000000000000c3')).toMatchObject({ outcome: 'applied', label_id: 'receipt' });
-  });
-});
-
-describe('the 14-day content cleanup runs while the mode is off', () => {
-  let h: Harness;
-  beforeAll(async () => {
-    h = await startHarness();
-  });
-  afterAll(async () => {
-    await h.dispose();
-  });
-  afterEach(() => {
-    checkGoogleCalls(h);
-  });
-
-  it('twenty days off: the subject, the sender\'s domain and the review item are gone, and Google was never called', async () => {
-    await addLabels(h);
-    await h.step(T0);
-    // An uncertain mail (the model's 0.5), shown in the review queue.
-    h.up.ai.confidence = 0.5;
-    deliver(h, MAILS.travelZh, T0);
-    await h.step(T0 + 5 * MINUTE);
-    expect(await decision(h, MAILS.travelZh.id)).toMatchObject({ outcome: 'unsure', content_cleared: 0, subject: '航班行程确认', sender_domain: 'travel.example.net' });
-    expect(await pendingReview(h, MAILS.travelZh.id)).toHaveLength(1);
-    const hash = (await decision(h, MAILS.travelZh.id))?.['sender_hash'];
+  it('clears 14-day content while off without contacting Gmail', async () => {
+    await setup();
+    const id = 'abc0000000000120';
+    deliver(h, { ...MAILS.bankEn, id }, now + MINUTE);
+    await step();
+    const hash = (await decision(h, id))?.['sender_hash'];
     await setMode(h, Mode.OFF);
-    const calls = h.up.gmail.calls.length;
-    for (let day = 1; day <= 20; day++) {
-      const result = await h.step(T0 + day * DAY);
-      expect(result.code).toBe('off');
-    }
-    expect(h.up.gmail.calls.length).toBe(calls);
-    // The sender's hash stays with the record (180 days): it is not the address.
-    expect(await decision(h, MAILS.travelZh.id)).toMatchObject({ content_cleared: 1, subject: null, sender: null, summary: null, sender_domain: null, sender_hash: hash });
-    expect(await h.sql(`SELECT id FROM review WHERE message_id = ?`, MAILS.travelZh.id)).toEqual([]);
-  });
-});
-
-describe('the owner’s own Gmail labels are never taken over', () => {
-  let h: Harness;
-  let now = T0;
-  beforeAll(async () => {
-    h = await startHarness();
-    await addLabels(h);
-    await h.step(now);
-  });
-  afterAll(async () => {
-    await h.dispose();
-  });
-  afterEach(() => {
-    checkGoogleCalls(h);
-  });
-
-  const labelCreates = () => h.up.gmail.calls.filter((call) => call.method === 'POST' && call.url.endsWith('/labels')).length;
-  const labelLists = () => h.up.gmail.calls.filter((call) => call.method === 'GET' && call.url.endsWith('/labels')).length;
-  const pendingItem = async (id: string) => `reviewItems/${(await h.sql<{ id: string }>(`SELECT id FROM review WHERE message_id = ? AND state = 'pending'`, id))[0]?.id ?? ''}`;
-  const newsletter = (id: string, labels?: string[]): SyntheticMail => ({ ...MAILS.newsletterEn, id, subject: `Weekly digest ${id}`, ...(labels === undefined ? {} : { labels }) });
-  let own = '';
-
-  it('a write never adopts: the owner’s Gmail label of the path leaves the label out of Gmail until the owner’s sync adopts it', async () => {
-    // The owner made 订阅 in Gmail and has a mail filed under it that stays in the inbox. In shadow two uncertain
-    // mails (the model's 0.5) wait in the review queue, one of them with the owner's label.
-    own = h.up.gmail.createUserLabel('Digests', true);
-    await setMode(h, Mode.SHADOW);
-    await roomInReview(h, now);
-    h.up.ai.confidence = 0.5;
-    deliver(h, newsletter('e1000000000000e1', ['INBOX', 'UNREAD', 'CATEGORY_UPDATES', own]), now);
-    deliver(h, newsletter('e1000000000000e0'), now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    h.up.ai.confidence = 0.92;
-    expect(await decision(h, 'e1000000000000e1')).toMatchObject({ outcome: 'unsure', top_label: 'newsletter', shown: 1 });
-    expect(await decision(h, 'e1000000000000e0')).toMatchObject({ outcome: 'unsure', top_label: 'newsletter', shown: 1 });
-    // Live: the first write finds the name taken, creates nothing and writes nothing.
-    await setMode(h, Mode.LIVE);
-    deliver(h, newsletter('e1000000000000e2'), now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(labelCreates()).toBe(0);
-    expect(modifies(h)).toEqual([]);
-    expect(await ledgerOf(h, 'e1000000000000e2')).toEqual([{ state: 'failed', origin: 'auto', last_code: 'label_name_taken' }]);
-    expect(await decision(h, 'e1000000000000e2')).toMatchObject({ outcome: 'suggested' });
-    expect(await h.api.getLabel({ name: 'labels/newsletter' })).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
-    // The next mail of the label is a suggestion at once: not even Gmail's labels are read.
-    const lists = labelLists();
-    deliver(h, newsletter('e1000000000000e3'), now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(labelLists()).toBe(lists);
-    expect(await decision(h, 'e1000000000000e3')).toMatchObject({ outcome: 'suggested' });
-    expect(await ledgerOf(h, 'e1000000000000e3')).toEqual([]);
-    // Only the owner's 从 Gmail 同步 adopts it.
-    expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 1 });
-    expect(await h.api.getLabel({ name: 'labels/newsletter' })).toMatchObject({ gmailLabelId: own, gmailState: Label_GmailState.ADOPTED });
-    deliver(h, newsletter('e1000000000000e4'), now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(gmailLabels(h, 'e1000000000000e4')).toEqual([own, 'CATEGORY_UPDATES', 'UNREAD'].sort());
-    expect(labelCreates()).toBe(0);
-  });
-
-  it('a label already on the mail is never written, so an undo never takes off one the owner put there', async () => {
-    // The review item from before the adoption, answered now: the mail already carries the owner's 订阅.
-    const before = modifies(h).length;
-    await h.api.resolveReviewItem({ name: await pendingItem('e1000000000000e1'), label: 'labels/newsletter', requestId: op() });
-    expect(modifies(h).length).toBe(before);
-    expect(await ledgerOf(h, 'e1000000000000e1')).toEqual([{ state: 'failed', origin: 'owner', last_code: 'already_labelled' }]);
-    expect(gmailLabels(h, 'e1000000000000e1')).toEqual([own, 'CATEGORY_UPDATES', 'INBOX', 'UNREAD'].sort());
-    expect((await h.api.listLedgerEntries({})).ledgerEntries.filter((entry) => entry.messageId === 'e1000000000000e1' && entry.undoable)).toEqual([]);
-    // A mail without it is written, and its undo removes exactly what mailsort added.
-    await h.api.resolveReviewItem({ name: await pendingItem('e1000000000000e0'), label: 'labels/newsletter', requestId: op() });
-    expect(gmailLabels(h, 'e1000000000000e0')).toEqual([own, 'CATEGORY_UPDATES', 'UNREAD'].sort());
-    const entry = (await h.api.listLedgerEntries({})).ledgerEntries.find((item) => item.messageId === 'e1000000000000e0');
-    await h.api.undoLedgerEntry({ name: entry?.name ?? '', requestId: op() });
-    expect(gmailLabels(h, 'e1000000000000e0')).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
-  });
-
-  it('a Gmail label with children is never adopted, including a grouping label created by the old app', async () => {
-    h.up.gmail.createUserLabel('Clubs');
-    h.up.gmail.createUserLabel('Clubs/Events');
-    const club = await h.api.createLabel({ label: create(LabelSchema, { displayName: 'Clubs', description: '社团的活动与通知' }), requestId: op() });
-    expect(club).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
-    expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 0 });
-    expect(await h.api.getLabel({ name: club.name })).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
-    const parent = h.up.gmail.createUserLabel('School');
-    h.up.gmail.createUserLabel('School/Homework');
-    await h.sql('INSERT INTO gmail_parents (gmail_id, create_time) VALUES (?, ?)', parent, now);
-    const school = await h.api.createLabel({ label: create(LabelSchema, { displayName: 'School', description: '学校的其他通知' }), requestId: op() });
-    expect(school).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
-    expect(await h.api.syncLabels({ requestId: op() })).toMatchObject({ linkedCount: 0 });
-    expect(await h.api.getLabel({ name: school.name })).toMatchObject({ gmailState: Label_GmailState.NAME_TAKEN });
-  });
-
-  it('a label created externally between list and create remains unowned after the conflict', async () => {
-    h.up.gmail.afterCall = (method, url) => {
-      if (method !== 'GET' || !url.pathname.endsWith('/labels')) return;
-      h.up.gmail.afterCall = null;
-      h.up.gmail.createUserLabel('Passports');
-    };
-    const label = await h.api.createLabel({ label: create(LabelSchema, { displayName: 'Passports', description: '护照办理与续签' }), requestId: op() });
-    expect(label).toMatchObject({ gmailLabelId: '', gmailState: Label_GmailState.NAME_TAKEN });
-    expect(await h.sql('SELECT count(*) AS n FROM gmail_parents WHERE gmail_id = ?', h.up.gmail.labelIdByName('Passports') ?? '')).toEqual([{ n: 0 }]);
+    const before = h.up.gmail.calls.length;
+    const pass = await h.step(T0 + 20 * DAY);
+    expect(pass.code).toBe('off');
+    expect(h.up.gmail.calls).toHaveLength(before);
+    expect(await decision(h, id)).toMatchObject({ content_cleared: 1, sender_hash: hash, subject: null, sender: null, summary: null, sender_domain: null });
   });
 });

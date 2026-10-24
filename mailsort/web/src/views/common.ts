@@ -1,20 +1,19 @@
-/**
- * What several views share: every label (for names and selects), a label select, a loading/error frame, and running a
- * mutation with its toast.
- */
+/** Shared priority loading, selects, view frames and mutation feedback. */
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { api, errorMessage, listAll, newRequestId, withRetry } from '../api.ts'
 import { emptyState } from '../components.ts'
 import { el, toast } from '../dom.ts'
+import { PRIORITIES } from '../priorities.ts'
 
 export async function allLabels(): Promise<Label[]> {
-  return listAll(async (pageToken) => {
+  const labels = await listAll(async (pageToken) => {
     const page = await api.listLabels({ pageSize: 50, pageToken })
     return { items: page.labels, next: page.nextPageToken }
   })
+  return PRIORITIES.flatMap((priority) => labels.filter((label) => label.name === `labels/${priority.id}`))
 }
 
-/** A select of the labels (value: the label's name), with `first` (value '': 都不是, 全部标签) on top when given. */
+/** A select of fixed priorities, with an optional first option for the whole range. */
 export function labelSelect(labels: readonly Label[], selected: string, first: string | null, attributes: Readonly<Record<string, string>> = {}): HTMLSelectElement {
   const select = el(
     'select',

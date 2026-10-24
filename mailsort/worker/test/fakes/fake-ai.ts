@@ -4,8 +4,7 @@
  *
  * Clef: an option scores when a word of its description (two or more characters, split at spaces and Chinese or
  * ASCII punctuation) occurs in the state's subject, snippet or body; the best option gets `confidence`, the rest share
- * what is left, and with no match "none" gets it. `suspicious` is high for the phrases of the synthetic phishing mail,
- * `bulk` for a mailing list. bge-m3: a hashed bag of character trigrams, normalized (similar text, similar vector).
+ * what is left, and with no match "none" gets it. bge-m3: a hashed bag of character trigrams, normalized (similar text, similar vector).
  * `quota` makes every call fail like the account's exhausted daily allocation; `choiceOverride` answers a view's
  * `choice` as a test sets it (by the options it was offered).
  */
@@ -23,8 +22,6 @@ function words(text: string): string[] {
     .split(/[\s,.;:!?、，。；：！？()（）/"'“”]+/u)
     .filter((word) => Array.from(word).length >= 2);
 }
-
-const SUSPICIOUS = ['verify your account', 'password expires', '账户异常', '立即验证', 'suspended'];
 
 export class FakeAi {
   /** The best option's probability (the decision's confidence). */
@@ -82,9 +79,7 @@ export class FakeAi {
         const rest = (1 - this.confidence) / Math.max(1, options.length - 1);
         const probabilities = Object.fromEntries(options.map((option) => [option, option === top ? this.confidence : rest]));
         answers[id] = { type: 'choice', choice: top, probabilities, confidence: this.confidence };
-      } else if (question.type === 'noul') {
-        const yes = id === 'suspicious' ? SUSPICIOUS.some((phrase) => text.includes(phrase)) : typeof state['list'] === 'string' && state['list'] !== '';
-        answers[id] = { type: 'noul', noul: yes ? 0.9 : 0.05 };
+
       }
     }
     return { model: model === '@cf/cloudflare/clef-flash' ? 'clef-flash' : 'clef', answers, usage: { input_tokens: this.tokensPerCall, output_tokens: 0 } };

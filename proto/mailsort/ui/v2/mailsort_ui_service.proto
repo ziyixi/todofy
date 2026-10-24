@@ -82,6 +82,16 @@ service MailsortUiService {
     option (google.api.method_signature) = "";
   }
 
+  // Replaces the owner's old topic labels with P1-P4. Deletes only the frozen, previously managed Gmail
+  // labels, never messages, and starts fresh priority learning. Repeated calls continue the same bounded setup.
+  rpc InitializePriorities(InitializePrioritiesRequest) returns (InitializePrioritiesResponse) {
+    option (google.api.http) = {
+      post: "/api/v2/labels:initializePriorities"
+      body: "*"
+    };
+    option (google.api.method_signature) = "";
+  }
+
   // Creates a label (AIP-133). It is created in Gmail (named display_name) before the first live write that
   // needs it, or at once when the mode is live and the grant allows writes. A label Gmail already has under that
   // name is never taken over: the label stays out of Gmail (Label.GmailState.GMAIL_STATE_NAME_TAKEN).
@@ -350,6 +360,27 @@ service MailsortUiService {
     };
     option (google.api.method_signature) = "settings,update_mask";
   }
+}
+
+// Input of InitializePriorities.
+message InitializePrioritiesRequest {
+  // A UUID for request deduplication (AIP-155). Use a new UUID for the next bounded setup step.
+  string request_id = 1 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+}
+
+// Result of one bounded InitializePriorities step.
+message InitializePrioritiesResponse {
+  // The current fixed priority labels, after the old labels have been removed.
+  repeated Label labels = 1;
+
+  // True only after the old managed Gmail labels are gone and all four new labels are linked.
+  bool completed = 2;
+
+  // Old Gmail labels removed by this setup; mail itself is never deleted.
+  int32 removed_label_count = 3;
 }
 
 // Input of GetLabel.

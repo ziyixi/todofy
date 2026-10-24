@@ -1,450 +1,196 @@
-/**
- * 标签 against the fake API (test/fakeServer.ts, the shared transcoder): the flat list with one
- * compact row per label (its last 7 days' count and 启用), a row's detail opened inline one at a time, the search over
- * labels' names, the description, 归档, a trust label's trusted domains (删除 each), the examples, the Gmail state,
- * 高级, and a new label, also when there is none yet.
- */
-import { mountApp, type Host } from './app.ts'
-import { labelNameProblem } from './views/label-name.ts'
-import { searchLabels } from './views/labels.ts'
-import { example, FakeServer, label, NOW, settle } from './test/fakeServer.ts'
-import { LabelConsolidation_State, LabelConsolidationSchema } from '@ziyixi/proto/mailsort/ui/v2/consolidation_pb'
-import { Label_GmailState, Label_Problem } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
-import { LabelCountSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+/** Fixed priority rows and the one-time setup, against the shared API transcoder. */
+import { Label_GmailState } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { create } from '@ziyixi/proto/protobuf'
+import { LabelCountSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import { mountApp, type Host } from './app.ts'
+import { example, FakeServer, label, NOW, settle } from './test/fakeServer.ts'
 
-const host: Host = { now: () => NOW, confirm: () => true }
+const asked = vi.fn(() => true)
+const host: Host = { now: () => NOW, confirm: asked }
 
-async function open(server: FakeServer, with_: Host = host): Promise<HTMLElement> {
+async function open(server: FakeServer): Promise<HTMLElement> {
   server.install()
   window.history.replaceState(null, '', '/labels')
   const root = document.createElement('div')
   document.body.append(root)
-  await mountApp(root, with_)
+  await mountApp(root, host)
   await settle()
   return root
 }
 
-/**
- * A store like the owner's: two groups, labels of one segment between them, a trust label with a trusted domain; one
- * label with mail this week.
- */
-function server(): FakeServer {
-  const s = new FakeServer()
-  s.labels = [label('dev-ci', '开发/CI通知'), label('dev-platform', '开发/平台工具'), label('account-security', '账号安全'), label('life-car-service', '生活/汽车/保养'), label('life-health', '生活/医疗'), label('travel', '出行')]
-  Object.assign(s.labels[0] ?? {}, { exampleCount: 2 })
-  Object.assign(s.labels[2] ?? {}, { trustImplying: true, trustedDomains: ['bank.example.com'] })
-  s.report = [create(LabelCountSchema, { label: 'labels/dev-ci', autoCount: 12, unsureCount: 1 })]
-  return s
-}
-
-const toastText = (root: HTMLElement) => root.querySelector('#toast')?.textContent ?? ''
-
-function buttonNamed(root: ParentNode, text: string): HTMLButtonElement {
+function button(root: ParentNode, text: string): HTMLButtonElement {
   const found = [...root.querySelectorAll('button')].find((node) => node.textContent === text)
   if (found === undefined) throw new Error(`no button ${text}`)
   return found
 }
 
-/** The row of the label named `name` in its group (`CI通知`, `汽车 › 保养`). */
-function row(root: HTMLElement, name: string): HTMLLIElement {
-  const found = [...root.querySelectorAll<HTMLLIElement>('li.leaf')].find((node) => node.querySelector('.leaf-name > span')?.textContent === name)
+function row(root: ParentNode, name: string): HTMLElement {
+  const found = [...root.querySelectorAll<HTMLElement>('.priority-row')].find((node) => node.querySelector('.leaf-name')?.textContent === name)
   if (found === undefined) throw new Error(`no row ${name}`)
   return found
 }
 
-function rowButton(root: HTMLElement, name: string): HTMLButtonElement {
-  const found = row(root, name).querySelector<HTMLButtonElement>('.leaf-main')
-  if (found === null) throw new Error(`no row button ${name}`)
+function expand(root: ParentNode, name: string): HTMLElement {
+  const found = row(root, name)
+  found.querySelector<HTMLButtonElement>('.leaf-main')?.click()
   return found
 }
 
-function input(root: ParentNode, name: string): HTMLInputElement {
-  const found = root.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)
-  if (found === null) throw new Error(`no input ${name}`)
-  return found
-}
-
-function type(field: HTMLInputElement | HTMLTextAreaElement, value: string): void {
-  field.value = value
-  field.dispatchEvent(new Event('input', { bubbles: true }))
-}
-
-function press(target: Element, key: string): void {
-  target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
-}
-
-const openDetails = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('.detail')].filter((node) => !node.hidden)
-
-describe('the tree', () => {
-  it('draws a flat list including full legacy names, counts and enable switches', async () => {
-    const root = await open(server())
-    const list = root.querySelector('ul.label-list')
-    expect(list?.children.length).toBe(6)
-    expect(root.querySelector('.branch')).toBeNull()
-    expect([...(list?.querySelectorAll('.leaf-name > span') ?? [])].map((node) => node.textContent)).toEqual(['开发/CI通知', '开发/平台工具', '账号安全', '生活/汽车/保养', '生活/医疗', '出行'])
-    expect(root.querySelector('.label-list-head')?.textContent).toBe('6 个标签启用')
-    const ci = row(root, '开发/CI通知')
-    expect(ci.querySelector('.leaf-count')?.textContent).toBe('7 天 12 封')
-    expect(ci.querySelectorAll('.leaf-row input').length).toBe(1)
-    expect(ci.querySelector('.leaf-row input')?.getAttribute('aria-label')).toBe('启用：开发/CI通知')
-    expect(root.textContent).not.toContain('正式打')
-    expect(row(root, '账号安全').querySelector('.leaf-count')).toBeNull()
+describe('fixed priorities', () => {
+  it('renders exactly four rows in urgency order with fixed inbox policy and no policy controls', async () => {
+    const server = new FakeServer()
+    server.labels.reverse()
+    server.report = [create(LabelCountSchema, { label: 'labels/p1', autoCount: 12 })]
+    const root = await open(server)
+    expect(root.querySelector('h1')?.textContent).toBe('分级')
+    expect([...root.querySelectorAll('.leaf-name')].map((node) => node.textContent)).toEqual(['P1', 'P2', 'P3', 'P4'])
+    expect(row(root, 'P1').textContent).toContain('现在处理或拿不准 · 留在收件箱')
+    expect(row(root, 'P1').textContent).toContain('7 天 12 封')
+    expect(row(root, 'P2').textContent).toContain('2–3 天内处理 · 自动归档')
+    expect(row(root, 'P3').textContent).toContain('周末处理 · 自动归档')
+    expect(row(root, 'P4').textContent).toContain('低价值或仅供参考 · 自动归档')
+    for (const name of ['P1', 'P2', 'P3', 'P4']) expand(root, name)
+    expect(root.querySelectorAll('input, textarea, select')).toHaveLength(0)
+    expect(root.textContent).not.toMatch(/新标签|改名|可信|钓鱼|敏感|高级|删除标签/)
+    expect(root.textContent).toContain('分类保持原有未读状态')
+    expect(root.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(true)
+    expect(server.calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
+    expect(server.calls.map((call) => call.path)).toEqual(['/api/v2/serviceStatus', '/api/v2/labels?page_size=50', '/api/v2/labelReport'])
   })
 
-  it('still draws the list when the week cannot be read, without counts', async () => {
-    const s = server()
-    s.reportFails = true
-    const root = await open(s)
-    expect(root.querySelectorAll('li.leaf').length).toBe(6)
+  it('keeps four policies visible before setup, and when reports fail', async () => {
+    const server = new FakeServer()
+    server.labels = [label('old', 'Old topic')]
+    server.reportFails = true
+    const root = await open(server)
+    expect(root.querySelectorAll('.priority-row')).toHaveLength(4)
+    expect(root.textContent).not.toContain('Old topic')
+    expect([...root.querySelectorAll('.priority-row .meta')].map((node) => node.textContent)).toEqual(Array<string>(4).fill('等待初始化'))
     expect(root.querySelector('.leaf-count')).toBeNull()
   })
-})
 
-describe('a row', () => {
-  it('says on the row when Gmail holds its name or lost the label', async () => {
-    const s = server()
-    s.labels[2]!.gmailState = Label_GmailState.NAME_TAKEN
-    s.labels[5]!.gmailState = Label_GmailState.MISSING
-    const root = await open(s)
-    expect(row(root, '账号安全').querySelector('.leaf-main > .meta.warn')?.textContent).toBe('同名已占用')
-    expect(row(root, '出行').querySelector('.leaf-main > .meta.warn')?.textContent).toBe('Gmail 中已删除')
-    expect(row(root, '开发/CI通知').querySelector('.leaf-main > .meta.warn')).toBeNull()
-  })
-
-  it('opens its detail inline, one at a time, and closes again', async () => {
-    const root = await open(server())
-    expect(openDetails(root).length).toBe(0)
-    rowButton(root, '开发/CI通知').click()
-    expect(openDetails(root).length).toBe(1)
-    expect(rowButton(root, '开发/CI通知').getAttribute('aria-expanded')).toBe('true')
-    expect(document.activeElement).toBe(rowButton(root, '开发/CI通知'))
-    const detail = openDetails(root)[0]
-    expect(detail?.getAttribute('aria-label')).toBe('开发/CI通知')
-    expect(detail?.querySelector('textarea')?.value).toBe('开发/CI通知 的说明')
-    expect([...(detail?.querySelectorAll('h3') ?? [])].map((node) => node.textContent)).toEqual(['例子 2'])
-    expect(detail?.querySelector(':scope > details.more > summary')?.textContent).toBe('高级')
-
-    rowButton(root, '出行').click()
-    expect(openDetails(root).map((node) => node.getAttribute('aria-label'))).toEqual(['出行'])
-    expect(rowButton(root, '开发/CI通知').getAttribute('aria-expanded')).toBe('false')
-    rowButton(root, '出行').click()
-    expect(openDetails(root).length).toBe(0)
-  })
-
-  it('turns 启用 off and on with only enabled and the etag in the mask, and puts the switch back when refused', async () => {
-    const s = server()
-    const root = await open(s)
-    const enabled = () => row(root, '开发/平台工具').querySelector<HTMLInputElement>('.leaf-row input.switch')
-    const flip = (on: boolean) => {
-      const node = enabled()
-      if (node === null) throw new Error('no switch')
-      node.checked = on
-      node.dispatchEvent(new Event('change'))
-    }
-    expect(enabled()?.checked).toBe(true)
-    flip(false)
+  it('loads learned examples only on request, deletes one and preserves the count across folding', async () => {
+    const server = new FakeServer()
+    server.labels[1]!.exampleCount = 2
+    server.examples = [example('e1', 'p2', '应在两天内回复的合成邮件'), example('e2', 'p2')]
+    const root = await open(server)
+    const p2 = expand(root, 'P2')
+    expect(p2.querySelector('h3')?.textContent).toBe('例子 2')
+    expect(server.calls.some((call) => call.path.startsWith('/api/v2/examples'))).toBe(false)
+    button(p2, '查看').click()
     await settle()
-    const patch = s.calls.find((call) => call.method === 'PATCH')
-    expect(decodeURIComponent(patch?.path ?? '')).toContain('/api/v2/labels/dev-platform?update_mask=enabled,etag')
-    expect(patch?.body).toMatchObject({ etag: 'etag-dev-platform' })
-    expect(toastText(root)).toBe('开发/平台工具：已停用')
-    expect(s.labels.find((item) => item.name === 'labels/dev-platform')?.enabled).toBe(false)
-    expect(row(root, '开发/平台工具').querySelector('.leaf-main > .meta')?.textContent).toBe('未启用')
-    // The next save carries the new etag: the fake refuses a stale one.
-    flip(true)
+    expect(server.calls.find((call) => call.path.startsWith('/api/v2/examples'))?.path).toContain('label=labels%2Fp2')
+    expect(p2.querySelectorAll('.example-list li')).toHaveLength(2)
+    p2.querySelector<HTMLButtonElement>('.example-list button')?.click()
     await settle()
-    expect(toastText(root)).toBe('开发/平台工具：已启用')
-    expect(s.labels.find((item) => item.name === 'labels/dev-platform')?.enabled).toBe(true)
-    // Changed elsewhere meanwhile: refused, and the switch is as before.
-    const changed = s.labels.find((item) => item.name === 'labels/dev-platform')
-    if (changed !== undefined) changed.etag = 'elsewhere'
-    flip(false)
-    await settle()
-    expect(toastText(root)).toBe('这一项已在别处修改，请刷新后重试')
-    expect(enabled()?.checked).toBe(true)
+    expect(server.examples.map((item) => item.name)).toEqual(['examples/e2'])
+    expect(p2.querySelector('h3')?.textContent).toBe('例子 1')
+    expand(root, 'P2')
+    expand(root, 'P2')
+    expect(p2.querySelector('h3')?.textContent).toBe('例子 1')
+    expect(server.calls.filter((call) => call.method === 'GET' && call.path.startsWith('/api/v2/examples'))).toHaveLength(1)
   })
 })
 
-describe('the search', () => {
-  it('finds labels by name', () => {
-    const s = server()
-    expect([...searchLabels(s.labels, '生活')]).toEqual(['labels/life-car-service', 'labels/life-health'])
-    expect([...searchLabels(s.labels, 'ci通知')]).toEqual(['labels/dev-ci'])
-    expect(searchLabels(s.labels, '  ').size).toBe(6)
+describe('priority setup', () => {
+  it('explains the exact action before starting and hides setup on completion', async () => {
+    const server = new FakeServer()
+    server.labels = [label('old', 'Old topic')]
+    const originalSettings = { ...server.settings }
+    const root = await open(server)
+    expect(root.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(false)
+    expect(root.textContent).toContain('已有邮件不会删除，收件箱位置和未读状态不变')
+    expect(root.textContent).toContain('移除本应用的旧 Gmail 分类标签及旧学习记录')
+    expect(server.calls.some((call) => call.path.endsWith(':initializePriorities'))).toBe(false)
+    const start = button(root, '启用 P1–P4 分级')
+    start.click()
+    start.click()
+    await settle()
+    const calls = server.calls.filter((call) => call.path.endsWith(':initializePriorities'))
+    expect(calls).toHaveLength(1)
+    expect(String(calls[0]?.body?.['request_id'])).toMatch(/^[0-9a-f-]{36}$/)
+    expect(calls[0]?.headers['x-csrf-token']).toBe('csrf-token')
+    expect(root.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(true)
+    expect(root.textContent).toContain('P1、P2、P3、P4 已启用')
+    expect(server.settings).toEqual(originalSettings)
+    expect(asked).not.toHaveBeenCalled()
   })
 
-  it('filters the tree as one types and clears with Escape', async () => {
-    const root = await open(server())
-    const search = input(root, '搜索标签')
-    search.focus()
-    type(search, '生活')
-    expect([...root.querySelectorAll('.leaf-name > span:first-child')].map((node) => node.textContent)).toEqual(['生活/汽车/保养', '生活/医疗'])
-    expect(root.querySelector('.label-list-head span')?.textContent).toBe('找到 2 个')
-    // The focus stays in the box while the tree repaints.
-    expect(document.activeElement).toBe(search)
-    type(search, '没有这个')
-    expect(root.querySelector('.empty')?.textContent).toBe('没有匹配的标签')
-    press(search, 'Escape')
-    expect(search.value).toBe('')
-    expect(root.querySelectorAll('li.leaf').length).toBe(6)
-  })
-})
-
-describe('the detail', () => {
-  it('saves the description on blur with only it and the etag in the mask', async () => {
-    const s = server()
-    const root = await open(s)
-    rowButton(root, '出行').click()
-    const area = openDetails(root)[0]?.querySelector('textarea')
-    if (area === undefined || area === null) throw new Error('no description')
-    const save = area.parentElement?.querySelector('button')
-    expect(save?.hidden).toBe(true)
-    type(area, '火车、机票、酒店的订单与行程变更')
-    expect(save?.hidden).toBe(false)
-    area.dispatchEvent(new Event('blur'))
+  it('continues bounded partial setup only after another click, with a fresh action ID', async () => {
+    const server = new FakeServer()
+    server.labels = []
+    server.initializeIncompleteRounds = 1
+    const root = await open(server)
+    button(root, '启用 P1–P4 分级').click()
     await settle()
-    const patch = s.calls.find((call) => call.method === 'PATCH')
-    expect(decodeURIComponent(patch?.path ?? '')).toContain('update_mask=description,etag')
-    expect(patch?.body).toMatchObject({ description: '火车、机票、酒店的订单与行程变更' })
-    expect(toastText(root)).toBe('说明已保存')
-    expect(save?.hidden).toBe(true)
-    // Blurring again without a change sends nothing.
-    area.dispatchEvent(new Event('blur'))
+    expect(root.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(false)
+    expect(root.textContent).toContain('本批设置已完成')
+    expect(row(root, 'P4').textContent).toContain('等待初始化')
+    expect(server.calls.filter((call) => call.path.endsWith(':initializePriorities'))).toHaveLength(1)
+    button(root, '继续设置').click()
     await settle()
-    expect(s.calls.filter((call) => call.method === 'PATCH').length).toBe(1)
+    const calls = server.calls.filter((call) => call.path.endsWith(':initializePriorities'))
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.body?.['request_id']).not.toBe(calls[1]?.body?.['request_id'])
+    expect(root.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(true)
   })
 
-  it('saves 归档 at once: on archives (the default), off keeps the mail in the inbox', async () => {
-    const s = server()
-    const root = await open(s)
-    rowButton(root, '账号安全').click()
-    const archive = [...(openDetails(root)[0]?.querySelectorAll(':scope > label.check') ?? [])].find((node) => node.textContent.startsWith('归档'))?.querySelector('input')
-    if (archive === undefined || archive === null) throw new Error('no switch')
-    expect(archive.checked).toBe(true)
-    archive.checked = false
-    archive.dispatchEvent(new Event('change'))
+  it('keeps setup available after reload when four linked labels still await final completion', async () => {
+    const server = new FakeServer()
+    server.initializationCompleted = false
+    const root = await open(server)
+    expect(server.labels.every((label) => label.gmailState === Label_GmailState.LINKED)).toBe(true)
+    expect(root.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(false)
+    expect(server.calls.filter((call) => call.path === '/api/v2/serviceStatus')).toHaveLength(1)
+    const reloaded = await open(server)
+    expect(reloaded.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(false)
+    button(reloaded, '启用 P1–P4 分级').click()
     await settle()
-    const patch = s.calls.find((call) => call.method === 'PATCH')
-    expect(decodeURIComponent(patch?.path ?? '')).toContain('update_mask=keep_in_inbox,etag')
-    expect(patch?.body).toMatchObject({ keep_in_inbox: true })
-    expect(s.labels.find((item) => item.name === 'labels/account-security')?.keepInInbox).toBe(true)
-    archive.checked = true
-    archive.dispatchEvent(new Event('change'))
-    await settle()
-    expect(s.labels.find((item) => item.name === 'labels/account-security')?.keepInInbox).toBe(false)
+    expect(server.initializationCompleted).toBe(true)
+    expect(reloaded.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(true)
+    const completed = await open(server)
+    expect(completed.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(true)
   })
 
-  it('lists a trust label\'s trusted domains, each with 删除, and none for another label', async () => {
-    const s = server()
-    const root = await open(s)
-    rowButton(root, '账号安全').click()
-    const part = openDetails(root)[0]?.querySelector('[aria-label="可信域名"]')
-    expect(part?.querySelector('h3')?.textContent).toBe('可信域名 1')
-    expect([...(part?.querySelectorAll('li p') ?? [])].map((node) => node.textContent)).toEqual(['bank.example.com'])
-    // There is no add: the domains are learned from the review queue.
-    expect(part?.querySelector('input')).toBeNull()
-    part?.querySelector<HTMLButtonElement>('button')?.click()
-    await settle()
-    const call = s.calls.find((item) => item.path.includes(':removeTrustedDomain'))
-    expect(call?.path).toBe('/api/v2/labels/account-security:removeTrustedDomain')
-    expect(call?.body).toMatchObject({ domain: 'bank.example.com', etag: 'etag-account-security' })
-    expect(toastText(root)).toBe('已删除 bank.example.com')
-    expect(openDetails(root)[0]?.querySelector('[aria-label="可信域名"]')?.textContent).toContain('可信域名 0')
-    rowButton(root, '出行').click()
-    expect(openDetails(root)[0]?.querySelector('[aria-label="可信域名"]')).toBeNull()
+  it('offers setup if an existing P1 policy is wrong or a Gmail label is missing', async () => {
+    const server = new FakeServer()
+    server.labels[0]!.keepInInbox = false
+    server.labels[3]!.gmailState = Label_GmailState.MISSING
+    const root = await open(server)
+    expect(root.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(false)
+    expect(row(root, 'P1').textContent).toContain('留在收件箱')
+    expect(row(root, 'P4').textContent).toContain('Gmail 标签待恢复')
   })
 
-  it('lists the examples on demand and deletes one', async () => {
-    const s = server()
-    const travel = s.labels.find((item) => item.name === 'labels/travel')
-    if (travel !== undefined) travel.exampleCount = 2
-    s.examples = [example('e1', 'travel', '火车票 [number] 出票成功'), example('e2', 'travel')]
-    const root = await open(s)
-    rowButton(root, '出行').click()
-    const part = openDetails(root)[0]?.querySelector('[aria-label="例子"]')
-    expect(part?.querySelector('h3')?.textContent).toBe('例子 2')
-    expect(s.calls.some((call) => call.path.startsWith('/api/v2/examples'))).toBe(false)
-    buttonNamed(part ?? root, '查看').click()
-    await settle()
-    expect([...(part?.querySelectorAll('.example-list p') ?? [])].map((node) => node.textContent)).toEqual(['火车票 [number] 出票成功', '例子 e2 的摘要'])
-    expect(s.calls.find((call) => call.path.startsWith('/api/v2/examples'))?.path).toContain('label=labels%2Ftravel')
-    part?.querySelector<HTMLButtonElement>('.example-list button')?.click()
-    await settle()
-    expect(s.examples.map((item) => item.name)).toEqual(['examples/e2'])
-    expect(part?.querySelector('h3')?.textContent).toBe('例子 1')
-    expect(toastText(root)).toBe('例子已删除')
+  it('retries a lost setup response with the same request ID', async () => {
+    const server = new FakeServer()
+    server.labels = []
+    const root = await open(server)
+    const fetcher = globalThis.fetch
+    let lost = false
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      const response = await fetcher(url, init)
+      if (!lost && url.endsWith(':initializePriorities')) { lost = true; throw new TypeError('lost response') }
+      return response
+    })
+    button(root, '启用 P1–P4 分级').click()
+    await vi.waitFor(() => expect(root.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(true), { timeout: 1500 })
+    const calls = server.calls.filter((call) => call.path.endsWith(':initializePriorities'))
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.body?.['request_id']).toBe(calls[1]?.body?.['request_id'])
   })
 
-  it('says first, in one line, when Gmail takes nothing from the label: its name is taken there, or its label is gone', async () => {
-    const s = server()
-    const states: Readonly<Record<string, Label_GmailState>> = { 'labels/travel': Label_GmailState.NAME_TAKEN, 'labels/account-security': Label_GmailState.MISSING, 'labels/life-health': Label_GmailState.PENDING }
-    for (const item of s.labels) item.gmailState = states[item.name] ?? item.gmailState
-    const root = await open(s)
-    const opened = (name: string) => {
-      rowButton(root, name).click()
-      const detail = openDetails(root)[0]
-      if (detail === undefined) throw new Error('no detail')
-      return detail
-    }
-    const taken = opened('出行')
-    expect(taken.firstElementChild?.matches('p.hint.warn[role="note"]')).toBe(true)
-    expect(taken.firstElementChild?.textContent).toBe('Gmail 里已有同名标签，改个名字或到 设置 → 从 Gmail 同步 沿用')
-    // Said once: 高级 does not repeat it.
-    expect(taken.querySelector(':scope > details.more')?.textContent).not.toContain('Gmail')
-    expect(opened('账号安全').firstElementChild?.textContent).toBe('Gmail 里已没有这个标签，不再打它；在 Gmail 建回同名标签后到 设置 → 从 Gmail 同步')
-    // A label not in Gmail yet says so quietly under 高级; a linked one says nothing about Gmail.
-    const pending = opened('生活/医疗')
-    expect(pending.querySelector('p.warn')).toBeNull()
-    expect(pending.querySelector(':scope > details.more p.hint')?.textContent).toBe('Gmail：尚未创建')
-    expect(opened('开发/CI通知').textContent).not.toContain('Gmail')
-  })
-
-  it('folds 可信, 敏感 (asking before it deletes examples), rename and delete under 高级, and no threshold', async () => {
-    const s = server()
-    const travel = s.labels.find((item) => item.name === 'labels/travel')
-    if (travel !== undefined) travel.exampleCount = 1
-    s.examples = [example('e1', 'travel')]
-    const asked: string[] = []
-    const root = await open(s, { now: () => NOW, confirm: (message) => (asked.push(message), true) })
-    rowButton(root, '出行').click()
-    const detail = () => openDetails(root)[0] ?? root
-    const advanced = detail().querySelector<HTMLDetailsElement>(':scope > details.more')
-    expect(advanced?.open).toBe(false)
-    expect(advanced?.querySelector('input[type="number"]')).toBeNull()
-    expect(advanced?.textContent).not.toContain('阈值')
-    if (advanced) advanced.open = true
-    advanced?.dispatchEvent(new Event('toggle'))
-    const switchNamed = (name: string) => {
-      const found = [...detail().querySelectorAll('details.more label.check')].find((node) => node.querySelector(':scope > span')?.firstChild?.textContent === name)?.querySelector('input')
-      if (found === undefined || found === null) throw new Error(`no switch ${name}`)
-      return found
-    }
-    // 启用 is on the row only.
-    expect([...detail().querySelectorAll('details.more label.check')].map((node) => node.querySelector(':scope > span')?.firstChild?.textContent)).toEqual(['可信', '敏感'])
-    // Turned 可信, the label shows its (still empty) trusted domains and says what that means.
-    const trust = switchNamed('可信')
-    trust.checked = true
-    trust.dispatchEvent(new Event('change'))
+  it('keeps a failed batch visible and preserves a continuation action', async () => {
+    const server = new FakeServer()
+    server.labels = []
+    server.initializeFails = true
+    const root = await open(server)
+    button(root, '启用 P1–P4 分级').click()
+    await vi.waitFor(() => expect(button(root, '继续设置').disabled).toBe(false), { timeout: 1500 })
+    expect(root.querySelector('[role="status"].warn')?.textContent).toContain('UNAVAILABLE')
+    server.initializeFails = false
+    button(root, '继续设置').click()
     await settle()
-    expect(detail().querySelector('[aria-label="可信域名"]')?.textContent).toBe('可信域名 0还没有，所以这个标签还不会自动打。在待审里选它、且发件人身份经 Gmail 验证（DMARC 通过）时，发件域会记在这里')
-    const sensitive = switchNamed('敏感')
-    sensitive.checked = true
-    sensitive.dispatchEvent(new Event('change'))
-    await settle()
-    expect(asked).toEqual(['打开“敏感”会删掉这个标签的 1 个例子，继续？'])
-    expect(s.examples.length).toBe(0)
-    expect(detail().querySelector('[aria-label="例子"]')?.textContent).toContain('敏感标签不留例子')
-
-    const enabled = row(root, '出行').querySelector<HTMLInputElement>('.leaf-row input.switch')
-    if (enabled === null) throw new Error('no switch')
-    enabled.checked = false
-    enabled.dispatchEvent(new Event('change'))
-    await settle()
-    // Off is said in words on the row, not by its gray alone.
-    expect(row(root, '出行').classList.contains('off')).toBe(true)
-    expect(row(root, '出行').querySelector('.leaf-main > .meta')?.textContent).toBe('未启用')
-
-    // A rename updates the name in place; it stays open with 高级 open and the focus on the path.
-    const path = input(detail(), '名称')
-    path.value = 'Travel'
-    buttonNamed(detail(), '改名').click()
-    await settle()
-    expect(decodeURIComponent(s.calls.filter((call) => call.method === 'PATCH').at(-1)?.path ?? '')).toContain('update_mask=display_name,etag')
-    expect(row(root, 'Travel').closest('.branch')).toBeNull()
-    expect(detail().querySelector<HTMLDetailsElement>(':scope > details.more')?.open).toBe(true)
-    expect(document.activeElement).toBe(input(detail(), '名称'))
-
-    buttonNamed(detail(), '删除标签').click()
-    await settle()
-    expect(asked.at(-1)).toBe('删除“Travel”和它的例子、可信域名？Gmail 里的标签和邮件不变，它打过的标签也不能再撤销。')
-    expect(s.labels.some((item) => item.name === 'labels/travel')).toBe(false)
-    expect(root.querySelectorAll('li.leaf').length).toBe(5)
-    expect(openDetails(root).length).toBe(0)
-  })
-})
-
-describe('a new label', () => {
-  it('is one quiet button; the label it creates opens with its description focused', async () => {
-    const s = server()
-    const root = await open(s)
-    expect(root.querySelector('.new-label')?.textContent).toBe('+ 新标签')
-    buttonNamed(root, '+ 新标签').click()
-    const path = input(root, '新标签名称')
-    expect(document.activeElement).toBe(path)
-    path.value = 'Careers'
-    press(path, 'Enter')
-    await settle()
-    expect(s.calls.find((call) => call.method === 'POST' && call.path.startsWith('/api/v2/labels?'))?.body).toMatchObject({ display_name: 'Careers', enabled: true })
-    expect(openDetails(root).map((node) => node.getAttribute('aria-label'))).toEqual(['Careers'])
-    expect(document.activeElement).toBe(openDetails(root)[0]?.querySelector('textarea'))
-    expect(root.querySelector('.new-label')?.textContent).toBe('+ 新标签')
-  })
-})
-
-describe('no label yet', () => {
-  it('offers one quiet + 新标签 and nothing else; the label it makes starts the list', async () => {
-    const s = new FakeServer()
-    s.labels = []
-    const root = await open(s)
-    expect(root.querySelector('.empty strong')?.textContent).toBe('还没有标签')
-    expect(root.querySelector('input[type="search"]')).toBeNull()
-    expect(root.textContent).not.toContain('推荐模板')
-    buttonNamed(root, '+ 新标签').click()
-    const path = input(root, '新标签名称')
-    path.value = 'Newsletters'
-    buttonNamed(root, '创建').click()
-    await settle()
-    expect(root.querySelectorAll('li.leaf').length).toBe(1)
-  })
-})
-
-
-describe('English flat names', () => {
-  it.each(['Work Updates', "News & Offers", 'Receipts (2026)', 'A'.repeat(40)])('accepts %s', (name) => {
-    expect(labelNameProblem(name)).toBeNull()
-  })
-  it.each(['旧名称', 'Work/Updates', '123', '', 'A'.repeat(41), 'Travel\n'])('rejects %j', (name) => {
-    expect(labelNameProblem(name)).not.toBeNull()
-  })
-  it('explains invalid new names and sends nothing', async () => {
-    const s = server()
-    const root = await open(s)
-    buttonNamed(root, '+ 新标签').click()
-    input(root, '新标签名称').value = '新的/标签'
-    buttonNamed(root, '创建').click()
-    await settle()
-    expect(toastText(root)).toContain('使用英文名称，最多 40 个字符')
-    expect(s.calls.some((call) => call.method === 'POST' && call.path.startsWith('/api/v2/labels?'))).toBe(false)
-  })
-})
-
-
-describe('label migration state', () => {
-  it('keeps old labels and their descriptions readable while disabling edits during migration', async () => {
-    const s = server()
-    s.consolidation = create(LabelConsolidationSchema, { state: LabelConsolidation_State.RUNNING })
-    const root = await open(s)
-    expect(root.textContent).toContain('标签正在整理，编辑暂时停用')
-    const ci = row(root, '开发/CI通知')
-    expect(ci.querySelector<HTMLInputElement>('input')?.disabled).toBe(true)
-    rowButton(root, '开发/CI通知').click()
-    const detail = openDetails(root)[0]!
-    expect(detail.querySelector('textarea')?.value).toBe('开发/CI通知 的说明')
-    expect(detail.querySelector('textarea')?.disabled).toBe(true)
-    expect(buttonNamed(detail, '改名').disabled).toBe(true)
-    expect(buttonNamed(root, '+ 新标签').disabled).toBe(true)
-    expect(input(root, '搜索标签').disabled).toBe(false)
-  })
-  it('explains a legacy name or children problem without hiding its current name', async () => {
-    const s = server()
-    s.labels[0]!.problem = Label_Problem.INVALID_NAME
-    s.labels[1]!.problem = Label_Problem.HAS_CHILDREN
-    const root = await open(s)
-    expect(row(root, '开发/CI通知').textContent).toContain('需整理')
-    rowButton(root, '开发/CI通知').click()
-    expect(openDetails(root)[0]?.textContent).toContain('名称不符合英文单层规则')
-    rowButton(root, '开发/平台工具').click()
-    expect(openDetails(root)[0]?.textContent).toContain('Gmail 中含子标签')
+    expect(root.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(true)
   })
 })

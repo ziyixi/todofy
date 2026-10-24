@@ -5,7 +5,7 @@
  * the real Google URL in `x-mailsort-original-url`; anything else is a 502 and is recorded as a stray request.
  */
 import { FakeAi } from './fake-ai.ts';
-import { FakeGmail } from './fake-gmail.ts';
+import { FakeGmail, type RecordedLedger } from './fake-gmail.ts';
 
 export const ORIGINAL_URL_HEADER = 'x-mailsort-original-url';
 
@@ -20,6 +20,10 @@ export class FakeUpstream {
    * planned at that moment, not only its shape (../runtime/helpers.ts checkGoogleCalls).
    */
   plannedPaths: (() => Promise<readonly string[]>) | null = null;
+  /** Reads the persisted one-time priority setup plan while the Worker waits for a label DELETE. */
+  priorityDeletes: (() => Promise<readonly string[]>) | null = null;
+  /** Reads the persisted ledger rows for a modify, including the original fixed priority labels. */
+  ledgerRows: ((messageId: string) => Promise<readonly RecordedLedger[]>) | null = null;
 
   reset(): void {
     this.gmail.reset();
@@ -46,6 +50,9 @@ export class FakeUpstream {
     const google = new URL(original);
     const labelWrite = (request.method === 'POST' || request.method === 'PATCH') && /\/labels(\/[^/]+)?$/.test(google.pathname);
     const planned = labelWrite ? await this.plannedPaths?.() : undefined;
-    return this.gmail.handle(request.method, google, request.headers, body, planned);
+    const priorityDeletes = request.method === 'DELETE' ? await this.priorityDeletes?.() : undefined;
+    const modify = request.method === 'POST' ? /^\/gmail\/v1\/users\/me\/messages\/([0-9a-f]{6,32})\/modify$/.exec(google.pathname) : null;
+    const ledgerRows = modify?.[1] === undefined ? undefined : await this.ledgerRows?.(modify[1]);
+    return this.gmail.handle(request.method, google, request.headers, body, planned, priorityDeletes, ledgerRows);
   }
 }

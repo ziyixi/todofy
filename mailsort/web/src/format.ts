@@ -15,7 +15,7 @@ export const MODE_NAMES: Readonly<Record<number, string>> = {
 export const MODE_HINTS: Readonly<Record<number, string>> = {
   [Mode.OFF]: '不读 Gmail，也不判断',
   [Mode.SHADOW]: '只判断和记录，不改 Gmail',
-  [Mode.LIVE]: '有把握的邮件打上标签，按归档设置移出收件箱；从不标为已读',
+  [Mode.LIVE]: '按 P1、P2、P3、P4 分级；P1 留在收件箱，P2、P3、P4 归档，未读状态不变',
 }
 
 /** Why the breaker tripped (Settings.breaker_reason). */
@@ -29,8 +29,8 @@ export const BREAKER_REASONS: Readonly<Record<string, string>> = {
 export const UNSURE_REASONS: Readonly<Record<string, string>> = {
   low_confidence: '把握不够',
   views_disagree: '两次判断不一致',
-  suspicious: '疑似钓鱼',
-  untrusted_sender: '发件人还不可信',
+  suspicious: '旧分级记录',
+  untrusted_sender: '旧分级记录',
   model_unavailable: '模型暂不可用',
 }
 
@@ -62,8 +62,8 @@ export function percent(value: number): string {
   return `${String(Math.round(value * 100))}%`
 }
 
-/** labels/x -> the label's display name (or the ID when unknown); '' -> 都不是. */
+/** Current priority names, a quiet marker for historical labels, and the legacy no-label answer. */
 export function labelText(name: string, labels: readonly Label[]): string {
   if (name === '') return '都不是'
-  return labels.find((label) => label.name === name)?.displayName ?? name.replace(/^labels\//, '')
+  return labels.find((label) => label.name === name)?.displayName ?? '历史分级'
 }

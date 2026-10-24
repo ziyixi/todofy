@@ -176,6 +176,17 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     return result.ok;
   };
   up.plannedPaths = async () => ((await probe('sql', ['SELECT display_name FROM labels'])) as { display_name: string }[]).map((row) => row.display_name);
+  up.priorityDeletes = async () => {
+    const rows = await probe('sql', ["SELECT value FROM meta WHERE key = 'priority_setup'"]) as { value: string }[];
+    const setup = JSON.parse(rows[0]?.value ?? 'null') as { remaining?: unknown } | null;
+    return Array.isArray(setup?.remaining) ? setup.remaining.filter((id): id is string => typeof id === 'string') : [];
+  };
+  up.ledgerRows = async (messageId) => {
+    const priorities = await probe('sql', ["SELECT gmail_id FROM labels WHERE id IN ('p1', 'p2', 'p3', 'p4') AND gmail_id IS NOT NULL"]) as { gmail_id: string }[];
+    const ids = new Set(priorities.map(row => row.gmail_id));
+    const rows = await probe('sql', ['SELECT gmail_label_id, state, archived, base_labels FROM ledger WHERE message_id = ?', messageId]) as { gmail_label_id: string; state: string; archived: number; base_labels: string }[];
+    return rows.map(row => ({ labelId: row.gmail_label_id, state: row.state, archived: row.archived === 1, replaceLabels: (JSON.parse(row.base_labels) as string[]).filter(id => id !== row.gmail_label_id && ids.has(id)) }));
+  };
   const fetchSort = (path: string, init?: RequestInit) => mf.dispatchFetch(`${ORIGIN}${path}`, { redirect: 'manual', ...init } as never) as unknown as Promise<Response>;
   let csrf: { token: string; cookie: string } | undefined;
   const csrfToken = async () => {

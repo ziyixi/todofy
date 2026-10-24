@@ -27,6 +27,17 @@ export interface RecordedCall {
   readonly body: string;
   /** For a label create or rename: the paths the store held when it was sent (FakeUpstream.plannedPaths). */
   readonly planned?: readonly string[];
+  /** The frozen retirement IDs the store held when this DELETE was sent. */
+  readonly priorityDeletes?: readonly string[];
+  /** Ledger rows and original priority labels from the store at modify send time. */
+  readonly ledgerRows?: readonly RecordedLedger[];
+}
+
+export interface RecordedLedger {
+  readonly labelId: string;
+  readonly state: string;
+  readonly archived: boolean;
+  readonly replaceLabels: readonly string[];
 }
 
 const SYSTEM_LABELS = ['INBOX', 'SENT', 'DRAFT', 'SPAM', 'TRASH', 'UNREAD', 'STARRED', 'IMPORTANT', 'CHAT', 'CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS', 'CATEGORY_PERSONAL'];
@@ -140,14 +151,14 @@ export class FakeGmail {
   }
 
   /** Every request Google would get. `url` is the real Google URL; `planned` is recorded with it (RecordedCall). */
-  handle(method: string, url: URL, headers: Headers, body: string, planned?: readonly string[]): Response {
-    const response = this.answer(method, url, headers, body, planned);
+  handle(method: string, url: URL, headers: Headers, body: string, planned?: readonly string[], priorityDeletes?: readonly string[], ledgerRows?: readonly RecordedLedger[]): Response {
+    const response = this.answer(method, url, headers, body, planned, priorityDeletes, ledgerRows);
     this.afterCall?.(method, url);
     return response;
   }
 
-  private answer(method: string, url: URL, headers: Headers, body: string, planned: readonly string[] | undefined): Response {
-    this.calls.push({ method, url: url.toString(), body, ...(planned === undefined ? {} : { planned }) });
+  private answer(method: string, url: URL, headers: Headers, body: string, planned: readonly string[] | undefined, priorityDeletes: readonly string[] | undefined, ledgerRows: readonly RecordedLedger[] | undefined): Response {
+    this.calls.push({ method, url: url.toString(), body, ...(planned === undefined ? {} : { planned }), ...(priorityDeletes === undefined ? {} : { priorityDeletes }), ...(ledgerRows === undefined ? {} : { ledgerRows }) });
     if (url.host === 'oauth2.googleapis.com' && url.pathname === '/token' && method === 'POST') {
       const form = new URLSearchParams(body);
       const scope = this.grants.get(form.get('refresh_token') ?? '');
@@ -198,6 +209,16 @@ export class FakeGmail {
       return json({ id: message.id, threadId: message.threadId, labelIds: [...message.labelIds], snippet: message.snippet, internalDate: String(message.internalDate), payload });
     }
     if (method === 'GET' && path === 'labels') return json({ labels: [...this.labels.values()] });
+    if (method === 'DELETE' && parts[0] === 'labels' && parts.length === 2) {
+      if (!writable) return gmailError(403, 'insufficientPermissions');
+      const id = parts[1] ?? '';
+      if (!/^Label_[0-9]{1,24}$/.test(id) || url.toString() !== `https://gmail.googleapis.com/gmail/v1/users/me/labels/${id}` || body !== '' || !priorityDeletes?.includes(id)) return gmailError(403, 'forbidden');
+      const label = this.labels.get(id);
+      if (label === undefined || label.type !== 'user') return gmailError(404, 'notFound');
+      this.labels.delete(id);
+      for (const message of this.messages.values()) this.applyModify(message.id, [], [id]);
+      return new Response(null, { status: 204 });
+    }
     if (method === 'POST' && path === 'labels') {
       if (!writable) return gmailError(403, 'insufficientPermissions');
       const { name } = JSON.parse(body) as { name: string };

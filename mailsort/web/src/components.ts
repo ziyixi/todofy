@@ -1,6 +1,6 @@
 /**
- * The UI's components (styles.css draws them): a card, a chip, a KPI number, a meter, a segmented control, a toggle
- * switch, a disclosure, a textarea that grows with its text, an empty state and the searchable label picker. Plain
+ * The UI's components (styles.css draws them): a card, a chip, a KPI number, a meter, a segmented control,
+ * an empty state and the searchable priority picker. Plain
  * DOM, text only ever as text.
  */
 import { button, el, type Child } from './dom.ts'
@@ -43,30 +43,6 @@ export function segmented<T>(label: string, options: readonly (readonly [T, stri
   )
 }
 
-/** A toggle switch with its name and an optional one-line hint; the input is returned to read `checked`. */
-export function toggle(name: string, checked: boolean, hint = ''): [HTMLLabelElement, HTMLInputElement] {
-  const input = el('input', { type: 'checkbox', class: 'switch', ...(checked ? { checked: true } : {}) })
-  return [el('label', { class: 'check' }, input, el('span', {}, name, hint === '' ? null : el('span', { class: 'hint' }, hint))), input]
-}
-
-/** A disclosure: `summary` opens the rest. */
-export function disclosure(summary: string, ...children: Child[]): HTMLDetailsElement {
-  return el('details', { class: 'more' }, el('summary', {}, summary), ...children)
-}
-
-/** Lets a textarea grow with its text, from its own rows up: on every input, and once it is in the page. */
-export function growing(area: HTMLTextAreaElement): HTMLTextAreaElement {
-  const fit = () => {
-    if (!area.isConnected) return
-    area.style.height = 'auto'
-    // scrollHeight leaves out the 1 px borders the box's height includes.
-    if (area.scrollHeight > 0) area.style.height = `${String(area.scrollHeight + 2)}px`
-  }
-  area.addEventListener('input', fit)
-  setTimeout(fit, 0)
-  return area
-}
-
 /** The empty state: one line, an optional hint under it, and what follows (its actions). */
 export function emptyState(title: string, hint = '', ...children: Child[]): HTMLElement {
   return el('div', { class: 'empty' }, el('strong', {}, title), hint === '' ? null : el('span', {}, hint), ...children)
@@ -87,8 +63,8 @@ let pickers = 0
 export function picker(options: readonly PickerOption[], initial: string, pick: (value: string) => void, cancel: () => void): HTMLElement {
   pickers += 1
   const id = `picker-${String(pickers)}`
-  const input = el('input', { type: 'search', placeholder: '搜索标签', 'aria-label': '搜索标签', role: 'combobox', 'aria-expanded': 'true', 'aria-controls': id, 'aria-autocomplete': 'list', autocomplete: 'off' })
-  const list = el('ul', { id, role: 'listbox', 'aria-label': '标签' })
+  const input = el('input', { type: 'search', placeholder: '搜索分级', 'aria-label': '搜索分级', role: 'combobox', 'aria-expanded': 'true', 'aria-controls': id, 'aria-autocomplete': 'list', autocomplete: 'off' })
+  const list = el('ul', { id, role: 'listbox', 'aria-label': '分级' })
   let shown: readonly PickerOption[] = options
   let active = Math.max(0, options.findIndex((option) => option.value === initial))
   const render = () => {
@@ -105,7 +81,7 @@ export function picker(options: readonly PickerOption[], initial: string, pick: 
       }),
     )
     if (shown.length === 0) {
-      list.append(el('li', { class: 'none' }, '没有这个标签'))
+      list.append(el('li', { class: 'none' }, '没有这个分级'))
       input.removeAttribute('aria-activedescendant')
     } else {
       input.setAttribute('aria-activedescendant', `${id}-${String(active)}`)

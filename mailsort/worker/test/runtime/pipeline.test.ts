@@ -1,355 +1,147 @@
-/**
- * The pipeline in workerd with a real SQLite MailsortState, the fake Gmail and the fake Workers AI
- * (../../../docs/design.md §4-§7): no backfill, the model's two views, shadow decisions only recorded, live label +
- * archive with UNREAD untouched, confident none left in the inbox, a mail asking for action archived like any other,
- * undo, a Gmail correction becoming an example, a trust label waiting for a trusted domain that a review choice
- * teaches, the review queue's daily quota, skips, the history resync, the auth-failure stop, the neuron budget's switch
- * to Clef-flash and the quota deferral. After every test, every request Google got is checked against the independent
- * table (../fakes/table.ts).
- */
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { create } from '@ziyixi/proto/protobuf';
-import { ReviewItem_State } from '@ziyixi/proto/mailsort/ui/v2/review_pb';
-import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
-import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
-import { MAILS } from '../fakes/fixtures.ts';
-import { DAY, HOUR, MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
-import { addLabels, checkGoogleCalls, clefCalls, decision, deliver, gmailLabels, modifies, setMode } from './helpers.ts';
+/** Priority pipeline with real workerd SQLite, synthetic Gmail and offline AI. */
+import { afterEach, describe, expect, it } from 'vitest';
+import { Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
+import { DEFAULT_DAILY_NEURON_BUDGET } from '../../src/limits.ts';
+import { PRIORITY_LABELS } from '../../src/priority.ts';
+import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
+import { MINUTE, startHarness, T0, type Harness } from './harness.ts';
+import { checkGoogleCalls, clefCalls, decision, deliver, gmailLabels, modifies, setMode } from './helpers.ts';
 
-describe('the pipeline, shadow then live', () => {
-  let h: Harness;
-  let now = T0;
-  beforeAll(async () => {
-    h = await startHarness();
-  });
-  afterAll(async () => {
-    await h.dispose();
-  });
-  afterEach(() => {
-    checkGoogleCalls(h);
-  });
+async function initialize(h: Harness, at = T0): Promise<void> {
+  for (const [i, label] of PRIORITY_LABELS.entries()) {
+    const gmailId = h.up.gmail.createUserLabel(label.displayName, true);
+    await h.sql(`INSERT INTO labels (id, seq, display_name, description, enabled, gmail_id, gmail_state, keep_in_inbox, create_time, update_time, etag) VALUES (?, ?, ?, ?, 1, ?, 'linked', ?, ?, ?, 'e')`, label.id, i + 1, label.displayName, label.description, gmailId, label.keepInInbox ? 1 : 0, at, at);
+  }
+  await h.sql(`INSERT INTO meta (key, value) VALUES ('priority_started_at', ?)`, String(at));
+  await h.step(at);
+}
+const force = (h: Harness, id: string) => { h.up.ai.choiceOverride = () => ({ [id]: 0.92, none: 0.08 }); };
+const newMail = (id: string, override: Partial<SyntheticMail> = {}): SyntheticMail => ({ ...MAILS.bankEn, id, subject: 'Synthetic brokerage statement', text: 'Your monthly statement is ready. No deadline or action.', ...override });
 
-  it('starts from the install-time cursor: mail from before is never sorted', async () => {
-    await addLabels(h);
-    deliver(h, MAILS.receiptEn, now - HOUR);
-    const first = await h.step(now);
-    expect(first.code).toBe('ok');
-    expect(await h.sql(`SELECT value FROM meta WHERE key = 'history_cursor'`)).toEqual([{ value: String(h.up.gmail.historyId) }]);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await decision(h, MAILS.receiptEn.id)).toBeUndefined();
-    expect(h.up.gmail.calls.some((call) => call.url.includes('/messages/'))).toBe(false);
-  });
-
-  it('shadow: two views agree, the decision is only recorded; nothing is written and nothing waits for review', async () => {
-    const from = h.up.ai.calls.length;
-    deliver(h, MAILS.newsletterEn, now);
-    now += 5 * MINUTE;
-    const pass = await h.step(now);
-    expect(pass.decided).toBe(1);
-    expect(await decision(h, MAILS.newsletterEn.id)).toMatchObject({ outcome: 'suggested', label_id: 'newsletter', decider: 'clef', shown: 0, dmarc: 1 });
-    // View 1 over every described label plus none; view 2 over view 1's three most likely labels, reversed, plus none.
-    const [view1, view2, ...rest] = clefCalls(h, from);
-    expect(rest).toEqual([]);
-    expect(view1?.options).toHaveLength(5);
-    expect(view2?.options).toHaveLength(4);
-    expect(view2?.options.at(-1)).toBe('none');
-    expect(view2?.options.at(-2)).toBe(view1?.options[0]);
-    expect(view2?.state).toEqual(view1?.state);
-    expect(view1?.state['sender_authenticated']).toBe('yes');
-    const row = await decision(h, MAILS.newsletterEn.id);
-    expect(Object.keys(JSON.parse(String(row?.['probabilities2'])) as object)).toHaveLength(4);
-    expect(row?.['sender_hash']).toMatch(/^[0-9a-f]{16}$/);
-    expect(JSON.stringify(row)).not.toContain('digest@news.example.com');
-    expect((await h.api.listReviewItems({})).reviewItems).toEqual([]);
-    expect(modifies(h)).toEqual([]);
-    expect(gmailLabels(h, MAILS.newsletterEn.id)).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
-    // The model saw masked text and a code for the address, never the address.
-    const state = JSON.stringify(view1?.state);
-    expect(state).not.toContain('owner@example.com');
-    expect(state).not.toContain('digest@news.example.com');
-    expect(state).toContain('[link news.example.com]');
-    expect(state).not.toContain('123456789');
-  });
-
-  it('live: a confident label is added and INBOX removed, UNREAD untouched; confident none stays in the inbox, not shown', async () => {
-    await setMode(h, Mode.LIVE);
-    deliver(h, MAILS.newsletterZh, now);
-    deliver(h, MAILS.unsure, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    const labelId = h.up.gmail.labelIdByName('Digests');
-    expect(labelId).toMatch(/^Label_/);
-    expect(gmailLabels(h, MAILS.newsletterZh.id)).toEqual(['CATEGORY_UPDATES', labelId, 'UNREAD'].sort());
-    expect(await decision(h, MAILS.newsletterZh.id)).toMatchObject({ outcome: 'applied', label_id: 'newsletter' });
-    expect(gmailLabels(h, MAILS.unsure.id)).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
-    expect(await decision(h, MAILS.unsure.id)).toMatchObject({ outcome: 'none', label_id: null, unsure_reason: '', shown: 0 });
-    const [entry] = (await h.api.listLedgerEntries({})).ledgerEntries;
-    expect(entry).toMatchObject({ messageId: MAILS.newsletterZh.id, label: 'labels/newsletter', archived: true, origin: 'auto' });
-    const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
-    expect(status).toMatchObject({ appliedTodayCount: 1, writeScope: true, decisionModel: 'clef', reviewCount: 0 });
-    expect(await h.sql(`SELECT outcome, n FROM flow WHERE outcome = 'no_label'`)).toEqual([{ outcome: 'no_label', n: 1 }]);
-  });
-
-  it('a mail that asks the owner to act soon is filed like any other: label added, INBOX removed, UNREAD untouched', async () => {
-    const from = h.up.ai.calls.length;
-    deliver(h, { ...MAILS.receiptZh, id: 'a1000000000000b1', subject: '订单已到快递柜', text: '订单包裹已到快递柜，凭取件码 1234 取件。' }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    const receipt = h.up.gmail.labelIdByName('Receipts');
-    expect(gmailLabels(h, 'a1000000000000b1')).toEqual(['CATEGORY_UPDATES', receipt, 'UNREAD'].sort());
-    // Neither view asks whether the mail needs action (the owner's decision of 2026-10-11), and the column stays NULL.
-    const questions = h.up.ai.calls.slice(from).filter((call) => call.model.includes('clef')).map((call) => Object.keys(call.input['questions'] as object).sort());
-    expect(questions).toEqual([['bulk', 'label', 'suspicious'], ['bulk', 'label', 'suspicious']]);
-    expect(await decision(h, 'a1000000000000b1')).toMatchObject({ outcome: 'applied', label_id: 'receipt', needs_action: null });
-    const entry = (await h.api.listLedgerEntries({})).ledgerEntries.find((item) => item.messageId === 'a1000000000000b1');
-    expect(entry).toMatchObject({ archived: true });
-    expect(await h.sql(`SELECT n FROM flow WHERE outcome = 'archived' AND label = 'receipt'`)).toEqual([{ n: 1 }]);
-    expect(await h.sql(`SELECT coalesce(sum(n), 0) AS n FROM flow WHERE outcome = 'kept_in_inbox'`)).toEqual([{ n: 0 }]);
-  });
-
-  it('undo removes exactly what it added and restores INBOX', async () => {
-    const entry = (await h.api.listLedgerEntries({})).ledgerEntries.find((item) => item.messageId === MAILS.newsletterZh.id);
-    const undone = await h.api.undoLedgerEntry({ name: entry?.name ?? '', requestId: op() });
-    expect(undone.state).toBe(4);
-    expect(gmailLabels(h, MAILS.newsletterZh.id)).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
-    expect(reasonOf(await rejection(h.api.undoLedgerEntry({ name: entry?.name ?? '', requestId: op() })))).toBe('NOT_UNDOABLE');
-    // The history records of mailsort's own writes are not feedback.
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await decision(h, MAILS.newsletterZh.id)).toMatchObject({ verdict: null });
-  });
-
-  it('a Gmail correction becomes an example, and putting the label back takes it away', async () => {
-    const receiptGmail = h.up.gmail.labelIdByName('Receipts') ?? '';
-    const newsletterGmail = h.up.gmail.labelIdByName('Digests') ?? '';
-    for (const [i, id] of ['c000000000000c01', 'c000000000000c02'].entries()) {
-      deliver(h, { ...MAILS.newsletterEn, id, subject: `Weekly digest ${String(i)}` }, now);
-      now += 5 * MINUTE;
-      await h.step(now);
-      expect(await decision(h, id)).toMatchObject({ outcome: 'applied', label_id: 'newsletter' });
-      h.up.gmail.ownerModify(id, [receiptGmail], [newsletterGmail]);
-      now += 5 * MINUTE;
-      await h.step(now);
-      expect(await decision(h, id)).toMatchObject({ verdict: 'corrected', verdict_label: 'receipt', verdict_source: 'gmail' });
-    }
-    const examples = await h.api.listExamples({ label: 'labels/receipt' });
-    expect(examples.examples.length).toBe(2);
-    expect(examples.examples[0]?.summary).toContain('Weekly digest');
-    // Putting the label back withdraws the correction: the example goes.
-    h.up.gmail.ownerModify('c000000000000c02', [newsletterGmail], [receiptGmail]);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await decision(h, 'c000000000000c02')).toMatchObject({ verdict: null });
-    expect((await h.api.listExamples({ label: 'labels/receipt' })).examples.length).toBe(1);
-    // The examples are embedded by the next passes, and the next decision reads them as context, never as a decider.
-    expect((await h.api.listExamples({})).examples.every((example) => example.embedded)).toBe(true);
-    const report = await h.api.getLabelReport({ name: 'labelReport' });
-    expect(report.labels.find((row) => row.label === 'labels/newsletter')).toMatchObject({ gmailCorrectionCount: 1, reviewCorrectionCount: 0 });
-  });
-
-  it('a trust label waits for a trusted domain, which the owner\'s review choice teaches; a forged copy never gets it', async () => {
-    deliver(h, MAILS.bankEn, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    // Authenticated, but bank.example.com is not among the label's trusted domains yet: uncertain, and informative.
-    expect(await decision(h, MAILS.bankEn.id)).toMatchObject({ outcome: 'unsure', unsure_reason: 'untrusted_sender', top_label: 'bank', shown: 1 });
-    expect(modifies(h).filter((call) => call.url.includes(MAILS.bankEn.id))).toEqual([]);
-    const [item] = (await h.api.listReviewItems({})).reviewItems;
-    expect(item).toMatchObject({ reason: 'untrusted_sender', subject: 'Your monthly bank statement', state: ReviewItem_State.PENDING, teachableDomain: 'bank.example.com' });
-    expect(item?.candidates[0]?.label).toBe('labels/bank');
-    // The owner's answer: a verdict, the label written in live mode (archived), and the domain learned.
-    const resolved = await h.api.resolveReviewItem({ name: item?.name ?? '', label: 'labels/bank', requestId: op() });
-    expect(resolved).toMatchObject({ state: ReviewItem_State.RESOLVED, resolvedLabel: 'labels/bank' });
-    const bank = h.up.gmail.labelIdByName('Banking');
-    expect(gmailLabels(h, MAILS.bankEn.id)).toEqual(['CATEGORY_UPDATES', bank, 'UNREAD'].sort());
-    expect((await h.api.getLabel({ name: 'labels/bank' })).trustedDomains).toEqual(['bank.example.com']);
-    expect(reasonOf(await rejection(h.api.skipReviewItem({ name: item?.name ?? '', requestId: op() })))).toBe('ALREADY_RESOLVED');
-    // The sender's next statement: confident and written; the model read the owner's verdict in the sender history.
-    const from = h.up.ai.calls.length;
-    deliver(h, { ...MAILS.bankEn, id: 'b100000000000001', subject: 'Your monthly bank statement for October' }, now);
-    deliver(h, { ...MAILS.bankEn, id: 'b100000000000002', subject: 'Your monthly bank statement (copy)', dmarc: 'fail' }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await decision(h, 'b100000000000001')).toMatchObject({ outcome: 'applied', label_id: 'bank' });
-    expect(String(clefCalls(h, from)[0]?.state['sender_history'])).toMatch(/^bank[a-z0-9-]* ×1$/);
-    // The owner's choice, written to Gmail, came back from the history as the same verdict: still the review's.
-    expect(await decision(h, MAILS.bankEn.id)).toMatchObject({ verdict_source: 'review', verdict_label: 'bank' });
-    // The forged copy (DMARC failed) stays uncertain, and the day's one place in the queue is taken. It read no
-    // sender history: the owner's verdict belongs to the address's authenticated mail.
-    expect(await decision(h, 'b100000000000002')).toMatchObject({ outcome: 'unsure', unsure_reason: 'untrusted_sender', shown: 0 });
-    const forged = clefCalls(h, from).filter((call) => call.state['sender_authenticated'] === 'no');
-    expect(forged.length).toBe(2);
-    expect(forged.map((call) => call.state['sender_history'])).toEqual([undefined, undefined]);
-    expect(gmailLabels(h, 'b100000000000002')).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
-    expect((await h.api.listReviewItems({})).reviewItems).toEqual([]);
-  });
-
-  it('shows at most the day\'s quota of uncertain mail; the next day has room again', async () => {
-    // A weak model: one view's 0.5 for the matched label, both views agreeing, is uncertain and informative.
-    h.up.ai.confidence = 0.5;
-    deliver(h, { ...MAILS.travelZh, id: 'd100000000000001' }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await decision(h, 'd100000000000001')).toMatchObject({ outcome: 'unsure', unsure_reason: 'low_confidence', top_label: 'travel', shown: 0 });
-    now = T0 + DAY + MINUTE;
-    deliver(h, { ...MAILS.travelZh, id: 'd100000000000002', subject: '航班行程变更' }, now);
-    await h.step(now);
-    // The mean of view 1's 0.5 and view 2's 0.5 put on view 1's scale (view 1 gave view 2's four options 0.875 of
-    // its probability): 0.46875.
-    expect(await decision(h, 'd100000000000002')).toMatchObject({ outcome: 'unsure', shown: 1, confidence: 0.46875 });
-    const items = (await h.api.listReviewItems({})).reviewItems;
-    expect(items.map((item) => item.reason)).toEqual(['low_confidence']);
-    expect(await h.sql(`SELECT outcome, sum(n) AS n FROM flow WHERE outcome LIKE 'unsure%' GROUP BY outcome ORDER BY outcome`)).toEqual([
-      { outcome: 'unsure', n: 2 },
-      { outcome: 'unsure_shown', n: 2 },
-    ]);
-    // 都不是: a verdict without a label, nothing written.
-    const writes = modifies(h).length;
-    await h.api.resolveReviewItem({ name: items[0]?.name ?? '', label: '', requestId: op() });
-    expect(await decision(h, 'd100000000000002')).toMatchObject({ verdict: 'confirmed', verdict_label: null, verdict_source: 'review' });
-    expect(modifies(h).length).toBe(writes);
-    h.up.ai.confidence = 0.92;
-  });
-
-  it('skips sent mail and a conversation already sorted', async () => {
-    deliver(h, MAILS.sent, now);
-    deliver(h, { ...MAILS.newsletterZh, id: 'e000000000000e01', threadId: `t${MAILS.bankEn.id}` }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(await decision(h, MAILS.sent.id)).toBeUndefined();
-    expect(await decision(h, 'e000000000000e01')).toMatchObject({ outcome: 'skipped', unsure_reason: 'thread_sorted' });
-    const rows = await h.sql(`SELECT count(*) AS n FROM pending`);
-    expect(rows).toEqual([{ n: 0 }]);
-  });
-
-  it('the history resync after a lost cursor reads the inbox of the last two days', async () => {
-    deliver(h, { ...MAILS.travelZh }, now);
-    h.up.gmail.oldestHistoryId = h.up.gmail.historyId + 1;
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(h.up.gmail.calls.some((call) => call.url.includes('/messages?labelIds=INBOX'))).toBe(true);
-    expect(await decision(h, MAILS.travelZh.id)).toMatchObject({ label_id: 'travel' });
-    h.up.gmail.oldestHistoryId = 0;
-  });
+let h: Harness;
+afterEach(async () => {
+  checkGoogleCalls(h); await h.dispose();
 });
 
-describe('limits and failures', () => {
-  let h: Harness;
-  let now = T0;
-  beforeAll(async () => {
+describe('fixed priorities', () => {
+  it('registers arrivals while waiting for explicit setup without classifying with old labels', async () => {
     h = await startHarness();
-    await addLabels(h);
-    await h.step(now);
-  });
-  afterAll(async () => {
-    await h.dispose();
-  });
-  afterEach(() => {
-    checkGoogleCalls(h);
-  });
-
-  it('switches to Clef-flash past 70 % of the neuron budget, then defers past the budget', async () => {
-    await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyNeuronBudget: 1000 }), updateMask: { paths: ['daily_neuron_budget'] }, requestId: op() });
-    // 20,000 input tokens: Clef 436 neurons a call, Clef-flash 164; each mail asks two views.
-    h.up.ai.tokensPerCall = 20_000;
-    for (let i = 0; i < 4; i++) deliver(h, { ...MAILS.receiptZh, id: `f00000000000f00${String(i)}`, subject: `您的订单 ${String(i)} 已发货` }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    const models = h.up.ai.calls.filter((call) => call.model.includes('clef')).map((call) => call.model);
-    expect(models).toEqual(['@cf/cloudflare/clef', '@cf/cloudflare/clef', '@cf/cloudflare/clef-flash', '@cf/cloudflare/clef-flash']);
-    const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
-    expect(status.decisionModel).toBe('clef-flash');
-    expect(status.neuronsToday).toBeGreaterThan(1000);
-    expect(await decision(h, 'f00000000000f001')).toMatchObject({ decider: 'clef-flash', outcome: 'suggested' });
-    // Past the budget the rest waits for the next UTC day: deferred, not failed.
-    expect(status.deferredCount).toBe(2);
-    h.up.ai.tokensPerCall = 2000;
-    await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyNeuronBudget: 10_000 }), updateMask: { paths: ['daily_neuron_budget'] }, requestId: op() });
-  });
-
-  it('defers (never fails) while Workers AI’s daily quota is used up, and decides the next UTC day', async () => {
-    h.up.ai.quota = true;
-    deliver(h, { ...MAILS.travelZh, id: 'f10000000000f101' }, now);
-    now += 5 * MINUTE;
-    const pass = await h.step(now);
-    expect(pass.code).toBe('deferred');
-    expect(await decision(h, 'f10000000000f101')).toBeUndefined();
-    // Waiting: counted as deferred (once, however many passes defer it again).
-    await h.step(now + 30_000);
-    expect((await h.sql(`SELECT sum(n) AS n FROM flow WHERE stage = 'deferred'`))[0]?.['n']).toBeGreaterThanOrEqual(1);
-    expect((await h.sql(`SELECT sum(n) AS n FROM flow WHERE stage = 'deferred'`))[0]?.['n']).toBe((await h.sql(`SELECT count(*) AS n FROM pending WHERE deferred > 0`))[0]?.['n']);
-    const status = await h.opsStatus();
-    expect(JSON.stringify(status['signals'])).toContain('ai_quota_exhausted');
-    h.up.ai.quota = false;
-    now = T0 + DAY + MINUTE;
-    await h.step(now);
-    await h.step(now + 30_000);
-    expect(await decision(h, 'f10000000000f101')).toMatchObject({ label_id: 'travel' });
-    // Each mail is in the flow once: the deferred ones left 延后 for the stage that decided them.
-    expect(await h.sql(`SELECT coalesce(sum(n), 0) AS n FROM flow WHERE stage = 'deferred'`)).toEqual([{ n: 0 }]);
-    const [counted] = await h.sql(`SELECT sum(n) AS n FROM flow WHERE outcome != 'corrected'`);
-    const [mails] = await h.sql(`SELECT count(*) AS n FROM decisions`);
-    expect(counted?.['n']).toBe(mails?.['n']);
-  });
-
-  it('a read-only grant never writes, even in live mode', async () => {
-    await setMode(h, Mode.LIVE);
-    h.up.gmail.grants.set('synthetic-refresh-token', 'https://www.googleapis.com/auth/gmail.readonly');
-    deliver(h, { ...MAILS.receiptEn, id: 'f20000000000f201' }, now);
-    // The cached access token expires (55 minutes of the test clock): the next refresh brings the read-only scope.
-    now += 2 * HOUR;
-    const pass = await h.step(now);
-    expect(pass.code, JSON.stringify(pass)).toBe('ok');
-    expect(await decision(h, 'f20000000000f201')).toMatchObject({ outcome: 'suggested' });
+    const pass = await h.step(T0);
+    expect(pass.code).toBe('priority_setup_required');
+    deliver(h, newMail('abc0000000000000'), T0 + MINUTE);
+    expect((await h.step(T0 + 2 * MINUTE)).code).toBe('priority_setup_required');
+    expect(await h.sql(`SELECT message_id FROM pending`)).toEqual([{ message_id: 'abc0000000000000' }]);
+    expect(await decision(h, 'abc0000000000000')).toBeUndefined();
     expect(modifies(h)).toEqual([]);
-    h.up.gmail.grants.set('synthetic-refresh-token', 'https://www.googleapis.com/auth/gmail.modify');
+    expect(h.up.ai.calls).toEqual([]);
   });
 
-  it('stops calling Google after the grant is refused three times, and raises a critical ops signal', async () => {
-    h.up.gmail.grants.clear();
-    now += 2 * HOUR;
-    for (let i = 0; i < 3; i++) {
-      now += 5 * MINUTE;
-      await h.step(now);
-    }
-    const calls = h.up.gmail.calls.length;
-    now += 5 * MINUTE;
-    const pass = await h.step(now);
-    expect(pass.code).toBe('stopped');
-    expect(h.up.gmail.calls.length).toBe(calls);
-    const status = await h.opsStatus();
-    expect(status['health']).toBe('degraded');
-    expect(status['signals']).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'gmail_auth_failed', severity: 'critical' })]));
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).authState).toBe(3);
-  });
-
-  it('the daily write limit trips the breaker to shadow', async () => {
-    h.up.gmail.grants.set('synthetic-refresh-token', 'https://www.googleapis.com/auth/gmail.modify');
-    // A fresh object (the stop holds until the refresh token changes).
-    await h.dispose();
+  it.each(['p1', 'p2', 'p3', 'p4'])('writes real %s and preserves UNREAD, keeping only P1 in Inbox', async (priority) => {
     h = await startHarness();
-    now = T0;
-    await addLabels(h);
+    await initialize(h);
     await setMode(h, Mode.LIVE);
-    await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyWriteLimit: 1 }), updateMask: { paths: ['daily_write_limit'] }, requestId: op() });
-    await h.step(now);
-    deliver(h, { ...MAILS.receiptEn, id: 'f30000000000f301' }, now);
-    deliver(h, { ...MAILS.receiptEn, id: 'f30000000000f302', subject: 'Receipt for order 2' }, now);
-    now += 5 * MINUTE;
-    await h.step(now);
-    expect(modifies(h).length).toBe(1);
-    const settings = await h.api.getSettings({ name: 'settings' });
-    expect(settings).toMatchObject({ breakerTripped: true, breakerReason: 'daily_limit', effectiveMode: Mode.SHADOW });
-    expect(JSON.stringify((await h.opsStatus())['signals'])).toContain('breaker_tripped');
-    // The refused write leaves its decision only recorded, not a review item.
-    expect(await decision(h, 'f30000000000f302')).toMatchObject({ outcome: 'suggested', shown: 0 });
+    force(h, priority);
+    const mail = newMail('abc0000000000001', { dmarc: 'fail' });
+    deliver(h, mail, T0 + MINUTE);
+    const pass = await h.step(T0 + 2 * MINUTE);
+    expect(pass).toMatchObject({ decided: 1, applied: 1 });
+    const gmailId = h.up.gmail.labelIdByName(priority.toUpperCase());
+    expect(gmailLabels(h, mail.id)).toEqual(['CATEGORY_UPDATES', 'UNREAD', gmailId, ...(priority === 'p1' ? ['INBOX'] : [])].sort());
+    expect(await decision(h, mail.id)).toMatchObject({ outcome: 'applied', label_id: priority, shown: 0, suspicious: null, bulk: null });
     expect((await h.api.listReviewItems({})).reviewItems).toEqual([]);
+    for (const call of h.up.ai.calls) {
+      expect(Object.keys(call.input['questions'] as object)).toEqual(['label']);
+      expect(JSON.stringify(call.input)).not.toMatch(/scam|phishing|suspicious|sender_authenticated/i);
+    }
   });
 
-  it('undoes a time range', async () => {
-    const result = await h.api.undoLedgerEntries({ startTime: timestampFromMs(T0 - DAY), endTime: timestampFromMs(T0 + DAY), requestId: op() });
-    expect(result).toMatchObject({ undoneCount: 1, remainingCount: 0 });
-    expect(gmailLabels(h, 'f30000000000f301')).toContain('INBOX');
+  it.each(['none', 'uncertain', 'disagreement'])('writes P1 without a mandatory review after valid %s', async (kind) => {
+    h = await startHarness();
+    await initialize(h);
+    await setMode(h, Mode.LIVE);
+    let calls = 0;
+    h.up.ai.choiceOverride = () => kind === 'none' ? { none: 0.92, p1: 0.08 } : kind === 'uncertain' ? { p2: 0.5, none: 0.5 } : ++calls === 1 ? { p2: 0.92, none: 0.08 } : { p1: 0.92, none: 0.08 };
+    const mail = newMail('abc0000000000002');
+    deliver(h, mail, T0 + MINUTE);
+    await h.step(T0 + 2 * MINUTE);
+    expect(await decision(h, mail.id)).toMatchObject({ outcome: 'applied', label_id: 'p1', shown: 0 });
+    expect(gmailLabels(h, mail.id)).toContain('INBOX');
+    expect(gmailLabels(h, mail.id)).toContain(h.up.gmail.labelIdByName('P1'));
+    expect(await h.sql(`SELECT id FROM review`)).toEqual([]);
+  });
+
+  it('judges an urgent new reply even when its conversation and message carry P3', async () => {
+    h = await startHarness();
+    await initialize(h);
+    await setMode(h, Mode.LIVE);
+    force(h, 'p3');
+    const first = newMail('abc0000000000003', { threadId: 'thread-synthetic' });
+    deliver(h, first, T0 + MINUTE);
+    await h.step(T0 + 2 * MINUTE);
+    force(h, 'p1');
+    const before = h.up.ai.calls.length;
+    const p3 = h.up.gmail.labelIdByName('P3') ?? '';
+    const reply = newMail('abc0000000000004', { threadId: 'thread-synthetic', subject: 'Urgent reply: action needed today', text: 'Please reply within one hour.', labels: ['INBOX', 'UNREAD', p3] });
+    deliver(h, reply, T0 + 3 * MINUTE);
+    await h.step(T0 + 4 * MINUTE);
+    expect(clefCalls(h, before)).toHaveLength(2);
+    expect(await h.sql(`SELECT state, last_code FROM ledger WHERE message_id = ?`, reply.id)).toEqual([{ state: 'applied', last_code: null }]);
+    expect(await decision(h, reply.id)).toMatchObject({ outcome: 'applied', label_id: 'p1', shown: 0 });
+    expect(gmailLabels(h, reply.id)).toContain('INBOX');
+    expect(gmailLabels(h, reply.id)).toContain(h.up.gmail.labelIdByName('P1'));
+    // Same message ID is never classified twice even if Gmail repeats the delivery record.
+    const after = h.up.ai.calls.length;
+    deliver(h, reply, T0 + 5 * MINUTE);
+    await h.step(T0 + 6 * MINUTE);
+    expect(h.up.ai.calls).toHaveLength(after);
+  });
+
+  it('keeps shadow as records only and does not reclassify mail received before cutover', async () => {
+    h = await startHarness();
+    await initialize(h);
+    force(h, 'p2');
+    const mail = newMail('abc0000000000005');
+    deliver(h, mail, T0 + MINUTE);
+    await h.step(T0 + 2 * MINUTE);
+    expect(await decision(h, mail.id)).toMatchObject({ outcome: 'suggested', label_id: 'p2' });
+    expect(modifies(h)).toEqual([]);
+    const old = newMail('abc0000000000006');
+    deliver(h, old, T0 - MINUTE);
+    await h.step(T0 + 3 * MINUTE);
+    expect(await decision(h, old.id)).toMatchObject({ outcome: 'skipped', unsure_reason: 'before_install' });
+  });
+
+  it('preserves the daily neuron budget, flash switch and next-day deferral', async () => {
+    h = await startHarness();
+    await initialize(h);
+    await setMode(h, Mode.LIVE);
+    force(h, 'p2');
+    const day = new Date(T0).toISOString().slice(0, 10);
+    await h.sql(`INSERT INTO usage (day, neurons) VALUES (?, ?) ON CONFLICT (day) DO UPDATE SET neurons = excluded.neurons`, day, DEFAULT_DAILY_NEURON_BUDGET * 0.71);
+    deliver(h, newMail('abc0000000000007'), T0 + MINUTE);
+    await h.step(T0 + 2 * MINUTE);
+    expect(clefCalls(h).map((call) => call.model)).toEqual(['@cf/cloudflare/clef-flash', '@cf/cloudflare/clef-flash']);
+    await h.sql(`UPDATE usage SET neurons = ? WHERE day = ?`, DEFAULT_DAILY_NEURON_BUDGET, day);
+    deliver(h, newMail('abc0000000000008'), T0 + 3 * MINUTE);
+    const calls = h.up.ai.calls.length;
+    const pass = await h.step(T0 + 4 * MINUTE);
+    expect(pass.code).toBe('deferred');
+    expect(pass.deferred).toBeGreaterThan(0);
+    expect(await h.sql(`SELECT message_id FROM pending`)).toEqual([{ message_id: 'abc0000000000008' }]);
+    expect(await decision(h, 'abc0000000000008')).toBeUndefined();
+    expect(h.up.ai.calls).toHaveLength(calls);
+    expect(await h.sql(`SELECT not_before FROM pending WHERE message_id = 'abc0000000000008'`)).toEqual([{ not_before: T0 + 86_400_000 }]);
+  });
+
+  it('backs off a model outage without creating a P1 write', async () => {
+    h = await startHarness();
+    await initialize(h);
+    await setMode(h, Mode.LIVE);
+    h.up.ai.broken = true;
+    deliver(h, newMail('abc0000000000009'), T0 + MINUTE);
+    await h.step(T0 + 2 * MINUTE);
+    expect(await decision(h, 'abc0000000000009')).toBeUndefined();
+    expect(modifies(h)).toEqual([]);
+    expect(await h.sql(`SELECT attempts, not_before FROM pending WHERE message_id = 'abc0000000000009'`)).toEqual([{ attempts: 1, not_before: T0 + 7 * MINUTE }]);
   });
 });

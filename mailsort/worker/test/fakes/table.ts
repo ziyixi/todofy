@@ -12,10 +12,11 @@ export interface TableContext {
    */
   readonly planned: ReadonlySet<string>;
   /** The ledger row's state and archive flag for (message, Gmail label), or null. */
-  readonly ledger: (messageId: string, labelId: string) => { state: string; archived: boolean } | null;
+  readonly ledger: (messageId: string, labelId: string) => { state: string; archived: boolean; replaceLabels?: readonly string[] } | null;
   /** Independent test fixture's explicit migration scope, never inferred from a request. */
   readonly merge?: { readonly labels: ReadonlySet<string>; readonly messages: ReadonlySet<string>; readonly swaps: ReadonlySet<string>; readonly hidden: ReadonlySet<string>; readonly names: ReadonlySet<string>; readonly createNames?: ReadonlySet<string> };
-
+  /** Explicit frozen owned retirement set from priority setup, never inferred from the requested label. */
+  readonly priorityDeletes?: ReadonlySet<string>;
 }
 
 const MESSAGE_ID = /^[0-9a-f]{6,32}$/;
@@ -81,6 +82,10 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
     return MESSAGE_ID.test(path[1] ?? '') && only('format', 'metadataHeaders', 'fields') && ['full', 'metadata'].includes(url.searchParams.get('format') ?? '') ? 'message_get' : null;
   }
   if (method === 'GET' && path.join('/') === 'labels') return params.length === 0 ? 'labels_list' : null;
+  if (method === 'DELETE' && path[0] === 'labels' && path.length === 2) {
+    const id = path[1] ?? '';
+    return /^Label_[0-9]{1,24}$/.test(id) && rawUrl === `https://gmail.googleapis.com/gmail/v1/users/me/labels/${id}` && body === '' && ctx.priorityDeletes?.has(id) === true ? 'labels_delete' : null;
+  }
   if (method === 'POST' && path.join('/') === 'labels') {
     const value = canonicalObject(body);
     if (value === null) return null;
@@ -101,15 +106,20 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
     const add = value.addLabelIds ?? [];
     const remove = value.removeLabelIds ?? [];
     if (Object.keys(value).some((key) => key !== 'addLabelIds' && key !== 'removeLabelIds')) return null;
-    const inbox = (list: string[]) => list.length === 0 || (list.length === 1 && list[0] === 'INBOX');
-    if (add.length === 1 && remove.length === 1 && add[0] !== remove[0] && ctx.owned.has(add[0] ?? '') && ctx.owned.has(remove[0] ?? '')) return ctx.merge?.swaps.has(`${id}:${remove[0] ?? ''}:${add[0] ?? ''}`) === true ? 'merge_modify' : null;
-    if (add.length === 1 && inbox(remove) && ctx.owned.has(add[0] ?? '')) {
-      const row = ctx.ledger(id, add[0] ?? '');
-      return row !== null && ['intended', 'applied'].includes(row.state) && row.archived === (remove.length === 1) ? 'classify' : null;
-    }
-    if (remove.length === 1 && inbox(add) && ctx.owned.has(remove[0] ?? '')) {
+    if (add.length === 1 && remove.length === 1 && add[0] !== remove[0] && ctx.owned.has(add[0] ?? '') && ctx.owned.has(remove[0] ?? '') && ctx.merge?.swaps.has(`${id}:${remove[0] ?? ''}:${add[0] ?? ''}`) === true) return 'merge_modify';
+    const replacementsMatch = (chosen: string, labels: string[], row: { archived: boolean; replaceLabels?: readonly string[] }) => {
+      const replacements = row.replaceLabels ?? [];
+      const actual = labels.filter((label) => label !== 'INBOX');
+      return row.archived === labels.includes('INBOX') && new Set(labels).size === labels.length && new Set(replacements).size === replacements.length &&
+        replacements.every((label) => /^Label_[0-9]{1,24}$/.test(label) && ctx.owned.has(label) && label !== chosen) && actual.length === replacements.length && actual.every((label) => replacements.includes(label));
+    };
+    if (remove.length === 1 && ctx.owned.has(remove[0] ?? '')) {
       const row = ctx.ledger(id, remove[0] ?? '');
-      return row !== null && row.state === 'undo_intended' && row.archived === (add.length === 1) ? 'undo' : null;
+      if (row?.state === 'undo_intended') return replacementsMatch(remove[0] ?? '', add, row) ? 'undo' : null;
+    }
+    if (add.length === 1 && ctx.owned.has(add[0] ?? '')) {
+      const row = ctx.ledger(id, add[0] ?? '');
+      if (row !== null && ['intended', 'applied'].includes(row.state)) return replacementsMatch(add[0] ?? '', remove, row) ? 'classify' : null;
     }
     return null;
   }

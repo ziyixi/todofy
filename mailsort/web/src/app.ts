@@ -1,14 +1,4 @@
-/**
- * The UI's shell (../../docs/design.md §9): a header with the name, one quiet status line (the mode in force, the
- * Gmail grant, the next run) and four tabs, a toast, and a router over the page's paths:
- *
- *   /           待审: the few uncertain mails the model asks about (its options, 都不是, 其他…, 跳过; by keyboard too)
- *   /overview   概览: what the mode does, today and 7 days, the flow of mail, the 7 days per label, the model budget
- *   /labels     标签: the labels as a flat list, each with its description, 归档, trusted domains, examples and switches
- *   /settings   设置: the mode, the range undo, the sync with Gmail
- *
- * Mobile first, light and dark from the system, plain DOM (no framework), and nothing but the page's own API.
- */
+/** The shell has overview, fixed priority labels and settings; legacy review stays at /review. */
 import { Mode, ServiceStatus_AuthState, type ServiceStatus } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { api } from './api.ts'
 import { chip, emptyState } from './components.ts'
@@ -45,9 +35,8 @@ export interface ViewContext {
 type View = (ctx: ViewContext) => Promise<void>
 
 const TABS: readonly (readonly [string, string, View])[] = [
-  ['/', '待审', renderReview],
   ['/overview', '概览', renderOverview],
-  ['/labels', '标签', renderLabels],
+  ['/labels', '分级', renderLabels],
   ['/settings', '设置', renderSettings],
 ]
 
@@ -73,14 +62,11 @@ export function mountApp(root: HTMLElement, host: Host = browserHost): Promise<v
 
   // Set by refreshStatus, which every render calls before its view.
   let status!: Promise<ServiceStatus>
-  let reviewCount = 0
   let leaving: (() => void)[] = []
 
-  // The four tabs are built once and only marked afterwards, so a tab chosen by keyboard keeps the focus. 待审's
-  // carries the queue's size, hidden while nothing waits.
-  const queue = chip('', 'accent')
+  // Keep the same tab elements so keyboard focus survives navigation.
   const tabs = TABS.map(([target, label]) => {
-    const link = el('a', { href: target }, label, target === '/' ? queue : null)
+    const link = el('a', { href: target }, label)
     link.addEventListener('click', (event) => {
       event.preventDefault()
       go(target)
@@ -90,20 +76,15 @@ export function mountApp(root: HTMLElement, host: Host = browserHost): Promise<v
   nav.append(...tabs.map(([, link]) => link))
   const paintNav = () => {
     for (const [target, link] of tabs) {
-      if (target === window.location.pathname) link.setAttribute('aria-current', 'page')
+      if (target === (window.location.pathname === '/' ? '/overview' : window.location.pathname)) link.setAttribute('aria-current', 'page')
       else link.removeAttribute('aria-current')
     }
-    queue.hidden = reviewCount === 0
-    queue.textContent = queue.hidden ? '' : String(reviewCount)
-    if (queue.hidden) queue.parentElement?.removeAttribute('aria-label')
-    else queue.parentElement?.setAttribute('aria-label', `待审（${String(reviewCount)} 封）`)
   }
   const refreshStatus = () => {
     status = api.getServiceStatus({ name: 'serviceStatus' })
     status.then(
       (answer) => {
         line.replaceChildren(...statusParts(answer, host.now()))
-        reviewCount = answer.reviewCount
         paintNav()
       },
       () => {
@@ -119,7 +100,7 @@ export function mountApp(root: HTMLElement, host: Host = browserHost): Promise<v
     paintNav()
     main.replaceChildren()
     const path = window.location.pathname
-    const view = TABS.find(([target]) => target === path)?.[2]
+    const view = path === '/' ? renderOverview : path === '/review' ? renderReview : TABS.find(([target]) => target === path)?.[2]
     if (view === undefined) {
       main.append(emptyState('找不到这个页面'))
       return

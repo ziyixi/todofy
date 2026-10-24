@@ -13,7 +13,6 @@
   --muted: #6e6e73;
   --line: #e5e5e1;
   /* An off switch's track: at least 3:1 against the card and the page (WCAG 1.4.11). */
-  --track: #8e8e93;
   /* The one accent. */
   --accent: #1f6f5c;
   --accent-ink: #ffffff;
@@ -56,7 +55,6 @@
     --ink: #ececee;
     --muted: #9b9ba1;
     --line: #2e2e33;
-    --track: #6e6e73;
     --accent: #6cc3a7;
     --accent-ink: #0b2a22;
     --accent-soft: #1d3a32;
@@ -308,67 +306,6 @@ button.link {
   text-decoration: underline;
 }
 
-/* The toggle switch: a checkbox drawn as a track and a knob. */
-input.switch {
-  appearance: none;
-  position: relative;
-  flex: none;
-  width: 36px;
-  height: 20px;
-  min-height: 0;
-  margin: 2px 0 0;
-  padding: 0;
-  border: 0;
-  border-radius: 999px;
-  background: var(--track);
-  cursor: pointer;
-}
-
-input.switch::before {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
-}
-
-input.switch:checked {
-  background: var(--accent);
-}
-
-input.switch:checked::before {
-  transform: translateX(16px);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  input.switch,
-  input.switch::before {
-    transition: background 0.15s ease, transform 0.15s ease;
-  }
-}
-
-/* A switch (or checkbox) and its text on one row at any width: the box never wraps away from its own text, the text
-   column takes the rest of the row and may shrink, and the hint is a block line under the text. */
-.check {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.check > span {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.check .hint {
-  display: block;
-}
-
 /* The segmented control: one choice of a few (the mode, the undo range). */
 .segmented {
   display: inline-flex;
@@ -482,44 +419,6 @@ input.switch:checked::before {
 
 .actions.center {
   justify-content: center;
-}
-
-/* The disclosure (高级). */
-details.more > summary {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-height: 32px;
-  color: var(--muted);
-  font-size: 13px;
-  list-style: none;
-  cursor: pointer;
-}
-
-details.more > summary::-webkit-details-marker {
-  display: none;
-}
-
-details.more > summary::after {
-  content: '›';
-  display: inline-block;
-  transform: rotate(90deg);
-}
-
-details.more[open] > summary::after {
-  transform: rotate(-90deg);
-}
-
-details.more > p {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-/* What a disclosure folds away when it holds controls (高级). */
-.more-body {
-  display: grid;
-  gap: 12px;
-  padding-top: var(--space-2);
 }
 
 /* The empty state. */
@@ -785,27 +684,6 @@ details.more > p {
   cursor: default;
 }
 
-/* Settings rows: the text left, its control right; stacked on a phone. */
-.setting {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2) var(--space-3);
-}
-
-.setting + .setting {
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-
-.setting > div {
-  display: grid;
-  flex: 1 1 0;
-  gap: 2px;
-  min-width: 0;
-}
-
 /* The undo's own range: two pickers side by side, stacked on a phone. */
 .range {
   display: grid;
@@ -847,12 +725,6 @@ kbd {
   border: 1px solid var(--line);
   border-radius: 4px;
   font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-  overflow-wrap: anywhere;
 }
 
 /* 标签 (views/labels.ts, label-detail.ts): one flat list with a hairline between rows and the detail opened under its row. */
@@ -903,7 +775,7 @@ kbd {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-/* The row's button: everything on the line but the switch. */
+/* The row opens its examples. */
 .leaf-main {
   display: flex;
   flex: 1 1 auto;
@@ -944,26 +816,10 @@ kbd {
   font-weight: 600;
 }
 
-.leaf.off .leaf-name {
-  color: var(--muted);
-}
-
 .leaf-count {
   flex: none;
   color: var(--muted);
   font-size: 13px;
-}
-
-/* The row's 启用 switch, its touch target the row's height. */
-.live {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  cursor: pointer;
-}
-
-.live .switch {
-  margin: 0;
 }
 
 .detail {
@@ -972,18 +828,6 @@ kbd {
   padding: var(--space-3);
   border-top: 1px solid var(--line);
   background: var(--bg);
-}
-
-.desc {
-  display: grid;
-  gap: var(--space-1);
-  justify-items: end;
-}
-
-.desc textarea {
-  min-height: 64px;
-  line-height: 1.5;
-  resize: none;
 }
 
 .part {
@@ -1002,7 +846,7 @@ kbd {
   font-weight: 400;
 }
 
-/* A trusted domain or an example on one line (wrapping on a phone), its 删除 on the right. */
+/* An example wraps on a phone and keeps 删除 on the right. */
 .example-list {
   display: grid;
   gap: var(--space-1);
@@ -1129,8 +973,7 @@ kbd {
   border-radius: 2px;
 }
 
-/* Owner plans and replay label pairs can contain long legacy names. */
-.consolidation-preview li,
+/* Wrap replay results at phone widths. */
 .replay-mismatches li {
   overflow-wrap: anywhere;
 }
@@ -1138,4 +981,22 @@ kbd {
 .replay-results {
   display: grid;
   gap: var(--space-2);
+}
+
+/* Fixed priorities keep their name and full policy legible at phone widths. */
+.priority-row .leaf-main {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.priority-policy {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.priority-row .leaf-count,
+.priority-row .meta {
+  grid-column: 2;
 }

@@ -155,6 +155,8 @@ message ServiceStatus {
   repeated string recent_error_codes = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The deployed commit.
   string build = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // All four Gmail identities were verified and new priority classification is enabled.
+  bool priorities_initialized = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // What the pipeline may do.

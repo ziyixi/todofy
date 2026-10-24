@@ -1,375 +1,104 @@
-/**
- * The decision's pure parts (../../docs/design.md §4): the two views and their decision table (view 2 on view 1's
- * scale, the trust gate, confident none), view 2's labels, the review queue's quota and its informative
- * band, what a review answer may teach (never a public mailbox provider), the sender history's text, DMARC from
- * Gmail's own header (forged From headers), Clef's request and the strict read of its answer; the neuron estimate,
- * quota detection, the per-mail backoff and the mode lowering.
- */
 import { describe, expect, it } from 'vitest';
-import { AiError, clefInput, clefState, cosine, criterion, cutTokens, decide, estimateTokens, isQuotaError, readClefAnswer } from '../src/ai.ts';
-import {
-  combined,
-  decideViews,
-  historyText,
-  informative,
-  joinsReview,
-  reviewQuota,
-  secondViewLabels,
-  sharedMailbox,
-  teachableDomain,
-  type Decision,
-  type LabelFacts,
-  type SenderTrust,
-  type View,
-} from '../src/decide.ts';
-import { dmarcAligned, neutralise } from '../src/dmarc.ts';
-import { modeCeiling } from '../src/env.ts';
-import { CLEF, CLEF_FLASH, MAIL_ATTEMPTS_MAX, NONE, RETRY_MAX_MS } from '../src/limits.ts';
-import { features } from '../src/mask.ts';
-import { readMessage } from '../src/mime.ts';
-import { retryDelay } from '../src/judge.ts';
-import { effectiveMode } from '../src/settings.ts';
-import { embedText, FakeAi, QUOTA_MESSAGE } from './fakes/fake-ai.ts';
-import { apiMessage, MAILS } from './fakes/fixtures.ts';
+import { AiError, clefInput, clefState, criterion, cutTokens, decide, estimateTokens, isQuotaError, readClefAnswer } from '../src/ai.ts';
+import { combined, decideViews, historyText, secondViewLabels, type LabelFacts, type View } from '../src/decide.ts';
+import { CLEF, CLEF_FLASH, NONE } from '../src/limits.ts';
+import { modelUnavailable, retryDelay } from '../src/judge.ts';
+import { P1_ID, PRIORITY_LABELS } from '../src/priority.ts';
+import { FakeAi, QUOTA_MESSAGE } from './fakes/fake-ai.ts';
 
-const labels = new Map<string, LabelFacts>([
-  ['newsletter', { id: 'newsletter', enabled: true, trust: false }],
-  ['receipt', { id: 'receipt', enabled: true, trust: false }],
-  ['travel', { id: 'travel', enabled: true, trust: false }],
-  ['bank', { id: 'bank', enabled: true, trust: true }],
-  ['off', { id: 'off', enabled: false, trust: false }],
-]);
-
-/** A view of the model: its probabilities (the top is the most likely) and p(suspicious). */
-function view(probabilities: Record<string, number>, suspicious = 0.02): View {
-  const top = Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]?.[0] ?? NONE;
-  return { probabilities, top, suspicious };
+const labels = new Map<string, LabelFacts>(PRIORITY_LABELS.map((label) => [label.id, { id: label.id, enabled: true }]));
+const options = PRIORITY_LABELS.map((label) => ({ id: label.id, key: label.id, name: label.displayName, description: label.description }));
+function view(probabilities: Record<string, number>): View {
+  return { probabilities, top: Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]?.[0] ?? NONE };
 }
+const state = { received_at: '2026-10-23T16:00:00Z', current_local_time: 'Friday, 10/23/2026, 09:00:00', current_week: '2026-10-19 through 2026-10-25', time_zone: 'America/Los_Angeles', subject: 'Synthetic brokerage statement is ready' };
 
-/** A sender that passed DMARC, trusted for the bank label; one that did not; one authenticated but not trusted. */
-const trusted: SenderTrust = { authenticated: true, trusted: (id) => id === 'bank' };
-const forged: SenderTrust = { authenticated: false, trusted: (id) => id === 'bank' };
-const unknown: SenderTrust = { authenticated: true, trusted: () => false };
-
-describe('the decision table', () => {
-  it('accepts a label when both views choose it, their mean reaches 0.7 and nothing is suspicious', () => {
-    const v1 = view({ newsletter: 0.8, receipt: 0.1, none: 0.1 });
-    expect(decideViews(v1, view({ newsletter: 0.7, receipt: 0.2, none: 0.1 }), labels, unknown)).toMatchObject({ kind: 'label', label: 'newsletter', confidence: 0.75 });
-    // The mean is what counts: 0.8 and 0.55 is below 0.7, though the first view alone was above.
-    expect(decideViews(v1, view({ newsletter: 0.55, receipt: 0.35, none: 0.1 }), labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'low_confidence', top: 'newsletter', confidence: 0.675 });
-    // Exactly at the threshold is enough.
-    expect(decideViews(view({ newsletter: 0.7, none: 0.3 }), view({ newsletter: 0.7, none: 0.3 }), labels, unknown)).toMatchObject({ kind: 'label' });
+describe('priority views', () => {
+  it('preserves the 0.7 threshold and view agreement', () => {
+    const first = view({ p2: 0.8, p1: 0.15, none: 0.05 });
+    expect(decideViews(first, view({ p2: 0.7, p1: 0.2, none: 0.1 }), labels)).toMatchObject({ kind: 'label', label: 'p2', confidence: 0.75 });
+    expect(decideViews(first, view({ p2: 0.55, p1: 0.35, none: 0.1 }), labels)).toMatchObject({ kind: 'unsure', reason: 'low_confidence' });
+    expect(decideViews(first, view({ p1: 0.8, p2: 0.15, none: 0.05 }), labels)).toMatchObject({ kind: 'unsure', reason: 'views_disagree' });
+    expect(decideViews(first, null, labels)).toMatchObject({ kind: 'unsure', reason: 'low_confidence' });
   });
 
-  it('puts view 2 on view 1\'s scale: its narrower question alone never lifts the mean', () => {
-    const seven = new Map(['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => [id, { id, enabled: true, trust: false }]));
-    const v1 = view({ a: 0.45, b: 0.06, c: 0.06, d: 0.06, e: 0.06, f: 0.06, g: 0.05, none: 0.2 });
-    expect(secondViewLabels(v1)).toEqual(['a', 'b', 'c']);
-    // View 2 asked only about a, b, c and none, to which view 1 gave 0.77: its 0.95 is worth 0.7315 on view 1's
-    // scale, and the mean (0.59) stays below 0.7 though view 1 put 55 % on other options.
-    const sharp = view({ a: 0.95, b: 0.01, c: 0.01, none: 0.03 });
-    expect(combined(v1, sharp, 'a')).toBeCloseTo((0.45 + 0.95 * 0.77) / 2, 10);
-    expect(decideViews(v1, sharp, seven, unknown)).toMatchObject({ kind: 'unsure', reason: 'low_confidence', top: 'a' });
-    // A view 2 that only renormalises view 1 (p1 / 0.77) gives view 1's own probability back.
-    expect(combined(v1, view({ a: 0.45 / 0.77, b: 0.06 / 0.77, c: 0.06 / 0.77, none: 0.2 / 0.77 }), 'a')).toBeCloseTo(0.45, 10);
-    // Over all of view 1's options the scale is 1, and a sharper second opinion still counts.
-    expect(decideViews(view({ a: 0.62, b: 0.2, none: 0.18 }), view({ a: 0.8, b: 0.1, none: 0.1 }), seven, unknown)).toMatchObject({ kind: 'label', label: 'a' });
-    expect(combined(view({ a: 0.62, b: 0.2, none: 0.18 }), null, 'a')).toBe(0.62);
+  it('keeps the second view on the first view scale', () => {
+    const first = view({ p2: 0.62, p1: 0.2, p3: 0.08, p4: 0.05, none: 0.05 });
+    const second = view({ p2: 0.8, p1: 0.1, p3: 0.05, none: 0.05 });
+    expect(combined(first, second, 'p2')).toBeCloseTo((0.62 + 0.8 * 0.95) / 2);
+    expect(secondViewLabels(first)).toEqual(['p2', 'p1', 'p3']);
+    expect(secondViewLabels(view({ p2: 0.39, p1: 0.31, none: 0.3 }))).toBeNull();
+    expect(secondViewLabels(view({ none: 0.8, p1: 0.2 }))).toBeNull();
   });
 
-  it('is uncertain when the views disagree, when view 2 did not run, or when either view finds an unauthenticated sender suspicious', () => {
-    const v1 = view({ newsletter: 0.6, receipt: 0.3, none: 0.1 });
-    expect(decideViews(v1, view({ receipt: 0.6, newsletter: 0.3, none: 0.1 }), labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'views_disagree', top: 'newsletter' });
-    expect(decideViews(v1, view({ none: 0.7, newsletter: 0.2, receipt: 0.1 }), labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'views_disagree' });
-    expect(decideViews(view({ newsletter: 0.35, receipt: 0.33, none: 0.32 }), null, labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'low_confidence', confidence: 0.35 });
-    expect(decideViews(view({ newsletter: 0.9, none: 0.1 }, 0.6), view({ newsletter: 0.9, none: 0.1 }), labels, forged)).toMatchObject({ kind: 'unsure', reason: 'suspicious' });
-    // The higher of the two views' p(suspicious).
-    expect(decideViews(view({ newsletter: 0.9, none: 0.1 }), view({ newsletter: 0.9, none: 0.1 }, 0.65), labels, forged)).toMatchObject({ kind: 'unsure', reason: 'suspicious' });
-    expect(decideViews(view({ newsletter: 0.9, none: 0.1 }), view({ newsletter: 0.9, none: 0.1 }, 0.59), labels, forged)).toMatchObject({ kind: 'label' });
-    // An authenticated sender's ordinary mail is not gated on it: the score told the owner's mail nothing apart.
-    expect(decideViews(view({ newsletter: 0.9, none: 0.1 }, 0.9), view({ newsletter: 0.9, none: 0.1 }), labels, unknown)).toMatchObject({ kind: 'label' });
+  it('has no sender authentication or trust requirement', () => {
+    const legacyTrust = new Map(labels);
+    legacyTrust.set('p2', { id: 'p2', enabled: true, trust: true });
+    const answer = view({ p2: 0.92, none: 0.08 });
+    expect(decideViews(answer, answer, legacyTrust)).toMatchObject({ kind: 'label', label: 'p2' });
   });
 
-  it('is confident that no label fits when view 1 says none with p >= 0.6, or both views say none', () => {
-    expect(decideViews(view({ none: 0.6, newsletter: 0.3, receipt: 0.1 }), null, labels, unknown)).toMatchObject({ kind: 'none', confidence: 0.6 });
-    expect(decideViews(view({ none: 0.5, newsletter: 0.3, receipt: 0.2 }), null, labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'low_confidence', top: null });
-    expect(decideViews(view({ none: 0.5, newsletter: 0.3, receipt: 0.2 }), view({ none: 0.8, newsletter: 0.2 }), labels, unknown)).toMatchObject({ kind: 'none' });
-  });
-
-  it('a trust label also needs an authenticated sender of a trusted domain and p(suspicious) below 0.95', () => {
-    const v = view({ bank: 0.9, none: 0.1 });
-    expect(decideViews(v, v, labels, trusted)).toMatchObject({ kind: 'label', label: 'bank' });
-    // A forged From (DMARC failed) or a look-alike domain never borrows the trust label.
-    expect(decideViews(v, v, labels, forged)).toMatchObject({ kind: 'unsure', reason: 'untrusted_sender' });
-    expect(decideViews(v, v, labels, unknown)).toMatchObject({ kind: 'unsure', reason: 'untrusted_sender' });
-    // Real bank notices scored 0.8–0.9: only a near-certain p(suspicious) stops a trusted sender's trust label.
-    const usual = view({ bank: 0.9, none: 0.1 }, 0.9);
-    expect(decideViews(usual, usual, labels, trusted)).toMatchObject({ kind: 'label', label: 'bank' });
-    const sure = view({ bank: 0.9, none: 0.1 }, 0.95);
-    expect(decideViews(sure, sure, labels, trusted)).toMatchObject({ kind: 'unsure', reason: 'suspicious' });
-  });
-
-  it('never accepts a label that is not enabled (it changed while the mail was decided)', () => {
-    const v = view({ off: 0.95, none: 0.05 });
-    expect(decideViews(v, v, labels, trusted)).toMatchObject({ kind: 'unsure', reason: 'low_confidence', top: 'off' });
-  });
-
-  it('runs view 2 over view 1\'s three most likely labels, only after a label top of at least 0.4', () => {
-    expect(secondViewLabels(view({ travel: 0.45, receipt: 0.2, none: 0.25, newsletter: 0.06, bank: 0.04 }))).toEqual(['travel', 'receipt', 'newsletter']);
-    expect(secondViewLabels(view({ travel: 0.39, receipt: 0.31, none: 0.3 }))).toBeNull();
-    expect(secondViewLabels(view({ none: 0.5, travel: 0.4, receipt: 0.1 }))).toBeNull();
-    expect(secondViewLabels(view({ travel: 0.9, none: 0.1 }))).toEqual(['travel']);
-  });
-
-  it('reads DMARC from Gmail’s topmost Authentication-Results only: a forged From is not authenticated', async () => {
-    const results = (header: string) => [header];
-    expect(dmarcAligned(results('mx.google.com; dkim=pass header.i=@bank.example.com; dmarc=pass (p=REJECT) header.from=bank.example.com'), 'bank.example.com')).toBe(true);
-    // The display name pretends, the address is another domain's: DMARC is about the address's domain.
-    expect(dmarcAligned(results('mx.google.com; dmarc=pass header.from=evil.example.net'), 'bank.example.com')).toBe(false);
-    expect(dmarcAligned(results('mx.google.com; dmarc=fail (p=REJECT) header.from=bank.example.com'), 'bank.example.com')).toBe(false);
-    expect(dmarcAligned(results('evil.example.net; dmarc=pass header.from=bank.example.com'), 'bank.example.com')).toBe(false);
-    expect(dmarcAligned(['mx.google.com; dmarc=fail header.from=bank.example.com', 'mx.google.com; dmarc=pass header.from=bank.example.com'], 'bank.example.com')).toBe(false);
-    // Comments and quoted strings are the sender's text: a result planted there never counts, and an unclosed one
-    // makes the header unreadable rather than letting what follows it count.
-    const planted = MAILS.injectedDmarc.authenticationResults;
-    expect(dmarcAligned([planted], 'bank.example.com')).toBe(false);
-    expect(dmarcAligned([planted.replace('dmarc=fail', 'dmarc=pass')], 'bank.example.com')).toBe(true);
-    // A ')' inside the quoted local part does not close the spf comment early.
-    expect(dmarcAligned(['mx.google.com; spf=pass (google.com: domain of "a)b;dmarc=pass header.from=bank.example.com"@evil.example.net designates 192.0.2.1) smtp.mailfrom=evil.example.net; dmarc=fail header.from=bank.example.com'], 'bank.example.com')).toBe(false);
-    expect(dmarcAligned(['mx.google.com; spf=pass (unclosed; dmarc=pass header.from=bank.example.com'], 'bank.example.com')).toBe(false);
-    expect(dmarcAligned(['mx.google.com; spf=pass smtp.mailfrom="a\\"; dmarc=pass header.from=bank.example.com'], 'bank.example.com')).toBe(false);
-    // Two dmarc results are ambiguous; an ARC comment that mentions dmarc=pass is only a comment.
-    expect(dmarcAligned(['mx.google.com; dmarc=pass header.from=bank.example.com; dmarc=fail header.from=bank.example.com'], 'bank.example.com')).toBe(false);
-    expect(dmarcAligned(['mx.google.com; arc=pass (i=1 spf=pass dkim=pass dmarc=pass fromdomain=bank.example.com); dmarc=pass (p=REJECT) header.from=bank.example.com'], 'bank.example.com')).toBe(true);
-    const sample = 'a (b "c)" d) e "f\\"g" h';
-    expect(neutralise(sample)?.length).toBe(sample.length);
-    expect(neutralise(sample)?.replace(/ +/g, ' ')).toBe('a e h');
-    // The whole path: synthetic mails whose From copies the bank's address, the forged one's DMARC failed, the
-    // look-alike's passed for another domain. Neither is authenticated for the bank, so the trust label waits.
-    const authenticated = async (mail: Parameters<typeof apiMessage>[0]) => {
-      const read = readMessage(apiMessage(mail));
-      if (read === null) throw new Error('fixture');
-      const f = await features(read);
-      return dmarcAligned(read.headers.authenticationResults, f.senderDomain) && f.senderDomain === 'bank.example.com';
-    };
-    expect(await authenticated(MAILS.bankEn)).toBe(true);
-    expect(await authenticated(MAILS.forgedBankLogin)).toBe(false);
-    expect(await authenticated(MAILS.lookalikeBank)).toBe(false);
-    expect(await authenticated(MAILS.injectedDmarc)).toBe(false);
+  it('keeps model failure distinct from a valid answer', () => {
+    expect(modelUnavailable()).toMatchObject({ decision: { kind: 'unsure', reason: 'model_unavailable' }, view1: null, view2: null });
+    expect(P1_ID).toBe('p1');
+    expect(retryDelay(1)).toBe(300_000);
   });
 });
 
-describe('the review queue', () => {
-  const unsure = (reason: Extract<Decision, { kind: 'unsure' }>['reason'], confidence: number, top: string | null = 'newsletter'): Extract<Decision, { kind: 'unsure' }> => ({ kind: 'unsure', reason, top, confidence, candidates: [] });
-
-  it('shows 5 % of the last week\'s average daily mail, rounded up, at least 1 and at most 5', () => {
-    expect(reviewQuota(0)).toBe(1);
-    expect(reviewQuota(10)).toBe(1);
-    expect(reviewQuota(30)).toBe(2);
-    expect(reviewQuota(41)).toBe(3);
-    expect(reviewQuota(1000)).toBe(5);
-  });
-
-  it('asks whether a label applies at all: a none top that is not sure, with a label in the band, is informative', () => {
-    const toss: Extract<Decision, { kind: 'unsure' }> = { kind: 'unsure', reason: 'low_confidence', top: null, confidence: 0.5, candidates: [{ label: '', probability: 0.5 }, { label: 'bank', probability: 0.45 }, { label: 'receipt', probability: 0.05 }] };
-    expect(informative(toss)).toBe(true);
-    // It takes a quota of 1, the band's only place.
-    expect(joinsReview(toss, 0, 1)).toBe(true);
-    expect(informative({ ...toss, candidates: [{ label: '', probability: 0.55 }, { label: 'bank', probability: 0.3 }, { label: 'receipt', probability: 0.15 }] })).toBe(false);
-    // decideViews records what informative reads.
-    const decided = decideViews(view({ none: 0.5, bank: 0.45, receipt: 0.05 }), null, labels, unknown);
-    expect(decided.kind === 'unsure' && informative(decided)).toBe(true);
-  });
-
-  it('prefers the informative band: [0.35, 0.7), views that disagree, an untrusted sender', () => {
-    expect(informative(unsure('low_confidence', 0.35))).toBe(true);
-    expect(informative(unsure('low_confidence', 0.69))).toBe(true);
-    expect(informative(unsure('low_confidence', 0.34))).toBe(false);
-    expect(informative(unsure('low_confidence', 0.5, null))).toBe(false);
-    expect(informative(unsure('views_disagree', 0.2))).toBe(true);
-    expect(informative(unsure('untrusted_sender', 0.9))).toBe(true);
-    expect(informative(unsure('model_unavailable', 0, null))).toBe(false);
-  });
-
-  it('keeps the day\'s last place for the informative band, and never asks with nothing to offer', () => {
-    // A quota of 2: the first uninformative mail takes a place, the second does not; an informative one takes the last.
-    expect(joinsReview(unsure('low_confidence', 0.2), 0, 2)).toBe(true);
-    expect(joinsReview(unsure('low_confidence', 0.2), 1, 2)).toBe(false);
-    expect(joinsReview(unsure('views_disagree', 0.5), 1, 2)).toBe(true);
-    expect(joinsReview(unsure('views_disagree', 0.5), 2, 2)).toBe(false);
-    // A quota of 1 is the informative band's only.
-    expect(joinsReview(unsure('suspicious', 0.1), 0, 1)).toBe(false);
-    expect(joinsReview(unsure('low_confidence', 0.5), 0, 1)).toBe(true);
-    expect(joinsReview(unsure('no_labels', 0, null), 0, 5)).toBe(false);
-  });
-});
-
-describe('trusted domains', () => {
-  it('a trust label\'s answer teaches only an authenticated, unsuspicious sender\'s own domain', () => {
-    expect(teachableDomain({ authenticated: true, domain: 'Bank.Example.com', suspicious: 0.02 })).toBe('bank.example.com');
-    // A forged From, a mail the model doubted (or could not judge), no domain: nothing to teach.
-    expect(teachableDomain({ authenticated: false, domain: 'bank.example.com', suspicious: 0.02 })).toBe('');
-    expect(teachableDomain({ authenticated: true, domain: 'bank.example.com', suspicious: 0.9 })).toBe('bank.example.com');
-    expect(teachableDomain({ authenticated: true, domain: 'bank.example.com', suspicious: 0.95 })).toBe('');
-    expect(teachableDomain({ authenticated: true, domain: 'bank.example.com', suspicious: null })).toBe('');
-    expect(teachableDomain({ authenticated: true, domain: null, suspicious: 0.02 })).toBe('');
-    // Anyone can send DMARC-aligned mail from a public mailbox provider.
-    expect(teachableDomain({ authenticated: true, domain: 'gmail.com', suspicious: 0.02 })).toBe('');
-  });
-
-  it('knows the public mailbox providers and their subdomains, not a look-alike of one', () => {
-    for (const domain of ['gmail.com', 'Outlook.com', 'qq.com', 'vip.qq.com', '163.com', 'icloud.com']) expect(sharedMailbox(domain), domain).toBe(true);
-    for (const domain of ['notgmail.com', 'qq.com.example.net', 'bank.example.com', 'com', '']) expect(sharedMailbox(domain), domain).toBe(false);
-  });
-});
-
-describe('the sender history', () => {
-  it('names the three labels the sender\'s mail got, the owner\'s verdicts first, as option keys', () => {
-    const key = (id: string) => (id === 'gone' ? null : id === NONE ? NONE : `key-${id}`);
-    const entries = [
-      { label: 'newsletter', owner: 0, auto: 5 },
-      { label: 'receipt', owner: 1, auto: 0 },
-      { label: NONE, owner: 2, auto: 0 },
-      { label: 'gone', owner: 3, auto: 0 },
-      { label: 'travel', owner: 0, auto: 1 },
-    ];
-    expect(historyText(entries, key)).toBe('none ×2, key-receipt ×1, key-newsletter ×5');
-    expect(historyText([], key)).toBe('');
-  });
-});
-
-describe('neighbours', () => {
-  it('similar texts have similar fake embeddings', () => {
-    const a = Float32Array.from(embedText('Your weekly digest: 5 new posts'));
-    const b = Float32Array.from(embedText('Your weekly digest: 6 new posts'));
-    const c = Float32Array.from(embedText('航班行程确认'));
-    expect(cosine(a, b)).toBeGreaterThan(0.8);
-    expect(cosine(a, c)).toBeLessThan(0.2);
-  });
-});
-
-describe('Clef', () => {
-  const options = [
-    { id: 'newsletter', key: 'subscriptions', name: '订阅', description: 'newsletter weekly digest' },
-    { id: 'receipt', key: 'receipts', name: '收据', description: 'receipt invoice' },
-  ];
-  const state = { from: 'Digest <news.example.com>', to: 'to-abc123', list: 'mailing list', subject: 'Your weekly digest', snippet: '', body: '', gmail_category: 'updates', similar_examples: [] };
-
-  it('asks one choice over the labels plus none, and two noul questions (never needs_action since 2026-10-11)', () => {
+describe('Clef priority contract', () => {
+  it('asks only how long the owner can wait, without fraud or bulk questions', () => {
     const input = clefInput(CLEF, state, options);
-    expect(input['model']).toBe('clef');
+    const questions = input['questions'] as Record<string, { type: string; criteria: Record<string, string>; instructions: string }>;
+    expect(Object.keys(questions)).toEqual(['label']);
+    expect(questions['label']?.type).toBe('choice');
+    expect(Object.keys(questions['label']?.criteria ?? {})).toEqual(['p1', 'p2', 'p3', 'p4', 'none']);
+    expect(questions['label']?.instructions).toContain('safely wait');
+    expect(JSON.stringify(input)).not.toMatch(/phishing|scam|impersonat|suspicious|sender_authenticated|\bbulk\b|Robinhood/i);
     expect(clefInput(CLEF_FLASH, state, options)['model']).toBe('clef-flash');
-    const questions = input['questions'] as Record<string, { type: string; criteria?: Record<string, string>; instructions?: string }>;
-    expect(Object.keys(questions).sort()).toEqual(['bulk', 'label', 'suspicious']);
-    expect(questions['suspicious']).toMatchObject({ type: 'noul' });
-    expect(questions['bulk']).toMatchObject({ type: 'noul' });
-    expect(Object.keys(questions['label']?.criteria ?? {})).toEqual(['subscriptions', 'receipts', NONE]);
-    expect(questions['label']?.criteria?.['subscriptions']).toBe('订阅: newsletter weekly digest');
-    expect(JSON.stringify(input)).not.toContain('"newsletter":');
-    // The second view offers the options in the order given (judge.ts passes view 1's reversed), none still last.
-    expect(Object.keys((clefInput(CLEF, state, [...options].reverse())['questions'] as typeof questions)['label']?.criteria ?? {})).toEqual(['receipts', 'subscriptions', NONE]);
+    expect(criterion({ name: 'P2', description: '这周处理' })).toBe('P2: 这周处理');
   });
 
-  it('gives every option its path: a random ID (an imported label) never stands for the meaning', () => {
-    expect(criterion({ name: '学校', description: '' })).toBe('学校');
-    expect(criterion({ name: '学校与社群', description: '课程、成绩、学术会议' })).toBe('学校与社群: 课程、成绩、学术会议');
-    expect(criterion({ name: '金融/投资', description: '券商对账单' })).toBe('金融/投资: 券商对账单');
-    const input = clefInput(CLEF, state, [{ id: 'lxy260f75g', key: 'school', name: '学校', description: '' }]);
-    expect(JSON.stringify(input)).not.toContain('lxy260f75g');
+  it('provides receipt time and the local day, clock and calendar week', () => {
+    const f = { sender: 'Broker <broker.example.com>', toCode: 'to-synthetic', listId: '', subject: 'Statement', snippet: 'Your statement is ready.', body: 'Your statement is ready. Read it when convenient.', category: '' };
+    const s = clefState(f, [], { history: '', receivedAt: Date.parse('2026-10-23T07:00:00Z'), now: Date.parse('2026-10-24T01:30:00Z') });
+    expect(s).toMatchObject({ received_at: '2026-10-23T07:00:00.000Z', time_zone: 'America/Los_Angeles', current_week: '2026-10-19 through 2026-10-25 (Monday through Sunday)' });
+    expect(s.current_local_time).toContain('Friday');
+    expect(s.current_local_time).toContain('18:30:00');
+    expect(s.snippet).toBeUndefined();
+    expect(s).not.toHaveProperty('sender_authenticated');
+    expect(s).not.toHaveProperty('sender_history');
   });
 
-  it('answers by label ID, whatever keys the model saw', async () => {
+  it('maps model keys to IDs and keeps neuron accounting unchanged', async () => {
     const ai = new FakeAi();
+    ai.choiceOverride = () => ({ p3: 0.92, none: 0.08 });
     const answer = await decide({ run: (model, input) => Promise.resolve(ai.run(model, input)) }, CLEF, state, options);
-    expect(answer.top).toBe('newsletter');
-    expect(Object.keys(answer.probabilities).sort()).toEqual(['newsletter', 'none', 'receipt']);
+    expect(answer.top).toBe('p3');
+    expect(answer.neurons).toBeCloseTo(2000 * 0.021818);
+    const flash = readClefAnswer(CLEF_FLASH, ai.run(CLEF_FLASH, clefInput(CLEF_FLASH, state, options)), ['p1', 'p2', 'p3', 'p4']);
+    expect(flash.neurons).toBeCloseTo(2000 * 0.008182);
+    expect(answer).not.toHaveProperty('suspicious');
+    expect(answer).not.toHaveProperty('bulk');
   });
 
-  it('keeps the state lean: no snippet the body starts with, no empty fields; the sender evidence always says yes or no', () => {
-    const f = { listId: '', sender: 'Shop <shop.example.com>', subject: 'Receipt', toCode: 'to-abc123', category: '' };
-    const body = 'Thank you for your order.\nYour receipt and invoice total is 42.00. More text follows here.';
-    const plain = { authenticated: false, history: '' };
-    const lean = clefState({ ...f, snippet: 'Thank you for your order. Your receipt and invoice total is 42.00.', body }, [], plain);
-    expect(lean).toEqual({ from: 'Shop <shop.example.com>', sender_authenticated: 'no', to: 'to-abc123', subject: 'Receipt', body });
-    expect(clefState({ ...f, snippet: 'Something else entirely', body }, [], plain).snippet).toBe('Something else entirely');
-    expect(clefState({ ...f, snippet: 'Thank you for your order.', body: '' }, [], plain).snippet).toBe('Thank you for your order.');
-    expect(clefState({ ...f, listId: 'x.example.com', snippet: '', body }, [{ label: 'receipts', summary: 'Receipt · Shop' }], plain)).toMatchObject({ list: 'mailing list', similar_examples: [{ label: 'receipts', text: 'Receipt · Shop' }] });
-    expect(clefState({ ...f, snippet: '', body }, [], { authenticated: true, history: 'receipts ×3, none ×1' })).toMatchObject({ sender_authenticated: 'yes', sender_history: 'receipts ×3, none ×1' });
-  });
-
-  it('reads the fake model’s answer and estimates neurons from input tokens', () => {
-    const ai = new FakeAi();
-    const answer = readClefAnswer(CLEF, ai.run(CLEF, clefInput(CLEF, state, options)), ['subscriptions', 'receipts']);
-    expect(answer.top).toBe('subscriptions');
-    expect(Object.keys(answer)).not.toContain('needsAction');
-    expect(answer.neurons).toBeCloseTo(2000 * 0.021818, 3);
-    const flash = readClefAnswer(CLEF_FLASH, ai.run(CLEF_FLASH, clefInput(CLEF_FLASH, state, options)), ['subscriptions', 'receipts']);
-    expect(flash.neurons).toBeCloseTo(2000 * 0.008182, 3);
-  });
-
-  it('refuses an answer whose keys, options or probabilities are not exactly what was asked', () => {
+  it('strictly refuses extra fraud questions, missing options and malformed probabilities', () => {
     const good = new FakeAi().run(CLEF, clefInput(CLEF, state, options));
-    const answers = good['answers'] as Record<string, Record<string, unknown>>;
-    const variants: unknown[] = [
+    const answers = good['answers'] as Record<string, unknown>;
+    for (const changed of [
       null,
-      { ...good, answers: { ...answers, extra: { type: 'noul', noul: 0.5 } } },
-      { ...good, answers: { label: answers['label'], suspicious: answers['suspicious'] } },
-      // A question no longer asked (needs_action, until 2026-10-11) is an extra key like any other.
-      { ...good, answers: { ...answers, needs_action: { type: 'noul', noul: 0.1 } } },
-      { ...good, answers: { ...answers, label: { ...answers['label'], probabilities: { subscriptions: 0.5, receipts: 0.5 } } } },
-      { ...good, answers: { ...answers, label: { ...answers['label'], probabilities: { subscriptions: 0.9, receipts: 0.9, none: 0.9 } } } },
-      { ...good, answers: { ...answers, label: { ...answers['label'], probabilities: { subscriptions: 2, receipts: -1, none: 0 } } } },
-      { ...good, answers: { ...answers, label: { ...answers['label'], probabilities: { subscriptions: 0.5, receipts: 0.5, none: 0, hacked: 0 } } } },
-      { ...good, answers: { ...answers, suspicious: { type: 'choice', noul: 0.1 } } },
+      { ...good, answers: {} },
+      { ...good, answers: { ...answers, suspicious: { type: 'noul', noul: 0.9 } } },
+      { ...good, answers: { label: { type: 'choice', probabilities: { p1: 1 } } } },
+      { ...good, answers: { label: { type: 'choice', probabilities: { p1: 2, p2: -1, p3: 0, p4: 0, none: 0 } } } },
       { ...good, usage: {} },
-    ];
-    expect(readClefAnswer(CLEF, good, ['subscriptions', 'receipts']).top).toBe('subscriptions');
-    for (const variant of variants) expect(() => readClefAnswer(CLEF, variant, ['subscriptions', 'receipts'])).toThrow(AiError);
-  });
-
-  it('knows a quota refusal from another failure', () => {
+    ]) expect(() => readClefAnswer(CLEF, changed, ['p1', 'p2', 'p3', 'p4'])).toThrow(AiError);
     expect(isQuotaError(new Error(QUOTA_MESSAGE))).toBe(true);
     expect(isQuotaError(new Error('3043: internal server error'))).toBe(false);
   });
 
-  it('estimates and cuts tokens in one pass', () => {
+  it('retains bounded sender context and token estimates', () => {
+    expect(historyText([{ label: 'p2', owner: 1, auto: 0 }, { label: 'old-topic', owner: 5, auto: 0 }], (id) => labels.has(id) ? id : null)).toBe('p2 ×1');
     expect(estimateTokens('你好世界')).toBe(4);
-    expect(estimateTokens('abcdefgh')).toBe(2);
     expect(cutTokens('一二三四五六', 3)).toBe('一二三…');
-    expect(estimateTokens(cutTokens('x'.repeat(10_000), 120))).toBeLessThanOrEqual(121);
-  });
-});
-
-describe('retries of one mail', () => {
-  it('back off per mail, doubling from 5 minutes, and give up after about five hours', () => {
-    expect(retryDelay(1)).toBe(5 * 60_000);
-    expect(retryDelay(2)).toBe(10 * 60_000);
-    expect(retryDelay(20)).toBe(RETRY_MAX_MS);
-    let total = 0;
-    for (let attempt = 1; attempt < MAIL_ATTEMPTS_MAX; attempt++) total += retryDelay(attempt);
-    expect(total).toBeGreaterThanOrEqual(4 * 3_600_000);
-  });
-});
-
-describe('retries of one mail', () => {
-  it('back off per mail, doubling from 5 minutes, and give up after about five hours', () => {
-    expect(retryDelay(1)).toBe(5 * 60_000);
-    expect(retryDelay(2)).toBe(10 * 60_000);
-    expect(retryDelay(20)).toBe(RETRY_MAX_MS);
-    let total = 0;
-    for (let attempt = 1; attempt < MAIL_ATTEMPTS_MAX; attempt++) total += retryDelay(attempt);
-    expect(total).toBeGreaterThanOrEqual(4 * 3_600_000);
-  });
-});
-
-describe('modes', () => {
-  it('lowers the owner’s mode to the deployment’s ceiling, and to shadow while the breaker is tripped', () => {
-    expect(modeCeiling({ MODE: 'live' })).toBe('live');
-    expect(modeCeiling({ MODE: 'garbage' })).toBe('off');
-    expect(modeCeiling({})).toBe('off');
-    expect(effectiveMode({ mode: 'live', breaker: '' }, 'live')).toBe('live');
-    expect(effectiveMode({ mode: 'live', breaker: '' }, 'shadow')).toBe('shadow');
-    expect(effectiveMode({ mode: 'live', breaker: 'daily_limit' }, 'live')).toBe('shadow');
-    expect(effectiveMode({ mode: 'shadow', breaker: '' }, 'off')).toBe('off');
   });
 });

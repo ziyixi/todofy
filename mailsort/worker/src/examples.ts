@@ -8,6 +8,7 @@ import { cosine, fromBlob } from './ai.ts';
 import { EXAMPLES_MAX, EXAMPLES_PER_LABEL_MAX } from './limits.ts';
 import { timeId } from './ids.ts';
 import type { ExampleRow, Store } from './store.ts';
+import { priorityStartedAt, PRIORITY_IDS } from './priority.ts';
 
 export interface Neighbour {
   readonly id: string;
@@ -29,7 +30,7 @@ function bump(store: Store): void {
 }
 
 export function embeddedCount(store: Store): number {
-  return store.count(`SELECT count(*) AS n FROM examples WHERE embedding IS NOT NULL`);
+  return store.count(`SELECT count(*) AS n FROM examples WHERE embedding IS NOT NULL AND create_time >= ? AND label_id IN ('p1', 'p2', 'p3', 'p4')`, priorityStartedAt(store));
 }
 
 /**
@@ -39,11 +40,13 @@ export function embeddedCount(store: Store): number {
  * that same mail made (its own summary, labelled with the answer) never tells the model the answer.
  */
 export function nearest(store: Store, vector: Float32Array, k: number, labels: ReadonlySet<string>, asOf: number, exclude: string): Neighbour[] {
-  const version = store.getMeta('examples_version') ?? '0';
+  const startedAt = priorityStartedAt(store);
+  const version = `${store.getMeta('examples_version') ?? '0'}:${String(startedAt)}`;
   if (cache?.version !== version) {
     const items = store
       .all<Pick<ExampleRow, 'id' | 'label_id' | 'summary' | 'message_id' | 'create_time' | 'embedding'>>(
-        `SELECT id, label_id, summary, message_id, create_time, embedding FROM examples WHERE embedding IS NOT NULL`,
+        `SELECT id, label_id, summary, message_id, create_time, embedding FROM examples WHERE embedding IS NOT NULL AND create_time >= ? AND label_id IN ('p1', 'p2', 'p3', 'p4')`,
+        startedAt,
       )
       .flatMap((row) => {
         const v = row.embedding === null ? null : fromBlob(row.embedding);
@@ -52,7 +55,7 @@ export function nearest(store: Store, vector: Float32Array, k: number, labels: R
     cache = { version, items };
   }
   return cache.items
-    .filter((item) => labels.has(item.label) && item.createTime < asOf && item.messageId !== exclude)
+    .filter((item) => PRIORITY_IDS.has(item.label) && labels.has(item.label) && item.createTime < asOf && item.messageId !== exclude)
     .map((item) => ({ id: item.id, label: item.label, summary: item.summary, similarity: cosine(vector, item.vector) }))
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, k);
@@ -112,7 +115,7 @@ export function dropEmbeddings(store: Store): number {
 }
 
 export function unembedded(store: Store, limit: number): { id: string; summary: string }[] {
-  return store.all<{ id: string; summary: string }>(`SELECT id, summary FROM examples WHERE embedding IS NULL ORDER BY id LIMIT ?`, limit);
+  return store.all<{ id: string; summary: string }>(`SELECT id, summary FROM examples WHERE embedding IS NULL AND create_time >= ? AND label_id IN ('p1', 'p2', 'p3', 'p4') ORDER BY id LIMIT ?`, priorityStartedAt(store), limit);
 }
 
 export function storeEmbedding(store: Store, id: string, blob: ArrayBuffer): void {

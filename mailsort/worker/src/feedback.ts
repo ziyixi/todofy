@@ -16,6 +16,7 @@ import { canonicalDecision, effectiveLedgerRow, isMergeFeedback } from './label-
 import { deleteExampleOf, putExample } from './examples.ts';
 import { countFlow, stageOf } from './flow.ts';
 import type { DecisionRow, Store } from './store.ts';
+import { PRIORITY_IDS, priorityStartedAt } from './priority.ts';
 
 export type VerdictSource = 'review' | 'gmail' | 'auto';
 
@@ -37,6 +38,7 @@ export function setCurrentLabels(store: Store, messageId: string, labels: readon
  * and a pending review item of the mail.
  */
 export function setVerdict(store: Store, row: DecisionRow, chosen: string | null, source: VerdictSource, now: number): void {
+  if (priorityStartedAt(store) === 0 || row.decided_at < priorityStartedAt(store) || (row.label_id !== null && !PRIORITY_IDS.has(row.label_id)) || (chosen !== null && !PRIORITY_IDS.has(chosen))) return;
   const predicted = row.label_id === null ? null : store.canonicalLabelId(row.label_id);
   const verdict = predicted === chosen ? 'confirmed' : 'corrected';
   // The flow's corrections count decisions whose label the owner changed, once each, on the day it was decided.
@@ -82,9 +84,10 @@ export function applyFeedback(store: Store, owned: ReadonlyMap<string, string>, 
     store.run(`DELETE FROM feedback WHERE key = ?`, event.key);
     if (isMergeFeedback(store, event)) continue;
     const original = owned.get(event.gmail_label_id);
-    const label = original === undefined ? undefined : store.canonicalLabelId(original);
+    if (original === undefined || !PRIORITY_IDS.has(original)) continue;
+    const label = store.canonicalLabelId(original);
     const row = store.decision(event.message_id);
-    if (label === undefined || row === undefined || row.outcome === 'skipped') continue;
+    if (!PRIORITY_IDS.has(label) || row === undefined || row.outcome === 'skipped' || (row.label_id !== null && !PRIORITY_IDS.has(row.label_id)) || row.decided_at < priorityStartedAt(store)) continue;
     const labels = new Set(labelsOf(canonicalDecision(store, row)));
     if (event.change === 'added') labels.add(label);
     else labels.delete(label);

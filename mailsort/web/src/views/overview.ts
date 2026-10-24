@@ -1,10 +1,4 @@
-/**
- * 概览 (`/overview`): what the model did, at a glance. One status line (what the mode in force does, the last sync, the
- * mail still waiting); four numbers for today, each with its last 7 days under it (处理, 有把握, 都不是, 拿不准); the
- * flow of today's mail, always drawn (with no mail, the skeleton at 0; on a phone it starts at its right end, where
- * the mail went); the table of the last 7 days per label (自动, 改正, 拿不准); and the model budget as a thin meter.
- * Days are UTC days, as the Worker counts them.
- */
+/** Overview shows classification counts, the flow, corrections by priority and the unchanged model budget. */
 import { MailFlow_Outcome, MailFlow_Stage, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { Mode, ServiceStatus_AuthState, type LabelReport, type ServiceStatus } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
@@ -57,26 +51,22 @@ function statusLine(status: ServiceStatus, now: number): HTMLElement {
   return el('p', { class: 'hint lead' }, parts.filter((part) => part !== '').join(' · '))
 }
 
-/**
- * Each label with mail in the last 7 days: its automatic labels, the owner's corrections, and uncertain mail. Mail that
- * got no label (都不是, or uncertain with 都不是 most likely) is in the numbers above, not here, so the empty line says
- * which is empty: no mail at all, or none on a label.
- */
+/** Automatic classifications and owner corrections over the last seven days. */
 function labelTable(answer: LabelReport, labels: readonly Label[]): HTMLElement {
   const rows = answer.labels
-    .map((row) => ({ name: labelText(row.label, labels), auto: row.autoCount, corrected: row.gmailCorrectionCount + row.reviewCorrectionCount, unsure: row.unsureCount }))
-    .filter((row) => row.auto + row.corrected + row.unsure > 0)
+    .map((row) => ({ name: labelText(row.label, labels), auto: row.autoCount, corrected: row.gmailCorrectionCount + row.reviewCorrectionCount }))
+    .filter((row) => row.auto + row.corrected > 0)
   const cell = (n: number) => el('td', {}, String(n))
   return card(
-    '各标签 · 最近 7 天',
+    '各分级 · 最近 7 天',
     '',
     rows.length === 0
-      ? emptyState(answer.decidedCount === 0 ? '最近 7 天还没有邮件' : '最近 7 天还没有邮件归到标签')
+      ? emptyState(answer.decidedCount === 0 ? '最近 7 天还没有邮件' : '最近 7 天还没有分级记录')
       : el(
           'table',
           { class: 'report' },
-          el('thead', {}, el('tr', {}, el('th', { scope: 'col' }, '标签'), el('th', { scope: 'col' }, '自动'), el('th', { scope: 'col' }, '改正'), el('th', { scope: 'col' }, '拿不准'))),
-          el('tbody', {}, ...rows.map((row) => el('tr', {}, el('th', { scope: 'row' }, row.name), cell(row.auto), cell(row.corrected), cell(row.unsure)))),
+          el('thead', {}, el('tr', {}, el('th', { scope: 'col' }, '分级'), el('th', { scope: 'col' }, '自动'), el('th', { scope: 'col' }, '改正'))),
+          el('tbody', {}, ...rows.map((row) => el('tr', {}, el('th', { scope: 'row' }, row.name), cell(row.auto), cell(row.corrected)))),
         ),
   )
 }
@@ -107,6 +97,8 @@ export async function renderOverview(ctx: ViewContext): Promise<void> {
     const graph = flowGraph(flow.counts, labels)
     const today = tallyOf(flow.counts)
     const sevenDays = (n: number) => `7 天 ${String(n)}`
+    const todayRank = (inbox: boolean) => flow.counts.filter((count) => LABELLED.has(count.outcome) && (inbox ? count.label === 'labels/p1' : ['labels/p2', 'labels/p3', 'labels/p4'].includes(count.label))).reduce((sum, count) => sum + count.mailCount, 0)
+    const weekRank = (inbox: boolean) => week.labels.filter((row) => inbox ? row.label === 'labels/p1' : ['labels/p2', 'labels/p3', 'labels/p4'].includes(row.label)).reduce((sum, row) => sum + row.autoCount, 0)
     fill(
       body,
       statusLine(status, ctx.host.now()),
@@ -114,9 +106,9 @@ export async function renderOverview(ctx: ViewContext): Promise<void> {
         'div',
         { class: 'kpis' },
         kpi('处理', today.decided, sevenDays(week.decidedCount)),
-        kpi('有把握', today.confident, sevenDays(week.autoCount)),
-        kpi('都不是', today.none, sevenDays(week.noLabelCount)),
-        kpi('拿不准', today.unsure, sevenDays(week.unsureCount)),
+        kpi('已分级', today.confident, sevenDays(week.autoCount)),
+        kpi('P1', todayRank(true), sevenDays(weekRank(true))),
+        kpi('P2、P3、P4', todayRank(false), sevenDays(weekRank(false))),
       ),
       card('今天的流程', graph.total === 0 ? '' : `共 ${String(graph.total)} 封`, sankeyChart(graph), graph.total === 0 ? el('p', { class: 'hint' }, '今天还没有邮件') : null),
       el('div', { class: 'two' }, labelTable(week, labels), budget(status)),

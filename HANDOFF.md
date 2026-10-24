@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-23 UTC. Active work, open acceptance and dated compatibility only; move completed rollout detail to
+Updated 2026-10-24 UTC. Active work, open acceptance and dated compatibility only; move completed rollout detail to
 a dated record and link it here. Rules are in [AGENTS](AGENTS.md); entry points in [README](README.md). Never put
 private content, credentials or raw production output here.
 
@@ -11,6 +11,15 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 [October 18](docs/history/handoff-2026-10-18.md), [October 11](docs/history/handoff-2026-10-11.md).
 
 ## Current work
+
+`codex/mailsort-priority` replaces topic sorting with four real Gmail labels: P1 keeps Inbox, P2-P4 archive;
+valid uncertainty becomes P1 without mandatory review. The scam/trust-domain model and gates are removed.
+Code/UI and the bounded owner initializer are implemented in `/private/tmp/todofy-tasks-design`;
+Claude's shared checkout is untouched. Local lint/types, 124 Worker unit tests, 69 real-SQLite runtime tests (including CPU), 62 UI cases, 26 deploy checks
+and the real local Wrangler smoke passed. The final branch gate and production release are next.
+Production still has the old 12 topic labels; neither Gmail labels nor real mail have been modified yet.
+The owner initializer removes only known old labels/learning and preserves mail/read/Inbox state, then starts
+fresh priority learning at its cutover cursor. Dated evidence: [priority rollout](mailsort/docs/priority-rollout.md).
 
 The Watch evidence implementation and native Dots acceptance are complete; the verification record is in
 [Watch evidence verification](docs/watch-evidence-verification.md). Its temporary subscription is stopped,

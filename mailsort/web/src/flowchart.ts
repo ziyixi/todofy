@@ -1,22 +1,9 @@
-/**
- * The flow of mail through the pipeline (../../docs/design.md §10) as a Sankey diagram: 新邮件 on the left, the stage
- * that handled each mail in the middle (跳过, Clef 27B, Clef-flash, 未调用模型, 延后), and on the right what the model
- * decided: each label written to Gmail, 都不是 (confident that no label fits), 拿不准 split by whether the mail
- * went to 待审 (all three left in the inbox), and 影子建议 (a confident label only recorded, nothing written). Link
- * widths are mail counts. With no mail at all it draws the skeleton instead: every stage and outcome at 0, muted
- * nodes and hairline links, so the diagram is always there.
- *
- * d3-sankey only lays the graph out (positions); the SVG is plain DOM in the page's theme: every color is a CSS token
- * (styles.css, light and dark), labels are colored by their complete name in a fixed order (the
- * labels' own order, so a day never repaints one of the first eight; a later group borrows a hue the day leaves free,
- * groupSlots), and only a day showing more than eight groups has gray ones. Color is never the only cue: every node
- * is named with its count. Hover or focus shows a node's or link's exact count and share. Motion is a short opacity
- * change, off under prefers-reduced-motion (styles.css).
- */
+/** The mail flow as a Sankey chart, with fixed P1-P4 outcomes and readable historical counters. */
 import { sankey, sankeyLeft, sankeyLinkHorizontal, type SankeyLink, type SankeyNode } from 'd3-sankey'
 import { MailFlow_Outcome, MailFlow_Stage, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { el } from './dom.ts'
+import { PRIORITIES } from './priorities.ts'
 
 /** The categorical slots of styles.css (--series-1 to --series-8). */
 const SERIES = 8
@@ -67,10 +54,10 @@ const SKIP_REASONS: Readonly<Record<number, string>> = {
 
 /** The outcomes without a label, in the diagram's order (under the labels). */
 const OUTCOMES: readonly FlowNodeData[] = [
-  { id: 'none', name: '都不是（留在收件箱）', kind: 'none', slot: 0, detail: ['模型确定没有合适的标签'] },
-  { id: 'unsure_shown', name: '拿不准（进了待审）', kind: 'unsure', slot: 0, detail: ['留在收件箱，在待审里问你'] },
-  { id: 'unsure', name: '拿不准（没进待审）', kind: 'unsure', slot: 0, detail: ['留在收件箱：今天的待审名额已满，或没有可问的标签'] },
-  { id: 'suggested', name: '影子建议（未写入）', kind: 'suggested', slot: 0, detail: ['有把握，但只记录：影子模式，或写入失败'] },
+  { id: 'none', name: '旧记录：未分级', kind: 'none', slot: 0, detail: ['旧分类流程中未分到标签的邮件，留在收件箱'] },
+  { id: 'unsure_shown', name: '旧记录：待确认', kind: 'unsure', slot: 0, detail: ['旧分类流程留下的确认记录，邮件留在收件箱'] },
+  { id: 'unsure', name: '旧记录：未确认', kind: 'unsure', slot: 0, detail: ['旧分类流程中尚未确认的邮件，留在收件箱'] },
+  { id: 'suggested', name: '影子建议（未写入）', kind: 'suggested', slot: 0, detail: ['分级仅作记录：影子模式，或未完成 Gmail 写入'] },
 ]
 
 /**
@@ -100,7 +87,7 @@ export function groupSlots(labels: readonly Label[], shown: ReadonlySet<string>)
 /** The graph of one MailFlow's counters (corrections are not mails, so not in it). `labels` give names, order and groups. */
 export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly Label[]): FlowGraph {
   const byName = new Map(labels.map((label) => [label.name, label]))
-  const nameOf = (label: string) => byName.get(label)?.displayName ?? '（已删除的标签）'
+  const nameOf = (label: string) => byName.get(label)?.displayName ?? '历史分级'
   const groupOf = (label: string) => byName.get(label)?.displayName ?? ''
   // Filled in once the counters are read (groupSlots below).
   let groupSlot = new Map<string, number>()
@@ -164,7 +151,7 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
   }
   const labelIds = [...used].filter((id) => id.startsWith('label:')).map((id) => id.slice('label:'.length))
   labelIds.sort((a, b) => order(a) - order(b) || (a < b ? -1 : 1))
-  for (const label of labelIds) nodes.push({ id: `label:${label}`, name: nameOf(label), kind: 'label', slot: slotOf(label), group: groupOf(label) })
+  for (const label of labelIds) nodes.push({ id: `label:${label}`, name: nameOf(label), kind: 'label', slot: slotOf(label), group: groupOf(label), detail: [PRIORITIES.find((priority) => label === `labels/${priority.id}`)?.policy ?? '历史分级记录'] })
   for (const node of OUTCOMES) if (used.has(node.id)) nodes.push(node)
 
   // In color order (home slots first), the legend's order.
@@ -180,34 +167,18 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
   }
 }
 
-/**
- * The graph of a day without mail: every stage and outcome and each path a mail can take, all at 0. 打标签 stands for
- * the labels (a label is a node of its own once it has mail).
- */
+/** An empty day still shows the four priorities, with zero counts. */
 export function skeletonGraph(): FlowGraph {
   const stage = ([, id, name]: (typeof STAGES)[number]): FlowNodeData => ({ id, name, kind: id === 'skipped' || id === 'deferred' ? 'terminal' : 'stage', slot: 0 })
-  const decided = ['clef', 'clef-flash']
+  const ranks: FlowNodeData[] = PRIORITIES.map((priority, index) => ({ id: `label:labels/${priority.id}`, name: priority.title, kind: 'label', slot: index + 1, group: priority.title, detail: [priority.policy] }))
   return {
     total: 0,
-    nodes: [
-      { id: 'new', name: '新邮件', kind: 'source', slot: 0 },
-      ...STAGES.map(stage),
-      { id: 'written', name: '打标签', kind: 'label', slot: 0 },
-      ...OUTCOMES,
-    ],
+    nodes: [{ id: 'new', name: '新邮件', kind: 'source', slot: 0 }, ...STAGES.map(stage), ...ranks, ...OUTCOMES.filter((node) => node.id === 'suggested')],
     links: [
       ...STAGES.map(([, id]) => ({ source: 'new', target: id, value: 0 })),
-      ...decided.flatMap((id) => [
-        { source: id, target: 'written', value: 0 },
-        { source: id, target: 'none', value: 0 },
-        { source: id, target: 'suggested', value: 0 },
-      ]),
-      ...['clef', 'clef-flash', 'no_model'].flatMap((id) => [
-        { source: id, target: 'unsure_shown', value: 0 },
-        { source: id, target: 'unsure', value: 0 },
-      ]),
+      ...['clef', 'clef-flash'].flatMap((id) => [...ranks.map((rank) => ({ source: id, target: rank.id, value: 0 })), { source: id, target: 'suggested', value: 0 }]),
     ],
-    groups: [],
+    groups: PRIORITIES.map((priority, index) => ({ name: priority.title, slot: index + 1 })),
   }
 }
 
@@ -358,7 +329,7 @@ export function sankeyChart(graph: FlowGraph): HTMLElement {
     box.append(
       el(
         'ul',
-        { class: 'flow-legend', 'aria-label': '标签颜色' },
+        { class: 'flow-legend', 'aria-label': '分级颜色' },
         ...groups.map((group) => {
           const swatch = el('span', { class: 'swatch' })
           swatch.style.background = group.slot === 0 ? 'var(--muted)' : `var(--series-${String(group.slot)})`

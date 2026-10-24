@@ -80,7 +80,7 @@
   [配额](dashboard/docs/limits.md)、[设置](dashboard/docs/setup.md)。不读取其他应用 D1/R2/代码；status、刷新、漂移有明确调用预算。
 - Links：[AGENTS](links/AGENTS.md)、[设计](links/docs/design.md)。匿名重定向一次索引读取、零写入、不记录 key/目标。
 - Watch：[AGENTS](watch/AGENTS.md)、[设计](watch/docs/design.md)。逐跳抓取政策、合成站点、内容不进通知；冻结 intent 幂等重试。
-- Mailsort：[AGENTS](mailsort/AGENTS.md)、[设计](mailsort/docs/design.md)。只经 `gmail.ts` 的封闭操作表访问 Gmail，从不标记已读或删除；
+- Mailsort：[AGENTS](mailsort/AGENTS.md)、[设计](mailsort/docs/design.md)。只经 `gmail.ts` 的封闭操作表访问 Gmail，从不标记已读或删除邮件；owner 明确授权的一次性分级设置可删除旧自有标签；
   Gmail 授权只由 owner 本机写入，部署不碰；合成邮件与回环假服务，内容不进日志。
 - Recall：[AGENTS](recall/AGENTS.md)、[设计](recall/docs/design.md)。只用合成页面，URL、标题与正文不进日志；三条机器路由各凭
   自己的令牌摘要，令牌由 owner 在设置里生成、只显示一次；归档由 recall 只增不删地写进 owner 的 Dropbox，

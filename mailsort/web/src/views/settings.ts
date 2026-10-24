@@ -1,16 +1,4 @@
-/**
- * 设置 (`/settings`): mode, undo, Gmail and replay evaluation.
- *
- * - 模式: 关闭, 影子 or 正式, and one line on what is in force (the deployment's MAILSORT_MODE ceiling or the breaker may
- *   lower the owner's choice; 解除熔断 once the breaker tripped; 正式 with a read-only Gmail grant writes nothing, and
- *   the line says how to grant writes). A choice names only `mode` (and the etag) in the mask, which is what clears a
- *   tripped breaker.
- * - 撤销: a time range (1 小时, 24 小时, 7 天 or one's own) and optionally one label; 预览 counts what an undo would take
- *   back, 确认撤销 then undoes it, 20 entries per call, until none is left. The safety net for every write.
- * - Gmail: 从 Gmail 同步 (renames and deletions made in Gmail; the owner's label of a label's path is adopted).
- *
- * The other settings (write limits, the neuron budget) keep their stored values; the API still takes them.
- */
+/** Settings keeps the existing mode, range undo and replay evaluation. */
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
@@ -20,7 +8,6 @@ import { card, segmented } from '../components.ts'
 import { button, el, toast } from '../dom.ts'
 import { BREAKER_REASONS, labelText, MODE_HINTS, MODE_NAMES, ms } from '../format.ts'
 import type { Host, ViewContext } from '../app.ts'
-import { consolidationPanel } from './consolidation.ts'
 import { replayCard } from './replay.ts'
 import { act, allLabels, frame, labelSelect } from './common.ts'
 
@@ -52,16 +39,6 @@ const PREVIEW_PAGES_MAX = 20
 /** Calls of one range undo at most: 30 x 20 entries, more than a month of writes at the daily cap's default. */
 const UNDO_ROUNDS_MAX = 30
 
-/** What SyncLabels did, in the owner's words. */
-function syncMessage(answer: { linkedCount: number; renamedCount: number; missingCount: number }): string {
-  return `已同步：关联 ${String(answer.linkedCount)}，改名 ${String(answer.renamedCount)}，Gmail 中缺失 ${String(answer.missingCount)}`
-}
-
-/** A settings row: its name and one hint line on the left, its control on the right. */
-function setting(name: string, hint: string, control: HTMLElement): HTMLElement {
-  return el('div', { class: 'setting' }, el('div', {}, el('span', {}, name), el('span', { class: 'hint' }, hint)), control)
-}
-
 function setMode(settings: Settings, mode: Mode, requestId: string): Promise<Settings> {
   return api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode, etag: settings.etag }), updateMask: { paths: ['mode', 'etag'] }, requestId })
 }
@@ -78,7 +55,7 @@ function modeCard(settings: Settings, status: ServiceStatus | null, ctx: ViewCon
   }
   const choose = (mode: Mode) => {
     if (mode === settings.mode) return
-    if (mode === Mode.LIVE && !ctx.host.confirm('切到正式？启用的标签会在 Gmail 里给有把握的邮件打标签（按归档设置移出收件箱），待审里的选择也会写入。')) return
+    if (mode === Mode.LIVE && !ctx.host.confirm('切到正式？新邮件会打上 P1、P2、P3、P4 标签。P1 留在收件箱，P2、P3、P4 自动归档，未读状态保持不变。')) return
     void act((requestId) => setMode(settings, mode, requestId), `已切到${MODE_NAMES[mode] ?? ''}`, after)
   }
   const resetBreaker = () => {
@@ -143,7 +120,7 @@ function undoCard(labels: readonly Label[], host: Host): HTMLElement {
   const start = el('input', { type: 'datetime-local', 'aria-label': '开始' })
   const end = el('input', { type: 'datetime-local', 'aria-label': '结束' })
   const custom = el('div', { class: 'range', hidden: true }, start, end)
-  const label = labelSelect(labels, '', '全部标签', { 'aria-label': '标签' })
+  const label = labelSelect(labels, '', '全部分级', { 'aria-label': '分级' })
   const result = el('div', { class: 'actions', 'aria-live': 'polite' })
   const ranges = el('div')
   const clear = () => {
@@ -220,19 +197,10 @@ function undoCard(labels: readonly Label[], host: Host): HTMLElement {
   )
 }
 
-async function gmailCard(labels: readonly Label[]): Promise<HTMLElement> {
-  return card(
-    'Gmail',
-    '',
-    setting('从 Gmail 同步', '跟上你在 Gmail 里的改名和删除，沿用同名标签', button('同步', () => void act((requestId) => api.syncLabels({ requestId }), syncMessage, () => Promise.resolve()))),
-    await consolidationPanel(labels),
-  )
-}
-
 export async function renderSettings(ctx: ViewContext): Promise<void> {
   const reload: () => Promise<void> = await frame(ctx.main, '设置', async (body) => {
     // The header's status (its grant) only adds a line: without it the page still works.
     const [settings, labels, status] = await Promise.all([api.getSettings({ name: 'settings' }), allLabels(), ctx.status().catch(() => null)])
-    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), undoCard(labels, ctx.host), await gmailCard(labels), await replayCard(labels))
+    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), undoCard(labels, ctx.host), await replayCard(labels))
   })
 }

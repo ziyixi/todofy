@@ -22,11 +22,10 @@ const labels = new Map<string, LabelFacts>([
   ['receipt', { id: 'receipt', enabled: true, trust: false }],
   ['bank', { id: 'bank', enabled: true, trust: true }],
 ]);
-const isTrust = (id: string) => labels.get(id)?.trust === true;
 
-function view(probabilities: Record<string, number>, suspicious = 0.02): View {
+function view(probabilities: Record<string, number>): View {
   const top = Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]?.[0] ?? NONE;
-  return { probabilities, top, suspicious };
+  return { probabilities, top };
 }
 
 /**
@@ -40,12 +39,12 @@ const CASE_FIELDS = [
 
 describe('the decision numbers', () => {
   it('reads both views: the top option, the runner-up, view 2 as it answered, the combined value and the higher p(suspicious)', () => {
-    const v1 = view({ newsletter: 0.8, receipt: 0.15, none: 0.05 }, 0.02);
-    const v2 = view({ newsletter: 0.9, receipt: 0.06, none: 0.04 }, 0.2);
-    const decision = decideViews(v1, v2, labels, { authenticated: true, trusted: () => false });
+    const v1 = view({ newsletter: 0.8, receipt: 0.15, none: 0.05 });
+    const v2 = view({ newsletter: 0.9, receipt: 0.06, none: 0.04 });
+    const decision = decideViews(v1, v2, labels);
     expect(decision).toMatchObject({ kind: 'label', label: 'newsletter' });
-    expect(numbersOf(decision, v1, v2, true, isTrust)).toEqual({
-      topOption: 'newsletter', topP: 0.8, runnerUpP: 0.15, view2P: 0.9, combined: decision.confidence, suspicious: 0.2, authenticated: true, trust: false,
+    expect(numbersOf(decision, v1, v2, true)).toEqual({
+      topOption: 'newsletter', topP: 0.8, runnerUpP: 0.15, view2P: 0.9, combined: decision.confidence, suspicious: null, authenticated: true, trust: false,
     });
     // The combined value is the mean on view 1's scale (here 1: view 2 was asked about every option view 1 had).
     expect(decision.confidence).toBeCloseTo((0.8 + 0.9) / 2, 10);
@@ -53,16 +52,16 @@ describe('the decision numbers', () => {
 
   it('a none top has no view 2 and no trust; a trust label says so; without view 1 only the sender is known', () => {
     const none = view({ none: 0.5, bank: 0.3, receipt: 0.2 });
-    const unsure = decideViews(none, null, labels, { authenticated: false, trusted: () => false });
-    expect(numbersOf(unsure, none, null, false, isTrust)).toEqual({
-      topOption: NONE, topP: 0.5, runnerUpP: 0.3, view2P: null, combined: 0.5, suspicious: 0.02, authenticated: false, trust: false,
+    const unsure = decideViews(none, null, labels);
+    expect(numbersOf(unsure, none, null, false)).toEqual({
+      topOption: NONE, topP: 0.5, runnerUpP: 0.3, view2P: null, combined: 0.5, suspicious: null, authenticated: false, trust: false,
     });
     const bank = view({ bank: 0.9, none: 0.1 });
-    const untrusted = decideViews(bank, bank, labels, { authenticated: true, trusted: () => false });
-    expect(untrusted).toMatchObject({ kind: 'unsure', reason: 'untrusted_sender' });
-    expect(numbersOf(untrusted, bank, bank, true, isTrust)).toMatchObject({ topOption: 'bank', view2P: 0.9, trust: true });
+    const untrusted = decideViews(bank, bank, labels);
+    expect(untrusted).toMatchObject({ kind: 'label', label: 'bank' });
+    expect(numbersOf(untrusted, bank, bank, true)).toMatchObject({ topOption: 'bank', view2P: 0.9, trust: false });
     const { decision } = modelUnavailable();
-    expect(numbersOf(decision, null, null, true, isTrust)).toEqual({
+    expect(numbersOf(decision, null, null, true)).toEqual({
       topOption: null, topP: null, runnerUpP: null, view2P: null, combined: null, suspicious: null, authenticated: true, trust: false,
     });
   });

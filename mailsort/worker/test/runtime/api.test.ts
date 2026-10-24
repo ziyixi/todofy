@@ -7,7 +7,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
 import { Label_GmailState, Label_Problem, LabelSchema } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
-import { ReviewItem_State } from '@ziyixi/proto/mailsort/ui/v2/review_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { fromWire } from '@ziyixi/proto/wire-json';
 import { OpsStatusSchema } from '@ziyixi/proto/ops/v1/ops_pb';
@@ -163,30 +162,21 @@ describe('the owner API', () => {
     await h.api.deleteLabel({ name: inbox.name, requestId: op() });
   });
 
-  it('the review queue: uncertain mail only, resolve, skip, already resolved', async () => {
-    // A week of 100 mails a day: the day's quota is 5, so both uncertain mails are shown.
-    for (let day = 1; day <= 7; day++) await h.sql(`INSERT INTO usage (day, decided) VALUES (?, 100)`, new Date(T0 - day * 86_400_000).toISOString().slice(0, 10));
+  it('uncertain new priority decisions go to P1 without mandatory review', async () => {
+    await h.api.initializePriorities({ requestId: op() });
     h.up.ai.confidence = 0.5;
-    h.up.gmail.deliver(message({ ...MAILS.newsletterEn, receivedAt: T0 }));
-    h.up.gmail.deliver(message({ ...MAILS.receiptEn, receivedAt: T0 }));
+    h.up.gmail.deliver(message({ ...MAILS.newsletterEn, receivedAt: T0 + HOUR }));
+    h.up.gmail.deliver(message({ ...MAILS.receiptEn, receivedAt: T0 + HOUR }));
     await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW }), updateMask: { paths: ['mode'] }, requestId: op() });
     const pass = await h.step(T0 + HOUR);
     h.up.ai.confidence = 0.92;
     const { reviewItems } = await h.api.listReviewItems({});
-    expect(reviewItems.length, JSON.stringify({ pass, decisions: await h.sql('SELECT message_id, outcome, unsure_reason FROM decisions') })).toBe(2);
-    expect(reviewItems.map((item) => item.reason)).toEqual(['low_confidence', 'low_confidence']);
-    const newsletter = reviewItems.find((item) => item.subject.includes('digest'));
-    const other = reviewItems.find((item) => item !== newsletter);
-    expect(newsletter?.candidates[0]).toMatchObject({ label: 'labels/newsletter', probability: 0.5 });
-    // Choosing a label that does not exist is refused before anything changes.
-    expect(reasonOf(await rejection(h.api.resolveReviewItem({ name: newsletter?.name ?? '', label: 'labels/nothing', requestId: op() })))).toBe('NOT_FOUND');
-    expect(await h.api.resolveReviewItem({ name: newsletter?.name ?? '', label: 'labels/newsletter', requestId: op() })).toMatchObject({ state: ReviewItem_State.RESOLVED, resolvedLabel: 'labels/newsletter' });
-    expect((await h.api.skipReviewItem({ name: other?.name ?? '', requestId: op() })).state).toBe(ReviewItem_State.SKIPPED);
-    expect(reasonOf(await rejection(h.api.skipReviewItem({ name: other?.name ?? '', requestId: op() })))).toBe('ALREADY_RESOLVED');
-    expect(reasonOf(await rejection(h.api.resolveReviewItem({ name: newsletter?.name ?? '', label: '', requestId: op() })))).toBe('ALREADY_RESOLVED');
-    // Shadow mode wrote nothing; the answer made an example of the label.
+    expect(pass.decided).toBe(2);
+    expect(reviewItems).toEqual([]);
+    expect(await h.sql(`SELECT outcome, label_id FROM decisions WHERE message_id IN (?, ?) ORDER BY message_id`, MAILS.newsletterEn.id, MAILS.receiptEn.id))
+      .toEqual([{ outcome: 'suggested', label_id: 'p1' }, { outcome: 'suggested', label_id: 'p1' }]);
+    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).reviewCount).toBe(0);
     expect(h.up.gmail.calls.filter((call) => call.url.endsWith('/modify'))).toEqual([]);
-    expect((await h.api.listExamples({ label: 'labels/newsletter' })).examples).toHaveLength(1);
   });
 
   it('ops-v1: counts and codes only, and the guard', async () => {

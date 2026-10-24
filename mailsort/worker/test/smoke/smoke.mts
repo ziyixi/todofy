@@ -4,16 +4,9 @@
  * Nothing reaches Google or Cloudflare: DEV_FAKE_UPSTREAM sends every Google request and every model call to the fake,
  * and every request the fake receives is checked against the independent table (../fakes/table.ts).
  *
- * It walks the owner's whole loop through the HTTP API the UI uses (mailsort.ui.v2): a shadow decision from the model's
- * two views, only recorded; live label + archive with UNREAD untouched; a confident none left in the inbox; a mail that
- * asks for action archived like any other, and only a label's 归档 off keeping its mail in the inbox; undo; a trust
- * label waiting for a trusted domain until the owner's review choice teaches it, a forged From never getting it; Gmail
- * corrections becoming examples; an owner's Gmail label of a label's path adopted; a nested label created in Gmail
- * with its parents; the neuron budget's switch to
- * Clef-flash and the quota deferral; the flow API (deferred mail counted once, while it waits); the legacy 分拣/x read
- * as x, a former parent not imported by the sync, a range undo of one label; the replay evaluation (nothing written,
- * the evidence as of the mail's time); the old /api/v1 paths answering 410; and last the auth failure. Run from
- * worker/ after the UI's build (the dev server serves web/dist):
+ * It exercises fixed P1-P4 setup through the generated owner HTTP API, CSRF rejection, shadow/live sorting,
+ * conservative P1 fallback, inherited-priority replacement, undo, Gmail corrections, read-only replay, neuron budget,
+ * quota recovery and authentication stop. Every mail and credential is synthetic. Run after the UI build:
  *
  *   npm run test:smoke
  */
@@ -26,12 +19,12 @@ import { join } from 'node:path';
 import { createHttpClient, type HttpCall } from '@ziyixi/proto/http-client';
 import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
-import { Label_GmailState, LabelSchema } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
 import { ReplayEvaluation_State } from '@ziyixi/proto/mailsort/ui/v2/replay_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
-import { LABELS, MAILS, message, type SyntheticMail } from '../fakes/fixtures.ts';
+import { MAILS, message, type SyntheticMail } from '../fakes/fixtures.ts';
+import type { RecordedLedger } from '../fakes/fake-gmail.ts';
 import { allowedOperation, FORBIDDEN_LABELS } from '../fakes/table.ts';
 import { FakeUpstream } from '../fakes/upstream.ts';
 import { DEV_REFRESH_TOKEN, serveFakeUpstream } from './fake-upstream.mts';
@@ -99,13 +92,12 @@ async function main(): Promise<void> {
     await run(origin, up, (now) => {
       clock = now;
     });
-    // Every request Google got is one of the closed table's shapes, with owned labels only, and a label's name one the
-    // store planned when it was sent (FakeUpstream.plannedPaths, set in run).
-    // Owned: the leaf labels the Worker created and the one this run made for it to adopt; never another of the owner's.
+    // Names come from the store at send time; ledger intents come from the scenarios' explicit expected outcomes.
+    // This fresh mailbox owns only the four priority labels the Worker created.
     const owned = up.gmail.mailsortLabelIds();
     for (const call of up.gmail.calls) {
-      const ledger = () => ({ state: call.body.includes('"addLabelIds":["INBOX"]') || (call.body.includes('removeLabelIds') && !call.body.includes('addLabelIds')) ? 'undo_intended' : 'intended', archived: call.body.includes('INBOX') });
-      if (allowedOperation(call.method, call.url, call.body, { owned, planned: new Set(call.planned ?? []), ledger }) === null) throw new Error(`smoke: a request outside the table: ${call.method} ${call.url}`);
+      const ledger = (_message: string, labelId: string) => call.ledgerRows?.find(row => row.labelId === labelId) ?? null;
+      if (allowedOperation(call.method, call.url, call.body, { owned, planned: new Set(call.planned ?? []), ledger, priorityDeletes: new Set(call.priorityDeletes ?? []) }) === null) throw new Error(`smoke: a request outside the table: ${call.method} ${call.url}`);
       for (const label of FORBIDDEN_LABELS) if (call.body.includes(`"${label}"`)) throw new Error(`smoke: ${label} in a write`);
     }
     check(up.strays.length === 0, `all ${String(up.gmail.calls.length)} Google requests are in the closed table; nothing else left the Worker`);
@@ -152,7 +144,13 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
     return fetch(`${origin}${call.url}`, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) });
   };
   const api = createHttpClient(MailsortUiService, send);
-  up.plannedPaths = async () => (await api.listLabels({})).labels.map((label) => label.displayName);
+  up.plannedPaths = async () => (await api.listLabels({})).labels.map(label => label.displayName);
+  // Expected intents belong to these synthetic scenarios. No request body can grant itself a ledger row.
+  const expected = new Map<string, RecordedLedger>();
+  up.ledgerRows = messageId => {
+    const row = expected.get(messageId);
+    return Promise.resolve(row === undefined ? [] : [{ ...row, replaceLabels: [...row.replaceLabels] }]);
+  };
   const id = () => crypto.randomUUID();
   let now = T0;
   const step = async (advance = 5 * MINUTE) => {
@@ -162,159 +160,133 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
     if (!response.ok) throw new Error(`step: ${String(response.status)}`);
     return response.json<{ decided?: number; code: string }>();
   };
-  const deliver = (mail: SyntheticMail) => { up.gmail.deliver(message({ ...mail, receivedAt: now })); };
+  const gmailId = (priority: string) => {
+    const value = up.gmail.labelIdByName(priority.toUpperCase());
+    if (value === undefined) throw new Error(`smoke: missing synthetic ${priority} label`);
+    return value;
+  };
+  const force = (priority: string) => { up.ai.choiceOverride = () => ({ [priority]: 0.92, ...(priority === 'none' ? { p1: 0.08 } : { none: 0.08 }) }); };
+  const deliver = (mail: SyntheticMail, priority?: string, replaceLabels: readonly string[] = []) => {
+    if (priority !== undefined) expected.set(mail.id, { labelId: gmailId(priority), state: 'intended', archived: priority !== 'p1', replaceLabels });
+    up.gmail.deliver(message({ ...mail, receivedAt: now }));
+  };
   const labelsOf = (messageId: string) => [...(up.gmail.messages.get(messageId)?.labelIds ?? [])];
-  const modifies = () => up.gmail.calls.filter((call) => call.url.endsWith('/modify')).length;
+  const modifies = () => up.gmail.calls.filter(call => call.url.endsWith('/modify')).length;
+  const checkPriority = (messageId: string, priority: string, inbox = priority === 'p1') => {
+    const labels = labelsOf(messageId);
+    const priorities = ['p1', 'p2', 'p3', 'p4'].map(gmailId).filter(label => labels.includes(label));
+    return priorities.length === 1 && priorities[0] === gmailId(priority) && labels.includes('UNREAD') && labels.includes('INBOX') === inbox;
+  };
+  const undo = async (messageId: string) => {
+    const entry = (await api.listLedgerEntries({})).ledgerEntries.find(item => item.messageId === messageId);
+    const row = expected.get(messageId);
+    if (entry === undefined || row === undefined) throw new Error('smoke: expected undoable synthetic write');
+    expected.set(messageId, { ...row, state: 'undo_intended' });
+    await api.undoLedgerEntry({ name: entry.name, requestId: id() });
+  };
 
-  const health = await fetch(`${origin}/health`);
-  check(health.ok, 'the dev Worker answers /health');
-  for (const label of LABELS) {
-    await api.createLabel({ labelId: label.id, label: create(LabelSchema, { displayName: label.displayName, description: label.description, enabled: true, trustImplying: 'trust' in label && label.trust }), requestId: id() });
-  }
-  check((await api.listLabels({})).labels.length === LABELS.length, 'labels created through the owner API');
-  const first = await step(0);
-  check(first.code === 'ok', 'the first pass stores the install-time cursor (no backfill)');
+  check((await fetch(`${origin}/health`)).ok, 'the local Worker answers /health');
+  const page = await fetch(origin);
+  check(page.ok && (await page.text()).includes('/assets/'), 'the local Worker serves the built UI');
+  const csrfRefusal = await fetch(`${origin}/api/v2/labels:initializePriorities`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: '{}' });
+  check(csrfRefusal.status === 403, 'the owner mutation rejects a request without CSRF');
+  check((await step(0)).code === 'priority_setup_required' && up.ai.calls.length === 0 && modifies() === 0, 'sorting waits for explicit priority setup');
+  const setupId = id();
+  const setup = await api.initializePriorities({ requestId: setupId });
+  const setupCalls = up.gmail.calls.length;
+  const repeatedSetup = await api.initializePriorities({ requestId: setupId });
+  check(setup.completed && setup.removedLabelCount === 0 && repeatedSetup.completed && up.gmail.calls.length === setupCalls && setup.labels.map(label => label.displayName).join() === 'P1,P2,P3,P4', 'the real owner API creates P1-P4 once on a fresh store');
+  check(up.gmail.calls.every(call => call.method !== 'DELETE'), 'fresh setup removes no Gmail labels or messages');
+  check((await step(0)).code === 'ok', 'the initialized pipeline starts from its setup cursor');
+  const initialSettings = await api.getSettings({ name: 'settings' });
+  check(initialSettings.mode === Mode.SHADOW && initialSettings.dailyNeuronBudget === 9500, 'setup preserves the shadow default and daily neuron budget');
 
-  // Shadow (the default): the model's two views agree, the decision is only recorded; no write, nothing to review.
+  force('p3');
   const before = up.ai.calls.length;
   deliver(MAILS.newsletterEn);
   await step();
-  const views = up.ai.calls.slice(before).filter((call) => call.model.includes('clef'));
-  check(views.length === 2 && (await api.listReviewItems({})).reviewItems.length === 0 && modifies() === 0, 'shadow: two views of the model agree; the decision is only recorded, nothing waits for review, nothing is written');
+  const views = up.ai.calls.slice(before).filter(call => call.model.includes('clef'));
+  check(views.length === 2 && (await api.listReviewItems({})).reviewItems.length === 0 && modifies() === 0 && labelsOf(MAILS.newsletterEn.id).includes('INBOX'), 'shadow records two model views without writing a label or mandatory review');
 
-  // Live: label + archive, UNREAD untouched; a mail no label fits stays in the inbox; one that asks for action is
-  // filed like any other (no needs_action exception since 2026-10-11).
   await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.LIVE }), updateMask: { paths: ['mode'] }, requestId: id() });
-  deliver(MAILS.newsletterZh);
-  deliver(MAILS.unsure);
-  deliver({ ...MAILS.receiptZh, id: 'a1000000000000b1', subject: '订单已到快递柜', text: '订单包裹已到快递柜，凭取件码 1234 取件。' });
-  await step();
-  const sorted = up.gmail.labelIdByName('Digests') ?? '';
-  const zh = labelsOf(MAILS.newsletterZh.id);
-  check(sorted !== '' && zh.includes(sorted) && !zh.includes('INBOX') && zh.includes('UNREAD'), 'live: the label is added and INBOX removed, UNREAD untouched');
-  const none = labelsOf(MAILS.unsure.id);
-  check(none.includes('INBOX') && none.every((label) => !label.startsWith('Label_')), 'confident none: the mail keeps INBOX and gets no label');
-  const pickup = labelsOf('a1000000000000b1');
-  check(pickup.includes(up.gmail.labelIdByName('Receipts') ?? '-') && !pickup.includes('INBOX') && pickup.includes('UNREAD'), 'a pickup code is labelled and archived like any other, UNREAD untouched');
-  // Only a label's 归档 switch keeps its mail in the inbox: off (keep_in_inbox), the label is only added.
-  const keepInInbox = async (on: boolean) => {
-    const receipt = await api.getLabel({ name: 'labels/receipt' });
-    await api.updateLabel({ label: create(LabelSchema, { name: receipt.name, keepInInbox: on, etag: receipt.etag }), updateMask: { paths: ['keep_in_inbox', 'etag'] }, requestId: id() });
-  };
-  await keepInInbox(true);
-  deliver({ ...MAILS.receiptZh, id: 'a1000000000000b2', subject: '订单 b2 已发货' });
-  await step();
-  const kept = labelsOf('a1000000000000b2');
-  check(kept.includes(up.gmail.labelIdByName('Receipts') ?? '-') && kept.includes('INBOX') && kept.includes('UNREAD'), '归档 off: the label is added and the mail stays in the inbox, UNREAD untouched');
-  await keepInInbox(false);
-
-  // Undo.
-  const entry = (await api.listLedgerEntries({})).ledgerEntries.find((item) => item.messageId === MAILS.newsletterZh.id);
-  await api.undoLedgerEntry({ name: entry?.name ?? '', requestId: id() });
-  const undone = labelsOf(MAILS.newsletterZh.id);
-  check(undone.includes('INBOX') && !undone.includes(sorted) && undone.includes('UNREAD'), 'undo: the label is removed and INBOX restored');
-
-  // A trust label waits for a trusted domain; the owner's review choice teaches it; a forged From never gets it.
-  deliver(MAILS.bankEn);
-  await step();
-  const [bankItem] = (await api.listReviewItems({})).reviewItems;
-  check(bankItem?.reason === 'untrusted_sender' && labelsOf(MAILS.bankEn.id).includes('INBOX'), 'a trust label for a sender not yet trusted: uncertain, shown in the review queue, nothing written');
-  await api.resolveReviewItem({ name: bankItem?.name ?? '', label: 'labels/bank', requestId: id() });
-  const bank = up.gmail.labelIdByName('Banking') ?? '-';
-  check(labelsOf(MAILS.bankEn.id).includes(bank) && (await api.getLabel({ name: 'labels/bank' })).trustedDomains.join() === 'bank.example.com', 'the owner\'s choice writes the label and teaches the sender\'s domain');
-  deliver({ ...MAILS.bankEn, id: 'b100000000000001', subject: 'Your monthly bank statement for October' });
-  deliver(MAILS.forgedBankLogin);
-  await step();
-  check(labelsOf('b100000000000001').includes(bank) && labelsOf(MAILS.forgedBankLogin.id).every((label) => !label.startsWith('Label_')), 'the trusted sender\'s next statement is labelled; a forged From (DMARC failed) gets nothing');
-
-  // Corrections in Gmail (to 收据, which mailsort made) -> examples; Personal is a label of the owner's own.
-  const receipt = up.gmail.labelIdByName('Receipts') ?? '';
-  const personal = up.gmail.createUserLabel('Personal');
-  for (const [i, messageId] of ['c000000000000c01', 'c000000000000c02'].entries()) {
-    deliver({ ...MAILS.newsletterEn, id: messageId, subject: `Weekly digest ${String(i)}` });
+  const priorityMessages = new Map<string, string>();
+  for (const [index, priority] of ['p1', 'p2', 'p3', 'p4'].entries()) {
+    force(priority);
+    const messageId = `a11000000000000${String(index)}`;
+    priorityMessages.set(priority, messageId);
+    deliver({ ...MAILS.bankEn, id: messageId, threadId: 'synthetic-priority-thread', dmarc: 'fail' }, priority);
     await step();
-    up.gmail.ownerModify(messageId, [receipt], [sorted]);
-    await step();
+    check(checkPriority(messageId, priority), `${priority.toUpperCase()} is the only priority; UNREAD stays unchanged and only P1 keeps Inbox`);
   }
+  force('none');
+  const fallback = 'a110000000000010';
+  deliver({ ...MAILS.unsure, id: fallback }, 'p1');
   await step();
-  const examples = (await api.listExamples({ label: 'labels/receipt' })).examples;
-  check(examples.length === 2 && examples.every((example) => example.embedded), 'corrections in Gmail become embedded examples of the new label');
-  // The owner made 出行 in Gmail by hand: the sync adopts the one of a label's path only.
-  const travel = up.gmail.createUserLabel('Trips', true);
-  const adopted = await api.syncLabels({ requestId: id() });
-  const travelLabel = adopted.labels.find((label) => label.name === 'labels/travel');
-  check(adopted.linkedCount === 1 && travelLabel?.gmailLabelId === travel && travelLabel.gmailState === Label_GmailState.ADOPTED && !adopted.labels.some((label) => label.gmailLabelId === personal), 'sync: the owner\'s Gmail label of a label\'s exact path is adopted, no other label imported');
+  check(checkPriority(fallback, 'p1') && (await api.listReviewItems({})).reviewItems.length === 0, 'a valid none answer becomes P1 in Inbox without mandatory review');
 
-  // A flat English label creates one Gmail label and no grouping parents.
-  await api.createLabel({ labelId: 'dev-ci-notices', label: create(LabelSchema, { displayName: 'Build Notices', description: 'CI build passed failed main 构建', enabled: true }), requestId: id() });
-  deliver(MAILS.ciBuild);
+  // A Gmail correction supplies current priority feedback and one replay sample.
+  const corrected = priorityMessages.get('p3') ?? '';
+  up.gmail.ownerModify(corrected, [gmailId('p2')], [gmailId('p3')]);
   await step();
-  const names = [...up.gmail.labels.values()].map((label) => label.name);
-  const ciLeaf = up.gmail.labelIdByName('Build Notices') ?? '';
-  const ci = labelsOf(MAILS.ciBuild.id);
-  check(!names.some((name) => name.includes('/')) && ciLeaf !== '' && ci.includes(ciLeaf) && !ci.includes('INBOX') && ci.filter((label) => label.startsWith('Label_')).length === 1, 'flat English label: one Gmail label, no grouping parents; confident mail archived');
-
-  // The replay evaluation: the owner's one answer (the bank mail) decided again as of its own time, nothing written
-  // (before the quota test below, which stops it for the day). Its domain was taught by that very answer, later: as of
-  // then its sender was not trusted, so it is uncertain, never a match borrowed from the answer.
-  const writes = modifies();
+  const examples = (await api.listExamples({ label: 'labels/p2' })).examples;
+  check(examples.length === 1 && examples[0]?.embedded, 'a Gmail P3-to-P2 correction becomes an embedded priority example');
+  force('p2');
+  const writesBeforeReplay = modifies();
+  const examplesBeforeReplay = examples.map(example => example.name).sort().join();
   const replay = await api.startReplayEvaluation({ name: 'replayEvaluation', requestId: id() });
   await step();
   const summary = await api.getReplayEvaluation({ name: 'replayEvaluation' });
-  check(
-    replay.totalCount === 1 && summary.state === ReplayEvaluation_State.SUCCEEDED && summary.evaluatedCount === 1 && summary.autoCount === 0 && summary.unsureCount === 1 && modifies() === writes,
-    'the replay evaluation decides the answered mail again as of its time (its domain not taught yet: uncertain) and writes nothing',
-  );
+  check(replay.totalCount === 1 && summary.state === ReplayEvaluation_State.SUCCEEDED && summary.evaluatedCount === 1 && summary.autoMatchCount === 1 && modifies() === writesBeforeReplay && (await api.listExamples({ label: 'labels/p2' })).examples.map(example => example.name).sort().join() === examplesBeforeReplay, 'replay checks current priority feedback without Gmail writes or new examples');
 
-  // The neuron budget: Clef-flash past 70 %.
-  // 16,000 input tokens: Clef about 349 neurons a call, Clef-flash 131; two views a mail; the day has used about 900 of
-  // its 3,000 so far, and the switch comes at 2,100.
+  const p2Message = priorityMessages.get('p2') ?? '';
+  await undo(p2Message);
+  check(labelsOf(p2Message).includes('INBOX') && labelsOf(p2Message).includes('UNREAD') && !labelsOf(p2Message).includes(gmailId('p2')), 'ordinary undo removes the assigned priority and restores Inbox');
+  force('p1');
+  const reply = 'a110000000000011';
+  deliver({ ...MAILS.bankEn, id: reply, threadId: 'synthetic-priority-thread', subject: 'Synthetic urgent reply', labels: ['INBOX', 'UNREAD', gmailId('p3')] }, 'p1', [gmailId('p3')]);
+  await step();
+  check(checkPriority(reply, 'p1'), 'a new reply replaces inherited P3 with one P1 label');
+  await undo(reply);
+  check(checkPriority(reply, 'p3', true), 'undo restores the inherited P3 and preserves Inbox and UNREAD');
+
+  const p4Message = priorityMessages.get('p4') ?? '';
+  const p4Expected = expected.get(p4Message);
+  if (p4Expected === undefined) throw new Error('smoke: missing expected P4 write');
+  expected.set(p4Message, { ...p4Expected, state: 'undo_intended' });
+  const range = await api.undoLedgerEntries({ startTime: timestampFromMs(T0), endTime: timestampFromMs(now + MINUTE), label: 'labels/p4', requestId: id() });
+  check(range.undoneCount === 1 && labelsOf(p4Message).includes('INBOX') && !labelsOf(p4Message).includes(gmailId('p4')) && checkPriority(corrected, 'p2'), 'range undo affects only P4 while the corrected P2 mail stays archived');
+
   await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyNeuronBudget: 3000 }), updateMask: { paths: ['daily_neuron_budget'] }, requestId: id() });
   up.ai.tokensPerCall = 16_000;
-  for (let i = 0; i < 5; i++) deliver({ ...MAILS.receiptZh, id: `f00000000000f00${String(i)}`, subject: `订单 ${String(i)} 已发货` });
+  force('p2');
+  for (let i = 0; i < 5; i++) deliver({ ...MAILS.receiptZh, id: `f00000000000f00${String(i)}` }, 'p2');
   await step();
-  const models = up.ai.calls.filter((call) => call.model.includes('clef')).map((call) => call.model);
-  const status = await api.getServiceStatus({ name: 'serviceStatus' });
-  check(models.includes('@cf/cloudflare/clef-flash') && status.decisionModel === 'clef-flash', 'past 70 % of the neuron budget the day continues on Clef-flash');
+  const budget = await api.getServiceStatus({ name: 'serviceStatus' });
+  check(up.ai.calls.some(call => call.model === '@cf/cloudflare/clef-flash') && budget.decisionModel === 'clef-flash', 'the existing 70 percent threshold switches decisions to Clef-flash');
   up.ai.tokensPerCall = 2000;
-  await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyNeuronBudget: 10_000 }), updateMask: { paths: ['daily_neuron_budget'] }, requestId: id() });
+  await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyNeuronBudget: 10000 }), updateMask: { paths: ['daily_neuron_budget'] }, requestId: id() });
 
-  // The quota: deferred, not failed.
   up.ai.quota = true;
-  deliver({ ...MAILS.travelZh, id: 'f10000000000f101' });
+  const deferredMessage = 'f10000000000f101';
+  deliver({ ...MAILS.travelZh, id: deferredMessage }, 'p2');
   const deferred = await step();
   const quota = await api.getServiceStatus({ name: 'serviceStatus' });
-  check(deferred.code === 'deferred' && quota.deferredCount >= 1 && quota.aiQuotaExhausted, 'Workers AI out of quota: the mail waits for the next UTC day (deferred, not failed)');
-  up.ai.quota = false;
+  check(deferred.code === 'deferred' && quota.deferredCount >= 1 && quota.aiQuotaExhausted && labelsOf(deferredMessage).includes('INBOX'), 'exhausted Workers AI quota defers mail without assigning P1');
+  const callsAtQuota = up.ai.calls.length;
+  const writesAtQuota = modifies();
+  await step();
   const flow = await api.getMailFlow({ name: 'mailFlows/today' });
   const waiting = (await api.getServiceStatus({ name: 'serviceStatus' })).deferredCount;
-  const counted = (stage: MailFlow_Stage, outcome: MailFlow_Outcome, label: string) => flow.counts.some((item) => item.stage === stage && item.outcome === outcome && item.label === label && item.mailCount >= 1);
-  check(
-    counted(MailFlow_Stage.CLEF, MailFlow_Outcome.ARCHIVED, 'labels/dev-ci-notices') &&
-      counted(MailFlow_Stage.CLEF, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/receipt') &&
-      counted(MailFlow_Stage.CLEF, MailFlow_Outcome.NO_LABEL, '') &&
-      counted(MailFlow_Stage.CLEF, MailFlow_Outcome.UNSURE_SHOWN, '') &&
-      flow.counts.filter((item) => item.stage === MailFlow_Stage.DEFERRED).reduce((sum, item) => sum + item.mailCount, 0) === waiting &&
-      waiting >= 1,
-    'the flow API counts each stage and outcome per label (archived, kept in inbox, no label, shown; deferred = the mail still waiting)',
-  );
+  const counted = (stage: MailFlow_Stage, outcome: MailFlow_Outcome, label: string) => flow.counts.some(item => item.stage === stage && item.outcome === outcome && item.label === label && item.mailCount >= 1);
+  check(up.ai.calls.length === callsAtQuota, `known quota exhaustion stops repeated model calls (${String(callsAtQuota)} to ${String(up.ai.calls.length)})`);
+  check(modifies() === writesAtQuota && waiting >= 1, 'quota waits without Gmail writes');
+  check(flow.counts.filter(item => item.stage === MailFlow_Stage.DEFERRED).reduce((sum, item) => sum + item.mailCount, 0) === waiting && counted(MailFlow_Stage.CLEF, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/p1') && counted(MailFlow_Stage.CLEF, MailFlow_Outcome.ARCHIVED, 'labels/p2'), 'flow counts deferred mail once alongside P1 and archived priorities');
+  up.ai.quota = false;
+  await step(T0 + 24 * 60 * MINUTE + MINUTE - now);
+  check(checkPriority(deferredMessage, 'p2') && !(await api.getServiceStatus({ name: 'serviceStatus' })).aiQuotaExhausted, 'the next UTC day resumes deferred mail with the existing budget');
 
-  // A flat rename, explicit sync and a range undo of one label.
-  const typed = await api.createLabel({ label: create(LabelSchema, { displayName: 'Weekly News', description: '新闻网站的每周摘要与精选文章推送' }), requestId: id() });
-  check(typed.displayName === 'Weekly News' && up.gmail.labelIdByName('Weekly News') === typed.gmailLabelId, 'flat English name is identical in Gmail and the app');
-  await api.updateLabel({ label: create(LabelSchema, { name: typed.name, displayName: 'Reading', etag: typed.etag }), updateMask: { paths: ['display_name', 'etag'] }, requestId: id() });
-  const synced = await api.syncLabels({ requestId: id() });
-  check(up.gmail.labelIdByName('Reading') === typed.gmailLabelId && synced.labels.some((label) => label.name === typed.name && label.displayName === 'Reading'), 'rename preserves the Gmail ID and sync reports the same name');
-  const rangeUndo = await api.undoLedgerEntries({ startTime: timestampFromMs(T0), endTime: timestampFromMs(now + MINUTE), label: 'labels/dev-ci-notices', requestId: id() });
-  const ciAfter = labelsOf(MAILS.ciBuild.id);
-  const bankAfter = labelsOf('b100000000000001');
-  check(rangeUndo.undoneCount === 1 && ciAfter.includes('INBOX') && !ciAfter.includes(ciLeaf) && !bankAfter.includes('INBOX'), 'range undo filtered to one label: only Build Notices is undone, the bank statement stays filed');
-
-  // A page of the API before v2 is told to reload.
   const old = await fetch(`${origin}/api/v1/labels`);
   check(old.status === 410 && (await old.text()).includes('RELOAD_REQUIRED'), 'the old /api/v1 paths answer 410 RELOAD_REQUIRED');
-
-  // The grant refused three times: Google is no longer called.
   up.gmail.grants.clear();
   await step(2 * 60 * MINUTE);
   await step();
@@ -322,7 +294,7 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   const calls = up.gmail.calls.length;
   const stopped = await step();
   const auth = await api.getServiceStatus({ name: 'serviceStatus' });
-  check(stopped.code === 'stopped' && up.gmail.calls.length === calls && auth.authState === 3, 'after three refusals of the grant the Worker stops calling Google (auth_state failed, the ops signal gmail_auth_failed)');
+  check(stopped.code === 'stopped' && up.gmail.calls.length === calls && auth.authState === 3, 'three grant refusals stop further Google requests');
 }
 
 main().then(

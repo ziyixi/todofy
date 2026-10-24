@@ -13,17 +13,18 @@
  *   labels_create  POST  /gmail/v1/users/me/labels                          an exact planned single English name
  *   labels_patch   PATCH /gmail/v1/users/me/labels/{owned id}               the name only, to the path the store
  *                                                                            plans for that label
+ *   labels_delete  DELETE /gmail/v1/users/me/labels/{frozen retired id}     one-time priority setup; mail is kept
  *   merge_list     GET   /gmail/v1/users/me/messages                       approved source, first 10 IDs, all time
  *   merge_metadata GET   /gmail/v1/users/me/messages/{registered id}       labels and history identity only
  *   labels_hide    PATCH /gmail/v1/users/me/labels/{verified empty id}     hide visibility, never delete
  *   message_modify POST  /gmail/v1/users/me/messages/{id}/modify            ledger shapes or an approved consolidation swap:
- *     classify: addLabelIds = [one owned label], removeLabelIds = [] or [INBOX], for a ledger row in `intended` or
- *               `applied` whose `archived` matches;
- *     undo:     removeLabelIds = [that owned label], addLabelIds = [] or [INBOX] (INBOX exactly when the row
- *               archived), for a ledger row in `undo_intended`;
+ *     classify: addLabelIds = [one owned label], removeLabelIds = the ledger's original fixed priorities, plus INBOX
+ *               exactly when its `intended` or `applied` row archived;
+ *     undo:     removeLabelIds = [that owned label], addLabelIds = those original priorities, plus INBOX exactly when
+ *               its `undo_intended` row archived;
  *     merge:    add one owned target and remove one owned source, for the persisted private migration intent.
  *
- * So there is no path to trash, untrash, delete, batchDelete, batchModify, send, drafts, filters, settings or
+ * So there is no path to trash, untrash, message deletion, batchDelete, batchModify, send, drafts, filters, settings or
  * forwarding, and no way to touch UNREAD, STARRED, IMPORTANT, SPAM, TRASH, CATEGORY_* or a label mailsort does not own.
  * Ownership is by Gmail label ID, never by name: a label is mailsort's once its store links it (one it created, or a
  * Gmail label of exactly the planned name that it adopted), and the owner's other labels never are.
@@ -75,12 +76,14 @@ export function hasControl(text: string): boolean {
   return false;
 }
 
-export type GmailOp = 'token' | 'profile' | 'history' | 'messages_list' | 'message_get' | 'labels_list' | 'labels_create' | 'labels_patch' | 'message_modify' | 'merge_list' | 'merge_metadata' | 'merge_modify' | 'labels_hide';
+export type GmailOp = 'token' | 'profile' | 'history' | 'messages_list' | 'message_get' | 'labels_list' | 'labels_create' | 'labels_patch' | 'labels_delete' | 'message_modify' | 'merge_list' | 'merge_metadata' | 'merge_modify' | 'labels_hide';
 
 /** A ledger row as the guard needs it (store.ts LedgerState). */
 export interface LedgerView {
   readonly state: 'intended' | 'applied' | 'failed' | 'undo_intended' | 'undone';
   readonly archived: boolean;
+  /** Original fixed priority labels this classification replaces, frozen in the ledger's base labels. */
+  readonly replaceLabels?: readonly string[];
 }
 
 /** What the guard knows of the app's own state: the labels it owns, the names it plans for them, and its ledger. */
@@ -100,7 +103,8 @@ export interface Ownership {
   mergeHide?(labelId: string): boolean;
   mergeRename?(labelId: string): string | null;
   mergeCreate?(name: string): boolean;
-
+  /** Frozen owned retirement IDs of the authorized, one-time priority setup. */
+  priorityDelete?(labelId: string): boolean;
 }
 
 /** A request the closed table refuses. Thrown before fetch; the message is a fixed code. */
@@ -174,7 +178,18 @@ function owned(labelId: string, ownership: Ownership): void {
   if (!USER_LABEL_ID.test(labelId) || !ownership.ownedLabelIds().has(labelId)) refuse('label_not_owned');
 }
 
-/** The modify body's two allowed shapes (the table above). */
+/** Both classify and undo must use exactly the original priority labels frozen by the ledger. */
+function checkReplacements(chosen: string, labels: string[], row: LedgerView, ownership: Ownership): void {
+  if (row.archived !== labels.includes('INBOX')) refuse('archive_mismatch');
+  const expected = labelList(row.replaceLabels);
+  for (const id of expected) {
+    owned(id, ownership);
+    if (id === chosen) refuse('replace_labels');
+  }
+  const actual = labels.filter((id) => id !== 'INBOX');
+  if (actual.length !== expected.length || !actual.every((id) => expected.includes(id))) refuse('replace_labels');
+}
+
 function checkModify(messageId: string, body: string | undefined, ownership: Ownership): void {
   const value = jsonBody(body, ['addLabelIds', 'removeLabelIds']);
   const add = labelList(value['addLabelIds']);
@@ -185,27 +200,32 @@ function checkModify(messageId: string, body: string | undefined, ownership: Own
     const source = remove[0] ?? '';
     owned(source, ownership);
     owned(target, ownership);
-    if (source === target || ownership.mergeSwap?.(messageId, source, target) !== true) refuse('no_merge_intent');
-    return;
+    if (source !== target && ownership.mergeSwap?.(messageId, source, target) === true) return;
   }
 
-  if (add.length === 1 && inboxOnly(remove)) {
+  if (remove.length === 1) {
+    const label = remove[0] ?? '';
+    const row = ownership.ledger(messageId, label);
+    if (row?.state === 'undo_intended') {
+      owned(label, ownership);
+      checkReplacements(label, add, row, ownership);
+      return;
+    }
+  }
+  if (add.length === 1 && add[0] !== 'INBOX') {
     // classify
     const label = add[0] ?? '';
     owned(label, ownership);
     const row = ownership.ledger(messageId, label);
-    if (row === null || (row.state !== 'intended' && row.state !== 'applied')) refuse('no_intent');
-    if (row.archived !== (remove.length === 1)) refuse('archive_mismatch');
-    return;
+    if (row !== null && (row.state === 'intended' || row.state === 'applied')) {
+      checkReplacements(label, remove, row, ownership);
+      return;
+    }
+    if (inboxOnly(remove)) refuse('no_intent');
   }
   if (remove.length === 1 && inboxOnly(add)) {
-    // undo
-    const label = remove[0] ?? '';
-    owned(label, ownership);
-    const row = ownership.ledger(messageId, label);
-    if (row === null || row.state !== 'undo_intended') refuse('no_undo_intent');
-    if (row.archived !== (add.length === 1)) refuse('archive_mismatch');
-    return;
+    owned(remove[0] ?? '', ownership);
+    refuse('no_undo_intent');
   }
   refuse('modify_shape');
 }
@@ -309,6 +329,11 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
       if (!flatName(name) || (!ownership.plannedPaths().has(name) && ownership.mergeCreate?.(name) !== true) || value['labelListVisibility'] !== 'labelShow' || value['messageListVisibility'] !== 'show') refuse('labels_create');
       return 'labels_create';
     }
+  }
+  if (method === 'DELETE' && rest.length === 2 && rest[0] === 'labels') {
+    const id = rest[1] ?? '';
+    if (!isUserLabelId(id) || request.url !== `${GMAIL_BASE}/labels/${id}` || request.body !== undefined || ownership.priorityDelete?.(id) !== true) refuse('priority_delete');
+    return 'labels_delete';
   }
   if (method === 'PATCH' && rest.length === 2 && rest[0] === 'labels') {
     if (url.search !== '') refuse('query_param');
@@ -622,6 +647,14 @@ export class GmailClient {
     await this.write('labels_patch', 'PATCH', `${GMAIL_BASE}/labels/${labelId}`, { name });
   }
 
+  /** Removes one frozen retired category label; Gmail keeps every message that carried it. */
+  async deletePriorityLabel(labelId: string): Promise<void> {
+    const { status, json, tooLarge } = await this.send({ method: 'DELETE', url: `${GMAIL_BASE}/labels/${labelId}` }, RESPONSE_MAX_BYTES, true);
+    if (tooLarge) throw new GoogleError('too_large', 'labels_delete_too_large');
+    // An interrupted setup may have removed the label before saving its progress.
+    if (status !== 404 && (status < 200 || status >= 300)) throw this.failure('labels_delete', status, json);
+  }
+
   /** First bounded page only: removing its source label safely makes progress without a mutable offset. */
   async mergeMessages(labelId: string, max = 10): Promise<string[]> {
     const params = new URLSearchParams({ labelIds: labelId, maxResults: String(max), includeSpamTrash: 'true', fields: 'messages/id,nextPageToken,resultSizeEstimate' });
@@ -652,12 +685,14 @@ export class GmailClient {
   }
 
   /** Adds an owned label (and removes INBOX when `archive`): the ledger row must be `intended` or `applied`. */
-  async classify(messageId: string, labelId: string, archive: boolean): Promise<void> {
-    await this.write('message_modify', 'POST', `${GMAIL_BASE}/messages/${messageId}/modify`, archive ? { addLabelIds: [labelId], removeLabelIds: ['INBOX'] } : { addLabelIds: [labelId] });
+  async classify(messageId: string, labelId: string, archive: boolean, replaceLabels: readonly string[] = []): Promise<void> {
+    const remove = [...replaceLabels, ...(archive ? ['INBOX'] : [])];
+    await this.write('message_modify', 'POST', `${GMAIL_BASE}/messages/${messageId}/modify`, { addLabelIds: [labelId], ...(remove.length === 0 ? {} : { removeLabelIds: remove }) });
   }
 
   /** Removes an owned label (and adds INBOX back when the row archived): the ledger row must be `undo_intended`. */
-  async undo(messageId: string, labelId: string, archived: boolean): Promise<void> {
-    await this.write('message_modify', 'POST', `${GMAIL_BASE}/messages/${messageId}/modify`, archived ? { removeLabelIds: [labelId], addLabelIds: ['INBOX'] } : { removeLabelIds: [labelId] });
+  async undo(messageId: string, labelId: string, archived: boolean, replaceLabels: readonly string[] = []): Promise<void> {
+    const add = [...replaceLabels, ...(archived ? ['INBOX'] : [])];
+    await this.write('message_modify', 'POST', `${GMAIL_BASE}/messages/${messageId}/modify`, { removeLabelIds: [labelId], ...(add.length === 0 ? {} : { addLabelIds: add }) });
   }
 }

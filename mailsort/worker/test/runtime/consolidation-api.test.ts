@@ -143,7 +143,7 @@ describe('label consolidation owner API', () => {
     expect(await h.api.startLabelConsolidation({ name: NAME, groups: [group()], requestId: op() })).toMatchObject({ state: LabelConsolidation_State.RUNNING });
   });
 
-  it('waits for an alarm already reading the model before freezing labels', async () => {
+  it('waits for an alarm already reading Gmail before freezing labels', async () => {
     await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW }), updateMask: { paths: ['mode'] }, requestId: op() });
     await h.step(T0);
     h.up.gmail.deliver(message({ id: 'a200000000000001', from: 'sender@example.com', subject: 'Synthetic notices', text: 'An original notice.', receivedAt: T0 + 1000 }));
@@ -151,7 +151,7 @@ describe('label consolidation owner API', () => {
     const release = Promise.withResolvers<undefined>();
     const original = h.up.handle.bind(h.up);
     h.up.handle = async (request) => {
-      if (new URL(request.url).pathname.startsWith('/ai/run/')) {
+      if (new URL(request.url).pathname.endsWith('/history')) {
         entered.resolve(undefined);
         await release.promise;
       }
@@ -159,7 +159,7 @@ describe('label consolidation owner API', () => {
     };
     const pass = h.step(T0 + 1000);
     try {
-      await Promise.race([entered.promise, pass.then(() => { throw new Error('alarm completed without reaching the model'); })]);
+      await Promise.race([entered.promise, pass.then(() => { throw new Error('alarm completed without reaching Gmail history'); })]);
       expect(reasonOf(await rejection(h.api.startLabelConsolidation({ name: NAME, groups: [group()], requestId: op() })))).toBe('CONSOLIDATION_PENDING_WRITES');
       expect(await h.api.getServiceStatus({ name: 'serviceStatus' })).toMatchObject({ name: 'serviceStatus' });
       expect(await h.sql(`SELECT count(*) AS n FROM label_merge_jobs`)).toEqual([{ n: 0 }]);

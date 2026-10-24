@@ -272,7 +272,8 @@ describe('fuzz: random operations never pass the guard unless the independent ta
       // Now and then the same body with one key written twice (a different value first): never accepted.
       const body = plain !== undefined && plain.startsWith('{"') && random() < 0.2 ? `{"${pick(random, ['addLabelIds', 'removeLabelIds', 'name'])}":["UNREAD"],${plain.slice(1)}` : plain;
       const row = random() < 0.7 ? { state: pick(random, states), archived: random() < 0.5 } : null;
-      const own: Ownership = { ...ownership(), ledger: (m, l) => (m === MESSAGE && l === OWNED ? row : null) };
+      const priorityDeletes = random() < 0.5 ? new Set([OWNED]) : new Set<string>();
+      const own: Ownership = { ...ownership(), priorityDelete: id => priorityDeletes.has(id), ledger: (m, l) => (m === MESSAGE && l === OWNED ? row : null) };
       let passed = true;
       try {
         checkRequest({ method, url, ...(body === undefined ? {} : { body }) }, own);
@@ -282,7 +283,7 @@ describe('fuzz: random operations never pass the guard unless the independent ta
       }
       if (!passed) continue;
       accepted++;
-      const op = allowedOperation(method, url, body ?? '', { owned: new Set([OWNED]), planned: PLANNED, ledger: (m, l) => (m === MESSAGE && l === OWNED ? row : null) });
+      const op = allowedOperation(method, url, body ?? '', { owned: new Set([OWNED]), planned: PLANNED, priorityDeletes, ledger: (m, l) => (m === MESSAGE && l === OWNED ? row : null) });
       expect(op, `${method} ${url} ${body ?? ''}`).not.toBeNull();
       for (const label of FORBIDDEN_LABELS) expect(body ?? '').not.toContain(`"${label}"`);
     }

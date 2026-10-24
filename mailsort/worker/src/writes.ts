@@ -30,6 +30,7 @@
  */
 import { effectiveLedgerRow } from './label-identity.ts';
 import { migrationActive } from './label-merge.ts';
+import { priorityGmailIds, PRIORITY_IDS } from './priority.ts';
 import { setCurrentLabels } from './feedback.ts';
 import { countFlow, stageOf } from './flow.ts';
 import { GmailRefused, GoogleError, isUserLabelId, type GmailClient, type GmailLabel } from './gmail.ts';
@@ -84,6 +85,12 @@ export function mailChanged(row: LedgerRow, labelIds: readonly string[]): boolea
   if (!labelIds.includes('INBOX')) return true;
   const base = new Set(JSON.parse(row.base_labels) as string[]);
   return labelIds.some((id) => isUserLabelId(id) && id !== row.gmail_label_id && !base.has(id));
+}
+
+/** Only other priority labels present when this message's write was intended may be replaced. */
+function replacedPriorities(store: Store, row: LedgerRow): string[] {
+  const priorityIds = priorityGmailIds(store);
+  return (JSON.parse(row.base_labels) as string[]).filter(id => id !== row.gmail_label_id && priorityIds.has(id));
 }
 
 /**
@@ -303,12 +310,14 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
           ctx.transact(() => store.run(`UPDATE ledger SET gmail_label_id = ? WHERE id = ?`, gmailId, row.id));
           row = { ...row, gmail_label_id: gmailId };
         }
-        await ctx.gmail.classify(row.message_id, gmailId, row.archived === 1);
+        await ctx.gmail.classify(row.message_id, gmailId, row.archived === 1, replacedPriorities(store, row));
         const now = ctx.now();
         ctx.transact(() => {
           store.run(`UPDATE ledger SET state = 'applied', apply_time = ?, last_code = NULL WHERE id = ?`, now, row.id);
           const decision = store.decision(row.message_id);
-          if (decision !== undefined) setCurrentLabels(store, row.message_id, [...(JSON.parse(decision.current_labels) as string[]), row.label_id]);
+          if (decision !== undefined) setCurrentLabels(store, row.message_id, [
+            ...(JSON.parse(decision.current_labels) as string[]).filter(id => !PRIORITY_IDS.has(id)), row.label_id,
+          ]);
           if (row.origin === 'auto') store.addUsage(utcDay(now), 'applied', 1);
         });
         applied++;
@@ -322,12 +331,16 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
           ctx.transact(() => store.run(`UPDATE ledger SET state = 'undone', undo_time = ? WHERE id = ?`, ctx.now(), row.id));
           continue;
         }
-        await ctx.gmail.undo(row.message_id, row.gmail_label_id, row.archived === 1);
+        const replaced = replacedPriorities(store, row);
+        await ctx.gmail.undo(row.message_id, row.gmail_label_id, row.archived === 1, replaced);
         const now = ctx.now();
         ctx.transact(() => {
           store.run(`UPDATE ledger SET state = 'undone', undo_time = ?, last_code = NULL WHERE id = ?`, now, row.id);
           const decision = store.decision(row.message_id);
-          if (decision !== undefined) setCurrentLabels(store, row.message_id, (JSON.parse(decision.current_labels) as string[]).filter((item) => item !== row.label_id));
+          if (decision !== undefined) setCurrentLabels(store, row.message_id, [
+            ...(JSON.parse(decision.current_labels) as string[]).filter(item => item !== row.label_id),
+            ...replaced.flatMap(id => { const prior = store.labelByGmailId(id); return prior === undefined ? [] : [prior.id]; }),
+          ]);
         });
         undone++;
       }

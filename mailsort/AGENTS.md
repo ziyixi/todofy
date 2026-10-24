@@ -1,21 +1,16 @@
 # mailsort：规则
 
-在 `mailsort/` 内工作时，除根目录 [`AGENTS.md`](../AGENTS.md) 外还适用以下规则。设计见 [`docs/design.md`](docs/design.md)。
+先读根 [AGENTS](../AGENTS.md)、[README](README.md) 和 [design](docs/design.md)。
 
-- **Gmail 安全靠构造，不靠提示词**：只有 `worker/src/gmail.ts` 调用 Google，每个请求先过封闭表 `checkRequest`（`docs/design.md` §2）。不得新增 trash、delete、send、drafts、filters、settings、forwarding、batchModify 等任何路径；`message_modify` 只能增删 mailsort 自己的标签和 INBOX，且必须对应账本中状态相符的行（含是否归档）；标签归属只按 Gmail ID（store 已关联的标签：自己建的，或 Gmail 里已有同名、被沿用的），从不按名字；`labels_create` 只能建 store 计划的单层英文名称，或正在整理的冻结计划在改名阶段指定的未创建目标名（最多 40 字符，不含 `/`），正常创建不生成父标签；`labels_patch` 只能把已拥有的标签改成 store 或已冻结整理计划中的名称；系统标签从不沿用；旧中文或多层记录仍可读取，新建和改名不接受旧格式；从不改 `UNREAD`、`STARRED`、`IMPORTANT`、`SPAM`、`TRASH`、`CATEGORY_*`。改表时同时改独立副本 `worker/test/fakes/table.ts` 并保持 `test/gmail-guard.test.ts` 的拒绝用例与 fuzz 通过；在提交说明中写明理由。授权范围只用 `gmail.readonly`/`gmail.modify`，从不请求 `https://mail.google.com/`。
-- **Owner 已定的行为**：每封新分类至多一个标签；标签使用单层英文名称，Gmail 与界面一致，说明继续使用中文（2026-10-11）；有把握才打标签并归档（移出 INBOX，邮件在标签下找），从不标记已读；只有标签的归档开关关掉（keep_in_inbox）时才只加标签、留在收件箱，没有 needs_action 例外：要你处理的邮件（取件码、验证码、付款、截止、要回复）同样归档，模型也不再被问这个问题（2026-10-11）；2026-10-10 起没有规则，每封都由模型判断：两次判断（view 1、view 2）一致且平均概率 ≥ 0.7 才算有把握（view 2 的概率先换算到 view 1 的尺度），发件人未通过 DMARC 对齐时还要求 p(suspicious) < 0.6，可信标签还要求 DMARC 对齐、发件域在该标签的可信域名中且 p(suspicious) < 0.95（按 2026-10-10 回放 owner 的回答校准：普通邮件的可疑分数分不开好坏，`docs/design.md` §4.4、§8.1）；可信域名只从 owner 在待审中的选择学来（DMARC 通过、模型并非几乎肯定可疑、不是公共邮箱时，只记那个确切域名；回答前界面先写出这个域名并询问，它从不是默认的一键答案），从不在界面输入，公共邮箱域名（gmail.com、qq.com 等）从不可信；没把握不打标签、留在收件箱，每天只有少数（配额 1–5，约 5%）进入待审，影子模式不放建议、不抽查；不回填历史邮件（从安装时的 historyId 开始）；默认 shadow；标签启用且模式为 live 即写入（没有按标签的“正式打”）；上线前用回放评估（`docs/design.md` §5.1）核对，回放只用该邮件当时已有的证据（发件人历史、例子、可信域名），从不用 owner 对它的回答；界面少即是多（2026-10-07 的视觉系统，2026-10-10 按模型优先重做）：只有 待审 · 概览 · 标签 · 设置 四页，待审只放拿不准的邮件、模型的选项一键回答（另有 都不是、其他…、跳过），不加回规则、正式打、抽查或逐封审阅的页面（`docs/design.md` §9）。不要改变这些默认值。
-- **密钥**：Gmail 授权（`GMAIL_CLIENT_ID`、`GMAIL_CLIENT_SECRET`、`GMAIL_REFRESH_TOKEN`）只由 owner 在本机用 `deploy/mint-token.mjs` 写入 Worker；从不进入 GitHub、CI 或聊天。部署既不需要、也不覆盖或删除它们（`--secrets-file` 保留未列出的 secret，由 `deploy/test/secrets-kept.test.mjs` 固定）。测试与本地开发只用合成值和 `DEV_FAKE_UPSTREAM` 回环假服务，从不访问 Google 或 Workers AI。
-- **邮件内容不可信、也是 owner 的个人数据**：只作为数据交给模型（掩码后的文本，模型没有工具）；日志与 ops-v1 只记 ID、状态、计数与错误码，从不记主题、发件人、地址或标签名。决策与待审中的内容（含发件域）14 天后清除，发件人只以带盐哈希保存（不存地址），例子（掩码摘要）与可信域名保留到删除，回放评估 7 天（`docs/design.md` §2，文档须与 `store.ts` 的 `prune` 一致），这项清理在任何模式下（包括 off）每个 UTC 日都运行；`observability` 只保留应用自己的计数与错误码日志行，invocation logs 与 traces 保持关闭；不接 AI Gateway。测试只用 `worker/test/fakes/fixtures.ts` 的合成邮件。
-- **Workers Free，$0**：不加 cron、D1、R2、KV、Queues 或 Workflows；调度只用 `MailsortState`（实例 `mailsort-v1`）的 `setAlarm()`。fetch handler 只做 Access、CSRF 与一次对象调用（10 ms）；每次 alarm 至多 40 个外部请求（Google 与 Workers AI 合计；每封至多 6 个：读取与回退、嵌入、两次判断、写入），回放评估只用每轮剩下的请求，且当天神经元低于现有每日预算时才调用模型，不修改预算。Workers AI 每天 10,000 神经元为整个账户共享：超过 owner 预算的 70% 改用 Clef-flash，超过预算或配额用尽时推迟到下一个 UTC 日（推迟，不失败、不算没把握）。修改流水线、存储或 API 时运行 `test/runtime/cpu.test.ts`；预算（`deploy/bundle-size.mjs`、`web/scripts/js-budget.mjs`）只能有意提高并在提交中写明原因。
-- **写入走账本**：每次 Gmail 写入先在事务中记为 `intended`/`undo_intended`，再调用，再记结果；重试复用同一行。每个 `intended` 行在发出前一刻都要过 `WriteGate`（当时生效的模式、断路器、写入授权、标签的启用、写入上限），不能只在每轮开始时检查一次；撤销行不受限。回放评估从不写 Gmail，也不产生决策、裁定、例子、待审或流程计数。断路器（每轮与每日写入上限、单标签占比突增）与部署上限 `MODE`（GitHub 变量 `MAILSORT_MODE`）只能降低模式，不能放宽。
-- **接口**：owner API 是 `proto/mailsort/ui/v2`（`/api/v2/`，AIP 风格，经共享转码器与客户端；v1 已在 `proto/retired.json` 退役，`/api/v1` 的 410 RELOAD_REQUIRED 保留到 2026-11-10，见根 `docs/history.md`）；改 proto 时运行 `proto/` 的 lint、api-lint 与 breaking。ops-v1 的计数、模式和信号见 `docs/design.md` §10，改动需同步 `test/golden/ops-v1.json` 与 `contracts/ops-v1/fixtures/OpsStatus/mailsort-*.json`。
-- **部署**：只由 CI 的 `Mailsort deploy` 经 `deploy/deploy-vars.mjs` 部署；不要手动 `wrangler deploy`，本地开发只用 `wrangler.test.toml`；分支检查通过后，用同一 SHA 经 main 的 Actions 发布。
-
-## 标签整理与效果检查
-
-- 整理使用现有对象、Alarm 与根 proto 的 `StartLabelConsolidation`、`GetLabelConsolidation`、`ResumeLabelConsolidation`。实际映射由 owner 私下提交，不能硬编码进仓库、测试或日志。操作步骤见 [`docs/label-consolidation.md`](docs/label-consolidation.md)。
-- 开始前检查当前 ID、名称、etag、设置一致性、Gmail 冲突和未完成写入。已有写入未排空时拒绝开始并提示等待；任务开始后暂停新分类、标签编辑、学习与撤销，新邮件继续登记。关闭模式和运维限制继续生效。
-- 尚未创建的标签仅在 `gmail_state=pending`、`gmail_id=null` 且没有同名冲突时参与整理；它没有 Gmail 成员要搬，仍合并原例子和可信域。未创建的目标只创建最终英文名，保存返回的 Gmail ID 后读回核验。已丢失、同名被占用或状态与 ID 不一致的标签仍拒绝；创建响应丢失时不按名称猜测归属。
-- Gmail 封闭表只增加冻结计划内的标签成员枚举、仅含 ID/标签/historyId 的读取、来源到目标的标签交换和已核验空标签的隐藏。历史邮件不重新分类、不读取正文、不改 INBOX、已读或其他标签；不新增 Gmail 删除操作。每批保留处理进度，标签修改只包含已确认的来源与目标。
-- 保留内部 ID、已有 Gmail ID、原始预测、概率及写入账本。合并映射只影响读取、统计及学习引用；例子和可信域保留原时间，敏感标签仍不留例子。迁移历史不能产生人工纠错。合并来源的旧操作保留为只读历史，不实现反向迁移或特殊撤销；合并后的新分类沿用普通撤销。
-- 设置页“检查分类效果”复用现有回放，读取最近 14 天已回答样本，消耗现有额度、不写 Gmail。相同请求重放幂等；正在运行时拒绝新任务覆盖，整理期间暂停。零样本、等待预算、关闭模式和失败分别显示，结果不能称为整个邮箱的准确率。
+- **当前行为（2026-10-23 owner 决定）**：四个真实 Gmail 标签 P1–P4。P1 需要及时看或拿不准，打标签并留 Inbox；P2 可等两三天、P3 可等周末、P4 低价值或 FYI，打标签并归档。始终保留原有已读状态。不增加定时搬回 Inbox、提醒或任务创建。
+- **模型只判阅读时效**：沿用 Clef/Clef-flash、两次判断、既有置信度和额度；valid none/分歧/低置信度落 P1，不进强制待审。模型错误、超时、预算不足按现有 pending 处理，不能伪装成判断结果。移除模型诈骗/钓鱼问题、可疑分数与可信域门槛，不为金融品牌加例外。Gmail 自己的 Spam 处理不改。
+- **每封新回复独立判断**：按 message ID 去重，不因会话以前有标签就跳过新消息。只替换该条新消息已有的本应用优先级，其他标签、星标、已读状态不改。
+- **Gmail 封闭表**：只有 `worker/src/gmail.ts` 访问 Google，每个请求先过 `checkRequest`。日常消息写入只增删本应用标签和 INBOX，并对应持久账本。一次性 InitializePriorities 允许 `DELETE /labels/Label_<digits>`，ID 必须属于持久冻结的旧自有标签集合；绝不开放邮件删除、trash、send、filters、settings、forwarding、batchModify 或系统标签删除。修改表同时改独立 fake/table 与拒绝/fuzz 测试。授权仅 gmail.readonly/gmail.modify。
+- **一次性替换**：使用现有 owner API、DO 和请求去重，不新建迁移平台。核对旧 ID 与 P1–P4 同名冲突，停新分类，完成已有撤销、取消旧自动写入意图，再移除旧标签。包括隐藏合并身份；未知标签不认领。保留所有邮件、Inbox/已读位置、原始决策和账本。四个新 Gmail ID 读回核对后才开始新分级。中断保留同一进度，404 删除视为已移除。预算内分步，关闭模式与授权继续生效。
+- **学习**：替换时清除旧例子、可信域、待审、反馈和回放，刷新例子缓存；旧决策与合并映射不能重新产生例子或进入发件人历史。`priority_started_at` 是新学习和无历史回填的边界，原始旧预测不改写。新 Gmail 纠正继续学习；回放只用新体系已回答样本，遵守当时证据边界，预算不变、不写 Gmail。
+- **旧接口**：v2 合同保留旧记录可读；初始化后拒绝旧的创建、改名、归档开关、可信域和标签整理操作。`/api/v1` 的 410 RELOAD_REQUIRED 保留到 2026-11-10，见根历史表。旧整理手册只用于历史记录，不是当前操作路径。
+- **密钥与隐私**：Gmail 授权只由 owner 本机 `deploy/mint-token.mjs` 写 Worker，不进入 GitHub、CI、聊天或日志。测试只用合成数据、本地绑定与假服务。生产内容不作 fixture；日志及 Ops 只记 ID、计数和安全错误码，不记主题、发件人、正文或标签名。模型只读掩码文本，没有工具。
+- **保留期**：决策内容14天、旧待审14天、非内容决策/账本180天、回放7天、计数400天；例子最多2000条，可由 owner 删除。每天清理，包括 off 模式。改操作或保留期，同提交更新网站 `/privacy/mailsort`。
+- **免费与性能**：一个 Worker、现有 SQLite DO/Alarm、Workers AI；不加 cron、D1、R2、KV、Queue 或 Workflow。fetch 只做 Access/CSRF 与一次对象调用；每轮最多40外部请求，模型/每日预算/写入上限继续生效。改流水线运行 runtime CPU 测试；不能靠未进入模型路径的绿色测试代替验收，不能暗改预算。
+- **接口与 UI**：owner API 用根 `proto/mailsort/ui/v2` 和共享转码器/客户端；新 IDL 做 lint、API lint、breaking/schema 检查。三页：概览、分级、设置；固定四行说明，不加回通用标签配置或安全审阅流程。例子按需加载，不做高频轮询。
+- **发布**：分支完整 CI gate 通过后，同一 SHA 经 main Actions 的 Mailsort deploy。保留既有 Gmail secrets、模式、预算和其他服务。部署与真实标签清理、真实新邮件验收分别记证据，不用假服务宣称生产行为已验证。

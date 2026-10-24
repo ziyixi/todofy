@@ -1,34 +1,17 @@
 /**
- * The replay evaluation (../../docs/design.md §5.1): before Gmail labelling goes live, the mails the owner answered in
- * the review queue are decided again by today's pipeline and compared with the owner's answers.
- *
- * StartReplayEvaluation (startReplay) takes every review item the owner resolved in the last REPLAY_WINDOW_MS with a
- * label or "none of them", at most REPLAY_ITEMS_MAX, newest first, and writes one row per mail with the owner's
- * answer, next to the job's own row (message_id ''), in the one table `replay`. Each alarm pass then decides a few of
- * them (replayStep), after the drain and the embeddings, with the subrequests the pass has left: it re-reads the mail
- * (metadata and body, as the drain does, with the read grant), gathers the same evidence and asks the same two views
- * (judge.ts), as of the mail's original decision (the sender history, the examples and the trusted domains of then:
- * never what the owner's answer to that mail, or a later one, taught), and records what the decision would have been,
- * and whether the review queue's quota of that day would have shown it. A model outage backs the mail off as the drain
- * does (and stops calling the model for the pass); a refused answer gets a few tries; then the mail counts as
- * uncertain (`model_unavailable`). It writes nothing to Gmail, makes
- * no verdict, example, decision, review item or flow count: only its own rows and the day's usage (Gmail calls,
- * neurons), which every model call counts against the owner's budget.
- *
- * It runs last in a pass, after the live pipeline, only while the day's neurons are below the owner's budget and
- * Workers AI's quota lasts (else the next UTC day), never while Home's
- * guard sheds (pipeline.ts), always with the full Clef (what live decisions use). Its rows are pruned REPLAY_KEPT_MS
- * after the start (store.ts prune). GetReplayEvaluation answers counts, label pairs and each evaluated mail's decision
- * numbers (replaySummary, numbersOf), never the mail's content: what the thresholds of decide.ts are calibrated with.
+ * Read-only replay of current priority decisions the owner confirmed or corrected in Gmail or the optional review.
+ * Each case uses its original decision clock and only earlier evidence, preserving the shared AI/request budgets.
+ * Historical topic decisions and examples never enter the priority replay.
  */
 import { AiError, AiQuotaError } from './ai.ts';
-import { higher, joinsReview, type Decision, type View } from './decide.ts';
+import type { Decision, View } from './decide.ts';
 import type { AiRunner } from './env.ts';
 import { GoogleError, type GmailClient } from './gmail.ts';
 import { timeId } from './ids.ts';
-import { gather, judge, modelUnavailable, retryDelay, reviewQuotaOn, type Judgement } from './judge.ts';
-import { BAD_ANSWER_ATTEMPTS_MAX, CLEF, DAY, MAIL_ATTEMPTS_MAX, NONE, REPLAY_BATCH, REPLAY_CASES_MAX, REPLAY_ITEMS_MAX, REPLAY_SUBREQUESTS, REPLAY_WINDOW_MS } from './limits.ts';
+import { gather, judge, modelUnavailable, retryDelay, type Judgement } from './judge.ts';
+import { BAD_ANSWER_ATTEMPTS_MAX, CLEF, MAIL_ATTEMPTS_MAX, NONE, REPLAY_BATCH, REPLAY_CASES_MAX, REPLAY_ITEMS_MAX, REPLAY_SUBREQUESTS, REPLAY_WINDOW_MS } from './limits.ts';
 import { readMessage } from './mime.ts';
+import { PRIORITY_IDS, priorityStartedAt } from './priority.ts';
 import type { Budget } from './session.ts';
 import type { SettingsValue } from './settings.ts';
 import { utcDay, type Store } from './store.ts';
@@ -84,10 +67,9 @@ export interface ReplayNumbers {
 /**
  * The numbers of a judgement: view 1's top option (a label ID or `none`), its probability and the next most likely
  * option's, view 2's probability of that label as it answered, the combined probability the threshold reads (view 1's
- * p(none) for a none top), the higher p(suspicious) of the two views, and whether the sender is authenticated and the
- * top label a trust label (`isTrust`). Without view 1 (the model unavailable, no label to offer) only the last two.
+ * p(none) for a none top). Legacy suspicious/trust fields stay unset or false; authentication is read-only metadata.
  */
-export function numbersOf(decision: Decision, view1: View | null, view2: View | null, authenticated: boolean, isTrust: (labelId: string) => boolean): ReplayNumbers {
+export function numbersOf(decision: Decision, view1: View | null, view2: View | null, authenticated: boolean): ReplayNumbers {
   if (view1 === null) return { topOption: null, topP: null, runnerUpP: null, view2P: null, combined: null, suspicious: null, authenticated, trust: false };
   const top = view1.top;
   const runnerUp = Object.entries(view1.probabilities).reduce((best, [option, p]) => (option === top ? best : Math.max(best, p)), 0);
@@ -97,9 +79,9 @@ export function numbersOf(decision: Decision, view1: View | null, view2: View | 
     runnerUpP: runnerUp,
     view2P: view2 === null || top === NONE ? null : (view2.probabilities[top] ?? 0),
     combined: decision.confidence,
-    suspicious: higher(view1, view2, 'suspicious'),
+    suspicious: null,
     authenticated,
-    trust: top !== NONE && isTrust(top),
+    trust: false,
   };
 }
 
@@ -111,11 +93,12 @@ export function startReplay(store: Store, now: number): string {
   store.run(`DELETE FROM replay`);
   const jobId = timeId(now);
   const items = store.all<{ message_id: string; resolved_label: string | null; as_of: number }>(
-    `SELECT r.message_id, r.resolved_label, coalesce(d.decided_at, r.receive_time) AS as_of FROM review r LEFT JOIN decisions d ON d.message_id = r.message_id
-     WHERE r.state IN ('confirmed', 'corrected') AND r.resolve_time >= ? ORDER BY r.resolve_time DESC, r.id DESC LIMIT ?`,
-    now - REPLAY_WINDOW_MS,
-    // A mail may have been asked twice (an older suggestion and its audit): its newest answer counts.
-    2 * REPLAY_ITEMS_MAX,
+    `SELECT message_id, verdict_label AS resolved_label, decided_at AS as_of FROM decisions
+     WHERE verdict IN ('confirmed', 'corrected') AND verdict_source IN ('review', 'gmail') AND verdict_at >= ?
+       AND decided_at >= ? AND verdict_label IN ('p1', 'p2', 'p3', 'p4') ORDER BY verdict_at DESC, message_id DESC LIMIT ?`,
+    Math.max(now - REPLAY_WINDOW_MS, priorityStartedAt(store)),
+    priorityStartedAt(store),
+    REPLAY_ITEMS_MAX,
   );
   const seen = new Set<string>();
   for (const item of items) {
@@ -155,16 +138,8 @@ function outcomeOf(decision: Decision): { outcome: string; label: string | null;
 /** Records a mail's replay: evaluated with its judgement (and the sender's authentication), or skipped (null). */
 function finish(store: Store, row: ReplayRow, now: number, evaluated: { readonly judgement: Judgement; readonly authenticated: boolean } | null): void {
   const decision = evaluated?.judgement.decision ?? null;
-  let shown = 0;
-  if (decision?.kind === 'unsure') {
-    // The quota of the mail's own day, against the mails of this replay shown on that day so far (rows are decided in
-    // the order of their days, so each day's mails compete as they arrived; one backed off goes after the rest).
-    const dayStart = Math.floor(row.as_of / DAY) * DAY;
-    const before = store.count(`SELECT count(*) AS n FROM replay WHERE job_id = ? AND shown = 1 AND as_of >= ? AND as_of < ?`, row.job_id, dayStart, dayStart + DAY);
-    shown = joinsReview(decision, before, reviewQuotaOn(store, row.as_of)) ? 1 : 0;
-  }
   const verdict = decision === null ? { outcome: null, label: null, reason: '' } : outcomeOf(decision);
-  const n = evaluated === null ? null : numbersOf(evaluated.judgement.decision, evaluated.judgement.view1, evaluated.judgement.view2, evaluated.authenticated, (id) => store.label(id)?.trust === 1);
+  const n = evaluated === null ? null : numbersOf(evaluated.judgement.decision, evaluated.judgement.view1, evaluated.judgement.view2, evaluated.authenticated);
   store.run(
     `UPDATE replay SET state = ?, outcome = ?, label = ?, reason = ?, shown = ?, done_time = ?, top_option = ?, top_p = ?, runner_up_p = ?, view2_p = ?, combined = ?,
        suspicious = ?, authenticated = ?, trust = ? WHERE job_id = ? AND message_id = ?`,
@@ -172,7 +147,7 @@ function finish(store: Store, row: ReplayRow, now: number, evaluated: { readonly
     verdict.outcome,
     verdict.label,
     verdict.reason,
-    shown,
+    0,
     now,
     n?.topOption ?? null,
     n?.topP ?? null,
@@ -203,6 +178,10 @@ export async function replayStep(deps: ReplayDeps): Promise<boolean> {
       if (store.one(`SELECT 1 AS x FROM replay WHERE job_id = ? AND state = 'pending'`, job.job_id) !== undefined) return false;
       deps.transact(() => store.run(`UPDATE replay SET state = 'succeeded', done_time = ? WHERE job_id = ? AND message_id = ''`, deps.now(), job.job_id));
       return false;
+    }
+    if (row.as_of < priorityStartedAt(store) || row.owner_label === null || !PRIORITY_IDS.has(row.owner_label)) {
+      deps.transact(() => { finish(store, row, deps.now(), null); });
+      continue;
     }
     if (!deps.budget.has(REPLAY_SUBREQUESTS)) return true;
     // Past the day's budget (shared with the live pipeline, which goes first in every pass) it waits for the next UTC day.

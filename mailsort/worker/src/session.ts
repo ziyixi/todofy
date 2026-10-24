@@ -11,6 +11,7 @@ import type { Env } from './env.ts';
 import { GmailClient, GoogleError, type AccessToken, type Ownership } from './gmail.ts';
 import { mergeOwnership } from './label-merge.ts';
 import { AUTH_FAILURES_STOP } from './limits.ts';
+import { priorityDeleteIds, priorityGmailIds } from './priority.ts';
 import { utcDay, type Store } from './store.ts';
 
 /** Subrequests left in this invocation (Google and Workers AI together). */
@@ -81,9 +82,13 @@ export async function openSession(options: SessionOptions): Promise<{ client: Gm
     ownedLabelIds: () => store.ownedGmailIds(),
     plannedPaths: () => new Set(store.labelPaths()),
     plannedPath: (labelId) => store.labelByGmailId(labelId)?.display_name ?? null,
+    priorityDelete: (labelId) => priorityDeleteIds(store).has(labelId),
     ledger: (messageId, labelId) => {
       const row = store.ledgerFor(messageId, labelId);
-      return row === undefined ? null : { state: row.state, archived: row.archived === 1 };
+      if (row === undefined) return null;
+      const priorities = priorityGmailIds(store);
+      const base = JSON.parse(row.base_labels) as string[];
+      return { state: row.state, archived: row.archived === 1, replaceLabels: base.filter(id => id !== labelId && priorities.has(id)) };
     },
   };
   const client = new GmailClient({

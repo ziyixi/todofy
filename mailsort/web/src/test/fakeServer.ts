@@ -2,8 +2,7 @@
  * An in-memory stand-in for the Worker's owner API (proto/mailsort/ui/v2), served by the same shared transcoder the
  * Worker uses, so every request is routed, decoded strictly and answered in the wire JSON profile as in production. It
  * keeps a few labels, examples, review items, ledger entries, the flow, the label report, the status and the settings;
- * a method it does not model answers UNIMPLEMENTED. UpdateLabel
- * changes only the masked fields and refuses a stale etag, as the Worker does. Every request must be a same-origin /api
+ * a method it does not model answers UNIMPLEMENTED. Every request must be a same-origin /api
  * path, and a mutation must carry the CSRF header.
  */
 import { vi } from 'vitest'
@@ -20,10 +19,10 @@ import {
   ListLedgerEntriesResponseSchema,
   ListReviewItemsResponseSchema,
   MailsortUiService,
-  SyncLabelsResponseSchema,
+  InitializePrioritiesResponseSchema,
+  type InitializePrioritiesResponse,
   UndoLedgerEntriesResponseSchema,
 } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb'
-import { LabelConsolidation_Phase, LabelConsolidation_State, LabelConsolidationSchema, type LabelConsolidation } from '@ziyixi/proto/mailsort/ui/v2/consolidation_pb'
 import { ReplayEvaluation_State, ReplayEvaluationSchema, type ReplayEvaluation } from '@ziyixi/proto/mailsort/ui/v2/replay_pb'
 import { ExampleSchema, LedgerEntry_State, LedgerEntrySchema, ReviewItem_State, ReviewItemSchema, type Example, type LedgerEntry, type ReviewItem } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
 import {
@@ -49,7 +48,7 @@ export interface Call {
 }
 
 export function label(id: string, displayName: string): Label {
-  return create(LabelSchema, { name: `labels/${id}`, displayName, description: `${displayName} 的说明`, enabled: true, gmailState: Label_GmailState.LINKED, descriptionVersion: 1, etag: `etag-${id}` })
+  return create(LabelSchema, { name: `labels/${id}`, displayName, description: `${displayName} 的说明`, enabled: true, gmailState: Label_GmailState.LINKED, descriptionVersion: 1, keepInInbox: id === 'p1', etag: `etag-${id}` })
 }
 
 export function reviewItem(id: string, init: Partial<ReviewItem> = {}): ReviewItem {
@@ -58,7 +57,7 @@ export function reviewItem(id: string, init: Partial<ReviewItem> = {}): ReviewIt
     state: ReviewItem_State.PENDING,
     subject: `主题 ${id}`,
     sender: 'Sender <example.com>',
-    candidates: [{ label: 'labels/newsletter', probability: 0.6 }, { label: '', probability: 0.3 }, { label: 'labels/receipt', probability: 0.1 }],
+    candidates: [{ label: 'labels/p2', probability: 0.6 }, { label: '', probability: 0.3 }, { label: 'labels/p3', probability: 0.1 }],
     reason: 'low_confidence',
     receiveTime: timestampFromMs(NOW - 3_600_000),
   }), init)
@@ -68,7 +67,7 @@ export function ledgerEntry(id: string, init: Partial<LedgerEntry> = {}): Ledger
   return Object.assign(create(LedgerEntrySchema, {
     name: `ledgerEntries/${id}`,
     messageId: `m${id}`,
-    label: 'labels/newsletter',
+    label: 'labels/p2',
     archived: true,
     origin: 'auto',
     state: LedgerEntry_State.APPLIED,
@@ -81,16 +80,6 @@ export function ledgerEntry(id: string, init: Partial<LedgerEntry> = {}): Ledger
 
 export function example(id: string, labelId: string, summary = `例子 ${id} 的摘要`): Example {
   return create(ExampleSchema, { name: `examples/${id}`, label: `labels/${labelId}`, summary, embedded: true, createTime: timestampFromMs(NOW - 86_400_000) })
-}
-
-/** UpdateLabel's mask paths and the Label fields they name. */
-const LABEL_FIELDS: Readonly<Record<string, keyof Label>> = {
-  display_name: 'displayName',
-  description: 'description',
-  enabled: 'enabled',
-  trust_implying: 'trustImplying',
-  keep_in_inbox: 'keepInInbox',
-  sensitive: 'sensitive',
 }
 
 /** One flow counter. */
@@ -111,7 +100,7 @@ function unimplemented(): never {
 
 export class FakeServer {
   readonly calls: Call[] = []
-  labels: Label[] = [label('newsletter', '订阅'), label('receipt', '收据')]
+  labels: Label[] = [label('p1', 'P1'), label('p2', 'P2'), label('p3', 'P3'), label('p4', 'P4')]
   reviewItems: ReviewItem[] = []
   examples: Example[] = []
   ledgerEntries: LedgerEntry[] = []
@@ -126,9 +115,10 @@ export class FakeServer {
   /** Fields of GetServiceStatus that a test sets (the rest as below; review_count counts the pending items). */
   status: Partial<ServiceStatus> = {}
   settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, etag: 's1' })
-  consolidation: LabelConsolidation | null = null
-  consolidationFails = false
-  private readonly consolidationRequests = new Map<string, LabelConsolidation>()
+  initializationCompleted = true
+  initializeIncompleteRounds = 0
+  initializeFails = false
+  private readonly initializationRequests = new Map<string, InitializePrioritiesResponse>()
   replay: ReplayEvaluation | null = null
   replayFails = false
   replayStartFails = false
@@ -139,42 +129,19 @@ export class FakeServer {
   constructor() {
     const handlers: Partial<ServiceHandlers<ShapeOf<typeof MailsortUiService>, null>> = {
       listLabels: () => Promise.resolve(create(ListLabelsResponseSchema, { labels: this.labels })),
-      createLabel: (request) => {
-        const created = Object.assign(create(LabelSchema), request.label, { name: `labels/${request.labelId === '' ? `l${String(this.labels.length)}` : request.labelId}`, gmailState: Label_GmailState.PENDING, etag: 'new' })
-        this.labels.push(created)
-        return Promise.resolve(created)
-      },
-      // As the Worker: a stale etag is refused, only the masked fields change, a new etag every time, and a label
-      // turned sensitive loses its examples.
-      updateLabel: (request) => {
-        const index = this.labels.findIndex((item) => item.name === request.label?.name)
-        const before = this.labels[index]
-        if (before === undefined || request.label === undefined) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no such label')
-        if (request.label.etag !== '' && request.label.etag !== before.etag) throw new RpcError(Code.ABORTED, 'ETAG_MISMATCH', 'stale etag')
-        const mask = updatePaths(request.updateMask)
-        const updated = Object.assign(create(LabelSchema), before, { etag: `${before.etag}+` })
-        for (const [path, field] of Object.entries(LABEL_FIELDS)) {
-          if (mask === '*' || mask.includes(path)) Object.assign(updated, { [field]: request.label[field] })
-        }
-        if (updated.sensitive && !before.sensitive) {
-          this.examples = this.examples.filter((item) => item.label !== before.name)
-          updated.exampleCount = 0
-        }
-        this.labels[index] = updated
-        return Promise.resolve(updated)
-      },
-      deleteLabel: (request) => {
-        this.labels = this.labels.filter((item) => item.name !== request.name)
-        return Promise.resolve(create(EmptySchema, {}))
-      },
-      removeTrustedDomain: (request) => {
-        const index = this.labels.findIndex((item) => item.name === request.name)
-        const before = this.labels[index]
-        if (before === undefined || !before.trustedDomains.includes(request.domain)) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no such domain')
-        if (request.etag !== '' && request.etag !== before.etag) throw new RpcError(Code.ABORTED, 'ETAG_MISMATCH', 'stale etag')
-        const updated = Object.assign(create(LabelSchema), before, { etag: `${before.etag}+`, trustedDomains: before.trustedDomains.filter((domain) => domain !== request.domain) })
-        this.labels[index] = updated
-        return Promise.resolve(updated)
+      initializePriorities: (request) => {
+        if (this.initializeFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', '分级设置暂不可用')
+        const previous = this.initializationRequests.get(request.requestId)
+        if (previous !== undefined) return Promise.resolve(previous)
+        const completed = this.initializeIncompleteRounds === 0
+        if (!completed) this.initializeIncompleteRounds -= 1
+        const removedLabelCount = this.labels.filter((item) => !/^labels\/p[1-4]$/.test(item.name)).length
+        this.labels = [label('p1', 'P1'), label('p2', 'P2'), label('p3', 'P3'), label('p4', 'P4')]
+        if (!completed) this.labels[3]!.gmailState = Label_GmailState.PENDING
+        this.initializationCompleted = completed
+        const answer = create(InitializePrioritiesResponseSchema, { labels: completed ? this.labels : [], completed, removedLabelCount })
+        this.initializationRequests.set(request.requestId, answer)
+        return Promise.resolve(answer)
       },
       listExamples: (request) => {
         const examples = request.label === '' ? this.examples : this.examples.filter((item) => item.label === request.label)
@@ -214,12 +181,6 @@ export class FakeServer {
         for (const item of batch) Object.assign(item, { state: LedgerEntry_State.UNDONE, undoable: false })
         return Promise.resolve(create(UndoLedgerEntriesResponseSchema, { undoneCount: batch.length, failedCount: 0, remainingCount: open.length - batch.length }))
       },
-      // As the Worker: the first label adopts the owner's Gmail label of its path; nothing is imported.
-      syncLabels: () => {
-        const first = this.labels[0]
-        if (first !== undefined) first.gmailState = Label_GmailState.ADOPTED
-        return Promise.resolve(create(SyncLabelsResponseSchema, { labels: this.labels, linkedCount: 1, renamedCount: 0, missingCount: 0 }))
-      },
       getMailFlow: (request) => Promise.resolve(create(MailFlowSchema, { name: request.name, startTime: timestampFromMs(NOW - 3_600_000), endTime: timestampFromMs(NOW), counts: this.flow })),
       getLabelReport: () => {
         if (this.reportFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', 'the store is busy')
@@ -234,26 +195,6 @@ export class FakeServer {
             shownCount: 2,
           }),
         )
-      },
-      getLabelConsolidation: () => {
-        if (this.consolidationFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', '整理状态暂不可用')
-        if (this.consolidation === null) throw new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'no consolidation')
-        return Promise.resolve(this.consolidation)
-      },
-      startLabelConsolidation: (request) => {
-        const previous = this.consolidationRequests.get(request.requestId)
-        if (previous !== undefined) return Promise.resolve(previous)
-        this.consolidation = create(LabelConsolidationSchema, { name: 'labelConsolidation', jobId: 'job-1', state: LabelConsolidation_State.RUNNING, phase: LabelConsolidation_Phase.PREFLIGHT, etag: 'c1', nextAction: 'wait', updateTime: timestampFromMs(NOW) })
-        this.consolidationRequests.set(request.requestId, this.consolidation)
-        return Promise.resolve(this.consolidation)
-      },
-      resumeLabelConsolidation: (request) => {
-        const previous = this.consolidationRequests.get(request.requestId)
-        if (previous !== undefined) return Promise.resolve(previous)
-        if (this.consolidation === null || request.etag !== this.consolidation.etag) throw new RpcError(Code.ABORTED, 'ETAG_MISMATCH', 'stale')
-        this.consolidation = Object.assign(create(LabelConsolidationSchema), this.consolidation, { state: LabelConsolidation_State.RUNNING, etag: 'c2', nextAction: 'wait', errorCode: '' })
-        this.consolidationRequests.set(request.requestId, this.consolidation)
-        return Promise.resolve(this.consolidation)
       },
       getReplayEvaluation: () => {
         if (this.replayFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', '回放状态暂不可用')
@@ -279,6 +220,7 @@ export class FakeServer {
             nextAlarmTime: timestampFromMs(NOW + 300_000),
             pendingCount: 2,
             reviewCount: this.reviewItems.filter((item) => item.state === ReviewItem_State.PENDING).length,
+            prioritiesInitialized: this.initializationCompleted,
             decidedTodayCount: 12,
             neuronsToday: 523.4,
             dailyNeuronBudget: 7000,

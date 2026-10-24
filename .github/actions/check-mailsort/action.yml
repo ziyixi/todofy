@@ -23,9 +23,8 @@ runs:
       working-directory: mailsort
       shell: bash -e {0}
       run: node --test deploy/test/*.test.mjs
-    # The closed table of Gmail operations (every recorded call against an independent copy, and a fuzz), masking,
-    # DMARC, the decision table of the two views, the review quota, the schema migrations, Clef's strict answer and
-    # ops-v1's golden bytes.
+    # The closed Gmail operation table and fuzz, masking, priority decisions, legacy schema reads, Clef's strict
+    # answer and ops-v1's golden bytes. Phishing/trust-domain scoring is no longer part of classification.
     - name: Lint, typecheck and test the Worker
       working-directory: mailsort/worker
       shell: bash -e {0}
@@ -34,8 +33,8 @@ runs:
         npm run typecheck
         npm test
     # A real SQLite MailsortState with the fake Gmail and fake Workers AI behind Miniflare's outbound service (no
-    # network): the pipeline in shadow and live, unsure, undo, feedback into examples, trust labels and their domains,
-    # the replay evaluation, the resync, the auth stop, the Clef-flash switch, the quota deferral, the breaker, the
+    # network): fixed P1-P4 in shadow/live, P1 fallback, label-only setup, ordinary undo, priority feedback,
+    # replay, resync, auth stop, Clef-flash, quota deferral, the breaker, the
     # owner API, ops-v1 over a service binding, and the CPU of the fetch handler and of MailsortState (its alarm path
     # at its bounds) against bounds scaled by the machine's measured speed (tools/workerd-cpu).
     - name: Runtime tests (workerd with a real Durable Object)

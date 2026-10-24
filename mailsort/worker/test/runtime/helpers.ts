@@ -15,11 +15,10 @@ export function checkGoogleCalls(h: Harness): void {
   // Owned: the leaf labels mailsort created and the ones a test made for it to adopt; never another of the owner's.
   const owned = h.up.gmail.mailsortLabelIds();
   for (const call of h.up.gmail.calls) {
-    // A label's name against the store's paths when it was sent (FakeUpstream.plannedPaths). The modify's ledger state
-    // at send time is the guard's own check; here: the table's shapes and owned labels.
+    // Names, retirement IDs and ledger rows are captured from the store when each request leaves.
     const planned = new Set(call.planned ?? []);
-    const ledger = () => ({ state: call.body.includes('"addLabelIds":["INBOX"]') || (call.body.includes('removeLabelIds') && !call.body.includes('addLabelIds')) ? 'undo_intended' : 'intended', archived: call.body.includes('INBOX') });
-    expect(allowedOperation(call.method, call.url, call.body, { owned, planned, ledger }), `${call.method} ${call.url} ${call.body}`).not.toBeNull();
+    const ledger = (_message: string, labelId: string) => call.ledgerRows?.find(row => row.labelId === labelId) ?? null;
+    expect(allowedOperation(call.method, call.url, call.body, { owned, planned, ledger, priorityDeletes: new Set(call.priorityDeletes ?? []) }), `${call.method} ${call.url} ${call.body}`).not.toBeNull();
     for (const label of FORBIDDEN_LABELS) expect(call.body).not.toContain(`"${label}"`);
   }
   expect(h.up.strays).toEqual([]);

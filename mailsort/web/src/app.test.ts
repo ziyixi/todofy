@@ -1,15 +1,8 @@
-/**
- * The owner's flows in the UI against the fake API (test/fakeServer.ts, the shared transcoder): the shell's four tabs
- * (the focus kept on a tab chosen by keyboard) and status line; 待审's one-tap answers, 都不是, 其他… and 跳过
- * (ResolveReviewItem or SkipReviewItem with the CSRF header and a request ID each), its keyboard, its picker, its
- * caution and its quiet state; 设置's mode, ceiling, breaker and read-only grant, the range undo's preview and
- * confirmation and the sync. 标签 has its own file, labels.test.ts; 概览 overview.test.ts.
- */
+/** The shell, optional legacy corrections, mode settings and range undo, through the shared API. */
 import { mountApp, type Host } from './app.ts'
 import { relative } from './format.ts'
 import { FakeServer, flowCount, label, ledgerEntry, NOW, reviewItem, settle } from './test/fakeServer.ts'
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
-import { Label_GmailState } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { CandidateSchema } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
 import { ReplayEvaluation_State, ReplayEvaluationSchema } from '@ziyixi/proto/mailsort/ui/v2/replay_pb'
 import { Mode, ServiceStatus_AuthState } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
@@ -46,40 +39,45 @@ function press(key: string): void {
 const rows = (root: HTMLElement) => [...root.querySelectorAll<HTMLLIElement>('ul.rows > li')]
 
 describe('the shell', () => {
-  it('uses current canonical English names in review, charts, reports, undo options and replay results', async () => {
+  it('uses P1-P4 names in review, charts, reports, undo options and replay results', async () => {
     const server = new FakeServer()
-    server.labels = [label('newsletter', 'Project Updates'), label('receipt', 'Purchase Records')]
+    server.labels = [label('p1', 'P1'), label('p2', 'P2'), label('p3', 'P3'), label('p4', 'P4')]
     server.reviewItems = [reviewItem('a')]
-    server.flow = [flowCount(MailFlow_Stage.CLEF, MailFlow_Outcome.ARCHIVED, 'labels/newsletter', 2)]
-    server.replay = create(ReplayEvaluationSchema, { name: 'replayEvaluation', state: ReplayEvaluation_State.SUCCEEDED, totalCount: 1, evaluatedCount: 1, autoCount: 1, mismatches: [{ decidedLabel: 'labels/newsletter', ownerLabel: 'labels/receipt', mailCount: 1 }] })
-    const root = await open(server, '/')
-    expect(root.querySelector('.answers')?.textContent).toContain('Project Updates')
+    server.flow = [flowCount(MailFlow_Stage.CLEF, MailFlow_Outcome.ARCHIVED, 'labels/p2', 2)]
+    server.replay = create(ReplayEvaluationSchema, { name: 'replayEvaluation', state: ReplayEvaluation_State.SUCCEEDED, totalCount: 1, evaluatedCount: 1, autoCount: 1, mismatches: [{ decidedLabel: 'labels/p2', ownerLabel: 'labels/p3', mailCount: 1 }] })
+    const root = await open(server, '/review')
+    expect(root.querySelector('.answers')?.textContent).toContain('P2')
     const navigate = async (path: string) => {
       root.querySelector<HTMLAnchorElement>(`.tabs a[href="${path}"]`)?.click()
       await settle()
-      expect(root.textContent).not.toContain('订阅')
-      expect(root.textContent).not.toContain('收据')
+      expect(root.textContent).not.toContain('旧主题')
     }
     await navigate('/overview')
-    expect(root.querySelector('.flow-legend')?.textContent).toContain('Project Updates')
-    expect(root.querySelector('.report')?.textContent).toContain('Purchase Records')
+    expect(root.querySelector('.flow-legend')?.textContent).toContain('P2')
+    expect(root.querySelector('.report')?.textContent).toContain('P3')
     await navigate('/settings')
-    expect([...root.querySelectorAll('select[aria-label="标签"] option')].map((node) => node.textContent)).toEqual(['全部标签', 'Project Updates', 'Purchase Records'])
-    expect(root.querySelector('.replay-mismatches')?.textContent).toContain('Project Updates → 你的回答：Purchase Records')
+    expect([...root.querySelectorAll('select[aria-label="分级"] option')].map((node) => node.textContent)).toEqual(['全部分级', 'P1', 'P2', 'P3', 'P4'])
+    expect(root.querySelector('.replay-mismatches')?.textContent).toContain('P2 → 你的回答：P3')
     await navigate('/labels')
-    expect([...root.querySelectorAll('.leaf-name')].map((node) => node.textContent)).toEqual(['Project Updates', 'Purchase Records'])
+    expect([...root.querySelectorAll('.leaf-name')].map((node) => node.textContent)).toEqual(['P1', 'P2', 'P3', 'P4'])
   })
 
-  it('has exactly four tabs, the quiet status line, and answers an unknown path', async () => {
+  it('opens overview by default without reading a review queue', async () => {
+    const server = new FakeServer()
+    const root = await open(server, '/')
+    expect(root.querySelector('h1')?.textContent).toBe('概览')
+    expect(root.querySelector('.tabs a[aria-current="page"]')?.textContent).toBe('概览')
+    expect(server.calls.some((call) => call.path.includes('reviewItems'))).toBe(false)
+  })
+
+  it('has exactly three tabs, the quiet status line, and answers an unknown path', async () => {
     const server = new FakeServer()
     server.reviewItems = [reviewItem('a'), reviewItem('b'), reviewItem('c')]
     const root = await open(server, '/nowhere')
     const tabs = [...root.querySelectorAll<HTMLAnchorElement>('.tabs a')]
-    expect(tabs.map((a) => a.firstChild?.textContent)).toEqual(['待审', '概览', '标签', '设置'])
-    expect(tabs.map((a) => a.getAttribute('href'))).toEqual(['/', '/overview', '/labels', '/settings'])
-    // The queue's size on its tab.
-    expect(tabs[0]?.querySelector('.chip')?.textContent).toBe('3')
-    expect(tabs[0]?.getAttribute('aria-label')).toBe('待审（3 封）')
+    expect(tabs.map((a) => a.firstChild?.textContent)).toEqual(['概览', '分级', '设置'])
+    expect(tabs.map((a) => a.getAttribute('href'))).toEqual(['/overview', '/labels', '/settings'])
+    expect(root.querySelector('.tabs .chip')).toBeNull()
     const line = root.querySelector('.status-line')
     expect([...(line?.children ?? [])].map((part) => part.textContent)).toEqual(['影子', 'Gmail ✓ 只读', '下次运行 5 分钟后'])
     expect(root.textContent).toContain('找不到这个页面')
@@ -97,7 +95,7 @@ describe('the shell', () => {
   it('keeps the focus on a tab chosen by keyboard: the tabs are only marked, never drawn again', async () => {
     const server = new FakeServer()
     server.reviewItems = [reviewItem('a')]
-    const root = await open(server, '/')
+    const root = await open(server, '/review')
     const overview = root.querySelector<HTMLAnchorElement>('.tabs a[href="/overview"]')
     if (overview === null) throw new Error('no tab')
     overview.focus()
@@ -107,7 +105,6 @@ describe('the shell', () => {
     expect(document.activeElement).toBe(overview)
     expect(overview.getAttribute('aria-current')).toBe('page')
     expect(root.querySelectorAll('.tabs a[aria-current]').length).toBe(1)
-    expect(root.querySelector('.tabs a .chip')?.textContent).toBe('1')
   })
 
   it('says 马上 for a time less than a minute ahead, 刚刚 for one just past', () => {
@@ -124,7 +121,7 @@ describe('the shell', () => {
     root.querySelector<HTMLAnchorElement>('.tabs a[href="/labels"]')?.click()
     await settle()
     expect(window.location.pathname).toBe('/labels')
-    expect(root.querySelector('.tabs a[aria-current="page"]')?.textContent).toBe('标签')
+    expect(root.querySelector('.tabs a[aria-current="page"]')?.textContent).toBe('分级')
     root.querySelector<HTMLAnchorElement>('.tabs a[href="/overview"]')?.click()
     await settle()
     expect(window.location.pathname).toBe('/overview')
@@ -133,7 +130,7 @@ describe('the shell', () => {
 })
 
 describe('待审', () => {
-  /** A row's answer buttons, as their accessible names (`订阅，60%`), then 其他… and 跳过. */
+  /** A row's answer buttons, as their accessible names (`P2，60%`), then 其他… and 跳过. */
   const buttons = (row: HTMLElement | undefined) => [...(row?.querySelectorAll('.answers > button') ?? [])].map((node) => node.getAttribute('aria-label') ?? node.textContent)
 
   /** The answer of `row` whose accessible name starts with `name`. */
@@ -146,47 +143,45 @@ describe('待审', () => {
   it('answers with one tap, through 其他… and with 都不是, and skips, with CSRF and a request ID each', async () => {
     const server = new FakeServer()
     server.reviewItems = [reviewItem('a'), reviewItem('b', { reason: 'model_unavailable', candidates: [] }), reviewItem('c'), reviewItem('d')]
-    const root = await open(server, '/')
+    const root = await open(server, '/review')
     expect(rows(root).length).toBe(4)
     const [a, b] = rows(root)
     expect(a?.textContent).toContain('主题 a')
     expect(a?.textContent).toContain('Sender <example.com>')
     expect(a?.querySelector('p.hint')?.textContent).toBe('把握不够')
     // The model's options in its order (都不是 where it ranked it), the first primary, then 其他… and 跳过.
-    expect(buttons(a)).toEqual(['订阅，60%', '都不是，30%', '收据，10%', '其他…', '跳过'])
-    expect(answer(a, '订阅').classList.contains('primary')).toBe(true)
-    expect(answer(a, '订阅').textContent).toBe('订阅60%')
+    expect(buttons(a)).toEqual(['P2，60%', '都不是，30%', 'P3，10%', '其他…', '跳过'])
+    expect(answer(a, 'P2').classList.contains('primary')).toBe(true)
+    expect(answer(a, 'P2').textContent).toBe('P260%')
     expect(answer(a, '都不是').classList.contains('primary')).toBe(false)
     // A mail the model gave no answer for: why, where to answer, and 都不是 without being suggested (not primary).
-    expect(b?.querySelector('p.hint')?.textContent).toBe('模型暂不可用：可用 其他… 选标签')
+    expect(b?.querySelector('p.hint')?.textContent).toBe('模型暂不可用：可用 其他… 选分级')
     expect(buttons(b)).toEqual(['都不是', '其他…', '跳过'])
     expect(answer(b, '都不是').classList.contains('primary')).toBe(false)
 
-    answer(a, '订阅').click()
+    answer(a, 'P2').click()
     await settle()
     const confirm = server.calls.find((call) => call.path.startsWith('/api/v2/reviewItems/a:resolve'))
     expect(confirm?.method).toBe('POST')
-    expect(confirm?.body?.['label']).toBe('labels/newsletter')
+    expect(confirm?.body?.['label']).toBe('labels/p2')
     expect(confirm?.headers['x-csrf-token']).toBe('csrf-token')
     expect(String(confirm?.body?.['request_id'])).toMatch(/^[0-9a-f-]{36}$/)
-    expect(toastText(root)).toBe('已确认：订阅')
+    expect(toastText(root)).toBe('已确认：P2')
     expect(rows(root).length).toBe(3)
-    // The header follows the queue.
-    expect(root.querySelector('.tabs a .chip')?.textContent).toBe('3')
 
     buttonNamed(rows(root)[0] ?? root, '其他…').click()
     const search = root.querySelector<HTMLInputElement>('.picker input')
     if (search === null) throw new Error('no picker')
     expect(document.activeElement).toBe(search)
     // Every label; 都不是 has its own button.
-    expect([...root.querySelectorAll('.picker [role="option"]')].map((node) => node.textContent)).toEqual(['订阅', '收据'])
-    search.value = '收'
+    expect([...root.querySelectorAll('.picker [role="option"]')].map((node) => node.textContent)).toEqual(['P1', 'P2', 'P3', 'P4'])
+    search.value = 'P3'
     search.dispatchEvent(new Event('input'))
-    expect([...root.querySelectorAll('.picker [role="option"]')].map((node) => node.textContent)).toEqual(['收据'])
+    expect([...root.querySelectorAll('.picker [role="option"]')].map((node) => node.textContent)).toEqual(['P3'])
     press('Enter')
     await settle()
-    expect(server.calls.find((call) => call.path.includes('/b:resolve'))?.body?.['label']).toBe('labels/receipt')
-    expect(toastText(root)).toBe('已选：收据')
+    expect(server.calls.find((call) => call.path.includes('/b:resolve'))?.body?.['label']).toBe('labels/p3')
+    expect(toastText(root)).toBe('已选：P3')
 
     answer(rows(root)[0], '都不是').click()
     await settle()
@@ -204,7 +199,7 @@ describe('待审', () => {
   it('moves with j and k, chooses with Enter and the digits, opens 其他… with c and skips with s', async () => {
     const server = new FakeServer()
     server.reviewItems = [reviewItem('a'), reviewItem('b'), reviewItem('c')]
-    const root = await open(server, '/')
+    const root = await open(server, '/review')
     expect(root.querySelector('.keys')?.textContent).toBe('j k 移动 · 1–4 选择 · c 其他 · s 跳过')
     press('j')
     expect(document.activeElement).toBe(rows(root)[0])
@@ -218,7 +213,7 @@ describe('待审', () => {
     expect(rows(root)[1]?.classList.contains('active')).toBe(true)
     press('Enter')
     await settle()
-    expect(server.calls.find((call) => call.path.startsWith('/api/v2/reviewItems/b:resolve'))?.body?.['label']).toBe('labels/newsletter')
+    expect(server.calls.find((call) => call.path.startsWith('/api/v2/reviewItems/b:resolve'))?.body?.['label']).toBe('labels/p2')
     // The row after it took its place and the focus.
     expect(rows(root).map((row) => row.getAttribute('aria-label'))).toEqual(['主题 a', '主题 c'])
     expect(document.activeElement).toBe(rows(root)[1])
@@ -250,78 +245,24 @@ describe('待审', () => {
     expect(root.querySelector('.empty strong')?.textContent).toBe('没有需要你确认的邮件')
   })
 
-  it('slows the owner down on a suspected phishing mail and on a trust label for a sender not trusted yet', async () => {
+  it('resolves a legacy entry without trust or scam warnings or confirmations', async () => {
     const server = new FakeServer()
-    server.labels.push(Object.assign(label('bank', '银行'), { trustImplying: true }))
-    const candidates = [create(CandidateSchema, { label: 'labels/bank', probability: 0.7 }), create(CandidateSchema, { label: 'labels/receipt', probability: 0.2 })]
-    server.reviewItems = [reviewItem('p', { reason: 'suspicious', candidates }), reviewItem('t', { reason: 'untrusted_sender', candidates })]
+    server.labels[0]!.trustImplying = true
+    server.reviewItems = [reviewItem('a', { reason: 'suspicious', teachableDomain: 'bank.example.net', candidates: [create(CandidateSchema, { label: 'labels/p1', probability: 0.7 })] })]
     const asked: string[] = []
-    const root = await open(server, '/', { now: () => NOW, confirm: (message) => (asked.push(message), false) })
-    const [phishing, trust] = rows(root)
-    // One warning line says why, and nothing more.
-    expect([...(phishing?.querySelectorAll('p.hint') ?? [])].map((node) => [node.textContent, node.classList.contains('warn')])).toEqual([['疑似钓鱼：先在 Gmail 里核对发件人和链接', true]])
-    expect(trust?.querySelector('p.hint.warn')?.textContent).toBe('发件人还不可信：先在 Gmail 里核对发件人')
-    // 都不是 after the model's labels; no answer is primary.
-    expect(buttons(trust)).toEqual(['银行，70%', '收据，20%', '都不是', '其他…', '跳过'])
-    expect(root.querySelector('#view .answers .primary')).toBeNull()
-    answer(phishing, '银行').click()
-    answer(trust, '银行').click()
+    const root = await open(server, '/review', { now: () => NOW, confirm: (message) => (asked.push(message), false) })
+    expect(root.querySelector('#view')?.textContent).not.toMatch(/可信|钓鱼|bank.example.net/)
+    expect(root.querySelector('.answers .primary')?.textContent).toBe('P170%')
+    answer(rows(root)[0], 'P1').click()
     await settle()
-    // Asked twice, refused twice: nothing was sent. Neither mail would teach a domain (no teachable_domain).
-    expect(asked).toEqual(['疑似钓鱼：先在 Gmail 里核对发件人和链接。仍然选“银行”？', '发件人还不可信：先在 Gmail 里核对发件人。仍然选“银行”？'])
-    expect(server.calls.some((call) => call.path.includes(':resolve'))).toBe(false)
-    // 都不是 is never asked about.
-    answer(phishing, '都不是').click()
-    await settle()
-    expect(asked.length).toBe(2)
-    expect(server.calls.some((call) => call.path.includes('/p:resolve'))).toBe(true)
-  })
-
-  it('names the domain before any answer that would teach a trust label one, whatever the reason, and never makes it primary', async () => {
-    const server = new FakeServer()
-    server.labels.push(Object.assign(label('bank', '银行'), { trustImplying: true }), Object.assign(label('broker', '券商'), { trustImplying: true, trustedDomains: ['bank-alerts.example.net'] }))
-    const candidates = [create(CandidateSchema, { label: 'labels/bank', probability: 0.55 }), create(CandidateSchema, { label: 'labels/receipt', probability: 0.3 })]
-    // 把握不够 (no warning line), yet a bank answer would trust the sender's domain.
-    server.reviewItems = [reviewItem('t', { reason: 'low_confidence', candidates, teachableDomain: 'bank-alerts.example.net' })]
-    const asked: string[] = []
-    let agree = false
-    const root = await open(server, '/', { now: () => NOW, confirm: (message) => (asked.push(message), agree) })
-    const [row] = rows(root)
-    expect(row?.querySelector('p.hint.warn')).toBeNull()
-    expect(answer(row, '银行').classList.contains('primary')).toBe(false)
-    // Neither a tap nor Enter trusts it without the question, which names the domain.
-    answer(row, '银行').click()
-    press('j')
-    press('Enter')
-    await settle()
-    const question = '选“银行”？这会把 bank-alerts.example.net 记为“银行”的可信域名，以后这个域名的邮件可以自动打上它。'
-    expect(asked).toEqual([question, question])
-    expect(server.calls.some((call) => call.path.includes(':resolve'))).toBe(false)
-    // A label that does not imply trust, or a trust label that lists the domain already, teaches nothing: no question.
-    answer(row, '收据').click()
-    await settle()
-    expect(asked.length).toBe(2)
-    expect(server.calls.find((call) => call.path.includes('/t:resolve'))?.body?.['label']).toBe('labels/receipt')
-    server.reviewItems = [reviewItem('u', { reason: 'low_confidence', candidates: [create(CandidateSchema, { label: 'labels/broker', probability: 0.6 })], teachableDomain: 'bank-alerts.example.net' })]
-    const again = await open(server, '/', { now: () => NOW, confirm: (message) => (asked.push(message), agree) })
-    expect(answer(rows(again)[0], '券商').classList.contains('primary')).toBe(true)
-    answer(rows(again)[0], '券商').click()
-    await settle()
-    expect(asked.length).toBe(2)
-    // Agreeing sends the answer.
-    server.reviewItems = [reviewItem('v', { reason: 'low_confidence', candidates, teachableDomain: 'bank-alerts.example.net' })]
-    agree = true
-    const third = await open(server, '/', { now: () => NOW, confirm: (message) => (asked.push(message), agree) })
-    answer(rows(third)[0], '银行').click()
-    await settle()
-    expect(asked.length).toBe(3)
-    expect(server.calls.find((call) => call.path.includes('/v:resolve'))?.body?.['label']).toBe('labels/bank')
+    expect(asked).toEqual([])
+    expect(server.calls.find((call) => call.path.includes('/a:resolve'))?.body?.['label']).toBe('labels/p1')
   })
 
   it('opens 其他… on Enter for a mail the model gave no answer for, never choosing 都不是', async () => {
     const server = new FakeServer()
     server.reviewItems = [reviewItem('m', { reason: 'model_unavailable', candidates: [] })]
-    const root = await open(server, '/')
+    const root = await open(server, '/review')
     press('j')
     press('Enter')
     await settle()
@@ -331,12 +272,12 @@ describe('待审', () => {
 
   it('gives a button only to the options worth one: the first always, the others from 5 %', async () => {
     const server = new FakeServer()
-    const candidates = [create(CandidateSchema, { label: 'labels/newsletter', probability: 0.92 }), create(CandidateSchema, { label: 'labels/receipt', probability: 0.04 }), create(CandidateSchema, { label: '', probability: 0.04 })]
-    server.reviewItems = [reviewItem('a', { candidates }), reviewItem('b', { candidates: [create(CandidateSchema, { label: '', probability: 0.5 }), create(CandidateSchema, { label: 'labels/receipt', probability: 0.3 })] })]
-    const root = await open(server, '/')
-    expect(buttons(rows(root)[0])).toEqual(['订阅，92%', '都不是', '其他…', '跳过'])
+    const candidates = [create(CandidateSchema, { label: 'labels/p2', probability: 0.92 }), create(CandidateSchema, { label: 'labels/p3', probability: 0.04 }), create(CandidateSchema, { label: '', probability: 0.04 })]
+    server.reviewItems = [reviewItem('a', { candidates }), reviewItem('b', { candidates: [create(CandidateSchema, { label: '', probability: 0.5 }), create(CandidateSchema, { label: 'labels/p3', probability: 0.3 })] })]
+    const root = await open(server, '/review')
+    expect(buttons(rows(root)[0])).toEqual(['P2，92%', '都不是', '其他…', '跳过'])
     // 都不是 ranked first is the primary answer, as any first option.
-    expect(buttons(rows(root)[1])).toEqual(['都不是，50%', '收据，30%', '其他…', '跳过'])
+    expect(buttons(rows(root)[1])).toEqual(['都不是，50%', 'P3，30%', '其他…', '跳过'])
     expect(answer(rows(root)[1], '都不是').classList.contains('primary')).toBe(true)
     answer(rows(root)[1], '都不是').click()
     await settle()
@@ -346,7 +287,7 @@ describe('待审', () => {
   it('says why a mail is unsure in plain words, never 阈值', async () => {
     const server = new FakeServer()
     server.reviewItems = [reviewItem('u', { reason: 'views_disagree' }), reviewItem('v')]
-    const root = await open(server, '/')
+    const root = await open(server, '/review')
     expect(rows(root)[0]?.textContent).toContain('两次判断不一致')
     expect(rows(root)[1]?.textContent).toContain('把握不够')
     expect(root.querySelector('#view')?.textContent).not.toContain('阈值')
@@ -360,31 +301,28 @@ describe('待审', () => {
     }
     try {
       const server = new FakeServer()
-      server.labels.push(label('travel', '出行'))
-      server.reviewItems = [reviewItem('a', { candidates: [create(CandidateSchema, { label: 'labels/newsletter', probability: 0.6 }), create(CandidateSchema, { label: 'labels/receipt', probability: 0.3 })] })]
-      const root = await open(server, '/')
+      server.reviewItems = [reviewItem('a', { candidates: [create(CandidateSchema, { label: 'labels/p2', probability: 0.6 }), create(CandidateSchema, { label: 'labels/p3', probability: 0.3 })] })]
+      const root = await open(server, '/review')
       buttonNamed(root, '其他…').click()
-      expect(root.querySelector('.picker [aria-selected="true"]')?.textContent).toBe('出行')
-      expect(scrolled.at(-1)).toBe('出行')
+      expect(root.querySelector('.picker [aria-selected="true"]')?.textContent).toBe('P1')
+      expect(scrolled.at(-1)).toBe('P1')
     } finally {
       delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
     }
   })
 
   it('says it is quiet when nothing waits', async () => {
-    const root = await open(new FakeServer(), '/')
+    const root = await open(new FakeServer(), '/review')
     expect(root.querySelector('.empty strong')?.textContent).toBe('没有需要你确认的邮件')
-    expect(root.querySelector('.empty span')?.textContent).toBe('只有模型拿不准的少数邮件会来这里')
-    const queue = root.querySelector<HTMLElement>('.tabs a .chip')
-    expect(queue?.hidden).toBe(true)
-    expect(queue?.parentElement?.hasAttribute('aria-label')).toBe(false)
+    expect(root.querySelector('.empty span')?.textContent).toBe('拿不准的邮件已归 P1，并留在收件箱。')
+    expect(root.querySelector('.tabs a .chip')).toBeNull()
   })
 })
 
 describe('设置', () => {
-  it('has the mode, undo, Gmail and replay evaluation', async () => {
+  it('has the mode, undo and replay evaluation', async () => {
     const root = await open(new FakeServer(), '/settings')
-    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '撤销', 'Gmail', '检查分类效果'])
+    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '撤销', '检查分类效果'])
     expect(root.querySelectorAll('input[type="number"]').length).toBe(0)
     expect(root.querySelector('[aria-label="模式"] [aria-pressed="true"]')?.textContent).toBe('影子')
     expect(root.textContent).toContain('只判断和记录，不改 Gmail')
@@ -397,7 +335,7 @@ describe('设置', () => {
     const root = await open(server, '/settings', { now: () => NOW, confirm: (message) => (asked.push(message), true) })
     buttonNamed(root, '正式').click()
     await settle()
-    expect(asked).toEqual(['切到正式？启用的标签会在 Gmail 里给有把握的邮件打标签（按归档设置移出收件箱），待审里的选择也会写入。'])
+    expect(asked).toEqual(['切到正式？新邮件会打上 P1、P2、P3、P4 标签。P1 留在收件箱，P2、P3、P4 自动归档，未读状态保持不变。'])
     const patch = server.calls.find((call) => call.method === 'PATCH')
     expect(decodeURIComponent(patch?.path ?? '')).toContain('update_mask=mode,etag')
     expect(patch?.body).toMatchObject({ mode: 'live', etag: 's1' })
@@ -420,7 +358,7 @@ describe('设置', () => {
     // With the write grant, what live does.
     server.status = { writeScope: true }
     const again = await open(server, '/settings')
-    expect(again.querySelector('.card p.hint')?.textContent).toBe('有把握的邮件打上标签，按归档设置移出收件箱；从不标为已读')
+    expect(again.querySelector('.card p.hint')?.textContent).toBe('按 P1、P2、P3、P4 分级；P1 留在收件箱，P2、P3、P4 归档，未读状态不变')
   })
 
   it('explains the deployment’s ceiling in one line', async () => {
@@ -471,20 +409,20 @@ describe('设置', () => {
 
   it('undoes one label’s entries only when a label is chosen, and says so in the preview', async () => {
     const server = new FakeServer()
-    server.labels = [label('travel', '出行'), label('newsletter', '订阅')]
-    server.ledgerEntries = [ledgerEntry('t1', { label: 'labels/travel' }), ledgerEntry('n1'), ledgerEntry('t2', { label: 'labels/travel' })]
+    server.labels = [label('p4', 'P4'), label('p2', 'P2')]
+    server.ledgerEntries = [ledgerEntry('t1', { label: 'labels/p4' }), ledgerEntry('n1'), ledgerEntry('t2', { label: 'labels/p4' })]
     const root = await open(server, '/settings')
-    const select = root.querySelector<HTMLSelectElement>('select[aria-label="标签"]')
+    const select = root.querySelector<HTMLSelectElement>('select[aria-label="分级"]')
     if (select === null) throw new Error('no select')
-    expect(select.options[0]?.textContent).toBe('全部标签')
-    select.value = 'labels/travel'
+    expect(select.options[0]?.textContent).toBe('全部分级')
+    select.value = 'labels/p4'
     select.dispatchEvent(new Event('change'))
     buttonNamed(root, '预览').click()
     await settle(10)
-    expect(root.textContent).toContain('将撤销“出行”的 2 条')
+    expect(root.textContent).toContain('将撤销“P4”的 2 条')
     buttonNamed(root, '确认撤销').click()
     await settle(10)
-    expect(server.calls.find((call) => call.path === '/api/v2/ledgerEntries:undo')?.body?.['label']).toBe('labels/travel')
+    expect(server.calls.find((call) => call.path === '/api/v2/ledgerEntries:undo')?.body?.['label']).toBe('labels/p4')
     expect(server.ledgerEntries.map((item) => [item.name, item.undoable])).toEqual([
       ['ledgerEntries/t1', false],
       ['ledgerEntries/n1', true],
@@ -520,12 +458,10 @@ describe('设置', () => {
     expect(root.textContent).toContain('将撤销 1 条')
   })
 
-  it('says what a sync from Gmail did', async () => {
+  it('keeps old label consolidation and Gmail import out of settings and out of API reads', async () => {
     const server = new FakeServer()
     const root = await open(server, '/settings')
-    buttonNamed(root, '同步').click()
-    await settle()
-    expect(toastText(root)).toBe('已同步：关联 1，改名 0，Gmail 中缺失 0')
-    expect(server.labels[0]?.gmailState).toBe(Label_GmailState.ADOPTED)
+    expect(root.textContent).not.toMatch(/整理标签|从 Gmail 同步|可信域名/)
+    expect(server.calls.some((call) => /labelConsolidation|:sync/.test(call.path))).toBe(false)
   })
 })
