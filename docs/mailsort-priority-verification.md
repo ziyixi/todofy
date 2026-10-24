@@ -100,7 +100,8 @@ fallback recheck. Mode, neuron budget and write caps remain unchanged. The exist
 unchanged and has not yet been calibrated against real model responses for these descriptions.
 
 Local candidate checks passed: 151 unit tests, 83 workerd tests, 79 UI tests, the local Wrangler smoke (62 closed-table
-fake Google calls), 26 deploy tests, proto lint/API lint, breaking checks and schema checks. Workerd tests include
+fake Google calls), 26 deploy tests, proto lint/API lint, breaking checks, schema/type checks and 459 TypeScript /
+110 Python proto contract tests. Workerd tests include
 actual prior P1 ledgers, successful replacement after a transient failure, rejection of stale undo and restoration
 of the latest preimage. The CPU fixture exercises both views through its fake binding; it does not measure classifier
 quality. The measured Worker was about 141 KiB gzip. Its code-size check allows 148 KiB; model and spending budgets

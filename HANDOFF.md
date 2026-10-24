@@ -20,7 +20,7 @@ are retained. Real Clef calibration and production retry are not yet verified; l
 quality. Live calibration awaits owner-authorized Workers AI API access; no candidate release or mailbox recheck
 has been performed yet.
 Local checks passed: 151 unit, 83 workerd, 79 UI, full local Wrangler smoke and 26 deployment-script tests. Proto
-lint/API lint, breaking and schema checks passed; the broader proto TypeScript suite is still running locally.
+lint/API lint, breaking, schema and TypeScript checks passed, plus 459 TypeScript and 110 Python contract tests.
 
 The Watch evidence implementation and native Dots acceptance are complete; the verification record is in
 [Watch evidence verification](docs/watch-evidence-verification.md). Its temporary subscription is stopped,

@@ -61,9 +61,9 @@ export default function MailsortPrivacyPage() {
             labels: P1, P2, P3 and P4. P1 is for mail that needs prompt attention or whose urgency
             is unclear, and stays in the inbox. P2 holds important information or required follow-up
             that can wait two or three days, P3 is substantive optional reading for the weekend, and
-            P4 is routine information, receipts or promotions without meaningful follow-up. P2, P3 and P4
-            are archived out of the inbox. Every classification preserves the message&apos;s read or
-            unread state.
+            P4 is routine information, receipts or promotions without meaningful follow-up. P2, P3
+            and P4 are archived out of the inbox. Every classification preserves the message&apos;s
+            read or unread state.
           </li>
           <li>
             It never sends, deletes or trashes mail and never marks mail read or unread. A new
@@ -84,8 +84,8 @@ export default function MailsortPrivacyPage() {
             The owner can also explicitly recheck current unread mail assigned P1 because the model
             was uncertain. This excludes messages the owner has confirmed or corrected and rechecks
             their current Gmail state, skipping mail now read or no longer carrying only P1. If the
-            result stays P1, only the stored model evidence changes; another Gmail write is unnecessary.
-            A result of P2, P3 or P4 replaces P1 and archives through the same ledger.
+            result stays P1, only the stored model evidence changes; another Gmail write is
+            unnecessary. A result of P2, P3 or P4 replaces P1 and archives through the same ledger.
           </li>
           <li>
             The owner can explicitly start a one-time switch from the old categories to P1–P4. This
@@ -109,11 +109,10 @@ export default function MailsortPrivacyPage() {
         <p>
           A new message is assigned a priority by a decision model (Clef on Cloudflare Workers AI),
           asked twice about how long the owner can safely wait before reading or acting on it, with
-          the nearest examples based on owner confirmations, corrections or confident classifications
-          left unchanged for three days,
-          compared through embeddings from the bge-m3 model, as context. All of this runs in the
-          owner&apos;s own Cloudflare account. The models are called directly, without AI Gateway,
-          which would log request bodies.
+          the nearest examples based on owner confirmations, corrections or confident
+          classifications left unchanged for three days, compared through embeddings from the bge-m3
+          model, as context. All of this runs in the owner&apos;s own Cloudflare account. The models
+          are called directly, without AI Gateway, which would log request bodies.
         </p>
         <p>
           The models read masked text only: the sender&apos;s display name and domain, the subject
@@ -130,12 +129,12 @@ export default function MailsortPrivacyPage() {
           America/Los_Angeles and the current Monday-to-Sunday week. Replay uses the original
           decision&apos;s clock. Sender history and examples come only from the P1–P4 system. An
           uncertain P1 assignment keeps its original model evidence and does not become automatic
-          sender history or a learned example without an explicit owner confirmation or correction. Each
-          message is assessed on its own content and timing. Normal processing handles new mail;
-          processing older unread mail requires the owner&apos;s explicit batch request. At 70% of
-          the daily model budget it switches to Clef-flash. Exhausted daily model or write quotas
-          leave batch work waiting for the next UTC day. Progress distinguishes applied labels,
-          skipped messages and failures.
+          sender history or a learned example without an explicit owner confirmation or correction.
+          Each message is assessed on its own content and timing. Normal processing handles new
+          mail; processing older unread mail requires the owner&apos;s explicit batch request. At
+          70% of the daily model budget it switches to Clef-flash. Exhausted daily model or write
+          quotas leave batch work waiting for the next UTC day. Progress distinguishes applied
+          labels, skipped messages and failures.
         </p>
 
         <h2>What is stored, and for how long</h2>
