@@ -12,14 +12,16 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-`codex/mailsort-priority` replaces topic sorting with four real Gmail labels: P1 keeps Inbox, P2-P4 archive;
+`codex/mailsort-priority-verification` records the released implementation; `a70ff257` replaces topic sorting with four real Gmail labels: P1 keeps Inbox, P2-P4 archive;
 valid uncertainty becomes P1 without mandatory review. The scam/trust-domain model and gates are removed.
 Code/UI and the bounded owner initializer are implemented in `/private/tmp/todofy-tasks-design`;
 Claude's shared checkout is untouched. Local lint/types, 124 Worker unit tests, 69 real-SQLite runtime tests (including CPU), 62 UI cases, 26 deploy checks
-and the real local Wrangler smoke passed. The final branch gate and production release are next.
+and the real local Wrangler smoke passed. The complete branch gate 40051440933 and same-SHA main release 40052652580 passed on a70ff257.
+Production code is live; the browser is at the explicit initializer awaiting action-time confirmation of
+permanent old-label/learning removal. No production label mutation has run yet.
 Production still has the old 12 topic labels; neither Gmail labels nor real mail have been modified yet.
 The owner initializer removes only known old labels/learning and preserves mail/read/Inbox state, then starts
-fresh priority learning at its cutover cursor. Dated evidence: [priority rollout](mailsort/docs/priority-rollout.md).
+fresh priority learning at its cutover cursor. Current acceptance: [priority verification](docs/mailsort-priority-verification.md); operator steps: [priority rollout](mailsort/docs/priority-rollout.md).
 
 The Watch evidence implementation and native Dots acceptance are complete; the verification record is in
 [Watch evidence verification](docs/watch-evidence-verification.md). Its temporary subscription is stopped,

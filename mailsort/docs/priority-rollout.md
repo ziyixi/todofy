@@ -36,11 +36,14 @@ only the existing Gmail write grant. It does not delete messages, read their bod
 - Reloading the UI after Gmail identities link but before setup verification retains the setup action through
   the real `ServiceStatus.priorities_initialized` field; linked Gmail IDs alone do not prove setup complete.
 
-## Current evidence
+## Release evidence
 
-Implementation is not yet released; production cutover is pending. Add actual CI/provider identities and the
-metadata-only production read-back after release. Do not interpret the implementation description as acceptance.
+Implementation `a70ff257526e8baa3d47e783da1980fff9d9ce11` passed the complete
+[branch gate](https://github.com/ziyixi/todofy/actions/runs/40051440933) and
+[same-SHA production release](https://github.com/ziyixi/todofy/actions/runs/40052652580).
+Only Mailsort and the matching website privacy page uploaded. The initializer remains a separate explicit owner
+operation; a code release never proves the old Gmail labels have been removed.
 
-Local verification uses only synthetic Gmail and local SQLite/Workers AI fakes. The focused setup tests verify
-managed/hidden old-label removal, unchanged mail bodies and read/star/Inbox/other-label state, history preservation,
-interruption continuation and external-name rejection. The local evidence above is separate from production acceptance.
+The [current production verification](../../docs/mailsort-priority-verification.md) records the actual cutover
+state, source read-back and any still-pending owner action. Its metadata-only evidence is separate from the local
+synthetic tests above. Real Chrome also completed setup and reload against the isolated empty fake mailbox.
