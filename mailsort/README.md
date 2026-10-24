@@ -20,7 +20,7 @@ Gmail's Spam handling stays unchanged. No sender-brand rules or probability thre
 - **分级** shows P1–P4. **整理当前未读** selects only ungraded unread messages, including archived ones.
   **重新判断全部未读** explicitly includes unread messages already carrying a priority; read mail is excluded.
   Both join the next hourly job, rather than starting a second classifier.
-- **设置** keeps off/shadow/live and the existing Gmail undo controls. Shadow records decisions without writes;
+- **设置** keeps off/shadow/live, the existing daily Gmail write cap and undo controls. Shadow records decisions without writes;
   off stops Gmail reads and classification. Existing write limits still apply.
 
 Routine runs do not reclassify already graded messages, including after a prompt update. Every reply has its own

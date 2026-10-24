@@ -69,6 +69,8 @@ async def run(client, settings: Settings, *, classify=classifier.classify) -> in
             results = await classify(messages, evaluated_at, settings.codex_home, usage)
         else:
             results = ()
+            usage.input_tokens = 0
+            usage.output_tokens = 0
             usage.partial = False
         accepted = report(api.RunStatus.COMPLETED, results)
         log(

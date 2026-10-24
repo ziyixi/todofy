@@ -321,7 +321,7 @@ describe('设置', () => {
   it('shows mode and undo without old model budgets or replay controls', async () => {
     const server = new FakeServer()
     const root = await open(server, '/settings')
-    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '撤销'])
+    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', 'Gmail 写入', '撤销'])
     expect(root.querySelectorAll('input[type="number"]').length).toBe(0)
     expect(root.querySelector('[aria-label="模式"] [aria-pressed="true"]')?.textContent).toBe('影子')
     expect(root.textContent).toContain('只判断和记录，不改 Gmail')
@@ -347,6 +347,32 @@ describe('设置', () => {
     buttonNamed(root, '正式').click()
     await settle()
     expect(server.calls.filter((call) => call.method === 'PATCH').length).toBe(1)
+  })
+
+  it('edits the existing daily Gmail cap only on request, without changing mode or the run cap', async () => {
+    const server = new FakeServer()
+    Object.assign(server.settings, { mode: Mode.LIVE, effectiveMode: Mode.LIVE, dailyWriteLimit: 150, runWriteLimit: 10 })
+    server.status = { appliedTodayCount: 150 }
+    const root = await open(server, '/settings')
+    expect(root.textContent).toContain('今日 150 / 150')
+    expect(root.querySelector('input[type="number"]')).toBeNull()
+    buttonNamed(root, '调整每日上限').click()
+    const input = root.querySelector<HTMLInputElement>('[aria-label="每日 Gmail 写入上限"]')
+    if (input === null) throw new Error('no daily limit input')
+    input.value = '0'
+    buttonNamed(root, '保存上限').click()
+    expect(server.calls.filter((call) => call.method === 'PATCH')).toHaveLength(0)
+    input.value = '300'
+    buttonNamed(root, '保存上限').click()
+    buttonNamed(root, '保存上限').click()
+    await settle()
+    const calls = server.calls.filter((call) => call.method === 'PATCH')
+    expect(calls).toHaveLength(1)
+    expect(decodeURIComponent(calls[0]?.path ?? '')).toContain('update_mask=daily_write_limit,etag')
+    expect(calls[0]?.body).toMatchObject({ daily_write_limit: 300, etag: 's1' })
+    expect(server.settings).toMatchObject({ dailyWriteLimit: 300, runWriteLimit: 10, mode: Mode.LIVE })
+    expect(root.textContent).toContain('今日 150 / 300')
+    expect(root.querySelector('input[type="number"]')).toBeNull()
   })
 
   it('says when 正式 cannot write yet: the grant is read-only', async () => {

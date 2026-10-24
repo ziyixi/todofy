@@ -36,7 +36,7 @@ without establishing an independently labeled accuracy score.
 - Worker: 153 unit tests; lint and all three TypeScript configurations.
 - Real workerd: 65 tests including generated machine HTTP, SQLite storage, multi-run 103-message recheck,
   write caps and new arrivals, failure state, and CPU. No actual Codex/Gmail call.
-- UI: 75 tests, lint/types/build. New hourly status, all-unread scope, no old budget/replay/learning controls.
+- UI: 76 tests, lint/types/build. New hourly status, all-unread scope, no old budget/replay/learning controls.
 - Deployment helpers: 26 synthetic tests, including Gmail grant exclusion and secret preservation.
 - Real local Wrangler smoke: 67 synthetic Google requests independently checked against the closed operation
   table; four priorities, read/star/other preservation, duplicate report, failed model, next run, all-unread,

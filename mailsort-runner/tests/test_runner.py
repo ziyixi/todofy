@@ -205,7 +205,8 @@ def test_empty_batch_reports_completion_without_model(tmp_path):
     assert asyncio.run(runner.run(client, settings, classify=never)) == 0
     client.close()
     assert len(reports) == 1 and reports[0].status == api.RunStatus.COMPLETED
-    assert reports[0].input_tokens is None and not reports[0].usage_partial
+    assert reports[0].input_tokens == reports[0].output_tokens == 0
+    assert not reports[0].usage_partial
 
 
 def test_model_failure_reports_partial_usage_without_output(tmp_path, capsys):

@@ -259,6 +259,7 @@ export class FakeServer {
         if (paths.includes('mode')) Object.assign(next, { mode: request.settings.mode, breakerTripped: false, breakerReason: '' })
         if (paths.includes('daily_neuron_budget')) next.dailyNeuronBudget = request.settings.dailyNeuronBudget
         if (paths.includes('run_write_limit')) next.runWriteLimit = request.settings.runWriteLimit
+        if (paths.includes('daily_write_limit')) next.dailyWriteLimit = request.settings.dailyWriteLimit
         next.effectiveMode = next.breakerTripped ? Mode.SHADOW : next.mode
         this.settings = next
         return Promise.resolve(this.settings)

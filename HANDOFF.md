@@ -19,7 +19,7 @@ P1-P4; routine hourly runs select only unread mail without a priority. No messag
 The local same-prompt 100-message comparison completed on SDK 0.163.0 (medium/high/max); private input and
 per-message trial results stay outside Git. Production cutover and the first natural hourly run remain unverified.
 The isolated checkout preserves Claude's shared source. Local checks include 153 Worker unit, 65 workerd
-(including CPU), 75 UI, 26 deploy tests and the full 67-request synthetic Wrangler smoke; CI/image and
+(including CPU), 76 UI, 26 deploy tests and the full 67-request synthetic Wrangler smoke; CI/image and
 production verification remain pending. The new independent Codex login awaits the owner's Passkey verification
 in Chrome; do not switch credentials or copy Newsletter auth to bypass it. VPS SSH works but sudo -n is unavailable,
 so the fixed foundation bundle will need one owner sudo command.
