@@ -162,34 +162,32 @@ describe('the owner API', () => {
     await h.api.deleteLabel({ name: inbox.name, requestId: op() });
   });
 
-  it('uncertain new priority decisions go to P1 without mandatory review', async () => {
+  it('direct Claude priorities remain records in shadow without mandatory review', async () => {
     await h.api.initializePriorities({ requestId: op() });
-    h.up.ai.confidence = 0.5;
+    h.up.claude.bucket = 'P2';
     h.up.gmail.deliver(message({ ...MAILS.newsletterEn, receivedAt: T0 + HOUR }));
     h.up.gmail.deliver(message({ ...MAILS.receiptEn, receivedAt: T0 + HOUR }));
     await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW }), updateMask: { paths: ['mode'] }, requestId: op() });
     const pass = await h.step(T0 + HOUR);
-    h.up.ai.confidence = 0.92;
     const { reviewItems } = await h.api.listReviewItems({});
     expect(pass.decided).toBe(2);
     expect(reviewItems).toEqual([]);
     expect(await h.sql(`SELECT outcome, label_id FROM decisions WHERE message_id IN (?, ?) ORDER BY message_id`, MAILS.newsletterEn.id, MAILS.receiptEn.id))
-      .toEqual([{ outcome: 'suggested', label_id: 'p1' }, { outcome: 'suggested', label_id: 'p1' }]);
+      .toEqual([{ outcome: 'suggested', label_id: 'p2' }, { outcome: 'suggested', label_id: 'p2' }]);
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).reviewCount).toBe(0);
     expect(h.up.gmail.calls.filter((call) => call.url.endsWith('/modify'))).toEqual([]);
   });
 
-  it('ops-v1: counts and codes only, and the guard', async () => {
+  it('ops-v1: counts and codes only, Claude usage and no guard', async () => {
     const status = await h.opsStatus();
     const read = fromWire(OpsStatusSchema, status);
     expect(read.unrecognized).toEqual([]);
-    expect(status).toMatchObject({ version: 'ops-v1', app: 'mailsort', health: 'ok', ui_url: 'https://sort.example.com/', capabilities: ['guard'] });
-    expect(Object.keys(status['counters'] as object)).toEqual(expect.arrayContaining(['decided_today', 'applied_today', 'unsure_today', 'review_pending', 'pending', 'neurons_today', 'neuron_budget']));
+    expect(status).toMatchObject({ version: 'ops-v1', app: 'mailsort', health: 'ok', ui_url: 'https://sort.example.com/', capabilities: [] });
+    expect(Object.keys(status['counters'] as object)).toEqual(expect.arrayContaining(['decided_today', 'applied_today', 'unsure_today', 'review_pending', 'pending', 'claude_spent_usd', 'claude_monthly_limit_usd']));
     const text = JSON.stringify(status);
     for (const secret of ['Weekly', 'digest@', 'owner@example.com', 'Newsletters', 'Lunch']) expect(text).not.toContain(secret);
     const until = new Date(T0 + 2 * HOUR).toISOString().replace('.000Z', 'Z');
-    const shed = (await h.opsSetGuard({ level: 'shed', reason: 'usage_80', until })) as { level: string; deferred: string[] };
-    expect(shed).toMatchObject({ level: 'shed', deferred: ['full_model', 'replay', 'embedding_rebuild'] });
+    expect(await h.opsSetGuard({ level: 'shed', reason: 'usage_80', until }).catch((error: unknown) => (error as Error).message)).toContain('invalid_input');
     expect((await h.opsSetGuard({ level: 'bogus' }).catch((error: unknown) => (error as Error).message))).toContain('invalid_input');
     expect(await h.opsSetGuard({ level: 'normal', reason: 'quota_recovered', until: null })).toMatchObject({ level: 'normal' });
   });

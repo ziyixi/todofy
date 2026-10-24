@@ -76,6 +76,16 @@ describe('labels', () => {
     for (const job of ['embedding', 'learning', 'source_probe']) expect(deferredJobLabel(job)).not.toBe(job)
   })
 
+  it('labels Mailsort Claude usage in dollars and tokens, with safe failure reasons', () => {
+    expect(counterValue('claude_spent_usd', 3.514105)).toBe('US$ 3.51')
+    expect(counterValue('claude_monthly_limit_usd', 20)).toBe('US$ 20.00')
+    expect(counterInfo('claude_spent_usd').label).toBe('Claude 本月估算费用')
+    expect(counterInfo('claude_output_tokens')).toEqual({ label: 'Claude 本月输出 token（含思考）', kind: 'tokens' })
+    for (const name of ['claude_input_tokens', 'claude_thinking_tokens']) expect(counterInfo(name).label).not.toBe(name)
+    for (const code of ['claude_not_configured', 'claude_auth', 'claude_spend_limit', 'claude_budget_exhausted', 'claude_unavailable', 'claude_bad_answer']) expect(signalLabel(code)).not.toBe(code)
+    expect(signalLabel('claude_spend_limit')).toBe('Mailsort Claude 工作区已达到月度消费上限')
+  })
+
   it('keeps unknown codes raw', () => {
     expect(signalLabel('brand_new')).toBe('brand_new')
     expect(signalLabel('toString')).toBe('toString')

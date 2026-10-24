@@ -19,10 +19,8 @@ import { join } from 'node:path';
 import { createHttpClient, type HttpCall } from '@ziyixi/proto/http-client';
 import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
-import { ReplayEvaluation_State } from '@ziyixi/proto/mailsort/ui/v2/replay_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { create } from '@ziyixi/proto/protobuf';
-import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { MAILS, message, type SyntheticMail } from '../fakes/fixtures.ts';
 import type { RecordedLedger } from '../fakes/fake-gmail.ts';
 import { allowedOperation, FORBIDDEN_LABELS } from '../fakes/table.ts';
@@ -67,6 +65,7 @@ async function main(): Promise<void> {
     ACCESS_OWNER: 'owner@example.com',
     CSRF_SIGNING_KEY: 'ab'.repeat(32),
     DEV_FAKE_UPSTREAM: fakeOrigin,
+    ANTHROPIC_API_KEY: 'synthetic-anthropic-key',
     GMAIL_CLIENT_ID: 'synthetic-client.apps.googleusercontent.com',
     GMAIL_CLIENT_SECRET: 'synthetic-secret',
     GMAIL_REFRESH_TOKEN: REFRESH_TOKEN,
@@ -153,7 +152,7 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   };
   const id = () => crypto.randomUUID();
   let now = T0;
-  const step = async (advance = 5 * MINUTE) => {
+  const step = async (advance = 60 * MINUTE) => {
     now += advance;
     setClock(now);
     const response = await fetch(`${origin}/__dev/step?now=${String(now)}`, { method: 'POST' });
@@ -165,7 +164,7 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
     if (value === undefined) throw new Error(`smoke: missing synthetic ${priority} label`);
     return value;
   };
-  const force = (priority: string) => { up.ai.choiceOverride = () => ({ [priority]: 0.92, ...(priority === 'none' ? { p1: 0.08 } : { none: 0.08 }) }); };
+  const force = (priority: 'p1' | 'p2' | 'p3' | 'p4') => { up.claude.bucket = priority.toUpperCase() as 'P1' | 'P2' | 'P3' | 'P4'; };
   const deliver = (mail: SyntheticMail, priority?: string, replaceLabels: readonly string[] = []) => {
     if (priority !== undefined) expected.set(mail.id, { labelId: gmailId(priority), state: 'intended', archived: priority !== 'p1', replaceLabels });
     up.gmail.deliver(message({ ...mail, receivedAt: now }));
@@ -199,102 +198,51 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   check(up.gmail.calls.every(call => call.method !== 'DELETE'), 'fresh setup removes no Gmail labels or messages');
   check((await step(0)).code === 'ok', 'the initialized pipeline starts from its setup cursor');
   const initialSettings = await api.getSettings({ name: 'settings' });
-  check(initialSettings.mode === Mode.SHADOW && initialSettings.dailyNeuronBudget === 9500, 'setup preserves the shadow default and daily neuron budget');
-
-  force('p3');
-  const before = up.ai.calls.length;
+  check(initialSettings.mode === Mode.SHADOW && initialSettings.runWriteLimit === 10, 'setup preserves the shadow mode and existing write cap');
+  force('p2');
   deliver(MAILS.newsletterEn);
   await step();
-  const views = up.ai.calls.slice(before).filter(call => call.model.includes('clef'));
-  check(views.length === 2 && (await api.listReviewItems({})).reviewItems.length === 0 && modifies() === 0 && labelsOf(MAILS.newsletterEn.id).includes('INBOX'), 'shadow records two model views without writing a label or mandatory review');
-
+  check(up.claude.calls.length === 1 && up.claude.calls[0]?.length === 1 && modifies() === 0, 'shadow records one native Claude batch without Gmail writes');
+  check((await api.listReviewItems({})).reviewItems.length === 0, 'direct Claude results do not create mandatory review');
   await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.LIVE }), updateMask: { paths: ['mode'] }, requestId: id() });
-  const priorityMessages = new Map<string, string>();
-  for (const [index, priority] of ['p1', 'p2', 'p3', 'p4'].entries()) {
+  for (const [index, priority] of (['p1', 'p2', 'p3', 'p4'] as const).entries()) {
+    const messageId = `a00000000000f00${String(index)}`;
     force(priority);
-    const messageId = `a11000000000000${String(index)}`;
-    priorityMessages.set(priority, messageId);
-    deliver({ ...MAILS.bankEn, id: messageId, threadId: 'synthetic-priority-thread', dmarc: 'fail' }, priority);
+    deliver({ ...MAILS.bankEn, id: messageId, dmarc: 'fail' }, priority);
     await step();
-    check(checkPriority(messageId, priority), `${priority.toUpperCase()} is the only priority; UNREAD stays unchanged and only P1 keeps Inbox`);
+    check(checkPriority(messageId, priority), `${priority.toUpperCase()} preserves unread and the configured Inbox/archive action`);
   }
-  force('none');
-  const fallback = 'a110000000000010';
-  deliver({ ...MAILS.unsure, id: fallback }, 'p1');
-  await step();
-  check(checkPriority(fallback, 'p1') && (await api.listReviewItems({})).reviewItems.length === 0, 'a valid none answer becomes P1 in Inbox without mandatory review');
-
-  // A Gmail correction supplies current priority feedback and one replay sample.
-  const corrected = priorityMessages.get('p3') ?? '';
-  up.gmail.ownerModify(corrected, [gmailId('p2')], [gmailId('p3')]);
-  await step();
-  const examples = (await api.listExamples({ label: 'labels/p2' })).examples;
-  check(examples.length === 1 && examples[0]?.embedded, 'a Gmail P3-to-P2 correction becomes an embedded priority example');
-  force('p2');
-  const writesBeforeReplay = modifies();
-  const examplesBeforeReplay = examples.map(example => example.name).sort().join();
-  const replay = await api.startReplayEvaluation({ name: 'replayEvaluation', requestId: id() });
-  await step();
-  const summary = await api.getReplayEvaluation({ name: 'replayEvaluation' });
-  check(replay.totalCount === 1 && summary.state === ReplayEvaluation_State.SUCCEEDED && summary.evaluatedCount === 1 && summary.autoMatchCount === 1 && modifies() === writesBeforeReplay && (await api.listExamples({ label: 'labels/p2' })).examples.map(example => example.name).sort().join() === examplesBeforeReplay, 'replay checks current priority feedback without Gmail writes or new examples');
-
-  const p2Message = priorityMessages.get('p2') ?? '';
-  await undo(p2Message);
-  check(labelsOf(p2Message).includes('INBOX') && labelsOf(p2Message).includes('UNREAD') && !labelsOf(p2Message).includes(gmailId('p2')), 'ordinary undo removes the assigned priority and restores Inbox');
-  force('p1');
-  const reply = 'a110000000000011';
-  deliver({ ...MAILS.bankEn, id: reply, threadId: 'synthetic-priority-thread', subject: 'Synthetic urgent reply', labels: ['INBOX', 'UNREAD', gmailId('p3')] }, 'p1', [gmailId('p3')]);
-  await step();
-  check(checkPriority(reply, 'p1'), 'a new reply replaces inherited P3 with one P1 label');
-  await undo(reply);
-  check(checkPriority(reply, 'p3', true), 'undo restores the inherited P3 and preserves Inbox and UNREAD');
-
-  const p4Message = priorityMessages.get('p4') ?? '';
-  const p4Expected = expected.get(p4Message);
-  if (p4Expected === undefined) throw new Error('smoke: missing expected P4 write');
-  expected.set(p4Message, { ...p4Expected, state: 'undo_intended' });
-  const range = await api.undoLedgerEntries({ startTime: timestampFromMs(T0), endTime: timestampFromMs(now + MINUTE), label: 'labels/p4', requestId: id() });
-  check(range.undoneCount === 1 && labelsOf(p4Message).includes('INBOX') && !labelsOf(p4Message).includes(gmailId('p4')) && checkPriority(corrected, 'p2'), 'range undo affects only P4 while the corrected P2 mail stays archived');
-
-  await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyNeuronBudget: 3000 }), updateMask: { paths: ['daily_neuron_budget'] }, requestId: id() });
-  up.ai.tokensPerCall = 16_000;
-  force('p2');
-  for (let i = 0; i < 5; i++) deliver({ ...MAILS.receiptZh, id: `f00000000000f00${String(i)}` }, 'p2');
-  await step();
-  const budget = await api.getServiceStatus({ name: 'serviceStatus' });
-  check(up.ai.calls.some(call => call.model === '@cf/cloudflare/clef-flash') && budget.decisionModel === 'clef-flash', 'the existing 70 percent threshold switches decisions to Clef-flash');
-  up.ai.tokensPerCall = 2000;
-  await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', dailyNeuronBudget: 10000 }), updateMask: { paths: ['daily_neuron_budget'] }, requestId: id() });
-
-  up.ai.quota = true;
-  const deferredMessage = 'f10000000000f101';
-  deliver({ ...MAILS.travelZh, id: deferredMessage }, 'p2');
-  const deferred = await step();
-  const quota = await api.getServiceStatus({ name: 'serviceStatus' });
-  check(deferred.code === 'deferred' && quota.deferredCount >= 1 && quota.aiQuotaExhausted && labelsOf(deferredMessage).includes('INBOX'), 'exhausted Workers AI quota defers mail without assigning P1');
-  const callsAtQuota = up.ai.calls.length;
-  const writesAtQuota = modifies();
-  await step();
+  await undo('a00000000000f001');
+  check(labelsOf('a00000000000f001').includes('INBOX') && labelsOf('a00000000000f001').includes('UNREAD'), 'undo restores Inbox while preserving unread');
+  let refused = false;
+  try { await api.startReplayEvaluation({ name: 'replayEvaluation', requestId: id() }); } catch { refused = true; }
+  check(refused && up.ai.calls.length === 0, 'retired model replay is refused and no Workers AI calls execute');
+  const budget = (await api.getServiceStatus({ name: 'serviceStatus' })).claudeBudget;
+  check(budget?.model === 'claude-opus-5-5' && budget.effort === 'medium' && budget.limitUsd === 20 && budget.spentUsd > 0 && budget.inputTokens > 0, 'owner status exposes recorded Claude usage and the monthly cap');
   const flow = await api.getMailFlow({ name: 'mailFlows/today' });
-  const waiting = (await api.getServiceStatus({ name: 'serviceStatus' })).deferredCount;
-  const counted = (stage: MailFlow_Stage, outcome: MailFlow_Outcome, label: string) => flow.counts.some(item => item.stage === stage && item.outcome === outcome && item.label === label && item.mailCount >= 1);
-  check(up.ai.calls.length === callsAtQuota, `known quota exhaustion stops repeated model calls (${String(callsAtQuota)} to ${String(up.ai.calls.length)})`);
-  check(modifies() === writesAtQuota && waiting >= 1, 'quota waits without Gmail writes');
-  check(flow.counts.filter(item => item.stage === MailFlow_Stage.DEFERRED).reduce((sum, item) => sum + item.mailCount, 0) === waiting && counted(MailFlow_Stage.CLEF, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/p1') && counted(MailFlow_Stage.CLEF, MailFlow_Outcome.ARCHIVED, 'labels/p2'), 'flow counts deferred mail once alongside P1 and archived priorities');
-  up.ai.quota = false;
-  await step(T0 + 24 * 60 * MINUTE + MINUTE - now);
-  check(checkPriority(deferredMessage, 'p2') && !(await api.getServiceStatus({ name: 'serviceStatus' })).aiQuotaExhausted, 'the next UTC day resumes deferred mail with the existing budget');
-
+  check(flow.counts.some(item => item.stage === MailFlow_Stage.CLAUDE && item.outcome === MailFlow_Outcome.ARCHIVED), 'flow attributes new decisions to Claude');
+  force('p2');
+  up.claude.spendLimit = true;
+  const deferredId = 'a00000000000f010';
+  deliver({ ...MAILS.bankEn, id: deferredId }, 'p2');
+  check((await step()).code === 'claude_spend_limit', 'provider workspace spend exhaustion retains pending mail');
+  const calls = up.claude.calls.length;
+  up.claude.spendLimit = false;
+  await step(5 * MINUTE);
+  check(up.claude.calls.length === calls && labelsOf(deferredId).includes('INBOX'), 'recorded spend exhaustion stops calls for the rest of the UTC month');
+  const date = new Date(now);
+  await step(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1) - now);
+  check(checkPriority(deferredId, 'p2'), 'the next UTC month resumes pending classification');
   const old = await fetch(`${origin}/api/v1/labels`);
   check(old.status === 410 && (await old.text()).includes('RELOAD_REQUIRED'), 'the old /api/v1 paths answer 410 RELOAD_REQUIRED');
   up.gmail.grants.clear();
   await step(2 * 60 * MINUTE);
   await step();
   await step();
-  const calls = up.gmail.calls.length;
+  const googleCalls = up.gmail.calls.length;
   const stopped = await step();
   const auth = await api.getServiceStatus({ name: 'serviceStatus' });
-  check(stopped.code === 'stopped' && up.gmail.calls.length === calls && auth.authState === 3, 'three grant refusals stop further Google requests');
+  check(stopped.code === 'stopped' && up.gmail.calls.length === googleCalls && auth.authState === 3, 'three grant refusals stop further Google requests');
 }
 
 main().then(

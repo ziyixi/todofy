@@ -47,7 +47,7 @@ it('reads Brief status and changes only its guard while preserving archive mode 
 it('shows no aggregate shed after each service is restored while account usage remains high', async () => {
   h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
   await h.tick(NOW - 20 * 60_000);
-  for (const app of ['mail-hero', 'todofy', 'watch', 'mailsort', 'brief'] as const) {
+  for (const app of ['mail-hero', 'todofy', 'watch', 'brief'] as const) {
     expect((await h.post(PATHS.guard, { app, level: 'normal' })).status).toBe(200);
   }
   expect((await h.snapshot()).digest.items.some((item) => item.code === 'guard_shed')).toBe(false);
@@ -65,7 +65,7 @@ it('excludes a service without the guard capability from the aggregate target', 
   h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
   await h.answer('watch', 'status', { value: await status('watch', { capabilities: [] }) });
   await h.tick(NOW - 20 * 60_000);
-  for (const app of ['mail-hero', 'todofy', 'mailsort', 'brief'] as const) {
+  for (const app of ['mail-hero', 'todofy', 'brief'] as const) {
     expect((await h.post(PATHS.guard, { app, level: 'normal' })).status).toBe(200);
   }
 
@@ -73,6 +73,19 @@ it('excludes a service without the guard capability from the aggregate target', 
   expect(home.body?.cloudflare.guard_level).toBe('normal');
   expect((await h.snapshot()).guard.apps.watch).toBeUndefined();
   expect(await h.callsOf('watch', 'setGuard')).toEqual([]);
+});
+
+it('reads Mailsort status without applying account guard or accepting owner guard changes', async () => {
+  h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
+  await h.tick(NOW - 20 * 60_000);
+  const snapshot = await h.snapshot();
+  expect(snapshot.apps.mailsort.status?.app).toBe('mailsort');
+  expect(snapshot.guard.apps.mailsort).toBeUndefined();
+  expect(await h.callsOf('mailsort', 'setGuard')).toEqual([]);
+  const response = await h.post(PATHS.guard, { app: 'mailsort', level: 'shed' });
+  expect(response.status).toBe(503);
+  await response.arrayBuffer();
+  expect(await h.callsOf('mailsort', 'setGuard')).toEqual([]);
 });
 
 it('shows one manually delayed service in Home and its own held marker', async () => {

@@ -54,4 +54,6 @@ enum ErrorReason {
   ERROR_REASON_REPLAY_ACTIVE = 14;
   // FAILED_PRECONDITION (400): existing mail processing and Gmail writes must finish before freezing a label plan.
   ERROR_REASON_CONSOLIDATION_PENDING_WRITES = 15;
+  // FAILED_PRECONDITION (400): this former model feature is retired; historical results remain readable.
+  ERROR_REASON_MODEL_FEATURE_RETIRED = 16;
 }

@@ -6,6 +6,6 @@
     "lib": ["ES2024"],
     "types": ["node", "@cloudflare/workers-types"]
   },
-  "include": ["."],
+  "include": [".", "../../src/text.d.ts"],
   "exclude": []
 }

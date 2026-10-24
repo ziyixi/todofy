@@ -1,7 +1,7 @@
 /**
  * Every bound of the Worker "mailsort" in one place (../../docs/design.md §8). Workers Free: 10 ms of CPU per Worker
  * request, 30 s of CPU per Durable Object invocation (an alarm, a request), 50 subrequests per invocation, and Workers
- * AI's 10,000 neurons a day shared by the whole account. The numbers below keep each alarm well inside those.
+ * Claude is called once per bounded batch. The legacy AI constants below decode historical evidence only.
  */
 
 export const SECOND = 1000;
@@ -28,17 +28,17 @@ export const ALARM_ERROR_RETRY_MS = MINUTE;
 // ---- subrequests (50 per invocation on Workers Free) --------------------------------------------------------------
 
 /**
- * The subrequests one alarm may make (Google and Workers AI together), below the 50 of the platform so that a retry
+ * The subrequests one alarm may make (Google and Claude together), below the 50 of the platform so that a retry
  * inside the run never hits the limit. Each step checks what is left before it starts.
  */
 export const ALARM_SUBREQUESTS = 40;
 /**
- * A mail's worst case: messages.get (and its metadata fallback), an embedding, the decision model's two views, a
- * modify. A label's creation in Gmail before its first write is checked apart (writes.ts executeWrites).
+ * Per-mail allowance for a Gmail read (with metadata fallback) and a write. One Claude request serves the batch.
+ * A label's creation in Gmail before its first write is checked apart (writes.ts executeWrites).
  */
-export const MAIL_SUBREQUESTS = 6;
-/** Mails decided per alarm at most: 6 x 6 = 36, after the token and up to three history pages (40 in all). */
-export const DRAIN_MAX = 6;
+export const MAIL_SUBREQUESTS = 3;
+/** Mails sent in one Claude request per alarm, subject to the remaining Gmail request budget. */
+export const DRAIN_MAX = 10;
 /** History pages read per alarm (each up to HISTORY_PAGE_SIZE records). */
 export const HISTORY_PAGES_MAX = 3;
 export const HISTORY_PAGE_SIZE = 100;
@@ -66,9 +66,9 @@ export const AUTH_FAILURES_STOP = 3;
 export const SUBJECT_CHARS = 200;
 export const SENDER_CHARS = 120;
 export const SNIPPET_CHARS = 300;
-export const BODY_CHARS = 2000;
-/** Base64 characters of a body part decoded at most (about 24 KiB of text, far more than BODY_CHARS needs). */
-export const BODY_BASE64_MAX = 32 * 1024;
+export const BODY_CHARS = 12000;
+/** Base64 characters decoded at most (96 KiB of bytes, enough for 12000 Unicode body characters). */
+export const BODY_BASE64_MAX = 128 * 1024;
 /** MIME parts visited at most, and the deepest nesting. */
 export const MIME_PARTS_MAX = 60;
 export const MIME_DEPTH_MAX = 6;

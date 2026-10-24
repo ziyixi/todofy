@@ -57,8 +57,8 @@ export const INJECTED = [
   { name: 'BUILD_SHA', from: 'GITHUB_SHA', kind: 'build', pattern: /^[0-9a-f]{40}$/ },
 ]
 
-/** The owner's Gmail grant: put by mint-token.mjs from the owner's machine, never by a deploy. */
-export const OWNER_ONLY_SECRETS = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
+/** Gmail and Claude credentials are put from the owner's machine, never by a deploy. */
+export const OWNER_ONLY_SECRETS = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN', 'ANTHROPIC_API_KEY']
 
 function checked(env, name, pattern) {
   const value = env[name]

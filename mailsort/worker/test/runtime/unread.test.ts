@@ -3,7 +3,7 @@ import { afterEach, expect, it } from 'vitest';
 import { Mode, UnreadClassification_State as State } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
 import { DAY, MINUTE, op, startHarness, T0, type Harness } from './harness.ts';
-import { checkGoogleCalls, clefCalls, decision, deliver, failModifies, gmailLabels, modifies, setMode } from './helpers.ts';
+import { checkGoogleCalls, decision, deliver, failModifies, gmailLabels, modifies, setMode } from './helpers.ts';
 
 let h: Harness;
 afterEach(async () => { checkGoogleCalls(h); await h.dispose(); });
@@ -13,7 +13,7 @@ async function ready(): Promise<void> {
   await h.step(T0);
   await setMode(h, Mode.LIVE);
   await h.api.initializePriorities({ requestId: op() });
-  h.up.ai.choiceOverride = () => ({ p2: 0.92, none: 0.08 });
+  h.up.claude.bucket = 'P2';
 }
 
 const mail = (id: number, labels = ['INBOX', 'UNREAD']): SyntheticMail => ({ ...MAILS.bankEn, id: `abc${id.toString(16).padStart(13, '0')}`, labels });
@@ -63,7 +63,7 @@ it('includes archived unread and old skipped decisions, leaves read mail alone, 
   await h.step(T0 + MINUTE);
   expect(await h.sql(`SELECT outcome FROM decisions WHERE message_id = ?`, oldInbox.id)).toEqual([{ outcome: 'skipped' }]);
   const original = new Map([read, spam, trash].map(message => [message.id, gmailLabels(h, message.id)]));
-  h.up.ai.choiceOverride = () => ({ p1: 0.92, none: 0.08 });
+  h.up.claude.bucket = 'P1';
   await start();
   await h.step(T0 + 2 * MINUTE);
   const p1 = h.up.gmail.labelIdByName('P1');
@@ -88,7 +88,7 @@ it('does not spend model allowance on already graded or no-longer-unread message
   };
   await h.step(T0 + MINUTE);
   expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 2, appliedCount: 0, skippedCount: 2 });
-  expect(clefCalls(h)).toHaveLength(0);
+  expect(h.up.claude.calls).toHaveLength(0);
   expect(modifies(h)).toHaveLength(0);
 });
 
@@ -99,14 +99,14 @@ it('uses the remaining daily write allowance and resumes next day without changi
   await h.sql(`INSERT INTO usage (day, applied) VALUES ('2026-10-01', ?) ON CONFLICT (day) DO UPDATE SET applied = excluded.applied`, before.dailyWriteLimit - 1);
   await start();
   await h.step(T0 + MINUTE);
-  expect(await progress()).toMatchObject({ state: State.RUNNING, totalCount: 3, appliedCount: 1, pendingCount: 2, deferredCount: 2 });
+  expect(await progress()).toMatchObject({ state: State.RUNNING, totalCount: 3, appliedCount: 1, pendingCount: 2, deferredCount: 0 });
   expect((await h.api.getSettings({ name: 'settings' })).breakerTripped).toBe(false);
   await h.step(T0 + DAY + MINUTE);
   expect(await progress()).toMatchObject({ state: State.COMPLETED, appliedCount: 3 });
   expect(await h.api.getSettings({ name: 'settings' })).toEqual(before);
 });
 
-it('waits in shadow without consuming the batch, switches at 70%, and defers quota until the next UTC day', async () => {
+it('waits in shadow and defers provider spend exhaustion until the next UTC month', async () => {
   await ready();
   deliver(h, mail(501), T0 - DAY);
   deliver(h, mail(502), T0 - DAY);
@@ -114,18 +114,16 @@ it('waits in shadow without consuming the batch, switches at 70%, and defers quo
   await setMode(h, Mode.SHADOW);
   await h.step(T0 + MINUTE);
   expect(await progress()).toMatchObject({ state: State.RUNNING, pendingCount: 2, appliedCount: 0 });
-  expect(clefCalls(h)).toHaveLength(0);
+  expect(h.up.claude.calls).toHaveLength(0);
   await setMode(h, Mode.LIVE);
-  await h.sql(`INSERT INTO usage (day, neurons) VALUES ('2026-10-01', 7000) ON CONFLICT (day) DO UPDATE SET neurons = 7000`);
-  h.up.ai.quota = true;
+  h.up.claude.spendLimit = true;
   await h.step(T0 + 6 * MINUTE);
   expect(await progress()).toMatchObject({ state: State.RUNNING, pendingCount: 2, deferredCount: 2 });
-  expect(h.up.ai.calls[0]?.model).toContain('clef-flash');
-  const calls = h.up.ai.calls.length;
-  await h.step(T0 + 7 * MINUTE);
-  expect(h.up.ai.calls).toHaveLength(calls);
-  h.up.ai.quota = false;
-  await h.step(T0 + DAY + MINUTE);
+  expect(h.up.claude.calls).toHaveLength(1);
+  h.up.claude.spendLimit = false;
+  await h.step(T0 + DAY);
+  expect(h.up.claude.calls).toHaveLength(1);
+  await h.step(Date.parse('2026-11-01T00:00:00Z'));
   expect(await progress()).toMatchObject({ state: State.COMPLETED, appliedCount: 2 });
 });
 
@@ -186,42 +184,43 @@ it('keeps normal unread batches unchanged and rechecks only the current unconfir
   await h.step(T0 + 2 * MINUTE);
   await h.step(T0 + 3 * MINUTE);
   expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 9, skippedCount: 9 });
-  expect(clefCalls(h)).toHaveLength(0);
-  h.up.ai.choiceOverride = () => ({ p3: 0.92, none: 0.08 });
+  expect(h.up.claude.calls).toHaveLength(0);
+  h.up.claude.bucket = 'P3';
   await start(op(), true);
   await h.step(T0 + 4 * MINUTE);
   expect(await h.sql(`SELECT message_id FROM unread_batch ORDER BY message_id`)).toEqual(eligible.map(message => ({ message_id: message.id })));
   expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 3, appliedCount: 3, failedCount: 0 });
-  expect(clefCalls(h)).toHaveLength(6);
+  expect(h.up.claude.calls).toHaveLength(1);
 });
 
-it.each([false, true])('refreshes a still-P1 decision without a Gmail write, new ledger or false applied count, confident=%s', async confident => {
+it.each([false, true])('refreshes a historical fallback P1 without a Gmail write or false applied count, legacyCase=%s', async () => {
   await ready();
   const p1 = h.up.gmail.labelIdByName('P1') ?? '';
   const other = h.up.gmail.createUserLabel('Personal');
   const message = mail(711, ['INBOX', 'UNREAD', 'STARRED', other]);
   deliver(h, message, T0 + MINUTE);
-  h.up.ai.choiceOverride = () => ({ p2: 0.5, p3: 0.3, none: 0.2 });
+  h.up.claude.bucket = 'P1';
   await h.step(T0 + 2 * MINUTE);
   const originalLedger = await h.sql(`SELECT id, state, superseded FROM ledger WHERE message_id = ?`, message.id);
   expect(originalLedger).toHaveLength(1);
   expect(originalLedger[0]).toMatchObject({ state: 'applied', superseded: 0 });
   h.up.gmail.ownerModify(message.id, [], ['INBOX']);
   const before = gmailLabels(h, message.id);
-  const modelCalls = h.up.ai.calls.length;
-  h.up.ai.choiceOverride = () => confident ? { p1: 0.92, none: 0.08 } : { p2: 0.5, p3: 0.3, none: 0.2 };
+  await h.sql(`UPDATE decisions SET top_label = 'p2', unsure_reason = 'low_confidence' WHERE message_id = ?`, message.id);
+  const modelCalls = h.up.claude.calls.length;
+  h.up.claude.bucket = 'P1';
 
   await start(op(), true);
   await h.step(T0 + 3 * MINUTE);
 
   expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 1, skippedCount: 1, appliedCount: 0, failedCount: 0 });
-  expect(await decision(h, message.id)).toMatchObject({ outcome: 'applied', label_id: 'p1', top_label: confident ? 'p1' : 'p2', unsure_reason: confident ? '' : 'low_confidence', current_labels: '["p1"]', decided_at: T0 + 3 * MINUTE });
+  expect(await decision(h, message.id)).toMatchObject({ outcome: 'applied', label_id: 'p1', top_label: 'p1', unsure_reason: '', current_labels: '["p1"]', decided_at: T0 + 3 * MINUTE });
   expect(await h.sql(`SELECT id, state, superseded FROM ledger WHERE message_id = ?`, message.id)).toEqual(originalLedger);
   expect(await h.sql(`SELECT n FROM flow WHERE outcome IN ('archived', 'kept_in_inbox')`)).toEqual([{ n: 1 }]);
   expect(modifies(h)).toHaveLength(1);
   expect(gmailLabels(h, message.id)).toEqual(before);
   expect(gmailLabels(h, message.id)).toContain(p1);
-  expect(clefCalls(h, modelCalls)).toHaveLength(2);
+  expect(h.up.claude.calls.slice(modelCalls)).toHaveLength(1);
 });
 
 it.each([false, true])('supersedes the original P1 ledger only after P3 applies and restores the recheck preimage on undo, retry=%s', async retry => {
@@ -231,14 +230,15 @@ it.each([false, true])('supersedes the original P1 ledger only after P3 applies 
   const other = h.up.gmail.createUserLabel('Personal');
   const message = mail(721, ['INBOX', 'UNREAD', 'STARRED', other]);
   deliver(h, message, T0 + MINUTE);
-  h.up.ai.choiceOverride = () => ({ p2: 0.5, p3: 0.3, none: 0.2 });
+  h.up.claude.bucket = 'P1';
   await h.step(T0 + 2 * MINUTE);
+  await h.sql(`UPDATE decisions SET top_label = 'p2', unsure_reason = 'low_confidence' WHERE message_id = ?`, message.id);
   const oldRows = await h.sql<{ id: string }>(`SELECT id FROM ledger WHERE message_id = ? AND label_id = 'p1'`, message.id);
   const oldName = `ledgerEntries/${oldRows[0]?.id ?? ''}`;
   expect((await h.api.getLedgerEntry({ name: oldName })).undoable).toBe(true);
   const before = gmailLabels(h, message.id);
   expect(before).toContain(p1);
-  h.up.ai.choiceOverride = () => ({ p3: 0.92, none: 0.08 });
+  h.up.claude.bucket = 'P3';
   const failing = retry ? failModifies(h, 503) : null;
 
   await start(op(), true);
@@ -282,7 +282,7 @@ it('skips a collected fallback when the owner reads it, changes its priority or 
   await setMode(h, Mode.LIVE);
   await h.step(T0 + 8 * MINUTE);
   expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 4, skippedCount: 4, appliedCount: 0, failedCount: 0 });
-  expect(clefCalls(h)).toHaveLength(0);
+  expect(h.up.claude.calls).toHaveLength(0);
   expect(modifies(h)).toHaveLength(0);
   expect(messages.map(message => gmailLabels(h, message.id))).toEqual(before);
 });
@@ -301,18 +301,18 @@ it('rechecks the original 100 successful identities without substituting a later
   }
   await h.sql(`INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time, apply_time)
     VALUES ('later-reapply', ?, 'p4', ?, 1, 'auto', 'applied', ?, ?)`, originals[0]?.id ?? '', p4, T0 + DAY, T0 + DAY);
-  h.up.ai.choiceOverride = () => ({ p4: 0.92, none: 0.08 });
+  h.up.claude.bucket = 'P4';
   await start(op(), false, true);
   const selected = await h.sql(`SELECT message_id FROM unread_batch ORDER BY message_id`);
   expect(selected).toEqual(originals.map(message => ({ message_id: message.id })));
   await setMode(h, Mode.SHADOW);
   await h.step(T0 + MINUTE);
   expect(await progress()).toMatchObject({ totalCount: 100, pendingCount: 100, appliedCount: 0 });
-  expect(clefCalls(h)).toHaveLength(0);
+  expect(h.up.claude.calls).toHaveLength(0);
   await setMode(h, Mode.LIVE);
   for (let pass = 6; pass <= 23; pass++) await h.step(T0 + pass * MINUTE);
   expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 100, skippedCount: 100, appliedCount: 0, failedCount: 0 });
-  expect(clefCalls(h)).toHaveLength(200);
+  expect(h.up.claude.calls.flat()).toHaveLength(100);
   expect(modifies(h)).toHaveLength(0);
   expect(h.up.gmail.calls.filter(call => new URL(call.url).pathname.endsWith('/messages'))).toHaveLength(0);
   await start(op(), false, true);
@@ -338,7 +338,7 @@ it('refreshes a same-P4 result without undoing the owner read or Inbox position 
   const other = h.up.gmail.createUserLabel('Personal');
   const message = mail(911, ['INBOX', 'UNREAD', 'STARRED', other]);
   deliver(h, message, T0 + MINUTE);
-  h.up.ai.choiceOverride = () => ({ p4: 0.92, none: 0.08 });
+  h.up.claude.bucket = 'P4';
   await h.step(T0 + 2 * MINUTE);
   h.up.gmail.ownerModify(message.id, ['INBOX'], ['UNREAD']);
   const before = gmailLabels(h, message.id);
@@ -358,7 +358,7 @@ it('rechecks read mail but skips owner priority changes, explicit verdicts, Spam
   const p3 = h.up.gmail.labelIdByName('P3') ?? '';
   const messages = Array.from({ length: 6 }, (_, index) => mail(921 + index));
   for (const message of messages) deliver(h, message, T0 + MINUTE);
-  h.up.ai.choiceOverride = () => ({ p4: 0.92, none: 0.08 });
+  h.up.claude.bucket = 'P4';
   await h.step(T0 + 2 * MINUTE);
   expect(modifies(h)).toHaveLength(6);
   h.up.gmail.ownerModify(mail(921).id, [], ['UNREAD']);
@@ -368,12 +368,12 @@ it('rechecks read mail but skips owner priority changes, explicit verdicts, Spam
   h.up.gmail.ownerModify(mail(925).id, ['SPAM'], []);
   h.up.gmail.ownerModify(mail(926).id, ['TRASH'], []);
   const unchanged = messages.slice(1).map(message => gmailLabels(h, message.id));
-  const calls = h.up.ai.calls.length;
-  h.up.ai.choiceOverride = () => ({ p2: 0.92, none: 0.08 });
+  const calls = h.up.claude.calls.length;
+  h.up.claude.bucket = 'P2';
   await start(op(), false, true);
   await h.step(T0 + 3 * MINUTE);
   expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 6, appliedCount: 1, skippedCount: 5, failedCount: 0 });
-  expect(clefCalls(h, calls)).toHaveLength(2);
+  expect(h.up.claude.calls.slice(calls)).toHaveLength(1);
   expect(gmailLabels(h, mail(921).id)).toEqual([h.up.gmail.labelIdByName('P2') ?? '']);
   expect(messages.slice(1).map(message => gmailLabels(h, message.id))).toEqual(unchanged);
 });
@@ -384,13 +384,13 @@ it.each([['p2', true, false], ['p1', false, true]] as const)('replaces P4 with %
   const other = h.up.gmail.createUserLabel('Personal');
   const message = mail(931, ['INBOX', 'UNREAD', 'STARRED', other]);
   deliver(h, message, T0 + MINUTE);
-  h.up.ai.choiceOverride = () => ({ p4: 0.92, none: 0.08 });
+  h.up.claude.bucket = 'P4';
   await h.step(T0 + 2 * MINUTE);
   if (!unread) h.up.gmail.ownerModify(message.id, [], ['UNREAD']);
   const before = gmailLabels(h, message.id);
   const old = (await h.api.listLedgerEntries({})).ledgerEntries[0];
   expect(old?.undoable).toBe(true);
-  h.up.ai.choiceOverride = () => ({ [target]: 0.92, none: 0.08 });
+  h.up.claude.bucket = target.toUpperCase() as 'P1' | 'P2';
   const failing = retry ? failModifies(h, 503) : null;
   await start(op(), false, true);
   await h.step(T0 + 3 * MINUTE);
@@ -408,4 +408,26 @@ it.each([['p2', true, false], ['p1', false, true]] as const)('replaces P4 with %
   await h.api.undoLedgerEntry({ name: latest?.name ?? '', requestId: op() });
   expect(gmailLabels(h, message.id)).toEqual(before);
   expect(gmailLabels(h, message.id)).toContain(p4);
+});
+
+
+it('preserves historical decision evidence when a requested fallback recheck exhausts invalid-response retries', async () => {
+  await ready();
+  const p1 = h.up.gmail.labelIdByName('P1') ?? '';
+  const input = mail(950, ['INBOX', 'UNREAD', p1]);
+  await storedFallback(input);
+  const before = await decision(h, input.id);
+  const labels = gmailLabels(h, input.id);
+  h.up.claude.badItems = true;
+  await start(op(), true);
+  let now = T0 + 2 * MINUTE;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await h.step(now);
+    const pending = (await h.sql<{ not_before: number }>(`SELECT not_before FROM pending WHERE message_id = ?`, input.id))[0];
+    if (pending !== undefined) now = pending.not_before;
+  }
+  expect(await decision(h, input.id)).toEqual(before);
+  expect(await progress()).toMatchObject({ state: State.COMPLETED, failedCount: 1, appliedCount: 0 });
+  expect(gmailLabels(h, input.id)).toEqual(labels);
+  expect(modifies(h)).toEqual([]);
 });

@@ -262,7 +262,7 @@ describe('GetCloudflareView and RefreshCloudflareView', () => {
     expect(cf.workers_truncated).toBe(false);
     expect(cf.resources.map((r) => r.kind)).toEqual(['d1', 'd1', 'do', 'do', 'do', 'r2', 'r2']);
     expect(cf.resources.find((r) => r.id === 'mail-hero-store')).toMatchObject({ resource: 'mail-hero-store', entry: 'mail-hero' });
-    expect(Object.keys(cf.guard.apps).sort()).toEqual(['brief', 'mail-hero', 'mailsort', 'todofy', 'watch']);
+    expect(Object.keys(cf.guard.apps).sort()).toEqual(['brief', 'mail-hero', 'todofy', 'watch']);
     if (count >= 5) {
       expect(cf.workers.find((w) => w.script === 'todofy-core')).toMatchObject({ entry: 'todofy', requests: 96, do_requests: 632, cpu_p99_us: 6207 });
       // Errors first, then requests.

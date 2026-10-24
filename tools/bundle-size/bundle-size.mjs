@@ -1,7 +1,7 @@
 // Bundle sizes against budgets, shared by the apps' CI (node --test tools/bundle-size/test/*.test.mjs in the Changes
 // job). Build tooling only: an app's own script imports it by relative path, and no Worker bundles it.
 //
-// - A Worker: every module `wrangler deploy --dry-run --outdir <dir>` wrote (.js, .mjs, .wasm; source maps are not
+// - A Worker: JavaScript, Wasm and .txt prompt modules from `wrangler deploy --dry-run --outdir <dir>` (source maps are not
 //   uploaded as code), gzip-compressed, against FREE_LIMIT_GZIP_BYTES (the Workers Free script size limit, 3 MiB
 //   compressed) and the app's own budget. Static assets do not count: Workers Static Assets serves them.
 // - A UI: every .js file of the built assets directory, gzip-compressed (what a browser downloads on the first visit
@@ -36,7 +36,7 @@ export function workerBundleSize(dir) {
     for (const name of readdirSync(path).sort()) {
       const full = join(path, name)
       if (statSync(full).isDirectory()) walk(full)
-      else if (/\.(m?js|wasm)$/.test(name)) {
+      else if (/\.(m?js|wasm|txt)$/.test(name)) {
         const bytes = readFileSync(full)
         raw += bytes.length
         gzip += gzipSize(bytes)

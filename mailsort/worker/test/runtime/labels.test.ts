@@ -7,7 +7,7 @@ import { Example_Origin } from '@ziyixi/proto/mailsort/ui/v2/review_pb';
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
 import { Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { MAILS } from '../fakes/fixtures.ts';
-import { DAY, MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
+import { DAY, HOUR, MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
 import { checkGoogleCalls, decision, deliver, gmailLabels, modifies, setMode } from './helpers.ts';
 
 describe('fixed priority labels and owner corrections', () => {
@@ -24,9 +24,9 @@ describe('fixed priority labels and owner corrections', () => {
   afterEach(() => { checkGoogleCalls(h); });
 
   async function classified(id: string, priority: string, labels?: string[]): Promise<void> {
-    h.up.ai.choiceOverride = () => ({ [priority]: 0.92, none: 0.08 });
+    h.up.claude.bucket = priority.toUpperCase() as 'P1' | 'P2' | 'P3' | 'P4';
     deliver(h, { ...MAILS.bankEn, id, ...(labels === undefined ? {} : { labels }) }, now + MINUTE);
-    now += 5 * MINUTE;
+    now += HOUR;
     await h.step(now);
     expect(await decision(h, id)).toMatchObject({ outcome: 'applied', label_id: priority, shown: 0 });
   }
@@ -86,15 +86,17 @@ describe('fixed priority labels and owner corrections', () => {
     expect(gmailLabels(h, id)).toEqual(['CATEGORY_UPDATES', 'INBOX', 'UNREAD']);
   });
 
-  it('replaces inherited priority on a new reply and undo restores its original label', async () => {
+  it('leaves an already prioritized unread reply unchanged during ordinary processing', async () => {
     const id = 'abc0000000000203';
     const p3 = h.up.gmail.labelIdByName('P3') ?? '';
-    await classified(id, 'p1', ['INBOX', 'UNREAD', p3]);
-    const p1 = h.up.gmail.labelIdByName('P1') ?? '';
-    expect(gmailLabels(h, id)).toEqual(['INBOX', 'UNREAD', p1].sort());
-    const entry = (await h.api.listLedgerEntries({})).ledgerEntries.find((row) => row.messageId === id);
-    await h.api.undoLedgerEntry({ name: entry?.name ?? '', requestId: op() });
+    const calls = h.up.claude.calls.length;
+    deliver(h, { ...MAILS.bankEn, id, labels: ['INBOX', 'UNREAD', p3] }, now + MINUTE);
+    now += HOUR;
+    await h.step(now);
+    expect(await decision(h, id)).toBeUndefined();
+    expect(h.up.claude.calls).toHaveLength(calls);
     expect(gmailLabels(h, id)).toEqual(['INBOX', 'UNREAD', p3].sort());
+    expect((await h.api.listLedgerEntries({})).ledgerEntries.some(row => row.messageId === id)).toBe(false);
   });
 
   it('learns a current Gmail priority correction, with flow counters and bounded examples', async () => {
@@ -103,19 +105,19 @@ describe('fixed priority labels and owner corrections', () => {
     const p2 = h.up.gmail.labelIdByName('P2') ?? '';
     const p3 = h.up.gmail.labelIdByName('P3') ?? '';
     h.up.gmail.ownerModify(id, [p3], [p2]);
-    now += 5 * MINUTE;
+    now += HOUR;
     await h.step(now);
     expect(await decision(h, id)).toMatchObject({ verdict: 'corrected', verdict_label: 'p3', verdict_source: 'gmail' });
     expect(await h.sql(`SELECT label_id, origin FROM examples WHERE message_id = ?`, id)).toEqual([{ label_id: 'p3', origin: 'correction' }]);
     expect((await h.api.listExamples({ label: 'labels/p3' })).examples).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'labels/p3', origin: Example_Origin.CORRECTION })]));
     expect((await h.api.getLabel({ name: 'labels/p3' })).trustedDomains).toEqual([]);
     const flow = await h.api.getMailFlow({ name: 'mailFlows/today' });
-    expect(flow.counts.find((row) => row.stage === MailFlow_Stage.CLEF && row.outcome === MailFlow_Outcome.CORRECTED && row.label === 'labels/p2')?.mailCount).toBeGreaterThan(0);
+    expect(flow.counts.find((row) => row.stage === MailFlow_Stage.CLAUDE && row.outcome === MailFlow_Outcome.CORRECTED && row.label === 'labels/p2')?.mailCount).toBeGreaterThan(0);
     const report = await h.api.getLabelReport({ name: 'labelReport' });
     expect(report.labels.find((row) => row.label === 'labels/p2')?.gmailCorrectionCount).toBeGreaterThan(0);
     // Returning to the applied label withdraws this correction and its example.
     h.up.gmail.ownerModify(id, [p2], [p3]);
-    now += 5 * MINUTE;
+    now += HOUR;
     await h.step(now);
     expect(await decision(h, id)).toMatchObject({ verdict: null });
     expect(await h.sql(`SELECT id FROM examples WHERE message_id = ?`, id)).toEqual([]);

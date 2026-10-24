@@ -18,13 +18,12 @@ runs:
         npm ci --prefix worker --no-audit --no-fund
         npm ci --prefix web --no-audit --no-fund
     # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after npm ci; the
-    # secrets test pins how that wrangler keeps the owner's Gmail grant on a deploy.
+    # secrets test pins how that wrangler keeps the owner's Gmail grant and Claude key on a deploy.
     - name: Test the production config, the deploy values and the token script
       working-directory: mailsort
       shell: bash -e {0}
       run: node --test deploy/test/*.test.mjs
-    # The closed Gmail operation table and fuzz, masking, priority decisions, legacy schema reads, Clef's strict
-    # answer and ops-v1's golden bytes. Phishing/trust-domain scoring is no longer part of classification.
+    # The closed Gmail operation table, masks, strict Claude JSON and usage, and historical schema/golden reads.
     - name: Lint, typecheck and test the Worker
       working-directory: mailsort/worker
       shell: bash -e {0}
@@ -32,9 +31,9 @@ runs:
         npm run lint
         npm run typecheck
         npm test
-    # A real SQLite MailsortState with the fake Gmail and fake Workers AI behind Miniflare's outbound service (no
-    # network): fixed P1-P4 in shadow/live, P1 fallback, label-only setup, ordinary undo, priority feedback,
-    # replay, resync, auth stop, Clef-flash, quota deferral, the breaker, the
+    # A real SQLite MailsortState with fake Gmail and Claude behind Miniflare's outbound service (no network):
+    # fixed P1-P4 in shadow/live, hourly batches, actual monthly usage, provider cap, label setup, undo,
+    # resync, auth stop, write-cap waits, historical replay, the
     # owner API, ops-v1 over a service binding, and the CPU of the fetch handler and of MailsortState (its alarm path
     # at its bounds) against bounds scaled by the machine's measured speed (tools/workerd-cpu).
     - name: Runtime tests (workerd with a real Durable Object)
@@ -49,5 +48,5 @@ runs:
         npm run typecheck
         npm test
         npm run build
-    # The real wrangler dev (wrangler.test.toml, local bindings, no AI binding) against the fakes on loopback: the owner's
+    # The real wrangler dev (wrangler.test.toml, local bindings) against the fakes on loopback: the owner's
     # whole loop through the HTTP API, every Google request checked against the table.

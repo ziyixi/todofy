@@ -5,7 +5,6 @@ import { applyFeedback, setVerdict } from '../src/feedback.ts';
 import { gather, judge, senderHistory } from '../src/judge.ts';
 import { CLEF } from '../src/limits.ts';
 import { readMessage } from '../src/mime.ts';
-import { daily } from '../src/pipeline.ts';
 import { PRIORITY_LABELS } from '../src/priority.ts';
 import { startReplay } from '../src/replay.ts';
 import { Budget } from '../src/session.ts';
@@ -77,7 +76,6 @@ describe('priority judgement and learning cutoff', () => {
     oldDecision(store, 'fallback', 'p1', CUT + 1);
     store.run(`UPDATE decisions SET top_label = 'p2', unsure_reason = 'low_confidence' WHERE message_id = 'fallback'`);
     expect(senderHistory(store, 'sender-hash', NOW, 'other-message')).toEqual([]);
-    daily(store, NOW);
     expect(store.decision('fallback')?.verdict).toBeNull();
     expect(store.all(`SELECT id FROM examples`)).toEqual([]);
     const row = store.decision('fallback');
@@ -108,11 +106,10 @@ describe('priority judgement and learning cutoff', () => {
     const old = store.decision('old');
     if (old === undefined) throw new Error('fixture');
     setVerdict(store, old, 'p2', 'review', NOW);
-    daily(store, NOW);
     expect(store.decision('old')?.verdict).toBeNull();
     expect(store.decision('topic')?.verdict).toBeNull();
-    expect(store.decision('current')?.verdict).toBe('weak');
-    expect(store.all<{ message_id: string }>(`SELECT message_id FROM examples`)).toEqual([{ message_id: 'current' }]);
+    expect(store.decision('current')?.verdict).toBeNull();
+    expect(store.all<{ message_id: string }>(`SELECT message_id FROM examples`)).toEqual([]);
   });
 
   it('starts replay only from current priority decisions, excluding old answers and aliases', () => {

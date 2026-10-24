@@ -75,6 +75,7 @@ export function labelMessage(row: LabelRow, exampleCount: number, trustedDomains
 
 /** The stages of decisions before 2026-10-10 (`rule`, `neighbours`) have no value: their rows are left out. */
 const FLOW_STAGES: Readonly<Partial<Record<FlowStage, MailFlow_Stage>>> = {
+  claude: MailFlow_Stage.CLAUDE,
   skipped: MailFlow_Stage.SKIPPED,
   clef: MailFlow_Stage.CLEF,
   'clef-flash': MailFlow_Stage.CLEF_FLASH,

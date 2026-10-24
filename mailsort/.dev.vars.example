@@ -9,9 +9,10 @@ DEV_MANUAL_ALARMS=true
 ACCESS_OWNER=owner@example.com
 # A locally generated 64-hex key, e.g. `openssl rand -hex 32`:
 CSRF_SIGNING_KEY=0000000000000000000000000000000000000000000000000000000000000000
-# The fake Gmail and fake Workers AI: `node test/smoke/fake-upstream.mts` in worker/ prints this origin. Every Google
-# request and every model call then goes there; nothing reaches Google or Cloudflare.
+# The fake Gmail and Claude: `node test/smoke/fake-upstream.mts` in worker/ prints this origin.
+# Every Google request and model call goes there; no external calls or real credentials.
 DEV_FAKE_UPSTREAM=http://127.0.0.1:8796
 GMAIL_CLIENT_ID=synthetic-client.apps.example.com
 GMAIL_CLIENT_SECRET=synthetic-secret
 GMAIL_REFRESH_TOKEN=synthetic-refresh-token
+ANTHROPIC_API_KEY=synthetic-claude-key

@@ -213,12 +213,14 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   URLs. One digest after 14:00 UTC plus at most nine urgent tasks keep to its own budget of ten a day (TaskInbox
   refuses a source's 21st).
   BROKEN and automatic pauses enter the digest; status/guard reach Home through Ops.
-- **Mailsort:** one SQLite DO, no D1/R2 and no cron, plus the Workers AI binding (Clef, Clef-flash, bge-m3). It
+- **Mailsort:** one SQLite DO/Alarm, no D1/R2 or cron. Hourly unread batches use Claude Opus 5.5 medium and one
+  maintained prompt, with a dedicated $20/month Anthropic workspace. It
   reads the owner's Gmail with the owner's own OAuth grant and only ever adds or removes its own labels (created by it
   or adopted, owned by ID) and INBOX, through the closed operation table of `gmail.ts`; it never marks mail read, deletes, sends or changes
   settings. Every write is a ledger row first and can be undone. Shadow mode (the default) only records; the
-  deployment variable `MODE` and the breaker can only lower the mode. The Gmail grant is put by the owner and never
-  passes through GitHub. See [AGENTS](../mailsort/AGENTS.md) and [design](../mailsort/docs/design.md).
+  deployment variable `MODE` and the breaker can only lower the mode. Gmail and Claude credentials are owner-written
+  Worker secrets and never pass through GitHub. Account Workers AI shedding does not affect its model.
+  See [AGENTS](../mailsort/AGENTS.md) and [design](../mailsort/docs/design.md).
 - **recall:** one SQLite DO (records, the bigram FTS5 index, the compacted change feed) and one private R2 bucket (the
   texts of a rolling retention window, a year by default; a text leaves only after the Dropbox archive confirmed it), no
   D1 and no cron. A Chrome extension (never in incognito) records visits with their focus time and a page's

@@ -351,7 +351,7 @@ describe('the store', () => {
     const examples = s.all(`SELECT * FROM examples`);
     s.migrate(transactional(sql));
     expect(s.schemaVersion()).toBe(SCHEMA_VERSION);
-    for (const row of cases) expect(s.decision(row.id)).toEqual({ ...before.get(row.id), top_label: row.top, unsure_reason: row.reason });
+    for (const row of cases) expect(s.decision(row.id)).toEqual({ ...before.get(row.id), top_label: row.top, unsure_reason: row.reason, model_reason: null });
     expect(s.all(`SELECT * FROM ledger ORDER BY id`)).toEqual(ledger);
     expect(s.all(`SELECT * FROM examples`)).toEqual(examples);
     for (const label of PRIORITY_LABELS) expect(s.label(label.id)).toMatchObject({ description: label.description, desc_version: 2 });

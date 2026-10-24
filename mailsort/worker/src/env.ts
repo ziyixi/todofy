@@ -18,8 +18,6 @@ export interface Env {
   readonly MAILSORT: DurableObjectNamespace<MailsortState>;
   /** The UI's static files (web/dist). */
   readonly ASSETS: Fetcher;
-  /** Workers AI: the decision models (Clef, Clef-flash) and the embedding model. Absent in tests and local development. */
-  readonly AI?: AiRunner;
 
   // vars (committed in ../../wrangler.toml; BUILD_SHA and MODE added at deploy by deploy/deploy-vars.mjs)
   /** The app's host, sort.ziyixi.science: the CSRF Origin. */
@@ -41,6 +39,8 @@ export interface Env {
 
   // secrets the owner puts with `wrangler secret put` from their own machine (deploy/mint-token.mjs); never in GitHub,
   // never sent or removed by a deploy (--secrets-file keeps the secrets it does not name).
+  /** Owner-written native Anthropic API key, isolated to the Mailsort workspace. */
+  readonly ANTHROPIC_API_KEY?: string;
   readonly GMAIL_CLIENT_ID?: string;
   readonly GMAIL_CLIENT_SECRET?: string;
   readonly GMAIL_REFRESH_TOKEN?: string;
@@ -111,27 +111,4 @@ export function upstreamFetch(env: Pick<Env, 'DEV_FAKE_UPSTREAM' | 'DEV_AUTH_BYP
     headers.set(ORIGINAL_URL_HEADER, request.url);
     return fetch(new Request(`${origin}${target.pathname}${target.search}`, { method: request.method, headers, body: request.body, redirect: 'manual' }));
   };
-}
-
-/**
- * The Workers AI runner: the binding, or in local development the loopback fake's `POST /ai/run/<model>` with the
- * input as JSON. Null when neither exists (tests that never decide with the model).
- */
-export function aiRunner(env: Pick<Env, 'AI' | 'DEV_FAKE_UPSTREAM' | 'DEV_AUTH_BYPASS'>, fetcher: typeof fetch = fetch): AiRunner | null {
-  const origin = devUpstream(env);
-  if (origin !== null) {
-    return {
-      async run(model, input) {
-        const response = await fetcher(`${origin}/ai/run/${model}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
-        const body: unknown = await response.json();
-        if (!response.ok) {
-          // The fake answers {"error": "<message>"}, as the binding throws an Error with the message.
-          const message = typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string' ? (body as { error: string }).error : 'ai_error';
-          throw new Error(message);
-        }
-        return body;
-      },
-    };
-  }
-  return env.AI ?? null;
 }

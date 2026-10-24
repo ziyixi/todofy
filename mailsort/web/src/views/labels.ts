@@ -1,4 +1,4 @@
-/** The four fixed Gmail priority labels, with their learned examples on demand. */
+/** The four fixed Gmail priorities, with historical examples available on demand. */
 import { Label_GmailState, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { api, errorMessage, newRequestId, withRetry } from '../api.ts'
 import { button, el, fill } from '../dom.ts'
@@ -91,7 +91,7 @@ export async function renderLabels(ctx: ViewContext): Promise<void> {
       el('div', { class: 'actions' }, start),
     )
     fill(body,
-      el('p', { class: 'hint lead' }, '新邮件使用 P1、P2、P3、P4 四个 Gmail 标签。拿不准时归 P1；分类保持原有未读状态。'),
+      el('p', { class: 'hint lead' }, 'Claude Opus 5.5（medium）按固定提示词分到 P1、P2、P3、P4。约每小时批量判断，分类保持原有未读状态。'),
       setup,
       result,
       unread,

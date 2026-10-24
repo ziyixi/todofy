@@ -46,6 +46,7 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
   DEV_MANUAL_ALARMS: 'true',
   // Any loopback origin: the outbound service answers every request, whatever its address.
   DEV_FAKE_UPSTREAM: 'http://127.0.0.1:9',
+  ANTHROPIC_API_KEY: 'synthetic-anthropic-key',
   GMAIL_CLIENT_ID: 'synthetic-client.apps.example.com',
   GMAIL_CLIENT_SECRET: 'synthetic-secret',
   GMAIL_REFRESH_TOKEN: REFRESH_TOKEN,
@@ -60,6 +61,7 @@ export function workerBundle(entry = 'src/index.ts'): Promise<string> {
   const bundle = build({
     entryPoints: [join(ROOT, entry)],
     bundle: true,
+    loader: { '.txt': 'text' },
     format: 'esm',
     platform: 'neutral',
     target: 'es2024',

@@ -4,6 +4,7 @@
  * runner). The Worker's development fetch (env.ts upstreamFetch) sends each Google request to this loopback origin with
  * the real Google URL in `x-mailsort-original-url`; anything else is a 502 and is recorded as a stray request.
  */
+import type { ClaudeEmail } from '../../src/claude.ts';
 import { FakeAi } from './fake-ai.ts';
 import { FakeGmail, type RecordedLedger } from './fake-gmail.ts';
 
@@ -12,6 +13,16 @@ export const ORIGINAL_URL_HEADER = 'x-mailsort-original-url';
 export class FakeUpstream {
   readonly gmail = new FakeGmail();
   readonly ai = new FakeAi();
+  readonly claude = {
+    calls: [] as ClaudeEmail[][],
+    bucket: 'P2' as 'P1' | 'P2' | 'P3' | 'P4',
+    status: 200,
+    badItems: false,
+    spendLimit: false,
+    inputTokens: 1200,
+    outputTokens: 120,
+    thinkingTokens: 40 as number | null,
+  };
   /** Requests that were neither Google nor Workers AI. */
   readonly strays: string[] = [];
   /**
@@ -28,12 +39,29 @@ export class FakeUpstream {
   reset(): void {
     this.gmail.reset();
     this.ai.reset();
+    this.claude.calls.length = 0;
+    this.claude.status = 200;
+    this.claude.spendLimit = false;
+    this.claude.badItems = false;
     this.strays.length = 0;
   }
 
   async handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const body = request.method === 'GET' || request.method === 'HEAD' ? '' : await request.text();
+    const originalUrl = request.headers.get(ORIGINAL_URL_HEADER) ?? request.url;
+    if (request.method === 'POST' && originalUrl === 'https://api.anthropic.com/v1/messages') {
+      const input = JSON.parse(body) as { messages: { content: string }[] };
+      const emails = (JSON.parse(input.messages[0]?.content ?? '{}') as { emails: ClaudeEmail[] }).emails;
+      this.claude.calls.push(emails);
+      if (this.claude.spendLimit) return Response.json({ error: { type: 'rate_limit_error', details: { error_code: 'enforced_spend_limit_reached' } } }, { status: 429 });
+      if (this.claude.status !== 200) return Response.json({ error: { type: 'api_error' } }, { status: this.claude.status });
+      const items = this.claude.badItems ? [] : emails.map(email => ({ id: email.id, bucket: this.claude.bucket, reason: 'Synthetic reading priority.' }));
+      return Response.json({ model: 'claude-opus-5-5', type: 'message', role: 'assistant', stop_reason: 'end_turn',
+        content: [{ type: 'text', text: JSON.stringify({ items }) }],
+        usage: { input_tokens: this.claude.inputTokens, output_tokens: this.claude.outputTokens,
+          ...(this.claude.thinkingTokens === null ? {} : { output_tokens_details: { thinking_tokens: this.claude.thinkingTokens } }) } });
+    }
     if (request.method === 'POST' && url.pathname.startsWith('/ai/run/')) {
       try {
         return Response.json(this.ai.run(decodeURIComponent(url.pathname.slice('/ai/run/'.length)), JSON.parse(body) as Record<string, unknown>));

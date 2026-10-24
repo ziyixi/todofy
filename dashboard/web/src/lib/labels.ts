@@ -161,6 +161,12 @@ const SIGNALS: Readonly<Record<string, string>> = {
   breaker_tripped: '写入超限，已退回影子模式（只记录）',
   sync_stale: 'Gmail 同步已停止',
   ai_quota_exhausted: 'Workers AI 今日额度已用完，邮件顺延到明天',
+  claude_not_configured: 'Mailsort Claude API 尚未配置',
+  claude_auth: 'Mailsort Claude API 授权失败',
+  claude_spend_limit: 'Mailsort Claude 工作区已达到月度消费上限',
+  claude_budget_exhausted: 'Mailsort 本月模型预算已用完',
+  claude_unavailable: 'Mailsort Claude API 暂不可用',
+  claude_bad_answer: 'Mailsort Claude 返回格式无效',
   // recall
   device_stale: '有浏览器超过 24 小时未上传',
   archive_not_connected: '浏览记录还没连上 Dropbox 备份',
@@ -369,7 +375,7 @@ export function modeInfo(name: string, value: boolean): { label: string; usual: 
   return { label: known ? known.label : name, usual: known ? known.normal === value : !value }
 }
 
-type CounterKind = 'count' | 'seconds' | 'bytes' | 'tokens' | 'days' | 'percent' | 'usd_cents'
+type CounterKind = 'count' | 'seconds' | 'bytes' | 'tokens' | 'days' | 'percent' | 'usd' | 'usd_cents'
 const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> = {
   database_ready: { label: '数据库可用', kind: 'count' },
   change_sequence: { label: '最近变更序号', kind: 'count' },
@@ -440,6 +446,11 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   gmail_calls_today: { label: '今日 Gmail 请求', kind: 'count' },
   neurons_today: { label: '今日 neurons', kind: 'count' },
   neuron_budget: { label: 'neuron 预算', kind: 'count' },
+  claude_spent_usd: { label: 'Claude 本月估算费用', kind: 'usd' },
+  claude_monthly_limit_usd: { label: 'Claude 配置月上限', kind: 'usd' },
+  claude_input_tokens: { label: 'Claude 本月输入 token', kind: 'tokens' },
+  claude_output_tokens: { label: 'Claude 本月输出 token（含思考）', kind: 'tokens' },
+  claude_thinking_tokens: { label: 'Claude 本月思考 token', kind: 'tokens' },
   last_sync_minutes: { label: '距上次同步（分钟）', kind: 'count' },
   // recall
   visits_today: { label: '今日访问', kind: 'count' },
@@ -470,6 +481,7 @@ export function counterValue(name: string, value: number): string {
   if (kind === 'seconds') return value === 0 ? '无' : formatDuration(value * 1000)
   if (kind === 'days') return `${formatNumber(value)} 天`
   if (kind === 'percent') return `${formatNumber(value)}%`
+  if (kind === 'usd') return `US$ ${value.toFixed(2)}`
   if (kind === 'usd_cents') return `US$ ${(value / 100).toFixed(2)}`
   return formatNumber(value)
 }

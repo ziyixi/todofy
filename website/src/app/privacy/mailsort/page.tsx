@@ -38,7 +38,7 @@ export default function MailsortPrivacyPage() {
       <header className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>{TITLE}</h1>
         <p className={styles.pageIntro}>
-          Effective and last updated <time dateTime="2026-10-23">October 23, 2026</time>.
+          Effective and last updated <time dateTime="2026-10-24">October 24, 2026</time>.
         </p>
       </header>
       <div className={articleStyles.articleBody}>
@@ -58,12 +58,12 @@ export default function MailsortPrivacyPage() {
           <li>
             Through a closed list of Gmail API operations it reads messages, their labels, the
             mailbox&apos;s list of labels and its change history, and creates four flat Gmail
-            labels: P1, P2, P3 and P4. P1 is for mail that needs prompt attention or whose urgency
-            is unclear, and stays in the inbox. P2 holds important information or required follow-up
-            that can wait two or three days, P3 is substantive optional reading for the weekend, and
-            P4 is routine information, receipts or promotions without meaningful follow-up. P2, P3
-            and P4 are archived out of the inbox. Every classification preserves the message&apos;s
-            read or unread state.
+            labels: P1, P2, P3 and P4. P1 is for mail with a concrete near-term reason for prompt
+            attention and stays in the inbox. P2 holds important information or required follow-up
+            that can wait two or three days, P3 is personal periodic summaries or worthwhile weekend
+            reading, and P4 is routine information, receipts or promotions without meaningful
+            follow-up. P2, P3 and P4 are archived out of the inbox. Every classification preserves
+            the message&apos;s read or unread state.
           </li>
           <li>
             It never sends, deletes or trashes mail and never marks mail read or unread. A new
@@ -101,7 +101,7 @@ export default function MailsortPrivacyPage() {
             where eligible. It keeps every message, its inbox position, read or unread state and
             other labels. It also clears the old examples, trusted sender domains, review queue and
             replay results. Older decisions and write ledgers remain under the retention periods
-            below, but do not feed the new priority learning or evaluation. An explicit unread batch
+            below, and are not used by the current prompt-based classifier. An explicit unread batch
             may replace a selected message&apos;s latest decision with its new priority decision;
             older write ledgers remain. Writes under removed labels can no longer be undone through
             mailsort.
@@ -115,34 +115,32 @@ export default function MailsortPrivacyPage() {
 
         <h2>How mail is processed</h2>
         <p>
-          A new message is assigned a priority by a decision model (Clef on Cloudflare Workers AI),
-          asked up to twice about how long the owner can safely wait before reading or acting on it,
-          with the nearest examples based on owner confirmations, corrections or confident
-          classifications left unchanged for three days, compared through embeddings from the bge-m3
-          model, as context. All of this runs in the owner&apos;s own Cloudflare account. The models
-          are called directly, without AI Gateway, which would log request bodies.
+          The app checks Gmail through its existing Cloudflare Durable Object Alarm and starts
+          classification batches roughly hourly. Each batch sends up to ten unread, unclassified
+          messages to Anthropic&apos;s Claude API, using Opus 5.5 medium. A maintained prompt asks
+          for a reading queue and a short reason for each message. There are no sender-brand rules,
+          probability thresholds, second model vote or learned-example context.
         </p>
         <p>
-          The models read masked text only: the sender&apos;s display name and domain, the subject
-          (up to 200 characters), Gmail&apos;s snippet (300), the first text part of the body
-          (2,000), Gmail&apos;s category, whether the message came from a mailing list, which
-          priorities the same sender&apos;s earlier messages got, a short code derived from the
-          address it was delivered to (never the address), and the masked summaries of similar
-          examples, together with the four priority names and descriptions. Email addresses and
-          numbers of six or more digits are masked, and links are cut to their domain, before a
-          model sees them.
+          Anthropic receives masked sender display name/domain, subject (up to 200 characters), body
+          (up to 12,000 characters, with a truncation flag), message identifiers, receipt time,
+          evaluation time and the America/Los_Angeles timezone. Addresses and long numbers are
+          masked and links reduced to their domains before transmission. Attachments are not sent.
+          Calls go directly to Anthropic, without an AI Gateway that logs request bodies.
         </p>
         <p>
-          The model also receives the message&apos;s receipt time, the current local time in
-          America/Los_Angeles and the current Monday-to-Sunday week. Replay uses the original
-          decision&apos;s clock. Sender history and examples come only from the P1–P4 system. An
-          uncertain P1 assignment keeps its original model evidence and does not become automatic
-          sender history or a learned example without an explicit owner confirmation or correction.
-          Each message is assessed on its own content and timing. Normal processing handles new
-          mail; processing older unread mail requires the owner&apos;s explicit batch request. At
-          70% of the daily model budget it switches to Clef-flash. Exhausted daily model or write
-          quotas leave batch work waiting for the next UTC day. Progress distinguishes applied
-          labels, skipped messages and failures.
+          Provider errors leave mail pending through the existing retry process; they do not assign
+          P1. A dedicated Claude workspace has a $20 monthly spend limit. Returned token usage and
+          nominal cost are recorded without message content. An exhausted monthly model allowance
+          waits until the next UTC month; reached daily Gmail write limits leave writes waiting. The
+          existing modes and write limits remain effective throughout.
+        </p>
+        <p>
+          Each message is judged independently. Normal processing retains its new-mail cutoffs;
+          processing older unread mail requires an explicit batch request. Deploying a model or
+          prompt change does not reclassify previously labelled mail. Old model probabilities,
+          examples and replay results remain historical records. Active embedding, automatic
+          learning and replay model jobs are retired.
         </p>
 
         <h2>What is stored, and for how long</h2>
@@ -157,20 +155,21 @@ export default function MailsortPrivacyPage() {
           </li>
           <li>
             Historical review entries (masked subject and sender): 14 days after the message
-            arrived. The one-time priority switch clears that queue; new uncertain mail goes to P1.
+            arrived. The one-time priority switch clears that queue; the current model does not
+            create review entries.
           </li>
           <li>
             Decisions and the ledger of changes, without content (the sender only as a salted hash
             of the address, never the address): 180 days.
           </li>
           <li>
-            Examples (a masked summary of at most 200 characters and its embedding): until the owner
-            deletes them, at most 2,000.
+            Historical examples (a masked summary of at most 200 characters and its embedding):
+            until the owner deletes them, at most 2,000.
           </li>
           <li>
-            A replay evaluation the owner starts (per message its identifier, the owner&apos;s
-            answer, the label decided again, the model&apos;s probabilities behind it and whether
-            the sender passed Gmail&apos;s DMARC check, no content): 7 days.
+            A historical replay evaluation (per message its identifier, the owner&apos;s answer, the
+            label decided again, the model&apos;s probabilities behind it and whether the sender
+            passed Gmail&apos;s DMARC check, no content): 7 days.
           </li>
           <li>
             The four priority labels (their names, descriptions and linked Gmail label IDs): until
@@ -185,20 +184,20 @@ export default function MailsortPrivacyPage() {
             progress, without mail content: until replaced by the next batch or the owner deletes
             the app&apos;s stored data.
           </li>
-          <li>Daily counters without content: 400 days.</li>
+          <li>Daily counters and returned Claude token/cost totals without content: 400 days.</li>
         </ul>
         <p>
           Logs hold counts and codes only, never subjects, senders, addresses or label names.
-          Google&apos;s authorization is kept only as encrypted secrets in the owner&apos;s own
-          Cloudflare account, never in source code or on GitHub.
+          Google&apos;s authorization and the Claude API key are kept as secrets in the owner&apos;s
+          own Cloudflare account, never in source code or on GitHub.
         </p>
 
         <h2>How the data is used</h2>
         <p>
-          The data is used only to label the owner&apos;s own mailbox and is read by no one but the
-          owner. It is not sold, not used for advertising, not used to train generalized AI models
-          and not shared with anyone; Cloudflare processes it only as the host and model provider
-          (Workers AI) of the owner&apos;s own account.
+          The data is used only to label the owner&apos;s own mailbox. It is not sold or used for
+          advertising. Cloudflare hosts the app and its stored records; Anthropic receives the
+          masked inputs above to provide the requested classification. Mail is not used by this app
+          to train a generalized model. Provider processing follows the applicable API terms.
         </p>
         <p>
           mailsort&apos;s use and transfer to any other app of information received from Google APIs

@@ -274,7 +274,7 @@ SAFETY_BUDGET = "10"
         """mailsort's Gmail grant, recall's machine-token digests and the brief's Claude and Resend keys are put by the
         owner from their own machine only."""
         source = TOOL.parents[1]
-        grant = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
+        grant = ['ANTHROPIC_API_KEY', 'GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
         digests = ['EXPORT_TOKEN_SHA256', 'EXPORT_TOKEN_SHA256_PREVIOUS', 'INGEST_TOKEN_SHA256', 'INGEST_TOKEN_SHA256_PREVIOUS']
         keys = ['ANTHROPIC_API_KEY', 'RESEND_API_KEY']
         self.assertEqual(cloud_profile.owner_machine_secrets(source), {'brief': keys, 'mailsort': grant, 'recall': digests})

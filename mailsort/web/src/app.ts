@@ -40,7 +40,7 @@ const TABS: readonly (readonly [string, string, View])[] = [
   ['/settings', '设置', renderSettings],
 ]
 
-/** The status line's parts: the mode badge, the Gmail grant (or its problem), the next run. */
+/** The status line's parts: mode, Gmail grant and the next background check (not the model batch). */
 function statusParts(status: ServiceStatus, now: number): HTMLElement[] {
   const mode = status.effectiveMode
   const badge = chip(MODE_NAMES[mode] ?? '—', mode === Mode.LIVE ? 'accent' : mode === Mode.OFF ? 'warn' : 'muted')
@@ -48,7 +48,7 @@ function statusParts(status: ServiceStatus, now: number): HTMLElement[] {
     status.authState === ServiceStatus_AuthState.OK
       ? el('span', {}, `Gmail ✓ ${status.writeScope ? '可写' : '只读'}`)
       : el('span', { class: 'problem' }, status.authState === ServiceStatus_AuthState.FAILED ? 'Gmail 授权失效' : status.authState === ServiceStatus_AuthState.NOT_CONFIGURED ? 'Gmail 未授权' : 'Gmail 未连接')
-  const next = status.nextAlarmTime === undefined ? null : el('span', {}, `下次运行 ${relative(status.nextAlarmTime, now)}`)
+  const next = status.nextAlarmTime === undefined ? null : el('span', {}, `下次检查 ${relative(status.nextAlarmTime, now)}`)
   return [badge, gmail, ...(next === null ? [] : [next])]
 }
 

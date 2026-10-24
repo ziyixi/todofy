@@ -1,6 +1,6 @@
 /** Priority batch actions and progress, exercised through the generated owner API. */
 import { create } from '@ziyixi/proto/protobuf'
-import { Mode, UnreadClassification_State, UnreadClassificationSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import { ClaudeBudgetSchema, Mode, UnreadClassification_State, UnreadClassificationSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { mountApp, type Host } from './app.ts'
 import { FakeServer, NOW, settle } from './test/fakeServer.ts'
 
@@ -48,7 +48,7 @@ describe('priority batch classification', () => {
     expect(ready.textContent).toContain('包括已归档邮件，排除垃圾邮件和回收站')
     expect(ready.textContent).toContain('P1 留在收件箱，P2–P4 归档')
     expect(ready.textContent).toContain('保留邮件、未读状态、星标和其他标签')
-    expect(ready.textContent).toContain('使用现有模型预算')
+    expect(ready.textContent).toContain('Claude 约每小时批量判断，使用配置的月度预算')
     expect(server.calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
   })
 
@@ -187,17 +187,28 @@ describe('priority batch classification', () => {
   })
 
   it.each([
-    [{ aiQuotaExhausted: true }, '今日模型配额已用完'],
-    [{ neuronsToday: 7000, dailyNeuronBudget: 7000 }, '今日模型预算已用完'],
-  ])('shows daily quota or budget deferral as waiting: %s', async (status, message) => {
+    { spentUsd: 20, providerLimitReached: false, message: '本月模型预算已用完，等待下个月继续' },
+    { spentUsd: 3, providerLimitReached: true, message: 'Anthropic 工作区已达到消费上限，等待额度恢复后继续' },
+  ])('shows a monthly budget or provider cap wait: $message', async ({ message, ...fields }) => {
     const server = liveServer()
-    server.status = { ...server.status, ...status }
+    server.status = { writeScope: true, claudeBudget: create(ClaudeBudgetSchema, { month: '2026-10', limitUsd: 20, ...fields }) }
     server.unreadClassification = batch()
     const card = await open(server)
     expect(card.textContent).toContain(message)
-    expect(card.textContent).toContain('等待下一个 UTC 日继续')
     expect(card.textContent).not.toContain('本轮整理已结束')
+    expect(card.textContent).not.toContain('下一个 UTC 日')
     expect(button(card, '整理当前未读').disabled).toBe(true)
+  })
+
+  it('keeps an absent Claude budget distinct from zero usage and preserves progress', async () => {
+    const server = liveServer()
+    server.status = { writeScope: true, claudeBudget: undefined }
+    server.unreadClassification = batch()
+    const card = await open(server)
+    expect(card.textContent).toContain('Claude 用量未提供，请刷新进度或等待服务更新')
+    expect(card.textContent).toContain('已应用 30')
+    expect(card.textContent).not.toContain('预算已用完')
+    expect(server.calls.every((call) => call.method === 'GET')).toBe(true)
   })
 
   it('reports completion with distinct applied, skipped and failed results and allows a new batch', async () => {

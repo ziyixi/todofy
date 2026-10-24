@@ -1,6 +1,5 @@
 # Local development and the smoke test only (never deployed; .github/scripts/test_wrangler_configs.py TEST_CONFIGS): the
-# production wrangler.toml without the Workers AI binding (wrangler dev would reach the account for it) and without the
-# Custom Domain. The Worker then calls the loopback fake of Gmail and Workers AI that DEV_FAKE_UPSTREAM names
+# production wrangler.toml without the Custom Domain. The Worker calls the loopback fake of Gmail and Claude that DEV_FAKE_UPSTREAM names
 # (worker/test/smoke/fake-upstream.mts), with the values of mailsort/.dev.vars (see .dev.vars.example).
 #
 #   cd worker && npm run dev        (http://127.0.0.1:8795)
@@ -8,6 +7,11 @@ name = "mailsort"
 main = "worker/src/index.ts"
 compatibility_date = "2026-09-08"
 workers_dev = false
+
+[[rules]]
+type = "Text"
+globs = ["**/*.txt"]
+fallthrough = false
 
 [assets]
 directory = "web/dist"

@@ -345,7 +345,7 @@ PROTO_NOT_BUNDLED = (
 # (PROTO_PACKAGES).
 # test_ci_changes.py checks this map against the Workers' imports.
 BUNDLED_BY = {
-    "contracts/ops-v1/ops-v1.ts": ("mail-hero", "dashboard", "watch", "mailsort", "brief"),
+    "contracts/ops-v1/ops-v1.ts": ("mail-hero", "dashboard", "watch", "brief"),
 }
 
 # Outputs that describe a reused branch run (strings, one line each).

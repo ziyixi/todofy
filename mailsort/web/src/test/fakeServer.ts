@@ -26,6 +26,7 @@ import {
 import { ReplayEvaluation_State, ReplayEvaluationSchema, type ReplayEvaluation } from '@ziyixi/proto/mailsort/ui/v2/replay_pb'
 import { ExampleSchema, LedgerEntry_State, LedgerEntrySchema, ReviewItem_State, ReviewItemSchema, type Example, type LedgerEntry, type ReviewItem } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
 import {
+  ClaudeBudgetSchema,
   LabelCountSchema,
   LabelReportSchema,
   Mode,
@@ -243,7 +244,12 @@ export class FakeServer {
             decidedTodayCount: 12,
             neuronsToday: 523.4,
             dailyNeuronBudget: 7000,
-            decisionModel: 'clef',
+            decisionModel: 'claude-opus-5-5',
+            claudeBudget: create(ClaudeBudgetSchema, {
+              model: 'claude-opus-5-5', effort: 'medium', month: '2026-10', limitUsd: 20, spentUsd: 0.5234,
+              inputTokens: 24000, outputTokens: 1200,
+              lastRequestTime: timestampFromMs(NOW - 600_000), nextBatchTime: timestampFromMs(NOW + 3_600_000),
+            }),
             recentErrorCodes: ['gmail_429'],
             build: 'test',
           }), this.status),

@@ -31,7 +31,7 @@ function width(value: number, max: number): string {
 export function meter(value: number, max: number, label: string, tone: '' | 'warn' | 'danger' = ''): HTMLElement {
   const fill = el('span')
   fill.style.width = width(value, max)
-  return el('span', { class: tone === '' ? 'meter' : `meter ${tone}`, role: 'meter', 'aria-label': label, 'aria-valuemin': '0', 'aria-valuemax': String(max), 'aria-valuenow': String(Math.round(value)) }, fill)
+  return el('span', { class: tone === '' ? 'meter' : `meter ${tone}`, role: 'meter', 'aria-label': label, 'aria-valuemin': '0', 'aria-valuemax': String(max), 'aria-valuenow': String(value) }, fill)
 }
 
 /** One choice of a few: buttons in a group, the current one pressed. */

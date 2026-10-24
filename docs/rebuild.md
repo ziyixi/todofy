@@ -17,6 +17,12 @@
 权限见 [bootstrap 凭据清单](../tools/cloud-bootstrap/README.md)。VPS 不接收此管理 token。
 准备 Node 26、uv，以及 [infra 固定版本](../infra/versions.tf)的 OpenTofu。
 
+Mailsort 的模型使用 Anthropic API：建立独立 `mailsort` 工作区并设置每月 $20 支出限额，
+生成只限该工作区的 API key。赠送额度也计入限额。保留组织与其他应用的原有配置。
+Worker 首次部署后，在 owner 本机运行 `cd mailsort/worker`，再运行
+`npx --no-install wrangler secret put ANTHROPIC_API_KEY --config ../wrangler.toml`。
+这个 key 与 Gmail 授权都不放进 bootstrap JSON 或 GitHub；后续发布会保留。未配置时 Home 显示具体缺失项。
+
 成功结果：账户已启用、`gh auth status` 正常、目标域名可用。登录或账户启用失败，先完成对应网页步骤。
 
 ## 2. 填两份配置

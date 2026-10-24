@@ -28,6 +28,8 @@ export interface ReadMessage {
   readonly headers: Headers;
   /** The body text (not yet masked or cut), or '' when there is none. */
   readonly body: string;
+  /** Decoding or Gmail's metadata fallback omitted body text. */
+  readonly bodyTruncated?: boolean;
 }
 
 interface Part {
@@ -47,7 +49,7 @@ function headerList(value: unknown): { name: string; value: string }[] {
 
 /** Decodes base64url text to UTF-8 (invalid bytes become U+FFFD; the input cut at BODY_BASE64_MAX). */
 export function decodeBase64Url(data: string): string {
-  const cut = data.slice(0, BODY_BASE64_MAX - (BODY_BASE64_MAX % 4)).replace(/[^A-Za-z0-9_-]/g, '');
+  const cut = data.slice(0, BODY_BASE64_MAX - (BODY_BASE64_MAX % 4)).replace(/[^A-Za-z0-9_+/-]/g, '');
   const standard = cut.replaceAll('-', '+').replaceAll('_', '/');
   const padded = standard + '='.repeat((4 - (standard.length % 4)) % 4);
   let binary: string;
@@ -90,31 +92,38 @@ export function tidy(text: string): string {
 }
 
 /** The first text/plain part's text, else the first text/html part's (stripped), depth-first and bounded. */
-export function bodyText(payload: unknown): string {
+function extractBody(payload: unknown): { text: string; truncated: boolean } {
   const found: { plain: string | null; html: string | null } = { plain: null, html: null };
   let visited = 0;
+  let plainTruncated = false;
+  let htmlTruncated = false;
   const walk = (part: Part, depth: number): void => {
     if (found.plain !== null || visited >= MIME_PARTS_MAX || depth > MIME_DEPTH_MAX) return;
     visited++;
     const type = typeof part.mimeType === 'string' ? part.mimeType.toLowerCase() : '';
     const data = typeof part.body?.data === 'string' ? part.body.data : '';
     // An attachment has no inline data in the fields read (attachmentId only).
-    if (data !== '' && type === 'text/plain') found.plain = decodeBase64Url(data);
-    else if (data !== '' && type === 'text/html' && found.html === null) found.html = decodeBase64Url(data);
+    if (data !== '' && type === 'text/plain') { found.plain = decodeBase64Url(data); plainTruncated = data.length > BODY_BASE64_MAX; }
+    else if (data !== '' && type === 'text/html' && found.html === null) { found.html = decodeBase64Url(data); htmlTruncated = data.length > BODY_BASE64_MAX; }
     if (Array.isArray(part.parts)) for (const child of part.parts as (Part | null)[]) walk(child ?? {}, depth + 1);
   };
   if (typeof payload === 'object' && payload !== null) walk(payload, 0);
-  if (found.plain !== null) return tidy(found.plain);
-  return found.html === null ? '' : tidy(stripHtml(found.html));
+  if (found.plain !== null) return { text: tidy(found.plain), truncated: plainTruncated };
+  return { text: found.html === null ? '' : tidy(stripHtml(found.html)), truncated: htmlTruncated };
+}
+
+export function bodyText(payload: unknown): string {
+  return extractBody(payload).text;
 }
 
 /** The message's fields the pipeline reads, or null when Gmail's answer lacks an ID. */
-export function readMessage(message: GmailMessage): ReadMessage | null {
+export function readMessage(message: GmailMessage, metadataOnly = false): ReadMessage | null {
   if (typeof message.id !== 'string') return null;
   const payload = (typeof message.payload === 'object' && message.payload !== null ? message.payload : {}) as Part;
   const headers = headerList(payload.headers);
   const first = (name: string) => headers.find((header) => header.name === name)?.value ?? '';
   const received = Number(message.internalDate ?? '');
+  const body = extractBody(payload);
   return {
     id: message.id,
     threadId: typeof message.threadId === 'string' ? message.threadId : message.id,
@@ -130,6 +139,7 @@ export function readMessage(message: GmailMessage): ReadMessage | null {
       messageId: first('message-id'),
       authenticationResults: headers.filter((header) => header.name === 'authentication-results').map((header) => header.value),
     },
-    body: bodyText(payload),
+    body: body.text,
+    bodyTruncated: metadataOnly || body.truncated,
   };
 }

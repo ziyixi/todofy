@@ -1,78 +1,52 @@
 # mailsort
 
-Personal Gmail reading priorities at `sort.ziyixi.science`. New incoming messages get one of four real Gmail labels.
-The UI uses Chinese; Gmail labels are `P1`, `P2`, `P3`, `P4`.
+Personal Gmail reading queues at `sort.ziyixi.science`. The Chinese UI manages four flat English Gmail labels.
 
 | Label | When to read | Gmail action |
 | --- | --- | --- |
-| P1 | Promptly, or the model cannot confidently choose a later time | Add P1; keep in Inbox |
-| P2 | Important information or required follow-up that can wait two or three days | Add P2; archive |
-| P3 | Substantive optional reading for a weekend session | Add P3; archive |
-| P4 | Routine FYI, receipts or promotions without meaningful follow-up or substantial reading | Add P4; archive |
+| P1 | Prompt attention, with a concrete near-term consequence | Keep in Inbox |
+| P2 | Important information or follow-up within two or three days | Archive |
+| P3 | Personal periodic summaries or worthwhile weekend reading | Archive |
+| P4 | Notifications, receipts and promotions kept for reference | Archive |
 
-Mail is never marked read, sent, trashed or deleted. Reading cadence is not a timer: the app does not move mail
-back into Inbox later or create tasks. Tasks' Mail categories and task priorities are independent.
+Mail is never marked read, sent, trashed or deleted. Stars and unrelated labels remain unchanged.
+There are no reminders, automatic resurfacing or task creation.
 
 ## Classification
 
-Workers AI Clef judges when it is safe to read the masked message, using receipt time, local date/week and current
-priority examples. A confident result needs the existing two-view agreement and threshold; valid uncertainty or
-`none` becomes P1. The original model result and fallback reason remain separate from that assigned label.
-Fallback P1 does not teach sender history or daily weak learning without an explicit owner verdict. Real synthetic
-captures set the combined threshold to 0.55; both views must still agree and the first-view gate remains 0.4.
-Provider errors use the existing backoff and can fail
-after retries; quota exhaustion waits for the next UTC day. Neither creates a priority judgment. Each new reply is
-judged independently; message IDs still deduplicate delivery. A new reply carrying an earlier priority can replace it without changing other
-labels, unread or starred state. Normal processing keeps its new-mail receipt cutoff.
+The existing Durable Object Alarm checks Gmail and maintenance every five minutes. Roughly hourly, it classifies
+pending unread, unclassified mail in bounded batches of up to ten, with one **Claude Opus 5.5 medium** request per
+batch. Backlog continues over subsequent Alarm calls within existing request and write caps. Normal history sync
+retains its new-mail Inbox/receipt cutoff; the explicit unread action also covers older and archived mail.
 
-On **分级**, the owner can choose **开始整理** under **整理当前未读邮件** (`StartUnreadClassification`). It first collects unread message
-IDs across all ages and folders, including archived mail, then processes that batch through the existing Alarm
-and pending queue. Spam, Trash and the normal incoming-mail exclusions are skipped, as are messages already
-carrying P1-P4 or no longer unread. Only this batch bypasses the new-mail cutoff and may replace a message's
-latest stored decision; old Gmail write ledgers remain. P1 puts an archived message in Inbox; ordinary undo restores
-its original Inbox position. Read/unread, stars and unrelated labels are preserved.
+The only classification policy is [the prompt](prompts/priority-classification.txt). Inputs include masked sender,
+subject, up to 12,000 body characters, receipt time and evaluation time. Each result is one P1-P4 choice and a short
+reason. No probability thresholds, sender-brand rules, second model vote or learned examples are used. An invalid
+result or unavailable provider leaves mail pending through existing backoff; it never fabricates P1.
 
-**重判保底 P1** uses the same request with `recheck_fallback=true`. It selects only current-priority unread
-fallback P1 decisions without an explicit owner confirmation or correction. Before judging, the app rereads Gmail
-and skips mail that is now read or no longer carries only P1. A result that remains P1 updates model evidence
-without another Gmail write and counts as skipped; a P2-P4 result uses the existing write ledger and archives.
+Mailsort has its own Claude workspace with a **$20/calendar-month provider spend limit**, separate from Brief.
+Gift-credit usage counts toward provider limits. The app records returned input/output/thinking tokens and
+list-price cost, and stops new calls once its recorded monthly cost reaches $20. The console remains the billing
+authority; out-of-app calls and calls with a lost response may not appear in the app tally. A provider spend refusal
+leaves pending mail for the next UTC month. There is no cheaper-model fallback.
 
-**重判原100封** selects the first 100 distinct messages successfully auto-graded under the current P1-P4 setup,
-including read and archived mail. Original ledger order freezes this cohort even after later arrivals or rechecks;
-it does not mean the newest 100 messages in Gmail. Owner-adjusted mail is skipped. An unchanged priority refreshes
-evidence without a Gmail write; a changed priority uses the normal ledger and preserves read state, stars and
-unrelated labels. The latest undo restores the pre-recheck labels and Inbox position.
+## UI and existing data
 
-The existing modes, write caps and model budget apply. At 70% of the daily neuron budget the model switches to
-Clef-flash; exhaustion defers work to the next UTC day. A paused mode or a reached write cap leaves batch work
-waiting. Progress distinguishes applied, skipped, failed and pending messages; completion does not mean every
-message received a label. Only the latest batch's IDs, state, ledger links and scan progress are kept until the
-next batch replaces them or the app's data is deleted; this progress stores no mail content.
+- 概览: mode, Gmail status, last check, next model batch, flow and recorded Claude usage.
+- 分级: four fixed queues, counts and explicit unread-batch progress.
+- 设置: mode, write limits and undo. Old examples, replay results and decision evidence remain readable as history.
 
-There is no model phishing/scam question, suspicious-score gate or trusted-domain requirement. Gmail's own spam
-handling is unchanged. Financial notices get a reading priority from their contents, without sender-brand rules.
+Off, shadow and live modes retain their existing meanings. Shadow records decisions without changing Gmail;
+live applies them. The deployment ceiling can lower the owner's mode. Existing labelled mail is not automatically
+reclassified after a deployment. Older recheck actions remain explicit owner operations.
 
-## UI
+The initial P1-P4 setup and historical label replacement are in [priority rollout](docs/priority-rollout.md).
+This Claude rollout does not repeat that setup or delete labels.
 
-- **概览**: mode, Gmail grant, freshness, today's flow, per-priority counts and the model budget. The last-seven-day
-  P1 count distinguishes direct P1 decisions from conservative fallback assignments.
-- **分级**: four fixed rows, their Inbox/archive behavior, learned examples loaded only on expansion, and the explicit
-  unread-batch action and progress.
-- **设置**: owner mode, existing undo and the read-only classification-effect check. Gmail corrections teach the
-  priority model. Uncertain mail does not require a separate review; the old `/review` path remains readable.
+## Development
 
-The initial **启用 P1–P4 分级** action replaces this app's old topic labels and learning. It deletes the old managed
-Gmail labels, including known retired identities, while retaining every message and its existing Inbox/unread
-state. Other labels stay untouched. Old decisions and ledgers remain history, excluded from new learning;
-an explicit unread batch may later replace the selected messages' latest decisions.
-A bounded step can be continued with the same stored setup; there is no background migration service.
-See [priority setup and verification](docs/priority-rollout.md).
-
-## Architecture and development
-
-One Worker, the existing SQLite `MailsortState` DO and its Alarm, plus static UI assets. No added database,
-scheduler, model provider or secret. Production Gmail calls go only through `worker/src/gmail.ts` and its closed
-operation table. Model, daily neuron budget, mode ceiling and request/write limits retain their existing values.
+One Worker serves static UI assets and a generated owner API backed by the existing SQLite DO `mailsort-v1`.
+`gmail.ts` owns Google calls; `claude.ts` owns Anthropic calls. There is no VPS process or extra database/scheduler.
 
 From `worker/`, with Node 26:
 
@@ -85,17 +59,24 @@ npm run test:smoke
 node --test ../deploy/test/*.test.mjs
 ```
 
-The runtime and smoke tests use local workerd/SQLite, fake Gmail and fake Workers AI. They never call Google or
-read personal mail. UI checks run in `web/`: `npm run lint && npm run typecheck && npm test && npm run build`.
-Design, storage bounds and retention are in [design](docs/design.md); collaboration rules in [AGENTS](AGENTS.md).
+Runtime and smoke tests use workerd/SQLite and fake Gmail/Claude endpoints with synthetic data.
+UI checks in `web/`: `npm run lint && npm run typecheck && npm test && npm run build`.
+See [design](docs/design.md) and [collaboration rules](AGENTS.md).
 
 ## Release and credentials
 
-Pass the complete branch CI gate, then release the exact same SHA through main's `Mailsort deploy`. The existing
-wrapper injects `BUILD_SHA`, the `MAILSORT_MODE` ceiling and Access/CSRF material. It preserves Gmail credentials.
-Do not use a plain `wrangler deploy` or put Gmail credentials in GitHub. Only the owner initializes those through
-`deploy/mint-token.mjs` on their own machine.
+Pass the complete branch CI gate, then release the exact same SHA through main Actions. The deploy wrapper
+injects Access/CSRF material, `BUILD_SHA` and the `MAILSORT_MODE` ceiling. Gmail and `ANTHROPIC_API_KEY` credentials
+are owner-written Worker secrets, excluded from GitHub and preserved by the wrapper. Do not run a plain release.
 
-The dashboard mode is lowered by the deployment ceiling and existing breaker. Initialization does not change
-mode or budgets. Off stops normal Gmail processing; retention still runs. Home reads only the standard private
-Ops binding. See the root [rebuild guide](../docs/rebuild.md) for a new account.
+For a new account, create a dedicated Claude workspace, set its monthly spend limit to $20, and issue a key scoped
+to that workspace. Put it directly into the Worker from the owner machine:
+
+```sh
+cd mailsort/worker
+npx --no-install wrangler secret put ANTHROPIC_API_KEY --config ../wrangler.toml
+```
+
+Gmail credentials still use `deploy/mint-token.mjs`. Full rebuild steps are in the root
+[rebuild guide](../docs/rebuild.md). Home reads private Ops status and API budget warnings; account Workers AI
+shedding no longer changes Mailsort's model.

@@ -19,10 +19,10 @@ import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_serv
 import type * as opsWire from '@ziyixi/proto/ops/v1/ops_wire';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { handlers, type ApiContext } from './api.ts';
-import { aiRunner, buildSha, modeCeiling, REQUEST_ID_HEADER, upstreamFetch, type Env } from './env.ts';
+import { buildSha, modeCeiling, REQUEST_ID_HEADER, upstreamFetch, type Env } from './env.ts';
 import type { AccessToken } from './gmail.ts';
 import { ALARM_ERROR_RETRY_MS, ALARM_SUBREQUESTS, MAX_BODY_BYTES, WAKE_MS } from './limits.ts';
-import { activeShed, setGuard, sortStatus, type GuardOutcome } from './ops-status.ts';
+import { setGuard, sortStatus, type GuardOutcome } from './ops-status.ts';
 import { runPass, type PassResult } from './pipeline.ts';
 import { API_DOMAIN, localize, REASONS } from './reasons.ts';
 import { Budget, noteTokenOk, openSession } from './session.ts';
@@ -105,14 +105,12 @@ export class MailsortState extends DurableObject<Env> {
             store: this.store,
             env: this.env,
             fetch: upstreamFetch(this.env),
-            ai: aiRunner(this.env),
             now: () => this.now(),
             transact: this.transact,
             token: this.token,
             saveToken: (token) => {
               this.token = token;
             },
-            shed: activeShed(this.store, this.now()) !== null,
           });
           // Counts and codes only: never a subject, a sender or a label name.
           console.log(JSON.stringify({ event: 'alarm', mode: pass.mode, synced: pass.synced, decided: pass.decided, applied: pass.applied, deferred: pass.deferred, code: pass.code }));
@@ -165,7 +163,7 @@ export class MailsortState extends DurableObject<Env> {
   }
 
   opsSetGuard(input: unknown): GuardOutcome {
-    return this.transact(() => setGuard(this.store, input, this.now()));
+    return this.transact(() => setGuard(this.store, input));
   }
 
   // ---- the owner API --------------------------------------------------------------------------------------------------
@@ -185,7 +183,6 @@ export class MailsortState extends DurableObject<Env> {
       wake: () => this.wake(),
       alarmAt: () => this.ctx.storage.getAlarm(),
       budget,
-      shed: activeShed(this.store, now) !== null,
       // This Start request is itself one mutation. Reads and emergency settings stay responsive.
       consolidationBusy: () => this.passRunning || this.mutationsInFlight > 1,
       gmail: async () => {

@@ -34,6 +34,36 @@ export const UNSURE_REASONS: Readonly<Record<string, string>> = {
   model_unavailable: '模型暂不可用',
 }
 
+/** Safe provider error codes; these describe the last attempt, not a new classification. */
+const CLAUDE_ERRORS: Readonly<Record<string, string>> = {
+  claude_not_configured: 'Claude API 尚未配置',
+  claude_auth: 'Claude API 授权失败，需检查专用工作区密钥',
+  claude_401: 'Claude API 授权失败，需检查专用工作区密钥',
+  claude_403: 'Claude API 权限不足，需检查专用工作区权限',
+  claude_budget_exhausted: '本月模型预算已用完，待下个月继续',
+  claude_spend_limit: 'Anthropic 工作区已达到消费上限，等待额度恢复',
+  claude_rate_limit: 'Claude API 请求受限，等待重试',
+  claude_unavailable: 'Claude API 暂不可用，等待重试',
+  claude_bad_answer: 'Claude 返回格式无效，本次没有生成分级',
+  claude_timeout: 'Claude API 请求超时，等待重试',
+  claude_network: 'Claude API 网络请求失败，等待重试',
+  claude_http_429: 'Claude API 请求受限，等待重试',
+  claude_response_too_large: 'Claude 返回超过大小上限，本次没有生成分级',
+  claude_bad_model: 'Claude 返回的模型不符合配置，本次没有生成分级',
+  claude_bad_usage: 'Claude 未返回有效用量，本次没有生成分级',
+  claude_bad_items: 'Claude 返回的邮件结果不完整，本次没有生成分级',
+  claude_incomplete: 'Claude 未完成回答，本次没有生成分级',
+  claude_bad_content: 'Claude 返回内容无效，本次没有生成分级',
+  claude_bad_json: 'Claude 返回格式无效，本次没有生成分级',
+  claude_bad_input: '模型请求内容无效，本次没有生成分级',
+}
+
+export function claudeErrorMessage(code: string): string {
+  const http = /^claude_http_(\d{3})$/.exec(code)
+  if (http !== null && code !== 'claude_http_429') return `Claude API 返回 HTTP ${http[1] as string}，本次没有生成分级`
+  return Object.hasOwn(CLAUDE_ERRORS, code) ? CLAUDE_ERRORS[code] as string : `Claude 请求失败（${code}）`
+}
+
 export function ms(time: Timestamp | undefined): number | null {
   return time === undefined ? null : timestampMs(time)
 }

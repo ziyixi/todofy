@@ -36,12 +36,14 @@ message MailFlow {
     STAGE_CLEF = 2;
     // The smaller decision model Clef-flash (past 70 % of the day's neuron budget).
     STAGE_CLEF_FLASH = 3;
-    // Still waiting for the next UTC day: the neuron budget or Workers AI's quota was used up. Counted on the
+    // Still waiting for model budget: the next UTC month for Claude, or next UTC day for historical AI. Counted on the
     // day of the mail's first deferral, and only while it waits: once it is decided or skipped it leaves this
     // count for the stage that handled it, so every mail is counted once.
     STAGE_DEFERRED = 4;
     // No model answer: no label to offer it, or the model unavailable after every retry.
     STAGE_NO_MODEL = 5;
+    // One native Claude API request classified a bounded batch.
+    STAGE_CLAUDE = 6;
   }
 
   // What became of the mail.
@@ -73,7 +75,7 @@ message MailFlow {
     OUTCOME_BEFORE_INSTALL = 10;
     // Skipped: Gmail could not give it (too large, refused, or failing for hours).
     OUTCOME_UNREADABLE = 11;
-    // Deferred to the next UTC day, still waiting.
+    // Deferred for model budget, still waiting.
     OUTCOME_DEFERRED = 12;
   }
 

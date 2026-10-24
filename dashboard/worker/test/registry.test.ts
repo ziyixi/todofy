@@ -153,6 +153,7 @@ describe('the registry', () => {
     expect(REGISTRY.resources.find((r) => r.id === 'recall-state')).toMatchObject({ kind: 'do', entry: 'recall', script: 'recall' });
     expect(resourceByMatch('r2', 'recall-store')).toMatchObject({ id: 'recall-store', entry: 'recall' });
     expect(REGISTRY.resources.find((r) => r.id === 'mailsort-state')).toMatchObject({ kind: 'do', entry: 'mailsort', script: 'mailsort' });
+    expect(REGISTRY.entries.find((entry) => entry.id === 'mailsort')?.status).toMatchObject({ type: 'ops_v1', guard: false });
     expect(REGISTRY.resources.find((r) => r.id === 'fleet-state')).toMatchObject({
       kind: 'do', entry: 'fleet', script: 'fleet',
     });
@@ -163,8 +164,8 @@ describe('the registry', () => {
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 11 status() + 2 probes (website, links) + 1 GraphQL + 5 setGuard + 2 canary calls + 1 createInboxTask + 12 drift calls.
-    expect(outboundPerTick()).toBe(34);
+    // 11 status() + 2 probes (website, links) + 1 GraphQL + 4 setGuard + 2 canary calls + 1 createInboxTask + 12 drift calls.
+    expect(outboundPerTick()).toBe(33);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
     expect(outboundPerRefresh()).toBe(13);
   });

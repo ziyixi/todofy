@@ -39,11 +39,14 @@ export interface FlowGraph {
 
 const STAGES: readonly (readonly [MailFlow_Stage, string, string])[] = [
   [MailFlow_Stage.SKIPPED, 'skipped', '跳过'],
-  [MailFlow_Stage.CLEF, 'clef', 'Clef 27B'],
-  [MailFlow_Stage.CLEF_FLASH, 'clef-flash', 'Clef-flash'],
-  [MailFlow_Stage.NO_MODEL, 'no_model', '未调用模型'],
-  [MailFlow_Stage.DEFERRED, 'deferred', '延后（额度）'],
+  [MailFlow_Stage.CLAUDE, 'claude', 'Claude Opus 5.5'],
+  [MailFlow_Stage.CLEF, 'clef', '历史 Clef 27B'],
+  [MailFlow_Stage.CLEF_FLASH, 'clef-flash', '历史 Clef-flash'],
+  [MailFlow_Stage.NO_MODEL, 'no_model', '历史未调用模型'],
+  [MailFlow_Stage.DEFERRED, 'deferred', '等待判断'],
 ]
+
+const CURRENT_STAGES = STAGES.filter(([stage]) => stage === MailFlow_Stage.SKIPPED || stage === MailFlow_Stage.CLAUDE || stage === MailFlow_Stage.DEFERRED)
 
 const SKIP_REASONS: Readonly<Record<number, string>> = {
   [MailFlow_Outcome.NOT_INBOX]: '已发送、草稿或垃圾邮件',
@@ -141,7 +144,7 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
       kind: terminal ? 'terminal' : 'stage',
       slot: 0,
       ...(id === 'skipped' ? { detail: [...skipped].map(([reason, n]) => `${reason} ${String(n)}`) } : {}),
-      ...(id === 'deferred' ? { detail: ['仍在等次日的模型额度；判断后计入处理它的那一步'] } : {}),
+      ...(id === 'deferred' ? { detail: ['等待模型批次、额度恢复或重试；成功判断后计入模型步骤'] } : {}),
     })
   }
   // Label nodes in the labels' order (deleted labels last), then the outcomes without a label.
@@ -173,10 +176,11 @@ export function skeletonGraph(): FlowGraph {
   const ranks: FlowNodeData[] = PRIORITIES.map((priority, index) => ({ id: `label:labels/${priority.id}`, name: priority.title, kind: 'label', slot: index + 1, group: priority.title, detail: [priority.policy] }))
   return {
     total: 0,
-    nodes: [{ id: 'new', name: '新邮件', kind: 'source', slot: 0 }, ...STAGES.map(stage), ...ranks, ...OUTCOMES.filter((node) => node.id === 'suggested')],
+    nodes: [{ id: 'new', name: '新邮件', kind: 'source', slot: 0 }, ...CURRENT_STAGES.map(stage), ...ranks, ...OUTCOMES.filter((node) => node.id === 'suggested')],
     links: [
-      ...STAGES.map(([, id]) => ({ source: 'new', target: id, value: 0 })),
-      ...['clef', 'clef-flash'].flatMap((id) => [...ranks.map((rank) => ({ source: id, target: rank.id, value: 0 })), { source: id, target: 'suggested', value: 0 }]),
+      ...CURRENT_STAGES.map(([, id]) => ({ source: 'new', target: id, value: 0 })),
+      ...ranks.map((rank) => ({ source: 'claude', target: rank.id, value: 0 })),
+      { source: 'claude', target: 'suggested', value: 0 },
     ],
     groups: PRIORITIES.map((priority, index) => ({ name: priority.title, slot: index + 1 })),
   }
@@ -303,7 +307,7 @@ export function sankeyChart(graph: FlowGraph): HTMLElement {
     const lines = [node.name, amount(value), ...(zero ? [] : (node.detail ?? []))]
     const group = svg('g', {
       class: `flow-node kind-${node.kind}${zero ? ' zero' : ''}`,
-      // The skeleton's nodes all say 0: named, but not eleven Tab stops.
+      // The skeleton's nodes all say 0: named, but not nine Tab stops.
       tabindex: zero ? -1 : 0,
       role: 'img',
       'aria-label': zero ? `${node.name}：0 封` : `${node.name}：${String(value)} 封，占 ${share(value, graph.total)}`,

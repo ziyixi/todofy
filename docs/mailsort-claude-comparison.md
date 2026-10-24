@@ -84,7 +84,7 @@ Haiku adaptive这一轮实际用了0个思考token，两组Haiku仍有13封标�
 - 模型为`claude-opus-5-5`、`claude-haiku-5-5`，响应模型身份与请求一致；使用官方Python SDK 2.3.0。
 - 两模型支持low、medium、high、xhigh、max。本轮按用户要求只选六组，未测xhigh，也未增加其他Haiku档位。Opus不能关闭adaptive；Haiku允许在medium关闭。[Opus资料](https://platform.claude.com/docs/en/models/opus-5-5/overview)、[Haiku资料](https://platform.claude.com/docs/en/models/haiku-5-5/overview)
 - 100封来自此前同一份私有快照，顺序、正文截断方式、统一冻结的`evaluated_at`及JSON schema不变。每个请求都包含整批，允许参考同一事项的新旧通知。
-- [原prompt](../mailsort/prompts/priority-classification.txt)保持原样，SHA-256为`0c7ab3aa1ccf61a96cb85c1ffb08e1e62c0ec55b18fa909c0bd2b7d675c8c5c5`。
+- 六组试验使用[该版本的原prompt](https://github.com/ziyixi/todofy/blob/511ec5063ecc1cd3602020aa2544f6cf975090f1/mailsort/prompts/priority-classification.txt)，SHA-256为`0c7ab3aa1ccf61a96cb85c1ffb08e1e62c0ec55b18fa909c0bd2b7d675c8c5c5`。后续生产 prompt 的编辑不改变本次试验。
 - 私人输入和逐封理由只留本机；公开仓库只有prompt、汇总报告及交接说明。临时API key已在控制台停用，本机key文件已删除，原Brief key保留。
 - Codex/VPS批处理实现已撤回，清理提交`1076deda`通过[分支CI](https://github.com/ziyixi/todofy/actions/runs/40125660575)。没有生产发布、Gmail改标或VPS安装。
 

@@ -27,7 +27,7 @@ import {
   type Isolate,
   type Measurement,
 } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
-import { DRAIN_MAX, EXAMPLES_MAX, LABELS_MAX, REPLAY_BATCH, REPLAY_CASES_MAX, REPLAY_ITEMS_MAX, SENDER_HISTORY_ROWS, TRUSTED_DOMAINS_PER_LABEL_MAX } from '../../src/limits.ts';
+import { DRAIN_MAX, EXAMPLES_MAX, LABELS_MAX, REPLAY_CASES_MAX, REPLAY_ITEMS_MAX, SENDER_HISTORY_ROWS, TRUSTED_DOMAINS_PER_LABEL_MAX } from '../../src/limits.ts';
 import { senderHash } from '../../src/mask.ts';
 import { PRIORITY_LABELS } from '../../src/priority.ts';
 import { MAILS, message } from '../fakes/fixtures.ts';
@@ -44,8 +44,7 @@ const OBJECT_ALARM_BOUND_MS = 0.05 * FREE_OBJECT_CPU_MS;
 const RUNS = 7;
 const HANDLER = 'fetch handler';
 const OBJECT = 'MailsortState';
-const ALARM = `alarm pass: 3 history pages, ${String(DRAIN_MAX)} mails, ${String(EXAMPLES_MAX)} examples`;
-const REPLAY = `alarm pass: the replay of ${String(REPLAY_BATCH)} mails`;
+const ALARM = `alarm pass: 3 history pages, ${String(DRAIN_MAX)} mails with 12000-character bodies, one Claude request`;
 const COLD_LABEL = "GET /api/csrf as the fetch handler's very first request";
 const ISSUER = SYNTHETIC_BINDINGS['ACCESS_ISSUER'] ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS['ACCESS_AUDIENCE'] ?? '';
@@ -67,7 +66,6 @@ async function startIsolate(): Promise<SortIsolate> {
   const h = await startHarness({
     inspectorPort: 0,
     splitObject: true,
-    aiBinding: true,
     // No bypass: Access is verified, and Google and Workers AI are reached as in production (through the fakes).
     bindings: { DEV_AUTH_BYPASS: undefined, DEV_FAKE_UPSTREAM: undefined },
     routes: new Map([[`${ISSUER}/cdn-cgi/access/certs`, () => Response.json(jwks)]]),
@@ -236,8 +234,9 @@ async function session({ h, meter: worker, object }: SortIsolate, index: number)
   // The alarm path at its bounds: the install pass, then 300 history records (3 pages) with DRAIN_MAX new mails.
   let clock = T0;
   await h.step(clock);
+  await h.sql(`UPDATE meta SET value = '0' WHERE key = 'next_model_at'`);
   await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', '{"mode":"live"}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
-  for (let i = 0; i < DRAIN_MAX; i++) h.up.gmail.deliver(message({ ...MAILS.newsletterZh, text: '合成阅读材料，但可以安全地等两三天。', id: `cc00000000000${String(i).padStart(3, '0')}`, receivedAt: T0 }));
+  for (let i = 0; i < DRAIN_MAX; i++) h.up.gmail.deliver(message({ ...MAILS.newsletterZh, text: '合成阅读材料，等待周末阅读。'.repeat(1500), id: `cc00000000000${String(i).padStart(3, '0')}`, receivedAt: T0 }));
   for (let i = 0; i < 300 - DRAIN_MAX; i++) h.up.gmail.ownerModify(`cc00000000000${String(i % DRAIN_MAX).padStart(3, '0')}`, i % 2 === 0 ? ['STARRED'] : [], i % 2 === 0 ? [] : ['STARRED']);
   clock += 5 * MINUTE;
   let decided = 0;
@@ -247,19 +246,13 @@ async function session({ h, meter: worker, object }: SortIsolate, index: number)
     }),
   ]);
   expect(decided).toBe(DRAIN_MAX);
-  expect(await h.sql(`SELECT count(*) AS n FROM decisions WHERE message_id LIKE 'cc%' AND probabilities2 != '{}'`)).toEqual([{ n: DRAIN_MAX }]);
+  expect(await h.sql(`SELECT count(*) AS n FROM decisions WHERE message_id LIKE 'cc%' AND decider = 'claude' AND model = 'claude-opus-5-5'`)).toEqual([{ n: DRAIN_MAX }]);
   expect(await h.sql(`SELECT count(*) AS n FROM examples WHERE embedding IS NOT NULL AND label_id IN ('p1', 'p2', 'p3', 'p4')`)).toEqual([{ n: EXAMPLES_MAX }]);
-  // All six messages actually embed and run both views; a setup/none shortcut would fail this bound check.
-  expect(await h.sql(`SELECT ai_calls FROM usage WHERE day = '2026-10-01'`)).toEqual([{ ai_calls: 3 * DRAIN_MAX }]);
-  // The replay evaluation of the mails just decided: a pass with nothing else to do decides REPLAY_BATCH of them again.
-  await h.sql(`DELETE FROM replay`);
-  await h.sql(`INSERT INTO replay (job_id, message_id, state, create_time) VALUES ('job1', '', 'running', ?)`, clock);
-  for (let i = 0; i < REPLAY_BATCH; i++) {
-    await h.sql(`INSERT INTO replay (job_id, message_id, state, owner_label, as_of, create_time) VALUES ('job1', ?, 'pending', 'p1', ?, ?)`, `cc00000000000${String(i).padStart(3, '0')}`, clock, clock);
-  }
-  clock += 5 * MINUTE;
-  const replay = summarize(REPLAY, [await object.cpu(async () => { await h.step(clock); })]);
-  expect(await h.sql(`SELECT count(*) AS n FROM replay WHERE state = 'evaluated'`)).toEqual([{ n: REPLAY_BATCH }]);
+  expect(h.up.claude.calls).toHaveLength(1);
+  expect(h.up.claude.calls[0]).toHaveLength(DRAIN_MAX);
+  expect(h.up.claude.calls[0]?.every(mail => Array.from(mail.body).length === 12000 && mail.body_truncated)).toBe(true);
+  expect(h.up.ai.calls).toEqual([]);
+  expect(await h.sql(`SELECT requests FROM claude_usage WHERE day = '2026-10-01'`)).toEqual([{ requests: 1 }]);
   await seedReplay(h);
 
   const api = [
@@ -277,7 +270,7 @@ async function session({ h, meter: worker, object }: SortIsolate, index: number)
   // Measured at its bound (read after the measurements, so their first run stays the isolate's first).
   const answer = await (await h.fetch('/api/v2/replayEvaluation', { headers })).json<{ cases: unknown[] }>();
   expect(answer.cases).toHaveLength(REPLAY_CASES_MAX);
-  return [cold, alarm, replay, ...api];
+  return [cold, alarm, ...api];
 }
 
 describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocation)', () => {
@@ -299,7 +292,6 @@ describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocati
       }
     }
     expect(get(ALARM).first, ALARM).toBeLessThan(OBJECT_ALARM_BOUND_MS);
-    expect(get(REPLAY).first, REPLAY).toBeLessThan(OBJECT_ALARM_BOUND_MS);
-    expect(reference.size).toBe(1 + 2 + 2 * 8);
+    expect(reference.size).toBe(1 + 1 + 2 * 8);
   });
 });

@@ -541,9 +541,10 @@
           "source": "deploy"
         },
         {
-          "name": "AI",
-          "type": "ai",
-          "source": "config"
+          "name": "ANTHROPIC_API_KEY",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
         },
         {
           "name": "ASSETS",

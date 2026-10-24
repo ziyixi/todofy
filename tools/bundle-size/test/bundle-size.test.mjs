@@ -47,11 +47,11 @@ function captured(check) {
   }
 }
 
-test('a Worker bundle counts every module, recursively, but no source map or other file', () => {
-  withDirectory({ 'index.js': 'export default {}\n'.repeat(100), 'index.js.map': 5000, 'README.md': 'x', 'chunks/a.mjs': 10, 'b.wasm': 3 }, (dir) => {
+test('a Worker bundle counts code and bundled prompt text, recursively, but no source map or README', () => {
+  withDirectory({ 'index.js': 'export default {}\n'.repeat(100), 'index.js.map': 5000, 'README.md': 'x', 'chunks/a.mjs': 10, 'b.wasm': 3, 'priority.txt': 'read by priority' }, (dir) => {
     const size = workerBundleSize(dir)
-    assert.deepEqual(size.files, ['b.wasm', 'a.mjs', 'index.js'])
-    assert.equal(size.raw, 'export default {}\n'.length * 100 + 10 + 3)
+    assert.deepEqual(size.files, ['b.wasm', 'a.mjs', 'index.js', 'priority.txt'])
+    assert.equal(size.raw, 'export default {}\n'.length * 100 + 10 + 3 + 'read by priority'.length)
     assert.ok(size.gzip > 0 && size.gzip < size.raw)
   })
 })

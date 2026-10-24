@@ -14,6 +14,7 @@ export const API_DOMAIN = 'sort.ziyixi.science';
 export type Reason = Exclude<keyof typeof ErrorReason | keyof typeof CommonReason, 'UNSPECIFIED'>;
 
 export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly message: string; readonly zh: string }>> = {
+  MODEL_FEATURE_RETIRED: { code: Code.FAILED_PRECONDITION, message: 'this former model feature is retired; historical results remain readable', zh: '旧模型回放和嵌入已停用，历史结果仍可查看' },
   UNAUTHORIZED: { code: Code.UNAUTHENTICATED, message: 'no valid Cloudflare Access login for the owner', zh: '未登录或凭据无效' },
   ACCESS_NOT_CONFIGURED: { code: Code.UNAVAILABLE, message: 'the Access settings are incomplete', zh: 'Cloudflare Access 配置不完整' },
   NOT_CONFIGURED: { code: Code.UNAVAILABLE, message: 'a required secret is missing', zh: '服务缺少必需的密钥配置' },
@@ -36,7 +37,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   NOT_UNDOABLE: { code: Code.FAILED_PRECONDITION, message: 'the ledger entry cannot be undone', zh: '这条记录不能撤销（已合并的历史记录、非本应用添加、已撤销，或 Gmail 标记已改变）' },
   GMAIL_NOT_AUTHORIZED: { code: Code.FAILED_PRECONDITION, message: 'Gmail is not authorized', zh: 'Gmail 尚未授权或授权已失效' },
   GMAIL_WRITE_NOT_ALLOWED: { code: Code.FAILED_PRECONDITION, message: 'the mode or the grant does not allow Gmail writes', zh: '当前模式或授权不允许修改 Gmail' },
-  DEPENDENCY_UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'Gmail or Workers AI did not answer; repeat the request', zh: 'Gmail 或模型暂时不可用，请稍后再试' },
+  DEPENDENCY_UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'Gmail or Claude did not answer; repeat the request', zh: 'Gmail 或模型暂时不可用，请稍后再试' },
   RELOAD_REQUIRED: { code: Code.FAILED_PRECONDITION, message: 'mailsort was updated: reload the page', zh: '邮件分拣已更新，请刷新页面' },
   CONSOLIDATION_ACTIVE: { code: Code.FAILED_PRECONDITION, message: 'a label consolidation owns these writes', zh: '标签整理尚未完成，请先查看整理进度；完成后可继续修改' },
   CONSOLIDATION_NOT_BLOCKED: { code: Code.FAILED_PRECONDITION, message: 'only a blocked consolidation can resume', zh: '这次标签整理没有暂停，无需恢复' },

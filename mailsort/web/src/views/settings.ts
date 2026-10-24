@@ -1,4 +1,4 @@
-/** Settings keeps the existing mode, range undo and replay evaluation. */
+/** Settings keeps mode and range undo, with old model evaluation readable as history. */
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
