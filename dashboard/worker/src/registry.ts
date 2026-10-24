@@ -206,7 +206,7 @@ const ENTRIES: readonly EntryDef[] = [
     accent: 'teal',
     url: 'https://sort.ziyixi.science/',
     access: true,
-    status: { type: 'ops_v1', binding: 'MAILSORT', guard: true },
+    status: { type: 'ops_v1', binding: 'MAILSORT', guard: false },
     tile_metric: { kind: 'counter', name: 'pending' },
     app_only_signals: [],
     order: 9,

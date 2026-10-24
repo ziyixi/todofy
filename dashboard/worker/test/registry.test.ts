@@ -164,8 +164,8 @@ describe('the registry', () => {
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 11 status() + 2 probes (website, links) + 1 GraphQL + 5 setGuard + 2 canary calls + 1 createInboxTask + 12 drift calls.
-    expect(outboundPerTick()).toBe(34);
+    // 11 status() + 2 probes (website, links) + 1 GraphQL + 4 setGuard + 2 canary calls + 1 createInboxTask + 12 drift calls.
+    expect(outboundPerTick()).toBe(33);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
     expect(outboundPerRefresh()).toBe(13);
   });

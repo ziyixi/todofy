@@ -61,7 +61,7 @@ function counts(store: Store, runId: string): { selected: number; judged: number
     `SELECT count(*) AS selected, coalesce(sum(priority IS NOT NULL), 0) AS judged FROM classification_items WHERE run_id = ?`, runId,
   ) ?? { selected: 0, judged: 0 };
 }
-function pendingWrites(store: Store): number {
+export function pendingWrites(store: Store): number {
   return store.count(`SELECT count(*) AS n FROM ledger WHERE state = 'intended' AND superseded = 0`);
 }
 

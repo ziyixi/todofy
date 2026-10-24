@@ -164,6 +164,7 @@ const SIGNALS: Readonly<Record<string, string>> = {
   batch_not_configured: '小时分类尚未连接，请完成 Runner 安装和专用口令配置',
   batch_stale: '超过两小时没有完整邮件检查，请检查 VPS 的 mailsort-runner',
   batch_failed: '小时分类失败，请在邮件分拣概览查看原因和下一步操作',
+  gmail_write_limit_wait: '今日 Gmail 写入已达上限，判断已保存，剩余标签等待明天写入',
   // recall
   device_stale: '有浏览器超过 24 小时未上传',
   archive_not_connected: '浏览记录还没连上 Dropbox 备份',

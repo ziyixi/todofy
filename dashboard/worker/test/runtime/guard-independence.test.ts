@@ -47,7 +47,7 @@ it('reads Brief status and changes only its guard while preserving archive mode 
 it('shows no aggregate shed after each service is restored while account usage remains high', async () => {
   h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
   await h.tick(NOW - 20 * 60_000);
-  for (const app of ['mail-hero', 'todofy', 'watch', 'mailsort', 'brief'] as const) {
+  for (const app of ['mail-hero', 'todofy', 'watch', 'brief'] as const) {
     expect((await h.post(PATHS.guard, { app, level: 'normal' })).status).toBe(200);
   }
   expect((await h.snapshot()).digest.items.some((item) => item.code === 'guard_shed')).toBe(false);
@@ -61,18 +61,23 @@ it('shows no aggregate shed after each service is restored while account usage r
   expect(snapshot.ops.attention.items.some((item) => item.code === 'guard_shed')).toBe(false);
 });
 
-it('excludes a service without the guard capability from the aggregate target', async () => {
+it('excludes fixed hourly Mailsort and a service without the guard capability from the aggregate target', async () => {
   h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
   await h.answer('watch', 'status', { value: await status('watch', { capabilities: [] }) });
+  await h.answer('mailsort', 'status', { value: await status('mailsort', { capabilities: [] }) });
   await h.tick(NOW - 20 * 60_000);
-  for (const app of ['mail-hero', 'todofy', 'mailsort', 'brief'] as const) {
+  for (const app of ['mail-hero', 'todofy', 'brief'] as const) {
     expect((await h.post(PATHS.guard, { app, level: 'normal' })).status).toBe(200);
   }
 
   const home = await h.view<HomeView>('home');
   expect(home.body?.cloudflare.guard_level).toBe('normal');
-  expect((await h.snapshot()).guard.apps.watch).toBeUndefined();
+  const snapshot = await h.snapshot();
+  expect(snapshot.guard.apps.watch).toBeUndefined();
+  expect(snapshot.guard.apps.mailsort).toBeUndefined();
+  expect(snapshot.apps.mailsort.status?.capabilities).toEqual([]);
   expect(await h.callsOf('watch', 'setGuard')).toEqual([]);
+  expect(await h.callsOf('mailsort', 'setGuard')).toEqual([]);
 });
 
 it('shows one manually delayed service in Home and its own held marker', async () => {

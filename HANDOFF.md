@@ -18,11 +18,17 @@ The owner explicitly approved one initial reclassification of **all currently un
 P1-P4; routine hourly runs select only unread mail without a priority. No messages are deleted or marked read.
 The local same-prompt 100-message comparison completed on SDK 0.163.0 (medium/high/max); private input and
 per-message trial results stay outside Git. Production cutover and the first natural hourly run remain unverified.
-The isolated checkout preserves Claude's shared source. Local checks include 153 Worker unit, 65 workerd
+The isolated checkout preserves Claude's shared source. Local checks include 154 Worker unit, 65 workerd
 (including CPU), 76 UI, 26 deploy tests and the full 67-request synthetic Wrangler smoke; CI/image and
 production verification remain pending. The new independent Codex login awaits the owner's Passkey verification
 in Chrome; do not switch credentials or copy Newsletter auth to bypass it. VPS SSH works but sudo -n is unavailable,
 so the fixed foundation bundle will need one owner sudo command.
+Mailsort Ops no longer advertises retired Workers AI quotas or load shedding. Gmail daily-cap waiting is an
+informational signal; saved decisions remain in the write ledger. Production currently reports the existing
+150-write cap exhausted and the old daily-limit breaker; the owner has been asked whether to raise the cap
+temporarily or wait for the next UTC day. Do not change the limit without that answer. CI for `69c70a29`
+passed the new Mailsort/runner/Platform/Website checks; its only failure was a Home runtime registry assertion
+missing the new hidden runner, now corrected. A full final branch gate remains required before main.
 The older five unstarted original-100 rechecks below were cancelled in the preceding authorized read-only audit;
 the production batch then reported applied 45, skipped 55, pending 0. Do not resume those cancelled requests.
 

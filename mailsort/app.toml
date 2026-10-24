@@ -35,7 +35,7 @@ position = 14
 # Counts and codes only: no subject, sender, address or label name leaves the Ops entrypoint.
 type = "ops_v1"
 binding = "MAILSORT"
-guard = true
+guard = false
 [entries.tile_metric]
 kind = "counter"
 name = "pending"

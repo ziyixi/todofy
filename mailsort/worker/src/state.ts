@@ -24,7 +24,7 @@ import { handlers, type ApiContext } from './api.ts';
 import { buildSha, modeCeiling, REQUEST_ID_HEADER, upstreamFetch, type Env } from './env.ts';
 import { GoogleError, type AccessToken } from './gmail.ts';
 import { ALARM_ERROR_RETRY_MS, ALARM_SUBREQUESTS, MAX_BODY_BYTES, WAKE_MS } from './limits.ts';
-import { activeShed, setGuard, sortStatus, type GuardOutcome } from './ops-status.ts';
+import { setGuard, sortStatus, type GuardOutcome } from './ops-status.ts';
 import { runPass, type PassResult } from './pipeline.ts';
 import { API_DOMAIN, localize, REASONS } from './reasons.ts';
 import { Budget, noteTokenOk, openSession } from './session.ts';
@@ -170,7 +170,7 @@ export class MailsortState extends DurableObject<Env> {
   }
 
   opsSetGuard(input: unknown): GuardOutcome {
-    return this.transact(() => setGuard(this.store, input, this.now()));
+    return this.transact(() => setGuard(this.store, input));
   }
 
   // ---- the owner API --------------------------------------------------------------------------------------------------
@@ -190,7 +190,6 @@ export class MailsortState extends DurableObject<Env> {
       wake: () => this.wake(),
       alarmAt: () => this.ctx.storage.getAlarm(),
       budget,
-      shed: activeShed(this.store, now) !== null,
       // This Start request is itself one mutation. Reads and emergency settings stay responsive.
       consolidationBusy: () => this.passRunning || this.mutationsInFlight > 1,
       gmail: async () => {

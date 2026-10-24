@@ -1,11 +1,8 @@
 /**
  * contracts/ops-v1: the exact bytes mailsort's Ops code answers for fixed synthetic state (MailsortState's own SQLite,
  * here node:sqlite behind the SqlStorage surface Store uses). The dashboard reads these answers: every case is compared
- * as compact JSON with test/golden/ops-v1.json, and two of them are the contract's fixtures (OpsStatus/mailsort-ok.json,
- * OpsStatus/mailsort-degraded.json), which proto/'s codecs, Todofy's schema check and the dashboard's reader test as
- * well. `UPDATE_GOLDEN=1 npx vitest run test/ops-golden.test.ts` rewrites the golden file (never the fixtures); only for
- * an intended change. A dashboard deployed before ops-v1 moved onto proto/ never binds mailsort, so the answers are
- * checked against the generated schema, not the legacy one.
+ * as compact JSON with test/golden/ops-v1.json. The frozen contract fixtures remain independently valid historical
+ * examples. UPDATE_GOLDEN=1 rewrites only the local golden file, for an intended current-output change.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
@@ -52,12 +49,9 @@ function usage(target: Store, decided: number, applied: number, unsure: number, 
   target.run(`INSERT INTO usage (day, gmail_calls, ai_calls, neurons, decided, applied, unsure) VALUES ('2026-10-06', 120, ?, ?, ?, ?, ?)`, decided, neurons, decided, applied, unsure);
 }
 
-/** The synthetic states' settings: the defaults with the budget the contract's fixtures were written with. */
-const SYNTHETIC = { ...DEFAULTS, dailyNeuronBudget: 7000 };
-
 function cases(): Record<string, unknown> {
   const ok = store();
-  writeSettings(ok, { ...SYNTHETIC, mode: 'live' }, NOW - HOUR);
+  writeSettings(ok, { ...DEFAULTS, mode: 'live' }, NOW - HOUR);
   usage(ok, 34, 21, 6, 1520.4);
   ok.setMeta('auth_state', 'ok');
   ok.setMeta('last_sync_at', String(NOW - 4 * MINUTE));
@@ -65,14 +59,14 @@ function cases(): Record<string, unknown> {
   ok.run(`INSERT INTO review (id, message_id, kind, state, decider, subject, sender, receive_time, create_time) VALUES ('r1', 'a2', 'unsure', 'pending', 'clef', '合成主题', 'Sender <example.org>', ?, ?)`, NOW, NOW);
 
   const degraded = store();
-  writeSettings(degraded, { ...SYNTHETIC, mode: 'live', breaker: 'daily_limit' }, NOW - HOUR);
+  writeSettings(degraded, { ...DEFAULTS, mode: 'live', breaker: 'daily_limit' }, NOW - HOUR);
   usage(degraded, 160, 150, 3, 8100);
   degraded.run(`UPDATE usage SET quota_exhausted = 1`);
   degraded.setMeta('auth_state', 'failed');
   degraded.setMeta('auth_failures', '3');
   degraded.setMeta('last_sync_at', String(NOW - 3 * HOUR));
-  const shed = { level: 'shed', reason: 'ai_neurons_high', until: '2026-10-07T01:00:00Z' };
-  const guarded = setGuard(degraded, shed, NOW - 30 * MINUTE);
+  const shed = { level: 'shed', reason: 'usage_80', until: '2026-10-07T01:00:00Z' };
+  const guarded = setGuard(degraded, shed);
 
   const unconfigured = store();
   const stale = store();
@@ -80,7 +74,6 @@ function cases(): Record<string, unknown> {
   stale.setMeta('last_sync_at', String(NOW - 2 * HOUR));
   const broken = store();
   broken.run('DROP TABLE usage');
-  const guards = store();
   return {
     'status/ok': sortStatus(ok, env, NOW),
     'status/forced-shadow': sortStatus(ok, { ...env, MODE: 'shadow' }, NOW),
@@ -89,10 +82,9 @@ function cases(): Record<string, unknown> {
     'status/off': sortStatus(unconfigured, { PUBLIC_HOST: 'sort.example.com', MODE: 'off' }, NOW),
     'status/sync-stale': sortStatus(stale, env, NOW),
     'status/unavailable': sortStatus(broken, env, NOW),
-    'guard/normal': guardState(guards, NOW),
-    'guard/set-shed': guarded,
-    'guard/cleared': setGuard(degraded, { level: 'normal', reason: 'quota_recovered', until: null }, NOW),
-    'guard/refused-too-far': setGuard(guards, { level: 'shed', reason: 'x', until: iso(NOW + 40 * HOUR) }, NOW),
+    'guard/normal': guardState(),
+    'guard/rejected-shed': guarded,
+    'guard/cleared': setGuard(degraded, { level: 'normal', reason: 'quota_recovered', until: null }),
   };
 }
 
@@ -104,10 +96,10 @@ test('every Ops answer for the synthetic states is byte for byte the golden one'
   for (const [name, value] of Object.entries(actual)) expect(JSON.stringify(value), name).toBe(JSON.stringify(golden[name]));
 });
 
-test("two answers are the contract's mailsort fixtures, byte for byte", () => {
-  const actual = cases();
-  expect(JSON.stringify(actual['status/ok'])).toBe(JSON.stringify(fixture('OpsStatus/mailsort-ok.json')));
-  expect(JSON.stringify(actual['status/degraded'])).toBe(JSON.stringify(fixture('OpsStatus/mailsort-degraded.json')));
+test('the frozen historical mailsort contract fixtures still pass the schema', () => {
+  for (const name of ['OpsStatus/mailsort-ok.json', 'OpsStatus/mailsort-degraded.json']) {
+    expect(validate(SCHEMA, 'OpsStatus', fixture(name)), name).toEqual([]);
+  }
 });
 
 test('every answer passes the generated schema; a refusal is invalid_input', () => {
@@ -127,8 +119,6 @@ test('the auth failure is critical (it reaches Home attention and the digest); t
   expect(degraded.signals.map((s) => [s.code, s.severity])).toEqual([
     ['gmail_auth_failed', 'critical'],
     ['breaker_tripped', 'warning'],
-    ['ai_quota_exhausted', 'info'],
-    ['guard_shed', 'info'],
   ]);
   expect(degraded.modes).toMatchObject({ live: false, breaker: true });
 });
@@ -141,4 +131,23 @@ test('a status holds counts and codes only: never a subject, a sender or a label
 test('the owner UI URL keeps the contract format, else it is left out', () => {
   expect(uiUrl('sort.example.com')).toBe('https://sort.example.com/');
   expect(uiUrl(null)).toBeUndefined();
+});
+
+test('does not advertise retired model budgets or shedding, and rejects a new shed', () => {
+  const target = store();
+  target.setMeta('guard_until', String(NOW + HOUR));
+  target.setMeta('guard_set_at', String(NOW - HOUR));
+  target.setMeta('guard_reason', 'historical_ai_budget');
+  target.run(`INSERT INTO usage (day, neurons, quota_exhausted) VALUES ('2026-10-06', 9999, 1)`);
+  const status = sortStatus(target, env, NOW);
+  expect(status.capabilities).toEqual([]);
+  expect(status.guard).toMatchObject({ level: 'normal', deferred: [] });
+  expect(status.signals.map(item => item.code)).not.toContain('ai_quota_exhausted');
+  expect(status.signals.map(item => item.code)).not.toContain('guard_shed');
+  expect(status.counters).not.toHaveProperty('neuron_budget');
+  expect(status.counters).not.toHaveProperty('neurons_today');
+  expect(setGuard(target, { level: 'shed', reason: 'usage_80', until: iso(NOW + HOUR) })).toEqual({ error: 'invalid_input' });
+  expect(setGuard(target, { level: 'bogus' })).toEqual({ error: 'invalid_input' });
+  expect(setGuard(target, { level: 'normal', reason: 'quota_recovered', until: null })).toMatchObject({ ok: { level: 'normal', deferred: [] } });
+  expect(target.getMeta('guard_reason')).toBeNull();
 });

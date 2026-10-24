@@ -33,7 +33,7 @@ without establishing an independently labeled accuracy score.
 
 ## Local implementation checks
 
-- Worker: 153 unit tests; lint and all three TypeScript configurations.
+- Worker: 154 unit tests; lint and all three TypeScript configurations.
 - Real workerd: 65 tests including generated machine HTTP, SQLite storage, multi-run 103-message recheck,
   write caps and new arrivals, failure state, and CPU. No actual Codex/Gmail call.
 - UI: 76 tests, lint/types/build. New hourly status, all-unread scope, no old budget/replay/learning controls.
@@ -47,12 +47,20 @@ without establishing an independently labeled accuracy score.
 - Platform implementation agent verified 287 related tests, with one real-k3s check reserved for CI, and compatible
   root proto/schema changes. Runtime template observation keeps the original process-state enum and distinguishes
   installed CronJob config from actual model execution.
+- Ops no longer advertises Workers AI quota, neuron budget or load shedding for the fixed Codex runner.
+  Gmail write-cap waiting is informational, uses the UTC day as its event identity, and preserves saved intents.
 
 CPU remained under the existing Worker/DO bounds. One local run measured the cold Worker around 2.16 reference ms,
 10-message/12k claim around 0.51 Worker + 38.08 DO ms, 100-result report around 0.79 Worker + 42.80 DO ms and
 five writes in an Alarm around 10.97 DO ms. These are local reference measurements, not Cloudflare telemetry.
 
 ## Pending CI and production evidence
+
+Branch CI `40097145164` passed Mailsort, the runner's real Docker build/smoke, Platform, Website and other
+application checks. Its sole failure was a Home runtime registry assertion missing the new hidden runner;
+that assertion is corrected in the final branch changes. This partial CI evidence is not a green gate.
+The production 150-write cap was already exhausted by the old classifier; the owner's choice between a
+temporary increase and waiting until the next UTC day remains pending. No limit was changed.
 
 - [ ] Complete branch CI gate and real three-image build/smoke.
 - [ ] Same green SHA main release, exact machine Access resources and managed identities.

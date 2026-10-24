@@ -211,6 +211,10 @@ it('continues classifying new arrivals while older judged mail waits at the dail
   expect(second.messages.map(message => message.messageId)).toEqual([mail(81).id]);
   expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).batchStatus?.pendingWriteCount).toBe(1);
   expect(await client().reportClassification({ runId: second.runId, requestId: op(), results: results(second.messages), status: RunStatus.COMPLETED, ...meta() })).toMatchObject({ acceptedCount: 1, pendingWriteCount: 2 });
+  expect((await h.opsStatus())['signals']).toEqual(expect.arrayContaining([expect.objectContaining({
+    code: 'gmail_write_limit_wait', severity: 'info', since: '2026-10-01T00:00:00Z',
+    metrics: { applied_today: settings.dailyWriteLimit, daily_write_limit: settings.dailyWriteLimit, pending_writes: 2 },
+  })]));
   await setMode(h, Mode.SHADOW); await h.step(T0 + 3 * MINUTE);
   expect(await h.sql(`SELECT state FROM ledger ORDER BY id`)).toEqual([{ state: 'intended' }, { state: 'intended' }]);
   await setMode(h, Mode.LIVE); await h.step(T0 + DAY + MINUTE);

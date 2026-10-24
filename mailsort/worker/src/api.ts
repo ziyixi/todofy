@@ -85,7 +85,6 @@ export interface ApiContext {
   /** A Gmail client for this request, or why there is none. */
   readonly gmail: () => Promise<GmailClient | 'not_configured' | 'stopped'>;
   readonly budget: Budget;
-  readonly shed: boolean;
   /** Existing alarm or owner mutation must finish before accepting a consolidation. */
   readonly consolidationBusy: () => boolean;
 }

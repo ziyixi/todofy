@@ -65,6 +65,8 @@ VPS没有新的入站端口、Tunnel、HTTP server或任意prompt执行接口。
 
 Home沿用Mailsort Ops，只读数量和固定状态码。Fleet的runner观测是`observation_scope=template`，
 只证明已安装的CronJob与固定镜像模板；它不是实际模型执行或Gmail成功的证据。
+不再发布旧Workers AI额度、神经元预算或降载能力。Gmail每日写入上限等待显示为信息提示，
+判断和待写入账本保留，次日继续；owner可在现有设置中按需调整每日上限。
 
 ## 6. 构建、发布与首次安装
 

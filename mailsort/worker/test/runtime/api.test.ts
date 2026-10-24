@@ -183,13 +183,12 @@ describe('the owner API', () => {
     const status = await h.opsStatus();
     const read = fromWire(OpsStatusSchema, status);
     expect(read.unrecognized).toEqual([]);
-    expect(status).toMatchObject({ version: 'ops-v1', app: 'mailsort', health: 'ok', ui_url: 'https://sort.example.com/', capabilities: ['guard'] });
-    expect(Object.keys(status['counters'] as object)).toEqual(expect.arrayContaining(['decided_today', 'applied_today', 'unsure_today', 'review_pending', 'pending', 'neurons_today', 'neuron_budget']));
+    expect(status).toMatchObject({ version: 'ops-v1', app: 'mailsort', health: 'ok', ui_url: 'https://sort.example.com/', capabilities: [] });
+    expect(Object.keys(status['counters'] as object)).toEqual(expect.arrayContaining(['decided_today', 'applied_today', 'unsure_today', 'review_pending', 'pending']));
     const text = JSON.stringify(status);
     for (const secret of ['Weekly', 'digest@', 'owner@example.com', 'Newsletters', 'Lunch']) expect(text).not.toContain(secret);
     const until = new Date(T0 + 2 * HOUR).toISOString().replace('.000Z', 'Z');
-    const shed = (await h.opsSetGuard({ level: 'shed', reason: 'usage_80', until })) as { level: string; deferred: string[] };
-    expect(shed).toMatchObject({ level: 'shed', deferred: ['full_model', 'replay', 'embedding_rebuild'] });
+    expect((await h.opsSetGuard({ level: 'shed', reason: 'usage_80', until }).catch((error: unknown) => (error as Error).message))).toContain('invalid_input');
     expect((await h.opsSetGuard({ level: 'bogus' }).catch((error: unknown) => (error as Error).message))).toContain('invalid_input');
     expect(await h.opsSetGuard({ level: 'normal', reason: 'quota_recovered', until: null })).toMatchObject({ level: 'normal' });
   });
