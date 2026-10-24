@@ -6,6 +6,8 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import { FakeAi } from './fake-ai.ts';
 
 const ai = new FakeAi();
+// This binding serves CPU tests: always measure embeddings, both decision views and the write path.
+ai.choiceOverride = () => ({ p2: 0.92, none: 0.08 });
 
 export class FakeAiBinding extends WorkerEntrypoint {
   run(model: string, input: Record<string, unknown>): Record<string, unknown> {

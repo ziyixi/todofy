@@ -56,6 +56,12 @@ function labelTable(answer: LabelReport, labels: readonly Label[]): HTMLElement 
   const rows = answer.labels
     .map((row) => ({ name: labelText(row.label, labels), auto: row.autoCount, corrected: row.gmailCorrectionCount + row.reviewCorrectionCount }))
     .filter((row) => row.auto + row.corrected > 0)
+  const p1 = answer.labels.find((row) => row.label === 'labels/p1')
+  const p1Breakdown = p1 === undefined || p1.autoCount === 0 ? null : el('p', { class: 'hint' },
+    p1.fallbackCount === undefined
+      ? 'P1 保底拆分未提供，请刷新或等待服务更新。'
+      : `明确 P1 ${String(p1.autoCount - p1.fallbackCount)} 封 · 保底 P1（拿不准）${String(p1.fallbackCount)} 封`,
+  )
   const cell = (n: number) => el('td', {}, String(n))
   return card(
     '各分级 · 最近 7 天',
@@ -68,6 +74,7 @@ function labelTable(answer: LabelReport, labels: readonly Label[]): HTMLElement 
           el('thead', {}, el('tr', {}, el('th', { scope: 'col' }, '分级'), el('th', { scope: 'col' }, '自动'), el('th', { scope: 'col' }, '改正'))),
           el('tbody', {}, ...rows.map((row) => el('tr', {}, el('th', { scope: 'row' }, row.name), cell(row.auto), cell(row.corrected)))),
         ),
+    p1Breakdown,
   )
 }
 

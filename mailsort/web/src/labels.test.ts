@@ -47,7 +47,7 @@ describe('fixed priorities', () => {
     expect(row(root, 'P1').textContent).toContain('现在处理或拿不准 · 留在收件箱')
     expect(row(root, 'P1').textContent).toContain('7 天 12 封')
     expect(row(root, 'P2').textContent).toContain('2–3 天内处理 · 自动归档')
-    expect(row(root, 'P3').textContent).toContain('周末处理 · 自动归档')
+    expect(row(root, 'P3').textContent).toContain('周末阅读 · 自动归档')
     expect(row(root, 'P4').textContent).toContain('低价值或仅供参考 · 自动归档')
     for (const name of ['P1', 'P2', 'P3', 'P4']) expand(root, name)
     expect(root.querySelectorAll('input, textarea, select')).toHaveLength(0)

@@ -84,3 +84,28 @@ were made to consume unused allowance. Remaining allowance stays available to no
 Only counts, operating state and quota metadata were read for acceptance; no real subject, sender or body was
 extracted, printed or made into a fixture. No operating mode, write cap, model budget, credential or other app was
 changed.
+
+## In progress: priority evidence and calibration
+
+Branch `codex/mailsort-priority-confidence` is a follow-up candidate, not a completed production release.
+A counts-only audit found 81 assigned P1 decisions, all from the uncertainty fallback. Their original raw model
+top choices were P4: 52, P3: 15, P2: 11 and P1: 3. These are model-output aggregates, without owner answers;
+they do not measure mailbox accuracy or establish that all 81 messages were urgent.
+All 81 were unanswered and there were zero current-era weak-acceptance examples at this audit.
+
+The candidate preserves the original model decision separately from assigned P1, repairs current-era fallback
+metadata from saved probability evidence, and excludes unconfirmed fallback assignments from automatic learning.
+It clarifies P2-P4 descriptions, splits direct/fallback P1 in the overview, and adds a narrow explicit unread
+fallback recheck. Mode, neuron budget and write caps remain unchanged. The existing confidence threshold is
+unchanged and has not yet been calibrated against real model responses for these descriptions.
+
+Local candidate checks passed: 151 unit tests, 83 workerd tests, 79 UI tests, the local Wrangler smoke (62 closed-table
+fake Google calls), 26 deploy tests, proto lint/API lint, breaking checks and schema checks. Workerd tests include
+actual prior P1 ledgers, successful replacement after a transient failure, rejection of stale undo and restoration
+of the latest preimage. The CPU fixture exercises both views through its fake binding; it does not measure classifier
+quality. The measured Worker was about 141 KiB gzip. Its code-size check allows 148 KiB; model and spending budgets
+are unchanged.
+
+Real-model calibration, release of the candidate and a live fallback recheck remain pending. Record their
+actual counts and provider/deployment identities here when performed; synthetic tests or the earlier 99-message
+batch do not establish those outcomes.

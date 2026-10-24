@@ -6,9 +6,9 @@ The UI uses Chinese; Gmail labels are `P1`, `P2`, `P3`, `P4`.
 | Label | When to read | Gmail action |
 | --- | --- | --- |
 | P1 | Promptly, or the model cannot confidently choose a later time | Add P1; keep in Inbox |
-| P2 | Safe to wait two or three days | Add P2; archive |
-| P3 | Safe to wait until the next weekend | Add P3; archive |
-| P4 | Optional, low-value or ordinary FYI | Add P4; archive |
+| P2 | Important information or required follow-up that can wait two or three days | Add P2; archive |
+| P3 | Substantive optional reading for a weekend session | Add P3; archive |
+| P4 | Routine FYI, receipts or promotions without meaningful follow-up or substantial reading | Add P4; archive |
 
 Mail is never marked read, sent, trashed or deleted. Reading cadence is not a timer: the app does not move mail
 back into Inbox later or create tasks. Tasks' Mail categories and task priorities are independent.
@@ -17,9 +17,11 @@ back into Inbox later or create tasks. Tasks' Mail categories and task prioritie
 
 Workers AI Clef judges when it is safe to read the masked message, using receipt time, local date/week and current
 priority examples. A confident result needs the existing two-view agreement and threshold; valid uncertainty or
-`none` becomes P1. Provider errors use the existing backoff and can fail after retries; quota exhaustion waits
-for the next UTC day. Neither creates a priority judgment. Each new reply is judged independently; message IDs
-still deduplicate delivery. A new reply carrying an earlier priority can replace it without changing other
+`none` becomes P1. The original model result and fallback reason remain separate from that assigned label.
+Fallback P1 does not teach sender history or daily weak learning without an explicit owner verdict. The threshold
+and revised descriptions still need real-model calibration. Provider errors use the existing backoff and can fail
+after retries; quota exhaustion waits for the next UTC day. Neither creates a priority judgment. Each new reply is
+judged independently; message IDs still deduplicate delivery. A new reply carrying an earlier priority can replace it without changing other
 labels, unread or starred state. Normal processing keeps its new-mail receipt cutoff.
 
 On **分级**, the owner can choose **开始整理** under **整理当前未读邮件** (`StartUnreadClassification`). It first collects unread message
@@ -28,6 +30,11 @@ and pending queue. Spam, Trash and the normal incoming-mail exclusions are skipp
 carrying P1-P4 or no longer unread. Only this batch bypasses the new-mail cutoff and may replace a message's
 latest stored decision; old Gmail write ledgers remain. P1 puts an archived message in Inbox; ordinary undo restores
 its original Inbox position. Read/unread, stars and unrelated labels are preserved.
+
+**重判保底 P1** uses the same request with `recheck_fallback=true`. It selects only current-priority unread
+fallback P1 decisions without an explicit owner confirmation or correction. Before judging, the app rereads Gmail
+and skips mail that is now read or no longer carries only P1. A result that remains P1 updates model evidence
+without another Gmail write and counts as skipped; a P2-P4 result uses the existing write ledger and archives.
 
 The existing modes, write caps and model budget apply. At 70% of the daily neuron budget the model switches to
 Clef-flash; exhaustion defers work to the next UTC day. A paused mode or a reached write cap leaves batch work
@@ -40,7 +47,8 @@ handling is unchanged. Financial notices get a reading priority from their conte
 
 ## UI
 
-- **概览**: mode, Gmail grant, freshness, today's flow, per-priority counts and the model budget.
+- **概览**: mode, Gmail grant, freshness, today's flow, per-priority counts and the model budget. The last-seven-day
+  P1 count distinguishes direct P1 decisions from conservative fallback assignments.
 - **分级**: four fixed rows, their Inbox/archive behavior, learned examples loaded only on expansion, and the explicit
   unread-batch action and progress.
 - **设置**: owner mode, existing undo and the read-only classification-effect check. Gmail corrections teach the

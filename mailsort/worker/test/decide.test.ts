@@ -52,7 +52,9 @@ describe('Clef priority contract', () => {
     expect(Object.keys(questions)).toEqual(['label']);
     expect(questions['label']?.type).toBe('choice');
     expect(Object.keys(questions['label']?.criteria ?? {})).toEqual(['p1', 'p2', 'p3', 'p4', 'none']);
-    expect(questions['label']?.instructions).toContain('safely wait');
+    expect(questions['label']?.instructions).toContain('important follow-up (P2)');
+    expect(questions['label']?.instructions).toContain('substantive optional reading (P3)');
+    expect(questions['label']?.instructions).toContain('routine FYI or promotions (P4)');
     expect(JSON.stringify(input)).not.toMatch(/phishing|scam|impersonat|suspicious|sender_authenticated|\bbulk\b|Robinhood/i);
     expect(clefInput(CLEF_FLASH, state, options)['model']).toBe('clef-flash');
     expect(criterion({ name: 'P2', description: '这周处理' })).toBe('P2: 这周处理');

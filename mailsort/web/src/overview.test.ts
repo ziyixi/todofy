@@ -175,6 +175,34 @@ describe('the flow diagram', () => {
 })
 
 describe('概览', () => {
+  it.each([
+    { name: 'mixed', fallbackCount: 67, note: '明确 P1 14 封 · 保底 P1（拿不准）67 封' },
+    { name: 'all fallback', fallbackCount: 81, note: '明确 P1 0 封 · 保底 P1（拿不准）81 封' },
+    { name: 'no fallback', fallbackCount: 0, note: '明确 P1 81 封 · 保底 P1（拿不准）0 封' },
+    { name: 'older server', fallbackCount: undefined, note: 'P1 保底拆分未提供，请刷新或等待服务更新。' },
+  ])('shows $name P1 counts without changing category totals or the flow', async ({ fallbackCount, note }) => {
+    const s = server()
+    s.report = [
+      create(LabelCountSchema, { label: 'labels/p1', autoCount: 81, ...(fallbackCount === undefined ? {} : { fallbackCount }) }),
+      create(LabelCountSchema, { label: 'labels/p2', fallbackCount: 0 }),
+      create(LabelCountSchema, { label: 'labels/p3', fallbackCount: 0 }),
+      create(LabelCountSchema, { label: 'labels/p4', autoCount: 19, fallbackCount: 0 }),
+    ]
+    const root = await open(s, '/overview')
+    const report = [...root.querySelectorAll('.card')].find((card) => card.querySelector('table.report') !== null)
+    expect(report?.querySelector('.hint')?.textContent).toBe(note)
+    expect([...(report?.querySelectorAll('tbody tr') ?? [])].map((row) => [...row.children].map((cell) => cell.textContent))).toEqual([
+      ['P1', '81', '0'],
+      ['P4', '19', '0'],
+    ])
+    expect([...root.querySelectorAll('.kpi-value')].map((node) => node.textContent)).toEqual(['14', '12', '2', '10'])
+    expect([...root.querySelectorAll('.kpi-sub')].map((node) => node.textContent)).toEqual(['7 天 50', '7 天 40', '7 天 81', '7 天 19'])
+    expect(root.querySelector('svg.flow-svg')?.getAttribute('aria-label')).toBe('邮件流程：共 20 封')
+    expect(root.querySelectorAll('.tabs a')).toHaveLength(3)
+    expect(root.textContent).not.toContain('准确率')
+    if (fallbackCount === undefined) expect(report?.textContent).not.toContain('明确 P1')
+  })
+
   it('shows the status line, today’s four numbers with their 7 days, the flow, the week per label and the budget, and no error box', async () => {
     const s = server()
     s.flow.push(flowCount(MailFlow_Stage.CLEF, MailFlow_Outcome.NO_LABEL, '', 3), flowCount(MailFlow_Stage.CLEF, MailFlow_Outcome.UNSURE_SHOWN, '', 1))

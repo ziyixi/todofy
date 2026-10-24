@@ -8,7 +8,7 @@ import { AiError, AiQuotaError, embed, toBlob, type ClefAnswer } from './ai.ts';
 import type { Decision } from './decide.ts';
 import { modeCeiling, type AiRunner, type Env, type ModeName } from './env.ts';
 import { putExample, storeEmbedding, unembedded } from './examples.ts';
-import { applyFeedback } from './feedback.ts';
+import { applyFeedback, setCurrentLabels } from './feedback.ts';
 import { countFlow, skipOutcome, stageOf, type FlowOutcome } from './flow.ts';
 import { GmailRefused, GoogleError, isMessageId, type AccessToken, type GmailClient, type HistoryPage } from './gmail.ts';
 import { labelMergeStep, mergeWritesToday, migrationActive } from './label-merge.ts';
@@ -42,7 +42,7 @@ import { replayStep } from './replay.ts';
 import { Budget, noteGoogleError, noteTokenOk, openSession, writeScope } from './session.ts';
 import { effectiveMode, readSettings, tripBreaker, type SettingsValue } from './settings.ts';
 import { utcDay, type Store } from './store.ts';
-import { finishUnread, isUnreadPending, scanUnread } from './unread.ts';
+import { fallbackP1, finishUnread, isUnreadPending, scanUnread, unreadRechecksFallback } from './unread.ts';
 import { executeWrites, intend, type WriteContext, type WriteGate } from './writes.ts';
 
 /** Labels Gmail puts on mail that is not the owner's incoming mail: never decided. */
@@ -290,6 +290,7 @@ function recordSkip(store: Store, id: string, threadId: string, receivedAt: numb
 async function decideMail(ctx: MailContext, messageId: string, attempts: number): Promise<MailOutcome> {
   const { store, gmail } = ctx;
   const unread = isUnreadPending(store, messageId);
+  const recheckFallback = unread && unreadRechecksFallback(store);
   if (unread) {
     // This batch promises actual Gmail labels. A pause or reached write cap must leave it queued.
     const at = ctx.now();
@@ -316,7 +317,13 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
     ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'not_inbox'); });
     return 'skipped';
   }
-  if (unread && read.labelIds.some(id => priorityGmailIds(store).has(id))) {
+  const priorityIds = priorityGmailIds(store);
+  const currentPriorities = read.labelIds.filter(id => priorityIds.has(id));
+  if (recheckFallback && (!fallbackP1(store, messageId) || currentPriorities.length !== 1 || currentPriorities[0] !== store.label(P1_ID)?.gmail_id)) {
+    ctx.transact(() => { finishPending(store, messageId); });
+    return 'skipped';
+  }
+  if (unread && !recheckFallback && currentPriorities.length > 0) {
     ctx.transact(() => { finishPending(store, messageId); });
     return 'skipped';
   }
@@ -369,22 +376,24 @@ async function decideMail(ctx: MailContext, messageId: string, attempts: number)
   // gate's, right before the write: a write it refuses stays recorded, like any failed write), else only recorded.
   const labels = store.labels();
   const label = decision.kind === 'label' ? labels.find((item) => item.id === decision.label) : undefined;
+  const unchangedP1 = recheckFallback && label?.id === P1_ID;
   // A label missing from Gmail, or whose path names a Gmail label not its own, writes nothing until the owner acts.
-  const apply = label !== undefined && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1 && writesLive(store, ctx.ceiling);
+  const apply = !unchangedP1 && label !== undefined && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1 && writesLive(store, ctx.ceiling);
   // Fixed cadence: P1 remains visible in Inbox, P2-P4 are archived.
   const archive = label?.id !== P1_ID;
   const intent: { id: string | null } = { id: null };
   ctx.transact(() => {
     // Valid uncertain/none model answers already became P1 in judge; failures do not create mandatory review.
     const shown = false;
-    const outcome = decision.kind === 'label' ? (apply ? 'applied' : 'suggested') : decision.kind === 'none' ? 'none' : 'unsure';
-    recordDecision(store, read, g, now, { outcome, decision, view1, view2, model, versions: judgement.versions, shown });
+    const outcome = decision.kind === 'label' ? (apply || unchangedP1 ? 'applied' : 'suggested') : decision.kind === 'none' ? 'none' : 'unsure';
+    recordDecision(store, read, g, now, { outcome, decision, modelDecision: judgement.modelDecision, view1, view2, model, versions: judgement.versions, shown });
     store.addUsage(utcDay(now), 'decided', 1);
     if (decision.kind === 'unsure') store.addUsage(utcDay(now), 'unsure', 1);
-    countFlow(store, now, stageOf(model), flowOutcome(decision, apply, archive, shown), decision.kind === 'label' ? decision.label : null);
+    if (unchangedP1) setCurrentLabels(store, read.id, [P1_ID]);
+    else countFlow(store, now, stageOf(model), flowOutcome(decision, apply, archive, shown), decision.kind === 'label' ? decision.label : null);
     if (apply) intent.id = intend(store, read.id, label, archive, 'auto', now, read.labelIds);
     if (unread && intent.id !== null) store.run(`UPDATE unread_batch SET ledger_id = ? WHERE message_id = ?`, intent.id, read.id);
-    finishPending(store, read.id, 'failed');
+    finishPending(store, read.id, unchangedP1 ? 'skipped' : 'failed');
   });
   const ledgerId = intent.id;
   if (ledgerId !== null) {
@@ -408,6 +417,7 @@ function flowOutcome(decision: Decision, applied: boolean, archive: boolean, sho
 interface Recorded {
   readonly outcome: 'applied' | 'suggested' | 'none' | 'unsure';
   readonly decision: Decision;
+  readonly modelDecision: Decision;
   readonly view1: ClefAnswer | null;
   readonly view2: ClefAnswer | null;
   readonly model: string;
@@ -421,7 +431,7 @@ interface Recorded {
  * 2026-10-11). Run inside a transaction.
  */
 function recordDecision(store: Store, read: { id: string; threadId: string; receivedAt: number }, g: Awaited<ReturnType<typeof gather>>, now: number, r: Recorded): void {
-  const { decision, view1, view2 } = r;
+  const { decision, modelDecision, view1, view2 } = r;
   store.run(
     `INSERT OR REPLACE INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, top_label, decider, unsure_reason, probabilities, probabilities2,
        suspicious, bulk, confidence, shown, model, versions, dmarc, sender_hash, sender_domain, subject, sender, summary, current_labels)
@@ -432,9 +442,9 @@ function recordDecision(store: Store, read: { id: string; threadId: string; rece
     now,
     r.outcome,
     decision.kind === 'label' ? decision.label : null,
-    decision.kind === 'label' ? decision.label : decision.kind === 'unsure' ? decision.top : null,
+    modelDecision.kind === 'label' ? modelDecision.label : modelDecision.kind === 'unsure' ? modelDecision.top : null,
     r.model === '' ? 'none' : r.model,
-    decision.kind === 'unsure' ? decision.reason : '',
+    modelDecision.kind === 'unsure' ? modelDecision.reason : modelDecision.kind === 'none' ? 'no_match' : '',
     JSON.stringify(view1?.probabilities ?? {}),
     JSON.stringify(view2?.probabilities ?? {}),
     null,
@@ -501,7 +511,7 @@ export function daily(store: Store, now: number): void {
   // Applied labels left alone for WEAK_ACCEPT_MS: a weak confirmation, and an example while the label has few.
   const weak = store.all<{ message_id: string; label_id: string; summary: string | null }>(
     `SELECT d.message_id, d.label_id, d.summary FROM decisions d
-     WHERE d.outcome = 'applied' AND d.verdict IS NULL AND d.decided_at >= ? AND d.decided_at <= ? AND d.label_id IN ('p1', 'p2', 'p3', 'p4')
+     WHERE d.outcome = 'applied' AND d.unsure_reason = '' AND d.verdict IS NULL AND d.decided_at >= ? AND d.decided_at <= ? AND d.label_id IN ('p1', 'p2', 'p3', 'p4')
        AND EXISTS (SELECT 1 FROM ledger l WHERE l.message_id = d.message_id AND l.label_id = d.label_id AND l.state = 'applied' AND l.superseded = 0)
      LIMIT 500`,
     priorityStartedAt(store),

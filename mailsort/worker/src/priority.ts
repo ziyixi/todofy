@@ -2,10 +2,10 @@ import type { Store } from './store.ts';
 
 /** Reading cadence, independent of Tasks' task priorities. */
 export const PRIORITY_LABELS = [
-  { id: 'p1', displayName: 'P1', description: '需要及时查看或处理，两三天后再看可能耽误事情；或信息不足、难以确定可以延后多久。保留在收件箱。', keepInInbox: true },
-  { id: 'p2', displayName: 'P2', description: '值得查看或需要处理，但可以安全地等两三天；不需要当天关注。', keepInInbox: false },
-  { id: 'p3', displayName: 'P3', description: '有阅读价值，可以等到下个周末集中看；此前不会错过需要处理的事项。', keepInInbox: false },
-  { id: 'p4', displayName: 'P4', description: '无需行动、可以略过的普通通知、促销或低价值 FYI。重要通知按时效选择 P1 或 P2。', keepInInbox: false },
+  { id: 'p1', displayName: 'P1', description: 'Prompt attention: waiting 2-3 days risks a required response, an active deadline, an unresolved obligation, or a material consequence. This is positively urgent, not merely a promotional countdown.', keepInInbox: true },
+  { id: 'p2', displayName: 'P2', description: 'Important information or required follow-up that can safely wait 2-3 days. Attention is worthwhile or necessary, but not needed today. Optional long-form reading belongs to P3.', keepInInbox: false },
+  { id: 'p3', displayName: 'P3', description: 'Substantive optional reading: articles, tutorials, analysis or newsletters worth a weekend reading session. No required response or near-term obligation. This remains P3 on Fridays and weekends.', keepInInbox: false },
+  { id: 'p4', displayName: 'P4', description: 'Routine FYI, successful status, confirmations, receipts or promotions without meaningful follow-up or substantial reading value. Optional offer expiry and expired optional events do not make it urgent.', keepInInbox: false },
 ] as const;
 
 export const P1_ID = 'p1';

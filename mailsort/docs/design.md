@@ -52,12 +52,13 @@ addresses, label names or credentials. The website's `/privacy/mailsort` page mu
 | ID/name | Policy | keep_in_inbox |
 | --- | --- | --- |
 | p1 / P1 |Prompt attention or uncertain priority |true |
-| p2 / P2 |Safe to wait two or three days |false |
-| p3 / P3 |Safe to wait until next weekend |false |
-| p4 / P4 |Optional low-value or ordinary FYI |false |
+| p2 / P2 |Important information or required follow-up that can wait two or three days |false |
+| p3 / P3 |Substantive optional reading for a weekend session |false |
+| p4 / P4 |Routine FYI, receipts or promotions without meaningful follow-up or substantial reading |false |
 
 All four are real, flat Gmail user labels. Important automated notices are graded by their actual timing and
-required action. No brand whitelist or subject-keyword rules. These are reading cadences, without later timers,
+required action. P3 remains optional reading on Fridays and weekends; an optional offer's expiry does not make
+P4 urgent. No brand whitelist or subject-keyword rules. These are reading cadences, without later timers,
 automatic Inbox resurfacing or priority escalation.
 
 Modes remain off, shadow and live. The deployment ceiling and existing breaker can lower the owner's mode.
@@ -80,13 +81,24 @@ gone. Only pending members of this batch bypass the normal Inbox/time boundary. 
 write ledger do the work; an active batch is reused when start is repeated. This authorizes the deployed app's
 normal masked-model processing, not exporting private mail or model requests to chat, logs or test fixtures.
 
+The optional `recheck_fallback=true` selects only current-era fallback P1 decisions without an owner confirmation
+or correction. Before processing, the app rereads Gmail and requires UNREAD with exactly the current P1 priority
+label; ordinary exclusions still apply. Already-read, relabeled or owner-answered mail is skipped. A new P1 result
+updates decision evidence without another Gmail intent or write and counts as skipped. A P2-P4 result uses the
+existing ledger and archive behavior. This option shares the ordinary batch's queue, mode gates, budgets and caps.
+
 Clef receives only current-priority examples/history, receipt time and the judgment's local date/week. It answers
 one priority question. The existing second view reorders the most likely options. Agreement and the unchanged
-0.7 combined threshold accept a later priority. A valid `none`, low confidence or disagreement falls back to P1.
+0.7 combined threshold accept a later priority. The threshold and revised descriptions still need real-model
+calibration. A valid `none`, low confidence or disagreement falls back to P1.
 It is tagged and kept in Inbox in live mode, with no mandatory review item. Provider/network/malformed-answer
 failures retain the existing pending/backoff path and become failures when retries are exhausted; quota exhaustion
 defers to the next UTC day. Neither failure path fabricates a P1 result. The unread batch reports terminal failures
 separately from applied labels.
+
+`label_id` records the assigned priority; `top_label`, `unsure_reason` and the two probability maps preserve the
+original model evidence. Schema 9 repairs overwritten current-era fallback metadata from those saved probabilities
+and the original confidence policy. It leaves assigned Gmail labels, owner verdicts and write ledgers unchanged.
 
 A new message can carry an older priority. Its persisted base label set authorizes replacing only those priority
 labels on that message. Earlier messages in the conversation and unrelated labels are not modified.
@@ -112,9 +124,10 @@ An explicit unread batch may replace the latest per-message decision for a selec
 decision; its older Gmail write ledger is retained.
 
 Sender history, weak acceptance, nearest/unembedded examples, Gmail feedback and replay admit only current P1-P4
-records at or after that boundary. A later daily pass cannot revive retired topic examples. A no-backfill receipt
-cutoff also prevents earlier mail being reclassified after cursor resync. The owner-requested unread batch is the
-only exception to that receipt cutoff.
+records at or after that boundary. Automatic sender history and daily weak acceptance exclude fallback P1;
+explicit owner confirmations and corrections can still teach. A later daily pass cannot revive retired topic
+examples. A no-backfill receipt cutoff also prevents earlier mail being reclassified after cursor resync. The
+owner-requested unread batch is the only exception to that receipt cutoff.
 
 ## 7. Writes and one-time setup
 
@@ -157,8 +170,10 @@ with assertions that those paths really ran. A setup-required early return is no
 Overview is the default route. The three visible tabs are 概览, 分级, 设置. Four fixed rows state the reading cadence
 and Inbox/archive behavior; examples load only when expanded. The setup card states exactly which old labels and
 learning are removed and that existing mail remains. It makes a bounded owner RPC per click, without polling.
-The 分级 page also offers 整理当前未读邮件 with 开始整理 and 刷新进度, showing scanning, pending/deferred, applied, skipped and failed counts. A completed
-batch can include skips or failures. Settings keeps modes, ordinary undo, read-only replay and budget information.
+The 分级 page also offers 整理当前未读邮件 with 开始整理, 重判保底 P1 and 刷新进度, showing scanning, pending/deferred,
+applied, skipped and failed counts. A completed batch can include skips or failures. The last-seven-day overview
+separates direct P1 decisions from fallback P1 assignments; assigned P1 alone is not evidence of urgent mail.
+Settings keeps modes, ordinary undo, read-only replay and budget information.
 Legacy outcomes are readable as history without presenting old topic names as active priorities.
 
 ## 10. Ops
@@ -176,6 +191,11 @@ exclusion, and label cleanup retaining every message and read/star/Inbox state. 
 mode gates, retries, replay boundaries and CPU checks. Unread-batch cases cover pagination/resume, old and archived
 mail, already graded/read exclusions, next-day deferral, write caps and original Inbox restoration on undo. The real
 local Wrangler smoke exercises the same generated owner API; no test reaches Google.
+
+Fallback regressions cover original evidence preservation and schema repair, exclusion from automatic learning,
+owner-correction protection, changed Gmail state before recheck, a P1 no-op without a new write, and an archive
+through the existing ledger when a later priority is accepted. Synthetic checks do not calibrate real-model
+confidence; that evidence and any live recheck results belong in the dated verification record.
 
 Production evidence records only labels/identities/counts, operating mode and provider versions. Do not read
 private mail to demonstrate the model. Dated evidence and the current cutover state are in

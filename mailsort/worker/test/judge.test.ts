@@ -52,7 +52,9 @@ describe('priority judgement and learning cutoff', () => {
     const ai = new FakeAi();
     let calls = 0;
     ai.choiceOverride = () => kind === 'none' ? { none: 0.92, p1: 0.08 } : kind === 'uncertain' ? { p2: 0.5, none: 0.5 } : ++calls === 1 ? { p2: 0.92, none: 0.08 } : { p1: 0.92, none: 0.08 };
-    expect(await judgement(setup(), ai)).toMatchObject({ decision: { kind: 'label', label: 'p1' } });
+    const result = await judgement(setup(), ai);
+    expect(result).toMatchObject({ decision: { kind: 'label', label: 'p1' } });
+    expect(result).toMatchObject({ modelDecision: kind === 'none' ? { kind: 'none' } : { kind: 'unsure', top: kind === 'disagreement' ? 'p2' : null, reason: kind === 'disagreement' ? 'views_disagree' : 'low_confidence' } });
   });
 
   it('preserves model failure as an error instead of inventing a P1 decision', async () => {
@@ -68,6 +70,21 @@ describe('priority judgement and learning cutoff', () => {
     oldDecision(store, 'current', 'p2', CUT + 2);
     store.run(`INSERT INTO label_aliases (source_id, target_id) VALUES ('bank', 'p1')`);
     expect(senderHistory(store, 'sender-hash', NOW, 'not-this-message')).toEqual([{ label: 'p2', owner: 0, auto: 1 }]);
+  });
+
+  it('learns fallback mail only after an explicit owner verdict', () => {
+    const store = setup();
+    oldDecision(store, 'fallback', 'p1', CUT + 1);
+    store.run(`UPDATE decisions SET top_label = 'p2', unsure_reason = 'low_confidence' WHERE message_id = 'fallback'`);
+    expect(senderHistory(store, 'sender-hash', NOW, 'other-message')).toEqual([]);
+    daily(store, NOW);
+    expect(store.decision('fallback')?.verdict).toBeNull();
+    expect(store.all(`SELECT id FROM examples`)).toEqual([]);
+    const row = store.decision('fallback');
+    if (row === undefined) throw new Error('fixture');
+    setVerdict(store, row, 'p3', 'review', NOW);
+    expect(senderHistory(store, 'sender-hash', NOW + 1, 'other-message')).toEqual([{ label: 'p3', owner: 1, auto: 0 }]);
+    expect(store.all(`SELECT label_id, origin FROM examples`)).toEqual([{ label_id: 'p3', origin: 'correction' }]);
   });
 
   it('excludes old and topic examples from embeddings, nearest neighbours and rebuilds', () => {

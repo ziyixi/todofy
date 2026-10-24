@@ -423,28 +423,31 @@ function integer(value: number, min: number, max: number): number {
  */
 function labelReport(ctx: ApiContext): ReturnType<typeof create<typeof LabelReportSchema>> {
   const start = Math.floor(ctx.now / DAY) * DAY - 6 * DAY;
-  type Row = { label: string | null; outcome: string; shown: number; gmail: number; review: number; n: number };
+  type Row = { label: string | null; outcome: string; shown: number; gmail: number; review: number; fallback: number; n: number };
   const rows = ctx.store.all<Row>(
     `SELECT coalesce(selected.target_id, d.label_id, d.top_label) AS label, d.outcome, d.shown,
        sum(d.verdict_source = 'gmail' AND d.verdict IN ('confirmed', 'corrected') AND coalesce(verdict.target_id, d.verdict_label, '') != coalesce(selected.target_id, d.label_id, d.top_label, '')) AS gmail,
        sum(d.verdict_source = 'review' AND coalesce(verdict.target_id, d.verdict_label, '') != coalesce(selected.target_id, d.label_id, d.top_label, '')) AS review,
+       sum(d.label_id = 'p1' AND d.unsure_reason IN ('low_confidence', 'views_disagree', 'no_match') AND d.outcome IN ('applied', 'suggested')) AS fallback,
        count(*) AS n
      FROM decisions d LEFT JOIN label_aliases selected ON selected.source_id = coalesce(d.label_id, d.top_label)
        LEFT JOIN label_aliases verdict ON verdict.source_id = d.verdict_label
      WHERE d.decided_at >= ? AND d.outcome != 'skipped' GROUP BY label, d.outcome, d.shown`,
     start,
   );
-  const per = new Map<string, { auto: number; gmail: number; review: number; unsure: number; shown: number }>();
-  const total = { decided: 0, auto: 0, none: 0, unsure: 0, shown: 0 };
+  const per = new Map<string, { auto: number; gmail: number; review: number; unsure: number; shown: number; fallback: number }>();
+  const total = { decided: 0, auto: 0, none: 0, unsure: 0, shown: 0, fallback: 0 };
   for (const row of rows) {
     const auto = row.outcome === 'applied' || row.outcome === 'suggested';
     total.decided += row.n;
     if (auto) total.auto += row.n;
+    total.fallback += row.fallback;
     if (row.outcome === 'none') total.none += row.n;
     if (row.outcome === 'unsure') total.unsure += row.n;
     if (row.outcome === 'unsure' && row.shown === 1) total.shown += row.n;
     if (row.label === null) continue;
-    const entry = per.get(row.label) ?? { auto: 0, gmail: 0, review: 0, unsure: 0, shown: 0 };
+    const entry = per.get(row.label) ?? { auto: 0, gmail: 0, review: 0, unsure: 0, shown: 0, fallback: 0 };
+    entry.fallback += row.fallback;
     if (auto) entry.auto += row.n;
     if (row.outcome === 'unsure') entry.unsure += row.n;
     if (row.outcome === 'unsure' && row.shown === 1) entry.shown += row.n;
@@ -463,6 +466,7 @@ function labelReport(ctx: ApiContext): ReturnType<typeof create<typeof LabelRepo
         reviewCorrectionCount: entry?.review ?? 0,
         unsureCount: entry?.unsure ?? 0,
         shownCount: entry?.shown ?? 0,
+        fallbackCount: entry?.fallback ?? 0,
       });
     }),
     decidedCount: total.decided,
@@ -470,6 +474,7 @@ function labelReport(ctx: ApiContext): ReturnType<typeof create<typeof LabelRepo
     noLabelCount: total.none,
     unsureCount: total.unsure,
     shownCount: total.shown,
+    fallbackCount: total.fallback,
   });
 }
 
@@ -491,11 +496,12 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
 
   async startUnreadClassification(request, ctx) {
     if (request.name !== 'unreadClassification') notFound();
-    const answer = once(ctx, request.requestId, 'StartUnreadClassification', request.name, UnreadClassificationSchema, () => {
+    const scope = request.recheckFallback ? `${request.name}:fallback` : request.name;
+    const answer = once(ctx, request.requestId, 'StartUnreadClassification', scope, UnreadClassificationSchema, () => {
       if (priorityStartedAt(ctx.store) === 0) bad('请先完成 P1–P4 分级设置。');
       if (!ownerWritesAllowed(ctx)) bad('请先恢复正式模式及 Gmail 写入授权。');
       if (ctx.consolidationBusy()) bad('邮件正在处理，请稍后再开始整理。');
-      startUnread(ctx.store, ctx.now);
+      startUnread(ctx.store, ctx.now, request.recheckFallback);
       return unreadProgress(ctx.store, ctx.now) ?? notFound();
     });
     await ctx.wake();

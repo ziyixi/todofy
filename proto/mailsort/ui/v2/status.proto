@@ -53,7 +53,7 @@ message LabelCount {
     (google.api.field_behavior) = OUTPUT_ONLY,
     (google.api.resource_reference).type = "sort.ziyixi.science/Label"
   ];
-  // Confident decisions of this label (written to Gmail, or recorded in shadow mode).
+  // Priorities assigned to this label (written to Gmail, or recorded in shadow mode), including P1 fallback.
   int32 auto_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Decisions of this label (confident, or the most likely option of an uncertain one) whose label the owner
   // changed in Gmail: moved to another label, or removed.
@@ -64,6 +64,9 @@ message LabelCount {
   int32 unsure_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Of those, shown in the review queue.
   int32 shown_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Subset of auto_count assigned conservatively to P1 after an uncertain or no-match model answer.
+  // Absent from an older server response; zero means none were fallback assignments.
+  optional int32 fallback_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // What the decisions of the last 7 days (UTC, today included) came to, per label. A singleton.
@@ -81,7 +84,7 @@ message LabelReport {
   repeated LabelCount labels = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Mails decided (not skipped).
   int32 decided_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Of those, a confident label.
+  // Of those, an assigned label, including conservative P1 fallback; see fallback_count.
   int32 auto_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Of those, confident that no label fits.
   int32 no_label_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -89,6 +92,9 @@ message LabelReport {
   int32 unsure_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Of the uncertain ones, shown in the review queue.
   int32 shown_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Subset of auto_count assigned conservatively to P1; not a direct urgency prediction.
+  // Absent from an older server response.
+  optional int32 fallback_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // The pipeline's state: codes, counts and times only. A singleton.

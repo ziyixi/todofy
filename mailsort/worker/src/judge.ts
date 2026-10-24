@@ -35,8 +35,8 @@ export async function gather(read: ReadMessage): Promise<Gathered> {
  */
 export function senderHistory(store: Store, hash: string, asOf: number, exclude: string): HistoryEntry[] {
   if (hash === '' || priorityStartedAt(store) === 0) return [];
-  const rows = store.all<{ outcome: string; label_id: string | null; verdict: string | null; verdict_label: string | null; verdict_source: string | null; verdict_at: number | null }>(
-    `SELECT outcome, label_id, verdict, verdict_label, verdict_source, verdict_at FROM decisions
+  const rows = store.all<{ outcome: string; label_id: string | null; unsure_reason: string; verdict: string | null; verdict_label: string | null; verdict_source: string | null; verdict_at: number | null }>(
+    `SELECT outcome, label_id, unsure_reason, verdict, verdict_label, verdict_source, verdict_at FROM decisions
      WHERE sender_hash = ? AND decided_at >= ? AND decided_at < ? AND message_id != ? ORDER BY decided_at DESC LIMIT ?`,
     hash,
     Math.max(asOf - SENDER_HISTORY_MS, priorityStartedAt(store)),
@@ -47,7 +47,7 @@ export function senderHistory(store: Store, hash: string, asOf: number, exclude:
   const counts = new Map<string, { owner: number; auto: number }>();
   for (const row of rows) {
     const owner = (row.verdict === 'confirmed' || row.verdict === 'corrected') && (row.verdict_source === 'review' || row.verdict_source === 'gmail') && (row.verdict_at ?? asOf) < asOf;
-    const original = owner ? (row.verdict_label ?? NONE) : row.outcome === 'applied' || row.outcome === 'suggested' ? row.label_id : null;
+    const original = owner ? (row.verdict_label ?? NONE) : row.unsure_reason === '' && (row.outcome === 'applied' || row.outcome === 'suggested') ? row.label_id : null;
     if (original === null || !PRIORITY_IDS.has(original)) continue;
     const label = store.canonicalLabelId(original);
     if (!PRIORITY_IDS.has(label)) continue;
@@ -72,6 +72,8 @@ export interface ModelContext {
 }
 
 export interface Judgement {
+  /** The model result before valid uncertainty becomes the applied P1 policy. */
+  readonly modelDecision: Decision;
   readonly decision: Decision;
   /** The views' answers (null when not asked: no label to offer, or view 2 did not run). */
   readonly view1: ClefAnswer | null;
@@ -90,7 +92,8 @@ export function retryDelay(attempts: number): number {
 
 /** The judgement of a mail the model could not decide (no Workers AI, or every retry failed): uncertain. */
 export function modelUnavailable(): Judgement {
-  return { decision: { kind: 'unsure', reason: 'model_unavailable', top: null, confidence: 0, candidates: [] }, view1: null, view2: null, versions: {} };
+  const decision: Decision = { kind: 'unsure', reason: 'model_unavailable', top: null, confidence: 0, candidates: [] };
+  return { decision, modelDecision: decision, view1: null, view2: null, versions: {} };
 }
 
 /** Counts one Workers AI call against the pass and the day. */
@@ -117,7 +120,10 @@ export async function judge(ctx: ModelContext, model: string, g: Gathered, asOf:
   // The model is offered only labels with a description: a bare name is too little to decide by. Their keys come from
   // their paths (paths.ts optionKeys), stable per path.
   const offered = enabled.filter((label) => label.description !== '');
-  if (offered.length === 0) return { decision: { kind: 'unsure', reason: 'no_labels', top: null, confidence: 0, candidates: [] }, view1: null, view2: null, versions };
+  if (offered.length === 0) {
+    const decision: Decision = { kind: 'unsure', reason: 'no_labels', top: null, confidence: 0, candidates: [] };
+    return { decision, modelDecision: decision, view1: null, view2: null, versions };
+  }
   const keys = optionKeys(offered.map((label) => ({ id: label.id, path: label.display_name })));
   const pathOf = new Map(labels.map((label) => [label.id, label.display_name]));
   // A label by the name the model knows it by: an offered label's key, another's slug; none for a deleted one.
@@ -157,5 +163,5 @@ export async function judge(ctx: ModelContext, model: string, g: Gathered, asOf:
   const decision: Decision = modelDecision.kind === 'label' ? modelDecision : {
     kind: 'label', label: P1_ID, confidence: modelDecision.confidence, candidates: modelDecision.candidates,
   };
-  return { decision, view1, view2, versions };
+  return { decision, modelDecision, view1, view2, versions };
 }

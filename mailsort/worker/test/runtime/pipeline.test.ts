@@ -96,6 +96,47 @@ describe('fixed priorities', () => {
     expect(h.up.ai.calls).toHaveLength(after);
   });
 
+  it('retains fallback evidence and learns it only after a Gmail correction', async () => {
+    h = await startHarness();
+    await initialize(h);
+    await setMode(h, Mode.LIVE);
+    let calls = 0;
+    h.up.ai.choiceOverride = () => ++calls % 2 === 1
+      ? { p1: 0.05, p2: 0.55, p3: 0.30, p4: 0.05, none: 0.05 }
+      : { p1: 0.06, p2: 0.57, p3: 0.31, none: 0.06 };
+    const first = newMail('abc0000000000010');
+    deliver(h, first, T0 + MINUTE);
+    await h.step(T0 + 2 * MINUTE);
+    expect(await decision(h, first.id)).toMatchObject({ outcome: 'applied', label_id: 'p1', top_label: 'p2', unsure_reason: 'low_confidence', shown: 0 });
+    expect(gmailLabels(h, first.id)).toContain('INBOX');
+    expect(await h.sql(`SELECT id FROM review`)).toEqual([]);
+    const report = await h.api.getLabelReport({ name: 'labelReport' });
+    expect(report).toMatchObject({ autoCount: 1, fallbackCount: 1 });
+    expect(report.labels.find(row => row.label === 'labels/p1')).toMatchObject({ autoCount: 1, fallbackCount: 1 });
+    expect(report.labels.find(row => row.label === 'labels/p2')).toMatchObject({ autoCount: 0, fallbackCount: 0 });
+
+    const before = h.up.ai.calls.length;
+    deliver(h, newMail('abc0000000000011'), T0 + 3 * MINUTE);
+    await h.step(T0 + 4 * MINUTE);
+    expect(clefCalls(h, before)).toHaveLength(2);
+    for (const call of clefCalls(h, before)) expect(call.state['sender_history']).toBeUndefined();
+    await h.step(T0 + 4 * 86_400_000);
+    expect(await h.sql(`SELECT verdict FROM decisions WHERE message_id IN (?, ?)`, first.id, 'abc0000000000011')).toEqual([{ verdict: null }, { verdict: null }]);
+    expect(await h.sql(`SELECT id FROM examples`)).toEqual([]);
+
+    const writes = modifies(h).length;
+    h.up.gmail.ownerModify(first.id, [h.up.gmail.labelIdByName('P3') ?? ''], [h.up.gmail.labelIdByName('P1') ?? '']);
+    await h.step(T0 + 4 * 86_400_000 + MINUTE);
+    expect(await decision(h, first.id)).toMatchObject({ label_id: 'p1', top_label: 'p2', unsure_reason: 'low_confidence', verdict: 'corrected', verdict_label: 'p3', verdict_source: 'gmail' });
+    expect(await h.sql(`SELECT label_id, origin FROM examples WHERE message_id = ?`, first.id)).toEqual([{ label_id: 'p3', origin: 'correction' }]);
+    expect(modifies(h)).toHaveLength(writes);
+    force(h, 'p3');
+    const after = h.up.ai.calls.length;
+    deliver(h, newMail('abc0000000000012'), T0 + 4 * 86_400_000 + 2 * MINUTE);
+    await h.step(T0 + 4 * 86_400_000 + 3 * MINUTE);
+    for (const call of clefCalls(h, after)) expect(call.state['sender_history']).toBe('p3 ×1');
+  });
+
   it('keeps shadow as records only and does not reclassify mail received before cutover', async () => {
     h = await startHarness();
     await initialize(h);

@@ -8,10 +8,12 @@
 // why there. The UI's own budget is in ../web/scripts/js-budget.mjs.
 // 2026-10-11: flat-label consolidation adds the owner API and bounded Gmail work; Linux CI measures 135.1 KiB.
 // Use a 140 KiB budget with modest build headroom; the platform limit and CPU/model budgets are unchanged.
+// 2026-10-24: fallback provenance, accurate counts and explicit unread recheck bring the bundle to about 141 KiB.
+// 148 KiB leaves build headroom; this is a code-size check, not a model or spending budget.
 //
 //   node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mailsort-bundle"     (from worker/, after the dry run's --outdir)
 import { checkWorkerBundle, isMain } from '../../tools/bundle-size/bundle-size.mjs'
 
-export const BUDGET_GZIP_BYTES = 140 * 1024
+export const BUDGET_GZIP_BYTES = 148 * 1024
 
 if (isMain(import.meta.url)) process.exitCode = checkWorkerBundle('The mailsort app', process.argv[2], BUDGET_GZIP_BYTES)

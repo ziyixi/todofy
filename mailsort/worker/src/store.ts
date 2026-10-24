@@ -20,8 +20,9 @@ import { effectiveLedgerRow } from './label-identity.ts';
 import { newEtag } from './ids.ts';
 import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, REPLAY_KEPT_MS, REQUEST_ID_TTL_MS, TRUSTED_DOMAINS_PER_LABEL_MAX } from './limits.ts';
 import { senderHash } from './mask.ts';
+import { PRIORITY_LABELS } from './priority.ts';
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export const SCHEMA_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -469,11 +470,11 @@ export interface DecisionRow extends Record<string, SqlStorageValue> {
   thread_id: string;
   received_at: number;
   decided_at: number;
-  /** applied: written to Gmail; suggested: a confident label only recorded; none: confident that no label fits. */
+  /** applied: written to Gmail; suggested: a label only recorded; none: confident that no label fits. */
   outcome: Outcome;
-  /** The confident label (applied or suggested). */
+  /** The applied or suggested label, including P1 used for valid model uncertainty. */
   label_id: string | null;
-  /** The decided label, or an uncertain decision's most likely label. */
+  /** The original model's most likely label; NULL for none. Kept separately from the P1 fallback. */
   top_label: string | null;
   decider: string;
   unsure_reason: string;
@@ -608,8 +609,42 @@ export class Store {
       if (version < 6) for (const statement of SCHEMA_V6) this.sql.exec(statement);
       if (version < 7) for (const statement of SCHEMA_V7) this.sql.exec(statement);
       if (version < 8) for (const statement of SCHEMA_V8) this.sql.exec(statement);
+      if (version < 9) {
+        this.restorePriorityEvidence();
+        if (Number(this.getMeta('priority_started_at') ?? 0) > 0) {
+          for (const label of PRIORITY_LABELS) {
+            if (this.run(`UPDATE labels SET description = ?, desc_version = desc_version + 1 WHERE id = ? AND description != ?`, label.description, label.id, label.description) > 0) this.touchLabel(label.id, Date.now());
+          }
+        }
+      }
       if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
     });
+  }
+
+  /**
+   * Version 9: restore priority-era model evidence overwritten by the P1 fallback. Use the recorded confidence and
+   * the original 0.7/0.6 policy, independent of later calibration. Labels, owner verdicts and Gmail ledgers stay intact.
+   */
+  private restorePriorityEvidence(): void {
+    const startedAt = Number(this.getMeta('priority_started_at') ?? 0);
+    if (startedAt === 0) return;
+    const rows = this.all<{ message_id: string; top: string | null; top2: string | null; none_p: number | null; confidence: number }>(
+      `SELECT d.message_id, d.confidence,
+         (SELECT key FROM json_each(d.probabilities) ORDER BY value DESC, key LIMIT 1) AS top,
+         (SELECT key FROM json_each(d.probabilities2) ORDER BY value DESC, key LIMIT 1) AS top2,
+         json_extract(d.probabilities, '$.none') AS none_p
+       FROM decisions d WHERE d.decided_at >= ? AND d.outcome IN ('applied', 'suggested')
+         AND d.label_id = 'p1' AND d.top_label = 'p1' AND d.unsure_reason = ''
+         AND d.decider IN ('clef', 'clef-flash') AND d.confidence IS NOT NULL`,
+      startedAt,
+    );
+    for (const row of rows) {
+      if (row.top === null) continue;
+      const reason = row.top === 'none' ? ((row.none_p ?? 0) >= 0.6 ? 'no_match' : 'low_confidence')
+        : row.top2 !== null && row.top2 !== row.top ? 'views_disagree'
+        : row.top2 === null || row.confidence < 0.7 ? 'low_confidence' : '';
+      if (row.top !== 'p1' || reason !== '') this.run(`UPDATE decisions SET top_label = ?, unsure_reason = ? WHERE message_id = ?`, row.top === 'none' ? null : row.top, reason, row.message_id);
+    }
   }
 
   /** The stored schema version (0 for a new database whose meta table was just created). */

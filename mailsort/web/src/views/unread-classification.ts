@@ -11,6 +11,7 @@ export function unreadClassificationCard(ctx: ViewContext, initialStatus: Servic
   const progress = el('div', { class: 'unread-progress', role: 'status', 'aria-live': 'polite' })
   const feedback = el('p', { class: 'hint warn', role: 'status', hidden: true })
   const start = button('开始整理', () => void begin(), { class: 'primary' })
+  const recheck = button('重判保底 P1', () => void begin(true))
   const refresh = button('刷新进度', () => void load())
 
   const paint = () => {
@@ -30,6 +31,7 @@ export function unreadClassificationCard(ctx: ViewContext, initialStatus: Servic
       hold === null ? null : el('p', { class: 'hint warn' }, hold),
     )
     start.disabled = busy || active || status === null
+    recheck.disabled = start.disabled
     refresh.disabled = busy
   }
 
@@ -55,14 +57,14 @@ export function unreadClassificationCard(ctx: ViewContext, initialStatus: Servic
     paint()
   }
 
-  const begin = async () => {
+  const begin = async (recheckFallback = false) => {
     if (start.disabled) return
     busy = true
     feedback.hidden = true
     paint()
     const requestId = newRequestId()
     try {
-      batch = await withRetry(() => api.startUnreadClassification({ name: 'unreadClassification', requestId }))
+      batch = await withRetry(() => api.startUnreadClassification({ name: 'unreadClassification', requestId, ...(recheckFallback ? { recheckFallback: true } : {}) }))
       ctx.refreshStatus()
     } catch (error) {
       failure(error)
@@ -74,10 +76,11 @@ export function unreadClassificationCard(ctx: ViewContext, initialStatus: Servic
   const box = el('section', { class: 'card unread-classification', 'aria-label': '整理当前未读邮件' },
     el('h2', {}, '整理当前未读邮件'),
     el('p', { class: 'hint' }, '整理当前所有未读邮件，包括已归档邮件，排除垃圾邮件和回收站。P1 留在收件箱，P2–P4 归档；保留邮件、未读状态、星标和其他标签。'),
+    el('p', { class: 'hint' }, '重判只处理当前未读的保底 P1；已读和已手动调整的邮件不动。'),
     el('p', { class: 'hint' }, '使用现有模型预算；模型额度用完后等待下一个 UTC 日继续。已应用只统计 Gmail 已确认的修改。'),
     progress,
     feedback,
-    el('div', { class: 'actions' }, start, refresh),
+    el('div', { class: 'actions' }, start, recheck, refresh),
   )
   paint()
   return box

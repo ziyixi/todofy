@@ -407,6 +407,9 @@ message StartUnreadClassificationRequest {
     (google.api.field_behavior) = OPTIONAL,
     (google.api.field_info).format = UUID4
   ];
+  // Rejudge only existing unread fallback-P1 decisions, excluding explicit owner verdicts.
+  // False keeps the ordinary batch behavior: already graded messages are skipped.
+  bool recheck_fallback = 3 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Input of GetLabel.

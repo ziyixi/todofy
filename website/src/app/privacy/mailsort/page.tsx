@@ -59,8 +59,9 @@ export default function MailsortPrivacyPage() {
             Through a closed list of Gmail API operations it reads messages, their labels, the
             mailbox&apos;s list of labels and its change history, and creates four flat Gmail
             labels: P1, P2, P3 and P4. P1 is for mail that needs prompt attention or whose urgency
-            is unclear, and stays in the inbox. P2 can wait two or three days, P3 until the next
-            weekend, and P4 is low-value or informational mail that can be skipped. P2, P3 and P4
+            is unclear, and stays in the inbox. P2 holds important information or required follow-up
+            that can wait two or three days, P3 is substantive optional reading for the weekend, and
+            P4 is routine information, receipts or promotions without meaningful follow-up. P2, P3 and P4
             are archived out of the inbox. Every classification preserves the message&apos;s read or
             unread state.
           </li>
@@ -78,6 +79,13 @@ export default function MailsortPrivacyPage() {
             excluded; messages already carrying P1–P4 or no longer unread are skipped. P1 brings an
             archived message into the inbox. The same models, modes and quotas apply, and the app
             preserves read or unread state, stars and unrelated labels throughout.
+          </li>
+          <li>
+            The owner can also explicitly recheck current unread mail assigned P1 because the model
+            was uncertain. This excludes messages the owner has confirmed or corrected and rechecks
+            their current Gmail state, skipping mail now read or no longer carrying only P1. If the
+            result stays P1, only the stored model evidence changes; another Gmail write is unnecessary.
+            A result of P2, P3 or P4 replaces P1 and archives through the same ledger.
           </li>
           <li>
             The owner can explicitly start a one-time switch from the old categories to P1–P4. This
@@ -101,7 +109,8 @@ export default function MailsortPrivacyPage() {
         <p>
           A new message is assigned a priority by a decision model (Clef on Cloudflare Workers AI),
           asked twice about how long the owner can safely wait before reading or acting on it, with
-          the nearest examples the owner has confirmed or corrected (or left alone for three days),
+          the nearest examples based on owner confirmations, corrections or confident classifications
+          left unchanged for three days,
           compared through embeddings from the bge-m3 model, as context. All of this runs in the
           owner&apos;s own Cloudflare account. The models are called directly, without AI Gateway,
           which would log request bodies.
@@ -119,7 +128,9 @@ export default function MailsortPrivacyPage() {
         <p>
           The model also receives the message&apos;s receipt time, the current local time in
           America/Los_Angeles and the current Monday-to-Sunday week. Replay uses the original
-          decision&apos;s clock. Sender history and examples come only from the P1–P4 system. Each
+          decision&apos;s clock. Sender history and examples come only from the P1–P4 system. An
+          uncertain P1 assignment keeps its original model evidence and does not become automatic
+          sender history or a learned example without an explicit owner confirmation or correction. Each
           message is assessed on its own content and timing. Normal processing handles new mail;
           processing older unread mail requires the owner&apos;s explicit batch request. At 70% of
           the daily model budget it switches to Clef-flash. Exhausted daily model or write quotas

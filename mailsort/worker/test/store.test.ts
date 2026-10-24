@@ -11,7 +11,8 @@ import { countFlow, readFlow } from '../src/flow.ts';
 import { DAY, TRUSTED_DOMAINS_PER_LABEL_MAX } from '../src/limits.ts';
 import { senderHash } from '../src/mask.ts';
 import { labelIdFor, normalizePath, optionKeys, ownerPath, parentGmailNames, pathOfGmailName, pathSlug, treeConflict } from '../src/paths.ts';
-import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_VERSION, senderHashesToBackfill, Store } from '../src/store.ts';
+import { PRIORITY_LABELS } from '../src/priority.ts';
+import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_VERSION, senderHashesToBackfill, Store } from '../src/store.ts';
 import { memorySql } from './fakes/sql.ts';
 
 const T0 = Date.parse('2026-10-06T08:00:00Z');
@@ -320,6 +321,45 @@ describe('the store', () => {
     expect(s.isTrusted('bank', 'alerts.bank.example.com', 0)).toBe(true);
     // Still exactly that domain (it covers no subdomain, unlike a former domain rule's).
     expect(s.isTrusted('broker', 'mail.broker.example.com', T0)).toBe(false);
+  });
+
+  it('restores only current priority fallback annotations from stored model evidence once', () => {
+    const sql = memorySql();
+    for (const statement of [...SCHEMA_V1, ...SCHEMA_V2, ...SCHEMA_V3, ...SCHEMA_V4, ...SCHEMA_V5, ...SCHEMA_V6, ...SCHEMA_V7, ...SCHEMA_V8]) sql.exec(statement);
+    const s = new Store(sql);
+    s.setMeta('schema_version', '8');
+    s.setMeta('priority_started_at', String(T0));
+    for (const [i, label] of PRIORITY_LABELS.entries()) s.run(`INSERT INTO labels (id, seq, display_name, description, desc_version, enabled, gmail_id, gmail_state, create_time, update_time, etag) VALUES (?, ?, ?, 'Previous definition', 1, 1, ?, 'linked', ?, ?, 'e')`, label.id, i, label.displayName, `Label_${String(i + 1)}`, T0, T0);
+    const cases = [
+      { id: 'low', at: T0 + 1, label: 'p1', first: { p1: 0.05, p2: 0.55, p3: 0.30, p4: 0.05, none: 0.05 }, second: { p1: 0.06, p2: 0.57, p3: 0.31, none: 0.06 }, confidence: 0.54575, top: 'p2', reason: 'low_confidence' },
+      { id: 'low-p1', at: T0 + 1, label: 'p1', first: { p1: 0.55, p2: 0.3, none: 0.15 }, second: { p1: 0.57, p2: 0.3, none: 0.13 }, confidence: 0.56, top: 'p1', reason: 'low_confidence' },
+      { id: 'none', at: T0 + 1, label: 'p1', first: { p1: 0.1, none: 0.9 }, second: {}, confidence: 0.9, top: null, reason: 'no_match' },
+      { id: 'disagree', at: T0 + 1, label: 'p1', first: { p2: 0.8, p3: 0.1, none: 0.1 }, second: { p2: 0.2, p3: 0.7, none: 0.1 }, confidence: 0.5, top: 'p2', reason: 'views_disagree' },
+      { id: 'confident', at: T0 + 1, label: 'p1', first: { p1: 0.92, none: 0.08 }, second: { p1: 0.92, none: 0.08 }, confidence: 0.92, top: 'p1', reason: '' },
+      { id: 'before-cutover', at: T0 - 1, label: 'p1', first: { p2: 0.55, none: 0.45 }, second: {}, confidence: 0.55, top: 'p1', reason: '' },
+      { id: 'old-topic', at: T0 + 1, label: 'bank', first: { bank: 0.55, none: 0.45 }, second: {}, confidence: 0.55, top: 'p1', reason: '' },
+    ];
+    for (const row of cases) {
+      s.run(`INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, top_label, decider, probabilities, probabilities2, confidence, sender_hash, summary, current_labels)
+        VALUES (?, ?, ?, ?, 'applied', ?, 'p1', 'clef', ?, ?, ?, 'sender-hash', 'Synthetic content', '["p1"]')`, row.id, row.id, row.at, row.at, row.label, JSON.stringify(row.first), JSON.stringify(row.second), row.confidence);
+      s.run(`INSERT INTO ledger (id, message_id, label_id, gmail_label_id, archived, origin, state, create_time) VALUES (?, ?, ?, 'Label_1', 0, 'auto', 'applied', ?)`, `l-${row.id}`, row.id, row.label, row.at);
+    }
+    s.run(`UPDATE decisions SET verdict = 'corrected', verdict_label = 'p3', verdict_source = 'gmail', verdict_at = ? WHERE message_id = 'low'`, T0 + 2);
+    s.run(`INSERT INTO examples (id, label_id, summary, origin, message_id, create_time) VALUES ('owner-example', 'p3', 'Synthetic content', 'correction', 'low', ?)`, T0 + 2);
+    const before = new Map(s.all(`SELECT * FROM decisions`).map(row => [row['message_id'], row]));
+    const ledger = s.all(`SELECT * FROM ledger ORDER BY id`);
+    const examples = s.all(`SELECT * FROM examples`);
+    s.migrate(transactional(sql));
+    expect(s.schemaVersion()).toBe(SCHEMA_VERSION);
+    for (const row of cases) expect(s.decision(row.id)).toEqual({ ...before.get(row.id), top_label: row.top, unsure_reason: row.reason });
+    expect(s.all(`SELECT * FROM ledger ORDER BY id`)).toEqual(ledger);
+    expect(s.all(`SELECT * FROM examples`)).toEqual(examples);
+    for (const label of PRIORITY_LABELS) expect(s.label(label.id)).toMatchObject({ description: label.description, desc_version: 2 });
+    const labels = s.labels();
+    const repaired = s.all(`SELECT * FROM decisions ORDER BY message_id`);
+    s.migrate(transactional(sql));
+    expect(s.all(`SELECT * FROM decisions ORDER BY message_id`)).toEqual(repaired);
+    expect(s.labels()).toEqual(labels);
   });
 
   it('learns a trusted domain once, never a public mailbox provider\'s, and keeps at most 50 per label, the oldest going first', () => {

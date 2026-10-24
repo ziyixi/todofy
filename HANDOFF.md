@@ -12,6 +12,16 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+Mailsort confidence correction is in progress on `codex/mailsort-priority-confidence` in the isolated checkout.
+Read-only production aggregates show that all 81 P1 assignments were conservative fallbacks, while 19 P4 passed
+the old policy. The fix preserves model evidence, excludes fallback assignments from automatic learning, separates
+P1 counts in the UI and adds a narrow retry for unread fallback P1. Original mail, owner verdicts and Gmail ledgers
+are retained. Real Clef calibration and production retry are not yet verified; local tests do not establish model
+quality. Live calibration awaits owner-authorized Workers AI API access; no candidate release or mailbox recheck
+has been performed yet.
+Local checks passed: 151 unit, 83 workerd, 79 UI, full local Wrangler smoke and 26 deployment-script tests. Proto
+lint/API lint, breaking and schema checks passed; the broader proto TypeScript suite is still running locally.
+
 The Watch evidence implementation and native Dots acceptance are complete; the verification record is in
 [Watch evidence verification](docs/watch-evidence-verification.md). Its temporary subscription is stopped,
 dedicated Watch paused and synthetic Work done. Existing hourly Work review remains unchanged.
