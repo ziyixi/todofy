@@ -15,15 +15,17 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 The owner cancelled the unshipped Codex/VPS Mailsort batch implementation on October 24. All of that branch's
 application, proto, CI, platform and infrastructure changes have been removed; only the unchanged prompt remains
 at `mailsort/prompts/priority-classification.txt` (SHA-256 `0c7ab3aa1ccf61a96cb85c1ffb08e1e62c0ec55b18fa909c0bd2b7d675c8c5c5`).
-No main push, production deployment, GitHub secret/variable update or VPS installation occurred. Do not resume
-the cancelled runner setup. Current work is a Claude API comparison using that prompt, not a production cutover.
-The owner approved a temporary API key and the private masked-email transfer to Anthropic, then limited the
-comparison to six configurations. All six 100-message requests completed, costing $3.514105 at list prices
-before credits. Recommendation: Opus 5.5 medium; high/max did not resolve the identified periodic-summary issue.
-The temporary key is disabled in the console and its local file removed; the existing Brief key is unchanged.
-Private inputs and per-message results stay outside Git. See [Claude comparison](docs/mailsort-claude-comparison.md).
-The prompt-only cleanup `1076deda` passed branch CI `40125660575`; no production switch or unread reclassification
-has occurred. Do not resume the cancelled Codex/VPS setup or treat this report as authorization to deploy Claude.
+No main push, production deployment, GitHub secret/variable update or VPS installation occurred for that cancelled path.
+Do not resume the runner setup. Six private Claude comparisons cost $3.514105 at list prices before credits;
+Opus 5.5 medium is the selected model. The temporary evaluation key is disabled and its local file removed;
+the existing Brief key is unchanged. See [Claude comparison](docs/mailsort-claude-comparison.md).
+
+The owner now authorizes the Claude implementation and rollout on `codex/mailsort-claude-api`:
+reuse the existing Worker, SQLite DO/Alarm and Gmail write ledger; roughly hourly bounded batches of unread,
+unclassified mail; one Opus 5.5 medium request and the maintained prompt; native $20/month Mailsort workspace
+limit, with an owner-written Worker API key excluded from GitHub. No VPS changes or automatic reclassification
+of existing P1-P4 mail. Implementation and synthetic verification are in progress; no Claude production cutover
+has occurred. Work stays in `/private/tmp/todofy-tasks-design`, outside Claude's shared source checkout.
 
 Mailsort's calibrated priority correction and original-100 entrypoint are deployed at `eb3e21dc` after full
 [branch gate 40064835511](https://github.com/ziyixi/todofy/actions/runs/40064835511) and
