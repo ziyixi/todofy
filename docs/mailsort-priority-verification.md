@@ -85,9 +85,9 @@ Only counts, operating state and quota metadata were read for acceptance; no rea
 extracted, printed or made into a fixture. No operating mode, write cap, model budget, credential or other app was
 changed.
 
-## In progress: priority evidence and calibration
+## Priority evidence and calibration
 
-Branch `codex/mailsort-priority-confidence` is a follow-up candidate, not a completed production release.
+The follow-up was developed on `codex/mailsort-priority-confidence`; its verified releases are recorded below.
 A counts-only audit found 81 assigned P1 decisions, all from the uncertainty fallback. Their original raw model
 top choices were P4: 52, P3: 15, P2: 11 and P1: 3. These are model-output aggregates, without owner answers;
 they do not measure mailbox accuracy or establish that all 81 messages were urgent.
@@ -132,11 +132,11 @@ cases pass at 0.563074, 0.651181 and 0.583853. Flash retains three P2-to-P1 erro
 These are in-sample results with one pair per model/case, including one conservative fallback in Clef's 16/16.
 They establish regressions for this sample, not production accuracy. Numeric captures are committed beside the
 synthetic fixtures and replayed through the real `judge()` path. Unit checks now pass 153 cases and the targeted
-pipeline/CPU workerd checks pass 16 cases. Release and the requested production recheck are still pending.
+pipeline/CPU workerd checks pass 16 cases. The subsequent release and mailbox batch are recorded below.
 
 ### Original 100-message repair entrypoint
 
-The owner requested reanalysis of the previously classified 100 messages. The prepared `recheck_initial100` option
+The owner requested reanalysis of the previously classified 100 messages. The `recheck_initial100` option
 uses the earliest successful automatic P1-P4 ledger identity per message, frozen at start; later arrivals and changed
 decision timestamps do not replace members. Read or archived messages are eligible; later owner choices are skipped.
 Same-priority results only refresh evidence, while a changed-priority write retains the existing ledger and quota gates.
@@ -148,8 +148,7 @@ selecting the newest 100 messages in the mailbox.
 
 The integrated local checks passed 153 unit, 91 workerd and 82 UI cases, Worker/UI lint and typechecks, UI build,
 the full local Wrangler smoke (62 closed-table fake Google requests), proto lint/API lint and breaking checks.
-These do not mean the production batch has run. Final branch gate, same-SHA release of the bounded repair entrypoint
-and actual batch results remain pending.
+The final simplified version passed its complete branch gate and same-SHA release, recorded below.
 
 ### Calibrated core deployed
 
@@ -158,3 +157,37 @@ the same `725db27df907c0d31245990afc420d4b1a831ee1` passed [main release 4006378
 Only Mailsort and its privacy page deployed. The verified app record is Deployment `7294197010`, Worker version
 `27a7ba8f-eee5-4c1c-bd88-78e4faf97dad`, with the original DO namespace unchanged. The refreshed production UI shows
 direct P1 0, fallback P1 82 and 4,392/9,500 estimated daily model use. No repair batch had started at this check.
+
+### Simplicity review and final release
+
+The owner rejected handling concurrent manual label edits during model evaluation. The final diff removes the
+new post-model Gmail metadata request, its exact-label comparison and three concurrency tests. It also removes
+a redundant P1 condition in the write path. The ordinary initial label check and the existing retry/write ledger
+remain. A separate review of this follow-up found no further necessary simplification; it introduced no new lock,
+rollback system, retry state, service or configurable policy.
+
+After removing that guard, the affected unread, failure and pipeline runtime checks passed all 51 cases. Worker
+lint/types and the full UI checks remained green. The complete [branch gate 40064835511](https://github.com/ziyixi/todofy/actions/runs/40064835511)
+passed on `eb3e21dc942f4fc78db5a3bf7794fa8c2537e937`, followed by the
+[same-SHA main release 40065406437](https://github.com/ziyixi/todofy/actions/runs/40065406437).
+Only Mailsort and its required privacy page deployed. Mailsort Deployment `7294420109` verified Worker version
+`e3f237e1-ec0d-4394-8a1a-d161c2aeb67b`; the DO namespace remained unchanged.
+
+### Original-100 production batch, 2026-10-24 UTC
+
+The existing authenticated owner UI started the original-100 action once. At the 05:28 UTC acceptance check,
+95 messages had been reanalyzed: 45 confirmed Gmail changes and 50 unchanged results, with zero failures.
+The 50 unchanged results refreshed decision evidence without another Gmail write. The completed 95 decisions
+were P1: 37 (all conservative fallback), P2: 0, P3: 7 and P4: 51. These counts describe model output, not owner-
+confirmed classification accuracy. The original 100 currently total P1: 40, P2: 0, P3: 7 and P4: 53, including
+five members whose old decisions have not yet been reanalyzed.
+
+The remaining five reached the existing daily Gmail-write limit: total daily successful writes were 150/150.
+App-estimated model use was about 7,622/9,500 and `quota_exhausted` remained false. The owner mode stayed live
+and its breaker remained clear. All five persisted pending entries have their normal next attempt at
+`2026-10-25T00:00:00Z` (October 24, 17:00 Los Angeles time); the existing Alarm will resume them without another
+start request. No limit, mode, usage counter or credential was changed. The batch is not yet complete.
+
+Only aggregate labels, batch states, allowance counters and retry times were read. No real mail body, subject,
+sender or message ID was exported. The UI retained the same batch and counts after a full reload. The next check
+should inspect this existing batch's completion and final distribution; do not replace its cohort with a new run.

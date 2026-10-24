@@ -12,28 +12,34 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-Mailsort confidence correction is in progress on `codex/mailsort-priority-confidence` in the isolated checkout.
-Read-only production aggregates show that all 81 P1 assignments were conservative fallbacks, while 19 P4 passed
-the old policy. The fix preserves model evidence, excludes fallback assignments from automatic learning, separates
-P1 counts in the UI and adds a narrow retry for unread fallback P1. Original mail, owner verdicts and Gmail ledgers
-are retained. Actual synthetic Clef calibration is complete (96 calls, about 949 estimated neurons); the temporary
-Read token was revoked after use. The candidate adopts 0.55 while retaining the 0.4 first-view gate and two-view
-agreement. Captured responses give Clef 16/16 and Flash 13/16, including conservative P1 outcomes; this is not mailbox
-accuracy. The owner requested reanalysis of the previously classified 100 messages. Implementation prepares the
-original first-100 successful automatic-ledger cohort, including read/archived mail and checking existing owner choices;
-this is the root's stated interpretation of that request. The calibrated core is deployed; the 100-message repair
-entrypoint and mailbox operation remain pending.
-Local checks passed: 151 unit, 83 workerd, 79 UI, full local Wrangler smoke and 26 deployment-script tests. Proto
-lint/API lint, breaking, schema and TypeScript checks passed, plus 459 TypeScript and 110 Python contract tests.
-Full branch gate [40063013920](https://github.com/ziyixi/todofy/actions/runs/40063013920) and same-SHA main
-[40063783779](https://github.com/ziyixi/todofy/actions/runs/40063783779) passed on `725db27d`. Mailsort's verified
-Deployment is `7294197010`, Worker version `27a7ba8f-eee5-4c1c-bd88-78e4faf97dad`; only Mailsort and privacy deployed.
-Live UI shows direct P1 0 and fallback P1 82 before the repair batch. Final 100-message code still needs its green SHA.
-Original-100 metadata was checked read-only: 99 previous unread-batch members plus one ordinary arrival, with 81 P1
-and 19 P4, and zero recorded owner verdicts. Integrated local checks passed 153 unit, 91 workerd, 82 UI cases,
-Worker/UI lint/typechecks, UI build, local Wrangler smoke and proto lint/API lint/breaking checks. No production recheck yet.
-Concurrent Gmail editing during model evaluation is outside this personal batch tool's scope. Processing keeps one
-initial label check and the pre-existing retry behavior; do not restore post-model guards or a concurrency test matrix.
+Mailsort's calibrated priority correction and original-100 entrypoint are deployed at `eb3e21dc` after full
+[branch gate 40064835511](https://github.com/ziyixi/todofy/actions/runs/40064835511) and
+[same-SHA main release 40065406437](https://github.com/ziyixi/todofy/actions/runs/40065406437). Only Mailsort and
+its required privacy page deployed. Verified Deployment `7294420109` reports Worker version
+`e3f237e1-ec0d-4394-8a1a-d161c2aeb67b`, with the existing DO namespace unchanged.
+
+The original 81 P1 assignments were all uncertainty fallbacks; 19 P4 passed the old policy. The deployed fix
+preserves model evidence, excludes unconfirmed fallback assignments from automatic learning and separates P1
+counts in the UI. Actual synthetic calibration used 96 calls, about 949 estimated neurons; its temporary Read
+token was revoked. Acceptance is now 0.55 with the existing 0.4 first-view gate and two-view agreement. Captured
+Clef results are 16/16 and Flash 13/16; these are sample regressions, not mailbox accuracy. Existing operating
+modes, model budgets, write limits and Gmail credentials remain unchanged.
+
+The authorized original-100 batch was started once through production UI. Its frozen cohort
+contains 99 previous unread-batch members and one ordinary arrival; before recheck it had 81 P1, 19 P4 and no
+recorded owner verdicts. It includes read/archived mail and excludes later arrivals. At 2026-10-24 05:28 UTC,
+95 were reanalyzed: 45 actual Gmail changes, 50 unchanged results and zero failures. Five remain queued until
+`2026-10-25T00:00:00Z` because the existing daily write limit reached 150/150; model use is about 7,622/9,500,
+not quota-exhausted. Mode is live, breaker clear. The existing Alarm resumes them; no setting was changed.
+Completed decisions are P1: 37 (all fallback), P2: 0, P3: 7, P4: 51. This is not mailbox accuracy. Verify this
+existing batch after its retry time; do not start another one. Acceptance docs are on `codex/mailsort-priority-verified`.
+
+The owner rejected a new post-model Gmail metadata check for concurrent manual edits. That request, its exact-label
+guard and three tests were removed, along with one redundant P1 condition. Keep the ordinary initial label check
+and pre-existing retry/ledger behavior; do not restore concurrency machinery or a test matrix. The affected runtime
+checks passed all 51 cases after removal. Integrated checks also covered 153 unit, 91 workerd and 82 UI cases,
+lint/types/build, the full local Wrangler smoke and proto lint/API lint/breaking checks. Full evidence is in
+[priority verification](docs/mailsort-priority-verification.md).
 
 The Watch evidence implementation and native Dots acceptance are complete; the verification record is in
 [Watch evidence verification](docs/watch-evidence-verification.md). Its temporary subscription is stopped,
@@ -42,14 +48,11 @@ Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's sha
 
 ## Latest verified release
 
-Mailsort's P1-P4 switch and owner-requested unread batch are complete. The full
-[branch gate](https://github.com/ziyixi/todofy/actions/runs/40055318376) and
-[same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/40056081312) passed on `d1295e7d`;
-only Mailsort and its required privacy update deployed. The old managed topic labels were removed with explicit
-confirmation, retaining mail. At 2026-10-24 03:07 UTC, the production UI showed all 99 unread batch messages applied,
-zero pending/skipped/failed/deferred. Daily model use was about 4,368/9,500; modes, caps and credentials stayed
-unchanged. P1 keeps Inbox, P2-P4 archive, uncertainty becomes P1, and the scam/trust gates are removed.
-The isolated checkout left Claude's shared tree untouched. Provider identity, tests and privacy-safe evidence are in
+Mailsort's calibrated priority correction and simplified original-100 entrypoint are live at `eb3e21dc`, as recorded
+above. Its earlier P1-P4 switch and 99-message unread batch completed at `d1295e7d`; the current recheck is a
+separate operation with five pending members. P1 keeps Inbox, P2-P4 archive, uncertainty becomes P1, and the
+scam/trust gates are removed. Original mail and history remain. The isolated checkout left Claude's shared tree
+untouched. Provider identity, tests and privacy-safe evidence are in
 [priority verification](docs/mailsort-priority-verification.md); actions are in [priority rollout](mailsort/docs/priority-rollout.md).
 
 Watch page evidence (`f7942fb6`) passed the complete
