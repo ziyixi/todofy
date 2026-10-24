@@ -64,5 +64,23 @@ schema and additive compatibility against `88ab95ba` passed. UI lint/types, 73 c
 is 58.0 KiB gzip under the unchanged 67 KiB cap. The real Wrangler smoke passed with all 62 synthetic Google
 requests inside the independent closed table, and all 26 deploy/credential-preservation cases passed. The pause
 regression also covers a persisted Gmail 503 intent across Shadow and a reached daily cap before next-day success.
-Worker gzip is 139.1 KiB against the unchanged 140 KiB budget. Release and actual owner batch acceptance remain
-pending at this checkpoint.
+Worker gzip is 139.1 KiB against the unchanged 140 KiB budget. A real Chrome check of the built UI and local Wrangler
+API completed a three-message synthetic batch: applied 3, pending/skipped/failed 0. Its temporary server, tab and
+state were removed afterward.
+
+[Full branch gate 40055318376](https://github.com/ziyixi/todofy/actions/runs/40055318376) and
+[same-SHA main release 40056081312](https://github.com/ziyixi/todofy/actions/runs/40056081312) passed on
+`d1295e7d9e52656b3d57560199698af9441a0f6e`. Only Mailsort and the required website privacy page deployed.
+GitHub Deployment `7293139149` reports success at `2026-10-24T02:55:28Z` after verifying the running identity and
+configuration. The Worker version is `7a0f9fe7-3e2b-45fd-ba81-99a2f9af0ce7`; its existing DO namespace is unchanged.
+
+The authenticated production UI independently displayed the new action, 正式 mode and writable Gmail grant.
+The owner's explicitly authorized batch was then started. At the 2026-10-24 03:07 UTC completion check, the UI
+reported 99 unread messages and 99 actual Gmail applies, with zero pending, skipped, failed or deferred. Navigating
+away and back retained the completed batch and counts. The original daily neuron budget stayed at 9,500; the UI
+reported 143 estimated neurons before starting and 4,368 afterward (the latter also includes normal arrivals).
+The day's usage remained below the 70% flash switch and below exhaustion. No synthetic or manual extra model calls
+were made to consume unused allowance. Remaining allowance stays available to normal mail.
+Only counts, operating state and quota metadata were read for acceptance; no real subject, sender or body was
+extracted, printed or made into a fixture. No operating mode, write cap, model budget, credential or other app was
+changed.

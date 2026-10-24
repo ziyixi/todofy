@@ -12,30 +12,22 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-`codex/mailsort-unread-priorities` is the active follow-up in the isolated checkout. The owner confirmed the P1-P4
-cutover and additionally requested classification of all currently unread messages within the existing allowance.
-Production InitializePriorities completed successfully on 2026-10-24 UTC; reloading shows four linked priority rows,
-no setup card, live mode and Gmail write scope. Mail was preserved. The follow-up adds an explicit unread-ID batch
-using the existing Alarm, queue, models and budgets; archived unread is included, Spam/Trash excluded, and only this
-explicit batch bypasses the ordinary new-mail cutoff. Implementation and production batch acceptance are pending.
-
-`codex/mailsort-priority-verification` records the released implementation; `a70ff257` replaces topic sorting with four real Gmail labels: P1 keeps Inbox, P2-P4 archive;
-valid uncertainty becomes P1 without mandatory review. The scam/trust-domain model and gates are removed.
-Code/UI and the bounded owner initializer are implemented in `/private/tmp/todofy-tasks-design`;
-Claude's shared checkout is untouched. Local lint/types, 124 Worker unit tests, 69 real-SQLite runtime tests (including CPU), 62 UI cases, 26 deploy checks
-and the real local Wrangler smoke passed. The complete branch gate 40051440933 and same-SHA main release 40052652580 passed on a70ff257.
-Production code and the explicitly confirmed label cutover are live. Old managed topic labels were replaced;
-messages and their original read/Inbox state were preserved during setup. The requested unread batch will apply
-the new priority filing policy afterward.
-The owner initializer removes only known old labels/learning and preserves mail/read/Inbox state, then starts
-fresh priority learning at its cutover cursor. Current acceptance: [priority verification](docs/mailsort-priority-verification.md); operator steps: [priority rollout](mailsort/docs/priority-rollout.md).
-
 The Watch evidence implementation and native Dots acceptance are complete; the verification record is in
 [Watch evidence verification](docs/watch-evidence-verification.md). Its temporary subscription is stopped,
 dedicated Watch paused and synthetic Work done. Existing hourly Work review remains unchanged.
 Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's shared source checkout is untouched.
 
 ## Latest verified release
+
+Mailsort's P1-P4 switch and owner-requested unread batch are complete. The full
+[branch gate](https://github.com/ziyixi/todofy/actions/runs/40055318376) and
+[same-SHA main release](https://github.com/ziyixi/todofy/actions/runs/40056081312) passed on `d1295e7d`;
+only Mailsort and its required privacy update deployed. The old managed topic labels were removed with explicit
+confirmation, retaining mail. At 2026-10-24 03:07 UTC, the production UI showed all 99 unread batch messages applied,
+zero pending/skipped/failed/deferred. Daily model use was about 4,368/9,500; modes, caps and credentials stayed
+unchanged. P1 keeps Inbox, P2-P4 archive, uncertainty becomes P1, and the scam/trust gates are removed.
+The isolated checkout left Claude's shared tree untouched. Provider identity, tests and privacy-safe evidence are in
+[priority verification](docs/mailsort-priority-verification.md); actions are in [priority rollout](mailsort/docs/priority-rollout.md).
 
 Watch page evidence (`f7942fb6`) passed the complete
 [branch gate](https://github.com/ziyixi/todofy/actions/runs/39950244799) and
