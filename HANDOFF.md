@@ -17,8 +17,13 @@ application, proto, CI, platform and infrastructure changes have been removed; o
 at `mailsort/prompts/priority-classification.txt` (SHA-256 `0c7ab3aa1ccf61a96cb85c1ffb08e1e62c0ec55b18fa909c0bd2b7d675c8c5c5`).
 No main push, production deployment, GitHub secret/variable update or VPS installation occurred. Do not resume
 the cancelled runner setup. Current work is a Claude API comparison using that prompt, not a production cutover.
-Private email snapshots, API credentials and per-message results stay outside Git. A temporary evaluation key
-and the masked-email transfer to Anthropic await the owner's specific confirmation.
+The owner approved a temporary API key and the private masked-email transfer to Anthropic, then limited the
+comparison to six configurations. All six 100-message requests completed, costing $3.514105 at list prices
+before credits. Recommendation: Opus 5.5 medium; high/max did not resolve the identified periodic-summary issue.
+The temporary key is disabled in the console and its local file removed; the existing Brief key is unchanged.
+Private inputs and per-message results stay outside Git. See [Claude comparison](docs/mailsort-claude-comparison.md).
+The prompt-only cleanup `1076deda` passed branch CI `40125660575`; no production switch or unread reclassification
+has occurred. Do not resume the cancelled Codex/VPS setup or treat this report as authorization to deploy Claude.
 
 Mailsort's calibrated priority correction and original-100 entrypoint are deployed at `eb3e21dc` after full
 [branch gate 40064835511](https://github.com/ziyixi/todofy/actions/runs/40064835511) and
