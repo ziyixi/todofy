@@ -96,8 +96,7 @@ All 81 were unanswered and there were zero current-era weak-acceptance examples 
 The candidate preserves the original model decision separately from assigned P1, repairs current-era fallback
 metadata from saved probability evidence, and excludes unconfirmed fallback assignments from automatic learning.
 It clarifies P2-P4 descriptions, splits direct/fallback P1 in the overview, and adds a narrow explicit unread
-fallback recheck. Mode, neuron budget and write caps remain unchanged. The existing confidence threshold is
-unchanged and has not yet been calibrated against real model responses for these descriptions.
+fallback recheck. Mode, neuron budget and write caps remain unchanged.
 
 Local candidate checks passed: 151 unit tests, 83 workerd tests, 79 UI tests, the local Wrangler smoke (62 closed-table
 fake Google calls), 26 deploy tests, proto lint/API lint, breaking checks, schema/type checks and 459 TypeScript /
@@ -107,6 +106,30 @@ of the latest preimage. The CPU fixture exercises both views through its fake bi
 quality. The measured Worker was about 141 KiB gzip. Its code-size check allows 148 KiB; model and spending budgets
 are unchanged.
 
-Real-model calibration, release of the candidate and a live fallback recheck remain pending. Record their
-actual counts and provider/deployment identities here when performed; synthetic tests or the earlier 99-message
-batch do not establish those outcomes.
+The full branch gate passed on `8bcac93d` ([run 40060474945](https://github.com/ziyixi/todofy/actions/runs/40060474945)).
+Two unchanged jobs needed a rerun: a local Miniflare connection failure and a WebKit dependency download timeout.
+This gate predates the calibrated threshold below; the final implementation needs its own green SHA.
+
+### Real synthetic responses, 2026-10-24 UTC
+
+The existing Clef request shape was used for 16 public English/Chinese fixtures, with identical message and clock
+inputs for the baseline and candidate descriptions. There were 96 provider calls: baseline Clef, candidate Clef
+and candidate Clef-flash, each with first and reordered second views. Estimated use was 949 neurons; no private
+mail was used. The dedicated Workers AI Read token was revoked after testing; no existing token was changed.
+
+| Descriptions / policy | Clef correct | Clef-flash correct |
+| --- | --- | --- |
+| Old descriptions, 0.7 | 9/16 | Not tested |
+| Candidate descriptions, 0.7 | 13/16 | 11/16 |
+| Candidate descriptions, 0.55 | 16/16 | 13/16 |
+
+The 0.55 row replays the actual captured probabilities with the new policy; it is not another provider run.
+Both views must agree and the first-view gate remains 0.4. All five expected-P1 cases stay P1 under both models.
+Clef's unknown-deadline case remains a conservative P1 at 0.535837; 0.50 would wrongly archive it. Its three P2
+cases pass at 0.563074, 0.651181 and 0.583853. Flash retains three P2-to-P1 errors, all conservative. Thresholds
+0.54 through 0.56 give the same captured results; no margin rule or extra model question was added.
+
+These are in-sample results with one pair per model/case, including one conservative fallback in Clef's 16/16.
+They establish regressions for this sample, not production accuracy. Numeric captures are committed beside the
+synthetic fixtures and replayed through the real `judge()` path. Unit checks now pass 153 cases and the targeted
+pipeline/CPU workerd checks pass 16 cases. Release and the requested production recheck are still pending.

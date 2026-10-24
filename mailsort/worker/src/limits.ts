@@ -80,8 +80,8 @@ export const NEIGHBOURS = 3;
 
 // ---- decisions (../../docs/design.md §4) ----------------------------------------------------------------------------
 
-/** A label is accepted when both views chose it and the mean of their probabilities reaches this. Not owner-facing. */
-export const AUTO_THRESHOLD = 0.7;
+/** Combined probability required after both views agree, calibrated on public synthetic reading-cadence captures. */
+export const AUTO_THRESHOLD = 0.55;
 /** The second view runs only when the first view's top option is a label at least this likely. */
 export const SECOND_VIEW_MIN = 0.4;
 /** The second view's options: the first view's most likely labels, this many (plus none). */

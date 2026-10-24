@@ -18,8 +18,9 @@ back into Inbox later or create tasks. Tasks' Mail categories and task prioritie
 Workers AI Clef judges when it is safe to read the masked message, using receipt time, local date/week and current
 priority examples. A confident result needs the existing two-view agreement and threshold; valid uncertainty or
 `none` becomes P1. The original model result and fallback reason remain separate from that assigned label.
-Fallback P1 does not teach sender history or daily weak learning without an explicit owner verdict. The threshold
-and revised descriptions still need real-model calibration. Provider errors use the existing backoff and can fail
+Fallback P1 does not teach sender history or daily weak learning without an explicit owner verdict. Real synthetic
+captures set the combined threshold to 0.55; both views must still agree and the first-view gate remains 0.4.
+Provider errors use the existing backoff and can fail
 after retries; quota exhaustion waits for the next UTC day. Neither creates a priority judgment. Each new reply is
 judged independently; message IDs still deduplicate delivery. A new reply carrying an earlier priority can replace it without changing other
 labels, unread or starred state. Normal processing keeps its new-mail receipt cutoff.

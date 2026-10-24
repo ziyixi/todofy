@@ -14,10 +14,10 @@ function view(probabilities: Record<string, number>): View {
 const state = { received_at: '2026-10-23T16:00:00Z', current_local_time: 'Friday, 10/23/2026, 09:00:00', current_week: '2026-10-19 through 2026-10-25', time_zone: 'America/Los_Angeles', subject: 'Synthetic brokerage statement is ready' };
 
 describe('priority views', () => {
-  it('preserves the 0.7 threshold and view agreement', () => {
-    const first = view({ p2: 0.8, p1: 0.15, none: 0.05 });
-    expect(decideViews(first, view({ p2: 0.7, p1: 0.2, none: 0.1 }), labels)).toMatchObject({ kind: 'label', label: 'p2', confidence: 0.75 });
-    expect(decideViews(first, view({ p2: 0.55, p1: 0.35, none: 0.1 }), labels)).toMatchObject({ kind: 'unsure', reason: 'low_confidence' });
+  it('accepts agreement at 0.55 and keeps lower confidence or disagreement uncertain', () => {
+    const first = view({ p2: 0.56, p1: 0.34, none: 0.1 });
+    expect(decideViews(first, view({ p2: 0.54, p1: 0.36, none: 0.1 }), labels)).toMatchObject({ kind: 'label', label: 'p2', confidence: 0.55 });
+    expect(decideViews(first, view({ p2: 0.53, p1: 0.37, none: 0.1 }), labels)).toMatchObject({ kind: 'unsure', reason: 'low_confidence' });
     expect(decideViews(first, view({ p1: 0.8, p2: 0.15, none: 0.05 }), labels)).toMatchObject({ kind: 'unsure', reason: 'views_disagree' });
     expect(decideViews(first, null, labels)).toMatchObject({ kind: 'unsure', reason: 'low_confidence' });
   });

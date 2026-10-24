@@ -1,4 +1,4 @@
-/** Two independent views must agree at the existing confidence threshold before a lower priority is accepted. */
+/** Two reordered views must agree at the calibrated confidence threshold before a lower priority is accepted. */
 import type { ClefAnswer } from './ai.ts';
 import {
   AUTO_THRESHOLD,

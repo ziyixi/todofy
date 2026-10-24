@@ -201,7 +201,7 @@ it.each([false, true])('refreshes a still-P1 decision without a Gmail write, new
   const other = h.up.gmail.createUserLabel('Personal');
   const message = mail(711, ['INBOX', 'UNREAD', 'STARRED', other]);
   deliver(h, message, T0 + MINUTE);
-  h.up.ai.choiceOverride = () => ({ p2: 0.6, none: 0.4 });
+  h.up.ai.choiceOverride = () => ({ p2: 0.5, p3: 0.3, none: 0.2 });
   await h.step(T0 + 2 * MINUTE);
   const originalLedger = await h.sql(`SELECT id, state, superseded FROM ledger WHERE message_id = ?`, message.id);
   expect(originalLedger).toHaveLength(1);
@@ -209,7 +209,7 @@ it.each([false, true])('refreshes a still-P1 decision without a Gmail write, new
   h.up.gmail.ownerModify(message.id, [], ['INBOX']);
   const before = gmailLabels(h, message.id);
   const modelCalls = h.up.ai.calls.length;
-  h.up.ai.choiceOverride = () => confident ? { p1: 0.92, none: 0.08 } : { p2: 0.6, none: 0.4 };
+  h.up.ai.choiceOverride = () => confident ? { p1: 0.92, none: 0.08 } : { p2: 0.5, p3: 0.3, none: 0.2 };
 
   await start(op(), true);
   await h.step(T0 + 3 * MINUTE);
@@ -231,7 +231,7 @@ it.each([false, true])('supersedes the original P1 ledger only after P3 applies 
   const other = h.up.gmail.createUserLabel('Personal');
   const message = mail(721, ['INBOX', 'UNREAD', 'STARRED', other]);
   deliver(h, message, T0 + MINUTE);
-  h.up.ai.choiceOverride = () => ({ p2: 0.6, none: 0.4 });
+  h.up.ai.choiceOverride = () => ({ p2: 0.5, p3: 0.3, none: 0.2 });
   await h.step(T0 + 2 * MINUTE);
   const oldRows = await h.sql<{ id: string }>(`SELECT id FROM ledger WHERE message_id = ? AND label_id = 'p1'`, message.id);
   const oldName = `ledgerEntries/${oldRows[0]?.id ?? ''}`;

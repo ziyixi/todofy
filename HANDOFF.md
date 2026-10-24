@@ -16,11 +16,15 @@ Mailsort confidence correction is in progress on `codex/mailsort-priority-confid
 Read-only production aggregates show that all 81 P1 assignments were conservative fallbacks, while 19 P4 passed
 the old policy. The fix preserves model evidence, excludes fallback assignments from automatic learning, separates
 P1 counts in the UI and adds a narrow retry for unread fallback P1. Original mail, owner verdicts and Gmail ledgers
-are retained. Real Clef calibration and production retry are not yet verified; local tests do not establish model
-quality. Live calibration awaits owner-authorized Workers AI API access; no candidate release or mailbox recheck
-has been performed yet.
+are retained. Actual synthetic Clef calibration is complete (96 calls, about 949 estimated neurons); the temporary
+Read token was revoked after use. The candidate adopts 0.55 while retaining the 0.4 first-view gate and two-view
+agreement. Captured responses give Clef 16/16 and Flash 13/16, including conservative P1 outcomes; this is not mailbox
+accuracy. The owner requested a 100-message recheck; original cohort versus latest mailbox scope is awaiting their
+answer. No candidate release or mailbox recheck has been performed yet.
 Local checks passed: 151 unit, 83 workerd, 79 UI, full local Wrangler smoke and 26 deployment-script tests. Proto
 lint/API lint, breaking, schema and TypeScript checks passed, plus 459 TypeScript and 110 Python contract tests.
+Full branch gate [40060474945](https://github.com/ziyixi/todofy/actions/runs/40060474945) passed on `8bcac93d`, before
+the calibrated threshold. Final implementation and any bounded 100-message operation still need a green branch SHA.
 
 The Watch evidence implementation and native Dots acceptance are complete; the verification record is in
 [Watch evidence verification](docs/watch-evidence-verification.md). Its temporary subscription is stopped,

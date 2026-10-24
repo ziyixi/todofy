@@ -88,9 +88,10 @@ updates decision evidence without another Gmail intent or write and counts as sk
 existing ledger and archive behavior. This option shares the ordinary batch's queue, mode gates, budgets and caps.
 
 Clef receives only current-priority examples/history, receipt time and the judgment's local date/week. It answers
-one priority question. The existing second view reorders the most likely options. Agreement and the unchanged
-0.7 combined threshold accept a later priority. The threshold and revised descriptions still need real-model
-calibration. A valid `none`, low confidence or disagreement falls back to P1.
+one priority question. The second view reorders the most likely options and runs when the first top probability
+is at least 0.4. Agreement and a 0.55 combined probability accept a later priority. The threshold was selected from
+real responses to 16 public synthetic cases; that small sample does not measure mailbox accuracy. A valid `none`,
+low confidence or disagreement falls back to P1.
 It is tagged and kept in Inbox in live mode, with no mandatory review item. Provider/network/malformed-answer
 failures retain the existing pending/backoff path and become failures when retries are exhausted; quota exhaustion
 defers to the next UTC day. Neither failure path fabricates a P1 result. The unread batch reports terminal failures
@@ -194,8 +195,9 @@ local Wrangler smoke exercises the same generated owner API; no test reaches Goo
 
 Fallback regressions cover original evidence preservation and schema repair, exclusion from automatic learning,
 owner-correction protection, changed Gmail state before recheck, a P1 no-op without a new write, and an archive
-through the existing ledger when a later priority is accepted. Synthetic checks do not calibrate real-model
-confidence; that evidence and any live recheck results belong in the dated verification record.
+through the existing ledger when a later priority is accepted. Frozen real Clef probabilities check the calibrated
+boundary through `judge()`; offline replay is distinct from fresh provider calls. Actual provider and live recheck
+results belong in the dated verification record.
 
 Production evidence records only labels/identities/counts, operating mode and provider versions. Do not read
 private mail to demonstrate the model. Dated evidence and the current cutover state are in

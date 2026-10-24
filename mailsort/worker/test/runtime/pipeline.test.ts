@@ -1,9 +1,11 @@
 /** Priority pipeline with real workerd SQLite, synthetic Gmail and offline AI. */
 import { afterEach, describe, expect, it } from 'vitest';
 import { Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
-import { DEFAULT_DAILY_NEURON_BUDGET } from '../../src/limits.ts';
+import { CLEF, DEFAULT_DAILY_NEURON_BUDGET } from '../../src/limits.ts';
 import { PRIORITY_LABELS } from '../../src/priority.ts';
 import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
+import { PRIORITY_CASES } from '../fakes/priority-cases.ts';
+import { PRIORITY_CLEF_CAPTURES } from '../fakes/priority-clef-captures.ts';
 import { MINUTE, startHarness, T0, type Harness } from './harness.ts';
 import { checkGoogleCalls, clefCalls, decision, deliver, gmailLabels, modifies, setMode } from './helpers.ts';
 
@@ -68,6 +70,25 @@ describe('fixed priorities', () => {
     expect(gmailLabels(h, mail.id)).toContain('INBOX');
     expect(gmailLabels(h, mail.id)).toContain(h.up.gmail.labelIdByName('P1'));
     expect(await h.sql(`SELECT id FROM review`)).toEqual([]);
+  });
+
+  it.each(['next-week-review-en', 'missing-deadline-zh'])('applies the captured confidence policy to %s', async (caseId) => {
+    const fixture = PRIORITY_CASES.find(row => row.id === caseId);
+    const capture = PRIORITY_CLEF_CAPTURES.find(row => row.id === caseId && row.model === CLEF);
+    if (fixture === undefined || capture === undefined) throw new Error('Missing synthetic calibration fixture');
+    h = await startHarness();
+    await initialize(h);
+    await setMode(h, Mode.LIVE);
+    let calls = 0;
+    h.up.ai.choiceOverride = () => ++calls === 1 ? { ...capture.first } : { ...capture.second };
+    const mail = newMail('abc00000000000c1', { subject: fixture.subject, text: fixture.body });
+    deliver(h, mail, fixture.receivedAt);
+    expect(await h.step(fixture.now)).toMatchObject({ decided: 1, applied: 1 });
+    expect(clefCalls(h)).toHaveLength(2);
+    expect(await decision(h, mail.id)).toMatchObject({ outcome: 'applied', label_id: fixture.expected, top_label: 'p2', unsure_reason: fixture.expected === 'p1' ? 'low_confidence' : '' });
+    expect(gmailLabels(h, mail.id)).toContain('UNREAD');
+    expect(gmailLabels(h, mail.id).includes('INBOX')).toBe(fixture.expected === 'p1');
+    expect(gmailLabels(h, mail.id)).toContain(h.up.gmail.labelIdByName(fixture.expected.toUpperCase()));
   });
 
   it('judges an urgent new reply even when its conversation and message carry P3', async () => {

@@ -108,8 +108,8 @@ export default function MailsortPrivacyPage() {
         <h2>How mail is processed</h2>
         <p>
           A new message is assigned a priority by a decision model (Clef on Cloudflare Workers AI),
-          asked twice about how long the owner can safely wait before reading or acting on it, with
-          the nearest examples based on owner confirmations, corrections or confident
+          asked up to twice about how long the owner can safely wait before reading or acting on it,
+          with the nearest examples based on owner confirmations, corrections or confident
           classifications left unchanged for three days, compared through embeddings from the bge-m3
           model, as context. All of this runs in the owner&apos;s own Cloudflare account. The models
           are called directly, without AI Gateway, which would log request bodies.
