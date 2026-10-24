@@ -48,14 +48,12 @@ RETIRED_WEBSITE_BINDINGS = {
     "RECONCILE_UTC_HOUR",
     "IGNORED_EDITOR_IDS",
 }
-# Bindings the owner retired from an app; a normal release of that app removes them, a repair still stops.
-# A binding to a deleted Worker stays until that Worker is gone (see infra/README "Retiring an app"). The release after
-# 2026-10-21's (Tasks backs itself up): todofy-core's TASKS, its last binding to Tasks. It needs that release of
-# 2026-10-21 live first, which removed todofy-core's task-write settings and the Tasks and watch bindings to Todofy's
-# retired entries. Empty this once Todofy's release is live.
-# A secret never goes here: a deploy keeps the secrets it does not name, so a retired secret is deleted before the push
-# or the release's record step fails.
-RETIRED_SERVICE_BINDINGS: dict[str, set[str]] = {"todofy": {"TASKS"}}
+# Exact non-secret bindings the owner retired; normal releases remove them, repairs still stop.
+# Remove each entry in a later change after a verified release has removed those bindings.
+# Todofy no longer writes Tasks through its TASKS service binding (2026-10-21).
+# Mailsort replaces Workers AI with its native Claude API client (2026-10-24).
+# Secrets never go here: deploy keeps unnamed secrets, so retire those separately before release.
+RETIRED_BINDINGS: dict[str, set[str]] = {"todofy": {"TASKS"}, "mailsort": {"AI"}}
 
 
 def read_toml(path):
@@ -193,10 +191,10 @@ def preflight(source, app, sha, repair, cloud, github, check_only=False):
                 change["reason"] = "LEGACY_WEBSITE_BINDING_RETIRED"
             if (
                 change["reason"] == "BINDING_UNDECLARED"
-                and change["field"] in RETIRED_SERVICE_BINDINGS.get(app, ())
+                and change["field"] in RETIRED_BINDINGS.get(app, ())
             ):
                 # Explicit owner-approved retirement; repair still cannot remove it.
-                change["reason"] = "RETIRED_SERVICE_BINDING"
+                change["reason"] = "RETIRED_BINDING"
     if any(item["reason"] in MANUAL for item in changes):
         print(json.dumps({"state": "manual_required", "changes": changes}))
         raise ReleaseError("REPAIR_MANUAL_REQUIRED")

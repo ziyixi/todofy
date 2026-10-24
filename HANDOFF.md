@@ -24,8 +24,10 @@ The owner now authorizes the Claude implementation and rollout on `codex/mailsor
 reuse the existing Worker, SQLite DO/Alarm and Gmail write ledger; roughly hourly bounded batches of unread,
 unclassified mail; one Opus 5.5 medium request and the maintained prompt; native $20/month Mailsort workspace
 limit, with an owner-written Worker API key excluded from GitHub. No VPS changes or automatic reclassification
-of existing P1-P4 mail. Implementation and local synthetic checks are complete; branch CI and key configuration are next.
-No Claude production cutover has occurred. Evidence: [Claude rollout](docs/mailsort-claude-verification.md). Work stays in `/private/tmp/todofy-tasks-design`, outside Claude's shared source checkout.
+of existing P1-P4 mail. Implementation SHA `a28e24ab` passed full branch CI `40132337773`; the owner-confirmed key is configured and
+one real five-synthetic-message API check passed ($0.01684). Main run `40140567311` stopped before upload because
+the planned old `AI` binding removal was not yet in the release retirement list. The scoped release-helper fix
+is in progress; no Claude production cutover has occurred. Evidence: [Claude rollout](docs/mailsort-claude-verification.md). Work stays in `/private/tmp/todofy-tasks-design`, outside Claude's shared source checkout.
 
 Mailsort's calibrated priority correction and original-100 entrypoint are deployed at `eb3e21dc` after full
 [branch gate 40064835511](https://github.com/ziyixi/todofy/actions/runs/40064835511) and

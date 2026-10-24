@@ -22,9 +22,10 @@ showed `$0.00 / $20.00` and reset on November 1 UTC. The existing organization $
 were not changed. Included API credits count toward spend caps; see [Anthropic credits documentation](https://platform.claude.com/docs/en/about-claude/api-credits-for-subscribers).
 The provider configuration screenshot is private, outside Git.
 
-The production key is planned as a single-workspace key with no Admin API access, written directly to the
-Mailsort Worker. It is excluded from GitHub secrets, bootstrap maps and deploy overwrite. Key issuance awaits the
-browser-required action-time confirmation; production has not switched yet.
+The owner confirmed creation of a long-lived, Mailsort-only key without Admin API access. It was written directly
+to the Mailsort Worker secret; all three existing Gmail secret names remain. The key did not enter GitHub, Git,
+bootstrap maps or logs, and its temporary local plaintext file was removed after configuration and testing.
+The Brief key remains unchanged.
 
 ## Local evidence
 
@@ -40,3 +41,18 @@ browser-required action-time confirmation; production has not switched yet.
 
 Tests use synthetic mail and local fake Google/Anthropic endpoints. No real Gmail labels were changed by these checks.
 A branch CI gate, same-SHA main release, actual provider call and post-deploy status verification remain to be recorded.
+
+## Real API and first release attempt
+
+The built production client sent one batch of five synthetic messages to the real API. It returned
+`claude-opus-5-5`, medium effort, 2,580 input tokens, 326 output tokens and zero reported thinking tokens.
+The nominal cost was $0.01684; all five P1-P4 choices matched the synthetic expectations. These are integration
+fixtures, not a mailbox-accuracy measurement. This out-of-app test is billed to the Mailsort workspace and is
+not included in the app's own usage table.
+
+Implementation SHA `a28e24abeebe85479793b026cbee5deba89528f7` passed the complete
+[branch gate](https://github.com/ziyixi/todofy/actions/runs/40132337773).
+The [first same-SHA main attempt](https://github.com/ziyixi/todofy/actions/runs/40140567311) stopped before upload:
+the release preflight correctly refused the old undeclared `AI` binding. Build SHA drift was an ordinary release
+difference, not the blocker. The existing exact binding-retirement list is being updated for Mailsort's intentional
+AI removal; no broad bypass or manual Worker code deployment is used.

@@ -84,6 +84,7 @@ class ProviderFixture:
                         "WatchState": "watch-state",
                         "MailCoordinator": "mail-coordinator",
                         "TodofyCore": "todofy-core-do",
+                        "MailsortState": "mailsort-state",
                     }[source["class_name"]]
                     binding["namespace_id"] = self.resources["durable_objects"][alias]
                 bindings.append(binding)
@@ -406,16 +407,18 @@ class DriftAcceptance(unittest.TestCase):
                 self.assert_readonly(fixture)
 
     def test_a_retired_binding_is_one_the_app_no_longer_declares(self):
-        # The release after 2026-10-21's retires todofy-core's binding to Tasks.
-        self.assertEqual(control.RETIRED_SERVICE_BINDINGS, {"todofy": {"TASKS"}})
-        for app, names in control.RETIRED_SERVICE_BINDINGS.items():
+        # Only these exact owner-approved retirements may pass a normal release.
+        self.assertEqual(control.RETIRED_BINDINGS, {"todofy": {"TASKS"}, "mailsort": {"AI"}})
+        for app, names in control.RETIRED_BINDINGS.items():
             for path in control.WORKERS[app]:
                 config = control.read_toml(ROOT / path)
                 declared = set(config.get("vars", {})) | {service["binding"] for service in config.get("services", [])}
+                if "binding" in config.get("ai", {}):
+                    declared.add(config["ai"]["binding"])
                 with self.subTest(app=app, path=path):
                     self.assertFalse(names & declared)
 
-    @patch.dict("control.RETIRED_SERVICE_BINDINGS", {"dashboard": {"OLD_APP"}})
+    @patch.dict("control.RETIRED_BINDINGS", {"dashboard": {"OLD_APP"}})
     def test_normal_home_release_removes_a_retired_binding(self):
         fixture = self.fixture("dashboard")
         fixture.bindings().append(
@@ -431,12 +434,12 @@ class DriftAcceptance(unittest.TestCase):
         self.assertEqual(
             json.loads(output.getvalue()),
             {"state": "repairable", "changes": [
-                {"script": "home", "field": "OLD_APP", "reason": "RETIRED_SERVICE_BINDING"},
+                {"script": "home", "field": "OLD_APP", "reason": "RETIRED_BINDING"},
             ]},
         )
         self.assert_readonly(fixture)
 
-    @patch.dict("control.RETIRED_SERVICE_BINDINGS", {"dashboard": {"OLD_APP"}})
+    @patch.dict("control.RETIRED_BINDINGS", {"dashboard": {"OLD_APP"}})
     def test_service_retirement_does_not_allow_other_bindings_apps_or_repairs(self):
         for app, repair, name in (
             ("dashboard", True, "OLD_APP"),
@@ -461,6 +464,44 @@ class DriftAcceptance(unittest.TestCase):
                     [{"script": fixture.configs[0]["name"], "field": name,
                       "reason": "BINDING_UNDECLARED"}],
                 )
+                self.assert_readonly(fixture)
+
+    def test_normal_mailsort_release_removes_only_the_retired_ai_binding(self):
+        fixture = self.fixture("mailsort")
+        fixture.bindings().append({"name": "AI", "type": "ai"})
+        fixture.binding("BUILD_SHA")["text"] = "b" * 40
+        output = io.StringIO()
+        with redirect_stdout(output):
+            required = preflight(ROOT, "mailsort", SHA, False, fixture.cloud, fixture.github)
+        self.assertTrue(required)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "state": "repairable", "changes": [
+                {"script": "mailsort", "field": "AI", "reason": "RETIRED_BINDING"},
+                {"script": "mailsort", "field": "BUILD_SHA", "reason": "BUILD_IDENTITY_CHANGED"},
+            ],
+        })
+        self.assert_readonly(fixture)
+
+    def test_ai_retirement_does_not_allow_other_bindings_apps_or_repairs(self):
+        for app, repair, name in (
+            ("mailsort", True, "AI"),
+            ("mailsort", False, "AI_EXTRA"),
+            ("mailsort", False, "ai"),
+            ("watch", False, "AI"),
+        ):
+            with self.subTest(app=app, repair=repair, name=name):
+                fixture = self.fixture(app)
+                fixture.bindings().append({"name": name, "type": "ai"})
+                output = io.StringIO()
+                with (
+                    redirect_stdout(output),
+                    self.assertRaisesRegex(ReleaseError, "REPAIR_MANUAL_REQUIRED"),
+                ):
+                    preflight(ROOT, app, SHA, repair, fixture.cloud, fixture.github)
+                self.assertEqual(json.loads(output.getvalue())["changes"], [
+                    {"script": fixture.configs[0]["name"], "field": name,
+                     "reason": "BINDING_UNDECLARED"},
+                ])
                 self.assert_readonly(fixture)
 
     def test_a_release_stops_for_a_repair_or_an_undeclared_secret(self):
