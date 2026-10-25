@@ -64,7 +64,7 @@ option (common.wire.v1.formats) = {
 };
 option (common.wire.v1.formats) = {
   name: "RuntimeResourceKey"
-  pattern: "(newsletter|newsletter-config-sync|platform-runtime|newsletter-daily|platform-observer|newsletter-service|platform-service|newsletter-release|platform-release|platform-runtime-config)"
+  pattern: "(newsletter|newsletter-config-sync|platform-runtime|newsletter-daily|platform-observer|newsletter-service|platform-service|newsletter-release|platform-release|platform-runtime-config|codex-gateway|codex-gateway-service|codex-gateway-release)"
   description: "Fixed public runtime alias, never an arbitrary Kubernetes resource."
 };
 
@@ -340,10 +340,10 @@ message ReconcilePlan {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).non_null = true
   ];
-  // At most ten fixed aliases, without manifests, paths, secrets or provider errors.
+  // At most thirteen fixed aliases, without manifests, paths, secrets or provider errors.
   repeated ReconcileChange changes = 7 [
     (google.api.field_behavior) = REQUIRED,
-    (common.wire.v1.field).max_items = 10
+    (common.wire.v1.field).max_items = 13
   ];
   // Safe reason why comparison/repair needs attention, independent of business health.
   optional string reason_code = 8 [(common.wire.v1.field).format = "ReleaseErrorCode"];

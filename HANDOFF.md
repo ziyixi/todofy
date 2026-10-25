@@ -25,8 +25,15 @@ Local checks passed Gateway 32, relevant Platform 86 (+80 subtests, two isolated
 and Home 176 UI tests with lint/typechecks/build. Physical SQLite tests cover reopen, UTC-day boundaries,
 independent instances and retained samples. The 30-day health snapshot is about 8 KiB, so only Gateway's
 existing bounded monitor read is raised to 12 KiB; NodeStatus and HostReport remain 12/16 KiB.
-Shared API lint/breaking and Changes checks passed. Branch CI, production deployment and persistence readback
-are pending. The shared checkout remains untouched.
+Shared API lint/breaking and Changes checks passed. The complete [branch gate 40234985072](https://github.com/ziyixi/todofy/actions/runs/40234985072)
+passed and `0fb5cb60` entered production. The new Platform and Newsletter images are running; all four services
+remain ready, but runtime readback exposed an older reconcile contract defect: its resource-key format omitted
+the three existing Gateway aliases and its plan bound was ten instead of thirteen. The staged Gateway manifest
+change therefore made `nodeStatus` return INTERNAL while ordinary workload reads stayed 200. The incomplete
+Actions run was stopped before Gateway deployment. The exact contract inventory correction and a real
+Planner/Service transition regression are being published; it requires no sudo or credential change. The
+reviewed rule record names only these two old/new output corrections, preserving every other compatibility check.
+Persistence production acceptance is pending. The shared checkout remains untouched.
 
 ### Codex monitor and Mailsort usage (`codex/inference-monitor`)
 

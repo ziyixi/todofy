@@ -1,0 +1,33 @@
+{
+  "about": "Exact reviewed output-rule transitions. All unlisted changes remain subject to the strict profile checks.",
+  "rules": [
+    {
+      "message": "platform.runtime.v1.ReconcileChange",
+      "field": "resource_key",
+      "number": 1,
+      "rule": "format",
+      "before": [
+        "(newsletter|newsletter-config-sync|platform-runtime|newsletter-daily|platform-observer|newsletter-service|platform-service|newsletter-release|platform-release|platform-runtime-config)",
+        0,
+        ""
+      ],
+      "after": [
+        "(newsletter|newsletter-config-sync|platform-runtime|newsletter-daily|platform-observer|newsletter-service|platform-service|newsletter-release|platform-release|platform-runtime-config|codex-gateway|codex-gateway-service|codex-gateway-release)",
+        0,
+        ""
+      ],
+      "since": "2026-10-25",
+      "reason": "Restore the three fixed Codex Gateway aliases already supported by the runtime renderer. Deploy Fleet consumers before Platform producers; older Gateway observations remain valid."
+    },
+    {
+      "message": "platform.runtime.v1.ReconcilePlan",
+      "field": "changes",
+      "number": 7,
+      "rule": "max_items",
+      "before": 10,
+      "after": 13,
+      "since": "2026-10-25",
+      "reason": "Match the thirteen fixed runtime manifests, including the three Codex Gateway resources. Deploy Fleet consumers before Platform producers; no producer emits more than thirteen changes."
+    }
+  ]
+}

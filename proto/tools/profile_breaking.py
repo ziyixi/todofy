@@ -76,6 +76,7 @@ import json
 import re
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import wire_rules
@@ -88,6 +89,7 @@ RESOURCE = "[google.api.resource]"
 WIRE_FIELD = "[common.wire.v1.field]"
 WIRE_METHOD = "[common.wire.v1.method]"
 VERBS = ("get", "put", "post", "delete", "patch", "custom")
+REVIEWED_RULES = Path(__file__).resolve().parents[1] / "reviewed-rules.json"
 
 
 def files(image: dict[str, Any], ignore: tuple[str, ...]) -> Iterator[dict[str, Any]]:
@@ -452,6 +454,41 @@ def ignored_dirs(buf_yaml: str) -> tuple[str, ...]:
     )
 
 
+def apply_reviewed_rules(
+    base: dict[str, Any], head: dict[str, Any], found: list[str], ignore: tuple[str, ...] = ()
+) -> list[str]:
+    """Exempt only exact, documented output-rule transitions at the CLI boundary."""
+    before, after = top_level(base, ignore), top_level(head, ignore)
+    base_enums, head_enums = wire_rules.enum_index(base), wire_rules.enum_index(head)
+    reviewed = set()
+    for entry in json.loads(REVIEWED_RULES.read_text(encoding="utf-8"))["rules"]:
+        name, number, rule = entry["message"], entry["number"], entry["rule"]
+        if name not in before or name not in after:
+            continue
+        old_file, old = before[name]
+        file, message = after[name]
+        previous = next((field for field in old.get("field", []) if field["number"] == number), None)
+        field = next((field for field in message.get("field", []) if field["number"] == number), None)
+        if previous is None or field is None or field["name"] != entry["field"]:
+            continue
+        if any(previous.get(key) != field.get(key) for key in ("name", "type", "typeName", "label", "proto3Optional")):
+            continue
+        was, now = Rules(old_file, old, previous, base_enums), Rules(file, message, field, head_enums)
+        expected_before, expected_after = entry["before"], entry["after"]
+        if rule == "format":
+            expected_before, expected_after = tuple(expected_before), tuple(expected_after)
+        if getattr(was, rule) != expected_before or getattr(now, rule) != expected_after:
+            continue
+        if {key for key in vars(was) if vars(was)[key] != vars(now)[key]} != {rule}:
+            continue
+        path = f"{name}.{field['name']} ({number})"
+        line = f"PROFILE_RULE_SAME {path}: changed ({rule})"
+        if any(item != line and f" {path}:" in item for item in found):
+            continue
+        reviewed.add(line)
+    return [line for line in found if line not in reviewed]
+
+
 def main(argv: list[str]) -> int:
     ignore: tuple[str, ...] = ()
     if len(argv) == 4 and argv[2] == "--config":
@@ -462,7 +499,8 @@ def main(argv: list[str]) -> int:
         print("usage: profile_breaking.py BASE_IMAGE.json HEAD_IMAGE.json [--config buf.yaml]", file=sys.stderr)
         return 2
     with open(argv[0]) as base_file, open(argv[1]) as head_file:
-        found = violations(json.load(base_file), json.load(head_file), ignore)
+        base, head = json.load(base_file), json.load(head_file)
+    found = apply_reviewed_rules(base, head, violations(base, head, ignore), ignore)
     for line in found:
         print(line)
     return 1 if found else 0

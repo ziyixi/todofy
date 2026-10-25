@@ -73,12 +73,12 @@ class RuntimeWire(unittest.TestCase):
                  "observed_at": "2026-10-03T00:00:00Z", "changes": [
                      {"resource_key": "platform-observer", "action": "update", "reason_code": "RUNTIME_FIELDS_CHANGED"}]}
         self.assertEqual(to_wire(from_wire(pb.ReconcilePlan, value, strict=True).message), value)
-        for key, item in (("changes", value["changes"] * 11), ("fingerprint", "too-short"),
+        for key, item in (("changes", value["changes"] * 14), ("fingerprint", "too-short"),
                           ("state", "autoresume"), ("manifests", {})):
             with self.subTest(field=key), self.assertRaises(WireJsonError):
                 from_wire(pb.ReconcilePlan, {**value, key: item}, strict=True)
         schema = json.loads((FIXTURES.parent / "platform-runtime-v1.schema.json").read_text())["$defs"]
-        self.assertEqual(schema["ReconcilePlan"]["properties"]["changes"]["maxItems"], 10)
+        self.assertEqual(schema["ReconcilePlan"]["properties"]["changes"]["maxItems"], 13)
 
 
 class HttpMetadata(unittest.TestCase):

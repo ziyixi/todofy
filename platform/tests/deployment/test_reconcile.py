@@ -9,14 +9,41 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from personal_cloud.deployment.kubernetes import DependencyUnavailable
+from personal_cloud.deployment.reconcile import RESOURCE_KEYS
 from personal_cloud.deployment.store import Store
+from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 from ziyixi_proto.platform.runtime.v1 import runtime_service_pb as api
 from ziyixi_proto.rpc_status import RpcError
-from ziyixi_proto.wire_json import to_wire
+from ziyixi_proto.wire_json import field_rules, to_wire
 
-from .test_release import CONFIG, CONTINUE, IDENTITY, REQUEST, SHA, Fixture
+from .test_release import CONFIG, CONTINUE, IDENTITY, REQUEST, SHA, STAMP, Fixture
 
 SECOND = "458521e1-5850-4a55-8b84-867ec5c41463"
+
+
+class RuntimeResourceContract(unittest.TestCase):
+    def test_every_fixed_resource_fits_the_reconcile_plan_contract(self):
+        changes = tuple(
+            pb.ReconcileChange(
+                resource_key=alias,
+                action="update",
+                reason_code="RUNTIME_FIELDS_CHANGED",
+            )
+            for alias in sorted(RESOURCE_KEYS.values())
+        )
+        self.assertGreaterEqual(
+            field_rules(pb.ReconcilePlan, "changes").max_items, len(changes)
+        )
+        for change in changes:
+            with self.subTest(resource_key=change.resource_key):
+                self.assertEqual(to_wire(change)["resource_key"], change.resource_key)
+        plan = pb.ReconcilePlan(
+            name="reconcilePlan",
+            state="repairable",
+            observed_at=STAMP,
+            changes=changes,
+        )
+        self.assertEqual(len(to_wire(plan)["changes"]), len(RESOURCE_KEYS))
 
 
 class RuntimeRepair(Fixture, unittest.TestCase):

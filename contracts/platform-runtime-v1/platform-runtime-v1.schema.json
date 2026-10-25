@@ -57,7 +57,7 @@
     "RuntimeResourceKey": {
       "description": "Fixed public runtime alias, never an arbitrary Kubernetes resource.",
       "type": "string",
-      "pattern": "^(?:(newsletter|newsletter-config-sync|platform-runtime|newsletter-daily|platform-observer|newsletter-service|platform-service|newsletter-release|platform-release|platform-runtime-config))$(?!\\n)"
+      "pattern": "^(?:(newsletter|newsletter-config-sync|platform-runtime|newsletter-daily|platform-observer|newsletter-service|platform-service|newsletter-release|platform-release|platform-runtime-config|codex-gateway|codex-gateway-service|codex-gateway-release))$(?!\\n)"
     },
     "WorkloadResourceName": {
       "description": "A configured workload resource name.",
@@ -557,7 +557,7 @@
         },
         "changes": {
           "type": "array",
-          "maxItems": 10,
+          "maxItems": 13,
           "items": {
             "$ref": "#/$defs/ReconcileChange"
           }

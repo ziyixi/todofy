@@ -336,6 +336,7 @@ PROTO_NOT_BUNDLED = (
     "proto/testdata/",
     "proto/scripts/",
     "proto/tools/profile_breaking.py",
+    "proto/reviewed-rules.json",
     # The retirement list and its check (proto/README.md "Retiring an element").
     "proto/retired.json",
     "proto/tools/retired.py",

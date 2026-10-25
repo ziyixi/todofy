@@ -772,9 +772,9 @@
                   "type": "string"
                 },
                 "changes": {
-                  "description": "At most ten fixed aliases, without manifests, paths, secrets or provider errors.",
+                  "description": "At most thirteen fixed aliases, without manifests, paths, secrets or provider errors.",
                   "type": "array",
-                  "maxItems": 10,
+                  "maxItems": 13,
                   "items": {
                     "type": "object",
                     "required": [
@@ -786,7 +786,7 @@
                       "resource_key": {
                         "description": "Fixed public alias, independent of private provider naming.",
                         "type": "string",
-                        "pattern": "^(?:(newsletter|newsletter-config-sync|platform-runtime|newsletter-daily|platform-observer|newsletter-service|platform-service|newsletter-release|platform-release|platform-runtime-config))$(?!\\n)"
+                        "pattern": "^(?:(newsletter|newsletter-config-sync|platform-runtime|newsletter-daily|platform-observer|newsletter-service|platform-service|newsletter-release|platform-release|platform-runtime-config|codex-gateway|codex-gateway-service|codex-gateway-release))$(?!\\n)"
                       },
                       "action": {
                         "description": "Create/update are ordinary manifest repair; conflict requires explicit owner action.",

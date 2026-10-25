@@ -197,6 +197,11 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
    proves the rules bite (72 cases, on `tasks/inbox/v1`, `watch/ui/v1`, `ops/v1`, `dashboard/ui/v1`, `todofy/report/v1`,
    `mailhero/webhook/v1` and `prototest`, the retirement of a package, a file, an enum value, an allowed value and an rpc
    with its request among them), and `test/python/test_profile_breaking.py` checks the directions on synthetic images.
+
+   Reviewed output-rule corrections are recorded in `reviewed-rules.json` with their exact old/new values and
+   rollout reason. The CLI permits only that one registered field rule when all other rules and field identity
+   remain unchanged; `violations()` and every unlisted change stay strict. The runtime resource inventory repair
+   deploys Fleet consumers before Platform producers through the existing release dependencies.
 5. **Adding a value to an open enum is compatible by design**, so neither buf nor the profile check flags it.
    What keeps consumers working is the reading rule: outputs are read leniently (an unknown enum name reads as
    `*_UNSPECIFIED`, an unknown field is skipped, both listed in `unrecognized`), and a consumer branches on

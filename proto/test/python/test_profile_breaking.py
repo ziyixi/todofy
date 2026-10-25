@@ -5,8 +5,13 @@ list may change, a closed enum may not grow, and a list's write_empty is wire li
 """
 
 import copy
+import io
+import json
 import sys
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
 from typing import Any
 
 from proto_test_support import PROTO
@@ -228,6 +233,92 @@ class RelationsTest(unittest.TestCase):
         self.assertEqual(rules_of(empty_flags(True), empty_flags(True)), [])
         self.assertEqual(rules_of(empty_flags(False), empty_flags(True)), ["PROFILE_FIELD_SAME_EMPTY t.v1.Out.flags"])
         self.assertEqual(rules_of(empty_flags(True), empty_flags(False)), ["PROFILE_FIELD_SAME_EMPTY t.v1.Out.flags"])
+
+
+RUNTIME_PATTERN = (
+    "(newsletter|newsletter-config-sync|platform-runtime|newsletter-daily|platform-observer|"
+    "newsletter-service|platform-service|newsletter-release|platform-release|platform-runtime-config)"
+)
+GATEWAY_PATTERN = RUNTIME_PATTERN[:-1] + "|codex-gateway|codex-gateway-service|codex-gateway-release)"
+
+
+def runtime_image(pattern: str = RUNTIME_PATTERN, max_items: int = 10) -> dict:
+    return {"file": [{
+        "name": "platform/runtime/v1/runtime.proto",
+        "package": "platform.runtime.v1",
+        "syntax": "proto3",
+        "options": {"[common.wire.v1.formats]": [{"name": "RuntimeResourceKey", "pattern": pattern}]},
+        "messageType": [
+            {"name": "ReconcileChange", "field": [{
+                "name": "resource_key", "number": 1, "label": "LABEL_OPTIONAL", "type": "TYPE_STRING",
+                "options": {"[common.wire.v1.field]": {"format": "RuntimeResourceKey"}},
+            }]},
+            {"name": "ReconcilePlan", "field": [{
+                "name": "changes", "number": 7, "label": "LABEL_REPEATED", "type": "TYPE_MESSAGE",
+                "typeName": ".platform.runtime.v1.ReconcileChange",
+                "options": {"[common.wire.v1.field]": {"maxItems": max_items}},
+            }]},
+        ],
+    }]}
+
+
+class ReviewedRulesTest(unittest.TestCase):
+    def cli(self, base: dict, head: dict) -> tuple[int, str]:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / name for name in ("base.json", "head.json")]
+            for path, value in zip(paths, (base, head), strict=True):
+                path.write_text(json.dumps(value))
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = profile_breaking.main([str(path) for path in paths])
+        return result, output.getvalue()
+
+    def test_exact_reviewed_changes_are_cli_only(self) -> None:
+        base, head = runtime_image(), runtime_image(GATEWAY_PATTERN, 13)
+        self.assertEqual(len(profile_breaking.violations(base, head)), 2)
+        self.assertEqual(self.cli(base, head), (0, ""))
+
+    def test_unlisted_resource_larger_cap_and_different_base_are_rejected(self) -> None:
+        for base, head in (
+            (runtime_image(), runtime_image(GATEWAY_PATTERN[:-1] + "|unreviewed-resource)", 13)),
+            (runtime_image(), runtime_image(GATEWAY_PATTERN, 14)),
+            (runtime_image(max_items=9), runtime_image(GATEWAY_PATTERN, 13)),
+            (runtime_image(GATEWAY_PATTERN, 13), runtime_image()),
+        ):
+            with self.subTest(base=base, head=head):
+                code, output = self.cli(base, head)
+                self.assertEqual(code, 1)
+                self.assertIn("PROFILE_RULE_SAME", output)
+
+    def test_another_rule_or_presence_change_on_the_field_is_not_exempted(self) -> None:
+        for change in ("allowed", "write_empty", "presence"):
+            head = runtime_image(GATEWAY_PATTERN, 13)
+            resource, changes = [message["field"][0] for message in head["file"][0]["messageType"]]
+            if change == "allowed":
+                resource["options"][profile_breaking.WIRE_FIELD]["allowed"] = ["newsletter"]
+            elif change == "write_empty":
+                changes["options"][profile_breaking.WIRE_FIELD]["writeEmpty"] = True
+            else:
+                resource["proto3Optional"] = True
+            with self.subTest(change=change):
+                code, output = self.cli(runtime_image(), head)
+                self.assertEqual(code, 1)
+                expected = {
+                    "allowed": "PROFILE_RULE_",
+                    "write_empty": "PROFILE_FIELD_SAME_EMPTY",
+                    "presence": "PROFILE_FIELD_SAME_PRESENCE",
+                }
+                self.assertIn(expected[change], output)
+
+    def test_the_same_rule_change_on_another_message_is_not_exempted(self) -> None:
+        base, head = runtime_image(), runtime_image(GATEWAY_PATTERN, 13)
+        for built in (base, head):
+            other = copy.deepcopy(built["file"][0]["messageType"][0])
+            other["name"] = "OtherChange"
+            built["file"][0]["messageType"].append(other)
+        code, output = self.cli(base, head)
+        self.assertEqual(code, 1)
+        self.assertIn("PROFILE_RULE_SAME platform.runtime.v1.OtherChange.resource_key", output)
 
 
 if __name__ == "__main__":

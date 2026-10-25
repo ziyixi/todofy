@@ -4,12 +4,15 @@ import unittest
 from copy import deepcopy
 from dataclasses import replace
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import Mock
 
+from fastapi.testclient import TestClient
 from personal_cloud.deployment.controller import Controller
 from personal_cloud.deployment.kubernetes import DependencyUnavailable
 from personal_cloud.deployment.resources import Renderer
 from personal_cloud.status_daemon.config import Workload
+from personal_cloud.status_daemon.server import Cache, Service, create_app
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 from ziyixi_proto.platform.runtime.v1 import runtime_service_pb as api
 from ziyixi_proto.wire_json import to_wire
@@ -218,6 +221,57 @@ class GatewayRelease(Fixture, unittest.TestCase):
                 for target in self.store.accepted_targets(self.controller.keys)
             },
             {SHA, GATEWAY_SHA},
+        )
+
+    def test_new_gateway_mount_reports_repairable_drift_through_node_status(self):
+        self.create_gateway()
+        self.complete_gateway()
+        resources = self.controller.renderer.render((*TARGETS, TARGET), GATEWAY_ID)
+        self.resource_state = {
+            (item["kind"], item["metadata"]["name"]): deepcopy(item)
+            for item in resources
+        }
+        self.resource_state[("CronJob", "newsletter-daily")]["spec"]["suspend"] = False
+        pod = self.resource_state[("Deployment", "codex-gateway")]["spec"]["template"][
+            "spec"
+        ]
+        # The new Platform image precedes Gateway's release and still observes its old mount.
+        pod["volumes"] = [item for item in pod["volumes"] if item["name"] != "state"]
+        container = pod["containers"][0]
+        container["volumeMounts"] = [
+            item for item in container["volumeMounts"] if item["name"] != "state"
+        ]
+        container["env"] = [
+            item for item in container["env"] if item["name"] != "DATA_DIR"
+        ]
+
+        def get(kind, name, **_):
+            return deepcopy(self.resource_state[(kind, name)])
+
+        self.kube.get = Mock(side_effect=get)
+        self.kube.dry_run = Mock(side_effect=lambda item, **_: deepcopy(item))
+        admission_call = self.admission.call
+        self.admission.call = lambda action, key, **_: admission_call(action, key)
+        service = Service(
+            Cache(SimpleNamespace(collect=self.gateway_snapshot)),
+            tuple(item.key for item in CONFIGURATION.workloads),
+        )
+        service.summary = self.controller.summary
+        service.plan = self.controller.plan
+        with TestClient(create_app(service)) as client:
+            response = client.get("/api/v1/nodeStatus")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["reconcile_plan"]
+        self.assertEqual(plan["state"], "repairable")
+        self.assertEqual(
+            plan["changes"],
+            [
+                {
+                    "resource_key": "codex-gateway",
+                    "action": "update",
+                    "reason_code": "RUNTIME_FIELDS_CHANGED",
+                }
+            ],
         )
 
     def test_gateway_pod_preserves_login_and_isolates_monitor_state_in_existing_volume(
