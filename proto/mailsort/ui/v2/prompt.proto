@@ -1,0 +1,30 @@
+// The owner's effective classification prompt. Saving freezes both texts for subsequent model calls.
+syntax = "proto3";
+package mailsort.ui.v2;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "PromptProto";
+option java_package = "science.ziyixi.mailsort.ui.v2";
+// A singleton containing the editable base prompt and personal rules. No mail content.
+message ClassificationPrompt {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/ClassificationPrompt"
+    pattern: "classificationPrompt"
+    singular: "classificationPrompt"
+    plural: "classificationPrompts"
+  };
+  // Always `classificationPrompt`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Nonempty base instructions. Combined with personal_rules, at most 12 KiB of UTF-8.
+  string base_text = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Personal rules appended to the base; may be empty. The combined limit is 12 KiB of UTF-8.
+  string personal_rules = 3 [(google.api.field_behavior) = OPTIONAL];
+  // `initial` before the first save. When supplied on update, must match the current value.
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+  // The last explicit save; absent while bundled defaults are in use.
+  google.protobuf.Timestamp update_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

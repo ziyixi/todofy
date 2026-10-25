@@ -1,9 +1,10 @@
 /** One Claude request for masked mail, with strict ID coverage and no automatic retries. */
 import { readCapped } from './gmail.ts';
 import { RESPONSE_MAX_BYTES } from './limits.ts';
-import { PRIORITY_PROMPT } from './priority-prompt.ts';
+import { PERSONAL_RULES, PRIORITY_PROMPT } from './priority-prompt.ts';
 
 export const CLAUDE_MODEL = 'claude-opus-5-5';
+export const CLAUDE_CACHE_TTL_MS = 5 * 60_000;
 const CLAUDE_URL = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_TOKENS = 16_384;
@@ -27,16 +28,25 @@ export interface ClaudeItem {
 
 export interface ClaudeUsage {
   readonly model: string;
+  /** All input: uncached tokens, cache writes and cache reads. */
   readonly inputTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly cacheReadTokens: number;
   /** Includes thinking; it must not be added again when calculating cost. */
   readonly outputTokens: number;
   readonly thinkingTokens: number | null;
-  /** USD millionths at Opus 5.5's $4 input / $20 output per million tokens. */
+  /** USD millionths, rounded up after applying Opus 5.5's input/cache/output rates. */
   readonly costMicros: number;
 }
 
 export interface ClaudeBatchResult extends ClaudeUsage {
   readonly items: readonly ClaudeItem[];
+}
+
+export interface ClaudeOptions {
+  readonly basePrompt?: string;
+  readonly personalRules?: string;
+  readonly cachePrompt?: boolean;
 }
 
 /** Only safe codes and numeric usage leave this client on failure. */
@@ -97,13 +107,23 @@ function readUsage(message: Record<string, unknown>): ClaudeUsage {
   const usage = record(message['usage']);
   const input = usage?.['input_tokens'];
   const output = usage?.['output_tokens'];
+  const cacheWrite = usage?.['cache_creation_input_tokens'] ?? 0;
+  const cacheRead = usage?.['cache_read_input_tokens'] ?? 0;
+  const creationValue = usage?.['cache_creation'];
+  const creation = record(creationValue);
+  // This client only requests 5m entries; older responses may omit the TTL breakdown.
+  const cache5m = creation === null ? cacheWrite : creation['ephemeral_5m_input_tokens'] ?? 0;
+  const cache1h = creation?.['ephemeral_1h_input_tokens'] ?? 0;
   const details = usage?.['output_tokens_details'];
   const thinking = details === undefined || details === null ? null : record(details)?.['thinking_tokens'];
   if (message['model'] !== CLAUDE_MODEL) throw new ClaudeError('claude_bad_model');
   if (!tokens(input) || !tokens(output) || (thinking !== null && (!tokens(thinking) || thinking > output))) throw new ClaudeError('claude_bad_usage');
-  const costMicros = 4 * input + 20 * output;
-  if (!Number.isSafeInteger(costMicros)) throw new ClaudeError('claude_bad_usage');
-  return { model: message['model'], inputTokens: input, outputTokens: output, thinkingTokens: thinking, costMicros };
+  if (!tokens(cacheWrite) || !tokens(cacheRead) || !tokens(cache5m) || !tokens(cache1h) || cache5m + cache1h !== cacheWrite
+    || (creationValue !== undefined && creationValue !== null && creation === null)) throw new ClaudeError('claude_bad_usage');
+  const inputTokens = input + cacheWrite + cacheRead;
+  const costMicros = Math.ceil(4 * input + 5 * cache5m + 8 * cache1h + 0.2 * cacheRead + 20 * output);
+  if (!Number.isSafeInteger(inputTokens) || !Number.isSafeInteger(costMicros)) throw new ClaudeError('claude_bad_usage');
+  return { model: message['model'], inputTokens, cacheWriteTokens: cacheWrite, cacheReadTokens: cacheRead, outputTokens: output, thinkingTokens: thinking, costMicros };
 }
 
 function readItems(value: unknown, ids: ReadonlySet<string>, usage: ClaudeUsage): ClaudeItem[] {
@@ -154,10 +174,17 @@ function providerFailure(status: number, value: unknown): ClaudeError {
 }
 
 /** The caller owns pending mail, mode gates and the month's $20 cap. This function sends once. */
-export async function classifyEmails(apiKey: string, emails: readonly ClaudeEmail[], fetcher: typeof fetch = fetch): Promise<ClaudeBatchResult> {
+export async function classifyEmails(apiKey: string, emails: readonly ClaudeEmail[], fetcher: typeof fetch = fetch, options: ClaudeOptions = {}): Promise<ClaudeBatchResult> {
   if (apiKey.trim() === '') throw new ClaudeConfigurationError('claude_not_configured');
   const ids = new Set(emails.map(email => email.id));
   if (emails.length === 0 || emails.length > 100 || ids.size !== emails.length || ids.has('')) throw new ClaudeError('claude_bad_input');
+  const basePrompt = options.basePrompt ?? PRIORITY_PROMPT;
+  const personalRules = options.personalRules ?? PERSONAL_RULES;
+  if (basePrompt.trim() === '') throw new ClaudeConfigurationError('claude_bad_prompt');
+  const system = [basePrompt, ...(personalRules.trim() === '' ? [] : [personalRules])].map(text => ({
+    type: 'text', text,
+    ...(options.cachePrompt === true ? { cache_control: { type: 'ephemeral', ttl: '5m' } } : {}),
+  }));
   const signal = AbortSignal.timeout(CLAUDE_TIMEOUT_MS);
   let response: Response;
   let bytes: Uint8Array | null;
@@ -170,7 +197,7 @@ export async function classifyEmails(apiKey: string, emails: readonly ClaudeEmai
         max_tokens: MAX_OUTPUT_TOKENS,
         thinking: { type: 'adaptive' },
         output_config: { effort: 'medium', format: { type: 'json_schema', schema: OUTPUT_SCHEMA } },
-        system: PRIORITY_PROMPT,
+        system,
         messages: [{ role: 'user', content: JSON.stringify({ emails }) }],
       }),
       redirect: 'manual',

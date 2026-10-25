@@ -200,6 +200,10 @@ message ClaudeBudget {
   string last_error_code = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The provider refused for this month's spend limit; work waits for the next UTC month.
   bool provider_limit_reached = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Tokens written to the prompt cache; included in input_tokens.
+  int32 cache_write_tokens = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Tokens read from the prompt cache; included in input_tokens.
+  int32 cache_read_tokens = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One owner-requested classification batch; the resource keeps its original name. Counts contain no mail content.

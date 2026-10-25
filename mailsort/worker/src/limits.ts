@@ -182,7 +182,7 @@ export const ERRORS_KEPT = 8;
 // ---- the owner API -----------------------------------------------------------------------------------------------------
 
 /** Maximum owner request body, including a bounded private consolidation plan. */
-export const MAX_BODY_BYTES = 16 * 1024;
+export const MAX_BODY_BYTES = 32 * 1024;
 export const PAGE = 50;
 export const LABEL_ID_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
 export const ID_PATTERN = /^[a-z0-9-]{1,40}$/;

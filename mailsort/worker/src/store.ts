@@ -22,7 +22,7 @@ import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, R
 import { senderHash } from './mask.ts';
 import { PRIORITY_LABELS } from './priority.ts';
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 /** The provider workspace cap is the hard boundary; this is the app's additional actual-usage stop. */
 export const CLAUDE_MONTHLY_LIMIT_MICROS = 20_000_000;
 
@@ -35,8 +35,15 @@ export const SCHEMA_V10: readonly string[] = [
   `ALTER TABLE decisions ADD COLUMN model_reason TEXT`,
 ];
 
+export const SCHEMA_V11: readonly string[] = [
+  `ALTER TABLE claude_usage ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE claude_usage ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0`,
+];
+
 export interface ClaudeUsageRow extends Record<string, SqlStorageValue> {
   input_tokens: number;
+  cache_write_tokens: number;
+  cache_read_tokens: number;
   output_tokens: number;
   thinking_tokens: number | null;
   cost_micros: number;
@@ -639,6 +646,7 @@ export class Store {
         }
       }
       if (version < 10) for (const statement of SCHEMA_V10) this.sql.exec(statement);
+      if (version < 11) for (const statement of SCHEMA_V11) this.sql.exec(statement);
       if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
     });
   }
@@ -758,17 +766,19 @@ export class Store {
   /** Reported API tokens and list-price cost, summed for one UTC calendar month. */
   claudeUsage(month: string): ClaudeUsageRow {
     return this.one<ClaudeUsageRow>(`SELECT coalesce(sum(input_tokens), 0) AS input_tokens, coalesce(sum(output_tokens), 0) AS output_tokens,
+      coalesce(sum(cache_write_tokens), 0) AS cache_write_tokens, coalesce(sum(cache_read_tokens), 0) AS cache_read_tokens,
       CASE WHEN count(thinking_tokens) = count(*) THEN coalesce(sum(thinking_tokens), 0) END AS thinking_tokens,
       coalesce(sum(cost_micros), 0) AS cost_micros, coalesce(sum(requests), 0) AS requests
       FROM claude_usage WHERE day >= ? AND day < ?`, `${month}-01`, `${month}-32`)
-      ?? { input_tokens: 0, output_tokens: 0, thinking_tokens: null, cost_micros: 0, requests: 0 };
+      ?? { input_tokens: 0, output_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 0, thinking_tokens: null, cost_micros: 0, requests: 0 };
   }
 
-  addClaudeUsage(day: string, usage: { readonly inputTokens: number; readonly outputTokens: number; readonly thinkingTokens: number | null; readonly costMicros: number }): void {
-    this.run(`INSERT INTO claude_usage (day, requests, input_tokens, output_tokens, thinking_tokens, cost_micros) VALUES (?, 1, ?, ?, ?, ?)
+  addClaudeUsage(day: string, usage: { readonly inputTokens: number; readonly outputTokens: number; readonly thinkingTokens: number | null; readonly costMicros: number; readonly cacheWriteTokens: number; readonly cacheReadTokens: number }): void {
+    this.run(`INSERT INTO claude_usage (day, requests, input_tokens, output_tokens, thinking_tokens, cost_micros, cache_write_tokens, cache_read_tokens) VALUES (?, 1, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(day) DO UPDATE SET requests = requests + 1, input_tokens = input_tokens + excluded.input_tokens,
         output_tokens = output_tokens + excluded.output_tokens, thinking_tokens = thinking_tokens + excluded.thinking_tokens,
-        cost_micros = cost_micros + excluded.cost_micros`, day, usage.inputTokens, usage.outputTokens, usage.thinkingTokens, usage.costMicros);
+        cost_micros = cost_micros + excluded.cost_micros, cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
+        cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens`, day, usage.inputTokens, usage.outputTokens, usage.thinkingTokens, usage.costMicros, usage.cacheWriteTokens, usage.cacheReadTokens);
   }
 
   // ---- labels -----------------------------------------------------------------------------------------------------------

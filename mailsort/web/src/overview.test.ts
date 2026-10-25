@@ -277,13 +277,15 @@ describe('概览', () => {
     const s = server()
     s.status = { claudeBudget: create(ClaudeBudgetSchema, {
       model: 'claude-opus-5-5', effort: 'medium', month: '2026-10', limitUsd: 20, spentUsd: 3.514105,
-      inputTokens: 125000, outputTokens: 16000, thinkingTokens: 5000,
+      inputTokens: 125000, cacheReadTokens: 100000, cacheWriteTokens: 5000, outputTokens: 16000, thinkingTokens: 5000,
       nextBatchTime: timestampFromMs(NOW + 3_600_000), lastRequestTime: timestampFromMs(NOW - 600_000),
     }) }
     const root = await open(s, '/overview')
-    expect(root.textContent).toContain('Claude Opus 5.5 · medium · 固定提示词')
+    expect(root.textContent).toContain('Claude Opus 5.5 · medium · 提示词可在设置中编辑')
     expect(root.textContent).toContain('本月费用 US$ 3.51 / 配置月上限 US$ 20.00')
-    expect(root.textContent).toContain('本应用记录的 API 用量：输入 125000 token · 输出（含思考）16000 token · 思考明细 5000 token')
+    expect(root.textContent).toContain('本应用记录的 API 用量：输入总计（含缓存）125000 token · 输出（含思考）16000 token · 思考明细 5000 token')
+    expect(root.textContent).toContain('缓存读取 100000 token · 缓存写入 5000 token，均已计入输入总计')
+    expect(root.textContent).toContain('缓存有效期为 5 分钟，连续批次可能命中')
     expect(root.textContent).toContain('不含赠金、折扣或本应用以外的调用')
     expect(root.textContent).toContain('下批判断最早在 1 小时后')
     expect(root.querySelector('.status-line')?.textContent).toContain('下次检查 5 分钟后')
@@ -311,7 +313,16 @@ describe('概览', () => {
     expect(root.textContent).toContain('Claude 用量未提供，请刷新或等待服务更新')
     expect(root.textContent).not.toContain('US$ 0.00')
     expect(root.textContent).not.toContain('US$ 20.00')
+    expect(root.textContent).not.toContain('缓存读取')
     expect(root.querySelector('[role="meter"]')).toBeNull()
+  })
+
+  it('shows zero cache usage for legacy uncached records without claiming savings', async () => {
+    const root = await open(new FakeServer(), '/overview')
+    expect(root.textContent).toContain('输入总计（含缓存）24000 token')
+    expect(root.textContent).toContain('缓存读取 0 token · 缓存写入 0 token')
+    expect(root.textContent).toContain('相隔约一小时的单批通常不会命中')
+    expect(root.textContent).not.toContain('节省')
   })
 
   it('routes current Claude results through the model while retaining historic Clef counts', () => {

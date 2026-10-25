@@ -15,7 +15,7 @@ describe('historical replay evaluation', () => {
     const server = new FakeServer()
     const card = await open(server)
     expect(card.textContent).toContain('没有历史检查记录')
-    expect(card.textContent).toContain('当前分级只用固定提示词')
+    expect(card.textContent).toContain('当前分级使用设置中的提示词')
     expect([...card.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['刷新历史记录'])
     expect(server.calls.every((call) => call.method === 'GET')).toBe(true)
     expect(server.calls.some((call) => call.path.endsWith(':start'))).toBe(false)

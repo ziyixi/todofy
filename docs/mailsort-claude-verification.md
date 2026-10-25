@@ -163,3 +163,31 @@ badge both showed 3. This resolves the stale zero display; it is not a claim tha
 reviewed gold label. The seven-day model report and Gmail's actual label totals are separate statistics.
 Screenshots are private, outside Git. Completed local checks included 199 Worker unit tests, 93 workerd cases,
 86 UI tests, types/lint/build, synthetic Wrangler smoke and proto checks.
+
+## Editable prompt and cache accounting
+
+The owner requested a personal-rules section and dashboard editing. The bundled defaults now specify USPS
+Informed Delivery P2 for ordinary previews and P1 for same-day action, Daily Briefing P1, and actual shopping
+receipts/order confirmations P2, including Weee and Yami. Brand promotions retain the general policy. These are
+prompt instructions, with no sender-specific code paths.
+
+The existing DO stores one optional base/rules override. Reading defaults does not write it; saving through the
+generated owner API freezes both texts for the next model call and survives deployment. Settings shows personal
+rules directly and the base in a collapsed section. The combined UTF-8 limit is 12 KiB. Existing batches, modes,
+Gmail limits and the native $20 workspace cap are unchanged; this change requests no historical reclassification.
+
+Stable system texts precede variable email/time input. Only consecutive batches request explicit five-minute
+cache breakpoints. Ordinary hourly single batches stay uncached. Eligibility is a bounded backlog hint, so an
+unneeded cache write can occur if remaining mail later skips; no per-batch saving is promised. Actual provider
+cache reads/writes are persisted in existing daily usage, included in total input and priced separately. The
+settings editor needs no new key, database, scheduler or prompt-version system.
+
+Local verification passed 215 Worker unit tests, 98 real workerd/SQLite cases (including CPU), 94 UI tests,
+26 config/deployment tests, the existing synthetic Wrangler smoke, Worker/UI types/lint/build and ten Home label
+tests. Website checks passed the changed privacy page/test lint/format, route types/TypeScript and 298 unit tests.
+Proto lint, API lint, breaking and schema checks passed. UI JavaScript is 60.3 KiB gzip. Tests cover persisted exact
+text, etag/request replay, an empty rules field, next-call prompt use, hourly uncached and backlog/tail cached
+requests, actual cache pricing, billed invalid responses and legacy usage migration without double counting.
+
+No real model request was added for this verification. A synthetic cache response proves accounting and request
+shape, not a production cache hit or mailbox accuracy. Branch/main release and live editor proof are pending.

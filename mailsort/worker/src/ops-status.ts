@@ -114,6 +114,8 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
       claude_spent_usd: claude.cost_micros / 1_000_000,
       claude_monthly_limit_usd: CLAUDE_MONTHLY_LIMIT_MICROS / 1_000_000,
       claude_input_tokens: claude.input_tokens,
+      claude_cache_write_tokens: claude.cache_write_tokens,
+      claude_cache_read_tokens: claude.cache_read_tokens,
       claude_output_tokens: claude.output_tokens,
       ...(claude.thinking_tokens === null ? {} : { claude_thinking_tokens: claude.thinking_tokens }),
     };

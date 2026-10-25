@@ -263,6 +263,8 @@ test.describe("public site", () => {
     await expect(page.locator("main time")).toHaveAttribute("datetime", "2026-10-24");
     await expect(page.locator("main")).toContainText("Anthropic");
     await expect(page.locator("main")).toContainText("$20 monthly spend limit");
+    await expect(page.locator("main")).toContainText("five-minute prompt cache");
+    await expect(page.locator("main")).toContainText("saved base instructions and personal rules");
     const navigation = page.getByRole("navigation", { name: "Primary" });
     await expect(navigation.locator('a[href^="/privacy"]')).toHaveCount(0);
     await expect(navigation.locator("a[aria-current]")).toHaveCount(0);

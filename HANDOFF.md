@@ -17,8 +17,12 @@ rules for USPS Informed Delivery, Daily Briefing and shopping receipts, plus cos
 Work stays in `/private/tmp/todofy-tasks-design`; Claude's shared checkout is untouched. Reuse the existing
 DO metadata and generated owner API, with one base/rules snapshot per model call and explicit five-minute
 cache breakpoints only for consecutive batches. Keep Opus 5.5 medium, the $20/month cap and all Gmail gates.
-The settings editor, actual cache-token accounting and matching privacy documentation are in progress.
-Next: synthetic/local checks, full branch CI, same-SHA main release, then owner UI save/reload and provider
+The settings editor, actual cache-token accounting and matching privacy documentation are implemented.
+Local checks passed: 215 Worker unit tests, 98 workerd/CPU cases, 94 UI tests, the synthetic Wrangler smoke,
+26 deploy/config tests, proto checks and the affected Home/website checks. Dry bundle is 139.4 KiB gzip
+against the existing 148 KiB budget; UI is 60.3 KiB. Evidence is in
+[Claude verification](docs/mailsort-claude-verification.md#editable-prompt-and-cache-accounting).
+Next: full branch CI, same-SHA main release, then owner UI save/reload and provider
 identity readback. Do not restart earlier mail batches or create a new key for this verification. A real
 provider cache hit is not yet verified; synthetic responses cannot establish one.
 

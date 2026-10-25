@@ -15,10 +15,13 @@ export class FakeUpstream {
   readonly ai = new FakeAi();
   readonly claude = {
     calls: [] as ClaudeEmail[][],
+    systems: [] as { text: string; cache_control?: { type: string; ttl: string } }[][],
     bucket: 'P2' as 'P1' | 'P2' | 'P3' | 'P4',
     status: 200,
     badItems: false,
     spendLimit: false,
+    cacheWriteTokens: 0,
+    cacheReadTokens: 0,
     inputTokens: 1200,
     outputTokens: 120,
     thinkingTokens: 40 as number | null,
@@ -40,6 +43,9 @@ export class FakeUpstream {
     this.gmail.reset();
     this.ai.reset();
     this.claude.calls.length = 0;
+    this.claude.systems.length = 0;
+    this.claude.cacheWriteTokens = 0;
+    this.claude.cacheReadTokens = 0;
     this.claude.status = 200;
     this.claude.spendLimit = false;
     this.claude.badItems = false;
@@ -51,15 +57,17 @@ export class FakeUpstream {
     const body = request.method === 'GET' || request.method === 'HEAD' ? '' : await request.text();
     const originalUrl = request.headers.get(ORIGINAL_URL_HEADER) ?? request.url;
     if (request.method === 'POST' && originalUrl === 'https://api.anthropic.com/v1/messages') {
-      const input = JSON.parse(body) as { messages: { content: string }[] };
+      const input = JSON.parse(body) as { messages: { content: string }[]; system: { text: string; cache_control?: { type: string; ttl: string } }[] };
       const emails = (JSON.parse(input.messages[0]?.content ?? '{}') as { emails: ClaudeEmail[] }).emails;
       this.claude.calls.push(emails);
+      this.claude.systems.push(input.system);
       if (this.claude.spendLimit) return Response.json({ error: { type: 'rate_limit_error', details: { error_code: 'enforced_spend_limit_reached' } } }, { status: 429 });
       if (this.claude.status !== 200) return Response.json({ error: { type: 'api_error' } }, { status: this.claude.status });
       const items = this.claude.badItems ? [] : emails.map(email => ({ id: email.id, bucket: this.claude.bucket, reason: 'Synthetic reading priority.' }));
       return Response.json({ model: 'claude-opus-5-5', type: 'message', role: 'assistant', stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify({ items }) }],
         usage: { input_tokens: this.claude.inputTokens, output_tokens: this.claude.outputTokens,
+          cache_creation_input_tokens: this.claude.cacheWriteTokens, cache_read_input_tokens: this.claude.cacheReadTokens,
           ...(this.claude.thinkingTokens === null ? {} : { output_tokens_details: { thinking_tokens: this.claude.thinkingTokens } }) } });
     }
     if (request.method === 'POST' && url.pathname.startsWith('/ai/run/')) {

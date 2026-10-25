@@ -4,7 +4,8 @@
  * Claude classifies a bounded batch in one request. Historical learning and replay remain readable.
  * Existing write gates and Gmail request limits apply to every step.
  */
-import { CLAUDE_MODEL, ClaudeBudgetError, ClaudeConfigurationError, ClaudeError, classifyEmails, type ClaudeBatchResult, type ClaudeEmail, type ClaudeItem } from './claude.ts';
+import { CLAUDE_CACHE_TTL_MS, CLAUDE_MODEL, ClaudeBudgetError, ClaudeConfigurationError, ClaudeError, classifyEmails, type ClaudeBatchResult, type ClaudeEmail, type ClaudeItem } from './claude.ts';
+import { readClassificationPrompt } from './classification-prompt.ts';
 import { modeCeiling, type Env, type ModeName } from './env.ts';
 import { applyFeedback, setCurrentLabels } from './feedback.ts';
 import { countFlow, skipOutcome, stageOf } from './flow.ts';
@@ -509,6 +510,9 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
       }
       if (prepared.length > 0) {
         const at = deps.now();
+        const prompt = readClassificationPrompt(store);
+        const recentCache = Number(store.getMeta('claude_prompt_cache_at') ?? 0) > at - CLAUDE_CACHE_TTL_MS;
+        const cachePrompt = store.count(`SELECT count(*) AS n FROM pending WHERE not_before <= ?`, at) > prepared.length || recentCache;
         let answer: ClaudeBatchResult | null = null;
         try {
           budget.left--;
@@ -518,10 +522,11 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
             time_zone: 'America/Los_Angeles', body: Array.from(g.features.body).slice(0, 12000).join(''),
             body_truncated: read.bodyTruncated === true || Array.from(read.body).length > 12000,
           }));
-          answer = await classifyEmails(deps.env.ANTHROPIC_API_KEY ?? '', emails, deps.fetch);
+          answer = await classifyEmails(deps.env.ANTHROPIC_API_KEY ?? '', emails, deps.fetch, { basePrompt: prompt.baseText, personalRules: prompt.personalRules, cachePrompt });
           const recorded = answer;
           transact(() => {
             store.addClaudeUsage(utcDay(at), recorded);
+            if (recorded.cacheWriteTokens + recorded.cacheReadTokens > 0) store.setMeta('claude_prompt_cache_at', String(at));
             store.setMeta('claude_last_request_at', String(at));
             store.deleteMeta('claude_error');
           });
@@ -530,6 +535,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
           transact(() => {
             if (error instanceof ClaudeError && error.usage !== undefined) {
               store.addClaudeUsage(utcDay(at), error.usage);
+              if (error.usage.cacheWriteTokens + error.usage.cacheReadTokens > 0) store.setMeta('claude_prompt_cache_at', String(at));
               store.setMeta('claude_last_request_at', String(at));
             }
             store.pushError(errorCode);

@@ -34,6 +34,8 @@ import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobu
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import type { ModeName } from './env.ts';
+import { ClassificationPromptSchema } from '@ziyixi/proto/mailsort/ui/v2/prompt_pb';
+import { classificationPromptMessage, readClassificationPrompt, saveClassificationPrompt, validClassificationPrompt } from './classification-prompt.ts';
 import { CLAUDE_MODEL } from './claude.ts';
 import { deleteExample, deleteExamplesOfLabel } from './examples.ts';
 import { setVerdict } from './feedback.ts';
@@ -999,6 +1001,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         model: CLAUDE_MODEL, effort: 'medium', month,
         limitUsd: CLAUDE_MONTHLY_LIMIT_MICROS / 1_000_000, spentUsd: claude.cost_micros / 1_000_000,
         inputTokens: claude.input_tokens, outputTokens: claude.output_tokens,
+        cacheWriteTokens: claude.cache_write_tokens, cacheReadTokens: claude.cache_read_tokens,
         ...(claude.thinking_tokens === null ? {} : { thinkingTokens: claude.thinking_tokens }),
         ...(lastRequest > 0 ? { lastRequestTime: timestampFromMs(lastRequest) } : {}),
         ...(nextBatch > 0 ? { nextBatchTime: timestampFromMs(nextBatch) } : {}),
@@ -1010,6 +1013,32 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       recentErrorCodes: store.errors(),
       build: ctx.build,
     });
+  },
+
+  getClassificationPrompt(request, ctx) {
+    if (request.name !== 'classificationPrompt') notFound();
+    return Promise.resolve(classificationPromptMessage(readClassificationPrompt(ctx.store)));
+  },
+
+  updateClassificationPrompt(request, ctx) {
+    const input = request.classificationPrompt ?? bad('classification_prompt is required');
+    if (input.name !== '' && input.name !== 'classificationPrompt') notFound();
+    let paths: '*' | readonly string[];
+    try { paths = updatePaths(request.updateMask); }
+    catch (error) { if (error instanceof FieldMaskError) bad('update_mask is not valid'); throw error; }
+    if (paths === '*' || !paths.some(path => path === 'base_text' || path === 'personal_rules')) bad('update_mask must name base_text or personal_rules');
+    return Promise.resolve(once(ctx, request.requestId, 'UpdateClassificationPrompt', 'classificationPrompt', ClassificationPromptSchema, () => {
+      const current = readClassificationPrompt(ctx.store);
+      if (input.etag !== '' && input.etag !== current.etag) throw sortError('ETAG_MISMATCH', [{ schema: ClassificationPromptSchema, message: classificationPromptMessage(current) }]);
+      let next = { baseText: current.baseText, personalRules: current.personalRules };
+      for (const path of paths) {
+        if (path === 'base_text') next = { ...next, baseText: input.baseText };
+        else if (path === 'personal_rules') next = { ...next, personalRules: input.personalRules };
+        else if (path !== 'etag') bad('update_mask must name base_text or personal_rules');
+      }
+      if (!validClassificationPrompt(next)) bad('base_text must be nonempty; both prompt fields together must fit 12 KiB UTF-8');
+      return classificationPromptMessage(saveClassificationPrompt(ctx.store, next, ctx.now));
+    }));
   },
 
   getSettings(request, ctx) {

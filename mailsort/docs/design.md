@@ -5,13 +5,14 @@ Gmail remains the mailbox. The app never sends mail, marks it read, deletes it o
 
 ## 1. Runtime
 
-One TypeScript Worker serves private React assets, verifies Access/Origin/CSRF and forwards the generated owner
+One TypeScript Worker serves private, framework-free UI assets, verifies Access/Origin/CSRF and forwards the generated owner
 API to SQLite DO `MailsortState`, stable object `mailsort-v1`. Its Alarm handles Gmail history, pending messages,
 Claude requests, the existing write ledger and daily retention. No VPS, cron or added storage/scheduler.
 
 `state.ts` owns API dispatch and Alarm lifecycle. `pipeline.ts` owns a bounded pass. `gmail.ts` owns Google access;
-`claude.ts` owns the Anthropic Messages API. The policy text is `prompts/priority-classification.txt`, bundled directly
-as text for production and local tests. The UI imports only generated wire types, never Worker implementation.
+`claude.ts` owns the Anthropic Messages API. Defaults are bundled from `prompts/priority-classification.txt` and
+`prompts/personal-rules.txt`. A saved override lives in existing DO metadata, not another database. The UI imports
+only generated wire types, never Worker implementation.
 
 ## 2. Gmail boundary and privacy
 
@@ -34,6 +35,7 @@ Production calls go directly to Anthropic, without AI Gateway or request-body lo
 | Daily aggregate counters and returned Claude usage | 400 days |
 | Historical masked examples and embeddings | Owner deletion, maximum 2,000 |
 | Fixed labels and Gmail identities | Until explicit app-data removal |
+| Saved base prompt and personal rules | Until replaced or app-data removal |
 | Owner request receipts | 1 day |
 | Latest unread batch IDs, state and scan progress, without content | Until next batch or app-data removal |
 
@@ -44,13 +46,21 @@ body or credentials. The website `/privacy/mailsort` must match these operations
 
 | ID/name | Policy | Inbox |
 | --- | --- | --- |
-| p1 / P1 | Prompt attention with a concrete near-term consequence | Keep |
+| p1 / P1 | Prompt attention, including the owner's Daily Briefing | Keep |
 | p2 / P2 | Important information or follow-up within two or three days | Archive |
 | p3 / P3 | Personal periodic summaries or worthwhile weekend reading | Archive |
-| p4 / P4 | Notifications, receipts and promotions kept for reference | Archive |
+| p4 / P4 | Notifications and promotions kept for reference | Archive |
 
-No sender-brand whitelist, scam score, probability threshold or forced category balance. A provider error cannot
-become a priority. The prompt distinguishes personal periodic reports from generic promotional digests.
+Personal rules take precedence over the base guidance. Initial preferences: ordinary USPS Informed Delivery P2,
+same-day action P1; Daily Briefing P1; actual shopping receipts/order confirmations (including Weee/Yami) P2.
+Brand promotions do not become purchase receipts. These rules are editable text, with no sender-specific code
+branches, scam score, probability threshold or forced category balance. A provider error cannot become a priority.
+
+`ClassificationPrompt` is one owner API singleton. Get returns the bundled defaults without creating a row;
+Update saves both texts in `meta.classification_prompt` using the existing field-mask, etag and request-ID receipts.
+The base must be nonblank; rules can be empty, and both together are bounded to 12 KiB UTF-8. A model call reads
+one snapshot. Saving affects the next call, preserves in-flight/historical decisions and survives code deployment.
+There is no prompt history, reset service or automatic reclassification.
 
 Off stops Gmail/model work; shadow records model decisions without Gmail changes; live applies them. The existing
 deployment ceiling and breaker can lower the owner mode. Setup or deployment does not raise it or replay old mail.
@@ -83,9 +93,21 @@ organization limit are separate. Credits count toward that spend limit and the c
 of each month. API keys are scoped to this workspace.
 
 The app stores returned usage in the existing SQLite store, by UTC day, and sums at most one month's rows. The
-recorded price is $4/million input and $20/million output tokens; thinking is part of output tokens, not an extra
-charge. Optional missing thinking breakdown remains unknown. Even a billed invalid result counts when the API
+recorded price is $4/million uncached input, $5/million five-minute cache writes, $0.20/million cache reads and
+$20/million output tokens; thinking is part of output tokens, not an extra charge. Input totals include uncached,
+cache-created and cache-read tokens. If the provider reports one-hour cache creation, it is priced at $8/million;
+this application only requests five minutes. Optional missing thinking breakdown remains unknown. Even a billed invalid result counts when the API
 returned its usage. No estimates, reservations or extra accounting service are introduced.
+
+The API's stable system blocks are base first, then nonempty personal rules; message-specific email/time data
+follows them. Each system block gets an explicit five-minute cache breakpoint only when the prepared batch has
+more due pending work behind it or a returned cache read/write began within five minutes. The latter is one
+timestamp in existing metadata, recorded from request start only when usage actually reports caching. No top-level
+automatic cache or email breakpoint is sent. Prefix edits invalidate the affected cache naturally; a rules edit
+can still reuse the base. No padding, prewarming or keepalive calls are used. Below the provider's minimum prefix
+length, caching may be ignored. Actual returned token fields determine cost and whether a hit occurred.
+See [Anthropic prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) and
+[Opus 5.5 pricing](https://platform.claude.com/docs/en/about-claude/pricing).
 
 At recorded cost >= $20, new calls wait until the next UTC month. A provider spend refusal does the same even if
 local accounting is lower. Network responses lost before usage is read and out-of-app calls may be absent locally;
@@ -109,8 +131,10 @@ initializer and consolidation state keep their original identity and resume beha
 ## 7. UI and Ops
 
 概览 shows Gmail freshness separately from the hourly model schedule, the current model/effort, recorded monthly
-cost/tokens and any provider/config error. 分级 shows the four queues and explicit unread-batch progress. 设置 keeps
-mode/write controls and undo. Old examples, model stages and replay results are labelled history.
+cost/tokens, actual cache reads/writes and any provider/config error. 分级 shows the four queues and explicit
+unread-batch progress. 设置 shows editable personal rules with a collapsed base-prompt field, alongside mode/write
+controls and undo. Saving updates that card in place; a prompt-load failure leaves other settings usable.
+Old examples, model stages and replay results are labelled history.
 
 Home's private Ops binding exposes fresh mode/auth/pending counts and Claude budget warnings. It no longer declares
 the account Workers AI guard capability: shedding unrelated free-model usage cannot switch or stop Mailsort's Claude

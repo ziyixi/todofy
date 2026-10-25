@@ -12,7 +12,7 @@ import { DAY, TRUSTED_DOMAINS_PER_LABEL_MAX } from '../src/limits.ts';
 import { senderHash } from '../src/mask.ts';
 import { labelIdFor, normalizePath, optionKeys, ownerPath, parentGmailNames, pathOfGmailName, pathSlug, treeConflict } from '../src/paths.ts';
 import { PRIORITY_LABELS } from '../src/priority.ts';
-import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_VERSION, senderHashesToBackfill, Store } from '../src/store.ts';
+import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V10, SCHEMA_VERSION, senderHashesToBackfill, Store } from '../src/store.ts';
 import { memorySql } from './fakes/sql.ts';
 
 const T0 = Date.parse('2026-10-06T08:00:00Z');
@@ -440,4 +440,17 @@ describe('retention', () => {
     expect(s.decision('m1')).toBeUndefined();
     expect(s.trustedDomains('bank')).toEqual(['bank.example.com']);
   });
+});
+
+
+it('adds zero cache counters to prior Claude usage and aggregates actual cache usage without duplicating input tokens', () => {
+  const sql = memorySql();
+  for (const statement of [...SCHEMA_V1, ...SCHEMA_V2, ...SCHEMA_V3, ...SCHEMA_V4, ...SCHEMA_V5, ...SCHEMA_V6, ...SCHEMA_V7, ...SCHEMA_V8, ...SCHEMA_V10]) sql.exec(statement);
+  sql.exec(`INSERT INTO meta (key, value) VALUES ('schema_version', '10')`);
+  sql.exec(`INSERT INTO claude_usage (day, requests, input_tokens, output_tokens, thinking_tokens, cost_micros) VALUES ('2026-10-06', 1, 1000, 100, 10, 6000)`);
+  const s = new Store(sql);
+  s.migrate();
+  expect(s.claudeUsage('2026-10')).toMatchObject({ input_tokens: 1000, cache_write_tokens: 0, cache_read_tokens: 0, cost_micros: 6000 });
+  s.addClaudeUsage('2026-10-06', { inputTokens: 1600, cacheWriteTokens: 200, cacheReadTokens: 400, outputTokens: 100, thinkingTokens: 10, costMicros: 7080 });
+  expect(s.claudeUsage('2026-10')).toMatchObject({ input_tokens: 2600, cache_write_tokens: 200, cache_read_tokens: 400, output_tokens: 200, cost_micros: 13080 });
 });

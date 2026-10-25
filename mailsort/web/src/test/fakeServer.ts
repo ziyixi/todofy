@@ -13,6 +13,7 @@ import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobu
 import { Code, RpcError } from '@ziyixi/proto/rpc-status'
 import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { MailFlow_CountSchema, MailFlowSchema, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
+import { ClassificationPromptSchema, type ClassificationPrompt } from '@ziyixi/proto/mailsort/ui/v2/prompt_pb'
 import {
   ListExamplesResponseSchema,
   ListLabelsResponseSchema,
@@ -119,6 +120,10 @@ export class FakeServer {
   /** Fields of GetServiceStatus that a test sets (the rest as below; review_count counts the pending items). */
   status: Partial<ServiceStatus> = {}
   settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, etag: 's1' })
+  classificationPrompt = create(ClassificationPromptSchema, { name: 'classificationPrompt', baseText: '按 P1、P2、P3、P4 判断合成邮件。', personalRules: '合成个人规则。', etag: 'initial' })
+  promptReadFails = false
+  promptSaveFails = false
+  private readonly promptUpdates = new Map<string, ClassificationPrompt>()
   initializationCompleted = true
   initializeIncompleteRounds = 0
   initializeFails = false
@@ -254,6 +259,26 @@ export class FakeServer {
             build: 'test',
           }), this.status),
         )
+      },
+      getClassificationPrompt: () => {
+        if (this.promptReadFails) throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', '提示词读取失败')
+        return Promise.resolve(this.classificationPrompt)
+      },
+      updateClassificationPrompt: (request) => {
+        const prior = this.promptUpdates.get(request.requestId)
+        if (prior !== undefined) return Promise.resolve(prior)
+        if (this.promptSaveFails) throw new RpcError(Code.INVALID_ARGUMENT, 'BAD_REQUEST', '提示词保存失败')
+        const input = request.classificationPrompt
+        if (input === undefined) throw new RpcError(Code.INVALID_ARGUMENT, 'BAD_REQUEST', '缺少提示词')
+        if (input.etag !== this.classificationPrompt.etag) throw new RpcError(Code.ABORTED, 'ETAG_MISMATCH', '提示词已改变')
+        const mask = updatePaths(request.updateMask)
+        const paths = mask === '*' ? [] : mask
+        const next = create(ClassificationPromptSchema, { ...this.classificationPrompt, etag: `prompt-${String(this.promptUpdates.size + 1)}`, updateTime: timestampFromMs(NOW) })
+        if (paths.includes('base_text')) next.baseText = input.baseText
+        if (paths.includes('personal_rules')) next.personalRules = input.personalRules
+        this.classificationPrompt = next
+        this.promptUpdates.set(request.requestId, next)
+        return Promise.resolve(next)
       },
       getSettings: () => Promise.resolve(this.settings),
       updateSettings: (request) => {

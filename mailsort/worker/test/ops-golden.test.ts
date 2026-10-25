@@ -53,8 +53,8 @@ function cases(): Record<string, unknown> {
   const ok = store();
   writeSettings(ok, { ...SYNTHETIC, mode: 'live' }, NOW - HOUR);
   usage(ok, 34, 21, 6, 1520.4);
-  ok.addClaudeUsage('2026-10-06', { inputTokens: 139_914, outputTokens: 5_476, thinkingTokens: 1_303, costMicros: 669_176 });
-  ok.addClaudeUsage('2026-09-30', { inputTokens: 10, outputTokens: 5, thinkingTokens: 0, costMicros: 140 });
+  ok.addClaudeUsage('2026-10-06', { inputTokens: 139_914, outputTokens: 5_476, cacheWriteTokens: 0, cacheReadTokens: 0, thinkingTokens: 1_303, costMicros: 669_176 });
+  ok.addClaudeUsage('2026-09-30', { inputTokens: 10, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 0, thinkingTokens: 0, costMicros: 140 });
   ok.setMeta('auth_state', 'ok');
   ok.setMeta('last_sync_at', String(NOW - 4 * MINUTE));
   ok.run(`INSERT INTO pending (message_id, added_at) VALUES ('a1', ?)`, NOW);
@@ -173,7 +173,7 @@ test('Claude errors become safe owner-action or availability signals', () => {
 
 test('an unavailable thinking breakdown stays absent from the current counters', () => {
   const target = store();
-  target.addClaudeUsage('2026-10-06', { inputTokens: 10, outputTokens: 5, thinkingTokens: null, costMicros: 140 });
+  target.addClaudeUsage('2026-10-06', { inputTokens: 10, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 0, thinkingTokens: null, costMicros: 140 });
   const status = sortStatus(target, { ...env, MODE: 'off' }, NOW);
   expect(status.counters).toMatchObject({ claude_spent_usd: 0.00014, claude_input_tokens: 10, claude_output_tokens: 5 });
   expect(status.counters).not.toHaveProperty('claude_thinking_tokens');

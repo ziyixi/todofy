@@ -4,10 +4,10 @@ Personal Gmail reading queues at `sort.ziyixi.science`. The Chinese UI manages f
 
 | Label | When to read | Gmail action |
 | --- | --- | --- |
-| P1 | Prompt attention, with a concrete near-term consequence | Keep in Inbox |
+| P1 | Prompt attention, including the owner's Daily Briefing | Keep in Inbox |
 | P2 | Important information or follow-up within two or three days | Archive |
 | P3 | Personal periodic summaries or worthwhile weekend reading | Archive |
-| P4 | Notifications, receipts and promotions kept for reference | Archive |
+| P4 | Notifications and promotions kept for reference | Archive |
 
 Mail is never marked read, sent, trashed or deleted. Stars and unrelated labels remain unchanged.
 There are no reminders, automatic resurfacing or task creation.
@@ -19,16 +19,26 @@ pending unread, unclassified mail in bounded batches of up to ten, with one **Cl
 batch. Backlog continues over subsequent Alarm calls within existing request and write caps. Normal history sync
 retains its new-mail Inbox/receipt cutoff; the explicit unread action also covers older and archived mail.
 
-The only classification policy is [the prompt](prompts/priority-classification.txt). Inputs include masked sender,
+Classification uses a [base prompt](prompts/priority-classification.txt) and [personal rules](prompts/personal-rules.txt).
+Edit either in **设置 → 分类提示词** and save; the existing database keeps the saved text through deployments.
+It applies to the next model batch and does not rerun classified mail. The initial personal rules put ordinary
+USPS Informed Delivery in P2 (P1 when timely action is needed), Daily Briefing in P1, and actual shopping receipts
+and order confirmations, including Weee and Yami, in P2. Promotions from the same brands keep the general policy.
+Inputs include masked sender,
 subject, up to 12,000 body characters, receipt time and evaluation time. Each result is one P1-P4 choice and a short
-reason. No probability thresholds, sender-brand rules, second model vote or learned examples are used. An invalid
+reason. Brand preferences live in editable prompt text; there are no sender-specific code branches,
+probability thresholds, second model vote or learned examples. An invalid
 result or unavailable provider leaves mail pending through existing backoff; it never fabricates P1.
 
 Mailsort has its own Claude workspace with a **$20/calendar-month provider spend limit**, separate from Brief.
-Gift-credit usage counts toward provider limits. The app records returned input/output/thinking tokens and
+Gift-credit usage counts toward provider limits. The app records returned input/output/thinking and cache tokens and
 list-price cost, and stops new calls once its recorded monthly cost reaches $20. The console remains the billing
 authority; out-of-app calls and calls with a lost response may not appear in the app tally. A provider spend refusal
 leaves pending mail for the next UTC month. There is no cheaper-model fallback.
+
+Consecutive batches can reuse five-minute Claude prompt caches. Only the stable base/rules prefix is marked;
+emails and evaluation times follow it. Ordinary hourly single batches do not request a cache write. The usage card
+shows actual cache reads/writes, and cost uses their separate prices. There is no prewarming or extra API call.
 
 ## UI and existing data
 
@@ -36,7 +46,7 @@ leaves pending mail for the next UTC month. There is no cheaper-model fallback.
 - 分级: four fixed queues, counts and explicit unread-batch progress. A manual start queues immediately; existing
   P1-P4 mail is skipped. While an active batch is visible, progress updates every 30 seconds. It stops on completion
   or leaving the page, and a reached daily write cap shows its UTC-reset time in the browser timezone.
-- 设置: mode, write limits and undo. Old examples, replay results and decision evidence remain readable as history.
+- 设置: personal rules, a collapsed base-prompt editor, mode, write limits and undo. Old examples, replay results and decision evidence remain readable as history.
 
 Off, shadow and live modes retain their existing meanings. Shadow records decisions without changing Gmail;
 live applies them. The deployment ceiling can lower the owner's mode. Existing labelled mail is not automatically

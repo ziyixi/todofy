@@ -58,12 +58,12 @@ export default function MailsortPrivacyPage() {
           <li>
             Through a closed list of Gmail API operations it reads messages, their labels, the
             mailbox&apos;s list of labels and its change history, and creates four flat Gmail
-            labels: P1, P2, P3 and P4. P1 is for mail with a concrete near-term reason for prompt
-            attention and stays in the inbox. P2 holds important information or required follow-up
-            that can wait two or three days, P3 is personal periodic summaries or worthwhile weekend
-            reading, and P4 is routine information, receipts or promotions without meaningful
-            follow-up. P2, P3 and P4 are archived out of the inbox. Every classification preserves
-            the message&apos;s read or unread state.
+            labels: P1, P2, P3 and P4. P1 is for mail requiring prompt attention, including the
+            owner&apos;s daily briefing, and stays in the inbox. P2 holds important information or
+            required follow-up that can wait two or three days, P3 is personal periodic summaries or
+            worthwhile weekend reading, and P4 is routine information or promotions without
+            meaningful follow-up. P2, P3 and P4 are archived out of the inbox. Every classification
+            preserves the message&apos;s read or unread state.
           </li>
           <li>
             It never sends, deletes or trashes mail and never marks mail read or unread. A new
@@ -118,8 +118,10 @@ export default function MailsortPrivacyPage() {
           The app checks Gmail through its existing Cloudflare Durable Object Alarm and starts
           classification batches roughly hourly. Each batch sends up to ten unread, unclassified
           messages to Anthropic&apos;s Claude API, using Opus 5.5 medium. A maintained prompt asks
-          for a reading queue and a short reason for each message. There are no sender-brand rules,
-          probability thresholds, second model vote or learned-example context.
+          for a reading queue and a short reason for each message. The owner can edit the base
+          instructions and personal rules in the dashboard. Those preferences currently cover USPS
+          delivery previews, Daily Briefing and shopping receipts. There are no sender-specific code
+          branches, probability thresholds, second model vote or learned-example context.
         </p>
         <p>
           Anthropic receives masked sender display name/domain, subject (up to 200 characters), body
@@ -127,6 +129,13 @@ export default function MailsortPrivacyPage() {
           evaluation time and the America/Los_Angeles timezone. Addresses and long numbers are
           masked and links reduced to their domains before transmission. Attachments are not sent.
           Calls go directly to Anthropic, without an AI Gateway that logs request bodies.
+        </p>
+        <p>
+          For consecutive batches, the app can request Anthropic&apos;s five-minute prompt cache for
+          the fixed base instructions and personal rules. Message-specific mail and evaluation times
+          follow those cache breakpoints and are not marked for prompt caching. Ordinary hourly
+          single batches do not request cache creation. Actual returned cache reads and writes are
+          included in the app&apos;s token and cost records.
         </p>
         <p>
           Provider errors leave mail pending through the existing retry process; they do not assign
@@ -185,6 +194,11 @@ export default function MailsortPrivacyPage() {
             the app&apos;s stored data.
           </li>
           <li>Daily counters and returned Claude token/cost totals without content: 400 days.</li>
+          <li>
+            The owner&apos;s saved base instructions and personal rules: until replaced or the owner
+            deletes the app&apos;s stored data. Saving instructions affects subsequent model calls
+            without changing older classification records.
+          </li>
         </ul>
         <p>
           Logs hold counts and codes only, never subjects, senders, addresses or label names.

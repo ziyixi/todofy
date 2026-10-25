@@ -12,7 +12,7 @@
 // (proto/ts/http-transcoder.ts) and called through the shared client (proto/ts/http-client.ts). Bodies, query
 // parameters and responses are JSON in the wire JSON profile (proto/README.md): proto field names (snake_case),
 // enum values in lower case without their prefix (`Mode.MODE_LIVE` is "live"), timestamps in RFC 3339 UTC.
-// Inputs are read strictly, outputs leniently. Request bodies are at most 16 KiB. Errors: errors.proto (this app's
+// Inputs are read strictly, outputs leniently. Request bodies are at most 32 KiB. Errors: errors.proto (this app's
 // reasons) and common/errors/v1/errors.proto (the reasons every API shares).
 //
 // Authentication, in front of the transcoder (packages/edge-auth): the whole host is behind Cloudflare Access,
@@ -51,6 +51,7 @@ import "google/protobuf/timestamp.proto";
 import "mailsort/ui/v2/consolidation.proto";
 import "mailsort/ui/v2/flow.proto";
 import "mailsort/ui/v2/label.proto";
+import "mailsort/ui/v2/prompt.proto";
 import "mailsort/ui/v2/replay.proto";
 import "mailsort/ui/v2/review.proto";
 import "mailsort/ui/v2/status.proto";
@@ -372,6 +373,25 @@ service MailsortUiService {
       body: "settings"
     };
     option (google.api.method_signature) = "settings,update_mask";
+  }
+
+  // The effective classification prompt; reads do not persist bundled defaults.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetClassificationPrompt(GetClassificationPromptRequest) returns (ClassificationPrompt) {
+    option (google.api.http) = {get: "/api/v2/{name=classificationPrompt}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Saves the named prompt fields for subsequent batches; does not reclassify historical mail.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateClassificationPrompt(UpdateClassificationPromptRequest) returns (ClassificationPrompt) {
+    option (google.api.http) = {
+      patch: "/api/v2/{classification_prompt.name=classificationPrompt}"
+      body: "classification_prompt"
+    };
+    option (google.api.method_signature) = "classification_prompt,update_mask";
   }
 }
 
@@ -830,6 +850,28 @@ message UpdateSettingsRequest {
   // INVALID_ARGUMENT, so a client that leaves a field out never switches the mode by accident.
   google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
   // The idempotency key (AIP-155), a query parameter; see MailsortUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of GetClassificationPrompt.
+message GetClassificationPromptRequest {
+  // Always `classificationPrompt`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/ClassificationPrompt"
+  ];
+}
+// Input of UpdateClassificationPrompt.
+message UpdateClassificationPromptRequest {
+  // New values for the fields named by update_mask. The etag checks the current revision when supplied.
+  ClassificationPrompt classification_prompt = 1 [(google.api.field_behavior) = REQUIRED];
+  // Explicit base_text and/or personal_rules paths; include etag to send the concurrency token.
+  // Empty, absent and wildcard masks are refused.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Idempotency key (AIP-155), a query parameter.
   string request_id = 3 [
     (google.api.field_info).format = UUID4,
     (google.api.field_behavior) = OPTIONAL

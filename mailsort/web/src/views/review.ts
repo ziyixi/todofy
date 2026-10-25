@@ -28,7 +28,7 @@ export async function renderReview(ctx: ViewContext): Promise<void> {
       allLabels(),
     ])
     fill(body,
-      el('p', { class: 'hint lead' }, '旧模型的待审记录仅供查看。当前 Claude 分级使用固定提示词，不再从确认或纠正中学习。'),
+      el('p', { class: 'hint lead' }, '旧模型的待审记录仅供查看。当前 Claude 分级使用设置中的提示词，不再从确认或纠正中学习。'),
       items.length === 0 ? emptyState('没有历史待审记录') : el('ul', { class: 'rows', 'aria-label': '历史待审邮件' }, ...items.map((item) => reviewRow(item, labels))),
     )
   })

@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [{
     name: 'mailsort-prompt',
     transform(code, id) {
-      return id.endsWith('/priority-classification.txt') ? { code: `export default ${JSON.stringify(code)};`, map: null } : undefined;
+      return /\/prompts\/[^/]+\.txt$/.test(id) ? { code: `export default ${JSON.stringify(code)};`, map: null } : undefined;
     },
   }],
   test: {

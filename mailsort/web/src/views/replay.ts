@@ -28,7 +28,7 @@ function results(replay: ReplayEvaluation, labels: readonly Label[]): HTMLElemen
 }
 
 export async function replayCard(labels: readonly Label[]): Promise<HTMLElement> {
-  const box = card('历史效果检查', '', el('p', { class: 'hint' }, '这是旧模型的检查结果，不代表当前 Claude 的效果。当前分级只用固定提示词，不再学习例子或运行旧回放。'))
+  const box = card('历史效果检查', '', el('p', { class: 'hint' }, '这是旧模型的检查结果，不代表当前 Claude 的效果。当前分级使用设置中的提示词，不再学习例子或运行旧回放。'))
   const content = el('div', { class: 'replay-results' })
   const feedback = el('p', { class: 'hint warn', role: 'status', hidden: true })
   const refresh = button('刷新历史记录', () => void load())
