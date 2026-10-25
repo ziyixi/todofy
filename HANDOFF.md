@@ -12,6 +12,11 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+Active follow-up `codex/mailsort-prompt-examples` adds the owner's requested few-shot input/JSON-response examples
+to the existing base prompt. Use synthetic messages only, cover all four queues and retain editable personal-rule
+precedence. Keep the stable prefix/cache layout and all runtime limits unchanged. Next: prompt/size checks,
+live editor save/reload, branch CI and same-SHA release of the matching bundled default. No real mail rerun.
+
 Editable Mailsort prompts and cache accounting are released at `70a60d4959289ade5691f5b9a12bf0818d756009`,
 after [branch CI 40152547981](https://github.com/ziyixi/todofy/actions/runs/40152547981) and the
 [same-SHA main release 40153166848](https://github.com/ziyixi/todofy/actions/runs/40153166848).

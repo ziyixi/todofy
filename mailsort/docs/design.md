@@ -56,6 +56,11 @@ same-day action P1; Daily Briefing P1; actual shopping receipts/order confirmati
 Brand promotions do not become purchase receipts. These rules are editable text, with no sender-specific code
 branches, scam score, probability threshold or forced category balance. A provider error cannot become a priority.
 
+The base has three input/JSON-response pairs covering seven synthetic messages and all four queues. They show
+timely reading, transactional versus promotional mail, and periodic reports versus ordinary technical notices.
+These demonstrate the default personal rules; changed or removed preferences follow the current rules/general
+guide, so an old example does not silently restore a deleted preference. Examples stay in the stable prefix.
+
 `ClassificationPrompt` is one owner API singleton. Get returns the bundled defaults without creating a row;
 Update saves both texts in `meta.classification_prompt` using the existing field-mask, etag and request-ID receipts.
 The base must be nonblank; rules can be empty, and both together are bounded to 12 KiB UTF-8. A model call reads
