@@ -23,7 +23,7 @@ Settings/status/UI, the typed stateless gateway and concrete third-workload depl
 Mailsort remains the scheduler and Gmail writer; both providers share its saved prompt and fixed P1-P4 validation.
 Claude cost/cache history remains separate. Gateway-only releases preserve Newsletter state; reconciliation retains
 accepted identities for the original pair. Local checks passed: Mailsort 226 unit/113 workerd, UI 104,
-deployment guard 26 and Wrangler smoke; gateway 10 synthetic tests; platform/CI/infra/Home/Fleet integration
+deployment guard 26 and Wrangler smoke; gateway 11 synthetic tests; platform/CI/infra/Home/Fleet integration
 checks are green. The Worker bundle is 145.9 KiB gzip within its existing 148 KiB budget. The bounded
 verified-release lookup retains prior success when GitHub appends inactive, fixing pre-existing reconciliation
 false failures. Full branch CI, provider provisioning, bootstrap, real inference and activation remain pending.

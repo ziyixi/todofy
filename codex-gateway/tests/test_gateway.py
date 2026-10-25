@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import codex_cli_bin
 import httpx
+from openai_codex.generated.v2_all import ThreadItem
 from ziyixi_proto.codex.inference.v1.inference_pb import (
     RunInferenceRequest,
     RunInferenceResponse,
@@ -39,7 +40,14 @@ class FakeTurn:
             status=SimpleNamespace(value="completed"),
             final_response=text,
             items=[
-                SimpleNamespace(type="commandExecution" if tool else "agentMessage")
+                ThreadItem.model_validate(
+                    {
+                        "type": "userMessage",
+                        "id": "synthetic-input",
+                        "content": [{"type": "text", "text": BODY["input_json"]}],
+                    }
+                ),
+                SimpleNamespace(type="commandExecution" if tool else "agentMessage"),
             ],
             usage=SimpleNamespace(
                 total=SimpleNamespace(input_tokens=101, output_tokens=23)
@@ -283,6 +291,13 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(override, overrides)
             self.assertIn(override, sdk.config.launch_args_override)
         self.assertIn("skills.config=[", " ".join(overrides))
+
+    async def test_sdk_user_message_is_input_and_preserves_the_valid_answer(self):
+        sdk = FakeSdk()
+        self.assertEqual(sdk.turn.result.items[0].root.type, "userMessage")
+        answer = await infer(RunInferenceRequest(**BODY), self.home, sdk=sdk)
+        self.assertEqual(answer.error_code, "")
+        self.assertEqual(answer.output_json, '{"items": []}')
 
     async def test_model_failures_are_safe_typed_results_without_content_in_logs(self):
         output = io.StringIO()

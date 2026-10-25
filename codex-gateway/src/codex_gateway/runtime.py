@@ -212,7 +212,7 @@ async def infer(
                     or len(output.encode("utf-8")) > MAX_OUTPUT_BYTES
                     or any(
                         getattr(getattr(item, "root", item), "type", "")
-                        not in {"agentMessage", "reasoning"}
+                        not in {"userMessage", "agentMessage", "reasoning"}
                         for item in result.items
                     )
                 ):
