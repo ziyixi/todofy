@@ -43,8 +43,17 @@ The setup and dependency update commands are in [dependencies](docs/dependencies
 Local checks passed 27 Node typechecks, 21 lint runs, 3,522 Vitest cases, 204 Mail Hero cases and 12 builds.
 Proto passed 459 TypeScript and 110 Python cases. Python 3.14 passed Newsletter's 2,322 tests and mypy,
 Gateway's 21, Platform's 131 (+143 subtests), Todofy's 1,255 and two build-context cases. All three production
-dependency selections install on 3.14; Linux amd64 wheel-only resolution passed. Full Linux image builds,
-the branch CI and production readback are pending. The shared Google Drive checkout remains untouched.
+dependency selections install on 3.14; Linux amd64 wheel-only resolution passed.
+
+Released `725d1d5dd8666127594798d3a5b5e416aab0bbbf` after the full
+[branch CI 40224123983](https://github.com/ziyixi/todofy/actions/runs/40224123983) and
+[same-SHA main release 40225053622](https://github.com/ziyixi/todofy/actions/runs/40225053622), both successful.
+All three Linux images built and their independent releases completed. The four VPS Deployments are ready,
+their four running Pods have zero restarts, and the host Codex CLI is 0.163.0. A real 6.1 / medium synthetic
+turn on the Python 3.14 gateway at 19:19 UTC returned all four IDs in 5.3 seconds. Home build `725d1d5`
+visibly shows Newsletter/Codex normal; its refreshed 19:21 UTC Fleet/Mailsort/Codex observations are all ok.
+No real Newsletter generation/send or old-mail reclassification was triggered. The shared Google Drive
+checkout remains untouched; temporary host CLI staging was removed.
 
 The first full workspace CI exposed a missing direct `workerd` test dependency under pnpm's isolated layout
 and Python 3.14 lint updates. Both are fixed; the real local Pyodide server now starts/stops and caches its bundle.
@@ -199,12 +208,14 @@ Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's sha
 
 ## Latest verified release
 
-Tasks and Personal MCP run `cb6e8c81`, with GTD execution review and daily-only Focus. The approved Goals view,
+The shared-dependency rollout is `725d1d5d`; all declared consumers passed their checks and released through
+[main 40225053622](https://github.com/ziyixi/todofy/actions/runs/40225053622). Feature records below identify
+the corresponding behavior changes. Tasks and Personal MCP retain GTD execution review and daily-only Focus from `cb6e8c81`. The approved Goals view,
 optional native associations and imported definitions remain intact. Source/version, full-suite and live evidence
 are in [GTD verification](docs/tasks-gtd-verification.md).
 
-Mailsort now runs `c121b02d`; Home remains on `70a60d49`. Both are verified app releases. The classifier uses
-Opus 5.5 medium and an independent $20 monthly workspace limit; live mode is confirmed. The earlier Clef release
+Mailsort and Home run `725d1d5d`. Mailsort selects Codex 6.1 Sol / medium; the Claude choice retains Opus 5.5
+medium, its independent $20 monthly workspace limit and usage history. Live mode remains selected. The earlier Clef release
 and cancelled original-100 batch are historical records in [priority verification](docs/mailsort-priority-verification.md).
 No five-member recheck remains pending. Provider identities and completed manual progress are in
 [Claude rollout](docs/mailsort-claude-verification.md).

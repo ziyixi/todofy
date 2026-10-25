@@ -44,3 +44,13 @@ Keep package dependency choices in their member manifests instead of installing 
 Shared-lock and toolchain changes reach the corresponding applications in CI and release source selection.
 Each production image is still built, tested and published independently. The running service version is
 verified from its normal release receipt and actual workload state, not from a lockfile alone.
+
+## Verified rollout
+
+Commit `725d1d5d` passed [full branch CI](https://github.com/ziyixi/todofy/actions/runs/40224123983) and
+[the same-SHA production release](https://github.com/ziyixi/todofy/actions/runs/40225053622) on October 25, 2026.
+The Linux Python 3.14 images for Platform, Newsletter and Codex Gateway built and deployed successfully.
+All four VPS Deployments are ready; host and container Codex use SDK/CLI 0.163.0. The gateway completed
+a real 6.1 / medium synthetic request after the runtime upgrade. No system Python replacement or new sudo
+setup was needed. The clean-checkout installation commands above were also tested without existing dependencies
+or generated code.

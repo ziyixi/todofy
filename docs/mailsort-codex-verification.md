@@ -28,6 +28,32 @@ The gateway's authenticated readback now selects 6.1 / medium, and a second real
 All four VPS Deployments have one ready replica; Newsletter's actual Deployment explicitly selects 6.1.
 No real Newsletter generation, send or old-mail reclassification was triggered for acceptance.
 
+## Shared dependencies and Python 3.14
+
+The complete workspace rollout `725d1d5dd8666127594798d3a5b5e416aab0bbbf` passed
+[branch CI 40224123983](https://github.com/ziyixi/todofy/actions/runs/40224123983) and
+[same-SHA main release 40225053622](https://github.com/ziyixi/todofy/actions/runs/40225053622).
+Node members use the root pnpm catalog/lock; Python members use root uv constraints/lock. Exact dependency
+versions no longer live in separate application locks. The three VPS images use Python 3.14.7 and resolve
+the same SDK/CLI 0.163.0; the active host CLI reports that version too.
+
+At `2026-10-25T19:19:24.617Z`, the upgraded gateway completed another real 6.1 / medium synthetic turn:
+all four IDs exactly once, P1 / P2 / P4 / P4, 5.3 seconds, 7,357 input / 151 output reported tokens.
+Authenticated runtime readback selects 6.1, and all four VPS Deployments are ready with zero Pod restarts.
+The actual Newsletter Deployment explicitly selects 6.1. No real Newsletter generation/send or old-mail
+reclassification was started.
+
+| Workload | Actual image digest |
+| --- | --- |
+| Codex Gateway | `sha256:0b1f73953096206dadf78b1be9daef2eefcdce0fe9503a7e975247742a430edd` |
+| Newsletter and config sync | `sha256:47657e55347e606386ba15500c4a036c86ef837315df83bf91f1f555de3a8476` |
+| Platform | `sha256:4b499b02da2ab3acbca730354da304383b1e30737d15fd5aa1a59cb47713ef06` |
+
+Home build `725d1d5` visibly reports Newsletter and Codex normal. Its manual status refresh at
+`2026-10-25T19:21:30.724Z` reports Fleet, Mailsort and Codex ok with zero consecutive failures and no signals.
+Existing attention dismissals were not changed. Temporary host CLI staging was removed; the operator's
+existing inference credential remains in its owner-only local configuration.
+
 ## Successful real inference
 
 At `2026-10-25T13:11:21.678Z`, the production TypeScript `classifyWithCodex` client completed a real request
