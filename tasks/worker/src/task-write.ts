@@ -50,6 +50,15 @@ const subtree = `WITH RECURSIVE descendants(id) AS (SELECT id FROM tasks WHERE i
 /** The timer's session when it times the completed task or one of its descendants. */
 const relatedTimer = `focus_timer WHERE id='timer' AND state<>'idle' AND task_id IN (SELECT id FROM descendants)`;
 
+/** Keep the first membership even after the task leaves this week or commits to a later one. */
+function recordCommitment(db: D1Database, row: TaskRow, now: number): D1PreparedStatement[] {
+  if (row.stage !== 'committed' || !row.committed_week) return [];
+  return [
+    db.prepare('INSERT OR IGNORE INTO gtd_week_commitments(week_start,task_id,created_at) VALUES(?,?,?)')
+      .bind(row.committed_week, row.id, now),
+  ];
+}
+
 /**
  * A completion settles Focus in its own batch, with no extra read: a related session is saved as a record (when it
  * reaches a minute) and stops, and the subtree's steps queued on that session's day, else on `day`, are done.
@@ -120,7 +129,7 @@ export async function createTask(db: D1Database, input: CreateTaskRequest, now: 
       : '?',
   );
   const write = db.prepare(`INSERT INTO tasks(${columns.join(',')}) VALUES(${placeholders.join(',')})`).bind(...values);
-  const writes = [write];
+  const writes = [write, ...recordCommitment(db, row, now)];
   if (append) {
     // Append and freeze its actual position in the same transaction, including concurrent creates.
     writes.push(
@@ -194,6 +203,7 @@ export async function updateTask(db: D1Database, input: UpdateTaskRequest, now: 
         `UPDATE tasks SET ${storedColumns.map((c) => `${c}=?`).join(',')},revision=revision+1,updated_at=? WHERE id=?`,
       )
       .bind(...storedColumns.map((c) => row[c]), now, id),
+    ...recordCommitment(db, row, now),
   ];
   if (row.project_id !== old.project_id) {
     writes.push(...(await moveTaskDescendants(db, id, row.project_id, now)));

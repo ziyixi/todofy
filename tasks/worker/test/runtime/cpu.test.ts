@@ -724,3 +724,85 @@ test(
   },
   CPU_TEST_TIMEOUT_MS,
 );
+
+test(
+  'GTD reports keep a full month and bounded long-title contexts within Worker CPU',
+  async () => {
+    const owner = await syntheticOwner();
+    const result = await measureInIsolates(
+      COLD_ISOLATES,
+      async () => {
+        const harness = await startHarness({
+          inspectorPort: 0,
+          bypass: false,
+          jwks: owner.jwks,
+          ownerToken: owner.token,
+        });
+        const ids = Array.from({ length: 100 }, (_, index) => index);
+        const rows = Array.from({ length: 31 * 30 }, (_, index) => ({
+          id: index,
+          task: index % 100,
+          day: `2030-10-${String(1 + Math.floor(index / 30)).padStart(2, '0')}`,
+        }));
+        await harness.db
+          .prepare(
+            "INSERT INTO tasks(id,title,duration_minutes,area,created_at,updated_at) VALUES('report-parent',?,120,'work',1,1)",
+          )
+          .bind('合成'.repeat(250))
+          .run();
+        await harness.db
+          .prepare(
+            `INSERT INTO tasks(id,title,parent_id,kind,area,duration_minutes,created_at,updated_at)
+        SELECT 'report-task-'||value,?,'report-parent','step','unassigned',30,1,1 FROM json_each(?)`,
+          )
+          .bind('合成'.repeat(250), JSON.stringify(ids))
+          .run();
+        await harness.db
+          .prepare(
+            `INSERT INTO focus_entries(id,task_id,day,seconds,source,area,created_at,updated_at)
+        SELECT 'report-entry-'||(value->>'id'),'report-task-'||(value->>'task'),value->>'day',1800,'manual','work',1,1 FROM json_each(?)`,
+          )
+          .bind(JSON.stringify(rows))
+          .run();
+        await harness.db
+          .prepare(
+            `INSERT INTO completions(id,task_id,title,completed_at)
+        SELECT 'report-completion-'||value,'report-task-'||value,'Synthetic completion',1918324800000 FROM json_each(?)`,
+          )
+          .bind(JSON.stringify(ids))
+          .run();
+        const meter = await connectCpuMeter(harness.mf, 'tasks');
+        return {
+          harness,
+          meter,
+          async dispose() {
+            meter.close();
+            await harness.dispose();
+          },
+        };
+      },
+      async ({ harness, meter }) => {
+        const read = async (area = '') => {
+          const response = await harness.fetch(`/api/tasks/v1/gtdReport?start_day=2030-10-01&end_day=2030-10-31&area=${area}`);
+          const text = await response.text();
+          expect(response.status, text.slice(0, 200)).toBe(200);
+          const report = JSON.parse(text) as { tasks: unknown[]; recorded_seconds: number };
+          expect(report.tasks).toHaveLength(100);
+          expect(report.recorded_seconds).toBe(31 * 30 * 1800);
+        };
+        return [
+          await meter.measure('first authenticated GTD month', read, 1),
+          await meter.measure('GTD month with 100 long task contexts', read, 7),
+          await meter.measure('GTD month filtered by inherited work area', () => read('work'), 7),
+        ];
+      },
+    );
+    for (const measurement of result.reference.values()) {
+      console.log(JSON.stringify({ event: 'tasks_gtd_report_cpu', ...measurement }));
+      expect(measurement.first, measurement.label).toBeLessThan(10);
+      if (measurement.label !== 'first authenticated GTD month')
+        expect(measurement.median, measurement.label).toBeLessThan(8);
+    }
+  },
+  CPU_TEST_TIMEOUT_MS,
+);

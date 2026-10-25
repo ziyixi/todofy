@@ -34,7 +34,7 @@ optionally remember IDs and view choices, never task text. `onSession` reports w
 (a Document Picture-in-Picture window) and keeps it working. `idlePause`/`onIdlePause` are the host's per-device
 Pause when away setting: where the browser has the Idle Detection API, a running count-up pauses in Tasks at the
 moment the owner left, and on return Focus asks whether to count that time (`src/idle-pause.ts`,
-`src/useIdlePause.ts`).
+`src/useIdlePause.ts`). `focusDay` opens a date selected in Tasks GTD; daily navigation then stays local.
 
 The package keeps the write ordering, confirmed timer state and pending-card rendering. It does not
 synchronize task stores or own server state. CSS is compiled into Tasks and scoped to planning classes and
@@ -61,12 +61,12 @@ area on its record, reloads hydrate the same session, and pause/resume keeps its
 task view at account midnight. Stop and a pomodoro's Finish save the session as one record of whole minutes;
 Finish caps it at the target and count-up stops at four hours, even if the browser was closed. Each queue
 change is one `MoveFocusStep`, and every write keeps its request ID until confirmed, so a lost answer replays.
-`readFocus` reads any range in reads of at most seven days, and records are added, changed and deleted with
-`addEntry`, `updateEntry` and `deleteEntry`. Focus has Day, Week and Month views with day navigation: each
-card's one time number is its logged time, which opens the day's records (`FocusEntries`); Week and Month
-show logged time by area, steps done and where the time went (`focus-stats.ts`). Only today's steps run,
-complete and reorder by their whole row; other days are read-only. A header checkbox shows the day's
-completed steps. Plan and Focus both count from Tasks' today (`PlanState.today`, `FocusState.date`). A task's estimate is its Tasks
+`readFocus` reads the selected day, and records are added, changed and deleted with `addEntry`,
+`updateEntry` and `deleteEntry`. Focus shows daily execution with previous/next day and Today controls.
+Each card's logged time opens the day's records (`FocusEntries`); past records remain editable. Only today's
+steps run, complete and reorder by their whole row. A header checkbox shows the day's completed steps.
+The View statistics link opens [Tasks GTD](../../tasks/docs/gtd.md), which owns the weekly bars, monthly
+calendar and time-by-task report. Selecting a statistics day opens it in Focus for record editing. Plan and Focus both count from Tasks' today (`PlanState.today`, `FocusState.date`). A task's estimate is its Tasks
 duration: the host supplies `updateEstimate`, which writes Tasks and answers the saved duration
 and the task's new etag (`{ estimate, etag }`). A Step opens a panel for its time and direct deletion
 with confirmation (`StepEditor`); tasks open the full planning panel. Deletion uses Tasks' existing

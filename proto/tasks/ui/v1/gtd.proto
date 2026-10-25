@@ -1,9 +1,8 @@
 // (-- api-linter: core::0142::time-field-type=disabled
 //     aip.dev/not-precedent: days and weeks are account-local calendar date text, YYYY-MM-DD, like Task.due_date, and
 //     ages are whole days; the wire JSON profile has no google.protobuf.Duration. --)
-// GTD statistics and the weekly review, which Tasks keeps: one row of counts per account day, written after 06:00
-// local time, and the review task Tasks creates on Sunday from 10:00 local time. Counts, states and times only,
-// never task text. Days and reviews copied from Todofy keep their values.
+// Owner GTD execution reports include task context and recorded time. Legacy daily counts and the Sunday weekly
+// review remain available; their old counts/states and copied Todofy values are preserved.
 syntax = "proto3";
 
 package tasks.ui.v1;
@@ -15,6 +14,123 @@ import "google/protobuf/timestamp.proto";
 option java_multiple_files = true;
 option java_outer_classname = "GtdProto";
 option java_package = "science.ziyixi.tasks.ui.v1";
+
+// Counts and time for an account-local period. Task kinds, Routine and parent metadata use current task properties;
+// completion occurrences retain their original dates. A literal Step also counts as Routine when its direct parent
+// is Routine. Routine is excluded from the main Task/Step counts and rates.
+message GtdReport {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/GtdReport"
+    pattern: "gtdReport"
+    singular: "gtdReport"
+    plural: "gtdReports"
+  };
+
+  // Always gtdReport.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Included account-local date bounds, YYYY-MM-DD.
+  string start_day = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Last included account-local day.
+  string end_day = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The account's current local day.
+  string today = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The account's IANA time zone.
+  string time_zone = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Empty, work or personal, as requested.
+  string area = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Non-Routine Task/Subtask completion occurrences.
+  int32 task_completion_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Non-Routine literal Step completion occurrences.
+  int32 step_completion_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Routine completion occurrences, regardless of kind.
+  int32 routine_completion_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Imported occurrences whose task is unavailable for classification.
+  int32 unclassified_completion_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every overlapping week began after commitment recording started. Older/initial partial periods have no Task rate.
+  bool task_plan_history_complete = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Distinct non-Routine Tasks ever committed to an overlapping week; absent with incomplete commitment history.
+  optional int32 planned_task_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Planned Tasks with at least one occurrence in the requested dates; absent with incomplete commitment history.
+  optional int32 completed_planned_task_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Distinct non-Routine literal Steps ever queued in the dates, including subsequently removed queue rows.
+  int32 planned_step_count = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Planned Steps with at least one completion occurrence in the requested dates.
+  int32 completed_planned_step_count = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Saved time, excluding an unfinished timer session.
+  int32 recorded_seconds = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Saved time on tasks currently marked Routine.
+  int32 routine_recorded_seconds = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every requested day, oldest first.
+  repeated GtdReportDay days = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most 100 current task contexts, ordered by recorded time then completion occurrences.
+  repeated GtdTaskProgress tasks = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // More task contexts exist; all aggregate counts and time still include them.
+  bool tasks_truncated = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Recorded seconds with saved work area.
+  int32 work_seconds = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Recorded seconds with saved personal area.
+  int32 personal_seconds = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Recorded seconds with no saved area.
+  int32 unassigned_seconds = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One day's completion occurrences and saved time, with the same classification as GtdReport.
+message GtdReportDay {
+  // Account-local day, YYYY-MM-DD.
+  string day = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Non-Routine Task/Subtask occurrences.
+  int32 task_completion_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Non-Routine literal Step occurrences.
+  int32 step_completion_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Routine occurrences.
+  int32 routine_completion_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Occurrences without a current task.
+  int32 unclassified_completion_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // All saved time.
+  int32 recorded_seconds = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Saved work time.
+  int32 work_seconds = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Saved personal time.
+  int32 personal_seconds = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Saved time with no area.
+  int32 unassigned_seconds = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Current task context beside its activity in the reporting period. Soft-deleted tasks retain historical activity.
+message GtdTaskProgress {
+  // Task identity.
+  string task_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current title.
+  string title = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current task or step kind.
+  string kind = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Immediate parent identity, or empty.
+  string parent_id = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current immediate parent title, or empty.
+  string parent_title = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current effective area: own area, else its nearest assigned ancestor; unassigned, work or personal.
+  string area = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current Routine flag, or its direct parent's flag for a literal Step.
+  bool routine = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current estimate in minutes, or zero.
+  int32 duration_minutes = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Completion occurrences in the dates.
+  int32 completion_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Saved time in the dates.
+  int32 recorded_seconds = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // In the corresponding weekly Task cohort or daily Step cohort. Routine is never planned for the main rate.
+  bool planned = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current completed state.
+  bool completed = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current non-deleted direct Steps.
+  int32 step_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current completed direct Steps.
+  int32 completed_step_count = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Local day of the most recent completion in the period, or empty.
+  string last_completed_day = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current immediate parent's estimate in minutes, or zero.
+  int32 parent_duration_minutes = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
 
 // One account day's counts, for every project and for the Inbox.
 message GtdDay {

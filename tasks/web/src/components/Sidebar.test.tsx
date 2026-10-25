@@ -9,7 +9,7 @@ import {
 import { TaskCountSchema } from "@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb";
 import { Sidebar } from "./Sidebar";
 import { EMPTY_CATALOG, type Catalog } from "../api";
-import { readRoute } from "../routes";
+import { readRoute, type Route } from "../routes";
 
 const project = create(ProjectSchema, {
   id: "studio",
@@ -43,10 +43,14 @@ const catalog = {
     ),
   ],
 };
-function sidebar(nextCatalog: Catalog = catalog, onAddTask = vi.fn()) {
+function sidebar(
+  nextCatalog: Catalog = catalog,
+  onAddTask = vi.fn(),
+  route: Route = { page: "inbox", id: "" },
+) {
   return render(
     <Sidebar
-      route={{ page: "inbox", id: "" }}
+      route={route}
       catalog={nextCatalog}
       onAddTask={onAddTask}
       onAddProject={vi.fn()}
@@ -65,6 +69,18 @@ afterEach(() => {
   browserStorage.clear();
   vi.unstubAllGlobals();
 });
+
+it.each(["#/gtd/time", "#/gtd/completion", "#/focus/2026-10-19"])(
+  "keeps the main navigation selected for %s",
+  (href) => {
+    const route = readRoute(href);
+    sidebar(catalog, vi.fn(), route);
+    const title = route.page === "gtd" ? "GTD" : "Focus";
+    expect(
+      screen.getByRole("link", { name: title }).getAttribute("aria-current"),
+    ).toBe("page");
+  },
+);
 
 it("shows positive category counts and keeps other navigation free of count badges", () => {
   sidebar();
@@ -105,9 +121,13 @@ it("places Search before Add task and groups the existing task and planning rout
   ).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Tasks" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Planning" })).toBeTruthy();
-  const navigation = screen.getByRole("navigation", { name: "Main navigation" });
+  const navigation = screen.getByRole("navigation", {
+    name: "Main navigation",
+  });
   expect(
-    [...navigation.querySelectorAll("a")].map((link) => link.getAttribute("href")),
+    [...navigation.querySelectorAll("a")].map((link) =>
+      link.getAttribute("href"),
+    ),
   ).toEqual([
     "#/inbox",
     "#/today",
@@ -205,11 +225,15 @@ it("expands asynchronously loaded project branches by default and remembers manu
   expect(
     screen.queryByRole("link", { name: "Synthetic research notes" }),
   ).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Expand Synthetic research" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Expand Synthetic research" }),
+  );
   expect(
     screen.getByRole("link", { name: "Synthetic research notes" }),
   ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Collapse Synthetic work" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Collapse Synthetic work" }),
+  );
   expect(
     screen.getAllByRole("link", { name: "Synthetic research" }),
   ).toHaveLength(1);

@@ -12,6 +12,21 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+### Tasks GTD execution review (`codex/tasks-gtd-review`)
+
+The owner approved Overview, Completion and Time. Work stays in isolated `/private/tmp/todofy-tasks-design`,
+based on remote main `f5dc372d`; Claude's shared tree is untouched. Focus Week/Month statistics move into GTD;
+daily execution, editable records and timers stay in Focus. No Decide again queue or mail-cleanup pressure.
+Metric definitions and historical limits are in [GTD](tasks/docs/gtd.md).
+
+Local checks: Worker 72 unit/152 runtime, planning-ui 321, web 112 and the full 141 Chromium journeys passed.
+The final report/date-default check passed separately; root-proto/source-consumer gates run in branch CI. The lazy GTD chunk is
+about 5.6 KiB gzip; Worker size is 167.1 KiB, with its documented ratchet raised to 175 KiB for this feature.
+CPU limits are unchanged. No paid plan, dependency, model call, service or scheduler was added. Branch CI,
+same-SHA release and live read-only acceptance remain pending. Native Chrome visual QA passed; see
+[tasks/design-qa.md](tasks/design-qa.md#gtd-execution-review).
+
+
 Tasks Goals is released at `fd4a82c109f9d25e903f9f058bd5e286a8b0ddc0`, after
 [full branch CI 40171075047](https://github.com/ziyixi/todofy/actions/runs/40171075047) and the
 [same-SHA main release 40171731163](https://github.com/ziyixi/todofy/actions/runs/40171731163).

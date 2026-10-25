@@ -128,6 +128,16 @@ export const BACKUP_TABLES: readonly BackupTable[] = [
     key: ['day', 'scope'],
   },
   {
+    name: 'gtd_week_commitments',
+    columns: ['week_start', 'task_id', 'created_at'],
+    key: ['week_start', 'task_id'],
+  },
+  {
+    name: 'gtd_reporting',
+    columns: ['id', 'started_at'],
+    key: ['id'],
+  },
+  {
     name: 'weekly_reviews',
     columns: ['week', 'state', 'task_id', 'created_at', 'completed_at'],
     key: ['week'],

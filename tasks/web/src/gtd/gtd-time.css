@@ -1,0 +1,303 @@
+.gtd-time {
+  --gtd-time-work: #537d4b;
+  --gtd-time-personal: #a1b68d;
+  --gtd-time-unassigned: #b9bdb5;
+}
+.gtd-time-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  margin: 0 0 28px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--line);
+}
+.gtd-time-metrics > div {
+  min-width: 0;
+  padding: 0 24px;
+  border-left: 1px solid var(--line);
+}
+.gtd-time-metrics > div:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+.gtd-time-metrics dt {
+  color: var(--muted);
+}
+.gtd-time-metrics dd {
+  margin: 4px 0 0;
+  font-size: 30px;
+  line-height: 1.3;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.gtd-time-metrics .gtd-time-metric-note {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.gtd-time-content {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 24px;
+}
+.gtd-time-chart,
+.gtd-time-tasks {
+  min-width: 0;
+}
+.gtd-time-tasks {
+  padding-left: 24px;
+  border-left: 1px solid var(--line);
+}
+.gtd-time h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.gtd-time-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.gtd-time-shades {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.gtd-time-shades i {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+}
+.gtd-time .plus-focus-month {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 24px;
+}
+.gtd-time .plus-focus-weekday {
+  padding: 0 6px 5px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+.gtd-time .plus-focus-month-day {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  min-width: 0;
+  height: 78px;
+  padding: 8px;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+.gtd-time [data-level="0"] {
+  background: #f0f5e9;
+}
+.gtd-time [data-level="1"] {
+  background: #e0edd1;
+}
+.gtd-time [data-level="2"] {
+  background: #c6dfb1;
+}
+.gtd-time [data-level="3"] {
+  background: #92bc7c;
+}
+.gtd-time .plus-focus-month-day.is-outside,
+.gtd-time .plus-focus-month-day.is-future {
+  background: #f3f4f2;
+  color: var(--muted);
+}
+.gtd-time .plus-focus-month-day.is-today {
+  outline: 1px solid var(--accent-fill);
+  outline-offset: -1px;
+}
+.gtd-time .plus-focus-month-day.is-today > span:first-child {
+  font-weight: 600;
+}
+.gtd-time .plus-focus-month-day:hover,
+.gtd-time .plus-focus-bars > button:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px var(--accent-fill);
+}
+.gtd-time .plus-focus-month-day:is(.is-outside, .is-future):hover {
+  box-shadow: none;
+}
+.gtd-time .plus-focus-bars {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 24px;
+}
+.gtd-time .plus-focus-bars > button {
+  display: grid;
+  grid-template-rows: 180px auto;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+}
+.gtd-time .plus-focus-bar-track {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.gtd-time .plus-focus-bar-value,
+.gtd-time .plus-focus-bar-day {
+  font-size: 12px;
+  line-height: 17px;
+  text-align: center;
+}
+.gtd-time .plus-focus-bar-value {
+  font-variant-numeric: tabular-nums;
+}
+.gtd-time .plus-focus-bar {
+  display: flex;
+  flex-direction: column-reverse;
+  width: min(36px, 100%);
+  height: calc(var(--share) * 150px);
+  border-radius: 3px 3px 0 0;
+  overflow: hidden;
+}
+.gtd-time .plus-focus-bar > span {
+  flex-basis: 0;
+}
+.gtd-time .plus-focus-bar [data-area="work"] {
+  background: var(--gtd-time-work);
+}
+.gtd-time .plus-focus-bar [data-area="personal"] {
+  background: var(--gtd-time-personal);
+}
+.gtd-time .plus-focus-bar [data-area="unassigned"] {
+  background: var(--gtd-time-unassigned);
+}
+.gtd-time .plus-focus-bar-day {
+  color: var(--muted);
+}
+.gtd-time .plus-focus-bar-day > span {
+  display: block;
+}
+.gtd-time .plus-focus-bars > .is-today .plus-focus-bar-day {
+  color: var(--accent);
+  font-weight: 600;
+}
+.gtd-time-task-heading,
+.gtd-time-task-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 70px 100px;
+  align-items: baseline;
+  gap: 10px;
+}
+.gtd-time-task-heading {
+  margin-bottom: 12px;
+}
+.gtd-time-task-heading > span {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+.gtd-time-tasks ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gtd-time-tasks li {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.gtd-time-task-title {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.gtd-time-task-title:hover {
+  text-decoration: underline;
+}
+.gtd-time-task-row > span {
+  font-size: 14px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.gtd-time-estimate {
+  color: var(--muted);
+}
+.gtd-time-task-bar {
+  height: 8px;
+  margin-top: 9px;
+  border-radius: 2px;
+  background: #e7e8e4;
+  overflow: hidden;
+}
+.gtd-time-task-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--gtd-time-work);
+}
+.gtd-time-routine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 24px;
+  margin: 22px 0;
+  font-size: 12px;
+}
+.gtd-time-routine span,
+.gtd-time-note {
+  color: var(--muted);
+  font-size: 13px;
+}
+.gtd-time-records {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-width: 1100px) {
+  .gtd-time-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gtd-time-tasks {
+    padding: 24px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+@media (max-width: 600px) {
+  .gtd-time-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .gtd-time-metrics > div {
+    padding: 0;
+    border: 0;
+  }
+  .gtd-time-metrics dd {
+    font-size: 25px;
+  }
+  .gtd-time .plus-focus-month-day {
+    height: 60px;
+    padding: 5px;
+    font-size: 10px;
+  }
+  .gtd-time-task-heading,
+  .gtd-time-task-row {
+    grid-template-columns: minmax(0, 1fr) 55px 80px;
+    gap: 6px;
+  }
+}

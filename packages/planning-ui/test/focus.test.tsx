@@ -10,7 +10,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createPrototype } from "./fixture";
 import { App } from "../src/App";
 import { FocusView } from "../src/FocusView";
-import { readableDate, weekLabel } from "../src/PlanningCalendar";
+import { readableDate } from "../src/PlanningCalendar";
 
 afterEach(() => {
   cleanup();
@@ -397,13 +397,12 @@ it("shows another day read-only, where a past day's records still change and a f
   );
   // The dates move by a day, and Today comes back.
   fireEvent.click(screen.getByRole("button", { name: "Previous day" }));
-  expect(onNavigate).toHaveBeenLastCalledWith("day", "2026-10-13");
+  expect(onNavigate).toHaveBeenLastCalledWith("2026-10-13");
   fireEvent.click(screen.getByRole("button", { name: "Next day" }));
-  expect(onNavigate).toHaveBeenLastCalledWith("day", "2026-10-15");
+  expect(onNavigate).toHaveBeenLastCalledWith("2026-10-15");
   fireEvent.click(screen.getByRole("button", { name: "Today" }));
-  expect(onNavigate).toHaveBeenLastCalledWith("day", "2026-10-13");
-  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
-  expect(onNavigate).toHaveBeenLastCalledWith("week", "2026-10-14");
+  expect(onNavigate).toHaveBeenLastCalledWith("2026-10-13");
+  expect(screen.queryByRole("tab")).toBeNull();
   rerender(<FocusView {...props} date="2026-10-15" />);
   expect(
     await screen.findByText("No steps planned for this day."),
@@ -456,79 +455,17 @@ it("keeps a day's records of steps that left its queue under Other time, where t
   ).toContain("15m logged");
 });
 
-it("draws Week as a bar a day, each named in full, which opens that day", async () => {
-  const { props, onNavigate } = await views();
-  render(<FocusView {...props} tab="week" date="2026-10-14" />);
-  const monday = await screen.findByRole("button", {
-    name: `${readableDate("2026-10-12", "en")}: 20m logged, work 20m, 0 of 1 steps done`,
-  });
-  expect(
-    screen.getByRole("button", {
-      name: `${readableDate("2026-10-13", "en")}: 0m logged, 0 of 3 steps done`,
-    }).className,
-  ).toBe("is-today");
-  expect(document.querySelectorAll(".plus-focus-bars > button")).toHaveLength(
-    7,
-  );
-  expect(
-    [...document.querySelectorAll(".plus-focus-stats dd")].map(
-      (value) => value.textContent,
-    ),
-  ).toEqual(["20m", "20m", "0m", "0"]);
-  // Where the time went: the step's parent, in Work's colour.
-  const group = screen
-    .getByRole("heading", { name: "Where the time went" })
-    .nextElementSibling!.querySelector("li")!;
-  expect(group.querySelector(".planning-full-title-text")!.textContent).toBe(
-    "Ship the small website refresh",
-  );
-  expect(group.querySelector(".plus-focus-group-time")!.textContent).toBe(
-    "20m",
-  );
-  expect(group.getAttribute("style")).toContain("var(--plus-area-work)");
-  fireEvent.click(monday);
-  expect(onNavigate).toHaveBeenLastCalledWith("day", "2026-10-12");
-  // The arrows move by a week.
-  fireEvent.click(screen.getByRole("button", { name: "Next week" }));
-  expect(onNavigate).toHaveBeenLastCalledWith("week", "2026-10-21");
-});
-
-it("draws Month as a shaded calendar of its own days, each opening in Day", async () => {
-  const { props, onNavigate } = await views();
-  render(<FocusView {...props} tab="month" date="2026-10-14" />);
-  const monday = await screen.findByRole("button", {
-    name: `${readableDate("2026-10-12", "en")}: 20m logged, work 20m, 0 of 1 steps done`,
-  });
-  expect(monday.getAttribute("data-level")).toBe("1");
-  expect(monday.textContent).toBe("1220m");
-  // October 2026 starts on a Thursday and ends on a Saturday: five weeks, the neighbours faded
-  // and not buttons.
-  expect(document.querySelectorAll(".plus-focus-month-day")).toHaveLength(35);
-  const outside = [
-    ...document.querySelectorAll(".plus-focus-month-day.is-outside"),
-  ];
-  expect(outside.map((cell) => cell.textContent)).toEqual([
-    "28",
-    "29",
-    "30",
-    "1",
-  ]);
-  expect(outside.every((cell) => cell.tagName === "SPAN")).toBe(true);
-  fireEvent.click(monday);
-  expect(onNavigate).toHaveBeenLastCalledWith("day", "2026-10-12");
-  fireEvent.click(screen.getByRole("button", { name: "Previous month" }));
-  expect(onNavigate).toHaveBeenLastCalledWith("month", "2026-09-01");
-});
-
-it("keeps Focus's view and date in the page header, reads them once, again after a write, and offers a retry", async () => {
+it("keeps Focus daily, opens statistics separately, rereads a past day after writes, and offers a retry", async () => {
   const actions = createPrototype();
   const readFocus = vi.spyOn(actions, "readFocus");
+  const onOpenGtd = vi.fn();
   render(
     <App
       actions={actions}
       language="en"
       onOpenTask={vi.fn()}
       onSettings={vi.fn()}
+      onOpenGtd={onOpenGtd}
       view="focus"
     />,
   );
@@ -570,27 +507,53 @@ it("keeps Focus's view and date in the page header, reads them once, again after
     (screen.getByRole("button", { name: "Today" }) as HTMLButtonElement)
       .disabled,
   ).toBe(false);
-  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
-  expect(subtitle()).toBe(
-    `${weekLabel("2026-10-12", "en")} · America/Los_Angeles`,
-  );
-  // The Completed checkbox belongs to Day.
-  expect(screen.queryByRole("checkbox", { name: "Completed" })).toBeNull();
-  await screen.findAllByRole("button", { name: /: \d+m logged/u });
-  const weekReads = () =>
+  expect(screen.getByRole("checkbox", { name: "Completed" })).toBeTruthy();
+  expect(screen.queryByRole("tab")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "View statistics" }));
+  expect(onOpenGtd).toHaveBeenCalledOnce();
+  const dayReads = () =>
     readFocus.mock.calls.filter(
-      ([start, end]) => start === "2026-10-12" && end === "2026-10-18",
+      ([start, end]) => start === "2026-10-12" && end === "2026-10-12",
     ).length;
-  expect(weekReads()).toBe(1);
-  // Stopping the session from the timer bar is a write: the week is read again.
+  expect(dayReads()).toBe(2);
+  // Stopping today's timer from its bar also refreshes the historical day on screen.
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop session" }));
   });
-  await vi.waitFor(() => expect(weekReads()).toBe(2));
-  fireEvent.click(screen.getByRole("tab", { name: "Month" }));
-  expect(subtitle()).toBe("October 2026 · America/Los_Angeles");
-  await screen.findByRole("button", {
-    name: `${readableDate("2026-10-31", "en")}: 0m logged`,
+  await vi.waitFor(() => expect(dayReads()).toBe(3));
+  expect(readFocus.mock.calls.every(([start, end]) => start === end)).toBe(true);
+});
+
+it("opens the day selected from statistics and keeps daily navigation local", async () => {
+  const actions = createPrototype();
+  const readFocus = vi.spyOn(actions, "readFocus");
+  const props = {
+    actions,
+    language: "en" as const,
+    onOpenTask: vi.fn(),
+    onSettings: vi.fn(),
+    view: "focus" as const,
+    focusDay: "2026-10-12",
+  };
+  const { rerender } = render(<App {...props} />);
+  await screen.findByRole("list", {
+    name: `Steps: ${readableDate("2026-10-12", "en")}`,
   });
-  expect(readFocus).toHaveBeenLastCalledWith("2026-10-01", "2026-10-31");
+  expect(readFocus).toHaveBeenLastCalledWith("2026-10-12", "2026-10-12");
+  fireEvent.click(screen.getByRole("button", { name: "Next day" }));
+  await screen.findByRole("list", { name: "Today's steps" });
+  expect(document.querySelector(".plus-subtitle")!.textContent).toContain(
+    readableDate("2026-10-13", "en"),
+  );
+  // A fresh GTD selection works while the page remains mounted for its mini timer.
+  rerender(<App {...props} focusDay="2026-10-14" />);
+  await screen.findByRole("list", {
+    name: `Steps: ${readableDate("2026-10-14", "en")}`,
+  });
+  expect(readFocus).toHaveBeenLastCalledWith("2026-10-14", "2026-10-14");
+  rerender(<App {...props} background focusDay="2026-10-14" />);
+  rerender(<App {...props} focusDay="2026-10-14" />);
+  await screen.findByRole("list", {
+    name: `Steps: ${readableDate("2026-10-14", "en")}`,
+  });
 });

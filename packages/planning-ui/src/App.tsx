@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { displayedTitle, elapsed } from "./domain";
 import { words } from "./i18n";
-import { weekLabel } from "./PlanningCalendar";
+import { readableDate, weekLabel } from "./PlanningCalendar";
 import {
   applyConfirmed,
   pendingTask,
@@ -32,7 +32,7 @@ import {
 } from "./plan-updates";
 import { Elapsed } from "./StatusMarks";
 import { PlanView } from "./PlanView";
-import { FocusView, focusLabel, type FocusTab } from "./FocusView";
+import { FocusView } from "./FocusView";
 import { StepEditor } from "./StepEditor";
 import { TaskEditor } from "./TaskEditor";
 import { WeeklyGoals } from "./WeeklyGoals";
@@ -77,8 +77,10 @@ export interface PlanningAppProps {
   onViewChange?: (view: View) => void;
   /** The weekly review's mail line opens the host's Mail page. */
   onOpenMail?: () => void;
-  /** The weekly review's GTD link opens the host's GTD page. */
+  /** Focus and the weekly review open the host's GTD page. */
   onOpenGtd?: () => void;
+  /** A selected statistics day opens Focus there; subsequent day navigation stays local. */
+  focusDay?: string;
   /** Data from an earlier visit, shown at once while it is read again in the background. */
   snapshot?: PlusSnapshot;
   /** The last confirmed data, or undefined once a remembered board is dropped. */
@@ -118,6 +120,7 @@ export function App({
   onViewChange,
   onOpenMail,
   onOpenGtd,
+  focusDay,
   snapshot,
   onSnapshot,
   review,
@@ -192,21 +195,22 @@ export function App({
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
   // Focus's quiet line opens Plan at Start now.
   const [showStart, setShowStart] = useState(false);
-  // Focus opens on today's Day, with completed steps hidden: Focus is for doing, so neither the
-  // view, its date nor the Completed checkbox is remembered. The header reads them.
-  const [focusTab, setFocusTab] = useState<FocusTab>("day");
-  // "" follows Tasks' today, past midnight too.
-  const [focusDate, setFocusDate] = useState("");
+  // Focus opens today unless statistics chose a day. An empty date follows Tasks' today at midnight.
+  const [focusDate, setFocusDate] = useState(focusDay ?? "");
+  const [requestedFocusDay, setRequestedFocusDay] = useState(focusDay);
   const [showCompleted, setShowCompleted] = useState(false);
   // Shown again after another page, Plan and Focus open as on a first visit; their dialog closed with them.
   const shownView = background ? undefined : view;
   const [visited, setVisited] = useState(shownView);
   if (visited !== shownView) {
     setVisited(shownView);
-    setFocusTab("day");
-    setFocusDate("");
+    setFocusDate(shownView === "focus" ? (focusDay ?? "") : "");
     setShowCompleted(false);
     if (!shownView) setSelectedId("");
+  }
+  if (requestedFocusDay !== focusDay) {
+    setRequestedFocusDay(focusDay);
+    if (shownView === "focus") setFocusDate(focusDay ?? "");
   }
   // Confirmed writes so far; Focus reads the other days it shows again after each.
   const [written, setWritten] = useState(0);
@@ -843,17 +847,13 @@ export function App({
                 {data
                   ? view === "plan"
                     ? weekLabel(data.days[0]?.date ?? data.plan.week, language)
-                    : focusLabel(
-                        focusTab,
-                        focusDate || data.focus.date,
-                        language,
-                      )
+                    : readableDate(focusDate || data.focus.date, language)
                   : ""}
                 {data && <span> · {data.plan.timezone}</span>}
               </div>
             </div>
             <div className="plus-header-actions">
-              {view === "focus" && focusTab === "day" && (
+              {view === "focus" && (
                 <label className="plus-completed-toggle">
                   <input
                     type="checkbox"
@@ -940,12 +940,11 @@ export function App({
                   busy={busy}
                   pending={pendingCards}
                   completing={completing}
-                  tab={focusTab}
                   date={focusDate || data.focus.date}
-                  onNavigate={(tab, date) => {
-                    setFocusTab(tab);
+                  onNavigate={(date) => {
                     setFocusDate(date === data.focus.date ? "" : date);
                   }}
+                  onOpenGtd={onOpenGtd}
                   actions={planActions}
                   run={run}
                   written={written}

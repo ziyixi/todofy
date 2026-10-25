@@ -124,6 +124,7 @@ test('a plan and its pages hold every row of every table', async () => {
       "INSERT INTO weekly_bets(week_start,area,text,created_at,updated_at) VALUES('2030-10-21','work','Synthetic goal',3,3)",
     ),
     // A GTD day, a review, a route and a TaskInbox day; the migration seeds the mail categories.
+    harness.db.prepare("INSERT INTO gtd_week_commitments(week_start,task_id,created_at) VALUES('2030-10-21',?,4)").bind(parent.id),
     harness.db.prepare(
       "INSERT INTO gtd_days(day,scope,open,age_0_7,age_8_14,age_15_30,age_31_plus,oldest_days,overdue,undated,computed_at) VALUES('2030-10-21','all',2,2,0,0,0,1,0,2,4)",
     ),

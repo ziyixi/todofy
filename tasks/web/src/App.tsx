@@ -419,7 +419,15 @@ export function App() {
                   </p>
                 }
               >
-                <GtdPage onOpenTask={(id) => void openTask(id)} />
+                <GtdPage
+                  selectedTab={route.id}
+                  timeZone={catalog.timeZone}
+                  refreshRevision={actions.mutationRevision}
+                  onOpenTask={(id) => void openTask(id)}
+                  onOpenDay={(day) => {
+                    window.location.hash = `/focus/${day}`;
+                  }}
+                />
               </Suspense>
             </ErrorBoundary>
           ) : route.page === "goals" ? (
@@ -483,6 +491,9 @@ export function App() {
               <PlanningPage
                 onCompleteTask={actions.finishTask}
                 page={planningPage ?? lastPlanningPage}
+                focusDay={
+                  route.page === "focus" ? route.id || undefined : undefined
+                }
                 background={!planningPage}
                 onSession={setFocusSession}
                 review={reviewRequest}

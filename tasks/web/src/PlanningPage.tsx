@@ -27,6 +27,7 @@ export default function PlanningPage({
   onSession,
   review,
   refreshRevision,
+  focusDay,
   onOpenTask,
   onSettings,
   onCompleteTask,
@@ -40,6 +41,8 @@ export default function PlanningPage({
   review: number;
   /** Changes after each task write Plan did not issue (useTaskActions' planRevision). */
   refreshRevision: number;
+  /** A GTD day link opens its existing execution/time-record view. */
+  focusDay?: string;
   onOpenTask: (id: string) => void;
   onSettings: () => void;
   /** Completes in Tasks, which settles `focusDay`'s Focus queue in the same write. */
@@ -99,6 +102,7 @@ export default function PlanningPage({
         refreshRevision={refreshRevision}
         review={review}
         view={page}
+        focusDay={focusDay}
         background={background}
         onSession={onSession}
         language="en"
@@ -111,7 +115,7 @@ export default function PlanningPage({
           window.location.hash = "/mail";
         }}
         onOpenGtd={() => {
-          window.location.hash = "/gtd";
+          window.location.hash = "/gtd/time";
         }}
         snapshot={snapshot}
         onSnapshot={setSnapshot}

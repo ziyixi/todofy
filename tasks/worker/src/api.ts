@@ -18,6 +18,7 @@ import { getPlan, updateWeeklyBet } from './plan.ts';
 import { createFocusEntry, deleteFocusEntry, updateFocusEntry } from './focus-entries.ts';
 import { convertMailItem, getMailCategories, updateMailCategories } from './mail.ts';
 import { listGtdDays } from './gtd.ts';
+import { getGtdReport } from './gtd-report.ts';
 import { getWeeklyReview, listWeeklyReviews } from './review.ts';
 import { getGoalCatalog, getKeyResult } from './goal-read.ts';
 import { goalId, keyResultMessage } from './goal-model.ts';
@@ -69,6 +70,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof TasksUiService>, ApiContex
   getWeeklyReview: (input, { env }) => getWeeklyReview(env, input),
   listWeeklyReviews: (input, { env }) => listWeeklyReviews(env.DB, input),
   listGtdDays: (input, { env, now }) => listGtdDays(env, input, now),
+  getGtdReport: (input, { env, now }) => getGtdReport(env.DB, input, accountZone(env), now),
   listChanges: (input, { env, now }) => listChanges(env.DB, input, localDate(now, accountZone(env))),
   listCompletions: (input, { env }) => listCompletions(env.DB, input),
   previewDate(input, { env, now }) {

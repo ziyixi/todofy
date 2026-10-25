@@ -273,7 +273,7 @@ test("a step's records change and grow in place, on yesterday too, and the popov
   expect(await sideways(page)).toBe(false);
 });
 
-test("Week's totals and bars follow the records, and Month's day opens in Day", async ({
+test("Focus statistics open GTD Time, and its calendar returns to editable daily records", async ({
   page,
 }, testInfo) => {
   const today = await tasksToday();
@@ -292,98 +292,103 @@ test("Week's totals and bars follow the records, and Month's day opens in Day", 
   const work = ids["Synthetic work step"]!;
   const personal = ids["Synthetic personal step"]!;
   await stubPlanning(page, {
-    tasks,
+    tasks: tasks.map((task) =>
+      task.kind === "step" ? task : { ...task, duration_minutes: 60 },
+    ),
     queues: { [today]: [work, personal] },
   });
   await addRecord(work, today, 30, "work");
   await addRecord(work, today, 15, "work");
   await addRecord(personal, today, 20, "personal");
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 1489, height: 1056 });
   await page.goto("/#/focus");
   await expect(card(page, work)).toBeVisible();
-  await page.getByRole("tab", { name: "Week" }).click();
-  const stats = page.locator(".plus-focus-stats");
-  await expect(stats.locator("dd")).toHaveText(["1h 5m", "45m", "20m", "0"]);
-  const bars = page.locator(".plus-focus-bars > button");
+  await page.getByRole("button", { name: "View statistics", exact: true }).click();
+  await expect(page).toHaveURL(/#\/gtd\/time$/u);
+  await expect(page.getByRole("tab", { name: "Time", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  const stats = page.locator('dl[aria-label="Recorded time totals"]');
+  const totals = stats.locator(":scope > div > dd:first-of-type");
+  await expect(totals).toHaveText(["1h 5m", "45m", "20m"]);
+  const bars = page.locator(".gtd-time .plus-focus-bars > button");
   await expect(bars).toHaveCount(7);
   const todayBar = bars.nth(
     (new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7,
   );
   await expect(todayBar).toHaveAccessibleName(
-    /: 1h 5m logged, work 45m, personal 20m, 0 of 2 steps done$/u,
+    /: 1h 5m recorded, Work 45m, Personal 20m$/u,
   );
   await expect(todayBar).toHaveClass("is-today");
-  // The busiest day's bar is the full 120px, Work under Personal in proportion.
   const [workPart, personalPart] = await todayBar
     .locator(".plus-focus-bar > span")
     .evaluateAll((parts) =>
       parts.map((part) => part.getBoundingClientRect().height),
     );
-  expect(workPart! + personalPart!).toBeCloseTo(120, 0);
+  const fullBar = await box(todayBar.locator(".plus-focus-bar"));
+  expect(workPart! + personalPart!).toBeCloseTo(fullBar.height, 0);
   expect(workPart! / personalPart!).toBeCloseTo(45 / 20, 1);
-  // Where the time went: by each step's outcome, the largest first.
-  await expect(
-    page.locator(".plus-focus-group .planning-full-title-text"),
-  ).toHaveText(["Synthetic work outcome", "Synthetic personal outcome"]);
-  await expect(page.locator(".plus-focus-group-time")).toHaveText([
+  await expect(page.locator(".gtd-time-task-title")).toHaveText([
+    "Synthetic work outcome",
+    "Synthetic personal outcome",
+  ]);
+  await expect(page.locator(".gtd-time-task-row > span:first-of-type")).toHaveText([
     "45m",
     "20m",
   ]);
-  // Every group's bar is on one track: the same start and the same length.
-  const tracks = await page
-    .locator(".plus-focus-group-bar")
-    .evaluateAll((bars) =>
-      bars.map((bar) => {
-        const { x, width } = bar.getBoundingClientRect();
-        return [x, width];
-      }),
-    );
-  expect(new Set(tracks.map((track) => track.join())).size).toBe(1);
+  await expect(page.locator(".gtd-time-estimate")).toHaveText(["1h", "1h"]);
   await page.screenshot({
-    path: testInfo.outputPath("focus-week-1440.png"),
+    path: testInfo.outputPath("gtd-time-week-1489.png"),
     fullPage: true,
   });
-  await page.getByRole("tab", { name: "Month" }).click();
-  const day = page.locator(".plus-focus-month-day.is-today");
+  const period = page.getByRole("group", { name: "GTD period" });
+  await period.getByRole("button", { name: "Month", exact: true }).click();
+  const day = page.locator(".gtd-time .plus-focus-month-day.is-today");
   await expect(day).toHaveAccessibleName(
-    /: 1h 5m logged, work 45m, personal 20m, 0 of 2 steps done$/u,
+    /: 1h 5m recorded, Work 45m, Personal 20m$/u,
   );
   await expect(day).toHaveAttribute("data-level", "2");
   await page.screenshot({
-    path: testInfo.outputPath("focus-month-1440.png"),
+    path: testInfo.outputPath("gtd-time-month-1489.png"),
     fullPage: true,
   });
-  // On a phone, neither scrolls sideways.
   await page.setViewportSize({ width: 375, height: 812 });
   expect(await sideways(page)).toBe(false);
   await page.screenshot({
-    path: testInfo.outputPath("focus-month-375.png"),
+    path: testInfo.outputPath("gtd-time-month-375.png"),
     fullPage: true,
   });
-  await page.getByRole("tab", { name: "Week" }).click();
+  await period.getByRole("button", { name: "Week", exact: true }).click();
   await expect(bars).toHaveCount(7);
   expect(await sideways(page)).toBe(false);
-  // Every day's label is two lines, its weekday over its date, so they share one baseline.
-  const labels = await page
-    .locator(".plus-focus-bar-day")
-    .evaluateAll((days) =>
-      days.map((day) => day.getBoundingClientRect().height),
-    );
-  expect(labels).toEqual(Array(7).fill(32));
+  const labels = await page.locator(".plus-focus-bar-day").evaluateAll((days) =>
+    days.map((day) => day.getBoundingClientRect().height),
+  );
+  expect(labels[0]).toBeGreaterThan(0);
+  expect(new Set(labels).size).toBe(1);
   await page.screenshot({
-    path: testInfo.outputPath("focus-week-375.png"),
+    path: testInfo.outputPath("gtd-time-week-375.png"),
     fullPage: true,
   });
-  // Month's day opens that day in Day.
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole("tab", { name: "Month" }).click();
+  await page.setViewportSize({ width: 1489, height: 1056 });
+  await period.getByRole("button", { name: "Month", exact: true }).click();
   await day.click();
-  await expect(page.getByRole("tab", { name: "Day" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
+  await expect(page).toHaveURL(new RegExp(`#/focus/${today}$`, "u"));
   await expect(card(page, work)).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Today", exact: true }),
-  ).toBeDisabled();
+  await card(page, work).locator(".plus-focus-logged").click();
+  const records = page.getByRole("dialog", {
+    name: "Time records · Synthetic work step",
+  });
+  const minutes = records.getByRole("spinbutton", { name: "Minutes, added" }).first();
+  await expect(minutes).toHaveValue("30");
+  await minutes.fill("35");
+  await minutes.press("Enter");
+  await expect(records.getByRole("status")).toHaveText("Saved");
+  await expect(records).toContainText("Total 50m");
+  await expect.poll(async () =>
+    ((await readFocus(today, today)).entries as Json[])
+      .filter((entry) => entry.task_id === work)
+      .reduce((sum, entry) => sum + Number(entry.seconds), 0),
+  ).toBe(3000);
 });

@@ -29,14 +29,15 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
   Floor/Ceiling text, confirm result milestones and record dated progress with evidence. Tasks/Subtasks can choose
   a KR; Steps inherit their direct parent's association. Completing work does not automatically complete the KR.
   Goal definitions load only on Goals or when its picker opens; ordinary task lists do not load goal history.
-- GTD (`#/gtd`) shows the daily counts of open, overdue and undated tasks and the Inbox's age, with 30-day trends and
-  the latest weekly review. Tasks counts once a day after 06:00 and creates the review task on Sunday from 10:00.
+- GTD (`#/gtd`) reviews execution through Overview, Completion and Time: Task/Step completion, Routine separately,
+  recorded time and current estimates. Week/Month and area filters are shared; a calendar day opens editable Focus
+  records. See [GTD](docs/gtd.md) for metric definitions and historical limits.
 - Plan keeps the candidate columns above a full-width Committed row, with horizontal cards and completion controls for outcomes and Steps.
 - Plan and Focus cards drag by their whole row, like the task list (6px, or a 250ms hold on touch); Week's
   commitments reorder like Review's Committed row, and Focus reorders today's steps.
 - Focus counts up by default: Start, work, then complete the step, which saves its time. Each step shows its logged
-  time, which opens its records to change or add; Day, Week and Month views show where the time went, and a
-  Completed checkbox shows the day's completed steps. The timer bar's Mini timer button floats the session in a
+  time, which opens its records to change or add. Focus keeps daily execution and timing; Week/Month statistics
+  live in GTD Time. A Completed checkbox shows the day's completed steps. The timer bar's Mini timer button floats the session in a
   small always-on-top window (Document Picture-in-Picture): the Step title, a steady clock, cumulative time against
   the estimate and visible Pause/Resume, Stop and Complete controls. The title remains visible at 64px high. It stays open on other pages and closes when the
   session ends. With Focus' Pause when away on (a per-device setting; Chrome asks for its permission on that click),

@@ -1,5 +1,49 @@
 # Approved Tasks interfaces: visual QA
 
+## GTD execution review
+
+final result: passed
+
+Source: the approved [Overview](docs/images/gtd/overview-approved.png),
+[Completion](docs/images/gtd/completion-approved.png) and [Time](docs/images/gtd/time-approved.png) designs,
+1489×1056 pixels. Native Chrome renderings use a 2560×873 CSS viewport and a 1200 px main-content cap.
+The stored comparison crops preserve that content width at density 1 and remove the wide window's outer
+whitespace; they do not claim that the Chrome viewport itself was resized. Full-page native captures were
+2545×984 (Overview), 2545×1495 (expanded Completion), and 2545×966 (final Time). The mock's main region is also
+1200 px. Footer positions are not compared across different viewport heights. All content is synthetic.
+
+Paired reviews, each containing the source and actual browser main region in one image:
+[Overview](docs/images/gtd/overview-comparison.png), [Completion](docs/images/gtd/completion-comparison.png),
+[Time](docs/images/gtd/time-comparison.png). Main-region captures:
+[Overview](docs/images/gtd/overview-chrome-main.png), [Completion](docs/images/gtd/completion-chrome-main.png),
+[Time](docs/images/gtd/time-chrome-main.png). Header/metric labels, parent/Step rows, calendar dates and task-time
+columns were also checked in the uncropped native browser and existing Chromium journeys.
+
+The first pass found a P2 readability mismatch in Time's calendar and secondary columns. Calendar cells are now
+78 px with 14 px text, section headings 20 px, and time-column headings/values 13/14 px. After rebuilding, Chrome
+was reloaded and the same month captured and compared again. No actionable P0/P1/P2 issue remains.
+
+- Typography: existing app system font; 30 px page title, 20 px section headings, readable native controls and
+  15 px Task rows. Parent and Step hierarchy remains recognizable; duplicated Step counts were removed.
+- Layout: flat metrics and two-column detail, with a stacked narrow layout. More real rows naturally make the
+  Completion list longer than the illustrative four-row mock. Explicit keyboard focus remains visible.
+- Colours: the existing warm white, green and sage tokens remain. GTD and dated Focus routes retain sidebar
+  selection. The month ramp shows recorded time, without a target or streak.
+- Assets: existing Lucide icons and native UI; charts are data-driven, not rasterized interface images.
+- Copy: email-cleanup and Decide again are absent. Completion counts and plan percentages have distinct labels;
+  unavailable historical rates show counts. The overview chart follows the selected period's actual counts,
+  instead of inventing four prior percentage baselines or making extra history requests. Completion reuses that
+  count chart. Time estimates remain explicitly current.
+
+Native Chrome interactions checked the three tabs, keyboard expansion of a parent's Steps, Week/Month selection
+and correct month/day labels. Existing real-D1 Chromium journeys additionally verify tab/date/area reuse,
+completion persistence, parent drilldown and calendar navigation to editable Focus records, including phone-width
+layout. The console check showed no application-origin errors; two messages originated in the installed Zotero
+extension and are outside this change.
+
+The final source check removes retired Focus statistics modules/tests/CSS and the former GTD trend component;
+there is one production implementation of each new view. No new framework, service or dependency was added.
+
 ## Goals
 
 Final result: passed for the approved annual Goal/KR view and its links to Plan, Tasks and Steps.

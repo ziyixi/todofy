@@ -21,6 +21,7 @@
  * with it NULL and resumes now, as a pause made before that release does. One made before 0008_mail_gtd_inbox.sql has
  * no mail categories, GTD days, weekly reviews or TaskInbox tables: they restore as migrated (no categories).
  * One made before 0009_goals.sql restores the annual goal tables empty and task/Bet links unset.
+ * One made before 0010_gtd_report.sql restores commitment history empty and starts reporting coverage at restore.
  *
  *   node tools/backup-restore.ts download --out <outside>/restore --remote
  *   node tools/backup-restore.ts config --database-name tasks-restore --database-id <uuid> --out <outside>/restore.toml
@@ -68,6 +69,8 @@ export const RESTORE_ORDER = [
   'plan_board',
   'mail_settings',
   'gtd_days',
+  'gtd_week_commitments',
+  'gtd_reporting',
   'weekly_reviews',
   'task_inbox_routes',
   'task_inbox_days',
@@ -80,15 +83,18 @@ export const PLANNING_TABLES = ['task_dependencies', 'weekly_bets', 'plan_board'
 export const MAIL_GTD_TABLES = ['mail_settings', 'gtd_days', 'weekly_reviews', 'task_inbox_routes', 'task_inbox_days'];
 /** The tables 0009_goals.sql added. Older backups restore them empty and task/Bet links unset. */
 export const GOAL_TABLES = ['objectives', 'key_results', 'goal_progress'];
+/** Historical weekly Task membership and the first recording timestamp. */
+export const GTD_REPORT_TABLES = ['gtd_week_commitments', 'gtd_reporting'];
 /** The tables later migrations added, oldest first: a backup lacks every table added after it was made. */
 const ADDED = [
   { migration: '0005_focus.sql', tables: FOCUS_TABLES },
   { migration: '0006_planning.sql', tables: PLANNING_TABLES },
   { migration: '0008_mail_gtd_inbox.sql', tables: MAIL_GTD_TABLES },
   { migration: '0009_goals.sql', tables: GOAL_TABLES },
+  { migration: '0010_gtd_report.sql', tables: GTD_REPORT_TABLES },
 ];
 /** The one row a migration seeds, which a backed-up row of that table replaces. */
-const SEEDED = ['focus_timer', 'plan_board', 'mail_settings'];
+const SEEDED = ['focus_timer', 'plan_board', 'mail_settings', 'gtd_reporting'];
 
 export class RestoreError extends Error {}
 

@@ -25,8 +25,6 @@ import {
   displayedTitle,
   effectiveArea,
   formattedMinutes,
-  mondayOf,
-  monthStart,
   taskIndex,
 } from "./domain";
 import { unplannedDue, unplannedText } from "./deadlines";
@@ -38,12 +36,10 @@ import {
 } from "./drag-announcements";
 import { FocusBlock, focusTitle, type FocusBlockProps } from "./FocusBlock";
 import type { RecordWrite } from "./FocusEntries";
-import { FocusMonth } from "./FocusMonth";
-import { FocusWeek } from "./FocusWeek";
 import { areaColor, outcomeForTask } from "./planning-outcomes";
 import { moved, pendingStep, predictMove, withRecord } from "./plan-updates";
 import { planningSensors } from "./row-drag";
-import { monthLabel, readableDate, weekLabel } from "./PlanningCalendar";
+import { readableDate } from "./PlanningCalendar";
 import { LoggedTime } from "./StatusMarks";
 import { words } from "./i18n";
 import type { IdlePause } from "./useIdlePause";
@@ -61,20 +57,6 @@ import type {
   SavedEntry,
 } from "./model";
 
-/** Focus's three views: one day's steps, a week's time and a month's. */
-export type FocusTab = "day" | "week" | "month";
-
-/** The first and last day a view shows around `date`. */
-export function focusRange(tab: FocusTab, date: string): [string, string] {
-  if (tab === "day") return [date, date];
-  if (tab === "week") {
-    const monday = mondayOf(date);
-    return [monday, addDays(monday, 6)];
-  }
-  const first = monthStart(date);
-  return [first, addDays(monthStart(date, 1), -1)];
-}
-
 /** What a Focus drag says: the dragged step's title, and the place it is over. */
 export function focusDragName(language: Language): SpokenName {
   return (data, as) => {
@@ -86,17 +68,6 @@ export function focusDragName(language: Language): SpokenName {
   };
 }
 
-/** The page header's line: the day, week or month Focus shows. */
-export function focusLabel(
-  tab: FocusTab,
-  date: string,
-  language: Language,
-): string {
-  if (tab === "day") return readableDate(date, language);
-  if (tab === "week") return weekLabel(mondayOf(date), language);
-  return monthLabel(date, language);
-}
-
 interface Props {
   plan: PlanState;
   /** Tasks' today: its queue and records, and the timer. */
@@ -105,12 +76,12 @@ interface Props {
   days?: readonly DayPlan[];
   /** Opens Plan › Review with Start now focused. */
   onShowStart?: () => void;
-  /** The view shown, Day unless another is chosen. */
-  tab?: FocusTab;
   /** The day the view is around; today unless another is chosen. */
   date?: string;
-  /** Shows another view or date. */
-  onNavigate?: (tab: FocusTab, date: string) => void;
+  /** Shows another day. */
+  onNavigate?: (date: string) => void;
+  /** Opens the host's statistics page. */
+  onOpenGtd?: () => void;
   language: Language;
   busy: boolean;
   /** Day cards whose queue write is not yet confirmed. */
@@ -143,14 +114,12 @@ interface Props {
 }
 
 /**
- * Focus: Day, Week and Month with their dates. Today's Day is the page's own data; any other range
- * is read from Tasks and kept while Focus is open, and what was shown stays, dimmed, until the next
- * range arrives.
+ * Daily execution and editable time records. Today uses the page's data; other days are read from
+ * Tasks and kept while Focus is open. The previous day stays dimmed while the next one loads.
  */
 export function FocusView(props: Props) {
   const {
     focus,
-    tab = "day",
     onNavigate = () => {},
     language,
     actions,
@@ -160,18 +129,17 @@ export function FocusView(props: Props) {
   const text = words(language);
   const today = focus.date;
   const date = props.date ?? today;
-  const [start, end] = focusRange(tab, date);
-  const onToday = tab === "day" && date === today;
-  const read = useFocusRange(actions, start, end, written, onToday);
+  const onToday = date === today;
+  const read = useFocusDay(actions, date, written, onToday);
   const current: FocusRange | undefined = onToday
     ? { days: [focus], tasks: focus.tasks, today }
     : read.range;
-  // What each view showed last, kept on screen while its next range loads.
-  const last = useRef<Partial<Record<FocusTab, FocusRange>>>({});
+  // Keep the last day on screen while another one loads.
+  const last = useRef<FocusRange | undefined>(undefined);
   useEffect(() => {
-    if (current) last.current[tab] = current;
+    if (current) last.current = current;
   });
-  const shown = current ?? last.current[tab];
+  const shown = current ?? last.current;
   const waiting = !current && Boolean(shown);
   // Confirm-first: a record shows its new value once Tasks saved it; until then its row waits.
   const writeRecord: RecordWrite = (key, write) =>
@@ -183,15 +151,14 @@ export function FocusView(props: Props) {
       },
       { pending: [key] },
     );
-  const openDay = (day: string) => onNavigate("day", day);
   return (
     <>
       <FocusToolbar
-        tab={tab}
         date={date}
         today={today}
         language={language}
         onNavigate={onNavigate}
+        onOpenGtd={props.onOpenGtd}
       />
       {read.failed && (
         <div className="plus-error" role="alert">
@@ -205,29 +172,12 @@ export function FocusView(props: Props) {
           aria-busy={(!onToday && read.loading) || undefined}
           inert={waiting || undefined}
         >
-          {tab === "day" ? (
-            <FocusDay
-              {...props}
-              day={shown.days[0]!}
-              tasks={shown.tasks}
-              writeRecord={writeRecord}
-            />
-          ) : tab === "week" ? (
-            <FocusWeek
-              range={shown}
-              today={today}
-              language={language}
-              onOpenDay={openDay}
-            />
-          ) : (
-            <FocusMonth
-              range={shown}
-              month={shown.days[0]!.date.slice(0, 7)}
-              today={today}
-              language={language}
-              onOpenDay={openDay}
-            />
-          )}
+          <FocusDay
+            {...props}
+            day={shown.days[0]!}
+            tasks={shown.tasks}
+            writeRecord={writeRecord}
+          />
         </div>
       ) : (
         !read.failed && (
@@ -241,14 +191,12 @@ export function FocusView(props: Props) {
 }
 
 /**
- * Focus days of a range from Tasks, kept per range while Focus is open. Each confirmed write reads
- * the shown range again, so a stopped session's record or a completion shows; a record write also
- * merges into every kept range at once.
+ * Other days from Tasks, cached while Focus is open. Confirmed writes refresh the displayed day;
+ * record writes also merge into every cached day.
  */
-function useFocusRange(
+function useFocusDay(
   actions: PlusActions,
-  start: string,
-  end: string,
+  date: string,
   written: number,
   skip: boolean,
 ) {
@@ -258,31 +206,30 @@ function useFocusRange(
   const [, setReads] = useState(0);
   const [failed, setFailed] = useState("");
   const [attempt, setAttempt] = useState(0);
-  const key = `${start}/${end}`;
-  const saved = skip ? undefined : cache.current.get(key);
+  const saved = skip ? undefined : cache.current.get(date);
   const fresh = saved?.written === written;
   useEffect(() => {
     if (skip || fresh) return;
     let current = true;
-    actions.readFocus(start, end).then(
+    actions.readFocus(date, date).then(
       (range) => {
         if (!current) return;
-        cache.current.set(key, { range, written });
+        cache.current.set(date, { range, written });
         setFailed("");
         setReads((count) => count + 1);
       },
       () => {
-        if (current) setFailed(key);
+        if (current) setFailed(date);
       },
     );
     return () => {
       current = false;
     };
-  }, [actions, start, end, key, written, skip, fresh, attempt]);
+  }, [actions, date, written, skip, fresh, attempt]);
   return {
     range: saved?.range,
-    loading: !skip && !fresh && failed !== key,
-    failed: !skip && failed === key,
+    loading: !skip && !fresh && failed !== date,
+    failed: !skip && failed === date,
     retry() {
       setFailed("");
       setAttempt((count) => count + 1);
@@ -306,73 +253,52 @@ function useFocusRange(
   };
 }
 
-/** Day, Week and Month, then the previous and next day, week or month, and Today. */
+/** Previous/next day, Today, and the statistics page. */
 function FocusToolbar({
-  tab,
   date,
   today,
   language,
   onNavigate,
+  onOpenGtd,
 }: {
-  tab: FocusTab;
   date: string;
   today: string;
   language: Language;
-  onNavigate: (tab: FocusTab, date: string) => void;
+  onNavigate: (date: string) => void;
+  onOpenGtd?: () => void;
 }) {
   const text = words(language);
-  const step = (direction: number) => {
-    if (tab === "day") return addDays(date, direction);
-    if (tab === "week") return addDays(date, 7 * direction);
-    return monthStart(date, direction);
-  };
-  const [previous, next] = {
-    day: [text.previousDay, text.nextDay],
-    week: [text.previousWeek, text.nextWeek],
-    month: [text.previousMonth, text.nextMonth],
-  }[tab];
-  const there =
-    tab === "day"
-      ? date === today
-      : tab === "week"
-        ? mondayOf(date) === mondayOf(today)
-        : date.slice(0, 7) === today.slice(0, 7);
   return (
     <div className="plus-focus-toolbar">
-      <div
-        className="planning-view-tabs"
-        role="tablist"
-        aria-label={text.focusView}
-      >
-        {(["day", "week", "month"] as const).map((value) => (
-          <button
-            key={value}
-            role="tab"
-            aria-selected={tab === value}
-            onClick={() => onNavigate(value, date)}
-          >
-            {text[value]}
-          </button>
-        ))}
-      </div>
       <nav
         className="plus-focus-nav"
         aria-label={language === "zh" ? "选择日期" : "Choose dates"}
       >
-        <button aria-label={previous} onClick={() => onNavigate(tab, step(-1))}>
+        <button
+          aria-label={text.previousDay}
+          onClick={() => onNavigate(addDays(date, -1))}
+        >
           <ChevronLeft size={18} />
         </button>
-        <button aria-label={next} onClick={() => onNavigate(tab, step(1))}>
+        <button
+          aria-label={text.nextDay}
+          onClick={() => onNavigate(addDays(date, 1))}
+        >
           <ChevronRight size={18} />
         </button>
         <button
           className="plus-focus-today"
-          disabled={there}
-          onClick={() => onNavigate(tab, today)}
+          disabled={date === today}
+          onClick={() => onNavigate(today)}
         >
           {text.today}
         </button>
       </nav>
+      {onOpenGtd && (
+        <button className="plus-focus-statistics" onClick={onOpenGtd}>
+          {language === "zh" ? "查看统计" : "View statistics"}
+        </button>
+      )}
     </div>
   );
 }

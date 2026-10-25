@@ -22,8 +22,7 @@
 .plus-idle-refused {
   font-size: 11px;
 }
-/* Day, Week and Month on the left; the previous and next day, week or month and Today on the
-   right, in the week calendar's style. */
+/* Daily navigation and the statistics link. */
 .plus-focus-toolbar {
   display: flex;
   align-items: center;
@@ -36,7 +35,6 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  margin-left: auto;
 }
 .plus-root .plus-focus-nav button {
   display: flex;
@@ -58,7 +56,17 @@
 .plus-root .plus-focus-nav .plus-focus-today:disabled {
   opacity: 0.5;
 }
-/* While the next day, week or month loads, the one shown stays, dimmed. */
+.plus-root .plus-focus-statistics {
+  padding: 0;
+  color: var(--plus-muted);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.plus-root .plus-focus-statistics:hover {
+  color: var(--plus-text);
+}
+/* While another day loads, the one shown stays dimmed. */
 .plus-focus-range.is-loading {
   opacity: 0.6;
 }
@@ -400,201 +408,7 @@
   color: var(--plus-text);
   font-size: 14px;
 }
-/* Week and Month: their numbers, each a 12px label over an 18px value. */
-.plus-focus-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 28px;
-  margin: 0 0 22px;
-}
-.plus-focus-stats dt {
-  font-size: 12px;
-  color: var(--plus-muted);
-}
-.plus-focus-stats dd {
-  margin: 2px 0 0;
-  font-size: 18px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.plus-focus-stats dt[data-area]::before {
-  content: "";
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 6px;
-  border-radius: 50%;
-  vertical-align: 1px;
-  background: var(--plus-area-work);
-}
-.plus-focus-stats dt[data-area="personal"]::before {
-  background: var(--plus-area-personal);
-}
-/* A bar per day, stacked by area with Work at the bottom, over a 140px chart. */
-.plus-focus-bars {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 6px;
-  margin: 0 0 12px;
-}
-.plus-root .plus-focus-bars > button {
-  display: grid;
-  grid-template-rows: 140px auto;
-  gap: 6px;
-  min-width: 0;
-  padding: 6px 4px;
-  border-radius: 5px;
-}
-.plus-root .plus-focus-bars > button:hover {
-  background: var(--plus-hover);
-}
-.plus-focus-bar-track {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-/* A narrow column puts "3h 20m" on two lines; a day is always two, its weekday over its date. */
-.plus-focus-bar-value,
-.plus-focus-bar-day {
-  font-size: 12px;
-  line-height: 16px;
-  text-align: center;
-}
-.plus-focus-bar-day > span {
-  display: block;
-}
-.plus-focus-bar-value {
-  color: var(--plus-text);
-  font-variant-numeric: tabular-nums;
-}
-.plus-focus-bar {
-  --bar-height: 120px;
-  display: flex;
-  flex-direction: column-reverse;
-  width: min(36px, 100%);
-  height: calc(var(--share) * var(--bar-height));
-  border-radius: 3px 3px 0 0;
-  overflow: hidden;
-}
-.plus-focus-bar > span {
-  flex-basis: 0;
-}
-.plus-focus-bar-day {
-  color: var(--plus-muted);
-}
-.plus-focus-bars > .is-today .plus-focus-bar-day {
-  color: var(--plus-selected-text);
-  font-weight: 600;
-}
-/* Where the time went: a dot, the title, a 4px bar in the group's area and its time. */
-.plus-focus-groups {
-  margin: 26px 0 0;
-}
-.plus-root .plus-focus-groups h3 {
-  margin: 0 0 10px;
-  font-size: 13px;
-}
-.plus-focus-groups ol {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.plus-focus-group {
-  display: grid;
-  /* A fixed time column, which fits "23h 56m", keeps every row's bar on one track. */
-  grid-template-columns: 8px minmax(0, 1fr) minmax(60px, 28%) 56px;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 0;
-  font-size: 13px;
-}
-.plus-focus-group-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--area-color);
-}
-.plus-focus-group-bar {
-  height: 4px;
-  border-radius: 2px;
-  background: var(--plus-surface);
-}
-.plus-focus-group-bar > span {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: var(--area-color);
-}
-.plus-focus-group-time {
-  font-size: 12px;
-  color: var(--plus-muted);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.plus-focus-groups > .plus-muted {
-  margin: 6px 0 0 18px;
-}
-/* Month: a Monday-first calendar shaded by logged time in a neutral ink ramp; colour stays for
-   areas and the accent for selection. */
-.plus-focus-month {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 4px;
-  margin: 0 0 12px;
-}
-.plus-focus-weekday {
-  padding: 0 6px 2px;
-  font-size: 12px;
-  color: var(--plus-muted);
-}
-.plus-root .plus-focus-month-day {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: flex-start;
-  min-width: 0;
-  height: 64px;
-  padding: 6px;
-  border-radius: 5px;
-  background: var(--plus-surface);
-  color: var(--plus-text);
-  font-size: 12px;
-  text-align: left;
-}
-.plus-focus-month-day > span {
-  max-width: 100%;
-  font-variant-numeric: tabular-nums;
-}
-.plus-focus-month-day.is-outside {
-  opacity: 0.45;
-}
-.plus-focus-month-day.is-today > span:first-child {
-  color: var(--plus-selected-text);
-  font-weight: 600;
-}
-.plus-root .plus-focus-month-day[data-level="1"] {
-  background: color-mix(in srgb, var(--plus-text) 6%, var(--plus-bg));
-}
-.plus-root .plus-focus-month-day[data-level="2"] {
-  background: color-mix(in srgb, var(--plus-text) 14%, var(--plus-bg));
-}
-.plus-root .plus-focus-month-day[data-level="3"] {
-  background: color-mix(in srgb, var(--plus-text) 26%, var(--plus-bg));
-}
-.plus-root button.plus-focus-month-day:hover {
-  outline: 1px solid var(--plus-line);
-}
 @media (max-width: 650px) {
-  /* Room above the busiest bar for a value on two lines. */
-  .plus-focus-bar {
-    --bar-height: 104px;
-  }
-  .plus-root .plus-focus-bars > button {
-    padding: 6px 0;
-  }
   .plus-focus-block {
     gap: 8px;
     padding: 10px;

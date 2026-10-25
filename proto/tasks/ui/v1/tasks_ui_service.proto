@@ -460,6 +460,13 @@ service TasksUiService {
   rpc ListGtdDays(ListGtdDaysRequest) returns (ListGtdDaysResponse) {
     option (google.api.http) = {get: "/api/tasks/v1/gtdDays"};
   }
+  // Completion, planning and recorded time for at most 31 account-local days.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetGtdReport(GetGtdReportRequest) returns (GtdReport) {
+    option (google.api.http) = {get: "/api/tasks/v1/{name=gtdReport}"};
+    option (google.api.method_signature) = "name";
+  }
 }
 
 // Catalog request.
@@ -1150,6 +1157,23 @@ message ListGtdDaysResponse {
   repeated GtdDay gtd_days = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Older days, back to the oldest counted one; empty on the last page.
   string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One bounded GTD reporting period.
+// (-- api-linter: core::0131::request-unknown-fields=disabled
+//     aip.dev/not-precedent: this singleton aggregates an explicit local-day range and optional area. --)
+message GetGtdReportRequest {
+  // Always gtdReport.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/GtdReport"
+  ];
+  // First included account-local day, YYYY-MM-DD. Omitting both bounds selects the current week.
+  string start_day = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Last included account-local day; at most 31 days from start_day, inclusive.
+  string end_day = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Empty for all areas, or work/personal. Time uses saved record area; other counts use current effective task area.
+  string area = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Input to GetGoalCatalog.

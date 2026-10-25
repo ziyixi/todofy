@@ -122,7 +122,7 @@ export function Sidebar({
   }
   const [showArchived, setShowArchived] = useState(false);
   const active = (page: Route["page"], id = "") =>
-    route.page === page && (page === "goals" || route.id === id);
+    route.page === page && (["goals", "gtd", "focus"].includes(page) || route.id === id);
   const projects = catalog.projects.filter(
     (project) => project.archived === showArchived && !project.inbox,
   );
