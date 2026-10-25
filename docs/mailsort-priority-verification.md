@@ -198,3 +198,11 @@ in the authorized audit, closing the batch with 45 actual Gmail changes, 55 skip
 The scheduled continuation described above was cancelled and must not resume. The later authorization to classify
 all currently unread mail has not been executed. The [Claude rollout](mailsort-claude-verification.md) does not
 start either reclassification.
+
+
+### Later interpretation correction
+
+Historical recheck snapshots used “skipped” for both unchanged model judgments and actual exclusions. In the earlier
+45-applied/55-skipped snapshot, 50 had been rejudged without a label change and five unstarted entries were later
+cancelled. Do not infer that the model omitted all 55. The current Claude API separates unchanged from true skipped;
+see [the recheck-counter fix](mailsort-claude-verification.md#recheck-result-counters-and-priority-badge-freshness).

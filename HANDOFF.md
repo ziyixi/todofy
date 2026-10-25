@@ -12,14 +12,17 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-Recheck results fix (`codex/mailsort-recheck-results`) is implemented and locally verified, awaiting branch CI.
-The owner's original-100 run at `2026-10-25T00:31:22.597Z` completed with legacy counters 52 applied/48 skipped;
-a fresh report has three P2. Successful same-grade judgments were misleadingly included in skipped, and priority
-badges never refreshed. The fix derives unchanged from existing metadata, makes skipped mean true exclusions and
-patches report badges in place after progress updates. No storage migration, prompt/cohort/guard/limit change or
-new model rerun. Local checks: 199 unit tests, 93 workerd cases, 86 UI tests, types/lint/build/smoke and proto checks.
+Recheck counting and badge freshness are fixed at `ed236228229450ac1c8b06de70a9f090d82c6da2`, after
+[branch CI 40148723336](https://github.com/ziyixi/todofy/actions/runs/40148723336) and
+[main release 40149463353](https://github.com/ziyixi/todofy/actions/runs/40149463353). Deployment `7306876510`
+verifies Worker `7626477f-8e3c-46b9-8d9d-0154c0913763` and the unchanged DO. The original-100 run retained its
+`2026-10-25T00:31:22.597Z` start time and now correctly reports 52 changed, 48 unchanged, zero excluded and zero failures.
+Its recorded nominal cost stayed $1.090184; no model rerun or stored-state migration was needed. Fresh Gmail
+metadata shows P2 has three messages, all unread; the labels UI now shows the same three and refreshes report badges
+with progress without replacing row/detail nodes. The button is named “重判最初100封” to identify its actual cohort.
+Limits, prompt and owner guards are unchanged. See [verification](docs/mailsort-claude-verification.md#recheck-result-counters-and-priority-badge-freshness).
 
-Unread progress fix is live at `c18f73f1985bd46eef96594914b3a3154d64f2eb`, after
+The earlier unread progress fix shipped at `c18f73f1985bd46eef96594914b3a3154d64f2eb`, after
 [branch CI 40146082647](https://github.com/ziyixi/todofy/actions/runs/40146082647) and
 [main release 40146726819](https://github.com/ziyixi/todofy/actions/runs/40146726819). Mailsort Deployment
 `7306499723` verifies Worker `f5b272b5-3919-454e-a4c7-57f651b646c1` and the same DO namespace. The manual card now
@@ -70,7 +73,7 @@ Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's sha
 
 ## Latest verified release
 
-Mailsort now runs `c18f73f1`; Home remains on `ff4b3532`. Both are verified app releases. The classifier uses
+Mailsort now runs `ed236228`; Home remains on `ff4b3532`. Both are verified app releases. The classifier uses
 Opus 5.5 medium and an independent $20 monthly workspace limit; live mode is confirmed. The earlier Clef release
 and cancelled original-100 batch are historical records in [priority verification](docs/mailsort-priority-verification.md).
 No five-member recheck remains pending. Provider identities and completed manual progress are in

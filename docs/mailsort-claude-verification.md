@@ -144,3 +144,22 @@ batch-status success. The action is named “重判最初100封” to make its e
 Local checks passed 199 Worker unit tests, 93 real workerd cases, 86 UI tests, types/lint/build, the synthetic Wrangler
 smoke and proto checks. A regression proves 100 messages all sent to Claude can yield unchanged 100 / skipped 0 with no
 Gmail writes; actual owner/Spam/Trash exclusions still skip and do not reach the model. Release proof follows.
+
+
+The statistics/UI fix `ed236228229450ac1c8b06de70a9f090d82c6da2` passed
+[branch CI 40148723336](https://github.com/ziyixi/todofy/actions/runs/40148723336) and
+[main release 40149463353](https://github.com/ziyixi/todofy/actions/runs/40149463353). Only Mailsort deployed.
+Deployment `7306876510` verifies Worker `7626477f-8e3c-46b9-8d9d-0154c0913763` and the same namespace.
+
+Fresh status retained the same batch start and returned 100 total, 52 applied, 48 unchanged, zero skipped/pending/
+failures. App-recorded nominal monthly cost stayed $1.090184 across this metadata-only correction. The deployed
+page showed “已改标 52 · 重判未变 48 · 未重判跳过 0”. Thus all 100 messages had actually been rejudged; the old 48
+skips were successful unchanged results, not missing analysis. No additional model call or Gmail change was
+triggered for verification, and no stored row/schema was rewritten.
+
+A read-only Gmail label-count query independently showed P2 total 3 / unread 3; its ID matched Mailsort's configured
+P2 label. All four configured priority labels were enabled and linked. The fresh server report and deployed P2
+badge both showed 3. This resolves the stale zero display; it is not a claim that every P2 decision was a human-
+reviewed gold label. The seven-day model report and Gmail's actual label totals are separate statistics.
+Screenshots are private, outside Git. Completed local checks included 199 Worker unit tests, 93 workerd cases,
+86 UI tests, types/lint/build, synthetic Wrangler smoke and proto checks.
