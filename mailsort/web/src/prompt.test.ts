@@ -54,7 +54,7 @@ describe('classification prompt editor', () => {
     expect(field(card, 'personal').value).toBe(server.classificationPrompt.personalRules)
     expect(field(card, 'personal').closest('details')).toBeNull()
     expect(card.querySelector('details')?.open).toBe(false)
-    expect(card.textContent).toContain('这两段文本会原样发送给 Claude')
+    expect(card.textContent).toContain('这两段文本会原样发送给所选分类引擎')
     expect(card.textContent).toContain('不会自动重判已分类邮件')
     expect(button(card, '保存').disabled).toBe(false)
     button(card, '保存').click()
@@ -123,7 +123,7 @@ describe('classification prompt editor', () => {
     server.promptReadFails = true
     const root = await open(server)
     const card = editor(root)
-    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '分类提示词', '撤销', '历史效果检查'])
+    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '分类引擎', '分类提示词', '撤销', '历史效果检查'])
     expect(card.textContent).toContain('提示词读取失败')
     expect(button(card, '保存').disabled).toBe(true)
     expect(field(card, 'personal').readOnly).toBe(true)

@@ -170,6 +170,7 @@ message OpsStatus {
         "watch",
         "fleet",
         "newsletter",
+        "codex-gateway",
         "notion-publish",
         "mailsort",
         "recall",

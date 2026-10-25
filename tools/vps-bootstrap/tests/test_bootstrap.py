@@ -54,6 +54,50 @@ def newsletter_container(runtime):
 
 
 class BootstrapTests(unittest.TestCase):
+    def test_gateway_bootstrap_includes_its_exact_workload_and_independent_bearer(self):
+        images = {
+            **IMAGES,
+            "codex-gateway": "ghcr.io/ziyixi/todofy-codex-gateway@sha256:" + "d" * 64,
+        }
+        runtime = prepare.render(ROOT, SHA, images)
+        self.assertEqual(len(runtime["items"]), 13)
+        configured = next(
+            item
+            for item in runtime["items"]
+            if item["metadata"]["name"] == "platform-runtime-config"
+        )
+        self.assertEqual(
+            {
+                item.key
+                for item in configuration(configured["data"]["runtime.json"]).workloads
+            },
+            {"newsletter", "platform-runtime", "codex-gateway"},
+        )
+        path, private = self.private()
+        private["codex_gateway_env"] = {"CODEX_GATEWAY_TOKEN": "g" * 40}
+        path.write_text(json.dumps(private))
+        allowed = prepare.allowed_keys(ROOT)
+        accepted = config.credentials(path, allowed)
+        with patch.object(cluster, "apply") as apply:
+            cluster.secrets(
+                {"namespace": "personal-cloud", "fleet_host": "fleet.example.invalid"},
+                accepted,
+            )
+        secret = next(
+            item
+            for item in apply.call_args.args[0]["items"]
+            if item["metadata"]["name"] == "codex-gateway-settings"
+        )
+        self.assertEqual(set(secret["data"]), {"CODEX_GATEWAY_TOKEN"})
+        private["codex_gateway_env"]["CODEX_GATEWAY_TOKEN"] = private["platform_env"][
+            "PLATFORM_DEPLOY_TOKEN"
+        ]
+        path.write_text(json.dumps(private))
+        with self.assertRaisesRegex(
+            config.BootstrapError, "CODEX_GATEWAY_IDENTITY_NOT_DISTINCT"
+        ):
+            config.credentials(path, allowed)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

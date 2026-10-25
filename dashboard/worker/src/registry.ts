@@ -267,6 +267,20 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: [],
     order: 4,
   },
+  {
+    id: 'codex-gateway',
+    name: 'Codex 推理',
+    description: 'VPS Codex 结构化推理服务',
+    group: 'services',
+    icon: 'server',
+    accent: 'slate',
+    url: null,
+    access: false,
+    status: { type: 'ops_v1', provider: 'fleet', binding: 'CODEX_GATEWAY', guard: false },
+    tile_metric: null,
+    app_only_signals: ['host_never_seen', 'host_stale', 'host_missing', 'codex_gateway_unavailable', 'deployment_pending'],
+    order: 5,
+  },
   // END service-catalog entries
   {
     // Not a monorepo app: the self-hosted VPS and home server keep their backups in the account's R2

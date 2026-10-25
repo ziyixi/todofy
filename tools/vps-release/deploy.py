@@ -29,7 +29,10 @@ def verified_snapshot(
     node: pb.NodeStatus, targets: tuple[pb.ReleaseTarget, ...], name: str, now: datetime
 ) -> bool:
     """Source labels alone never pass: require independent actual digest/provenance and adapter readiness."""
-    if node.state not in {"ready", "degraded"} or not fresh(node.observed_at, now):
+    gateway_only = {target.workload_key for target in targets} == {"codex-gateway"}
+    if (not gateway_only and node.state not in {"ready", "degraded"}) or not fresh(
+        node.observed_at, now
+    ):
         return False
     summary = node.current_release
     if (
@@ -40,9 +43,9 @@ def verified_snapshot(
     ):
         return False
     statuses = {item.workload_key: item for item in node.workloads}
-    if len(statuses) != len(node.workloads) or set(statuses) != {
+    if len(statuses) != len(node.workloads) or not {
         target.workload_key for target in targets
-    }:
+    } <= set(statuses):
         return False
     for target in targets:
         item = statuses.get(target.workload_key)
@@ -133,16 +136,24 @@ class Deployment:
         *,
         resume: bool = False,
         timeout: int = 1800,
+        gateway_only: bool = False,
     ) -> pb.Release:
         if not 30 <= timeout <= 3600:
             raise ReleaseFailure("INVALID_DEPLOYMENT_TIMEOUT")
         if (resume and digests is not None) or (
             not resume
-            and (digests is None or set(digests) != {"newsletter", "platform-runtime"})
+            and (
+                digests is None
+                or set(digests)
+                not in ({"newsletter", "platform-runtime"}, {"codex-gateway"})
+            )
         ):
             raise ReleaseFailure("INVALID_DEPLOYMENT_IMAGES")
         deadline = self.monotonic() + timeout
-        identity = release_id(sha)
+        gateway_only = gateway_only or (
+            digests is not None and set(digests) == {"codex-gateway"}
+        )
+        identity = release_id(sha, gateway_only=gateway_only)
         name = "releases/" + identity
         if resume:
             release = self.call(
@@ -246,12 +257,12 @@ class Deployment:
         release: pb.Release, sha: str, name: str
     ) -> tuple[pb.ReleaseTarget, ...]:
         """Adopt only this source's original configured, strictly decoded creation targets."""
-        identity = release_id(sha)
         targets = release.targets
+        keys = {target.workload_key for target in targets}
+        identity = release_id(sha, gateway_only=keys == {"codex-gateway"})
         if (
-            len(targets) != 2
-            or {target.workload_key for target in targets}
-            != {"newsletter", "platform-runtime"}
+            len(targets) != len(keys)
+            or keys not in ({"newsletter", "platform-runtime"}, {"codex-gateway"})
             or any(
                 target.source_sha != sha
                 or target.request_id != identity
@@ -291,6 +302,12 @@ def main() -> int:
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--newsletter-image")
     parser.add_argument("--platform-image")
+    parser.add_argument("--codex-gateway-image")
+    parser.add_argument(
+        "--gateway-only",
+        action="store_true",
+        help="Resume the independent gateway release",
+    )
     parser.add_argument(
         "--resume",
         action="store_true",
@@ -300,13 +317,18 @@ def main() -> int:
     parser.add_argument("--evidence-file", type=Path)
     args = parser.parse_args()
     if args.resume and (
-        args.newsletter_image is not None or args.platform_image is not None
+        args.newsletter_image is not None
+        or args.platform_image is not None
+        or args.codex_gateway_image is not None
     ):
         parser.error(
             "--resume reads the original frozen images; do not supply new images"
         )
-    if not args.resume and (not args.newsletter_image or not args.platform_image):
-        parser.error("a new release requires both verified images")
+    if not args.resume and (
+        bool(args.codex_gateway_image)
+        == bool(args.newsletter_image or args.platform_image)
+    ):
+        parser.error("select the gateway image or both paired runtime images")
     transport = None
     try:
         if args.resume:
@@ -315,7 +337,12 @@ def main() -> int:
             profile, digests = verified_images(
                 ROOT,
                 args.source_sha,
-                {"newsletter": args.newsletter_image, "platform": args.platform_image},
+                {"codex-gateway": args.codex_gateway_image}
+                if args.codex_gateway_image
+                else {
+                    "newsletter": args.newsletter_image,
+                    "platform": args.platform_image,
+                },
             )
         credentials = {
             name: os.environ.get(name, "")
@@ -328,7 +355,11 @@ def main() -> int:
         transport = Transport(profile["vps"]["platform_runtime_host"], credentials)
         deployment = Deployment(transport)
         release = deployment.execute(
-            args.source_sha, digests, resume=args.resume, timeout=args.timeout
+            args.source_sha,
+            digests,
+            resume=args.resume,
+            timeout=args.timeout,
+            gateway_only=args.gateway_only,
         )
         if args.evidence_file is not None:
             write_evidence(args.evidence_file, release)

@@ -14,6 +14,23 @@ import reviewed_plans
 
 
 class Classification(unittest.TestCase):
+    def test_gateway_route_keeps_the_exact_path_loopback_and_origin_access(self):
+        app = {"domain": "runtime.example.invalid", "aud": "a" * 64}
+        gateway_app = {"domain": app["domain"] + "/api/codex/v1/*", "aud": "b" * 64}
+        origin = {"access": {"required": True, "team_name": "synthetic", "aud_tag": [app["aud"]]}}
+        gateway_origin = {"access": {"required": True, "team_name": "synthetic", "aud_tag": [gateway_app["aud"]]}}
+        gateway = {"hostname": app["domain"], "path": "/api/codex/v1/.*",
+                   "service": "http://127.0.0.1:18766", "origin_request": gateway_origin}
+        runtime = {"hostname": app["domain"], "service": "http://127.0.0.1:18765", "origin_request": origin}
+        ingress = {"ingress": [gateway, runtime, {"service": "http_status:404"}]}
+        self.assertTrue(reconcile_policy._loopback_ingress(ingress, app, "synthetic", gateway_app))
+        self.assertFalse(reconcile_policy._loopback_ingress(ingress, app, "synthetic"))
+        for field, value in (("path", "/.*"), ("service", "http://127.0.0.1:6443"),
+                             ("hostname", "another.example.invalid"), ("origin_request", {})):
+            with self.subTest(field=field):
+                changed = {"ingress": [{**gateway, field: value}, runtime, {"service": "http_status:404"}]}
+                self.assertFalse(reconcile_policy._loopback_ingress(changed, app, "synthetic", gateway_app))
+
     def dns(self):
         tunnel = "a" * 8 + "-" + "b" * 4 + "-" + "c" * 4 + "-" + "d" * 4 + "-" + "e" * 12
         before = {"id": "record", "zone_id": "zone", "name": "runtime.example.invalid", "type": "CNAME",

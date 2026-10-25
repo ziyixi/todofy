@@ -94,3 +94,22 @@ def local_process(request_id: str) -> Business:
         if _matches(pb.ReleaseTarget, "request_id", request_id)
         else None,
     )
+
+
+def codex_gateway(value: dict) -> Business:
+    if (
+        not isinstance(value, dict)
+        or value.get("service") != "codex-gateway"
+        or value.get("status") != "ok"
+    ):
+        return Business(admission="unsupported")
+    sha, request = value.get("source_sha"), value.get("release_request_id")
+    return Business(
+        admission="unsupported",
+        health="healthy",
+        worker_healthy=True,
+        source_sha=sha if _matches(pb.ReleaseTarget, "source_sha", sha) else None,
+        request_id=request
+        if _matches(pb.ReleaseTarget, "request_id", request)
+        else None,
+    )

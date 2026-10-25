@@ -86,7 +86,7 @@ mail, database contents, or private configuration. `record` prints a small recei
 `deployment_id`, `app`, `source_sha`, and `verified=true`.
 
 `last_good` inspects the newest 100 app records and accepts the first record of this format whose
-latest status is `success`. Failed or legacy records are skipped. This per-app evidence is separate
+latest status is `success`, or `inactive` with an earlier `success` among its ten newest statuses. Latest failure/error, unverified inactive and legacy records are skipped. This per-app evidence is separate
 from CI's cumulative diff base: a documentation commit or a green CI run does not replace the last
 successfully deployed revision. Missing verified evidence stops repair; it does not guess a source SHA.
 

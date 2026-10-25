@@ -2,17 +2,22 @@
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
-import { Mode, ServiceStatus_AuthState, SettingsSchema, type ServiceStatus, type Settings } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import { ClassificationProvider, Mode, ServiceStatus_AuthState, SettingsSchema, type ServiceStatus, type Settings } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { api, errorMessage, newRequestId, withRetry } from '../api.ts'
 import { card, segmented } from '../components.ts'
 import { button, el, toast } from '../dom.ts'
-import { BREAKER_REASONS, labelText, MODE_HINTS, MODE_NAMES, ms } from '../format.ts'
+import { BREAKER_REASONS, classificationProvider, classificationProviderName, labelText, MODE_HINTS, MODE_NAMES, ms } from '../format.ts'
 import type { Host, ViewContext } from '../app.ts'
 import { replayCard } from './replay.ts'
 import { promptCard } from './prompt.ts'
 import { act, allLabels, frame, labelSelect } from './common.ts'
+import { classifierDetails } from './classifier.ts'
 
 const MODES: readonly (readonly [Mode, string])[] = [Mode.OFF, Mode.SHADOW, Mode.LIVE].map((mode) => [mode, MODE_NAMES[mode] ?? ''] as const)
+const PROVIDERS: readonly (readonly [ClassificationProvider, string])[] = [
+  [ClassificationProvider.CLAUDE, 'Claude API'],
+  [ClassificationProvider.CODEX, 'VPS Codex'],
+]
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -78,6 +83,43 @@ function modeCard(settings: Settings, status: ServiceStatus | null, ctx: ViewCon
     segmented('模式', MODES, settings.mode, choose),
     el('p', { class: warn ? 'hint warn' : 'hint' }, line),
     settings.breakerTripped ? el('div', { class: 'actions' }, button('解除熔断', resetBreaker)) : null,
+  )
+}
+
+function providerCard(settings: Settings, status: ServiceStatus | null, ctx: ViewContext, reload: () => Promise<void>): HTMLElement {
+  const selected = classificationProvider(settings.classificationProvider)
+  const feedback = el('p', { class: 'hint warn', role: 'status', 'aria-live': 'polite' })
+  let saving = false
+  const save = async (provider: ClassificationProvider) => {
+    if (saving || provider === selected) return
+    saving = true
+    for (const control of choices.querySelectorAll('button')) control.disabled = true
+    feedback.textContent = '正在保存…'
+    const requestId = newRequestId()
+    try {
+      await withRetry(() => api.updateSettings({
+        settings: create(SettingsSchema, { name: 'settings', classificationProvider: provider, etag: settings.etag }),
+        updateMask: { paths: ['classification_provider', 'etag'] },
+        requestId,
+      }))
+      toast(`已切到 ${classificationProviderName(provider)}`)
+      ctx.refreshStatus()
+      await reload()
+    } catch (error) {
+      feedback.textContent = errorMessage(error)
+    } finally {
+      saving = false
+      for (const control of choices.querySelectorAll('button')) control.disabled = false
+    }
+  }
+  const choices = segmented('分类引擎', PROVIDERS, selected, (provider) => void save(provider))
+  return card(
+    '分类引擎',
+    '',
+    choices,
+    el('p', { class: 'hint' }, '切换从下一批生效；已分类邮件不重判。'),
+    classifierDetails(status, ctx.host.now(), selected),
+    feedback,
   )
 }
 
@@ -203,6 +245,6 @@ export async function renderSettings(ctx: ViewContext): Promise<void> {
   const reload: () => Promise<void> = await frame(ctx.main, '设置', async (body) => {
     // The header's status (its grant) only adds a line: without it the page still works.
     const [settings, labels, status] = await Promise.all([api.getSettings({ name: 'settings' }), allLabels(), ctx.status().catch(() => null)])
-    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), prompt, undoCard(labels, ctx.host), await replayCard(labels))
+    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), providerCard(settings, status, ctx, () => reload()), prompt, undoCard(labels, ctx.host), await replayCard(labels))
   })
 }

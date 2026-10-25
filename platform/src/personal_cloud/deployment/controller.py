@@ -61,9 +61,12 @@ class Controller:
 
     def create(self, request):
         targets = request.release.targets
+        selected = {target.workload_key for target in targets}
+        paired = {self.workloads[key].key for key in ("newsletter", "personal-cloud")}
+        gateway = self.workloads.get("codex-gateway")
         if (
-            len(targets) != 2
-            or {target.workload_key for target in targets} != self.keys
+            len(targets) != len(selected)
+            or selected not in (paired, {gateway.key} if gateway else set())
             or len({target.source_sha for target in targets}) != 1
             or any(
                 target.request_id != request.request_id or target.generation is not None
@@ -73,7 +76,7 @@ class Controller:
             raise _error(
                 "INVALID_ARGUMENT",
                 CommonReason.BAD_REQUEST,
-                "The release must select both configured workloads with one source and creation identity.",
+                "Select the paired runtime workloads or the Codex gateway with one source and creation identity.",
             )
         body = {
             "request_id": request.request_id,
@@ -130,12 +133,11 @@ class Controller:
                 )
             body = None
             if plan.state == "repairable":
-                source = self.store.get(request.name.split("/", 1)[1])
                 body = {
                     "request_id": request.request_id,
                     "targets": [
                         {**target, "request_id": request.request_id}
-                        for target in source.body["targets"]
+                        for target in self.planner.targets()
                     ],
                 }
             record = self.store.reconcile(frozen, body)
@@ -211,7 +213,10 @@ class Controller:
         self.store.checkpoint(record.identity, phase, checkpoint, observed=observed)
 
     def _hold(self, record, reason, *, failed=False, observed=()):
-        if record.checkpoint in {"resume", "unsuspend", "finish"}:
+        if record.checkpoint in {"resume", "unsuspend", "finish"} and any(
+            target["workload_key"] == self.workloads["newsletter"].key
+            for target in record.body["targets"]
+        ):
             # A lost resume acknowledgement may have reopened admission. Do not invent a closed gate
             # or force a different gate over unknown business work. Suspend new cron triggers if possible.
             try:
@@ -249,12 +254,13 @@ class Controller:
         )
 
     def _verified(self, snapshot, targets, *, resumed=False):
+        selected = {target.workload_key for target in targets}
         observed = {
             value.workload_key: value
             for value in snapshot.workloads
-            if value.workload_key in self.keys
+            if value.workload_key in selected
         }
-        if set(observed) != self.keys:
+        if set(observed) != selected:
             return False
         for wanted in targets:
             value = observed[wanted.workload_key]
@@ -330,7 +336,9 @@ class Controller:
 
     def _step(self, record):
         targets = self.release(record).targets
-        newsletter = self.workloads["newsletter"]
+        gateway = self.workloads.get("codex-gateway")
+        if gateway and {target.workload_key for target in targets} == {gateway.key}:
+            return self._gateway_step(record, targets, gateway)
         platform = self.workloads["personal-cloud"]
         platform_target = next(
             target for target in targets if target.workload_key == platform.key
@@ -432,8 +440,7 @@ class Controller:
                     continue
                 self.kube.apply(item)
                 if item["kind"] == "ConfigMap" and item["metadata"]["name"] in {
-                    newsletter.release_configmap,
-                    platform.release_configmap,
+                    workload.release_configmap for workload in self.workloads.values()
                 }:
                     self.kube.patch(
                         "ConfigMap",
@@ -466,7 +473,10 @@ class Controller:
                 record, "verifying", "activate", observed=self._observations(snapshot)
             )
         elif checkpoint == "activate":
-            for item in (newsletter, platform):
+            selected = {target.workload_key for target in targets}
+            for item in self.workloads.values():
+                if item.key not in selected:
+                    continue
                 self.kube.patch(
                     "ConfigMap",
                     item.release_configmap,
@@ -492,4 +502,44 @@ class Controller:
             self._next(record, "ready", "done", observed=self._observations(snapshot))
         else:
             raise ValueError("invalid_release_checkpoint")
+        return True
+
+    def _gateway_step(self, record, targets, gateway):
+        """The inference service has no Newsletter admission or scheduled business work."""
+        checkpoint = record.checkpoint
+        if checkpoint == "suspend":
+            self._next(record, "applying", "apply")
+        elif checkpoint == "apply":
+            for item in self.renderer.render(targets, record.identity):
+                if self.stop.is_set():
+                    return False
+                self.kube.apply(item)
+            self.kube.patch(
+                "ConfigMap", gateway.release_configmap, {"data": {"phase": "applying"}}
+            )
+            self._next(record, "verifying", "verify")
+        elif checkpoint in {"verify", "finish"}:
+            snapshot = self._snapshot()
+            if not self._verified(snapshot, targets, resumed=checkpoint == "finish"):
+                if self._timed_out(record):
+                    self._hold(
+                        record,
+                        ErrorReason.RELEASE_HELD,
+                        observed=self._observations(snapshot),
+                    )
+                return False
+            self._next(
+                record,
+                "verifying" if checkpoint == "verify" else "ready",
+                "activate" if checkpoint == "verify" else "done",
+                observed=self._observations(snapshot),
+            )
+        elif checkpoint == "activate":
+            self.kube.patch(
+                "ConfigMap", gateway.release_configmap, {"data": {"phase": "activated"}}
+            )
+            self._next(record, "verifying", "finish")
+        else:
+            self._hold(record, ErrorReason.RELEASE_HELD, failed=True)
+            return False
         return True

@@ -281,6 +281,21 @@ class Store:
             ).fetchone()
         return self._record(row) if row else None
 
+    def accepted_targets(self, keys: set[str]) -> tuple[dict, ...]:
+        """One metadata query per configured workload; retain older independent releases."""
+        result = []
+        with self.transaction() as database:
+            for key in sorted(keys):
+                row = database.execute(
+                    "SELECT target.value FROM releases, json_each(releases.body, '$.targets') AS target "
+                    "WHERE releases.phase='ready' AND json_extract(target.value, '$.workload_key')=? "
+                    "ORDER BY releases.created DESC, releases.rowid DESC LIMIT 1",
+                    (key,),
+                ).fetchone()
+                if row:
+                    result.append(json.loads(row[0]))
+        return tuple(result)
+
     def active(self) -> Record | None:
         with self.transaction() as database:
             row = database.execute(

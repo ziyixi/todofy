@@ -38,7 +38,10 @@ def accepted_release(profile, public):
     with sqlite3.connect(ledger.as_uri() + "?mode=ro", uri=True, timeout=5) as database:
         database.row_factory = sqlite3.Row
         row = database.execute(
-            "SELECT identity,body,phase,checkpoint FROM releases ORDER BY created DESC,rowid DESC LIMIT 1"
+            "SELECT identity,body,phase,checkpoint FROM releases "
+            "WHERE EXISTS (SELECT 1 FROM json_each(releases.body, '$.targets') AS target "
+            "WHERE json_extract(target.value, '$.workload_key')='platform-runtime') "
+            "ORDER BY created DESC,rowid DESC LIMIT 1"
         ).fetchone()
     require(
         row is not None and UUID.fullmatch(row["identity"]), "RECOVERY_RELEASE_MISSING"
@@ -58,12 +61,17 @@ def accepted_release(profile, public):
     targets = body["targets"]
     require(
         isinstance(targets, list)
-        and len(targets) == 2
+        and len(targets) in {2, 3}
         and {item.get("workload_key") for item in targets if isinstance(item, dict)}
-        == {"newsletter", "platform-runtime"},
+        in (
+            {"newsletter", "platform-runtime"},
+            {"newsletter", "platform-runtime", "codex-gateway"},
+        ),
         "RECOVERY_LEDGER_INVALID",
     )
     for item in targets:
+        if item["workload_key"] == "codex-gateway":
+            continue
         require(
             set(item) == {"workload_key", "source_sha", "image_digest", "request_id"}
             and item["source_sha"] == public["source_sha"]

@@ -260,8 +260,10 @@ test.describe("public site", () => {
     await expect(
       page.getByRole("link", { name: "https://myaccount.google.com/permissions" }),
     ).toHaveAttribute("href", "https://myaccount.google.com/permissions");
-    await expect(page.locator("main time")).toHaveAttribute("datetime", "2026-10-24");
+    await expect(page.locator("main time")).toHaveAttribute("datetime", "2026-10-25");
     await expect(page.locator("main")).toContainText("Anthropic");
+    await expect(page.locator("main")).toContainText("OpenAI");
+    await expect(page.locator("main")).toContainText("choose Claude API or VPS Codex");
     await expect(page.locator("main")).toContainText("$20 monthly spend limit");
     await expect(page.locator("main")).toContainText("five-minute prompt cache");
     await expect(page.locator("main")).toContainText("saved base instructions and personal rules");

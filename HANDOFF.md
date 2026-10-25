@@ -12,6 +12,24 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+### Mailsort provider switch and independent Codex gateway (`codex/mailsort-provider-select`)
+
+Owner authorized implementation, source/main CI publication, independent VPS inference, precise Tunnel/Access
+routing, scoped machine credentials, existing subscription auth, synthetic tests, and activation for unclassified
+unread mail. Old labelled mail is not rechecked. An eight-hour scoped operator was installed by the owner; remove
+it after acceptance. Existing VPS Codex login status reports ChatGPT authentication; real inference remains pending.
+
+Settings/status/UI, the typed stateless gateway and concrete third-workload deployment integration are implemented.
+Mailsort remains the scheduler and Gmail writer; both providers share its saved prompt and fixed P1-P4 validation.
+Claude cost/cache history remains separate. Gateway-only releases preserve Newsletter state; reconciliation retains
+accepted identities for the original pair. Local checks passed: Mailsort 226 unit/113 workerd, UI 104,
+deployment guard 26 and Wrangler smoke; gateway 10 synthetic tests; platform/CI/infra/Home/Fleet integration
+checks are green. The Worker bundle is 145.9 KiB gzip within its existing 148 KiB budget. The bounded
+verified-release lookup retains prior success when GitHub appends inactive, fixing pre-existing reconciliation
+false failures. Full branch CI, provider provisioning, bootstrap, real inference and activation remain pending.
+Work stays in the isolated checkout.
+
+
 ### Tasks GTD execution review
 
 Released `cb6e8c810c1f836decd2cdee9beb8708ada32699` after full
@@ -88,7 +106,7 @@ $0.13058 app-recorded nominal Claude usage. The deployed status retained the ori
 Opus 5.5 medium and the $20 monthly limit. No batch was restarted or existing limits raised.
 See [Claude verification](docs/mailsort-claude-verification.md#manual-unread-progress-follow-up).
 
-The cancelled Codex/VPS Mailsort runner was removed before release and must not be resumed. The six-condition
+The earlier Codex/VPS batch runner was canceled and removed. Current gateway work keeps scheduling in Mailsort. The six-condition
 Claude comparison used [the original benchmark prompt](https://github.com/ziyixi/todofy/blob/511ec5063ecc1cd3602020aa2544f6cf975090f1/mailsort/prompts/priority-classification.txt)
 and cost $3.514105 at list prices before credits. Its temporary evaluation key is disabled and its local file removed.
 The maintained prompt now clarifies personal periodic reports; the benchmark remains a record of its earlier

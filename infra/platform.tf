@@ -49,6 +49,47 @@ resource "cloudflare_zero_trust_access_application" "platform_machine" {
   }
 }
 
+resource "cloudflare_zero_trust_access_service_token" "codex_gateway" {
+  account_id = var.account_id
+  name       = "Codex inference only"
+  duration   = "forever"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "cloudflare_zero_trust_access_policy" "codex_gateway" {
+  account_id = var.account_id
+  name       = "Codex inference service only"
+  decision   = "non_identity"
+  include = [{ service_token = {
+    token_id = cloudflare_zero_trust_access_service_token.codex_gateway.id
+  } }]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "cloudflare_zero_trust_access_application" "codex_gateway" {
+  account_id                 = var.account_id
+  name                       = "Codex inference machine API"
+  type                       = "self_hosted"
+  domain                     = "${local.platform_runtime_hostname}/api/codex/v1/*"
+  destinations               = [{ type = "public", uri = "${local.platform_runtime_hostname}/api/codex/v1/*" }]
+  app_launcher_visible       = false
+  auto_redirect_to_identity  = false
+  enable_binding_cookie      = false
+  http_only_cookie_attribute = true
+  session_duration           = "24h"
+  policies                   = [{ id = cloudflare_zero_trust_access_policy.codex_gateway.id, precedence = 1 }]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 resource "cloudflare_zero_trust_tunnel_cloudflared" "platform" {
   account_id = var.account_id
   name       = "todofy-private-platform"
@@ -64,6 +105,18 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "platform" {
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.platform.id
   config = {
     ingress = [
+      {
+        hostname = local.platform_runtime_hostname
+        path     = "/api/codex/v1/.*"
+        service  = "http://127.0.0.1:18766"
+        origin_request = {
+          access = {
+            required  = true
+            aud_tag   = [cloudflare_zero_trust_access_application.codex_gateway.aud]
+            team_name = local.platform_access_team
+          }
+        }
+      },
       {
         hostname = local.platform_runtime_hostname
         service  = "http://127.0.0.1:18765"
@@ -106,5 +159,15 @@ output "platform_bootstrap" {
     client_id     = cloudflare_zero_trust_access_service_token.platform_deploy.client_id
     client_secret = cloudflare_zero_trust_access_service_token.platform_deploy.client_secret
     tunnel_id     = cloudflare_zero_trust_tunnel_cloudflared.platform.id
+  }
+}
+
+output "codex_gateway_bootstrap" {
+  sensitive = true
+  value = {
+    client_id     = cloudflare_zero_trust_access_service_token.codex_gateway.client_id
+    client_secret = cloudflare_zero_trust_access_service_token.codex_gateway.client_secret
+    app_id        = cloudflare_zero_trust_access_application.codex_gateway.id
+    audience      = cloudflare_zero_trust_access_application.codex_gateway.aud
   }
 }

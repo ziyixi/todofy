@@ -43,6 +43,8 @@ message Settings {
   // AIP-154: changes with every change. UpdateSettings that carries an etag is refused with ETAG_MISMATCH when
   // the settings changed since.
   string etag = 9 [(google.api.field_behavior) = OPTIONAL];
+  // The fixed classification provider. Legacy settings use Claude; changing this affects the next model batch.
+  ClassificationProvider classification_provider = 10 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // One label's share of the last 7 days of decisions.
@@ -150,7 +152,7 @@ message ServiceStatus {
   double neurons_today = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Historical Workers AI daily budget (Settings.daily_neuron_budget); inactive for Claude.
   int32 daily_neuron_budget = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Current decision model ID: `claude-opus-5-5`.
+  // The selected classification provider's model ID.
   string decision_model = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Historical Workers AI quota state; inactive for Claude.
   bool ai_quota_exhausted = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -172,9 +174,29 @@ message ServiceStatus {
   // The next UTC midnight while today's automatic and consolidation writes have reached the daily Gmail cap.
   // Absent while the current day's write allowance remains available.
   google.protobuf.Timestamp gmail_write_resume_time = 25 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The selected classification provider's readiness, errors and batch schedule.
+  ClassifierStatus classifier = 26 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// The current Claude model, monthly actual usage and next eligible batch time. Contains no mail content.
+// The selected classification provider. Contains no endpoint URL, credentials or mail content.
+message ClassifierStatus {
+  // The owner's selected provider.
+  ClassificationProvider provider = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The selected provider's fixed model ID.
+  string model = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The selected provider's fixed reasoning effort.
+  string effort = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Required local configuration is present and valid; this does not check network reachability or credentials.
+  bool configured = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The selected provider's most recent safe error code, empty after success.
+  string last_error_code = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The earliest next model batch time; maintenance alarms continue separately.
+  google.protobuf.Timestamp next_batch_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The most recent valid response from this provider; absent until recorded by this release.
+  google.protobuf.Timestamp last_success_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The fixed Claude model and monthly actual usage, retained when Codex is selected. Contains no mail content.
 message ClaudeBudget {
   // The fixed Anthropic model ID.
   string model = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -194,7 +216,7 @@ message ClaudeBudget {
   optional int32 thinking_tokens = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The most recent response whose usage was recorded.
   google.protobuf.Timestamp last_request_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The earliest next model batch time; maintenance alarms continue separately.
+  // The earliest next Claude batch time; absent while Codex is selected. Maintenance alarms continue separately.
   google.protobuf.Timestamp next_batch_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Most recent safe provider or configuration error code, empty after success.
   string last_error_code = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -245,8 +267,18 @@ message UnreadClassification {
   int32 failed_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Pending messages waiting for their next eligible time, including daily quota deferral.
   int32 deferred_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Successful Claude rechecks whose priority stayed the same, without a new Gmail write.
+  // Successful model rechecks whose priority stayed the same, without a new Gmail write.
   int32 unchanged_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The two classification providers the owner may select. There is no automatic fallback.
+enum ClassificationProvider {
+  // Never written; refused on input.
+  CLASSIFICATION_PROVIDER_UNSPECIFIED = 0;
+  // Direct Anthropic API with its independent monthly budget.
+  CLASSIFICATION_PROVIDER_CLAUDE = 1;
+  // The configured VPS Codex endpoint.
+  CLASSIFICATION_PROVIDER_CODEX = 2;
 }
 
 // What the pipeline may do.

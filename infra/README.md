@@ -72,10 +72,11 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (39 objects)
+### Managed here (42 objects)
 
-This is the maximum declared count. Fresh bootstrap creates 35 objects before the first Worker release,
-then adds its exact mail rule (36). An adopted account retains the frozen legacy backup app (37).
+This is the maximum declared count. It includes the dedicated Codex inference token, policy and
+path application. Fresh bootstrap omits the optional legacy backup application and the mail rule
+until its receiving Worker exists.
 Objects being retired ([Retiring an app](#retiring-an-app)) are not counted: [`retired.tf`](retired.tf) moves them
 out of the managed addresses (a retired Access policy instead leaves with its resource block) so that the next apply
 deletes them.
@@ -108,8 +109,11 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_service_token.platform_deploy` | Deployment machine identity | Dedicated token in encrypted state and encrypted one-time handoff; never an owner identity |
 | `cloudflare_zero_trust_access_policy.platform_deploy` | Deployment machine policy | Includes only the dedicated service token |
 | `cloudflare_zero_trust_access_application.platform_machine["runtime"]` | Platform machine API | Whole runtime host; no browser owner access |
+| `cloudflare_zero_trust_access_service_token.codex_gateway` | Inference machine identity | Dedicated inference token in encrypted state and its encrypted handoff |
+| `cloudflare_zero_trust_access_policy.codex_gateway` | Inference machine policy | Includes only the dedicated inference token |
+| `cloudflare_zero_trust_access_application.codex_gateway` | Codex inference API | Only the existing runtime host's `/api/codex/v1/*` path; no deployment or owner access |
 | `cloudflare_zero_trust_tunnel_cloudflared.platform` | Platform connector | Dedicated tunnel; preserves the existing SSH tunnel |
-| `cloudflare_zero_trust_tunnel_cloudflared_config.platform` | Platform ingress | Loopback daemon HTTP only, then 404; never routes Kubernetes |
+| `cloudflare_zero_trust_tunnel_cloudflared_config.platform` | Platform ingress | Exact Codex prefix to loopback 18766, daemon to loopback 18765, then 404; each validates its Access audience |
 | `cloudflare_dns_record.platform["runtime"]` | Runtime CNAME | Only this exact platform host; existing Worker and mailbox DNS remain with their current owners |
 | `cloudflare_zero_trust_access_application.mail_hero_backup` | Access app "Mail Hero backup API" | `mail-hero.ziyixi.science/api/internal/backup/*`. Used by the backup collector's machine identity (mail-hero/AGENTS.md §7). **Frozen**: an apply refuses any write to it ([Apply](#apply-p4)) |
 | `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "links" \| "tasks"]` | D1 databases | Existence only |
@@ -165,7 +169,12 @@ Listed by category only. These are neither declared nor read, and their values a
 
 Only the dedicated platform runtime CNAME is managed here, in [`platform.tf`](platform.tf).
 It points to the new platform tunnel and is restricted by the infrastructure guard to this exact address.
-The tunnel routes the authenticated daemon API, never the Kubernetes API. Existing SSH ingress is independent.
+The tunnel routes the authenticated daemon API and the exact `/api/codex/v1/.*` inference path on the
+same hostname. That path goes to loopback port 18766; the daemon uses 18765. A dedicated path Access
+application accepts only the inference service token, and its Tunnel rule validates that application's
+audience. The deployment app and token retain the daemon route. Kubernetes and the existing SSH
+ingress remain independent. `codex_gateway_bootstrap` is sensitive; the existing certificate handoff
+exports it as `codex-gateway-bootstrap.cms`, containing only the inference credentials and path app identity.
 
 Worker hostnames remain Wrangler Custom Domains with read-only records. Mail Hero's receive subdomain
 MX, DKIM and SPF records remain Email Routing-owned. Apex mailbox records, third-party verification

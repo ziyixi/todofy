@@ -1,4 +1,4 @@
-"""Render public bootstrap resources from one verified commit and two immutable images."""
+"""Render public bootstrap resources from one verified commit and immutable images."""
 
 import argparse
 import ast
@@ -57,6 +57,7 @@ def allowed_keys(root):
             "NEWSLETTER_TIME_ZONE",
         ],
         "platform": ["PLATFORM_DEPLOY_TOKEN"],
+        "codex-gateway": ["CODEX_GATEWAY_TOKEN"],
         "controlled": sorted(CONTROLLED),
     }
 
@@ -206,13 +207,22 @@ def main():
     parser.add_argument("--sha", required=True)
     parser.add_argument("--newsletter-image", required=True)
     parser.add_argument("--platform-image", required=True)
+    parser.add_argument("--codex-gateway-image")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         prepare(
             ROOT,
             args.sha,
-            {"newsletter": args.newsletter_image, "platform": args.platform_image},
+            {
+                "newsletter": args.newsletter_image,
+                "platform": args.platform_image,
+                **(
+                    {"codex-gateway": args.codex_gateway_image}
+                    if args.codex_gateway_image
+                    else {}
+                ),
+            },
             args.output,
         )
     except (BootstrapError, OSError, ValueError, KeyError):

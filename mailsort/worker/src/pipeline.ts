@@ -1,10 +1,11 @@
 /**
  * Bounded alarm pass: retain content, wait for priority setup, sync Gmail history, learn current priority feedback,
  * retry ledger writes, and classify each new message independently. P1 stays in Inbox, P2-P4 are archived.
- * Claude classifies a bounded batch in one request. Historical learning and replay remain readable.
+ * The selected engine classifies a bounded batch in one request. Historical learning and replay remain readable.
  * Existing write gates and Gmail request limits apply to every step.
  */
-import { CLAUDE_CACHE_TTL_MS, CLAUDE_MODEL, ClaudeBudgetError, ClaudeConfigurationError, ClaudeError, classifyEmails, type ClaudeBatchResult, type ClaudeEmail, type ClaudeItem } from './claude.ts';
+import { CLAUDE_CACHE_TTL_MS, ClaudeBudgetError, ClaudeConfigurationError, ClaudeError, classifyEmails, type ClaudeBatchResult, type ClaudeEmail, type ClaudeItem } from './claude.ts';
+import { classifyWithCodex, CodexError, CodexConfigurationError, type CodexBatchResult } from './codex.ts';
 import { readClassificationPrompt } from './classification-prompt.ts';
 import { modeCeiling, type Env, type ModeName } from './env.ts';
 import { applyFeedback, setCurrentLabels } from './feedback.ts';
@@ -355,12 +356,11 @@ async function prepareMail(ctx: MailContext, messageId: string, attempts: number
   return { read, gathered: await gather(read), priorPriority: priorPriority ?? null, recheck: recheckFallback || recheckInitial100, unread, attempts };
 }
 
-async function applyClaude(ctx: MailContext, prepared: PreparedMail, result: ClaudeItem, writeNow = true): Promise<MailOutcome> {
+async function applyClassification(ctx: MailContext, prepared: PreparedMail, result: ClaudeItem, provider: 'claude' | 'codex', model: string, writeNow = true): Promise<MailOutcome> {
   const { store } = ctx;
   const { read, gathered: g, priorPriority, recheck, unread } = prepared;
   const now = ctx.now();
   const labelId = result.bucket.toLowerCase();
-  const model = 'claude';
   // The outcome: a confident label is written to Gmail while live is in force with a write grant (the caps are the
   // gate's, right before the write: a write it refuses stays recorded, like any failed write), else only recorded.
   const labels = store.labels();
@@ -372,12 +372,12 @@ async function applyClaude(ctx: MailContext, prepared: PreparedMail, result: Cla
   const archive = label?.id !== P1_ID;
   const intent: { id: string | null } = { id: null };
   ctx.transact(() => {
-    // Only a validated Claude P1-P4 result reaches a recorded decision.
+    // Only a validated P1-P4 result reaches a recorded decision.
     const outcome = apply || unchangedPriority ? 'applied' : 'suggested';
-    recordDecision(store, read, g, now, { outcome, label: labelId, decider: model, model: CLAUDE_MODEL, reason: '', modelReason: mask(result.reason, 300) });
+    recordDecision(store, read, g, now, { outcome, label: labelId, decider: provider, model, reason: '', modelReason: mask(result.reason, 300) });
     store.addUsage(utcDay(now), 'decided', 1);
     if (unchangedPriority) setCurrentLabels(store, read.id, [label.id]);
-    else countFlow(store, now, stageOf(model), apply ? (archive ? 'archived' : 'kept_in_inbox') : 'suggested', labelId);
+    else countFlow(store, now, stageOf(provider), apply ? (archive ? 'archived' : 'kept_in_inbox') : 'suggested', labelId);
     if (apply) intent.id = intend(store, read.id, label, archive, 'auto', now, read.labelIds);
     if (unread && intent.id !== null) store.run(`UPDATE unread_batch SET ledger_id = ? WHERE message_id = ?`, intent.id, read.id);
     finishPending(store, read.id, unchangedPriority ? 'skipped' : 'failed');
@@ -395,7 +395,7 @@ async function applyClaude(ctx: MailContext, prepared: PreparedMail, result: Cla
 interface Recorded {
   readonly outcome: 'applied' | 'suggested' | 'unsure';
   readonly label: string | null;
-  readonly decider: 'claude' | 'none';
+  readonly decider: 'claude' | 'codex' | 'none';
   readonly model: string;
   readonly reason: string;
   readonly modelReason?: string;
@@ -438,6 +438,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
   const now = deps.now();
   const settings = readSettings(store);
   const mode = effectiveMode(settings, modeCeiling(deps.env));
+  const provider = settings.classificationProvider;
   const idle = now + ALARM_IDLE_MS;
   transact(() => {
     store.setMeta('last_alarm_at', String(now));
@@ -498,7 +499,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
     const nextModelAt = Number(store.getMeta('next_model_at') ?? '0');
     const month = utcDay(deps.now()).slice(0, 7);
     const providerLimited = store.getMeta('claude_limited_month') === month;
-    if (providerLimited || store.claudeUsage(month).cost_micros >= CLAUDE_MONTHLY_LIMIT_MICROS) {
+    if (provider === 'claude' && (providerLimited || store.claudeUsage(month).cost_micros >= CLAUDE_MONTHLY_LIMIT_MICROS)) {
       deferred = deferModel(store, nextUtcMonth(deps.now()), deps.now(), transact);
       code = 'claude_spend_limit';
     } else if (deps.now() >= nextModelAt) {
@@ -513,7 +514,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
         const prompt = readClassificationPrompt(store);
         const recentCache = Number(store.getMeta('claude_prompt_cache_at') ?? 0) > at - CLAUDE_CACHE_TTL_MS;
         const cachePrompt = store.count(`SELECT count(*) AS n FROM pending WHERE not_before <= ?`, at) > prepared.length || recentCache;
-        let answer: ClaudeBatchResult | null = null;
+        let answer: ClaudeBatchResult | CodexBatchResult | null = null;
         try {
           budget.left--;
           const emails: ClaudeEmail[] = prepared.map(({ read, gathered: g }) => ({
@@ -522,16 +523,26 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
             time_zone: 'America/Los_Angeles', body: Array.from(g.features.body).slice(0, 12000).join(''),
             body_truncated: read.bodyTruncated === true || Array.from(read.body).length > 12000,
           }));
-          answer = await classifyEmails(deps.env.ANTHROPIC_API_KEY ?? '', emails, deps.fetch, { basePrompt: prompt.baseText, personalRules: prompt.personalRules, cachePrompt });
-          const recorded = answer;
-          transact(() => {
-            store.addClaudeUsage(utcDay(at), recorded);
-            if (recorded.cacheWriteTokens + recorded.cacheReadTokens > 0) store.setMeta('claude_prompt_cache_at', String(at));
-            store.setMeta('claude_last_request_at', String(at));
-            store.deleteMeta('claude_error');
-          });
+          if (provider === 'codex') {
+            answer = await classifyWithCodex(deps.env, emails, deps.fetch, { basePrompt: prompt.baseText, personalRules: prompt.personalRules });
+            transact(() => {
+              store.setMeta('codex_last_request_at', String(at));
+              store.setMeta('codex_last_success_at', String(at));
+              store.deleteMeta('codex_error');
+            });
+          } else {
+            const recorded = await classifyEmails(deps.env.ANTHROPIC_API_KEY ?? '', emails, deps.fetch, { basePrompt: prompt.baseText, personalRules: prompt.personalRules, cachePrompt });
+            answer = recorded;
+            transact(() => {
+              store.addClaudeUsage(utcDay(at), recorded);
+              if (recorded.cacheWriteTokens + recorded.cacheReadTokens > 0) store.setMeta('claude_prompt_cache_at', String(at));
+              store.setMeta('claude_last_request_at', String(at));
+              store.setMeta('claude_last_success_at', String(at));
+              store.deleteMeta('claude_error');
+            });
+          }
         } catch (error) {
-          const errorCode = error instanceof ClaudeError ? error.code : 'claude_unexpected';
+          const errorCode = error instanceof ClaudeError || error instanceof CodexError ? error.code : `${provider}_unexpected`;
           transact(() => {
             if (error instanceof ClaudeError && error.usage !== undefined) {
               store.addClaudeUsage(utcDay(at), error.usage);
@@ -539,11 +550,11 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
               store.setMeta('claude_last_request_at', String(at));
             }
             store.pushError(errorCode);
-            store.setMeta('claude_error', errorCode);
+            store.setMeta(`${provider}_error`, errorCode);
             if (error instanceof ClaudeBudgetError) store.setMeta('claude_limited_month', month);
-            if (!(error instanceof ClaudeBudgetError) && !(error instanceof ClaudeConfigurationError)) {
+            if (!(error instanceof ClaudeBudgetError) && !(error instanceof ClaudeConfigurationError) && !(error instanceof CodexConfigurationError) && errorCode !== 'codex_quota') {
               for (const item of prepared) {
-                if (item.attempts + 1 >= (errorCode.startsWith('claude_bad_') || errorCode === 'claude_incomplete' ? BAD_ANSWER_ATTEMPTS_MAX : MAIL_ATTEMPTS_MAX)) {
+                if (item.attempts + 1 >= (/^(claude|codex)_bad_/.test(errorCode) || errorCode === 'claude_incomplete' || errorCode === 'codex_response_too_large' ? BAD_ANSWER_ATTEMPTS_MAX : MAIL_ATTEMPTS_MAX)) {
                   if (!item.recheck || store.decision(item.read.id) === undefined) {
                     recordDecision(store, item.read, item.gathered, at, { outcome: 'unsure', label: null, decider: 'none', model: '', reason: 'model_unavailable' });
                     store.addUsage(utcDay(at), 'decided', 1);
@@ -557,13 +568,14 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
             }
           });
           if (error instanceof ClaudeBudgetError) deferred = deferModel(store, nextUtcMonth(at), at, transact);
+          else if (errorCode === 'codex_quota') deferred = deferModel(store, at + HOUR, at, transact);
           code = errorCode;
         }
         let stopped = false;
         if (answer !== null) for (const item of answer.items) {
           const original = prepared.find(value => value.read.id === item.id);
           if (original === undefined) continue;
-          const outcome = await applyClaude(ctx, original, item, !stopped);
+          const outcome = await applyClassification(ctx, original, item, provider, answer.model, !stopped);
           decided++;
           if (outcome === 'stop') { stopped = true; code = 'gmail_stopped'; }
         }

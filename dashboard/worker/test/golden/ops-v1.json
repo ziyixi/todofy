@@ -248,6 +248,29 @@
       "guard"
     ]
   },
+  "read/OpsStatus/codex-gateway-ok.json": {
+    "version": "ops-v1",
+    "app": "codex-gateway",
+    "generated_at": "2026-10-01T14:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "heartbeat_age_seconds": 0
+    },
+    "last_backup_at": null,
+    "ui_url": "https://fleet.example.com/",
+    "capabilities": []
+  },
   "read/OpsStatus/fleet-ok.json": {
     "version": "ops-v1",
     "app": "fleet",

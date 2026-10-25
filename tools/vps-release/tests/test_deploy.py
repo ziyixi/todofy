@@ -102,6 +102,78 @@ class Clock:
 
 
 class ActionDeployment(unittest.TestCase):
+    def test_gateway_only_release_uses_a_distinct_identity_and_accepts_other_workloads(
+        self,
+    ):
+        gateway_id = release_id(SHA, gateway_only=True)
+        self.assertNotEqual(gateway_id, IDENTITY)
+        target = replace(
+            TARGETS[0], workload_key="codex-gateway", request_id=gateway_id
+        )
+        status = replace(
+            node().workloads[0],
+            name="workloads/codex-gateway",
+            workload_key="codex-gateway",
+            admission_state="unsupported",
+            release=replace(
+                node().workloads[0].release,
+                desired=replace(target, generation=3),
+                actual=replace(target, generation=3),
+            ),
+        )
+        response = replace(
+            release(),
+            name="releases/" + gateway_id,
+            request_id=gateway_id,
+            targets=(target,),
+        )
+        snapshot = replace(
+            node(),
+            workloads=(status, *node().workloads),
+            current_release=replace(
+                node().current_release, name=response.name, request_id=gateway_id
+            ),
+        )
+        requests = []
+
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json=to_wire(
+                    snapshot if request.url.path.endswith("nodeStatus") else response
+                ),
+            )
+
+        client = self.client(handler)
+        self.assertEqual(
+            client.execute(SHA, {"codex-gateway": target.image_digest}), response
+        )
+        body = json.loads(requests[0].content)
+        self.assertEqual(body["targets"], [to_wire(target)])
+        self.assertTrue(verified_snapshot(snapshot, (target,), response.name, NOW))
+        self.assertTrue(
+            verified_snapshot(
+                replace(snapshot, state="unknown"), (target,), response.name, NOW
+            )
+        )
+        forged = replace(
+            status,
+            release=replace(
+                status.release,
+                actual=replace(target, image_digest="sha256:" + "f" * 64, generation=3),
+            ),
+        )
+        self.assertFalse(
+            verified_snapshot(
+                replace(snapshot, workloads=(forged, *node().workloads)),
+                (target,),
+                response.name,
+                NOW,
+            )
+        )
+        self.assertEqual(client.execute(SHA, resume=True, gateway_only=True), response)
+
     def client(self, handler, *, clock=None):
         transport = Transport(
             "platform-runtime.example.test",

@@ -27,6 +27,11 @@ uv run --project platform --frozen python tools/vps-release/deploy.py \
 ```
 
 Both repositories must belong to the configured owner; mutable tags and partial digests are refused.
+The independent gateway uses `--codex-gateway-image ghcr.io/OWNER/todofy-codex-gateway@sha256:FULL_DIGEST`
+in place of the paired image arguments. Its creation identity is distinct from a pair release at the
+same SHA; it preserves Newsletter admission and schedule state. Status verification accepts additional
+configured workloads while requiring exact physical identities for every selected target. To resume a
+held gateway operation with the client, pass `--resume --gateway-only` and its original source SHA.
 The same SHA derives the same release/request UUID4. A transport retry repeats the identical frozen body.
 Changing images under that existing identity is a conflict, not an excuse to silently create a new release.
 The daemon acknowledges persistence first; the client polls the exact resource. Success additionally

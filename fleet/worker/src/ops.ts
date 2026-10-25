@@ -17,3 +17,10 @@ export class NewsletterOps extends WorkerEntrypoint<Env> {
   }
   setGuard(): never { throw new Error('invalid_input'); }
 }
+
+export class CodexGatewayOps extends WorkerEntrypoint<Env> {
+  async status(): Promise<ops.OpsStatus> {
+    return this.env.FLEET.get(this.env.FLEET.idFromName(OBJECT_NAME)).status('codex-gateway', Date.now());
+  }
+  setGuard(): never { throw new Error('invalid_input'); }
+}

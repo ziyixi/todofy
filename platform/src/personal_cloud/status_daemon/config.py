@@ -76,6 +76,7 @@ def workloads(text: str) -> tuple[Workload, ...]:
         if not isinstance(value["adapter"], str) or value["adapter"] not in {
             "newsletter",
             "personal-cloud",
+            "codex-gateway",
             "deployment",
         }:
             raise ValueError("invalid_configuration")

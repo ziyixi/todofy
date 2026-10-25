@@ -63,6 +63,8 @@ def expect(
     tasks_deploy=False,
     personal_mcp_check=False,
     personal_mcp_deploy=False,
+    codex_gateway_check=False,
+    codex_gateway_deploy=False,
 ):
     # The bootstrap mask (ci_changes.outputs): an app in CHECK_ONLY never deploys, and neither does Home while an app it
     # binds is one. Mailsort was CHECK_ONLY until its Access application existed (mailsort/docs/design.md §12), recall
@@ -88,6 +90,7 @@ def expect(
         "links_check": links_check,
         "watch_check": watch_check,
         "newsletter_check": newsletter_check,
+        "codex_gateway_check": codex_gateway_check,
         "fleet_check": fleet_check,
         "platform_check": platform_check,
         "mailsort_check": mailsort_check,
@@ -105,6 +108,7 @@ def expect(
         "links_deploy": links_deploy,
         "watch_deploy": watch_deploy,
         "newsletter_deploy": newsletter_deploy,
+        "codex_gateway_deploy": codex_gateway_deploy,
         "fleet_deploy": fleet_deploy,
         "platform_publish": platform_publish,
         "platform_deploy": platform_deploy,
@@ -122,7 +126,7 @@ def expect(
 # Every app checked (a contracts/ or .github/ change, the links app and the watch app included); the dashboard
 # checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero plus
 # EDGE_AUTH; every app with the website Worker (the relay Worker is added where a test expects it).
-ALL_CHECKED = {"dashboard_check": True, "website_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "brief_check": True, "tasks_check": True, "personal_mcp_check": True}
+ALL_CHECKED = {"dashboard_check": True, "website_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "codex_gateway_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "brief_check": True, "tasks_check": True, "personal_mcp_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 LINKS = {"links_check": True, "links_deploy": True}
 WATCH = {"watch_check": True, "watch_deploy": True}
@@ -130,7 +134,8 @@ FLEET = {"fleet_check": True, "fleet_deploy": True}
 MAILSORT = {"mailsort_check": True, "mailsort_deploy": True}
 RECALL = {"recall_check": True, "recall_deploy": True}
 BRIEF = {"brief_check": True, "brief_deploy": True}
-PLATFORM = {"platform_check": True, "platform_publish": True, "platform_deploy": True}
+CODEX_GATEWAY = {"codex_gateway_check": True, "codex_gateway_deploy": True}
+PLATFORM = {"platform_check": True, "platform_publish": True, "platform_deploy": True, **CODEX_GATEWAY}
 VPS = {**PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 ALL = {**DASH}
 # Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, the links app, the watch
@@ -233,6 +238,34 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(["todofy/app.toml"]), expect(T, F, T, F, F))
         self.assertFalse(push(["proto/todofy/ui/v1/owner.proto"])["newsletter_deploy"])
 
+    def test_codex_gateway_production_inputs_release_only_the_gateway(self):
+        for path in (
+            "codex-gateway/src/codex_gateway/server.py",
+            "codex-gateway/src/codex_gateway/test_fixture.py",
+            "codex-gateway/pyproject.toml",
+            "codex-gateway/uv.lock",
+            "codex-gateway/Dockerfile",
+            "codex-gateway/.dockerignore",
+        ):
+            with self.subTest(path=path):
+                expected = expect(F, F, T, F, F, **CODEX_GATEWAY)
+                self.assertEqual(push([path]), expected)
+                self.assertEqual(push([path], ref=BRANCH), expected)
+                self.assertEqual(push(["codex-gateway/tests/test_server.py", path]), expected)
+        self.assertEqual(push(["codex-gateway-notes.md"]), expect(F, F, F, F, F))
+
+    def test_codex_gateway_docs_tests_and_catalog_metadata_check_without_publication(self):
+        for path in ("codex-gateway/README.md", "codex-gateway/docs/operations.md", "codex-gateway/tests/test_server.py", "codex-gateway/app.toml"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, T, F, F, codex_gateway_check=T))
+
+    def test_codex_inference_proto_reaches_only_gateway_and_mailsort_bundles(self):
+        result = push(["proto/codex/inference/v1/inference.proto"])
+        self.assertTrue(result["proto"])
+        self.assertEqual({app for app in ci_changes.APPS if result[f"{ci_changes.PREFIX[app]}_check"]}, set(ci_changes.PROTO_USERS))
+        self.assertEqual({key for key, value in result.items() if value and key.endswith(("_deploy", "_publish"))}, {"codex_gateway_deploy", "mailsort_deploy"})
+        self.assertEqual(ci_changes.dispatched("codex-gateway"), expect(F, F, T, F, F, packages=T, proto=T, **CODEX_GATEWAY))
+
     def test_platform_release_changes_publish_its_independent_tested_image(self):
         for path in ("platform/src/personal_cloud/deployment/controller.py", "platform/src/personal_cloud/status_daemon/reader.py", "platform/k3s/newsletter.yaml"):
             with self.subTest(path=path):
@@ -243,7 +276,7 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(["platform/app.toml"]), expect(F, F, T, F, F, platform_check=T))
         self.assertEqual(push(["platform-notes.md"]), expect(F, F, F, F, F))
 
-    def test_vps_build_and_release_tools_publish_both_same_sha_images_but_documents_do_not(self):
+    def test_vps_build_and_release_tools_publish_all_three_same_sha_images_but_documents_do_not(self):
         for directory in ("tools/container-release/", "tools/platform-build/", "tools/vps-release/"):
             with self.subTest(directory=directory):
                 executable = push([directory + "build.py"])
@@ -252,12 +285,16 @@ class Classify(unittest.TestCase):
                 self.assertTrue(executable["platform_check"])
                 self.assertTrue(executable["platform_publish"])
                 self.assertTrue(executable["platform_deploy"])
+                self.assertTrue(executable["codex_gateway_check"])
+                self.assertTrue(executable["codex_gateway_deploy"])
                 documentation = push([directory + "README.md"])
                 self.assertTrue(documentation["newsletter_check"])
                 self.assertTrue(documentation["platform_check"])
                 self.assertFalse(documentation["newsletter_deploy"])
                 self.assertFalse(documentation["platform_publish"])
                 self.assertFalse(documentation["platform_deploy"])
+                self.assertTrue(documentation["codex_gateway_check"])
+                self.assertFalse(documentation["codex_gateway_deploy"])
 
     def test_one_app_checks_and_deploys_only_itself_plus_contracts(self):
         self.assertEqual(push(["todofy/worker/todofy/core/render.py"]), expect(T, F, T, T, F))
@@ -477,7 +514,7 @@ class Classify(unittest.TestCase):
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside the Workers that import them, so a change must redeploy each."""
-        bundled = expect(T, T, T, F, T, **ALL, website_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, **BRIEF, proto=T, tasks_check=T, personal_mcp_check=T)
+        bundled = expect(T, T, T, F, T, **ALL, website_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, **BRIEF, proto=T, tasks_check=T, personal_mcp_check=T, codex_gateway_check=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
         self.assertEqual(
             push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), {**bundled, "todofy_deploy": True}
@@ -497,6 +534,7 @@ class Classify(unittest.TestCase):
             "newsletter": [REPO / "newsletter" / "src"],
             "fleet": [REPO / "fleet" / "worker" / "src", REPO / "fleet" / "web" / "src"],
             "platform": [REPO / "platform" / "src"],
+            "codex-gateway": [REPO / "codex-gateway" / "src"],
             "mailsort": [REPO / "mailsort" / "worker" / "src", REPO / "mailsort" / "web" / "src"],
             "recall": [REPO / "recall" / "worker" / "src", REPO / "recall" / "web" / "src", REPO / "recall" / "shared"],
             "brief": [REPO / "brief" / "worker" / "src", REPO / "brief" / "web" / "src"],
@@ -567,6 +605,7 @@ class Classify(unittest.TestCase):
                 "watch": ("ts",),
                 "fleet": ("ts",),
                 "platform": ("python",),
+                "codex-gateway": ("python",),
                 "website": ("ts",),
                 "mailsort": ("ts",),
                 "recall": ("ts",),
@@ -577,7 +616,7 @@ class Classify(unittest.TestCase):
         )
         # Todofy is both: todofy-core vendors the Python package, its gateway and UI bundle the TypeScript
         # (todofy.ui.v1).
-        ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"}, {"todofy", "platform"}
+        ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"}, {"todofy", "platform", "codex-gateway"}
         every, none = ts | python, set()
         cases = {
             # recommendation-v1 and summary-v1: todofy-core builds the reports, Todofy's gateway and UI read them in
@@ -599,6 +638,8 @@ class Classify(unittest.TestCase):
             "proto/website/sync/v1/sync.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"},
             # mailsort's owner API: its Worker serves it, its UI calls it.
             "proto/mailsort/ui/v2/mailsort_ui_service.proto": {"mailsort"},
+            # Only the gateway serves this inference API and Mailsort calls it.
+            "proto/codex/inference/v1/inference.proto": {"codex-gateway", "mailsort"},
             # recall's owner API, the extension's upload and the archive feed: its Worker serves all three.
             "proto/recall/ui/v1/recall_ui_service.proto": {"recall", "personal-mcp"},
             "proto/recall/ingest/v1/ingest.proto": {"recall", "personal-mcp"},
@@ -625,7 +666,7 @@ class Classify(unittest.TestCase):
             "proto/ts/rpc-status.ts": ts,
             "proto/ts/package.json": ts,
             "proto/buf.gen.yaml": ts,
-            # The Python runtime and generator: only todofy-core vendors the wheel.
+            # The Python runtime and generator reach every production Python user.
             "proto/python/src/ziyixi_proto/wire_json.py": python,
             "proto/python/build_backend.py": python,
             "proto/python/pyproject.toml": python,
@@ -687,6 +728,8 @@ class Classify(unittest.TestCase):
                 platform_deploy="platform" in deployed,
                 newsletter_check="platform" in deployed,
                 newsletter_deploy="platform" in deployed,
+                codex_gateway_check=T,
+                codex_gateway_deploy=bool(deployed & {"codex-gateway", "platform"}),
                 mailsort_check=T,
                 mailsort_deploy="mailsort" in deployed,
                 recall_check=T,
@@ -714,6 +757,7 @@ class Classify(unittest.TestCase):
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/ui/v1/fleet_ui_service.proto"), {"fleet"})
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/telemetry/v1/host_report.proto"), {"fleet", "platform"})
         self.assertEqual(ci_changes.proto_deploys("proto/mailhero/ui/v2/message.proto"), {"mail-hero"})
+        self.assertEqual(ci_changes.proto_deploys("proto/codex/inference/v1/inference.proto"), {"codex-gateway", "mailsort"})
 
     def test_deleting_a_retired_package_deploys_nothing(self):
         """A package proto/retired.json lists is gone with its importers' use of it: its deletion checks every user and
@@ -775,10 +819,10 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
 
-    def test_image_promotion_tool_changes_require_both_tested_publications(self):
+    def test_image_promotion_tool_changes_require_all_three_tested_publications(self):
         for path in ("tools/container-release/image.py", "tools/container-release/test_image.py"):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED, newsletter_deploy=T, platform_publish=T, platform_deploy=T))
+                self.assertEqual(push([path]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED, newsletter_deploy=T, platform_publish=T, platform_deploy=T, codex_gateway_deploy=T))
         self.assertEqual(push(["tools/container-release/README.md"]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
 
     def test_a_shared_package_checks_and_deploys_every_app_that_compiles_it_in(self):
@@ -822,7 +866,7 @@ class Classify(unittest.TestCase):
         ]
         self.assertEqual(
             push(paths),
-            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T, personal_mcp_check=T),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T, personal_mcp_check=T, codex_gateway_check=T),
         )
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
@@ -1122,6 +1166,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false", tasks_check="false", tasks_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false", personal_mcp_check="false", personal_mcp_deploy="false")
+        expected.update(codex_gateway_check="false", codex_gateway_deploy="false")
         expected.update(links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false", fleet_check="false", fleet_deploy="false", platform_check="false", platform_publish="false", platform_deploy="false", mailsort_check="false", mailsort_deploy="false", recall_check="false", recall_deploy="false", recall_extension_publish="false", brief_check="false", brief_deploy="false")
         self.assertEqual(outputs, expected)
 
@@ -1130,7 +1175,7 @@ class RealGit(unittest.TestCase):
         self.commit("packages/edge-auth/src/access.ts")
         after = self.commit("README.md.orig")
         outputs = self.main_run(after, green)
-        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy", "platform_check", "platform_publish", "platform_deploy", "recall_extension_publish"}
+        unaffected = {"website_check", "website_deploy", "website_relay_deploy", "newsletter_check", "newsletter_deploy", "platform_check", "platform_publish", "platform_deploy", "recall_extension_publish", "codex_gateway_check", "codex_gateway_deploy"}
         # An app that compiles edge-auth in but is CHECK_ONLY does not deploy (none now), nor Home while it binds one.
         bootstrap = {f"{ci_changes.PREFIX[app]}_deploy" for app in ci_changes.CHECK_ONLY & set(ci_changes.PACKAGE_USERS["edge-auth"])}
         if ci_changes.HOME_BOUND & ci_changes.CHECK_ONLY:
@@ -1345,6 +1390,8 @@ class DeployConditions(unittest.TestCase):
     # which do not run when nothing of that app changed.
     SKIPPED_OK = {
         ("vps-deploy", "fleet-deploy"),
+        ("codex-gateway-deploy", "fleet-deploy"),
+        ("codex-gateway-deploy", "vps-deploy"),
         ("dashboard-deploy", "todofy-deploy"),
         ("dashboard-deploy", "mail-hero-deploy"),
         ("dashboard-deploy", "watch-deploy"),
@@ -1378,6 +1425,7 @@ class DeployConditions(unittest.TestCase):
         "watch-checks",
         "newsletter-checks",
         "newsletter-image",
+        "codex-gateway-checks",
         "fleet-checks",
         "platform-checks",
         "mailsort-checks",
@@ -1412,6 +1460,8 @@ class DeployConditions(unittest.TestCase):
                 "tasks-deploy",
                 "watch-deploy",
                 "newsletter-deploy",
+                "codex-gateway-image",
+                "codex-gateway-deploy",
                 "fleet-deploy",
                 "mailsort-deploy",
                 "recall-deploy",
@@ -1441,7 +1491,7 @@ class DeployConditions(unittest.TestCase):
                         self.assertEqual(condition.count(f"needs.{need}.result == 'skipped'"), 1)
                     else:
                         self.assertIn(f"needs.{need}.result == 'success'", condition)
-                        if name == "vps-deploy" and need in {"newsletter-deploy", "platform-image", "vps-bootstrap-bundle"}:
+                        if name == "vps-deploy" and need in {"newsletter-deploy", "codex-gateway-image", "platform-image", "vps-bootstrap-bundle"}:
                             self.assertIn(f"needs.{need}.result == 'skipped'", condition)
                             self.assertIn("github.event_name == 'workflow_dispatch' && inputs.resume_vps_release", condition)
                             self.assertIn("!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)", condition)
@@ -1452,14 +1502,15 @@ class DeployConditions(unittest.TestCase):
     def test_resume_skips_build_artifacts_and_publication_but_keeps_source_checks(self):
         jobs = self.jobs()
         guard = "!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)"
-        for name in ("newsletter-image", "newsletter-deploy", "platform-image"):
+        for name in ("newsletter-image", "newsletter-deploy", "codex-gateway-image", "platform-image"):
             with self.subTest(job=name):
                 self.assertIn(guard, self.condition(jobs[name]))
         platform = jobs["platform-checks"]
         self.assertEqual(platform.count("if: ${{ " + guard + " }}"), 2)
         self.assertIn("pytest platform/tests tools/platform-build/tests tools/vps-release/tests", platform)
         release = jobs["vps-deploy"]
-        self.assertIn('if [ "$RESUME_RELEASE" = true ]; then\n            args+=(--resume)\n          else', release)
+        self.assertIn('if [ "$RESUME_RELEASE" = true ]; then\n            args+=(--resume)\n          elif [ -n "$CODEX_GATEWAY_IMAGE" ]; then', release)
+        self.assertIn('args+=(--codex-gateway-image "$CODEX_GATEWAY_IMAGE")', release)
         self.assertIn('args+=(--newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE")', release)
         self.assertIn("RELEASE_SOURCE_SHA: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}", release)
         self.assertIn('--source-sha "$RELEASE_SOURCE_SHA" --evidence-file "$RUNNER_TEMP/vps-release-evidence.json" "${args[@]}"', release)
@@ -1506,6 +1557,8 @@ class DeployConditions(unittest.TestCase):
                 "tasks-deploy": "tasks-production",
                 "watch-deploy": "watch-production",
                 "newsletter-deploy": "newsletter-production",
+                "codex-gateway-image": "codex-gateway-image-production",
+                "codex-gateway-deploy": "vps-production",
                 "fleet-deploy": "fleet-production",
                 "mailsort-deploy": "mailsort-production",
                 "recall-deploy": "recall-production",
@@ -1527,6 +1580,8 @@ class DeployConditions(unittest.TestCase):
             ("links-deploy", "links-checks", "links_deploy"),
             ("watch-deploy", "watch-checks", "watch_deploy"),
             ("newsletter-deploy", "newsletter-checks", "newsletter_deploy"),
+            ("codex-gateway-image", "codex-gateway-checks", "codex_gateway_deploy"),
+            ("codex-gateway-deploy", "codex-gateway-image", "codex_gateway_deploy"),
             ("fleet-deploy", "fleet-checks", "fleet_deploy"),
             ("mailsort-deploy", "mailsort-checks", "mailsort_deploy"),
             ("recall-deploy", "recall-checks", "recall_deploy"),
@@ -1539,6 +1594,40 @@ class DeployConditions(unittest.TestCase):
             with self.subTest(job=job):
                 self.assertIn(f"needs.{checks}.result == 'success'", condition)
                 self.assertIn(f"needs.changes.outputs.{flag} == 'true'", condition)
+
+    def test_codex_gateway_checks_and_publication_use_the_same_credential_free_artifact(self):
+        blocks = self.jobs()
+        checks = blocks["codex-gateway-checks"]
+        self.assertNotIn("${{ secrets.", checks)
+        self.assertNotIn("environment:", checks)
+        self.assertNotIn("packages: write", checks)
+        self.assertIn("uses: ./.github/actions/check-codex-gateway", checks)
+        action = (REPO / ".github/actions/check-codex-gateway/action.yml").read_text()
+        self.assertNotIn("${{ secrets.", action)
+        checks += action
+        self.assertIn("python -m unittest discover -s codex-gateway/tests -v", checks)
+        self.assertIn("docker run --rm --network none", checks)
+        self.assertIn("name: codex-gateway-image-${{ github.sha }}", checks)
+        self.assertIn("if-no-files-found: error", checks)
+        publish = blocks["codex-gateway-image"]
+        self.assertIn("name: codex-gateway-image-${{ github.sha }}", publish)
+        self.assertIn("run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}", publish)
+        self.assertIn('image.py publish --service codex-gateway --sha "$GITHUB_SHA"', publish)
+        self.assertNotIn("docker build", publish)
+
+    def test_codex_gateway_deploy_keeps_other_services_out_of_its_release(self):
+        blocks = self.jobs()
+        deploy = blocks["codex-gateway-deploy"]
+        self.assertIn("needs.codex-gateway-image.result == 'success'", self.condition(deploy))
+        self.assertIn("vars.VPS_DEPLOY_ENABLED == 'true'", self.condition(deploy))
+        self.assertIn("NEWSLETTER_IMAGE: ''", deploy)
+        self.assertIn("PLATFORM_IMAGE: ''", deploy)
+        self.assertIn("CODEX_GATEWAY_IMAGE: ${{ needs.codex-gateway-image.outputs.image }}", deploy)
+        self.assertIn("RESUME_RELEASE: 'false'", deploy)
+        bundle = blocks["vps-bootstrap-bundle"]
+        self.assertIn("needs.codex-gateway-image.result == 'success'", self.condition(bundle))
+        self.assertIn("--codex-gateway-image", bundle)
+        self.assertIn("${{ needs.codex-gateway-image.outputs.image }}", bundle)
 
     def test_the_gate_always_runs(self):
         self.assertEqual(self.condition(self.jobs()["gate"]), "always()")
@@ -2646,7 +2735,7 @@ def fake_github(runs, jobs_by_run, artifacts_by_run=None):
             return {"total_count": len(jobs), "jobs": jobs}
         match = re.fullmatch(rf"/repos/{re.escape(REPOSITORY)}/actions/runs/(\d+)/artifacts\?per_page=100", path)
         if match:
-            artifacts = (artifacts_by_run or {}).get(int(match.group(1)), [{"name": f"{prefix}-{SHA}", "expired": False} for prefix in ("newsletter-image", "platform-image", "recall-extension", "recall-orion")])
+            artifacts = (artifacts_by_run or {}).get(int(match.group(1)), [{"name": f"{prefix}-{SHA}", "expired": False} for prefix in ("newsletter-image", "platform-image", "codex-gateway-image", "recall-extension", "recall-orion")])
             return {"artifacts": artifacts}
         raise AssertionError(f"unexpected read {path}")
 
@@ -2756,7 +2845,7 @@ class Reuse(unittest.TestCase):
                                   ([{"name": "newsletter-image-other", "expired": False}], False),
                                   ([{"name": f"newsletter-image-{SHA}", "expired": False}], True)):
             with self.subTest(artifacts=artifacts):
-                get = fake_github([branch_run()], {800: green_jobs("Newsletter checks", "Newsletter image checks", "Platform checks", "Contracts")}, {800: [*artifacts, {"name": f"platform-image-{SHA}", "expired": False}]})
+                get = fake_github([branch_run()], {800: green_jobs("Newsletter checks", "Newsletter image checks", "Platform checks", "Codex gateway checks", "Contracts")}, {800: [*artifacts, {"name": f"platform-image-{SHA}", "expired": False}, {"name": f"codex-gateway-image-{SHA}", "expired": False}]})
                 result, extra, _ = ci_changes.try_reuse("push", MAIN, SHA, needed, ENV, get)
                 self.assertEqual(extra["checks_reused"], str(reused).lower())
                 self.assertEqual(result["newsletter_check"], not reused)
@@ -2767,12 +2856,32 @@ class Reuse(unittest.TestCase):
         needed = push(["platform/src/personal_cloud/status_daemon/server.py"])
         for artifacts, reused in (([], False), ([{"name": f"platform-image-{SHA}", "expired": True}], False), ([{"name": "platform-image-other", "expired": False}], False), ([{"name": f"platform-image-{SHA}", "expired": False}], True)):
             with self.subTest(artifacts=artifacts):
-                get = fake_github([branch_run()], {800: green_jobs("Newsletter checks", "Newsletter image checks", "Platform checks", "Contracts")}, {800: [*artifacts, {"name": f"newsletter-image-{SHA}", "expired": False}]})
+                get = fake_github([branch_run()], {800: green_jobs("Newsletter checks", "Newsletter image checks", "Platform checks", "Codex gateway checks", "Contracts")}, {800: [*artifacts, {"name": f"newsletter-image-{SHA}", "expired": False}, {"name": f"codex-gateway-image-{SHA}", "expired": False}]})
                 result, extra, _ = ci_changes.try_reuse("push", MAIN, SHA, needed, ENV, get)
                 self.assertEqual(extra["checks_reused"], str(reused).lower())
                 self.assertEqual(result["platform_check"], not reused)
                 self.assertTrue(result["platform_publish"])
                 self.assertTrue(result["platform_deploy"])
+
+    def test_codex_gateway_reuse_requires_its_green_check_and_live_same_sha_image(self):
+        needed = push(["codex-gateway/src/codex_gateway/server.py"])
+        for artifacts, reused in (
+            ([], False),
+            ([{"name": f"codex-gateway-image-{SHA}", "expired": True}], False),
+            ([{"name": "codex-gateway-image-other", "expired": False}], False),
+            ([{"name": f"codex-gateway-image-{SHA}", "expired": False}], True),
+        ):
+            with self.subTest(artifacts=artifacts):
+                get = fake_github([branch_run()], {800: green_jobs("Codex gateway checks", "Contracts")}, {800: artifacts})
+                result, extra, _ = ci_changes.try_reuse("push", MAIN, SHA, needed, ENV, get)
+                self.assertEqual(extra["checks_reused"], str(reused).lower())
+                self.assertEqual(result["codex_gateway_check"], not reused)
+                self.assertEqual({key for key, value in result.items() if value and key.endswith(("_deploy", "_publish"))}, {"codex_gateway_deploy"})
+        for check in (None, job("Codex gateway checks", "skipped"), job("Codex gateway checks", "failure"), job("Codex gateway checks", None, "in_progress")):
+            with self.subTest(check=check):
+                jobs = green_jobs("Contracts") + ([check] if check else [])
+                result, extra, _ = self.reuse(needed, [branch_run()], {800: jobs})
+                self.assertEqual((result, extra["checks_reused"]), (needed, "false"))
 
     def test_extension_reuse_requires_the_live_same_sha_build_artifact(self):
         needed = push(["recall/extension/src/sw.ts"])
@@ -2810,6 +2919,7 @@ class Reuse(unittest.TestCase):
             "Platform checks",
             "Newsletter checks",
             "Newsletter image checks",
+            "Codex gateway checks",
             "Contracts",
             "Shared packages",
             "Infra checks",

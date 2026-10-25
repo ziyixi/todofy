@@ -15,11 +15,13 @@ class ExportFailed(RuntimeError):
     """The export failed without revealing credentials."""
 
 
-def encrypted_export(session, env: dict[str, str], fetch, directory: Path) -> None:
+def encrypted_export(session, env: dict[str, str], fetch, directory: Path, *, output_name="platform_bootstrap") -> None:
     """Read only the managed bootstrap output and this tunnel's connector token."""
     certificate = env.get("VPS_BOOTSTRAP_CERT", "")
     if not certificate:
         return
+    if output_name not in {"platform_bootstrap", "codex_gateway_bootstrap"}:
+        raise ExportFailed("Invalid bootstrap output selection")
     if (
         len(certificate) > 8192
         or not certificate.startswith("-----BEGIN CERTIFICATE-----\n")
@@ -27,7 +29,7 @@ def encrypted_export(session, env: dict[str, str], fetch, directory: Path) -> No
     ):
         raise ExportFailed("Invalid bootstrap recipient")
     result = subprocess.run(
-        [session.tofu.binary, "output", "-json", "platform_bootstrap"],
+        [session.tofu.binary, "output", "-json", output_name],
         cwd=directory,
         env=session.tofu.env,
         capture_output=True,
@@ -38,25 +40,32 @@ def encrypted_export(session, env: dict[str, str], fetch, directory: Path) -> No
         raise ExportFailed("Bootstrap output unavailable")
     try:
         value = json.loads(result.stdout)
-        if set(value) != {"client_id", "client_secret", "tunnel_id"}:
+        expected = {"client_id", "client_secret", "tunnel_id"} if output_name == "platform_bootstrap" else {"client_id", "client_secret", "app_id", "audience"}
+        if set(value) != expected:
             raise ValueError
-        if not re.fullmatch(r"[0-9a-f-]{36}", value["tunnel_id"]):
+        identifier = value["tunnel_id"] if output_name == "platform_bootstrap" else value["app_id"]
+        if not isinstance(identifier, str) or not re.fullmatch(r"[0-9a-f-]{36}", identifier):
+            raise ValueError
+        if output_name == "codex_gateway_bootstrap" and (not isinstance(value["audience"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", value["audience"])):
             raise ValueError
         for name in ("client_id", "client_secret"):
             if not isinstance(value[name], str) or not re.fullmatch(r"[\x21-\x7e]{24,512}", value[name]):
                 raise ValueError
     except (TypeError, ValueError, KeyError):
         raise ExportFailed("Invalid bootstrap output") from None
-    account = session.values["account_id"]
-    connector = fetch(f"/accounts/{account}/cfd_tunnel/{value['tunnel_id']}/token")
-    if not isinstance(connector, str) or not re.fullmatch(r"[A-Za-z0-9+/=_-]{32,2048}", connector):
-        raise ExportFailed("Tunnel connector credential unavailable")
-    value["connector_token"] = connector
+    if output_name == "platform_bootstrap":
+        account = session.values["account_id"]
+        connector = fetch(f"/accounts/{account}/cfd_tunnel/{value['tunnel_id']}/token")
+        if not isinstance(connector, str) or not re.fullmatch(r"[A-Za-z0-9+/=_-]{32,2048}", connector):
+            raise ExportFailed("Tunnel connector credential unavailable")
+        value["connector_token"] = connector
     value["version"] = 1
     cert_path = session.work / "bootstrap-recipient.pem"
     cert_path.write_text(certificate)
     cert_path.chmod(0o600)
-    target = Path(env["RUNNER_TEMP"]) / "platform-bootstrap.cms"
+    target_name = "platform-bootstrap.cms" if output_name == "platform_bootstrap" else "codex-gateway-bootstrap.cms"
+    target = Path(env["RUNNER_TEMP"]) / target_name
     encrypted = subprocess.run(
         ["openssl", "cms", "-encrypt", "-aes-256-gcm", "-binary", "-outform", "DER",
          "-recip", str(cert_path), "-keyopt", "rsa_padding_mode:oaep", "-keyopt", "rsa_oaep_md:sha256"],

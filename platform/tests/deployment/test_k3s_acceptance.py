@@ -10,11 +10,37 @@ from personal_cloud.deployment.kubernetes import Client, DependencyUnavailable
 from personal_cloud.deployment.reconcile import declared_view
 from personal_cloud.deployment.resources import Renderer
 
+from .test_codex_gateway import CONFIGURATION, TARGET
 from .test_release import CONFIG, IDENTITY, TARGETS, asset
 
 
 @unittest.skipUnless(os.environ.get("K3S_ACCEPTANCE_DIR"), "isolated k3s only")
 class K3sAcceptance(unittest.TestCase):
+    def test_gateway_resources_apply_with_the_existing_namespace_controller(self):
+        directory = Path(os.environ["K3S_ACCEPTANCE_DIR"])
+        kube = Client(
+            CONFIG.namespace,
+            origin="https://127.0.0.1:6443",
+            token_file=str(directory / "token"),
+            ca_file=str(directory / "ca.crt"),
+        )
+        self.addCleanup(kube.close)
+        resources = Renderer(CONFIGURATION, asset=asset()).render(
+            (TARGET,), TARGET.request_id
+        )
+        self.assertEqual(len(resources), 3)
+        for desired in resources:
+            kube.apply(desired)
+            actual = kube.get(desired["kind"], desired["metadata"]["name"])
+            self.assertEqual(declared_view(actual, desired), desired)
+            self.assertEqual(declared_view(kube.dry_run(desired), desired), desired)
+        deployment = kube.get("Deployment", "codex-gateway")
+        pod = deployment["spec"]["template"]["spec"]
+        self.assertFalse(pod["automountServiceAccountToken"])
+        self.assertEqual(
+            pod["volumes"][0]["persistentVolumeClaim"]["claimName"], "newsletter-auth"
+        )
+
     def test_real_ssa_restore_noop_conflict_and_persistent_objects(self):
         directory = Path(os.environ["K3S_ACCEPTANCE_DIR"])
         admin = config.new_client_from_config(str(directory / "kubeconfig"))

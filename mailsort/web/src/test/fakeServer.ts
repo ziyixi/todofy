@@ -120,6 +120,7 @@ export class FakeServer {
   /** Fields of GetServiceStatus that a test sets (the rest as below; review_count counts the pending items). */
   status: Partial<ServiceStatus> = {}
   settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, etag: 's1' })
+  settingsSaveFails = false
   classificationPrompt = create(ClassificationPromptSchema, { name: 'classificationPrompt', baseText: '按 P1、P2、P3、P4 判断合成邮件。', personalRules: '合成个人规则。', etag: 'initial' })
   promptReadFails = false
   promptSaveFails = false
@@ -282,6 +283,7 @@ export class FakeServer {
       },
       getSettings: () => Promise.resolve(this.settings),
       updateSettings: (request) => {
+        if (this.settingsSaveFails) throw new RpcError(Code.INVALID_ARGUMENT, 'BAD_REQUEST', '设置保存失败')
         if (request.settings === undefined) throw new RpcError(Code.INVALID_ARGUMENT, 'BAD_REQUEST', 'settings')
         // As the Worker: only the masked fields change, and naming `mode` clears the breaker.
         const mask = updatePaths(request.updateMask)
@@ -290,6 +292,7 @@ export class FakeServer {
         if (paths.includes('mode')) Object.assign(next, { mode: request.settings.mode, breakerTripped: false, breakerReason: '' })
         if (paths.includes('daily_neuron_budget')) next.dailyNeuronBudget = request.settings.dailyNeuronBudget
         if (paths.includes('run_write_limit')) next.runWriteLimit = request.settings.runWriteLimit
+        if (paths.includes('classification_provider')) next.classificationProvider = request.settings.classificationProvider
         next.effectiveMode = next.breakerTripped ? Mode.SHADOW : next.mode
         this.settings = next
         return Promise.resolve(this.settings)

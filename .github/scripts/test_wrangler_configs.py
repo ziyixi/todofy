@@ -434,9 +434,9 @@ class Files(unittest.TestCase):
                         "binding": "TASK_INBOX", "service": "tasks", "entrypoint": "TaskInbox", "props": {"source": "home"},
                     })
                     continue
-                expected = "NewsletterOps" if service["binding"] == "NEWSLETTER" else "Ops"
+                expected = {"NEWSLETTER": "NewsletterOps", "CODEX_GATEWAY": "CodexGatewayOps"}.get(service["binding"], "Ops")
                 self.assertEqual(service["entrypoint"], expected)
-                if expected == "NewsletterOps":
+                if expected in {"NewsletterOps", "CodexGatewayOps"}:
                     self.assertEqual(service["service"], "fleet")
         # The watch app parses untrusted pages: it reaches Tasks only through the create-only TaskInbox, bound to its
         # own source, never through TasksApi or Ops (until 2026-10-21 it bound Todofy's Intents, now deleted).

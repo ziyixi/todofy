@@ -2,7 +2,7 @@
  * The UI's words for the API's values: modes, uncertain reasons, and times in the browser's zone.
  */
 import { timestampMs, type Timestamp } from '@ziyixi/proto/protobuf/wkt'
-import { Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import { ClassificationProvider, Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 
 export const MODE_NAMES: Readonly<Record<number, string>> = {
@@ -62,6 +62,39 @@ export function claudeErrorMessage(code: string): string {
   const http = /^claude_http_(\d{3})$/.exec(code)
   if (http !== null && code !== 'claude_http_429') return `Claude API 返回 HTTP ${http[1] as string}，本次没有生成分级`
   return Object.hasOwn(CLAUDE_ERRORS, code) ? CLAUDE_ERRORS[code] as string : `Claude 请求失败（${code}）`
+}
+
+/** Older settings and status responses did not carry a provider. */
+export function classificationProvider(value: ClassificationProvider | undefined): ClassificationProvider {
+  return value === ClassificationProvider.CODEX ? ClassificationProvider.CODEX : ClassificationProvider.CLAUDE
+}
+
+export function classificationProviderName(value: ClassificationProvider): string {
+  return value === ClassificationProvider.CODEX ? 'VPS Codex' : 'Claude API'
+}
+
+const CODEX_ERRORS: Readonly<Record<string, string>> = {
+  codex_not_configured: 'VPS Codex 尚未配置',
+  codex_auth: 'VPS Codex 授权失败，需检查服务凭据或订阅登录',
+  codex_rate_limit: 'Codex 请求受限，等待重试',
+  codex_quota: 'Codex 订阅额度暂不可用，等待额度恢复',
+  codex_unavailable: 'VPS Codex 暂不可用，等待重试',
+  codex_timeout: 'VPS Codex 请求超时，等待重试',
+  codex_network: 'VPS Codex 网络请求失败，等待重试',
+  codex_bad_answer: 'Codex 返回格式无效，本次没有生成分级',
+  codex_bad_json: 'Codex 返回格式无效，本次没有生成分级',
+  codex_bad_items: 'Codex 返回的邮件结果不完整，本次没有生成分级',
+  codex_bad_input: '模型请求内容无效，本次没有生成分级',
+  codex_response_too_large: 'Codex 返回超过大小上限，本次没有生成分级',
+  codex_bad_model: 'Codex 返回的模型不符合配置，本次没有生成分级',
+  codex_bad_usage: 'Codex 未返回有效用量，本次没有生成分级',
+}
+
+export function classifierErrorMessage(provider: ClassificationProvider, code: string): string {
+  if (provider === ClassificationProvider.CLAUDE) return claudeErrorMessage(code)
+  const http = /^codex_http_(\d{3})$/.exec(code)
+  if (http !== null) return `VPS Codex 返回 HTTP ${http[1] as string}，本次没有生成分级`
+  return Object.hasOwn(CODEX_ERRORS, code) ? CODEX_ERRORS[code] as string : 'VPS Codex 请求失败，待重试；可刷新查看状态'
 }
 
 export function ms(time: Timestamp | undefined): number | null {

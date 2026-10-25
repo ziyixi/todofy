@@ -158,7 +158,8 @@ class ReaderTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            rules[-1]["resourceNames"], ["newsletter-release", "platform-release"]
+            rules[-1]["resourceNames"],
+            ["newsletter-release", "platform-release", "codex-gateway-release"],
         )
         serialized = json.dumps(objects).lower()
         for denied in (

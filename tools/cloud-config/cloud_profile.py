@@ -14,6 +14,9 @@ DAEMON_UNITS = {
     "cloudflared_platform": "cloudflared-platform.service",
 }
 MANAGED_ADDRESSES = frozenset({
+    "cloudflare_zero_trust_access_service_token.codex_gateway",
+    "cloudflare_zero_trust_access_policy.codex_gateway",
+    "cloudflare_zero_trust_access_application.codex_gateway",
     "cloudflare_zero_trust_access_service_token.platform_deploy",
     "cloudflare_zero_trust_access_policy.platform_deploy",
     'cloudflare_zero_trust_access_application.platform_machine["runtime"]',
@@ -110,7 +113,7 @@ def identifiers(value: object, field: str, pattern: str) -> dict[str, str]:
 
 
 def image_repositories(profile: dict) -> dict[str, str]:
-    return {app: "ghcr.io/" + profile["repository"] + "-" + app for app in ("newsletter", "platform")}
+    return {app: "ghcr.io/" + profile["repository"] + "-" + app for app in ("newsletter", "platform", "codex-gateway")}
 
 
 def deployment_urls(profile: dict) -> dict[str, str]:

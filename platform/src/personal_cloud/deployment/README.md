@@ -5,7 +5,15 @@ baked Kustomize List rather than receiving manifests, shell commands, logs or pr
 The initial deployment profile supports Newsletter and Platform: both targets have one source SHA
 and creation UUID, with separate immutable image digests. Callers cannot supply generation; it is
 observed from Kubernetes. Repository images are restricted to the configured owner's
-`todofy-newsletter` and `todofy-platform` packages.
+`todofy-newsletter`, `todofy-platform` and `todofy-codex-gateway` packages.
+
+Codex gateway releases select one `codex-gateway` target and use their own deterministic creation
+identity. They apply only that Deployment, Service and release ConfigMap, then verify its baked
+source SHA, startup request ID and running digest. They do not call Newsletter admission or change
+its CronJob. Two-workload runtime configurations remain valid during the first daemon upgrade.
+Reconciliation selects the latest ready target for each configured workload from the existing ledger,
+so a gateway-only release retains the previously accepted Newsletter and Platform identities. Repair
+still respects Newsletter's manual pause and uses its established drain protocol when the pair is selected.
 
 FastAPI authorizes the independent release bearer before consuming request bytes. Cloudflare Access
 protects the external machine transport. Actions holds neither SSH nor Kubernetes credentials. The

@@ -1,0 +1,14 @@
+**
+!codex-gateway/
+!codex-gateway/pyproject.toml
+!codex-gateway/uv.lock
+!codex-gateway/src/
+!codex-gateway/src/**
+!proto/
+!proto/python/
+!proto/python/pyproject.toml
+!proto/python/src/
+!proto/python/src/ziyixi_proto/
+!proto/python/src/ziyixi_proto/**
+**/__pycache__/**
+**/*.pyc

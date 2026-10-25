@@ -1,0 +1,142 @@
+"""Authenticated, bounded HTTP transport for the generated inference contract."""
+
+import hmac
+import json
+import os
+import pathlib
+import re
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from ziyixi_proto.codex.inference.v1.inference_pb import (
+    HTTP_BINDINGS,
+    RunInferenceRequest,
+    RunInferenceResponse,
+)
+from ziyixi_proto.http_routes import decode_request
+from ziyixi_proto.rpc_status import RpcError, status_body
+from ziyixi_proto.wire_json import WireJsonError, to_wire
+
+from codex_gateway.runtime import infer
+
+MAX_BODY_BYTES = 768 * 1024
+BUILD_INFO_FILE = pathlib.Path(__file__).with_name("build-info.json")
+PRIVATE_HEADERS = {"cache-control": "no-store", "x-content-type-options": "nosniff"}
+Runner = Callable[[RunInferenceRequest, pathlib.Path], Awaitable[RunInferenceResponse]]
+
+
+def _object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON field")
+        value[key] = item
+    return value
+
+
+def _constant(_: str) -> None:
+    raise ValueError("invalid JSON number")
+
+
+def _json(raw: str | bytes) -> Any:
+    return json.loads(raw, object_pairs_hook=_object, parse_constant=_constant)
+
+
+def _baked_source_sha() -> str | None:
+    try:
+        value = json.loads(BUILD_INFO_FILE.read_text())
+    except (OSError, ValueError):
+        return None
+    sha = value.get("source_sha") if isinstance(value, dict) else None
+    return sha if isinstance(sha, str) and re.fullmatch(r"[a-f0-9]{40}", sha) else None
+
+
+def create_app(*, runner: Runner = infer) -> FastAPI:
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    binding = next(item for item in HTTP_BINDINGS if item.rpc == "RunInference")
+    source_sha = _baked_source_sha()
+
+    @app.exception_handler(RpcError)
+    async def rpc_error(_request: Request, error: RpcError) -> JSONResponse:
+        return JSONResponse(
+            status_body(error), status_code=error.http_status, headers=PRIVATE_HEADERS
+        )
+
+    @app.get("/healthz")
+    async def health() -> JSONResponse:
+        return JSONResponse(
+            {
+                "service": "codex-gateway",
+                "status": "ok",
+                "source_sha": source_sha,
+                "release_request_id": os.getenv("CODEX_GATEWAY_RELEASE_REQUEST_ID", ""),
+            },
+            headers=PRIVATE_HEADERS,
+        )
+
+    async def run(request: Request) -> JSONResponse:
+        token = os.getenv("CODEX_GATEWAY_TOKEN", "").strip()
+        if not token:
+            raise RpcError(
+                "UNAVAILABLE", "GATEWAY_NOT_CONFIGURED", "Inference is not configured"
+            )
+        headers = request.headers.getlist("authorization")
+        if len(headers) != 1 or not hmac.compare_digest(
+            headers[0].encode(), ("Bearer " + token).encode()
+        ):
+            raise RpcError(
+                "UNAUTHENTICATED",
+                "INFERENCE_NOT_AUTHORIZED",
+                "Inference authorization required",
+            )
+        if (
+            request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            != "application/json"
+        ):
+            raise RpcError(
+                "INVALID_ARGUMENT", "INVALID_INFERENCE_REQUEST", "Use application/json"
+            )
+        raw = bytearray()
+        async for chunk in request.stream():
+            if len(raw) + len(chunk) > MAX_BODY_BYTES:
+                raise RpcError(
+                    "INVALID_ARGUMENT",
+                    "INVALID_INFERENCE_REQUEST",
+                    "Inference request exceeds limit",
+                )
+            raw.extend(chunk)
+        try:
+            decoded = _json(bytes(raw))
+            message = decode_request(
+                binding, request.url.path, request.query_params.multi_items(), decoded
+            )
+            if (
+                not isinstance(message, RunInferenceRequest)
+                or not message.instructions.strip()
+            ):
+                raise ValueError("invalid inference request")
+            _json(message.input_json)
+            if not isinstance(_json(message.output_schema_json), dict):
+                raise ValueError("schema must be an object")
+        except (UnicodeError, ValueError, WireJsonError, RecursionError):
+            raise RpcError(
+                "INVALID_ARGUMENT",
+                "INVALID_INFERENCE_REQUEST",
+                "Invalid inference request",
+            ) from None
+        home = os.getenv("CODEX_HOME", "")
+        if (
+            not home
+            or not pathlib.Path(home).is_absolute()
+            or not pathlib.Path(home).is_dir()
+        ):
+            raise RpcError(
+                "UNAVAILABLE", "GATEWAY_NOT_CONFIGURED", "Inference is not configured"
+            )
+        answer = await runner(message, pathlib.Path(home))
+        return JSONResponse(to_wire(answer), headers=PRIVATE_HEADERS)
+
+    app.add_api_route(binding.path_template, run, methods=[binding.method])
+    return app

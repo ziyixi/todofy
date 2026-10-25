@@ -49,7 +49,7 @@ function deliveryOverdue(newsletter: Report['newsletter'], now: number): boolean
 }
 
 export function statusSnapshot(
-  app: 'fleet' | 'newsletter', report: Report | null, receivedAt: number | null,
+  app: 'fleet' | 'newsletter' | 'codex-gateway', report: Report | null, receivedAt: number | null,
   now: number, publicHost: string,
 ): ops.OpsStatus {
   const age = freshness(receivedAt, now);
@@ -62,7 +62,11 @@ export function statusSnapshot(
     add(code, age === 'missing' ? 'critical' : 'warning');
   }
   if (age === 'fresh' && report) {
-    if (app === 'newsletter') {
+    if (app === 'codex-gateway') {
+      const runtime = workload(report, app);
+      if (!runtime || runtime.process_state !== 'running' || runtime.health_state !== 'healthy') add('codex_gateway_unavailable', 'critical');
+      if (!runtime || !releaseReady(runtime)) add('deployment_pending');
+    } else if (app === 'newsletter') {
       const runtime = workload(report, 'newsletter');
       const healthy = runtime?.process_state === 'running'
         && runtime.health_state !== 'unsupported'
@@ -93,7 +97,7 @@ export function statusSnapshot(
         const value = report.newsletter[key];
         if (typeof value === 'number') counters[key] = value;
       }
-    } else {
+    } else if (app === 'fleet') {
       if (typeof report.disk_used_percent === 'number') counters.disk_used_percent = report.disk_used_percent;
       if (typeof report.memory_used_percent === 'number') counters.memory_used_percent = report.memory_used_percent;
     }

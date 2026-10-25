@@ -51,11 +51,15 @@ test("no secret is declared required: a deploy before the owner's first mint-tok
   for (const name of OWNER_ONLY_SECRETS) assert.ok(!values.includes(name), name)
 })
 
-test('vars: the public host and the Access issuer (and the AUD once Infra apply made it); nothing injected or secret', () => {
+test('vars: public host, Access identity and generated Codex endpoint; nothing injected or secret', () => {
   const names = Object.keys(config.vars).sort()
-  assert.ok(['ACCESS_ISSUER,PUBLIC_HOST', 'ACCESS_AUDIENCE,ACCESS_ISSUER,PUBLIC_HOST'].includes(names.join()), names.join())
+  assert.ok(['ACCESS_ISSUER,CODEX_ENDPOINT_URL,PUBLIC_HOST', 'ACCESS_AUDIENCE,ACCESS_ISSUER,CODEX_ENDPOINT_URL,PUBLIC_HOST'].includes(names.join()), names.join())
   assert.equal(config.vars.PUBLIC_HOST, 'sort.ziyixi.science')
   assert.match(config.vars.ACCESS_ISSUER, /^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/)
+  const endpoint = new URL(config.vars.CODEX_ENDPOINT_URL)
+  assert.equal(endpoint.protocol, 'https:')
+  assert.equal(endpoint.pathname, '/api/codex/v1/inference:run')
+  assert.equal(endpoint.search, '')
   if (config.vars.ACCESS_AUDIENCE !== undefined) {
     assert.match(config.vars.ACCESS_AUDIENCE, /^[0-9a-f]{64}$/)
     assert.notEqual(config.vars.ACCESS_AUDIENCE, '0'.repeat(64))
@@ -64,7 +68,7 @@ test('vars: the public host and the Access issuer (and the AUD once Infra apply 
   for (const name of names) assert.ok(!name.startsWith('DEV_'), name)
   for (const name of ['ACCESS_OWNER', 'ACCESS_OWNER_ALIASES', 'CSRF_SIGNING_KEY', 'MODE']) assert.ok(!names.includes(name), name)
   assert.ok(!values.includes('@'))
-  assert.deepEqual([...new Set(values.match(/[a-z0-9.-]*ziyixi\.science/g))], ['sort.ziyixi.science'])
+  assert.deepEqual([...new Set(values.match(/[a-z0-9.-]*ziyixi\.science/g))], [config.vars.PUBLIC_HOST, endpoint.hostname])
 })
 
 test('the development config is the production one without AI, routes and secrets: never deployable', () => {

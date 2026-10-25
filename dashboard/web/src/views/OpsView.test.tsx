@@ -78,6 +78,7 @@ describe('操作与记录', () => {
       '网站同步',
       'Newsletter',
       '个人 MCP',
+      'Codex 推理',
       '个人控制台',
       '自托管服务器',
       '平台运行时',
@@ -104,8 +105,9 @@ describe('操作与记录', () => {
     expect(rows[9]).toHaveTextContent('公开地址探测')
     expect(rows[11]).toHaveTextContent('ops-v1 状态接口')
     // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
-    expect(rows[14]).toHaveTextContent('未接入监控')
-    expect(within(rows[14] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
+    const servers = within(about).getByRole('rowheader', { name: '自托管服务器' }).closest('tr')
+    expect(servers).toHaveTextContent('未接入监控')
+    expect(within(servers as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
     expect(rows[12]).toHaveTextContent('ops-v1 状态接口')
     expect(within(rows[12] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('personal-mcp')
   })

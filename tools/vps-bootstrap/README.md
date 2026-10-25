@@ -21,6 +21,7 @@ platform/.venv/bin/python tools/vps-bootstrap/prepare.py \
   --sha <verified-40-character-source-sha> \
   --newsletter-image ghcr.io/<owner>/<repository>-newsletter@sha256:<digest> \
   --platform-image ghcr.io/<owner>/<repository>-platform@sha256:<digest> \
+  --codex-gateway-image ghcr.io/<owner>/<repository>-codex-gateway@sha256:<digest> \
   --output <new-public-bundle-directory>
 ```
 
@@ -59,6 +60,7 @@ it or send tokens through chat. Exact shape:
     "NEWSLETTER_TIME_ZONE": "America/Los_Angeles"
   },
   "platform_env": {"PLATFORM_DEPLOY_TOKEN": "<dedicated release API token>"},
+  "codex_gateway_env": {"CODEX_GATEWAY_TOKEN": "<independent inference-only bearer>"},
   "fleet_key": "<64 hexadecimal characters, independent receipt HMAC>",
   "connector_token": "<dedicated runtime Tunnel connector token>",
   "old_paths": {
@@ -75,6 +77,12 @@ token. Preserve existing editor/send values; editor requires 24–512 characters
 send/monitor/platform require 32–512, and tokens cannot contain whitespace.
 Editor and send must differ, monitor must differ from editor/send/platform, and
 platform must differ from send. These checks run before server changes.
+Gateway bundles require `codex_gateway_env` containing only its independent bearer, distinct from
+Newsletter and deployment tokens. Older two-image bundles and private inputs remain supported.
+The gateway runs as UID 10001, mounts the existing `newsletter-auth` claim, and receives no Kubernetes
+service token. Its loopback port is 18766. The existing remotely managed platform Tunnel routes only
+`/api/codex/v1/.*` to that port before the normal platform rule. Each route retains the origin JWT
+check for its dedicated Access application; inference credentials do not grant deployment access.
 The renderer controls persistent paths, release/admission IDs, and service URLs.
 Private input cannot override those paths or inject PATH/HOME/PYTHONPATH,
 OPENAI_API_KEY or loader variables. A fresh VPS may use `old_paths: {}`; Newsletter's

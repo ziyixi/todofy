@@ -2,6 +2,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: personal-cloud
 resources:
+  - codex-gateway.yaml
   - platform-runtime.yaml
   - deployment.yaml
   - config-sync.yaml

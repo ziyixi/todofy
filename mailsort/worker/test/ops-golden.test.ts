@@ -21,6 +21,23 @@ const HOUR = 60 * MINUTE;
 const GRANT = { GMAIL_CLIENT_ID: 'synthetic.apps.googleusercontent.com', GMAIL_CLIENT_SECRET: 'synthetic', GMAIL_REFRESH_TOKEN: 'synthetic' };
 const env = { PUBLIC_HOST: 'sort.example.com', MODE: 'live', ANTHROPIC_API_KEY: 'synthetic-claude-key', ...GRANT };
 
+test('Ops reports only the selected provider failure and keeps Claude accounting historical under Codex', () => {
+  const target = store();
+  writeSettings(target, { ...DEFAULTS, mode: 'live', classificationProvider: 'codex' }, NOW);
+  target.setMeta('auth_state', 'ok');
+  target.setMeta('last_sync_at', String(NOW));
+  target.setMeta('claude_error', 'claude_spend_limit');
+  target.setMeta('claude_limited_month', '2026-10');
+  target.addClaudeUsage('2026-10-06', { inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, thinkingTokens: 0, costMicros: 20_000_000 });
+  const configured = { ...env, CODEX_ENDPOINT_URL: 'https://codex.example.com/api/codex/v1/inference:run', CODEX_ENDPOINT_TOKEN: 'synthetic-inference-token' };
+  expect(sortStatus(target, configured, NOW).signals).toEqual([]);
+  expect(sortStatus(target, configured, NOW).counters.claude_spent_usd).toBe(20);
+  target.setMeta('codex_error', 'codex_auth');
+  expect(sortStatus(target, configured, NOW).signals).toMatchObject([{ code: 'codex_auth', severity: 'warning' }]);
+  writeSettings(target, { ...DEFAULTS, mode: 'live', classificationProvider: 'claude' }, NOW + 1);
+  expect(sortStatus(target, configured, NOW).signals).toMatchObject([{ code: 'claude_spend_limit', severity: 'warning' }]);
+});
+
 function sqlStorage(): SqlStorage {
   const db = new DatabaseSync(':memory:');
   return {

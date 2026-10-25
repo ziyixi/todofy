@@ -41,6 +41,12 @@ export interface Env {
   // never sent or removed by a deploy (--secrets-file keeps the secrets it does not name).
   /** Owner-written native Anthropic API key, isolated to the Mailsort workspace. */
   readonly ANTHROPIC_API_KEY?: string;
+  /** Private Codex gateway URL and its inference-only bearer, never exposed by the owner API. */
+  readonly CODEX_ENDPOINT_URL?: string;
+  readonly CODEX_ENDPOINT_TOKEN?: string;
+  /** Machine access to the exact private gateway path, separate from its inference bearer. */
+  readonly CODEX_ACCESS_CLIENT_ID?: string;
+  readonly CODEX_ACCESS_CLIENT_SECRET?: string;
   readonly GMAIL_CLIENT_ID?: string;
   readonly GMAIL_CLIENT_SECRET?: string;
   readonly GMAIL_REFRESH_TOKEN?: string;

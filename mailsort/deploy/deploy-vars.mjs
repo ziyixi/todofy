@@ -58,7 +58,7 @@ export const INJECTED = [
 ]
 
 /** Gmail and Claude credentials are put from the owner's machine, never by a deploy. */
-export const OWNER_ONLY_SECRETS = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN', 'ANTHROPIC_API_KEY']
+export const OWNER_ONLY_SECRETS = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN', 'ANTHROPIC_API_KEY', 'CODEX_ENDPOINT_TOKEN', 'CODEX_ACCESS_CLIENT_ID', 'CODEX_ACCESS_CLIENT_SECRET']
 
 function checked(env, name, pattern) {
   const value = env[name]

@@ -1,0 +1,21 @@
+version = 1
+id = "codex-gateway"
+target = "vps"
+image = "ghcr.io/ziyixi/todofy-codex-gateway"
+
+[[entries]]
+id = "codex-gateway"
+name = "Codex 推理"
+description = "VPS Codex 结构化推理服务"
+group = "services"
+icon = "server"
+accent = "slate"
+access = false
+app_only_signals = ["host_never_seen", "host_stale", "host_missing", "codex_gateway_unavailable", "deployment_pending"]
+order = 5
+position = 32
+[entries.status]
+type = "ops_v1"
+provider = "fleet"
+binding = "CODEX_GATEWAY"
+guard = false

@@ -6,6 +6,7 @@ from api import ReleaseError
 
 SHA = re.compile(r"[0-9a-f]{40}")
 APPS = {
+    "codex-gateway",
     "todofy",
     "mail-hero",
     "dashboard",
@@ -47,11 +48,18 @@ def last_good(api, repository, app):
             or payload.get("format") != "personal-cloud-release-v1"
         ):
             continue
-        statuses = api.call(base + "/" + str(record["id"]) + "/statuses?per_page=1")
+        # An inactive status can follow the release's recorded verification success.
+        statuses = api.call(base + "/" + str(record["id"]) + "/statuses?per_page=10")
         if (
             isinstance(statuses, list)
             and statuses
-            and statuses[0].get("state") == "success"
+            and (
+                statuses[0].get("state") == "success"
+                or (
+                    statuses[0].get("state") == "inactive"
+                    and any(status.get("state") == "success" for status in statuses[1:10])
+                )
+            )
         ):
             identity(repository, app, record.get("sha"))
             return record

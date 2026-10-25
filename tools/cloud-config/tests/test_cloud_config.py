@@ -139,6 +139,28 @@ SAFETY_BUDGET = "10"
                 self.assertIn('HOST_KEY = "unrelated-host"', outputs["demo/wrangler.toml"])
                 self.assertEqual((root / "fleet/wrangler.toml").read_text(), fleet)
 
+    def test_mailsort_inference_url_follows_the_existing_runtime_host_only(self):
+        original = '''name = "mailsort"
+account_id = "dddddddddddddddddddddddddddddddd"
+routes = [{ pattern = "mailsort.example.test", custom_domain = true }]
+[vars]
+CODEX_ENDPOINT_URL = "https://old.example.test/api/codex/v1/inference:run" # public endpoint
+SAFETY_BUDGET = "10"
+'''
+        for runtime_host in ("platform-runtime.example.test", "replacement-runtime.example.test"):
+            with self.subTest(runtime_host=runtime_host):
+                root = self.fixture()
+                (root / "config/cloud.toml").write_text(CLOUD.replace("platform-runtime.example.test", runtime_host))
+                (root / "mailsort").mkdir()
+                (root / "mailsort/app.toml").write_text(MANIFEST.replace("demo", "mailsort"))
+                (root / "mailsort/wrangler.toml").write_text(original)
+                (root / "demo/wrangler.toml").write_text(CONFIG + 'CODEX_ENDPOINT_URL = "https://unrelated.example.test/"\n')
+                outputs = generate.generated_files(root)
+                expected = original.replace("d" * 32, "a" * 32).replace("old.example.test", runtime_host)
+                self.assertEqual(outputs["mailsort/wrangler.toml"], expected)
+                self.assertIn('CODEX_ENDPOINT_URL = "https://unrelated.example.test/"', outputs["demo/wrangler.toml"])
+                self.assertEqual((root / "mailsort/wrangler.toml").read_text(), original)
+
     def test_check_does_not_mutate_and_write_is_idempotent(self):
         root = self.fixture()
         outputs = generate.generated_files(root)
@@ -271,10 +293,11 @@ SAFETY_BUDGET = "10"
                 cloud_profile.worker_secret_specs(root)
 
     def test_owner_machine_secrets_never_reach_the_github_maps_in_the_repository(self):
-        """mailsort's Gmail grant, recall's machine-token digests and the brief's Claude and Resend keys are put by the
+        """mailsort's model/Access credentials and Gmail grant, recall's machine-token digests and the brief's keys are put by the
         owner from their own machine only."""
         source = TOOL.parents[1]
-        grant = ['ANTHROPIC_API_KEY', 'GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
+        grant = ['ANTHROPIC_API_KEY', 'CODEX_ACCESS_CLIENT_ID', 'CODEX_ACCESS_CLIENT_SECRET', 'CODEX_ENDPOINT_TOKEN',
+                 'GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
         digests = ['EXPORT_TOKEN_SHA256', 'EXPORT_TOKEN_SHA256_PREVIOUS', 'INGEST_TOKEN_SHA256', 'INGEST_TOKEN_SHA256_PREVIOUS']
         keys = ['ANTHROPIC_API_KEY', 'RESEND_API_KEY']
         self.assertEqual(cloud_profile.owner_machine_secrets(source), {'brief': keys, 'mailsort': grant, 'recall': digests})

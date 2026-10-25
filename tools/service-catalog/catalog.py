@@ -247,9 +247,11 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
                 require(type(status["guard"]) is bool, f"{app}.guard")
                 provider = status.get("provider")
                 if data["target"] == "vps":
-                    require(app == "newsletter" and provider == "fleet" and status["binding"] == "NEWSLETTER"
+                    providers = {"newsletter": ("NEWSLETTER", "NewsletterOps"),
+                                 "codex-gateway": ("CODEX_GATEWAY", "CodexGatewayOps")}
+                    require(app in providers and provider == "fleet" and status["binding"] == providers[app][0]
                             and status["guard"] is False, f"{app}.VPS Ops provider")
-                    service, entrypoint = "fleet", "NewsletterOps"
+                    service, entrypoint = "fleet", providers[app][1]
                 else:
                     require(provider is None, f"{app}.Ops provider")
                     service, entrypoint = worker, "Ops"

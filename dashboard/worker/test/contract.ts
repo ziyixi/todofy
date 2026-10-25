@@ -46,6 +46,7 @@ const SERVICES = {
   watch: [ops.OpsService],
   fleet: [ops.OpsService],
   newsletter: [ops.OpsService],
+  'codex-gateway': [ops.OpsService],
   'notion-publish': [ops.OpsService, WebsiteSyncService],
   mailsort: [ops.OpsService],
   recall: [ops.OpsService],

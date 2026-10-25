@@ -14,7 +14,7 @@ from ..deployment.kubernetes import (
     Client,
     DependencyUnavailable,
 )
-from .adapters import Business, local_process, newsletter
+from .adapters import Business, codex_gateway, local_process, newsletter
 from .config import Configuration, Workload
 from .evidence import timestamp, workload
 
@@ -154,6 +154,18 @@ class Reader:
                     business = Business()
             elif item.adapter == "personal-cloud":
                 business = local_process(self.process_request_id)
+            elif item.adapter == "codex-gateway":
+                try:
+                    business = codex_gateway(
+                        self.transport(
+                            "http://" + item.deployment + ":8080/healthz",
+                            {"Accept": "application/json"},
+                            4096,
+                            self._remaining(deadline),
+                        )
+                    )
+                except ReadError:
+                    business = Business(admission="unsupported")
             # Configuration changes during the observation cannot lend their identity to a different physical pod.
             if self._optional("ConfigMap", item.release_configmap, deadline) != target:
                 raise ReadError()

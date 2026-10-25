@@ -7,13 +7,18 @@ from transport import ReleaseFailure
 
 
 def write_evidence(path, release):
-    if (
-        release.phase != "ready"
-        or len({target.source_sha for target in release.targets}) != 1
-    ):
+    if release.phase != "ready" or not release.targets:
         raise ReleaseFailure("RELEASE_EVIDENCE_INVALID")
+    source = next(
+        (
+            target
+            for target in release.targets
+            if target.workload_key == "platform-runtime"
+        ),
+        release.targets[0],
+    )
     value = {
-        "source_sha": release.targets[0].source_sha,
+        "source_sha": source.source_sha,
         "release": release.name,
         "etag": release.etag,
         "phase": "ready",

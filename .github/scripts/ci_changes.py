@@ -142,6 +142,7 @@ KEYS = (
     "links_check",
     "watch_check",
     "newsletter_check",
+    "codex_gateway_check",
     "fleet_check",
     "platform_check",
     "mailsort_check",
@@ -161,6 +162,7 @@ KEYS = (
     "links_deploy",
     "watch_deploy",
     "newsletter_deploy",
+    "codex_gateway_deploy",
     "fleet_deploy",
     "platform_publish",
     "platform_deploy",
@@ -181,6 +183,7 @@ DISPATCH = {
     "links": ("links",),
     "watch": ("watch",),
     "newsletter": ("newsletter",),
+    "codex-gateway": ("codex-gateway",),
     "fleet": ("fleet",),
     "platform": ("platform",),
     "mailsort": ("mailsort",),
@@ -210,6 +213,7 @@ CLOUD_CONFIG = {"config/cloud.toml", "config/resources.toml", "config/account-re
 # normally. test_app_isolation.py guards imports across this boundary.
 APP_TEST_DIRECTORIES = (
     "newsletter/tests/",
+    "codex-gateway/tests/",
     "platform/tests/",
     "todofy/tests/",
     "todofy/gateway/test/",
@@ -241,6 +245,7 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "watch": ("ts",),
     "fleet": ("ts",),
     "platform": ("python",),
+    "codex-gateway": ("python",),
     "website": ("ts",),
     "mailsort": ("ts",),
     "recall": ("ts",),
@@ -264,6 +269,7 @@ PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
 # value imports, Python imports; test_proto.py checks this against the sources). A package missing here
 # reaches every user (fail safe; test_proto.py fails until it is listed).
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
+    "proto/codex/inference/": ("codex-gateway", "mailsort"),
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
@@ -363,6 +369,7 @@ CHECK_JOBS = {
     "links_check": ("Links checks",),
     "watch_check": ("Watch checks",),
     "newsletter_check": ("Newsletter checks", "Newsletter image checks"),
+    "codex_gateway_check": ("Codex gateway checks",),
     "fleet_check": ("Fleet checks",),
     "platform_check": ("Platform checks",),
     "mailsort_check": ("Mailsort checks",),
@@ -398,11 +405,11 @@ def outputs(
     extension: bool = False,
 ) -> dict[str, bool]:
     checked, deployed = set(checked), set(deployed)
-    # This release profile takes two independently tested images of the same source SHA. Any publication/VPS
-    # deployment input therefore publishes both; metadata-only inputs still check without publishing.
+    # Paired releases publish all three images for a complete bootstrap bundle. A gateway-only release
+    # remains independent; metadata-only inputs check without publishing.
     if deployed & {"newsletter", "platform"}:
-        checked.update({"newsletter", "platform"})
-        deployed.update({"newsletter", "platform"})
+        checked.update({"newsletter", "platform", "codex-gateway"})
+        deployed.update({"newsletter", "platform", "codex-gateway"})
     result = {
         "contracts": contracts,
         "packages": packages,
@@ -470,13 +477,13 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     # Catalog metadata and reviewed test directories are checked, but are not production inputs.
     direct_deploys = {app for app in apps if any(path.startswith(f"{app}/") and path != f"{app}/app.toml"
                        and not path.startswith(APP_TEST_DIRECTORIES)
-                       and not (app in {"newsletter", "platform"} and path.endswith(".md")) for path in paths)}
+                       and not (app in {"newsletter", "platform", "codex-gateway"} and path.endswith(".md")) for path in paths)}
     if "newsletter" in direct_deploys:
         direct_deploys.add("platform")
     # This shared promotion tool owns both tested-image publications. Its executable changes need fresh tested
     # images and the gated VPS release; its Markdown remains ordinary tooling documentation (checks only).
     if any(path.startswith(("tools/container-release/", "tools/platform-build/", "tools/vps-release/")) and not path.endswith(".md") for path in paths):
-        direct_deploys.update({"newsletter", "platform"})
+        direct_deploys.update({"newsletter", "platform", "codex-gateway"})
     # packages/<name>/<file>: at least three components; packages/README.md is documentation.
     package_paths = [path for path in paths if path.startswith("packages/") and path.count("/") >= 2]
     package_names = {path.split("/")[1] for path in package_paths}
@@ -631,6 +638,8 @@ def find_reusable(
             tested_artifacts = []
             if result["newsletter_deploy"]:
                 tested_artifacts.append(f"newsletter-image-{sha}")
+            if result["codex_gateway_deploy"]:
+                tested_artifacts.append(f"codex-gateway-image-{sha}")
             if result["platform_publish"]:
                 tested_artifacts.append(f"platform-image-{sha}")
             if result["recall_extension_publish"]:

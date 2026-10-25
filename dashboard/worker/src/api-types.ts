@@ -21,7 +21,7 @@
  *
  * | Method                | HTTP                                  | Served by      | Budget per call                |
  * | --------------------- | ------------------------------------- | -------------- | ------------------------------ |
- * | GetRegistry           | GET  /api/v1/registry                 | Worker (no DO) | ≤ 15 KiB; ETag "<build>" → 304 |
+ * | GetRegistry           | GET  /api/v1/registry                 | Worker (no DO) | ≤ 16 KiB; ETag "<build>" → 304 |
  * | GetHomeView           | GET  /api/v1/homeView                 | DO, 1 call     | ≤ 10 KiB; ≤ 40 rows read       |
  * | GetFlowsView          | GET  /api/v1/flowsView                | DO, 1 call     | ≤ 20 KiB; ≤ 40 rows read       |
  * | GetCloudflareView     | GET  /api/v1/cloudflareView           | DO, 1 call     | ≤ 24 KiB; ≤ 40 rows read       |
@@ -230,7 +230,7 @@ export type CanaryState = Omit<CanaryView, 'id'>;
  * is open on the wire (an app may join within ops-v1), so the generated type of `app` is a string; this dashboard knows
  * exactly the apps it binds.
  */
-export type OpsApp = 'mail-hero' | 'todofy' | 'watch' | 'fleet' | 'newsletter' | 'notion-publish' | 'mailsort' | 'recall' | 'brief' | 'tasks' | 'personal-mcp';
+export type OpsApp = 'mail-hero' | 'todofy' | 'watch' | 'fleet' | 'newsletter' | 'codex-gateway' | 'notion-publish' | 'mailsort' | 'recall' | 'brief' | 'tasks' | 'personal-mcp';
 
 // ---- transport outside the service --------------------------------------------------------------------------
 
@@ -309,7 +309,7 @@ export const BREAKDOWN_UNCLASSIFIED = 'unknown';
  */
 export const VIEW_BODY_MAX = 64 * 1024;
 export const VIEW_BODY_BUDGET = {
-  registry: 15 * 1024,
+  registry: 16 * 1024,
   home: 10 * 1024,
   // Six flows: 16.1 KB on the mockup day (2026-09-30), 17.4 KB in the workerd suite's full canary history with 20
   // Workers.
@@ -334,7 +334,7 @@ export const VIEW_ROWS_READ_MAX = 320;
 
 /**
  * Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. Personal MCP adds one read-only status() call.
- * (11 status, 2 probes, 1 GraphQL, 5 setGuard, 2 canary, 1 createInboxTask, 12 drift = 34).
+ * (12 status, 2 probes, 1 GraphQL, 4 setGuard, 2 canary, 1 createInboxTask, 12 drift = 34).
  */
 export const MAX_OUTBOUND_PER_TICK = 34;
 /** Outbound calls one owner refresh may make (tested). */

@@ -52,6 +52,7 @@ FIELD_MASK = ".google.protobuf.FieldMask"
 # Every other package is TypeScript only. .github/scripts/test_proto.py keeps this, the wheel and the apps' imports in
 # step.
 PYTHON_PACKAGES = {
+    "codex.inference.v1": True,
     "todofy.report.v1": True,
     "ops.v1": True,
     "website.sync.v1": True,

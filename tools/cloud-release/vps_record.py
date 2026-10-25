@@ -30,16 +30,17 @@ def receipt(path):
     ):
         raise ReleaseError("RELEASE_EVIDENCE_INVALID")
     targets = value["targets"]
-    if not isinstance(targets, list) or len(targets) != 2:
+    if not isinstance(targets, list) or len(targets) not in {1, 2, 3}:
         raise ReleaseError("RELEASE_EVIDENCE_INVALID")
     if {
         target.get("workload_key") for target in targets if isinstance(target, dict)
-    } != {"newsletter", "platform-runtime"}:
+    } not in ({"newsletter", "platform-runtime"}, {"codex-gateway"}, {"newsletter", "platform-runtime", "codex-gateway"}):
         raise ReleaseError("RELEASE_EVIDENCE_INVALID")
     for target in targets:
         if set(target) != {"workload_key", "image_digest", "source_sha", "request_id"}:
             raise ReleaseError("RELEASE_EVIDENCE_INVALID")
-        if target["source_sha"] != value["source_sha"] or not re.fullmatch(
+        if (not re.fullmatch(r"[0-9a-f]{40}", target["source_sha"])
+                or (target["workload_key"] in {"newsletter", "platform-runtime"} and target["source_sha"] != value["source_sha"])) or not re.fullmatch(
             r"sha256:[0-9a-f]{64}", target["image_digest"]
         ):
             raise ReleaseError("RELEASE_EVIDENCE_INVALID")
@@ -55,6 +56,7 @@ def main():
         if os.environ.get("GITHUB_REF") != "refs/heads/main":
             raise ReleaseError("MAIN_REQUIRED")
         value = receipt(args.evidence_file)
+        app = "codex-gateway" if len(value["targets"]) == 1 else "platform"
         repository = os.environ["GITHUB_REPOSITORY"]
         run_url = (
             "https://github.com/"
@@ -65,7 +67,7 @@ def main():
         identifier = record_success(
             Api("github", os.environ.get("GH_TOKEN", "")),
             repository,
-            "platform",
+            app,
             value["source_sha"],
             {"runtime": value},
             run_url,
@@ -74,7 +76,7 @@ def main():
             json.dumps(
                 {
                     "deployment_id": identifier,
-                    "app": "platform",
+                    "app": app,
                     "source_sha": value["source_sha"],
                     "verified": True,
                 }

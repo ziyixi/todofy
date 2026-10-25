@@ -105,7 +105,7 @@ describe('GetRegistry', () => {
     const first = await h.view<Registry>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(VIEW_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'tasks', 'personal-mcp', 'self-hosted']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'tasks', 'personal-mcp', 'codex-gateway', 'self-hosted']);
     expect(first.body?.entries.find((entry) => entry.id === 'personal-mcp')).toMatchObject({
       group: 'services', access: true, status_type: 'ops_v1', scripts: ['personal-mcp'],
     });
@@ -132,6 +132,7 @@ describe('GetHomeView and RefreshHomeView', () => {
       website: ['unknown', 'never_checked'],
       'notion-publish': ['unknown', 'never_checked'],
       newsletter: ['unknown', 'never_checked'],
+      'codex-gateway': ['unknown', 'never_checked'],
       fleet: ['unknown', 'never_checked'],
       mailsort: ['unknown', 'never_checked'],
       recall: ['unknown', 'never_checked'],
@@ -404,6 +405,7 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
       ['brief', true, 'brief'],
       ['tasks', true, 'tasks'],
       ['personal-mcp', true, 'personal-mcp'],
+      ['codex-gateway', true, 'codex-gateway'],
     ]);
     expect(ops.canary).toMatchObject({ id: 'mail-todofy', enabled: true, manual_limit: 3 });
     expect(ops.digest.enabled).toBe(true);

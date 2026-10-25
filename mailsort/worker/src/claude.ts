@@ -1,5 +1,6 @@
 /** One Claude request for masked mail, with strict ID coverage and no automatic retries. */
 import { readCapped } from './gmail.ts';
+import { classificationItems, CLASSIFICATION_OUTPUT_SCHEMA, type ClassificationEmail, type ClassificationItem } from './classification-result.ts';
 import { RESPONSE_MAX_BYTES } from './limits.ts';
 import { PERSONAL_RULES, PRIORITY_PROMPT } from './priority-prompt.ts';
 
@@ -9,22 +10,8 @@ const CLAUDE_URL = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_TOKENS = 16_384;
 
-export interface ClaudeEmail {
-  readonly id: string;
-  readonly subject: string;
-  readonly sender: string;
-  readonly received_at: string;
-  readonly evaluated_at: string;
-  readonly time_zone: string;
-  readonly body: string;
-  readonly body_truncated: boolean;
-}
-
-export interface ClaudeItem {
-  readonly id: string;
-  readonly bucket: 'P1' | 'P2' | 'P3' | 'P4';
-  readonly reason: string;
-}
+export type ClaudeEmail = ClassificationEmail;
+export type ClaudeItem = ClassificationItem;
 
 export interface ClaudeUsage {
   readonly model: string;
@@ -78,23 +65,6 @@ export class ClaudeConfigurationError extends ClaudeError {
   }
 }
 
-const OUTPUT_SCHEMA = {
-  type: 'object',
-  properties: {
-    items: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: { id: { type: 'string' }, bucket: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'] }, reason: { type: 'string' } },
-        required: ['id', 'bucket', 'reason'],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ['items'],
-  additionalProperties: false,
-};
-
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
@@ -127,20 +97,9 @@ function readUsage(message: Record<string, unknown>): ClaudeUsage {
 }
 
 function readItems(value: unknown, ids: ReadonlySet<string>, usage: ClaudeUsage): ClaudeItem[] {
-  const answer = record(value);
-  if (answer === null || Object.keys(answer).length !== 1 || !Array.isArray(answer['items']) || answer['items'].length !== ids.size) throw new ClaudeError('claude_bad_items', 200, usage);
-  const seen = new Set<string>();
-  return answer['items'].map((value: unknown) => {
-    const item = record(value);
-    const id = item?.['id'];
-    const bucket = item?.['bucket'];
-    const reason = item?.['reason'];
-    if (item === null || Object.keys(item).length !== 3 || typeof id !== 'string' || !ids.has(id) || seen.has(id)
-      || (bucket !== 'P1' && bucket !== 'P2' && bucket !== 'P3' && bucket !== 'P4')
-      || typeof reason !== 'string' || reason.trim() === '' || reason.length > 1000) throw new ClaudeError('claude_bad_items', 200, usage);
-    seen.add(id);
-    return { id, bucket, reason };
-  });
+  const items = classificationItems(value, ids);
+  if (items === null) throw new ClaudeError('claude_bad_items', 200, usage);
+  return items;
 }
 
 function readAnswer(value: unknown, ids: ReadonlySet<string>): ClaudeBatchResult {
@@ -196,7 +155,7 @@ export async function classifyEmails(apiKey: string, emails: readonly ClaudeEmai
         model: CLAUDE_MODEL,
         max_tokens: MAX_OUTPUT_TOKENS,
         thinking: { type: 'adaptive' },
-        output_config: { effort: 'medium', format: { type: 'json_schema', schema: OUTPUT_SCHEMA } },
+        output_config: { effort: 'medium', format: { type: 'json_schema', schema: CLASSIFICATION_OUTPUT_SCHEMA } },
         system,
         messages: [{ role: 'user', content: JSON.stringify({ emails }) }],
       }),

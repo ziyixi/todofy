@@ -18,7 +18,7 @@ flowchart LR
   Observer --> Fleet[Cloudflare Fleet / Home]
 ```
 
-A release closes Newsletter admission and suspends its trigger. Its durable drain must be frozen and
+A paired runtime release closes Newsletter admission and suspends its trigger. Its durable drain must be frozen and
 free of active work before replacing the engine. Historical unknown outcomes remain unchanged and
 visible as degraded business health; they do not authorize a retry. The daemon upgrades itself first, then uses the new
 version's baked Kustomize resources. Checkpoints survive restart. Only physical Pod image IDs, observed
@@ -37,10 +37,15 @@ resume; retrying CreateRelease alone never reopens admission or forces ambiguous
 | `../tools/vps-release/` | Actions HTTP client; no host commands or runtime source imports |
 | `../tools/vps-bootstrap/` | One-time privileged installer and public bundle preparation |
 
-Newsletter and the daemon remain separate images. Both carry the release's source SHA and are promoted
+Newsletter, the daemon and Codex gateway have separate images. They carry the release's source SHA and are promoted
 from the exact tested image tar; deployment uses registry digests. The daemon Deployment and observer
 CronJob use the same platform image. No application executable or Python dependencies are installed on
 the host. If k3s stops, Fleet marks observations stale or missing rather than guessing unit states.
+
+The Codex gateway has its own one-target release path. It does not change Newsletter admission or
+its daily trigger, and uses the existing Codex login volume with an independent inference bearer.
+The existing platform Tunnel routes its exact inference prefix through a separate path-scoped
+Access application. Gateway process health is separate from login, quota and actual inference results.
 
 The owner executes one prepared bootstrap with sudo. Initial engine admission stays frozen until the
 first verified API release. See [rebuild](../docs/rebuild.md) for configuration, secrets and recovery limits.

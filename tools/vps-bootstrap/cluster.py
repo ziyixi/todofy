@@ -76,7 +76,7 @@ def apply(value):
 def secrets(profile, private):
     namespace = profile["namespace"]
     items = []
-    for name, variables in (
+    environments = (
         ("newsletter-settings", private["newsletter_env"]),
         ("newsletter-trigger", private["trigger_env"]),
         ("platform-settings", private["platform_env"]),
@@ -89,7 +89,10 @@ def secrets(profile, private):
                 + "/api/internal/fleet/v1/receipt",
             },
         ),
-    ):
+    )
+    if "codex_gateway_env" in private:
+        environments += (("codex-gateway-settings", private["codex_gateway_env"]),)
+    for name, variables in environments:
         items.append(
             {
                 "apiVersion": "v1",
@@ -106,8 +109,14 @@ def secrets(profile, private):
 
 
 def held_runtime(bundle, namespace):
-    apply(read_json(Path(bundle) / "runtime.json"))
-    for name in ("newsletter", "newsletter-config-sync", "platform-runtime"):
+    runtime = read_json(Path(bundle) / "runtime.json")
+    apply(runtime)
+    names = [
+        item["metadata"]["name"]
+        for item in runtime["items"]
+        if item["kind"] == "Deployment"
+    ]
+    for name in names:
         kubectl(
             [
                 "-n",

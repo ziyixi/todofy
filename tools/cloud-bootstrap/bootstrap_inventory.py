@@ -23,6 +23,9 @@ STANDALONE = {
     "mail-hero-backup": "cloudflare_zero_trust_access_application.mail_hero_backup",
 }
 PLATFORM_ADDRESSES = {
+    "cloudflare_zero_trust_access_service_token.codex_gateway",
+    "cloudflare_zero_trust_access_policy.codex_gateway",
+    "cloudflare_zero_trust_access_application.codex_gateway",
     "cloudflare_zero_trust_access_service_token.platform_deploy",
     "cloudflare_zero_trust_access_policy.platform_deploy",
     'cloudflare_zero_trust_access_application.platform_machine["runtime"]',

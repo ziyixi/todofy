@@ -59,6 +59,15 @@ class PrivateInput(unittest.TestCase):
         self.assertEqual(vps["platform_env"]["PLATFORM_DEPLOY_TOKEN"], "existing-deploy")
         self.assertEqual(vps["fleet_key"], "existing-hmac")
 
+    def test_gateway_private_input_keeps_only_the_independent_inference_token(self):
+        value = {"vps": {"codex_gateway_env": {"CODEX_GATEWAY_TOKEN": "existing-inference"}}}
+        configured = private_input.generated_secrets(value)
+        vps = private_input.vps_credentials(value, configured, "connector")
+        self.assertEqual(vps["codex_gateway_env"], value["vps"]["codex_gateway_env"])
+        value["vps"]["codex_gateway_env"]["PLATFORM_DEPLOY_TOKEN"] = "forbidden"
+        with self.assertRaisesRegex(BootstrapError, "VPS_PRIVATE_INPUT_INVALID"):
+            private_input.vps_credentials(value, configured, "connector")
+
     def test_private_files_refuse_repo_and_non_owner_permissions(self):
         with self.assertRaises(BootstrapError):
             private_input.write_private(ROOT / "secret.json", {}, ROOT)

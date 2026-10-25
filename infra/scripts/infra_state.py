@@ -115,6 +115,7 @@ ALLOWED_TYPES = frozenset({
 })
 # New network resources are scoped by address as well as type. No unrelated DNS or tunnel is managed.
 PLATFORM_OBJECTS = frozenset({
+    "cloudflare_zero_trust_access_service_token.codex_gateway",
     "cloudflare_zero_trust_access_service_token.platform_deploy",
     "cloudflare_zero_trust_tunnel_cloudflared.platform",
     "cloudflare_zero_trust_tunnel_cloudflared_config.platform",
@@ -160,7 +161,7 @@ if tomllib is not None:
 # Preserve the existing older-Python local output-check behaviour; CI requires 3.11+.
 WRANGLER_CONFIGS = tuple(production_workers(REPO)) if tomllib is not None else ()
 PUBLIC_OUTPUTS = ("access_aud", "d1_database_ids", "r2_bucket_names")
-OUTPUTS = (*PUBLIC_OUTPUTS, "platform_bootstrap")
+OUTPUTS = (*PUBLIC_OUTPUTS, "platform_bootstrap", "codex_gateway_bootstrap")
 
 
 class Refused(Exception):
@@ -1241,6 +1242,8 @@ def export_platform_credentials(session: "Session", env: dict[str, str]) -> None
 
     try:
         encrypted_export(session, env, lambda path: cloudflare_get(env["CLOUDFLARE_API_TOKEN"], path), INFRA)
+        encrypted_export(session, env, lambda path: cloudflare_get(env["CLOUDFLARE_API_TOKEN"], path), INFRA,
+                         output_name="codex_gateway_bootstrap")
     except (ExportFailed, OSError, subprocess.SubprocessError):
         raise Refused("platform credential export failed; retry a no-change apply with the same recipient") from None
 

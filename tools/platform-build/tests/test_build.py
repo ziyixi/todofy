@@ -29,7 +29,7 @@ def test_image_context_identity_and_reviewed_manifest_asset(tmp_path):
     assert json.loads((context / "build-info.json").read_text()) == {"source_sha": sha}
     resources = json.loads((app / "personal_cloud/resources.json").read_text())
     assert resources["kind"] == "List"
-    assert len(resources["items"]) == 10
+    assert len(resources["items"]) == 13
     runtime = next(
         item
         for item in resources["items"]

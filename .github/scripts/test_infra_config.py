@@ -405,6 +405,19 @@ class MatchesTheApps(unittest.TestCase):
         self.assertIn("app_launcher_visible        = false", application)
         self.assertNotIn("fleet_receipt.id", code.split("# --- Fleet machine receipt")[0])
 
+    def test_codex_access_identity_is_limited_to_the_inference_path(self):
+        code = (INFRA / "platform.tf").read_text()
+        application = re.search(r'resource "cloudflare_zero_trust_access_application" "codex_gateway" \{(.*?)^\}', code, re.S | re.M).group(1)
+        policy = re.search(r'resource "cloudflare_zero_trust_access_policy" "codex_gateway" \{(.*?)^\}', code, re.S | re.M).group(1)
+        self.assertIn('domain                     = "${local.platform_runtime_hostname}/api/codex/v1/*"', application)
+        self.assertIn('decision   = "non_identity"', policy)
+        self.assertIn("token_id = cloudflare_zero_trust_access_service_token.codex_gateway.id", policy)
+        self.assertNotIn("platform_deploy", application + policy)
+        self.assertNotIn("bypass", application + policy)
+        self.assertIn('path     = "/api/codex/v1/.*"', code)
+        self.assertIn('service  = "http://127.0.0.1:18766"', code)
+        self.assertIn('aud_tag   = [cloudflare_zero_trust_access_application.codex_gateway.aud]', code)
+
     def test_every_worker_that_checks_access_has_an_application_of_its_name(self):
         """The access_aud output is keyed by Worker name; a Worker whose ACCESS_AUDIENCE no application key matches
         would fail the outputs check in "Infra drift"."""

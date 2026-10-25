@@ -2,6 +2,7 @@
 import { sankey, sankeyLeft, sankeyLinkHorizontal, type SankeyLink, type SankeyNode } from 'd3-sankey'
 import { MailFlow_Outcome, MailFlow_Stage, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
+import { ClassificationProvider } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { el } from './dom.ts'
 import { PRIORITIES } from './priorities.ts'
 
@@ -40,13 +41,12 @@ export interface FlowGraph {
 const STAGES: readonly (readonly [MailFlow_Stage, string, string])[] = [
   [MailFlow_Stage.SKIPPED, 'skipped', '跳过'],
   [MailFlow_Stage.CLAUDE, 'claude', 'Claude Opus 5.5'],
+  [MailFlow_Stage.CODEX, 'codex', 'VPS Codex'],
   [MailFlow_Stage.CLEF, 'clef', '历史 Clef 27B'],
   [MailFlow_Stage.CLEF_FLASH, 'clef-flash', '历史 Clef-flash'],
   [MailFlow_Stage.NO_MODEL, 'no_model', '历史未调用模型'],
   [MailFlow_Stage.DEFERRED, 'deferred', '等待判断'],
 ]
-
-const CURRENT_STAGES = STAGES.filter(([stage]) => stage === MailFlow_Stage.SKIPPED || stage === MailFlow_Stage.CLAUDE || stage === MailFlow_Stage.DEFERRED)
 
 const SKIP_REASONS: Readonly<Record<number, string>> = {
   [MailFlow_Outcome.NOT_INBOX]: '已发送、草稿或垃圾邮件',
@@ -171,16 +171,18 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
 }
 
 /** An empty day still shows the four priorities, with zero counts. */
-export function skeletonGraph(): FlowGraph {
+export function skeletonGraph(provider: ClassificationProvider = ClassificationProvider.CLAUDE): FlowGraph {
+  const model = provider === ClassificationProvider.CODEX ? 'codex' : 'claude'
+  const currentStages = STAGES.filter(([, id]) => id === 'skipped' || id === model || id === 'deferred')
   const stage = ([, id, name]: (typeof STAGES)[number]): FlowNodeData => ({ id, name, kind: id === 'skipped' || id === 'deferred' ? 'terminal' : 'stage', slot: 0 })
   const ranks: FlowNodeData[] = PRIORITIES.map((priority, index) => ({ id: `label:labels/${priority.id}`, name: priority.title, kind: 'label', slot: index + 1, group: priority.title, detail: [priority.policy] }))
   return {
     total: 0,
-    nodes: [{ id: 'new', name: '新邮件', kind: 'source', slot: 0 }, ...CURRENT_STAGES.map(stage), ...ranks, ...OUTCOMES.filter((node) => node.id === 'suggested')],
+    nodes: [{ id: 'new', name: '新邮件', kind: 'source', slot: 0 }, ...currentStages.map(stage), ...ranks, ...OUTCOMES.filter((node) => node.id === 'suggested')],
     links: [
-      ...CURRENT_STAGES.map(([, id]) => ({ source: 'new', target: id, value: 0 })),
-      ...ranks.map((rank) => ({ source: 'claude', target: rank.id, value: 0 })),
-      { source: 'claude', target: 'suggested', value: 0 },
+      ...currentStages.map(([, id]) => ({ source: 'new', target: id, value: 0 })),
+      ...ranks.map((rank) => ({ source: model, target: rank.id, value: 0 })),
+      { source: model, target: 'suggested', value: 0 },
     ],
     groups: PRIORITIES.map((priority, index) => ({ name: priority.title, slot: index + 1 })),
   }
@@ -222,9 +224,9 @@ type Link = SankeyLink<FlowNodeData, FlowLinkData>
  * the skeleton (skeletonGraph): laid out as if each path carried one mail, then drawn with hairline links, muted
  * nodes and every count 0.
  */
-export function sankeyChart(graph: FlowGraph): HTMLElement {
+export function sankeyChart(graph: FlowGraph, provider: ClassificationProvider = ClassificationProvider.CLAUDE): HTMLElement {
   const zero = graph.total === 0
-  const drawn = zero ? skeletonGraph() : graph
+  const drawn = zero ? skeletonGraph(provider) : graph
   const box = el('div', { class: 'flow-chart' })
   const scroll = el('div', { class: 'flow-scroll' })
   const tip = el('div', { class: 'flow-tip', role: 'status', hidden: true })

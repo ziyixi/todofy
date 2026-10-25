@@ -177,12 +177,12 @@ export async function startFlows(
     },
   });
   let csrf: { token: string; cookie: string } | null = null;
-  const pending: Record<StubApp, { app: StubApp; method: string; args: unknown[] }[]> = { 'mail-hero': [], todofy: [], watch: [], fleet: [], newsletter: [], 'notion-publish': [], mailsort: [], recall: [], brief: [], tasks: [], 'personal-mcp': [] };
+  const pending: Record<StubApp, { app: StubApp; method: string; args: unknown[] }[]> = { 'mail-hero': [], todofy: [], watch: [], fleet: [], newsletter: [], 'codex-gateway': [], 'notion-publish': [], mailsort: [], recall: [], brief: [], tasks: [], 'personal-mcp': [] };
   const drain = async (app: StubApp) => {
     pending[app].push(...(await harness.calls(app)));
     return pending[app].splice(0);
   };
-  const scenarios: Record<StubApp, Record<string, StubAnswer>> = { 'mail-hero': {}, todofy: {}, watch: {}, fleet: {}, newsletter: {}, 'notion-publish': {}, mailsort: {}, recall: {}, brief: {}, tasks: {}, 'personal-mcp': {} };
+  const scenarios: Record<StubApp, Record<string, StubAnswer>> = { 'mail-hero': {}, todofy: {}, watch: {}, fleet: {}, newsletter: {}, 'codex-gateway': {}, 'notion-publish': {}, mailsort: {}, recall: {}, brief: {}, tasks: {}, 'personal-mcp': {} };
   const flows: FlowHarness = {
     ...harness,
     analytics,
@@ -231,7 +231,7 @@ export async function startFlows(
           items: [...digestItems, ...ops.attention.info].map(({ source, code, severity }) => ({ source, code, severity })),
         },
         observed: ops.attention.items.flatMap((item) => (item.observed === undefined ? [] : [{ source: item.source, code: item.code, level: item.observed }])),
-        apps: { 'mail-hero': app('mail-hero'), todofy: app('todofy'), watch: app('watch'), fleet: app('fleet'), newsletter: app('newsletter'), 'notion-publish': app('notion-publish'), mailsort: app('mailsort'), recall: app('recall'), brief: app('brief'), tasks: app('tasks'), 'personal-mcp': app('personal-mcp') },
+        apps: { 'mail-hero': app('mail-hero'), todofy: app('todofy'), watch: app('watch'), fleet: app('fleet'), newsletter: app('newsletter'), 'codex-gateway': app('codex-gateway'), 'notion-publish': app('notion-publish'), mailsort: app('mailsort'), recall: app('recall'), brief: app('brief'), tasks: app('tasks'), 'personal-mcp': app('personal-mcp') },
         usage: cloudflare.usage,
         guard: ops.guard,
         canary: ops.canary,

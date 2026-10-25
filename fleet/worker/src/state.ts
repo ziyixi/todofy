@@ -100,7 +100,7 @@ export class FleetState extends DurableObject<Env> {
     return JSON.stringify(toWire(FleetStatusSchema, snapshot));
   }
 
-  status(app: 'fleet' | 'newsletter', now: number): ops.OpsStatus {
+  status(app: 'fleet' | 'newsletter' | 'codex-gateway', now: number): ops.OpsStatus {
     const doc = this.latest();
     const report: Report | null = doc ? JSON.parse(doc.report) as Report : null;
     return statusSnapshot(app, report, doc?.received_at ?? null, now, this.env.PUBLIC_HOST);

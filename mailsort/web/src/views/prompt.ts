@@ -97,7 +97,7 @@ export function promptCard(): HTMLElement {
   })
 
   const box = card('分类提示词', '',
-    el('p', { class: 'hint' }, '这两段文本会原样发送给 Claude。保存对下一批生效，不会自动重判已分类邮件。'),
+    el('p', { class: 'hint' }, '这两段文本会原样发送给所选分类引擎。保存对下一批生效，不会自动重判已分类邮件。'),
     el('div', { class: 'prompt-editor' },
       el('label', { for: personal.id }, el('span', {}, '个人规则'), personal),
       el('details', { class: 'prompt-core' }, el('summary', {}, '基础提示词'), el('label', { for: base.id }, el('span', { class: 'visually-hidden' }, '基础提示词'), base)),

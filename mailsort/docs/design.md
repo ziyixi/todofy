@@ -1,18 +1,28 @@
 # Mailsort design
 
-The owner's Gmail has four reading queues. Claude judges the latest reasonable reading time from message content;
+The owner's Gmail has four reading queues. The selected model judges the latest reasonable reading time from message content;
 Gmail remains the mailbox. The app never sends mail, marks it read, deletes it or creates tasks.
 
 ## 1. Runtime
 
 One TypeScript Worker serves private, framework-free UI assets, verifies Access/Origin/CSRF and forwards the generated owner
 API to SQLite DO `MailsortState`, stable object `mailsort-v1`. Its Alarm handles Gmail history, pending messages,
-Claude requests, the existing write ledger and daily retention. No VPS, cron or added storage/scheduler.
+model requests, the existing write ledger and daily retention. The independent VPS Codex gateway only executes
+the selected synchronous inference call; it has no Gmail credentials, saved jobs or autonomous scheduler.
 
 `state.ts` owns API dispatch and Alarm lifecycle. `pipeline.ts` owns a bounded pass. `gmail.ts` owns Google access;
-`claude.ts` owns the Anthropic Messages API. Defaults are bundled from `prompts/priority-classification.txt` and
+`claude.ts` owns the Anthropic Messages API and `codex.ts` calls the independent gateway through the root
+`codex.inference.v1` contract. Defaults are bundled from `prompts/priority-classification.txt` and
 `prompts/personal-rules.txt`. A saved override lives in existing DO metadata, not another database. The UI imports
 only generated wire types, never Worker implementation.
+
+The [gateway](../../codex-gateway/README.md) uses the official
+[Codex Python SDK](https://learn.chatgpt.com/docs/codex-sdk), pinned to `openai-codex==0.156.1` and its runtime.
+Each request creates a temporary workspace and an ephemeral thread, fixes `gpt-6.1-sol` at medium effort, and
+requires the mounted ChatGPT subscription account. It has no API-key fallback. Only the existing authentication
+PVC is shared with Newsletter; there is no Newsletter source import, workflow call or shared business state.
+Operational tools, web access, plugins, MCP and skills are disabled; the gateway verifies disabled skills before
+starting the model and rejects any returned tool item. It stores no inference job or mail-content log.
 
 ## 2. Gmail boundary and privacy
 
@@ -24,7 +34,9 @@ The historical one-time initializer may delete only old user-label IDs already f
 The model receives one array of message IDs, masked sender/subject/body, receipt time, evaluation time and timezone.
 Subject is capped at 200 characters and body at 12,000; body truncation is explicit. Addresses and long numbers are
 masked and links reduced to domains. Attachments are not sent. Model input is untrusted data with no tool access.
-Production calls go directly to Anthropic, without AI Gateway or request-body logging.
+With Claude selected, calls go directly to Anthropic. With Codex selected, the owner's VPS gateway forwards the
+masked input to OpenAI. Neither application path logs request or response content. The gateway receives no Gmail
+authorization and cannot read or modify the mailbox.
 
 | Stored data | Retention |
 | --- | --- |
@@ -70,6 +82,12 @@ There is no prompt history, reset service or automatic reclassification.
 Off stops Gmail/model work; shadow records model decisions without Gmail changes; live applies them. The existing
 deployment ceiling and breaker can lower the owner mode. Setup or deployment does not raise it or replay old mail.
 
+`Settings.classification_provider` persists one of two choices: Claude API (`claude-opus-5-5`, medium) or VPS Codex
+(`gpt-6.1-sol`, medium). A missing legacy field means Claude until the owner chooses otherwise. Both use the same
+saved prompt snapshot. The existing mask, etag and request-ID handling protects a switch; it preserves mode,
+breaker, write limits, prompt and Claude accounting history. The existing Alarm can resume pending work with the
+chosen provider. A switch does not start an unread/recheck batch, rewrite classified history or enable automatic fallback.
+
 ## 4. Hourly batches
 
 The existing Alarm normally maintains Gmail every five minutes. A persisted `next_model_at` starts new model work
@@ -84,27 +102,31 @@ messages in its thread. The explicit unread action includes older/archived mail,
 progress table. Older recheck options remain explicit owner operations and never start on deployment.
 
 `claude.ts` sends a standard Messages API request to `claude-opus-5-5` with adaptive thinking, medium effort and
-structured JSON output. The response must cover all input IDs exactly once, with P1-P4 and a short reason. It has
-a bounded response and timeout. There is no provider/model fallback, second vote, embeddings or automatic learning.
+structured JSON output. `codex.ts` sends the same prompt and masked mail snapshot to
+`https://platform-runtime.ziyixi.science/api/codex/v1/inference:run`, with a dedicated Access machine identity and
+an inference-only Bearer. The gateway contract separates instructions, JSON input and JSON output schema. Both
+providers must cover all input IDs exactly once, with P1-P4 and a short reason. Responses and timeouts are bounded
+(120 seconds at the caller, 110 seconds for the Codex operation). There is no provider/model fallback, second vote,
+embeddings or automatic learning.
 
 Provider/network failures use the existing pending backoff. Invalid results are not partially applied. Exhausted
 retries become visible failures without new Gmail labels. Historical probabilities, examples and ledger entries
-keep their original meanings; none are rewritten as Claude judgments.
+keep their original meanings; none are rewritten as judgments from the selected provider.
 
 ## 5. Cost and credentials
 
-A dedicated Anthropic Mailsort workspace has a provider-native $20/calendar-month spend limit; Brief and the
+Only Claude uses the dedicated Anthropic Mailsort workspace's provider-native $20/calendar-month spend limit; Brief and the
 organization limit are separate. Credits count toward that spend limit and the cap resets on the first UTC day
 of each month. API keys are scoped to this workspace.
 
-The app stores returned usage in the existing SQLite store, by UTC day, and sums at most one month's rows. The
+The app stores returned Claude usage in the existing SQLite store, by UTC day, and sums at most one month's rows. The
 recorded price is $4/million uncached input, $5/million five-minute cache writes, $0.20/million cache reads and
 $20/million output tokens; thinking is part of output tokens, not an extra charge. Input totals include uncached,
 cache-created and cache-read tokens. If the provider reports one-hour cache creation, it is priced at $8/million;
 this application only requests five minutes. Optional missing thinking breakdown remains unknown. Even a billed invalid result counts when the API
 returned its usage. No estimates, reservations or extra accounting service are introduced.
 
-The API's stable system blocks are base first, then nonempty personal rules; message-specific email/time data
+For Claude, the API's stable system blocks are base first, then nonempty personal rules; message-specific email/time data
 follows them. Each system block gets an explicit five-minute cache breakpoint only when the prepared batch has
 more due pending work behind it or a returned cache read/write began within five minutes. The latter is one
 timestamp in existing metadata, recorded from request start only when usage actually reports caching. No top-level
@@ -114,12 +136,20 @@ length, caching may be ignored. Actual returned token fields determine cost and 
 See [Anthropic prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) and
 [Opus 5.5 pricing](https://platform.claude.com/docs/en/about-claude/pricing).
 
-At recorded cost >= $20, new calls wait until the next UTC month. A provider spend refusal does the same even if
+At recorded Claude cost >= $20, new Claude calls wait until the next UTC month. A provider spend refusal does the same even if
 local accounting is lower. Network responses lost before usage is read and out-of-app calls may be absent locally;
 Anthropic's console is the billing authority. Config/auth failures stay visible and do not assign fallback P1.
+Claude's monthly cap and explicit cache policy do not apply to Codex. Selecting Codex preserves those records as
+history. Codex uses the existing ChatGPT subscription, subject to its account/model availability and usage limits;
+the app does not convert Codex tokens into Claude API fees. A saved login or a healthy process cannot establish
+successful model access. Verify a real synthetic inference separately.
 
-Gmail OAuth and `ANTHROPIC_API_KEY` are owner-written Worker secrets. `app.toml`, generated secret inventories and
-the deploy wrapper keep them out of GitHub and preserve them during deploy. The initial account setup is in the
+Gmail OAuth, `ANTHROPIC_API_KEY`, `CODEX_ENDPOINT_TOKEN`, `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET`
+are owner-written Worker secrets. `app.toml`, generated secret inventories and the deploy wrapper keep them out
+of GitHub release secrets and preserve them during deploy. `CODEX_ENDPOINT_URL` is a generated, non-secret deployment
+var for the fixed route above; the UI accepts no arbitrary endpoint. IaC owns the dedicated Access identity and
+keeps sensitive outputs in encrypted state. The subscription login stays on the VPS auth PVC, outside Worker/GitHub
+credentials. The initial account setup is in the
 [root rebuild guide](../../docs/rebuild.md); the concrete key command is in [README](../README.md).
 
 ## 6. Existing writes and history
@@ -136,29 +166,35 @@ initializer and consolidation state keep their original identity and resume beha
 ## 7. UI and Ops
 
 概览 shows Gmail freshness separately from the hourly model schedule, the current model/effort, recorded monthly
-cost/tokens, actual cache reads/writes and any provider/config error. 分级 shows the four queues and explicit
-unread-batch progress. 设置 shows editable personal rules with a collapsed base-prompt field, alongside mode/write
+Claude cost/tokens, actual Claude cache reads/writes and the selected provider/config error. While Codex is selected,
+Claude figures are labelled history. `ServiceStatus.classifier` reports the selected provider, fixed model/effort,
+local configuration, next batch time, safe error and last successful response; configuration presence does not check
+network reachability or authentication. 分级 shows the four queues and explicit unread-batch progress. 设置 shows
+the persistent two-choice selector and editable personal rules with a collapsed base-prompt field, alongside mode/write
 controls and undo. Saving updates that card in place; a prompt-load failure leaves other settings usable.
 Old examples, model stages and replay results are labelled history.
 
-Home's private Ops binding exposes fresh mode/auth/pending counts and Claude budget warnings. It no longer declares
-the account Workers AI guard capability: shedding unrelated free-model usage cannot switch or stop Mailsort's Claude
-model. The manual batch card consumes the fresh status after Start and reads status every 30 seconds only while
+Home's private Ops binding exposes fresh mode/auth/pending counts and selected-provider warnings; Claude budget
+warnings apply only while Claude is selected. It no longer declares the account Workers AI guard capability:
+shedding unrelated free-model usage cannot switch or stop Mailsort's model. The manual batch card consumes the fresh status after Start and reads status every 30 seconds only while
 its batch is active and visible. It cancels on hide/leave/completion and refreshes once on visible return.
 `ServiceStatus.gmail_write_resume_time` reports the next UTC midnight only when the effective daily write cap is
-full. The UI uses that timestamp for a specific local-time explanation. No new endpoint or scheduler is added. Recheck progress derives `unchanged_count` from existing batch/decision
+full. The UI uses that timestamp for a specific local-time explanation. No new owner API endpoint or scheduler is added. Recheck progress derives `unchanged_count` from existing batch/decision
 metadata and excludes it from `skipped_count`; a successful same-grade judgment is not an unprocessed exclusion.
 Labels refreshes its existing report after status updates and patches count spans in place, preserving focus and
 expanded details. Home owns its existing warning dismissal behavior.
 
 ## 8. Verification and release
 
-Use synthetic Gmail/Claude endpoints, the independent Gmail operation table, real workerd/SQLite, the generated
+Use synthetic Gmail/Claude/Codex endpoints, the independent Gmail operation table, real workerd/SQLite, the generated
 owner API and the existing local Wrangler smoke. Cover batch ID validation, all four Gmail outcomes, preserved
 read/star/other labels, already-classified skips, hourly cadence, actual usage, monthly reset/wait, auth/provider
-failure and ordinary write-cap waits. CPU tests must reach the actual batched Claude path. Frozen contract fixtures
+failure and ordinary write-cap waits. Cover provider persistence, legacy defaults, selected-provider errors, no fallback
+and preserved mode/breaker/prompt/budget history. CPU tests must reach the active batched model path. Gateway checks
+use the shared Python wire codec, a fake SDK and offline pinned-feature inspection. Frozen contract fixtures
 remain unchanged and readable.
 
 Pass the full branch CI gate; deploy the same SHA through main Actions and record actual Worker/Deployment identity.
-Code deployment, native provider configuration, a real synthetic model call and actual Gmail classification are
+The gateway has its own image/workload release. Process `/healthz` reports the image's baked source identity and
+release request ID. Code deployment, native provider configuration, a real synthetic model call and actual Gmail classification are
 separate evidence. No existing mail is automatically reclassified by this rollout.

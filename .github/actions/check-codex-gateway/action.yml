@@ -1,0 +1,43 @@
+name: check-codex-gateway
+description: Check and archive the independent inference image without credentials or model calls.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: '26'
+    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        version: '0.12.10'
+        working-directory: codex-gateway
+        enable-cache: true
+    - name: Check the locked gateway and synthetic inference contract
+      working-directory: .
+      shell: bash -e {0}
+      run: |
+        npm ci --prefix proto --no-audit --no-fund
+        node proto/tools/ensure.mjs
+        uv sync --project codex-gateway --locked
+        uv run --project codex-gateway --locked ruff check codex-gateway/src codex-gateway/tests
+        uv run --project codex-gateway --locked ruff format --check codex-gateway/src codex-gateway/tests
+        uv run --project codex-gateway --locked python -m unittest discover -s codex-gateway/tests -v
+    - name: Build the tested inference image
+      working-directory: .
+      shell: bash -e {0}
+      run: |
+        docker build --platform linux/amd64 --file codex-gateway/Dockerfile \
+          --build-arg SOURCE_SHA="$GITHUB_SHA" \
+          --build-arg SOURCE_REPOSITORY="https://github.com/$GITHUB_REPOSITORY" \
+          --tag "codex-gateway-ci:$GITHUB_SHA" .
+        tested_image=$(docker image inspect --format '{{.Id}}' "codex-gateway-ci:$GITHUB_SHA")
+        docker run --rm --network none --env EXPECTED_SHA="$GITHUB_SHA" --entrypoint python "$tested_image" \
+          -c 'import codex_gateway.app, codex_gateway.runtime, openai_codex; import importlib.resources, json, os; assert json.loads(importlib.resources.files("codex_gateway").joinpath("build-info.json").read_text())["source_sha"] == os.environ["EXPECTED_SHA"]'
+        python3 tools/container-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
+          --directory "$RUNNER_TEMP/codex-gateway-image"
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: codex-gateway-image-${{ github.sha }}
+        path: ${{ runner.temp }}/codex-gateway-image/
+        if-no-files-found: error
+        retention-days: 1
+        compression-level: 6

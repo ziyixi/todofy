@@ -1,7 +1,7 @@
 /** Priority batch actions and progress, exercised through the generated owner API. */
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
-import { ClaudeBudgetSchema, Mode, UnreadClassification_State, UnreadClassificationSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import { ClassificationProvider, ClassifierStatusSchema, ClaudeBudgetSchema, Mode, UnreadClassification_State, UnreadClassificationSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { mountApp, type Host, type ViewContext } from './app.ts'
 import { api } from './api.ts'
 import { FakeServer, NOW, settle } from './test/fakeServer.ts'
@@ -52,7 +52,7 @@ describe('priority batch classification', () => {
     expect(ready.textContent).toContain('P1 留在收件箱，P2–P4 归档')
     expect(ready.textContent).toContain('保留邮件、未读状态、星标和其他标签')
     expect(ready.textContent).toContain('已有 P1–P4 标签的邮件会跳过')
-    expect(ready.textContent).toContain('点击后立即排队，在剩余模型预算和 Gmail 写入额度内分批处理')
+    expect(ready.textContent).toContain('点击后立即排队，在所选分类引擎的可用额度和 Gmail 写入额度内分批处理')
     expect(ready.textContent).not.toContain('每小时')
     expect(server.calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
   })
@@ -234,6 +234,43 @@ describe('priority batch classification', () => {
     expect(card.textContent).toContain('已改标 30')
     expect(card.textContent).not.toContain('预算已用完')
     expect(server.calls.every((call) => call.method === 'GET')).toBe(true)
+  })
+
+  it('uses the selected Codex schedule while an exhausted Claude budget remains historical', async () => {
+    const server = liveServer()
+    server.status = {
+      writeScope: true,
+      classifier: create(ClassifierStatusSchema, { provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: true, nextBatchTime: timestampFromMs(NOW + 1_800_000) }),
+      claudeBudget: create(ClaudeBudgetSchema, { limitUsd: 20, spentUsd: 20, providerLimitReached: true, lastErrorCode: 'claude_spend_limit', nextBatchTime: timestampFromMs(NOW + 3_600_000) }),
+    }
+    server.unreadClassification = batch()
+    const card = await open(server)
+    expect(card.textContent).toContain('下批判断最早在 30 分钟后')
+    expect(card.textContent).not.toContain('Anthropic 工作区已达到消费上限')
+    expect(card.textContent).not.toContain('本月模型预算已用完')
+    expect(card.textContent).not.toContain('Claude 用量未提供')
+    expect(card.textContent).not.toContain('下批判断最早在 1 小时后')
+    expect(button(card, '整理当前未读').disabled).toBe(true)
+    expect(server.calls.every((call) => call.method === 'GET')).toBe(true)
+  })
+
+  it('shows the selected Codex error and Gmail quota without needing a Claude budget', async () => {
+    const server = liveServer()
+    server.status = {
+      writeScope: true, claudeBudget: undefined,
+      classifier: create(ClassifierStatusSchema, { provider: ClassificationProvider.CODEX, configured: true, lastErrorCode: 'codex_auth' }),
+      gmailWriteResumeTime: timestampFromMs(NOW + 16 * 3_600_000),
+    }
+    server.unreadClassification = batch()
+    const card = await open(server)
+    expect(card.textContent).toContain('VPS Codex 授权失败')
+    expect(card.textContent).not.toContain('Claude 用量未提供')
+    expect(card.textContent).not.toContain('已达本应用今日 Gmail 写入上限')
+    server.status.classifier = create(ClassifierStatusSchema, { provider: ClassificationProvider.CODEX, configured: true })
+    button(card, '刷新进度').click()
+    await settle()
+    expect(card.textContent).toContain('已达本应用今日 Gmail 写入上限')
+    expect(card.textContent).not.toContain('VPS Codex 授权失败')
   })
 
   it('shows an actual Gmail daily-cap resume time instead of calling it a model retry', async () => {

@@ -109,13 +109,15 @@ existing namespace, removes the first-deploy exceptions and binds Home to Brief'
 | `Infra checks` | Structural safety guards, `tofu fmt`, locked-provider initialization without backend credentials, `tofu validate`, plan-summary/local-values/export tests and static Wrangler/output consistency. No provider token, state or production plan is read. |
 | `Newsletter checks`, `Newsletter image checks` | Locked engine/unit/synthetic model checks, build smoke checks, then build linux/amd64 and test the exact image ID/configuration. Save the tested image tar and identity/checksum manifest as a one-day artifact. |
 | `Platform checks` | Locked Python lint/tests of daemon, observer and release/build tools; compile standard Kustomize assets, build linux/amd64 and test the exact image's dependencies, source identity and observer imports without network. Save that tested image and manifest as a one-day artifact. |
+| `Codex gateway checks` | Locked Python lint and synthetic inference tests, followed by the independent linux/amd64 image build and offline source/dependency check. Archive `codex-gateway-image-<sha>` for checked-byte promotion; no login, credentials or real model call. |
 | `CI gate` | Fails on any required failed/cancelled job. Unchanged jobs or explicitly verified same-SHA reuse may be skipped. **The one check to require on main.** |
-| `Newsletter image publish`, `Platform image` | After main's gate and the required successful checks or verified same-SHA reuse, load and publish the tested artifacts to the catalog's image repositories. Publication does not rebuild or prove a VPS rollout. |
+| `Newsletter image publish`, `Platform image`, `Codex gateway image` | After main's gate and the required successful checks or verified same-SHA reuse, load and publish the tested artifacts to the catalog's image repositories. Publication does not rebuild or prove a VPS rollout. |
 | `Recall extension release` | After main's gate, when `recall/extension/` or `recall/shared/` changed (`recall_extension_publish`; also a dispatch for recall or all, and a run of everything): publish the extension artifact `Recall checks` tested (from the reused run on same-SHA reuse) as the GitHub Release `recall-extension-v<version>` with its zip, the commit and the CI run; a version whose tag exists is skipped. The extension publication job with `contents: write`; it reads no secret, and no job needs it, so a failure delays no deploy (the failed run's diff is retried by the next push). |
 | Cloudflare app deploy jobs | After main's gate and app checks: build the verified UI, write private values, dry-run, enforce hostname safety, apply only the app's required D1 migrations and deploy its committed config. Each app retains its production probes and concurrency group. |
 | `Tasks deploy`, `Watch deploy` | Tasks waits for Todofy (its `MAIL` binding names Todofy's `Mail` entry); Watch waits for Tasks (its `TASKS` binding names Tasks' `TaskInbox`) and for Todofy, because a failed Todofy deploy leaves Tasks deploy skipped rather than failed. Each also proceeds when the jobs it waits for are skipped. |
 | `Dashboard deploy` | Also waits for Todofy, Mail Hero, Tasks, Watch, Fleet, Mailsort, Recall, Brief and website relay deploys to succeed or be skipped. Its `FLEET`/`NEWSLETTER` service bindings require Fleet's `Ops`/`NewsletterOps`, `BRIEF` requires Brief's `Ops` and `TASK_INBOX` Tasks' `TaskInbox`; selected providers deploy before Home in the same SHA's release. |
 | `VPS deploy` | After both image publications and the gate, when `VPS_DEPLOY_ENABLED=true`: call the daemon's shared-proto release API and verify the durable result and fresh physical provenance. See the VPS section below. |
+| `Codex gateway deploy` | After its image publication and any selected VPS/Fleet release, use one gateway target through the same release API. Verify baked source, startup identity, digest and generation; retain Newsletter admission and trigger state. |
 
 On main, the diff base is the last successful push run of this workflow; failed/cancelled releases do not
 lose their changes. Branch checks compare with the merge base against `origin/main`. No usable base runs
@@ -130,8 +132,9 @@ required check, missing artifact, different SHA or manual run runs checks again.
 A package change checks and deploys its actual `PACKAGE_USERS`; a Markdown-only package change checks
 those consumers without deploying. Contract runtime values deploy only `BUNDLED_BY` consumers; schemas
 and fixtures still trigger checks. Generic CI/check tooling checks applications without deploying them.
-Explicit image build/publication/VPS release tooling changes release the paired Newsletter and Platform
-images. A Dashboard-only change does not redeploy its Ops providers. Root documentation alone runs
+Explicit image build/publication/VPS release tooling changes publish the runtime pair and gateway for
+a complete bootstrap bundle. Gateway-only source changes leave Newsletter and Platform untouched.
+A Dashboard-only change does not redeploy its Ops providers. Root documentation alone runs
 `Changes` and the gate. These rules are tested against dependencies/imports, including proto import closure.
 
 Production job conditions retain `!cancelled()` and explicit successful dependency results. A reused check

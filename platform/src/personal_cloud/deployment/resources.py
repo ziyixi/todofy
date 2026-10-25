@@ -9,6 +9,9 @@ from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 from ..status_daemon.config import Configuration
 
 NAMES = {
+    ("Deployment", "codex-gateway"),
+    ("Service", "codex-gateway"),
+    ("ConfigMap", "codex-gateway-release"),
     ("Deployment", "newsletter"),
     ("Deployment", "newsletter-config-sync"),
     ("Deployment", "platform-runtime"),
@@ -64,7 +67,11 @@ def configuration_wire(config: Configuration) -> dict:
 
 
 def image(config: Configuration, adapter: str, digest: str) -> str:
-    suffix = {"newsletter": "newsletter", "personal-cloud": "platform"}[adapter]
+    suffix = {
+        "newsletter": "newsletter",
+        "personal-cloud": "platform",
+        "codex-gateway": "codex-gateway",
+    }[adapter]
     return (
         "ghcr.io/"
         + config.repository.split("/", 1)[0].lower()
@@ -83,25 +90,45 @@ class Renderer:
         self.workloads = {
             item.adapter: item
             for item in config.workloads
-            if item.adapter in {"newsletter", "personal-cloud"}
+            if item.adapter in {"newsletter", "personal-cloud", "codex-gateway"}
         }
         selected = [
             item
             for item in config.workloads
-            if item.adapter in {"newsletter", "personal-cloud"}
+            if item.adapter in {"newsletter", "personal-cloud", "codex-gateway"}
         ]
         if (
-            set(self.workloads) != {"newsletter", "personal-cloud"}
-            or len(selected) != 2
-            or len({item.deployment for item in selected}) != 2
-            or len({item.release_configmap for item in selected}) != 2
+            not {"newsletter", "personal-cloud"} <= set(self.workloads)
+            or len(selected) != len(self.workloads)
+            or len({item.deployment for item in selected}) != len(selected)
+            or len({item.release_configmap for item in selected}) != len(selected)
         ):
             raise ValueError("unsupported_release_profile")
         self.asset = load() if asset is None else deepcopy(asset)
-        if {
+        names = {
             (item["kind"], item["metadata"]["name"]) for item in self.asset["items"]
-        } != NAMES or len(self.asset["items"]) != len(NAMES):
+        }
+        legacy = {name for name in NAMES if not name[1].startswith("codex-gateway")}
+        allowed = (NAMES,) if "codex-gateway" in self.workloads else (NAMES, legacy)
+        if names not in allowed or len(self.asset["items"]) != len(names):
             raise ValueError("invalid_resource_asset")
+
+    @staticmethod
+    def adapter(name: str) -> str:
+        if name.startswith("codex-gateway"):
+            return "codex-gateway"
+        return "personal-cloud" if name.startswith("platform-") else "newsletter"
+
+    def sources(self, targets):
+        selected = {target.workload_key for target in targets}
+        return tuple(
+            source
+            for source in self.asset["items"]
+            if (
+                workload := self.workloads.get(self.adapter(source["metadata"]["name"]))
+            )
+            and workload.key in selected
+        )
 
     def render(
         self,
@@ -112,10 +139,10 @@ class Renderer:
     ) -> tuple[dict, ...]:
         selected = {target.workload_key: target for target in targets}
         output = []
-        for source in self.asset["items"]:
+        for source in self.sources(targets):
             item = deepcopy(source)
             kind, name = item["kind"], item["metadata"]["name"]
-            adapter = "personal-cloud" if name.startswith("platform-") else "newsletter"
+            adapter = self.adapter(name)
             workload = self.workloads[adapter]
             target = selected[workload.key]
             item["metadata"]["namespace"] = self.config.namespace
@@ -125,6 +152,14 @@ class Renderer:
                 "platform-runtime": self.workloads["personal-cloud"].deployment,
                 "platform-release": self.workloads["personal-cloud"].release_configmap,
             }
+            if "codex-gateway" in self.workloads:
+                gateway = self.workloads["codex-gateway"]
+                replacements.update(
+                    {
+                        "codex-gateway": gateway.deployment,
+                        "codex-gateway-release": gateway.release_configmap,
+                    }
+                )
             item["metadata"]["name"] = replacements.get(name, name)
             if kind == "ConfigMap":
                 if name == "platform-runtime-config":
@@ -226,7 +261,11 @@ class Renderer:
                                 "NEWSLETTER_RELEASE_REQUEST_ID": target.request_id,
                             }
                             if adapter == "newsletter"
-                            else {"PLATFORM_RELEASE_REQUEST_ID": target.request_id}
+                            else {
+                                "CODEX_GATEWAY_RELEASE_REQUEST_ID"
+                                if adapter == "codex-gateway"
+                                else "PLATFORM_RELEASE_REQUEST_ID": target.request_id
+                            }
                         )
                         for env in container.get("env", []):
                             if env["name"] in values:
@@ -236,5 +275,18 @@ class Renderer:
                             {"name": key, "value": value}
                             for key, value in values.items()
                         )
+            if kind in {"Deployment", "CronJob"}:
+                template = item["spec"]
+                if kind == "CronJob":
+                    template = template["jobTemplate"]["spec"]
+                template["template"].setdefault("metadata", {}).setdefault(
+                    "annotations", {}
+                ).update(
+                    {
+                        "personal-cloud/source-sha": target.source_sha,
+                        "personal-cloud/image-digest": target.image_digest,
+                        "personal-cloud/request-id": target.request_id,
+                    }
+                )
             output.append(item)
         return tuple(output)

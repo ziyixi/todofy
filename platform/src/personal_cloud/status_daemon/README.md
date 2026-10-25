@@ -13,6 +13,8 @@ Status. Unknown workload aliases and invalid queries fail before provider reads.
   time budget stops further dependency calls; individual calls receive the remaining timeout.
 - `adapters.py`: separate business capabilities. Newsletter uses its existing private monitor-only
   JSON interface; the local daemon uses baked image metadata and its actual startup request ID.
+  The Codex gateway's bounded internal `/healthz` read supplies its baked source SHA and startup
+  request ID. Process health does not establish Codex login, subscription quota or successful inference.
 - `evidence.py`: combines physical container digest, generation and process provenance. Desired
   specs and annotations cannot supply actual identity. Missing generation remains absent.
 - `server.py`: FastAPI/Uvicorn transport, thirty-second snapshot cache, sixty-second maximum fallback

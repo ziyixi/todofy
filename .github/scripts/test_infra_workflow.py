@@ -131,8 +131,9 @@ class InfraApplyWorkflow(unittest.TestCase):
         uses = re.findall(r"uses: (\S+)", self.code)
         shared = re.findall(r"uses: (\S+)", code(WORKFLOW.read_text()))
         self.assertEqual(uses[:len(shared)], shared)
-        self.assertEqual(uses[len(shared):], ["actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"])
+        self.assertEqual(uses[len(shared):], ["actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"] * 2)
         self.assertIn("path: ${{ runner.temp }}/platform-bootstrap.cms", self.code)
+        self.assertIn("path: ${{ runner.temp }}/codex-gateway-bootstrap.cms", self.code)
         self.assertIn("retention-days: 1", self.code)
         self.assertIn("if: vars.VPS_BOOTSTRAP_CERT != ''", self.code)
         for action in uses:

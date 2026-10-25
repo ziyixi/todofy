@@ -27,7 +27,7 @@ import {
   type MailsortUiService,
 } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
 import { LedgerEntrySchema, ReviewItemSchema } from '@ziyixi/proto/mailsort/ui/v2/review_pb';
-import { LabelCountSchema, LabelReportSchema, ServiceStatus_AuthState, ServiceStatusSchema, SettingsSchema, UnreadClassificationSchema, type Settings } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
+import { ClassificationProvider, LabelCountSchema, LabelReportSchema, ServiceStatus_AuthState, ServiceStatusSchema, SettingsSchema, UnreadClassificationSchema, type Settings } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { decodePageToken, encodePageToken, PageTokenError, type PageParameters } from '@ziyixi/proto/page-token';
 import { create, type DescMessage, type JsonValue, type MessageShape } from '@ziyixi/proto/protobuf';
 import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobuf/wkt';
@@ -36,6 +36,7 @@ import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import type { ModeName } from './env.ts';
 import { ClassificationPromptSchema } from '@ziyixi/proto/mailsort/ui/v2/prompt_pb';
 import { classificationPromptMessage, readClassificationPrompt, saveClassificationPrompt, validClassificationPrompt } from './classification-prompt.ts';
+import { CLASSIFICATION_EFFORT, CODEX_MODEL, codexEndpoint } from './classifier-config.ts';
 import { CLAUDE_MODEL } from './claude.ts';
 import { deleteExample, deleteExamplesOfLabel } from './examples.ts';
 import { setVerdict } from './feedback.ts';
@@ -66,7 +67,7 @@ import { replaySummary } from './replay.ts';
 import { initializePriorities } from './priority-setup.ts';
 import { prioritySetup, priorityStartedAt } from './priority.ts';
 import { authState, type Budget, writeScope } from './session.ts';
-import { effectiveMode, readSettings, writeSettings, type SettingsValue } from './settings.ts';
+import { effectiveMode, readSettings, writeSettings, type ClassificationProviderName, type SettingsValue } from './settings.ts';
 import { CLAUDE_MONTHLY_LIMIT_MICROS, utcDay, type DecisionRow, type LabelRow, type LedgerRow, type ReviewRow, type Store } from './store.ts';
 import { startUnread, unreadProgress } from './unread.ts';
 import { ensureGmailLabel, executeWrites, hasSublabels, intend, intendUndo, linkGmailLabel, setNameTaken, undoable, userLabelsByName, type WriteContext } from './writes.ts';
@@ -78,7 +79,11 @@ export interface ApiContext {
   readonly now: number;
   readonly build: string;
   readonly ceiling: ModeName;
-  readonly env: Parameters<typeof authState>[1] & { readonly ANTHROPIC_API_KEY?: string };
+  readonly env: Parameters<typeof authState>[1] & {
+    readonly ANTHROPIC_API_KEY?: string;
+    readonly CODEX_ENDPOINT_URL?: string;
+    readonly CODEX_ENDPOINT_TOKEN?: string;
+  };
   readonly transact: <T>(fn: () => T) => T;
   /** Brings the alarm forward (a new mode, a rebuild, a write left for a retry). */
   readonly wake: () => Promise<void>;
@@ -392,10 +397,21 @@ function choose(ctx: ApiContext, item: ReviewRow, decision: DecisionRow, chosen:
 
 // ---- settings ----------------------------------------------------------------------------------------------------------------
 
+const CLASSIFICATION_PROVIDERS: Readonly<Record<ClassificationProviderName, ClassificationProvider>> = {
+  claude: ClassificationProvider.CLAUDE,
+  codex: ClassificationProvider.CODEX,
+};
+
+function classifierConfigured(provider: ClassificationProviderName, env: ApiContext['env']): boolean {
+  if (provider === 'claude') return (env.ANTHROPIC_API_KEY ?? '').trim() !== '';
+  return codexEndpoint(env) !== null;
+}
+
 function settingsMessage(ctx: ApiContext, value: SettingsValue): Settings {
   return create(SettingsSchema, {
     name: 'settings',
     mode: MODES[value.mode],
+    classificationProvider: CLASSIFICATION_PROVIDERS[value.classificationProvider],
     effectiveMode: MODES[effectiveMode(value, ctx.ceiling)],
     runWriteLimit: value.runWriteLimit,
     dailyWriteLimit: value.dailyWriteLimit,
@@ -976,6 +992,10 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const claude = store.claudeUsage(month);
     const lastRequest = Number(store.getMeta('claude_last_request_at') ?? 0);
     const nextBatch = Number(store.getMeta('next_model_at') ?? 0);
+    const provider = settings.classificationProvider;
+    const model = provider === 'codex' ? CODEX_MODEL : CLAUDE_MODEL;
+    const configured = classifierConfigured(provider, ctx.env);
+    const lastSuccess = Number(store.getMeta(`${provider}_last_success_at`) ?? 0);
     return create(ServiceStatusSchema, {
       name: 'serviceStatus',
       prioritiesInitialized: priorityStartedAt(store) > 0,
@@ -996,16 +1016,22 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       aiCallTodayCount: usage.ai_calls,
       neuronsToday: Math.round(usage.neurons * 10) / 10,
       dailyNeuronBudget: settings.dailyNeuronBudget,
-      decisionModel: CLAUDE_MODEL,
+      decisionModel: model,
+      classifier: {
+        provider: CLASSIFICATION_PROVIDERS[provider], model, effort: CLASSIFICATION_EFFORT, configured,
+        lastErrorCode: store.getMeta(`${provider}_error`) ?? (configured ? '' : `${provider}_not_configured`),
+        ...(Number.isFinite(nextBatch) && nextBatch > 0 ? { nextBatchTime: timestampFromMs(nextBatch) } : {}),
+        ...(Number.isFinite(lastSuccess) && lastSuccess > 0 ? { lastSuccessTime: timestampFromMs(lastSuccess) } : {}),
+      },
       claudeBudget: {
-        model: CLAUDE_MODEL, effort: 'medium', month,
+        model: CLAUDE_MODEL, effort: CLASSIFICATION_EFFORT, month,
         limitUsd: CLAUDE_MONTHLY_LIMIT_MICROS / 1_000_000, spentUsd: claude.cost_micros / 1_000_000,
         inputTokens: claude.input_tokens, outputTokens: claude.output_tokens,
         cacheWriteTokens: claude.cache_write_tokens, cacheReadTokens: claude.cache_read_tokens,
         ...(claude.thinking_tokens === null ? {} : { thinkingTokens: claude.thinking_tokens }),
         ...(lastRequest > 0 ? { lastRequestTime: timestampFromMs(lastRequest) } : {}),
-        ...(nextBatch > 0 ? { nextBatchTime: timestampFromMs(nextBatch) } : {}),
-        lastErrorCode: store.getMeta('claude_error') ?? (ctx.env.ANTHROPIC_API_KEY === undefined ? 'claude_not_configured' : ''),
+        ...(provider === 'claude' && Number.isFinite(nextBatch) && nextBatch > 0 ? { nextBatchTime: timestampFromMs(nextBatch) } : {}),
+        lastErrorCode: store.getMeta('claude_error') ?? (classifierConfigured('claude', ctx.env) ? '' : 'claude_not_configured'),
         providerLimitReached: store.getMeta('claude_limited_month') === month,
       },
       aiQuotaExhausted: usage.quota_exhausted === 1,
@@ -1068,10 +1094,19 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           if (mode === null) throw sortError('INVALID_SETTINGS');
           // Choosing a mode is the owner's reset of the breaker.
           next = { ...next, mode, breaker: '' };
+        } else if (path === 'classification_provider') {
+          const provider = input.classificationProvider === ClassificationProvider.CLAUDE ? 'claude'
+            : input.classificationProvider === ClassificationProvider.CODEX ? 'codex' : null;
+          if (provider === null) throw sortError('INVALID_SETTINGS');
+          next = { ...next, classificationProvider: provider };
         } else if (path === 'run_write_limit') next = { ...next, runWriteLimit: integer(input.runWriteLimit, 1, RUN_WRITE_LIMIT_MAX) };
         else if (path === 'daily_write_limit') next = { ...next, dailyWriteLimit: integer(input.dailyWriteLimit, 1, DAILY_WRITE_LIMIT_MAX) };
         else if (path === 'daily_neuron_budget') next = { ...next, dailyNeuronBudget: integer(input.dailyNeuronBudget, NEURON_BUDGET_MIN, NEURON_BUDGET_MAX) };
         else if (!['name', 'etag', 'effective_mode', 'breaker_tripped', 'breaker_reason'].includes(path)) bad('update_mask names an unknown field');
+      }
+      if (next.classificationProvider !== current.classificationProvider) {
+        ctx.store.setMeta('next_model_at', String(ctx.now));
+        ctx.store.run('UPDATE pending SET not_before = ? WHERE deferred > 0', ctx.now);
       }
       return settingsMessage(ctx, writeSettings(ctx.store, next, ctx.now));
     });

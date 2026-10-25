@@ -228,7 +228,7 @@ lost `version`.
 
 | Route | Served by | Budget |
 | --- | --- | --- |
-| `GET /api/v1/registry` (GetRegistry) | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 15 KiB |
+| `GET /api/v1/registry` (GetRegistry) | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 16 KiB |
 | `GET /api/csrf` | Worker (signed token + `home_csrf` cookie, design.md §6) | — |
 | `GET /api/v1/homeView` (GetHomeView) | DO `view('home')` | 1 DO call; ordinary fixture ≤ 40 rows read; ≤ 10 KiB |
 | `GET /api/v1/flowsView` (GetFlowsView) | DO | ordinary fixture ≤ 40 rows read; ≤ 20 KiB |
@@ -306,9 +306,10 @@ the strip's observed items, §4), the canary rows or the reminder ledger. The me
 older estimates; reads grow with retained decisions while views continue to poll every five minutes.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
-Per tick: 11 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fleet, Newsletter, mailsort, recall, the
-brief, Tasks and Personal MCP) + 2 probes (website, links) + 1 GraphQL + ≤ 4 `setGuard` + ≤ 2 canary calls + ≤ 1 `createInboxTask` + ≤ 12
-read-only drift calls (§10) = 33 outbound calls. Mailsort's Claude budget is independent of account Workers AI shedding.
+Per tick: 12 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fleet, Newsletter, mailsort, recall, the
+brief, Tasks, Personal MCP and Codex gateway) + 2 probes (website, links) + 1 GraphQL + ≤ 4 `setGuard` + ≤ 2 canary calls + ≤ 1 `createInboxTask` + ≤ 12
+read-only drift calls (§10) = 34 outbound calls, including the read-only Codex gateway status.
+Mailsort's Claude budget is independent of account Workers AI shedding.
 (`outboundPerTick`, tested ≤ `MAX_OUTBOUND_PER_TICK` = 34 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
 status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~3 per tick
 (`cf_scripts` and one `probe:<entry>` per probe). The links probe is one request of its Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in

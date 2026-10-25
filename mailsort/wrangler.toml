@@ -1,5 +1,5 @@
 # Worker "mailsort": the owner's Gmail sorting (sort.ziyixi.science, docs/design.md): new INBOX mail read through the
-# Gmail API, classified hourly by Claude Opus 5.5 medium, labelled P1-P4 and archived (never marked read) in live mode.
+# Gmail API, classified hourly by the selected Claude/Codex provider, labelled P1-P4 and archived (never marked read) in live mode.
 # The production configuration and its single source of truth: top level =
 # production, never [env.*] or keep_vars. Every static value is committed here (the repository is public: nothing
 # personal, no secret).
@@ -70,6 +70,8 @@ new_sqlite_classes = ["MailsortState"]
 [vars]
 # The app's host: the only origin a mutation may come from (CSRF).
 PUBLIC_HOST = "sort.ziyixi.science"
+# Public route derived from the existing VPS profile; inference and Access credentials are owner-only secrets.
+CODEX_ENDPOINT_URL = "https://platform-runtime.ziyixi.science/api/codex/v1/inference:run"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
 # The AUD tag of the Access application "mailsort" (the whole host; infra/access.tf owner_apps["mailsort"]), created
 # by "Infra apply" on 2026-10-07: config/resources.toml [access_audiences] holds it and tools/cloud-config/generate.py

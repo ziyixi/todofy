@@ -1,4 +1,4 @@
-"""Bounded server-side apply comparison of this image's ten declared runtime resources."""
+"""Bounded server-side apply comparison of this image's declared runtime resources."""
 
 import hashlib
 import json
@@ -13,6 +13,9 @@ from .kubernetes import DependencyUnavailable
 
 PLAN_SECONDS = 25
 RESOURCE_KEYS = {
+    ("Deployment", "codex-gateway"): "codex-gateway",
+    ("Service", "codex-gateway"): "codex-gateway-service",
+    ("ConfigMap", "codex-gateway-release"): "codex-gateway-release",
     ("Deployment", "newsletter"): "newsletter",
     ("Deployment", "newsletter-config-sync"): "newsletter-config-sync",
     ("Deployment", "platform-runtime"): "platform-runtime",
@@ -83,6 +86,11 @@ class Planner:
             raise DependencyUnavailable()
         return min(5, remaining)
 
+    def targets(self):
+        return self.store.accepted_targets(
+            {item.key for item in self.renderer.workloads.values()}
+        )
+
     def _plan(self, record, *, state, changes=(), reason=None, fingerprint=None):
         value = pb.ReconcilePlan(
             name="reconcilePlan",
@@ -111,7 +119,7 @@ class Planner:
         try:
             targets = tuple(
                 from_wire(pb.ReleaseTarget, value, strict=True).message
-                for value in record.body["targets"]
+                for value in self.targets()
             )
             platform = self.renderer.workloads["personal-cloud"].key
             if self.source_sha is not None and any(
@@ -127,7 +135,7 @@ class Planner:
             )
             daily = None
             for source, desired in zip(
-                self.renderer.asset["items"], resources, strict=True
+                self.renderer.sources(targets), resources, strict=True
             ):
                 key = RESOURCE_KEYS[(source["kind"], source["metadata"]["name"])]
                 change, fields, actual = self._compare(desired, key, deadline)
@@ -160,7 +168,7 @@ class Planner:
                 {
                     "release": record.identity,
                     "etag": record.etag,
-                    "targets": record.body["targets"],
+                    "targets": [to_wire(target) for target in targets],
                     "live": live,
                     "admission": admission["state"],
                     "suspended": False,

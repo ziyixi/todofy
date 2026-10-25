@@ -8,7 +8,7 @@ import { mountApp, type Host } from './app.ts'
 import { clamp, flowGraph, sankeyChart, skeletonGraph } from './flowchart.ts'
 import { FakeServer, flowCount, label, NOW, settle } from './test/fakeServer.ts'
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
-import { ClaudeBudgetSchema, LabelCountSchema, Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import { ClassificationProvider, ClassifierStatusSchema, ClaudeBudgetSchema, LabelCountSchema, Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 
@@ -333,6 +333,27 @@ describe('概览', () => {
     expect(graph.links).toContainEqual({ source: 'claude', target: 'label:labels/p1', value: 3 })
     expect(graph.nodes.map((node) => node.name)).toContain('Claude Opus 5.5')
     expect(graph.nodes.map((node) => node.name)).toContain('历史 Clef 27B')
+  })
+
+  it('keeps Codex and Claude counters on their own model nodes', () => {
+    const s = server()
+    s.flow.push(flowCount(MailFlow_Stage.CLAUDE, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/p1', 3), flowCount(MailFlow_Stage.CODEX, MailFlow_Outcome.ARCHIVED, 'labels/p2', 4))
+    const graph = flowGraph(s.flow, s.labels)
+    expect(graph.total).toBe(27)
+    expect(graph.links).toContainEqual({ source: 'claude', target: 'label:labels/p1', value: 3 })
+    expect(graph.links).toContainEqual({ source: 'codex', target: 'label:labels/p2', value: 4 })
+    expect(graph.nodes.map((node) => node.name)).toContain('VPS Codex')
+    expect(graph.nodes.map((node) => node.name)).toContain('Claude Opus 5.5')
+  })
+
+  it('uses Codex in an empty-day diagram when it is the selected provider', async () => {
+    const s = new FakeServer()
+    s.status = { classifier: create(ClassifierStatusSchema, { provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: true }) }
+    const root = await open(s, '/overview')
+    const nodes = [...root.querySelectorAll('.flow-node')].map((node) => node.textContent)
+    expect(nodes).toContain('VPS Codex0')
+    expect(nodes).not.toContain('Claude Opus 5.50')
+    expect(root.querySelectorAll('.flow-node.zero')).toHaveLength(9)
   })
 
   it('says in the status line when 正式 cannot write yet: the grant is read-only', async () => {

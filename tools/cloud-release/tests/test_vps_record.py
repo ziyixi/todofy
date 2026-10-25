@@ -43,6 +43,14 @@ class EvidenceTests(unittest.TestCase):
         value = self.value()
         self.assertEqual(self.read(value), value)
 
+    def test_gateway_only_and_combined_repair_preserve_independent_source_identity(self):
+        value = self.value()
+        gateway = {**value["targets"][0], "workload_key": "codex-gateway", "source_sha": "c" * 40}
+        combined = {**value, "targets": [*value["targets"], gateway]}
+        self.assertEqual(self.read(combined), combined)
+        single = {**value, "source_sha": "c" * 40, "targets": [gateway]}
+        self.assertEqual(self.read(single), single)
+
     def test_held_partial_or_private_receipts_are_not_recorded(self):
         for change in ({"phase": "held"}, {"targets": []}, {"token": "synthetic"}):
             with self.subTest(change=change), self.assertRaises(ReleaseError):

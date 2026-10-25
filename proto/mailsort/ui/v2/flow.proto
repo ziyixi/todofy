@@ -44,6 +44,8 @@ message MailFlow {
     STAGE_NO_MODEL = 5;
     // One native Claude API request classified a bounded batch.
     STAGE_CLAUDE = 6;
+    // One VPS Codex request classified a bounded batch.
+    STAGE_CODEX = 7;
   }
 
   // What became of the mail.

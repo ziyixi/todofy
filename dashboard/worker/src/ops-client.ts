@@ -171,6 +171,7 @@ export const CALLED_METHODS = {
   watch: ['status', 'setGuard'],
   fleet: ['status', 'setGuard'],
   newsletter: ['status', 'setGuard'],
+  'codex-gateway': ['status', 'setGuard'],
   'notion-publish': ['status', 'setGuard', 'getSyncStatus', 'requestSync', 'getSyncRequest'],
   mailsort: ['status', 'setGuard'],
   recall: ['status', 'setGuard'],
@@ -179,7 +180,7 @@ export const CALLED_METHODS = {
   'personal-mcp': ['status', 'setGuard'],
 } as const;
 
-type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'TASK_INBOX'>;
+type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'TASK_INBOX'>;
 
 function missing(): Promise<never> {
   return Promise.reject(new MissingBinding('not_configured'));
@@ -191,6 +192,7 @@ export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<ops.OpsSt
     if (app === 'watch') return (env.WATCH as Bindings['WATCH'] | undefined)?.status() ?? missing();
     if (app === 'fleet') return (env.FLEET as Bindings['FLEET'] | undefined)?.status() ?? missing();
     if (app === 'newsletter') return (env.NEWSLETTER as Bindings['NEWSLETTER'] | undefined)?.status() ?? missing();
+    if (app === 'codex-gateway') return (env.CODEX_GATEWAY as Bindings['CODEX_GATEWAY'] | undefined)?.status() ?? missing();
     if (app === 'notion-publish') return (env.WEBSITE_SYNC as Bindings['WEBSITE_SYNC'] | undefined)?.status() ?? missing();
     if (app === 'mailsort') return (env.MAILSORT as Bindings['MAILSORT'] | undefined)?.status() ?? missing();
     if (app === 'recall') return (env.RECALL as Bindings['RECALL'] | undefined)?.status() ?? missing();
@@ -202,7 +204,7 @@ export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<ops.OpsSt
 }
 
 export async function opsSetGuard(env: Bindings, app: OpsApp, input: ops.SetGuardInput): Promise<OpsCall<ops.GuardState>> {
-  if (app === 'fleet' || app === 'newsletter' || app === 'notion-publish' || app === 'recall' || app === 'tasks' || app === 'personal-mcp') return refused;
+  if (app === 'fleet' || app === 'newsletter' || app === 'codex-gateway' || app === 'notion-publish' || app === 'recall' || app === 'tasks' || app === 'personal-mcp') return refused;
   const args = encode(OpsService.method.setGuard, [input]);
   if (args === null) return refused;
   const sent = args[0] as ops.SetGuardInput;

@@ -38,7 +38,7 @@ export default function MailsortPrivacyPage() {
       <header className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>{TITLE}</h1>
         <p className={styles.pageIntro}>
-          Effective and last updated <time dateTime="2026-10-24">October 24, 2026</time>.
+          Effective and last updated <time dateTime="2026-10-25">October 25, 2026</time>.
         </p>
       </header>
       <div className={articleStyles.articleBody}>
@@ -77,8 +77,9 @@ export default function MailsortPrivacyPage() {
             older and archived messages. The app collects their identifiers before processing that
             batch. Spam, Trash and other messages outside its normal incoming-mail rules are
             excluded; messages already carrying P1–P4 or no longer unread are skipped. P1 brings an
-            archived message into the inbox. The same models, modes and quotas apply, and the app
-            preserves read or unread state, stars and unrelated labels throughout.
+            archived message into the inbox. The selected provider&apos;s limits, modes and Gmail
+            write limits apply, and the app preserves read or unread state, stars and unrelated
+            labels throughout.
           </li>
           <li>
             The owner can also explicitly recheck current unread mail assigned P1 because the model
@@ -117,45 +118,57 @@ export default function MailsortPrivacyPage() {
         <p>
           The app checks Gmail through its existing Cloudflare Durable Object Alarm and starts
           classification batches roughly hourly. Each batch sends up to ten unread, unclassified
-          messages to Anthropic&apos;s Claude API, using Opus 5.5 medium. A maintained prompt asks
-          for a reading queue and a short reason for each message. The owner can edit the base
-          instructions and personal rules in the dashboard. Those preferences currently cover USPS
-          delivery previews, Daily Briefing and shopping receipts. There are no sender-specific code
-          branches, probability thresholds, second model vote or learned-example context.
+          messages to the owner&apos;s selected provider. The owner can choose Claude API or VPS
+          Codex in the dashboard. Claude uses Opus 5.5 medium; Codex uses OpenAI&apos;s gpt-6.1-sol
+          with medium effort through an independent service on the owner&apos;s VPS. The choice is
+          saved; existing settings use Claude until the owner switches. Both choices use the same
+          prompt, which asks for a reading queue and a short reason for each message. The owner can
+          edit the base instructions and personal rules in the dashboard. Those preferences
+          currently cover USPS delivery previews, Daily Briefing and shopping receipts. There are no
+          sender-specific code branches, probability thresholds, second model vote or
+          learned-example context.
         </p>
         <p>
-          Anthropic receives masked sender display name/domain, subject (up to 200 characters), body
-          (up to 12,000 characters, with a truncation flag), message identifiers, receipt time,
-          evaluation time and the America/Los_Angeles timezone. Addresses and long numbers are
-          masked and links reduced to their domains before transmission. Attachments are not sent.
-          Calls go directly to Anthropic, without an AI Gateway that logs request bodies.
+          The selected provider receives masked sender display name/domain, subject (up to 200
+          characters), body (up to 12,000 characters, with a truncation flag), message identifiers,
+          receipt time, evaluation time and the America/Los_Angeles timezone. Addresses and long
+          numbers are masked and links reduced to their domains before transmission. Attachments are
+          not sent. Claude calls go directly to Anthropic. Codex calls pass through the owner&apos;s
+          VPS to OpenAI, using the owner&apos;s existing ChatGPT subscription login. The gateway has
+          no Gmail authorization and gives the model no business tools or web access. It executes
+          one synchronous request without saved inference jobs, autonomous work or mail-content
+          logs. Neither application path logs request or response content.
         </p>
         <p>
-          For consecutive batches, the app can request Anthropic&apos;s five-minute prompt cache for
-          the fixed base instructions and personal rules. Message-specific mail and evaluation times
-          follow those cache breakpoints and are not marked for prompt caching. Ordinary hourly
-          single batches do not request cache creation. Actual returned cache reads and writes are
-          included in the app&apos;s token and cost records.
+          While Claude is selected, consecutive batches can request Anthropic&apos;s five-minute
+          prompt cache for the fixed base instructions and personal rules. Message-specific mail and
+          evaluation times follow those cache breakpoints and are not marked for prompt caching.
+          Ordinary hourly single batches do not request cache creation. Actual returned cache reads
+          and writes are included in the app&apos;s token and cost records.
         </p>
         <p>
           Provider errors leave mail pending through the existing retry process; they do not assign
-          P1. A dedicated Claude workspace has a $20 monthly spend limit. Returned token usage and
-          nominal cost are recorded without message content. An exhausted monthly model allowance
-          waits until the next UTC month; reached daily Gmail write limits leave writes waiting. The
-          existing modes and write limits remain effective throughout.
+          P1 or switch providers automatically. A dedicated Claude workspace has a $20 monthly spend
+          limit. Returned Claude token usage and nominal cost are recorded without message content.
+          Its exhausted monthly allowance waits until the next UTC month. That cap and the explicit
+          cache policy apply only to Claude. Codex uses the subscription account&apos;s availability
+          and usage limits, with no API-key or model fallback. Switching preserves Claude&apos;s
+          usage history, the saved prompt, mode and Gmail write limits. Reached daily Gmail write
+          limits leave writes waiting regardless of provider.
         </p>
         <p>
           Each message is judged independently. Normal processing retains its new-mail cutoffs;
           processing older unread mail requires an explicit batch request. Deploying a model or
-          prompt change does not reclassify previously labelled mail. Old model probabilities,
-          examples and replay results remain historical records. Active embedding, automatic
-          learning and replay model jobs are retired.
+          prompt or provider change does not reclassify previously labelled mail or start a manual
+          batch. Old model probabilities, examples and replay results remain historical records.
+          Active embedding, automatic learning and replay model jobs are retired.
         </p>
 
         <h2>What is stored, and for how long</h2>
         <p>
-          Data is stored in the owner&apos;s own Cloudflare account. Daily cleanup applies these
-          retention periods:
+          Classification records are stored in the owner&apos;s own Cloudflare account. The Codex
+          gateway processes masked input temporarily and has no mail database. Daily cleanup applies
+          these retention periods:
         </p>
         <ul>
           <li>
@@ -202,16 +215,19 @@ export default function MailsortPrivacyPage() {
         </ul>
         <p>
           Logs hold counts and codes only, never subjects, senders, addresses or label names.
-          Google&apos;s authorization and the Claude API key are kept as secrets in the owner&apos;s
-          own Cloudflare account, never in source code or on GitHub.
+          Google&apos;s authorization, the Claude API key and the gateway&apos;s inference/Access
+          credentials are kept as secrets in the owner&apos;s own Cloudflare account, never in
+          source code or GitHub release secrets. The ChatGPT subscription login stays on the
+          owner&apos;s VPS; Gmail authorization is not sent there.
         </p>
 
         <h2>How the data is used</h2>
         <p>
           The data is used only to label the owner&apos;s own mailbox. It is not sold or used for
-          advertising. Cloudflare hosts the app and its stored records; Anthropic receives the
-          masked inputs above to provide the requested classification. Mail is not used by this app
-          to train a generalized model. Provider processing follows the applicable API terms.
+          advertising. Cloudflare hosts the app and its stored records. Depending on the saved
+          choice, Anthropic receives the masked inputs directly, or OpenAI receives them through the
+          owner&apos;s VPS. Mail is not used by this app to train a generalized model. Provider
+          processing follows the terms for the selected service.
         </p>
         <p>
           mailsort&apos;s use and transfer to any other app of information received from Google APIs

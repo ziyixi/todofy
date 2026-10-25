@@ -100,6 +100,41 @@ class ReleaseTests(unittest.TestCase):
             ):
                 last_good(api, "example/cloud", "fleet")
 
+    def test_inactive_record_retains_its_prior_verified_success(self):
+        record = {"id": 1, "sha": SHA, "payload": {"format": "personal-cloud-release-v1"}}
+        api = FakeApi([[record], [{"state": "inactive"}, {"state": "success"}]])
+        self.assertEqual(last_good(api, "example/cloud", "mailsort"), record)
+        self.assertEqual(
+            api.requests[1][0],
+            "/repos/example/cloud/deployments/1/statuses?per_page=10",
+        )
+        self.assertEqual(len(api.requests), 2)
+
+    def test_inactive_record_without_success_in_bounded_history_is_rejected(self):
+        record = {"id": 1, "sha": SHA, "payload": {"format": "personal-cloud-release-v1"}}
+        for statuses in (
+            [{"state": "inactive"}],
+            [{"state": "inactive"}] * 10 + [{"state": "success"}],
+        ):
+            with (
+                self.subTest(statuses=statuses),
+                self.assertRaisesRegex(ReleaseError, "VERIFIED_DEPLOYMENT_MISSING"),
+            ):
+                last_good(FakeApi([[record], statuses]), "example/cloud", "mailsort")
+
+    def test_latest_failure_or_error_does_not_promote_a_prior_success(self):
+        record = {"id": 1, "sha": SHA, "payload": {"format": "personal-cloud-release-v1"}}
+        for state in ("failure", "error"):
+            with (
+                self.subTest(state=state),
+                self.assertRaisesRegex(ReleaseError, "VERIFIED_DEPLOYMENT_MISSING"),
+            ):
+                last_good(
+                    FakeApi([[record], [{"state": state}, {"state": "success"}]]),
+                    "example/cloud",
+                    "mailsort",
+                )
+
     def test_document_head_cannot_replace_a_services_last_verified_sha(self):
         record = {
             "id": 1,

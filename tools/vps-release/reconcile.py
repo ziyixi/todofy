@@ -21,10 +21,15 @@ UUID = re.compile(
 
 def frozen(client, release, name):
     targets = release.targets
+    keys = {x.workload_key for x in targets}
     if (
-        len(targets) != 2
-        or {x.workload_key for x in targets} != {"newsletter", "platform-runtime"}
-        or len({x.source_sha for x in targets}) != 1
+        len(targets) != len(keys)
+        or keys
+        not in (
+            {"newsletter", "platform-runtime"},
+            {"codex-gateway"},
+            {"newsletter", "platform-runtime", "codex-gateway"},
+        )
         or any(
             x.request_id != release.request_id or x.generation is not None
             for x in targets
@@ -139,15 +144,15 @@ def execute(
     )
     if release.name == source.name:
         return {**summary, "result": "no_change"}
-    targets = tuple(
-        type(x)(
-            workload_key=x.workload_key,
-            source_sha=x.source_sha,
-            image_digest=x.image_digest,
-            request_id=request_id,
-        )
-        for x in originals
-    )
+    # Independent ready releases are combined by the server's accepted ledger.
+    # Every target from the triggering release must retain its frozen source and image.
+    targets = frozen(client, release, release.name)
+    retained = {(x.workload_key, x.source_sha, x.image_digest) for x in targets}
+    if (
+        not {(x.workload_key, x.source_sha, x.image_digest) for x in originals}
+        <= retained
+    ):
+        raise ReleaseFailure("RELEASE_ACKNOWLEDGEMENT_INVALID")
     return observe(
         client,
         release,

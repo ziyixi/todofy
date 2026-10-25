@@ -193,7 +193,13 @@ def vps_credentials(value: dict, configured: dict[str, str], connector: str) -> 
     fleet_key = previous.get("fleet_key", configured["FLEET_REPORT_HMAC_KEY"])
     if platform["PLATFORM_DEPLOY_TOKEN"] != configured["PLATFORM_DEPLOY_TOKEN"] or fleet_key != configured["FLEET_REPORT_HMAC_KEY"]:
         raise BootstrapError("VPS_SECRET_CONSUMER_MISMATCH")
-    return {"schema_version": 1, "newsletter_env": newsletter, "trigger_env": trigger,
+    result = {"schema_version": 1, "newsletter_env": newsletter, "trigger_env": trigger,
             "platform_env": platform, "fleet_key": fleet_key,
             "connector_token": connector,
             "old_paths": previous.get("old_paths", {})}
+    if "codex_gateway_env" in previous:
+        gateway = previous["codex_gateway_env"]
+        if not isinstance(gateway, dict) or set(gateway) != {"CODEX_GATEWAY_TOKEN"}:
+            raise BootstrapError("VPS_PRIVATE_INPUT_INVALID")
+        result["codex_gateway_env"] = dict(gateway)
+    return result

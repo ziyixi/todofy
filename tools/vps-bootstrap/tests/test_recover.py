@@ -27,6 +27,28 @@ IMAGES = {
 
 
 class CurrentRecovery(unittest.TestCase):
+    def test_later_gateway_release_does_not_replace_the_daemon_recovery_identity(self):
+        gateway_id = "70fffa4a-129a-4747-bca2-e671831ab30e"
+        self.store.create(
+            gateway_id,
+            {
+                "request_id": gateway_id,
+                "targets": [
+                    {
+                        "workload_key": "codex-gateway",
+                        "source_sha": "d" * 40,
+                        "image_digest": "sha256:" + "e" * 64,
+                        "request_id": gateway_id,
+                    }
+                ],
+            },
+        )
+        self.store.checkpoint(gateway_id, "ready", "done")
+        with patch.object(recover.host, "real_path", return_value=self.ledger):
+            accepted = recover.accepted_release(self.public["profile"], self.public)
+        self.assertEqual(accepted["identity"], IDENTITY)
+        self.assertEqual(self.store.latest().identity, gateway_id)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

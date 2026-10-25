@@ -167,6 +167,12 @@ const SIGNALS: Readonly<Record<string, string>> = {
   claude_budget_exhausted: 'Mailsort 本月模型预算已用完',
   claude_unavailable: 'Mailsort Claude API 暂不可用',
   claude_bad_answer: 'Mailsort Claude 返回格式无效',
+  codex_not_configured: 'Mailsort Codex 推理尚未配置',
+  codex_auth: 'Mailsort Codex 授权失败',
+  codex_quota: 'Mailsort Codex 订阅额度暂不可用',
+  codex_unavailable: 'Mailsort Codex 推理暂不可用',
+  codex_bad_answer: 'Mailsort Codex 返回格式无效',
+  codex_gateway_unavailable: 'Codex 推理服务暂不可用',
   // recall
   device_stale: '有浏览器超过 24 小时未上传',
   archive_not_connected: '浏览记录还没连上 Dropbox 备份',

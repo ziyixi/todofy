@@ -1,14 +1,15 @@
 /** Overview shows classification counts, model batches and the actual reported Claude usage. */
 import { MailFlow_Outcome, MailFlow_Stage, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
-import { Mode, ServiceStatus_AuthState, type LabelReport, type ServiceStatus } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import { ClassificationProvider, Mode, ServiceStatus_AuthState, type LabelReport, type ServiceStatus } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { api } from '../api.ts'
 import { card, emptyState, kpi, meter } from '../components.ts'
 import { el, fill } from '../dom.ts'
 import { flowGraph, sankeyChart } from '../flowchart.ts'
-import { claudeErrorMessage, labelText, MODE_HINTS, MODE_NAMES, relative, when } from '../format.ts'
+import { classificationProvider, claudeErrorMessage, labelText, MODE_HINTS, MODE_NAMES, relative, when } from '../format.ts'
 import type { ViewContext } from '../app.ts'
 import { allLabels, frame } from './common.ts'
+import { classifierDetails } from './classifier.ts'
 
 /** One period's decided mail by what became of it. */
 export interface Tally {
@@ -78,7 +79,9 @@ function labelTable(answer: LabelReport, labels: readonly Label[]): HTMLElement 
 /** Monthly usage comes only from the returned budget record; an older response is not zero spend. */
 function budget(status: ServiceStatus, now: number): HTMLElement {
   const usage = status.claudeBudget
-  if (usage === undefined) return card('Claude 模型与用量', '', el('p', { class: 'hint warn' }, 'Claude 用量未提供，请刷新或等待服务更新。'))
+  const active = classificationProvider(status.classifier?.provider) === ClassificationProvider.CLAUDE
+  const title = active ? 'Claude 模型与用量' : 'Claude 历史用量（当前未使用）'
+  if (usage === undefined) return card(title, '', el('p', { class: active ? 'hint warn' : 'hint' }, 'Claude 用量未提供，请刷新或等待服务更新。'))
   const dollars = (value: number) => `US$ ${value.toFixed(2)}`
   const exhausted = usage.limitUsd > 0 && usage.spentUsd >= usage.limitUsd
   const model = usage.model === 'claude-opus-5-5' ? 'Claude Opus 5.5' : usage.model || '模型未提供'
@@ -87,21 +90,21 @@ function budget(status: ServiceStatus, now: number): HTMLElement {
     : exhausted
       ? '本月模型预算已用完，剩余邮件待下个月继续。'
       : ''
-  const waiting = status.deferredCount > 0 ? `${String(status.deferredCount)} 封暂缓，后台按额度或重试时间继续` : ''
+  const waiting = active && status.deferredCount > 0 ? `${String(status.deferredCount)} 封暂缓，后台按额度或重试时间继续` : ''
   return card(
-    'Claude 模型与用量',
+    title,
     usage.month || '月份未提供',
     el('p', { class: 'hint' }, `${model} · ${usage.effort || 'effort 未提供'} · 提示词可在设置中编辑`),
     el('p', {}, `本月费用 ${dollars(usage.spentUsd)} / 配置月上限 ${dollars(usage.limitUsd)}`),
-    meter(usage.spentUsd, usage.limitUsd, '本月 Claude 费用', usage.providerLimitReached || exhausted ? 'danger' : ''),
+    meter(usage.spentUsd, usage.limitUsd, '本月 Claude 费用', active && (usage.providerLimitReached || exhausted) ? 'danger' : ''),
     el('p', { class: 'hint' }, `本应用记录的 API 用量：输入总计（含缓存）${String(usage.inputTokens)} token · 输出（含思考）${String(usage.outputTokens)} token · 思考明细${usage.thinkingTokens === undefined ? '未提供' : ` ${String(usage.thinkingTokens)} token`}`),
     el('p', { class: 'hint' }, `缓存读取 ${String(usage.cacheReadTokens)} token · 缓存写入 ${String(usage.cacheWriteTokens)} token，均已计入输入总计。`),
     el('p', { class: 'hint' }, '缓存有效期为 5 分钟，连续批次可能命中；相隔约一小时的单批通常不会命中。用量以 API 实际返回为准。'),
     el('p', { class: 'hint' }, '费用按这些用量及标价估算，不含赠金、折扣或本应用以外的调用；工作区消费以 Anthropic 账单为准。'),
-    el('p', { class: 'hint' }, usage.nextBatchTime === undefined ? '下批判断时间尚未提供' : `下批判断最早在 ${relative(usage.nextBatchTime, now)}（${when(usage.nextBatchTime)}）。日常新邮件自动分类通常约每小时一批。`),
+    active ? el('p', { class: 'hint' }, usage.nextBatchTime === undefined ? '下批判断时间尚未提供' : `下批判断最早在 ${relative(usage.nextBatchTime, now)}（${when(usage.nextBatchTime)}）。日常新邮件自动分类通常约每小时一批。`) : el('p', { class: 'hint' }, '当前使用 VPS Codex；这里保留 Claude API 的费用记录与月上限。'),
     el('p', { class: 'meta' }, usage.lastRequestTime === undefined ? '尚无已记录用量的 Claude 响应' : `最近用量记录 ${when(usage.lastRequestTime)}`),
-    usage.lastErrorCode === '' ? null : el('p', { class: 'hint warn' }, `最近一次请求：${claudeErrorMessage(usage.lastErrorCode)}`),
-    note === '' && waiting === '' ? null : el('p', { class: 'hint' }, [note, waiting].filter((text) => text !== '').join('；')),
+    usage.lastErrorCode === '' ? null : el('p', { class: active ? 'hint warn' : 'hint' }, `${active ? '最近一次请求' : 'Claude 历史请求'}：${claudeErrorMessage(usage.lastErrorCode)}`),
+    !active || (note === '' && waiting === '') ? null : el('p', { class: 'hint' }, [note, waiting].filter((text) => text !== '').join('；')),
   )
 }
 
@@ -116,6 +119,7 @@ export async function renderOverview(ctx: ViewContext): Promise<void> {
     fill(
       body,
       statusLine(status, ctx.host.now()),
+      card('分类引擎', '', classifierDetails(status, ctx.host.now())),
       el(
         'div',
         { class: 'kpis' },
@@ -125,7 +129,7 @@ export async function renderOverview(ctx: ViewContext): Promise<void> {
         kpi('P2、P3、P4', todayRank(false), sevenDays(weekRank(false))),
       ),
       el('p', { class: 'hint' }, '大字与流程图为今日累计处理记录；7 天小字及下表按最新判断计数。重判保留历史处理记录。'),
-      card('今天的流程', graph.total === 0 ? '' : `共 ${String(graph.total)} 封`, sankeyChart(graph), graph.total === 0 ? el('p', { class: 'hint' }, '今天还没有邮件') : null),
+      card('今天的流程', graph.total === 0 ? '' : `共 ${String(graph.total)} 封`, sankeyChart(graph, classificationProvider(status.classifier?.provider)), graph.total === 0 ? el('p', { class: 'hint' }, '今天还没有邮件') : null),
       el('div', { class: 'two' }, labelTable(week, labels), budget(status, ctx.host.now())),
     )
     // Where the diagram is wider than its box (a phone), it starts at its right end: the labels, 都不是, 拿不准.

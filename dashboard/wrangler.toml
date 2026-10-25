@@ -68,6 +68,11 @@ service = "fleet"
 entrypoint = "NewsletterOps"
 
 [[services]]
+binding = "CODEX_GATEWAY"
+service = "fleet"
+entrypoint = "CodexGatewayOps"
+
+[[services]]
 binding = "WEBSITE_SYNC"
 service = "ziyixi-notion-publish"
 entrypoint = "Ops"

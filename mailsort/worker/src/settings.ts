@@ -9,8 +9,11 @@ import { newEtag } from './ids.ts';
 import { DEFAULT_DAILY_NEURON_BUDGET, DEFAULT_DAILY_WRITE_LIMIT, DEFAULT_RUN_WRITE_LIMIT } from './limits.ts';
 import type { Store } from './store.ts';
 
+export type ClassificationProviderName = 'claude' | 'codex';
+
 export interface SettingsValue {
   readonly mode: ModeName;
+  readonly classificationProvider: ClassificationProviderName;
   readonly runWriteLimit: number;
   readonly dailyWriteLimit: number;
   readonly dailyNeuronBudget: number;
@@ -22,6 +25,7 @@ export interface SettingsValue {
 /** A fresh install starts in shadow: nothing is written to Gmail until the owner chooses live. */
 export const DEFAULTS: Omit<SettingsValue, 'etag'> = {
   mode: 'shadow',
+  classificationProvider: 'claude',
   runWriteLimit: DEFAULT_RUN_WRITE_LIMIT,
   dailyWriteLimit: DEFAULT_DAILY_WRITE_LIMIT,
   dailyNeuronBudget: DEFAULT_DAILY_NEURON_BUDGET,
@@ -41,6 +45,7 @@ export function readSettings(store: Store): SettingsValue {
   const number = (value: unknown, fallback: number) => (typeof value === 'number' && Number.isFinite(value) ? value : fallback);
   return {
     mode,
+    classificationProvider: stored.classificationProvider === 'codex' ? 'codex' : 'claude',
     runWriteLimit: number(stored.runWriteLimit, DEFAULTS.runWriteLimit),
     dailyWriteLimit: number(stored.dailyWriteLimit, DEFAULTS.dailyWriteLimit),
     dailyNeuronBudget: number(stored.dailyNeuronBudget, DEFAULTS.dailyNeuronBudget),

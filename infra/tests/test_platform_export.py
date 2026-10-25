@@ -34,7 +34,7 @@ class EncryptedBootstrap(unittest.TestCase):
                                        tofu=SimpleNamespace(binary='tofu', env={}))
         self.env = {'VPS_BOOTSTRAP_CERT': self.cert.read_text(), 'RUNNER_TEMP': str(self.root)}
 
-    def export(self):
+    def export(self, output_name="platform_bootstrap"):
         run = platform_export.subprocess.run
         def execute(args, **kwargs):
             if args[0] == 'tofu':
@@ -45,7 +45,22 @@ class EncryptedBootstrap(unittest.TestCase):
             self.paths.append(path)
             return self.connector
         with patch.object(platform_export.subprocess, 'run', execute):
-            platform_export.encrypted_export(self.session, self.env, fetch, self.root)
+            platform_export.encrypted_export(self.session, self.env, fetch, self.root, output_name=output_name)
+
+    def test_inference_handoff_has_only_its_token_and_path_app_identity(self):
+        self.value = {"client_id": "synthetic-id-" + "d" * 32,
+                      "client_secret": "synthetic-secret-" + "e" * 32,
+                      "app_id": "00000000-0000-4000-8000-000000000000", "audience": "f" * 64}
+        self.export("codex_gateway_bootstrap")
+        self.assertEqual(self.paths, [])
+        target = self.root / "codex-gateway-bootstrap.cms"
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn(self.value["client_secret"].encode(), target.read_bytes())
+        decrypted = subprocess.run(["openssl", "cms", "-decrypt", "-binary", "-inform", "DER",
+                                    "-in", str(target), "-recip", str(self.cert), "-inkey", str(self.key)],
+                                   capture_output=True)
+        self.assertEqual(decrypted.returncode, 0)
+        self.assertEqual(json.loads(decrypted.stdout), {**self.value, "version": 1})
 
     def test_real_envelope_decrypts_only_with_the_owner_key(self):
         self.export()

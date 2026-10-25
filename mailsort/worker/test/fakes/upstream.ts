@@ -5,10 +5,14 @@
  * the real Google URL in `x-mailsort-original-url`; anything else is a 502 and is recorded as a stray request.
  */
 import type { ClaudeEmail } from '../../src/claude.ts';
+import { create } from '@ziyixi/proto/protobuf';
+import { fromWire, toWire } from '@ziyixi/proto/wire-json';
+import { RunInferenceRequestSchema, RunInferenceResponseSchema, type RunInferenceRequest } from '@ziyixi/proto/codex/inference/v1/inference_pb';
 import { FakeAi } from './fake-ai.ts';
 import { FakeGmail, type RecordedLedger } from './fake-gmail.ts';
 
 export const ORIGINAL_URL_HEADER = 'x-mailsort-original-url';
+export const CODEX_ENDPOINT = 'https://codex.synthetic.example/api/codex/v1/inference:run';
 
 export class FakeUpstream {
   readonly gmail = new FakeGmail();
@@ -25,6 +29,14 @@ export class FakeUpstream {
     inputTokens: 1200,
     outputTokens: 120,
     thinkingTokens: 40 as number | null,
+  };
+  readonly codex = {
+    calls: [] as ClaudeEmail[][],
+    requests: [] as RunInferenceRequest[],
+    bucket: 'P2' as 'P1' | 'P2' | 'P3' | 'P4',
+    status: 200,
+    errorCode: '',
+    badItems: false,
   };
   /** Requests that were neither Google nor Workers AI. */
   readonly strays: string[] = [];
@@ -49,6 +61,12 @@ export class FakeUpstream {
     this.claude.status = 200;
     this.claude.spendLimit = false;
     this.claude.badItems = false;
+    this.codex.calls.length = 0;
+    this.codex.requests.length = 0;
+    this.codex.bucket = 'P2';
+    this.codex.status = 200;
+    this.codex.errorCode = '';
+    this.codex.badItems = false;
     this.strays.length = 0;
   }
 
@@ -56,6 +74,18 @@ export class FakeUpstream {
     const url = new URL(request.url);
     const body = request.method === 'GET' || request.method === 'HEAD' ? '' : await request.text();
     const originalUrl = request.headers.get(ORIGINAL_URL_HEADER) ?? request.url;
+    if (request.method === 'POST' && originalUrl === CODEX_ENDPOINT) {
+      const input = fromWire(RunInferenceRequestSchema, JSON.parse(body)).message;
+      const emails = (JSON.parse(input.inputJson) as { emails: ClaudeEmail[] }).emails;
+      this.codex.requests.push(input);
+      this.codex.calls.push(emails);
+      if (this.codex.status !== 200) return new Response('Synthetic private gateway failure.', { status: this.codex.status });
+      const items = this.codex.badItems ? [] : emails.map(email => ({ id: email.id, bucket: this.codex.bucket, reason: 'Synthetic reading priority.' }));
+      return Response.json(toWire(RunInferenceResponseSchema, create(RunInferenceResponseSchema, {
+        model: 'gpt-6.1-sol', effort: 'medium', outputJson: this.codex.errorCode ? '' : JSON.stringify({ items }),
+        inputTokens: 1200, outputTokens: 120, errorCode: this.codex.errorCode,
+      })));
+    }
     if (request.method === 'POST' && originalUrl === 'https://api.anthropic.com/v1/messages') {
       const input = JSON.parse(body) as { messages: { content: string }[]; system: { text: string; cache_control?: { type: string; ttl: string } }[] };
       const emails = (JSON.parse(input.messages[0]?.content ?? '{}') as { emails: ClaudeEmail[] }).emails;

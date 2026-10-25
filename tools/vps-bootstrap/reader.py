@@ -60,7 +60,11 @@ def resources(namespace):
                 {
                     "apiGroups": [""],
                     "resources": ["configmaps"],
-                    "resourceNames": ["newsletter-release", "platform-release"],
+                    "resourceNames": [
+                        "newsletter-release",
+                        "platform-release",
+                        "codex-gateway-release",
+                    ],
                     "verbs": ["get"],
                 },
             ],

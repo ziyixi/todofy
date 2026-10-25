@@ -1,0 +1,50 @@
+// One bounded, stateless inference turn through the owner's VPS Codex subscription runtime.
+syntax = "proto3";
+
+package codex.inference.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "InferenceProto";
+option java_package = "science.ziyixi.codex.inference.v1";
+
+// A single model turn. This service has no persisted job resource or autonomous follow-up work.
+service InferenceService {
+  // Runs one structured-output turn; retries belong to the calling application.
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: This fixed stateless machine endpoint has no resource name. --)
+  rpc RunInference(RunInferenceRequest) returns (RunInferenceResponse) {
+    option (google.api.http) = {
+      post: "/api/codex/v1/inference:run"
+      body: "*"
+    };
+  }
+}
+
+// Inputs are untrusted data; the runtime never grants them tools or application credentials.
+message RunInferenceRequest {
+  // Stable system instructions, including the owner's current classification preferences.
+  string instructions = 1 [(google.api.field_behavior) = REQUIRED];
+  // JSON-encoded dynamic input, kept separate from instructions.
+  string input_json = 2 [(google.api.field_behavior) = REQUIRED];
+  // JSON Schema for the final model response.
+  string output_schema_json = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A completed attempt. An error leaves output_json empty; the caller must not apply a partial result.
+message RunInferenceResponse {
+  // Actual configured model for this turn.
+  string model = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Configured reasoning effort.
+  string effort = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Complete structured JSON result; empty on failure.
+  string output_json = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Reported total input tokens, including cached input; zero when unavailable.
+  int32 input_tokens = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Reported output tokens; zero when unavailable.
+  int32 output_tokens = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Safe failure code, empty on success. Never contains a provider exception or input text.
+  string error_code = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

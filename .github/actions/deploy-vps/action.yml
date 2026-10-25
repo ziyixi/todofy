@@ -21,6 +21,10 @@ inputs:
     description: "platform image"
     required: false
     default: ''
+  codex-gateway-image:
+    description: "independent codex gateway image"
+    required: false
+    default: ''
   resume-release:
     description: "resume release"
     required: false
@@ -54,6 +58,7 @@ runs:
         PLATFORM_DEPLOY_TOKEN: ${{ inputs.platform-deploy-token }}
         NEWSLETTER_IMAGE: ${{ inputs.newsletter-image }}
         PLATFORM_IMAGE: ${{ inputs.platform-image }}
+        CODEX_GATEWAY_IMAGE: ${{ inputs.codex-gateway-image }}
         RESUME_RELEASE: ${{ inputs.resume-release }}
         RELEASE_SOURCE_SHA: ${{ inputs.source-sha }}
       working-directory: .
@@ -62,6 +67,8 @@ runs:
         args=()
         if [ "$RESUME_RELEASE" = true ]; then
           args+=(--resume)
+        elif [ -n "$CODEX_GATEWAY_IMAGE" ]; then
+          args+=(--codex-gateway-image "$CODEX_GATEWAY_IMAGE")
         else
           args+=(--newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE")
         fi

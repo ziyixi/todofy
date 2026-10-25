@@ -9,7 +9,7 @@ index of those files, not a runtime service or a second infrastructure controlle
 | The application's committed `wrangler.toml` | Worker name, Custom Domains, resources, bindings, ordinary configuration |
 | `infra/*.tf` outside the marked catalog regions | Resource identities, policy attachment, `prevent_destroy`, storage existence, outputs, encrypted state and provider configuration |
 | GitHub's production environment and application deploy wrappers | Secret values and operational switches |
-| VPS image release tooling | Independently tested Newsletter/Platform artifacts, source SHA and immutable digests; the catalog records only each image repository |
+| VPS image release tooling | Independently tested Newsletter/Platform/Codex gateway artifacts, source SHA and immutable digests; the catalog records only each image repository |
 
 The catalog contains no email address, account or resource ID, IP address, credential, private endpoint,
 operational switch or production state. It never reads `.env`, private configuration, credentials or an
@@ -105,7 +105,7 @@ Each entry has one status kind:
 
 | Kind | Fields and meaning |
 | --- | --- |
-| `ops_v1` | `binding`, `guard`; binding must already name the same Worker's `Ops` entrypoint in Home's Wrangler config. The explicit Newsletter `provider = "fleet"` case requires `NEWSLETTER` to name Fleet's `NewsletterOps`. |
+| `ops_v1` | `binding`, `guard`; binding must name the same Worker's `Ops` entrypoint in Home's Wrangler config. The explicit VPS Fleet adapters use `NEWSLETTER`/`NewsletterOps` or `CODEX_GATEWAY`/`CodexGatewayOps`. |
 | `public_http` | `path`, nonempty 2xx `expect`, boolean `enabled`; optional `content_type`, `outside_access`, `error_rate` |
 | `analytics` | `max_idle_hours`, an integer from 1 to 168; existing traffic-based activity signal |
 | `self` | Home's own status |
@@ -122,11 +122,13 @@ bounded Newsletter business snapshot without Home reaching the VPS or storing a 
 Platform is a separate VPS image application with a hidden `platform-runtime` entry and `status.type = "none"`;
 Fleet displays the shared runtime node/workload/release status. Both image fields identify repositories,
 never mutable deployment tags. Release targets, heartbeat transport and Kubernetes manifests belong to
-their [architecture/contracts](architecture.md), not to the catalog.
+their [architecture/contracts](architecture.md), not to the catalog. Codex gateway is a separate VPS image
+with a Home service entry; Fleet projects its process/release evidence through `CodexGatewayOps` without
+calling inference. Login, quota and actual model results remain the caller's responsibility.
 
 Hostname and image-owner validation use the public profile in [`config/cloud.toml`](../config/cloud.toml).
 Personal settings and resource identities still do not belong in manifests. A provider field is not a
-general cross-application escape hatch: the schema allows only the explicit checked Newsletter/Fleet case.
+general cross-application escape hatch: the schema allows only the two explicit checked Fleet adapters.
 
 ## Generated outputs and consumers
 
@@ -161,11 +163,12 @@ catalog.workers                # normalized Worker mapping, in position order
 catalog.access                 # public paths plus Wrangler-derived destinations
 ```
 
-CI uses `apps` to distinguish Cloudflare checks from VPS image checks. Newsletter and Platform must not enter
+CI uses `apps` to distinguish Cloudflare checks from VPS image checks. Newsletter, Platform and Codex gateway must not enter
 Worker hostname guards or Wrangler deploy steps. Platform's separately declared machine infrastructure is
-owned by infra, rather than inferred from its image manifest. CI prefixes are `newsletter` and `platform`;
-existing output prefixes remain unchanged, including `mail_hero`. A VPS release publishes both independently
-tested images of the same SHA; changing a catalog row alone does not start that release.
+owned by infra, rather than inferred from its image manifest. CI prefixes include `newsletter`, `platform`
+and `codex_gateway`. A paired runtime release publishes all three independently tested images for its
+complete bootstrap bundle. Gateway-only changes release only the gateway. Changing a catalog row alone
+does not start a release.
 
 ## Adding or changing a service
 

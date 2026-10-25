@@ -240,6 +240,11 @@
           "source": "deploy"
         },
         {
+          "name": "CODEX_GATEWAY",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "CSRF_SIGNING_KEY",
           "type": "secret_text",
           "source": "deploy"
@@ -555,6 +560,29 @@
           "name": "BUILD_SHA",
           "type": "plain_text",
           "source": "deploy"
+        },
+        {
+          "name": "CODEX_ACCESS_CLIENT_ID",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "CODEX_ACCESS_CLIENT_SECRET",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "CODEX_ENDPOINT_TOKEN",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "CODEX_ENDPOINT_URL",
+          "type": "plain_text",
+          "source": "config"
         },
         {
           "name": "CSRF_SIGNING_KEY",

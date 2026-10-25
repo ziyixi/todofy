@@ -10,11 +10,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cloud-config"))
 from cloud_profile import image_repositories, load_profile
 
 
-def release_id(sha: str) -> str:
+def release_id(sha: str, *, gateway_only: bool = False) -> str:
     """Same verified source SHA retains the existing canonical UUID4 across network retries."""
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("Invalid source identity")
-    digest = hashlib.sha256(("personal-cloud-release-v1:" + sha).encode()).digest()
+    prefix = (
+        "personal-cloud-codex-release-v1:"
+        if gateway_only
+        else "personal-cloud-release-v1:"
+    )
+    digest = hashlib.sha256((prefix + sha).encode()).digest()
     return str(UUID(bytes=digest[:16], version=4))
 
 
@@ -39,9 +44,13 @@ def reconcile_id(repository: str, run_id: str, attempt: str) -> str:
 def verified_images(
     root: Path, sha: str, images: dict[str, str]
 ) -> tuple[dict, dict[str, str]]:
-    """Accept only this profile owner's two fixed published images, both pinned by full SHA256."""
+    """Accept only the profile's fixed repositories, pinned by full SHA256."""
     profile = release_profile(root, sha)
-    if set(images) != {"newsletter", "platform"}:
+    if set(images) not in (
+        {"newsletter", "platform"},
+        {"codex-gateway"},
+        {"newsletter", "platform", "codex-gateway"},
+    ):
         raise ValueError("Invalid release images")
     repositories = image_repositories(profile)
     digests = {}
