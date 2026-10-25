@@ -12,7 +12,7 @@ import { DAY, TRUSTED_DOMAINS_PER_LABEL_MAX } from '../src/limits.ts';
 import { senderHash } from '../src/mask.ts';
 import { labelIdFor, normalizePath, optionKeys, ownerPath, parentGmailNames, pathOfGmailName, pathSlug, treeConflict } from '../src/paths.ts';
 import { PRIORITY_LABELS } from '../src/priority.ts';
-import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V10, SCHEMA_VERSION, senderHashesToBackfill, Store } from '../src/store.ts';
+import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V10, SCHEMA_V11, SCHEMA_VERSION, senderHashesToBackfill, Store } from '../src/store.ts';
 import { memorySql } from './fakes/sql.ts';
 
 const T0 = Date.parse('2026-10-06T08:00:00Z');
@@ -453,4 +453,33 @@ it('adds zero cache counters to prior Claude usage and aggregates actual cache u
   expect(s.claudeUsage('2026-10')).toMatchObject({ input_tokens: 1000, cache_write_tokens: 0, cache_read_tokens: 0, cost_micros: 6000 });
   s.addClaudeUsage('2026-10-06', { inputTokens: 1600, cacheWriteTokens: 200, cacheReadTokens: 400, outputTokens: 100, thinkingTokens: 10, costMicros: 7080 });
   expect(s.claudeUsage('2026-10')).toMatchObject({ input_tokens: 2600, cache_write_tokens: 200, cache_read_tokens: 400, output_tokens: 200, cost_micros: 13080 });
+});
+
+it('migrates version 11 with an empty Codex usage table while preserving Claude history', () => {
+  const sql = memorySql();
+  for (const statement of [...SCHEMA_V1, ...SCHEMA_V2, ...SCHEMA_V3, ...SCHEMA_V4, ...SCHEMA_V5, ...SCHEMA_V6, ...SCHEMA_V7, ...SCHEMA_V8, ...SCHEMA_V10, ...SCHEMA_V11]) sql.exec(statement);
+  sql.exec(`INSERT INTO meta (key, value) VALUES ('schema_version', '11')`);
+  sql.exec(`INSERT INTO claude_usage (day, requests, input_tokens, output_tokens, cost_micros) VALUES ('2026-10-06', 1, 1000, 100, 6000)`);
+  const s = new Store(sql);
+  s.migrate(transactional(sql));
+  s.migrate(transactional(sql));
+  expect(s.schemaVersion()).toBe(SCHEMA_VERSION);
+  expect(s.codexUsage('2026-10')).toEqual({ requests: 0, successes: 0, failures: 0, usage_reported: 0, input_tokens: 0, output_tokens: 0 });
+  expect(s.claudeUsage('2026-10')).toMatchObject({ requests: 1, input_tokens: 1000, output_tokens: 100, cost_micros: 6000 });
+});
+
+it('counts Codex attempts once, separates unavailable usage and bounds month and retention reads', () => {
+  const s = store();
+  s.addCodexUsage('2026-10-06', true, { inputTokens: 1200, outputTokens: 120 });
+  s.addCodexUsage('2026-10-06', false, { inputTokens: 600, outputTokens: 60 });
+  s.addCodexUsage('2026-10-06', false);
+  s.addCodexUsage('2026-10-07', true, { inputTokens: 0, outputTokens: 0 });
+  s.addCodexUsage('2026-09-30', true, { inputTokens: 10, outputTokens: 1 });
+  expect(s.codexUsage('2026-10')).toEqual({ requests: 4, successes: 2, failures: 2, usage_reported: 3, input_tokens: 1800, output_tokens: 180 });
+  expect(s.codexUsage('2026-09')).toMatchObject({ requests: 1, input_tokens: 10 });
+  const oldDay = new Date(T0 - 401 * DAY).toISOString().slice(0, 10);
+  s.addCodexUsage(oldDay, true, { inputTokens: 5, outputTokens: 2 });
+  s.prune(T0);
+  expect(s.count(`SELECT count(*) AS n FROM codex_usage WHERE day = ?`, oldDay)).toBe(0);
+  expect(s.codexUsage('2026-10').requests).toBe(4);
 });

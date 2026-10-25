@@ -176,6 +176,32 @@ message ServiceStatus {
   google.protobuf.Timestamp gmail_write_resume_time = 25 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The selected classification provider's readiness, errors and batch schedule.
   ClassifierStatus classifier = 26 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Persisted Codex classification request and reported-token totals for the current UTC month.
+  CodexUsage codex_usage = 27 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Application-observed Codex usage, retained independently of the selected provider. No price or account quota.
+message CodexUsage {
+  // Configured model for new classification requests.
+  string model = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Configured reasoning effort.
+  string effort = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // UTC calendar month, YYYY-MM.
+  string month = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Reported input-token total; requests without reported usage are excluded.
+  int32 input_tokens = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Reported output-token total.
+  int32 output_tokens = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // HTTP classification requests actually attempted, including failed or unanswered requests.
+  int32 request_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Requests that returned a valid complete classification result.
+  int32 success_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Attempted requests without a valid complete classification result.
+  int32 failure_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Responses supplying actual token usage, including reported usage on failed results.
+  int32 usage_reported_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Latest completed attempted request; absent until this release records a request.
+  google.protobuf.Timestamp last_request_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // The selected classification provider. Contains no endpoint URL, credentials or mail content.

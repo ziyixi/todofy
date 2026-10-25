@@ -24,7 +24,7 @@ describe('page shell', () => {
     expect(document.title).toBe('个人控制台')
     expect(screen.getByText('时区：浏览器本地（Asia/Shanghai）')).toBeInTheDocument()
     expect(screen.getByText('构建 0123456')).toBeInTheDocument()
-    expect(screen.getByText('用量为整个 Cloudflare 账户')).toBeInTheDocument()
+    expect(screen.getByText('Cloudflare 用量为整个账户')).toBeInTheDocument()
   })
 
   it('switches views by hash, reads each view once and never re-reads the registry', async () => {

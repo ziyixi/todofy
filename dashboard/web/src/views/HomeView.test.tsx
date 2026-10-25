@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { apiError, freezeClock, installFetch, json, renderApp, serve, PATHS } from '../test/harness'
-import { analyticsUnavailable, healthy, observedOnly, oneWarning, shell, todofyUnreachable, withLinkOnly, type Scenario } from '../test/fixtures'
+import { analyticsUnavailable, healthy, observedOnly, oneWarning, shell, todofyUnreachable, withCodex, withLinkOnly, type Scenario } from '../test/fixtures'
 
 async function showHome(scenario: Scenario) {
   freezeClock()
@@ -79,6 +79,16 @@ describe('首页', () => {
       metric: { kind: 'counter', name: 'active_subscriptions', value: 0 } }] }
     await showHome(scenario)
     expect(within(launcher()).getByRole('link', { name: '个人 MCP：正常，当前订阅 0，查看操作与记录' })).toHaveAttribute('href', '#/ops')
+  })
+
+  it('opens the Codex service row directly in its inference monitor', async () => {
+    await showHome(withCodex())
+    const link = within(launcher()).getByRole('link', { name: 'Codex 推理：正常，查看推理监控' })
+    expect(link).toHaveAttribute('href', '#/ops/codex-gateway')
+    await userEvent.click(link)
+    expect(await screen.findByRole('heading', { level: 1, name: 'Codex 推理' })).toBeInTheDocument()
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Mail Hero' })).not.toBeInTheDocument()
   })
 
   it('shows a link-only tile as its host: no status button, no fake green', async () => {

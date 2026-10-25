@@ -37,6 +37,9 @@ export class FakeUpstream {
     status: 200,
     errorCode: '',
     badItems: false,
+    inputTokens: 1200,
+    outputTokens: 120,
+    usageAvailable: true,
   };
   /** Requests that were neither Google nor Workers AI. */
   readonly strays: string[] = [];
@@ -67,6 +70,9 @@ export class FakeUpstream {
     this.codex.status = 200;
     this.codex.errorCode = '';
     this.codex.badItems = false;
+    this.codex.inputTokens = 1200;
+    this.codex.outputTokens = 120;
+    this.codex.usageAvailable = true;
     this.strays.length = 0;
   }
 
@@ -83,7 +89,8 @@ export class FakeUpstream {
       const items = this.codex.badItems ? [] : emails.map(email => ({ id: email.id, bucket: this.codex.bucket, reason: 'Synthetic reading priority.' }));
       return Response.json(toWire(RunInferenceResponseSchema, create(RunInferenceResponseSchema, {
         model: 'gpt-6.1-sol', effort: 'medium', outputJson: this.codex.errorCode ? '' : JSON.stringify({ items }),
-        inputTokens: 1200, outputTokens: 120, errorCode: this.codex.errorCode,
+        inputTokens: this.codex.inputTokens, outputTokens: this.codex.outputTokens,
+        usageAvailable: this.codex.usageAvailable, errorCode: this.codex.errorCode,
       })));
     }
     if (request.method === 'POST' && originalUrl === 'https://api.anthropic.com/v1/messages') {

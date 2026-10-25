@@ -88,4 +88,6 @@ message RunInferenceResponse {
   int32 output_tokens = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Safe failure code, empty on success. Never contains a provider exception or input text.
   string error_code = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether the SDK supplied actual token usage, including a real zero. False is unknown consumption.
+  bool usage_available = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

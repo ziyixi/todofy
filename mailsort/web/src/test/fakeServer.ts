@@ -28,6 +28,7 @@ import { ReplayEvaluation_State, ReplayEvaluationSchema, type ReplayEvaluation }
 import { ExampleSchema, LedgerEntry_State, LedgerEntrySchema, ReviewItem_State, ReviewItemSchema, type Example, type LedgerEntry, type ReviewItem } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
 import {
   ClaudeBudgetSchema,
+  CodexUsageSchema,
   LabelCountSchema,
   LabelReportSchema,
   Mode,
@@ -256,6 +257,7 @@ export class FakeServer {
               inputTokens: 24000, outputTokens: 1200,
               lastRequestTime: timestampFromMs(NOW - 600_000), nextBatchTime: timestampFromMs(NOW + 3_600_000),
             }),
+            codexUsage: create(CodexUsageSchema, { model: 'gpt-6.1-sol', effort: 'medium', month: '2026-10' }),
             recentErrorCodes: ['gmail_429'],
             build: 'test',
           }), this.status),

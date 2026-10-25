@@ -274,7 +274,7 @@ PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
 # value imports, Python imports; test_proto.py checks this against the sources). A package missing here
 # reaches every user (fail safe; test_proto.py fails until it is listed).
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
-    "proto/codex/inference/": ("codex-gateway", "mailsort"),
+    "proto/codex/inference/": ("codex-gateway", "mailsort", "mail-hero", "todofy", "dashboard", "watch", "website", "recall", "brief", "tasks", "personal-mcp", "fleet", "platform"),
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the

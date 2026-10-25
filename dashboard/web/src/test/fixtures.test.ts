@@ -24,6 +24,7 @@ import {
   todofyUnreachable,
   withLinkOnly,
   withWorkers,
+  withCodex,
   type Scenario,
 } from './fixtures'
 
@@ -41,6 +42,7 @@ const SCENARIOS: Readonly<Record<string, () => Scenario>> = {
   canaryFailed,
   withLinkOnly,
   withWorkers: () => withWorkers(50),
+  withCodex,
 }
 
 /** Paths a lenient read did not recognize; it throws on a wrong type, a missing REQUIRED field or a broken rule. */

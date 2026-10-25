@@ -242,6 +242,7 @@ async def infer(
     output = ""
     error_code = ""
     input_tokens = output_tokens = 0
+    usage_available = False
     stage = "configuration"
     try:
         if sdk is None:
@@ -285,6 +286,7 @@ async def infer(
                 )
                 result = await turn.run()
                 if result.usage is not None:
+                    usage_available = True
                     input_tokens = result.usage.total.input_tokens
                     output_tokens = result.usage.total.output_tokens
                 output = result.final_response
@@ -328,6 +330,7 @@ async def infer(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         error_code=error_code,
+        usage_available=usage_available,
     )
 
 

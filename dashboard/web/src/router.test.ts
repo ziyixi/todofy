@@ -10,6 +10,7 @@ describe('hash routes', () => {
     expect(parseHash('#/cloudflare')).toEqual({ view: 'cloudflare' })
     expect(parseHash('#/cloudflare/worker/todofy-core')).toEqual({ view: 'cloudflare', script: 'todofy-core' })
     expect(parseHash('#/ops')).toEqual({ view: 'ops' })
+    expect(parseHash('#/ops/codex-gateway')).toEqual({ view: 'ops', app: 'codex-gateway' })
   })
 
   it('falls back safely on anything else', () => {
@@ -17,6 +18,8 @@ describe('hash routes', () => {
     expect(parseHash('#/flows/Bad Id')).toEqual({ view: 'flows' })
     expect(parseHash('#/cloudflare/worker/<x>')).toEqual({ view: 'cloudflare' })
     expect(parseHash('#/flows/a/b/c')).toEqual({ view: 'flows' })
+    expect(parseHash('#/ops/Bad App')).toEqual({ view: 'ops' })
+    expect(parseHash('#/ops/codex-gateway/extra')).toEqual({ view: 'ops' })
     // A bad stage keeps the flow.
     expect(parseHash('#/flows/mail-to-task/Bad Stage')).toEqual({ view: 'flows', flow: 'mail-to-task' })
   })
@@ -31,7 +34,7 @@ describe('hash routes', () => {
   })
 
   it('round-trips canonical hashes', () => {
-    for (const hash of ['#/', '#/flows', '#/flows/ops-digest', '#/flows/ops-digest/collect', '#/cloudflare', '#/cloudflare/worker/home', '#/ops']) {
+    for (const hash of ['#/', '#/flows', '#/flows/ops-digest', '#/flows/ops-digest/collect', '#/cloudflare', '#/cloudflare/worker/home', '#/ops', '#/ops/codex-gateway']) {
       expect(routeHash(parseHash(hash))).toBe(hash)
     }
   })

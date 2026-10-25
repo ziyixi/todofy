@@ -79,7 +79,7 @@ export function targetHash(target: Target): string {
     case 'cloudflare':
       return routeHash(target.script ? { view: 'cloudflare', script: target.script } : { view: 'cloudflare' })
     case 'ops':
-      return routeHash({ view: 'ops' })
+      return routeHash(target.entry === 'codex-gateway' ? { view: 'ops', app: target.entry } : { view: 'ops' })
     case 'home':
       return routeHash({ view: 'home' })
   }
@@ -102,6 +102,7 @@ export function targetLabel(reg: Reg, target: Target, source: string): string {
  * flow it takes part in, else 操作与记录.
  */
 export function entryPageHash(reg: Reg, entry: RegistryEntry): { hash: string; what: string } {
+  if (entry.id === 'codex-gateway') return { hash: routeHash({ view: 'ops', app: entry.id }), what: '查看推理监控' }
   if (entry.id === 'notion-publish' || entry.id === 'personal-mcp') return { hash: routeHash({ view: 'ops' }), what: '查看操作与记录' }
   const script = entry.scripts[0]
   if (script !== undefined) return { hash: routeHash({ view: 'cloudflare', script }), what: '查看 Cloudflare 中的 Worker' }

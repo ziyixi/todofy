@@ -439,6 +439,174 @@
                   "next_due_at": {
                     "description": "Next due business work, null or absent when the adapter cannot determine it.",
                     "type": "string"
+                  },
+                  "inference_status": {
+                    "description": "Content-free gateway observation, present only when the configured adapter supplies it.",
+                    "type": "object",
+                    "required": [
+                      "started_at",
+                      "model",
+                      "effort",
+                      "sdk_version",
+                      "request_count",
+                      "success_count",
+                      "failure_count",
+                      "active_count",
+                      "input_tokens",
+                      "output_tokens",
+                      "usage_reported_count",
+                      "last_error_code",
+                      "recent_requests",
+                      "observed_at"
+                    ],
+                    "properties": {
+                      "started_at": {
+                        "description": "Start of this gateway process, not the first inference.",
+                        "type": "string"
+                      },
+                      "model": {
+                        "description": "Configured default model. A request may explicitly select another model.",
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^(?:[a-z0-9][a-z0-9._-]{0,63})$(?!\\n)"
+                      },
+                      "effort": {
+                        "description": "Fixed configured effort.",
+                        "const": "medium"
+                      },
+                      "sdk_version": {
+                        "description": "Installed SDK version; its bundled CLI uses the same version.",
+                        "type": "string",
+                        "maxLength": 32,
+                        "pattern": "^(?:[0-9][A-Za-z0-9.+_-]{0,31}|unknown)$(?!\\n)"
+                      },
+                      "request_count": {
+                        "description": "Valid authenticated inference requests accepted by this process, including active requests.",
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "success_count": {
+                        "description": "Completed responses without a model error code.",
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "failure_count": {
+                        "description": "Completed or interrupted requests that failed; HTTP 200 alone is not success.",
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "active_count": {
+                        "description": "Requests active at observed_at. Host observations are periodic, not a live stream.",
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "input_tokens": {
+                        "description": "Sum of reported input tokens. Missing usage is excluded, not interpreted as zero consumption.",
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "output_tokens": {
+                        "description": "Sum of reported output tokens.",
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "usage_reported_count": {
+                        "description": "Completed responses for which token usage was actually reported.",
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "last_completed_at": {
+                        "description": "Last completed request, absent before the first completion.",
+                        "type": "string"
+                      },
+                      "last_duration_ms": {
+                        "description": "Full gateway request duration, including SDK startup and cleanup. Absent before the first completion.",
+                        "type": "number",
+                        "minimum": 0.0
+                      },
+                      "average_duration_ms": {
+                        "description": "Mean full request duration for completed requests; absent before the first completion.",
+                        "type": "number",
+                        "minimum": 0.0
+                      },
+                      "last_error_code": {
+                        "description": "Last completed request's safe error, empty after success or before any completion.",
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^(?:[a-z][a-z0-9_]{0,63}|)$(?!\\n)"
+                      },
+                      "recent_requests": {
+                        "description": "At most eight latest completions, newest first. No prompt, response, address or caller-supplied name.",
+                        "type": "array",
+                        "maxItems": 8,
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "sequence",
+                            "completed_at",
+                            "model",
+                            "effort",
+                            "duration_ms",
+                            "error_code",
+                            "input_tokens",
+                            "output_tokens",
+                            "usage_available"
+                          ],
+                          "properties": {
+                            "sequence": {
+                              "description": "Monotonic process-local sequence assigned when this request starts.",
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "completed_at": {
+                              "description": "Completion time.",
+                              "type": "string"
+                            },
+                            "model": {
+                              "description": "Selected safe model identifier, or unknown when it was not a model identifier.",
+                              "type": "string",
+                              "maxLength": 64,
+                              "pattern": "^(?:[a-z0-9][a-z0-9._-]{0,63})$(?!\\n)"
+                            },
+                            "effort": {
+                              "description": "Configured effort.",
+                              "const": "medium"
+                            },
+                            "duration_ms": {
+                              "description": "Full request wall duration, measured with a monotonic clock.",
+                              "type": "number",
+                              "minimum": 0.0
+                            },
+                            "error_code": {
+                              "description": "Empty for success; safe code for model, timeout, cancellation or service failure.",
+                              "type": "string",
+                              "maxLength": 64,
+                              "pattern": "^(?:[a-z][a-z0-9_]{0,63}|)$(?!\\n)"
+                            },
+                            "input_tokens": {
+                              "description": "Reported input tokens; meaningful only when usage_available is true.",
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "output_tokens": {
+                              "description": "Reported output tokens; meaningful only when usage_available is true.",
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "usage_available": {
+                              "description": "Whether this completion supplied actual token usage, including a real zero.",
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "observed_at": {
+                        "description": "Actual gateway snapshot time; forwarding or reading a cached snapshot does not change it.",
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false

@@ -4,7 +4,9 @@ import json
 from dataclasses import dataclass
 from importlib.resources import files
 
+from ziyixi_proto.codex.inference.v1.monitoring_pb import InferenceStatus
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
+from ziyixi_proto.wire_json import WireJsonError, from_wire
 
 from .config import _matches
 
@@ -18,6 +20,7 @@ class Business:
     request_id: str | None = None
     active_count: int | None = None
     unknown_count: int | None = None
+    inference_status: InferenceStatus | None = None
 
 
 def baked_source_sha() -> str | None:
@@ -104,6 +107,14 @@ def codex_gateway(value: dict) -> Business:
     ):
         return Business(admission="unsupported")
     sha, request = value.get("source_sha"), value.get("release_request_id")
+    inference_status = None
+    if "inference_status" in value:
+        try:
+            inference_status = from_wire(
+                InferenceStatus, value["inference_status"], strict=True
+            ).message
+        except WireJsonError:
+            pass
     return Business(
         admission="unsupported",
         health="healthy",
@@ -112,4 +123,6 @@ def codex_gateway(value: dict) -> Business:
         request_id=request
         if _matches(pb.ReleaseTarget, "request_id", request)
         else None,
+        active_count=inference_status.active_count if inference_status else None,
+        inference_status=inference_status,
     )

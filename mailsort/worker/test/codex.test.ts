@@ -55,7 +55,7 @@ describe('the Mailsort Codex inference client', () => {
       properties: { items: { items: { required: ['id', 'bucket', 'reason'], additionalProperties: false, properties: { bucket: { enum: ['P1', 'P2', 'P3', 'P4'] } } } } },
     });
     expect(JSON.stringify(body)).not.toContain(ENV.CODEX_ENDPOINT_TOKEN);
-    expect(result).toEqual({ model: 'gpt-6.1-sol', items: ITEMS, inputTokens: 1200, outputTokens: 120 });
+    expect(result).toEqual({ model: 'gpt-6.1-sol', items: ITEMS, inputTokens: 1200, outputTokens: 120, usageAvailable: true });
     expect(result).not.toHaveProperty('costMicros');
   });
 
@@ -73,7 +73,7 @@ describe('the Mailsort Codex inference client', () => {
 
   it('rejects missing or non-HTTPS configuration and ambiguous input before making a request', async () => {
     const fetcher = answer();
-    await expect(classifyWithCodex({ ...ENV, CODEX_ENDPOINT_TOKEN: '' }, EMAILS, fetcher, PROMPT)).rejects.toMatchObject({ name: 'CodexConfigurationError', code: 'codex_not_configured' });
+    await expect(classifyWithCodex({ ...ENV, CODEX_ENDPOINT_TOKEN: '' }, EMAILS, fetcher, PROMPT)).rejects.toMatchObject({ name: 'CodexConfigurationError', code: 'codex_not_configured', attempted: false });
     await expect(classifyWithCodex({ ...ENV, CODEX_ENDPOINT_URL: 'http://codex.synthetic.example/run' }, EMAILS, fetcher, PROMPT)).rejects.toMatchObject({ code: 'codex_not_configured' });
     await expect(classifyWithCodex(ENV, [EMAILS[0], EMAILS[0]], fetcher, PROMPT)).rejects.toMatchObject({ code: 'codex_bad_input' });
     await expect(classifyWithCodex(ENV, EMAILS, fetcher, { ...PROMPT, basePrompt: ' ' })).rejects.toMatchObject({ code: 'codex_bad_input' });
@@ -81,9 +81,9 @@ describe('the Mailsort Codex inference client', () => {
   });
 
   it('rejects malformed JSON, incomplete or duplicated IDs and unexpected result fields atomically', async () => {
-    await expect(classifyWithCodex(ENV, EMAILS, answer({ outputJson: 'synthetic malformed private output' }), PROMPT)).rejects.toMatchObject({ code: 'codex_bad_json', message: 'codex_bad_json' });
+    await expect(classifyWithCodex(ENV, EMAILS, answer({ outputJson: 'synthetic malformed private output' }), PROMPT)).rejects.toMatchObject({ code: 'codex_bad_json', message: 'codex_bad_json', attempted: true, usage: { inputTokens: 1200, outputTokens: 120 } });
     for (const items of [ITEMS.slice(0, 1), [ITEMS[0], ITEMS[0]], [ITEMS[0], { ...ITEMS[1], id: 'unrequested' }], [ITEMS[0], { ...ITEMS[1], bucket: 'P5' }], [ITEMS[0], { ...ITEMS[1], confidence: 0.8 }]]) {
-      await expect(classifyWithCodex(ENV, EMAILS, answer({ outputJson: JSON.stringify({ items }) }), PROMPT)).rejects.toMatchObject({ code: 'codex_bad_items', message: 'codex_bad_items' });
+      await expect(classifyWithCodex(ENV, EMAILS, answer({ outputJson: JSON.stringify({ items }) }), PROMPT)).rejects.toMatchObject({ code: 'codex_bad_items', message: 'codex_bad_items', usage: { inputTokens: 1200, outputTokens: 120 } });
     }
   });
 
@@ -97,7 +97,7 @@ describe('the Mailsort Codex inference client', () => {
   });
 
   it('keeps subscription quota and auth failures explicit and hides unknown gateway error text', async () => {
-    await expect(classifyWithCodex(ENV, EMAILS, answer({ errorCode: 'codex_quota', outputJson: '' }), PROMPT)).rejects.toMatchObject({ code: 'codex_quota' });
+    await expect(classifyWithCodex(ENV, EMAILS, answer({ errorCode: 'codex_quota', outputJson: '' }), PROMPT)).rejects.toMatchObject({ code: 'codex_quota', attempted: true, usage: { inputTokens: 1200, outputTokens: 120 } });
     await expect(classifyWithCodex(ENV, EMAILS, answer({ errorCode: 'codex_auth', outputJson: '' }), PROMPT)).rejects.toMatchObject({ name: 'CodexConfigurationError', code: 'codex_auth' });
     const error: unknown = await classifyWithCodex(ENV, EMAILS, answer({ errorCode: 'synthetic-private-provider-detail', outputJson: '' }), PROMPT).catch((error: unknown) => error);
     expect(error).toMatchObject({ code: 'codex_unavailable', message: 'codex_unavailable' });
@@ -112,7 +112,14 @@ describe('the Mailsort Codex inference client', () => {
       expect(JSON.stringify(error)).not.toContain('synthetic private gateway response');
       expect(fetcher).toHaveBeenCalledOnce();
     }
-    await expect(classifyWithCodex(ENV, EMAILS, vi.fn<typeof fetch>().mockRejectedValue(new Error('synthetic private network error')), PROMPT)).rejects.toMatchObject({ code: 'codex_network', message: 'codex_network' });
+    await expect(classifyWithCodex(ENV, EMAILS, vi.fn<typeof fetch>().mockRejectedValue(new Error('synthetic private network error')), PROMPT)).rejects.toMatchObject({ code: 'codex_network', message: 'codex_network', attempted: true, usage: undefined });
+  });
+
+  it('distinguishes reported zero usage from an older gateway with unavailable usage', async () => {
+    const zero = { inputTokens: 0, outputTokens: 0 };
+    expect(await classifyWithCodex(ENV, EMAILS, answer(zero), PROMPT)).toMatchObject({ ...zero, usageAvailable: false });
+    expect(await classifyWithCodex(ENV, EMAILS, answer({ ...zero, usageAvailable: true }), PROMPT)).toMatchObject({ ...zero, usageAvailable: true });
+    await expect(classifyWithCodex(ENV, EMAILS, answer({ ...zero, errorCode: 'codex_timeout' }), PROMPT)).rejects.toMatchObject({ code: 'codex_timeout', usage: undefined });
   });
 
   it('bounds the response before parsing or exposing its body', async () => {

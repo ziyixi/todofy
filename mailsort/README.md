@@ -64,9 +64,15 @@ work. It shares only the existing login PVC with Newsletter; it does not import 
 The model gets masked data without business tools or web access. The gateway requires ChatGPT subscription auth,
 with no API-key fallback. Process health and a saved login do not establish model availability or successful inference.
 
+The app records Codex HTTP classification attempts, valid/failed responses and reported input/output tokens by UTC day,
+retains those counters for 400 days and shows the current UTC month's totals. A response with an invalid classification
+still contributes its reported tokens. Failed requests without returned usage count as attempts with unknown token use;
+the UI shows how many requests supplied usage. Input totals include cached input. These records start with this release,
+preserve both providers' history on a switch and do not estimate subscription cost or the ChatGPT account's remaining allowance.
+
 ## UI and existing data
 
-- 概览: mode, Gmail status, selected classifier/configuration, next model batch, flow and Claude usage history.
+- 概览: mode, Gmail status, selected classifier/configuration, next model batch, flow and separate Codex/Claude usage history.
 - 分级: four fixed queues, counts and explicit unread-batch progress. A manual start queues immediately; existing
   P1-P4 mail is skipped. While an active batch is visible, progress updates every 30 seconds. It stops on completion
   or leaving the page, and a reached daily write cap shows its UTC-reset time in the browser timezone.

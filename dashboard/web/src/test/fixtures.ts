@@ -11,6 +11,7 @@ import todofyOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.
 import shedMailHero from '../../../../contracts/ops-v1/fixtures/GuardState/shed-mail-hero.json'
 import shedTodofy from '../../../../contracts/ops-v1/fixtures/GuardState/shed-todofy.json'
 import guardNormal from '../../../../contracts/ops-v1/fixtures/GuardState/normal.json'
+import codexGatewayOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/codex-gateway-ok.json'
 import type { CanaryRun, CanaryView, GuardState, OpsStatus, QuotaRow, Usage } from '../../../worker/src/api-types.ts'
 import type {
   AttentionItem,
@@ -51,6 +52,35 @@ export const guards = {
 
 export function registry(): Registry {
   return registryView(BUILD)
+}
+
+export function codexInference(patch: Partial<NonNullable<OpsStatus['codex_inference']>> = {}): NonNullable<OpsStatus['codex_inference']> {
+  return {
+    observed_at: '2026-09-29T16:59:00.000Z', started_at: '2026-09-29T14:00:00.000Z',
+    model: 'gpt-6.1-sol', effort: 'medium', sdk_version: '0.163.0', request_count: 3,
+    success_count: 1, failure_count: 1, active_count: 1, input_tokens: 6_400, output_tokens: 200, usage_reported_count: 1,
+    last_completed_at: '2026-09-29T16:58:00.000Z', last_duration_ms: 110_000, average_duration_ms: 57_700,
+    last_error_code: 'codex_timeout',
+    recent_requests: [
+      { sequence: 2, completed_at: '2026-09-29T16:58:00.000Z', model: 'gpt-6.1-sol', effort: 'medium',
+        duration_ms: 110_000, error_code: 'codex_timeout', input_tokens: 0, output_tokens: 0, usage_available: false },
+      { sequence: 1, completed_at: '2026-09-29T16:54:00.000Z', model: 'gpt-6.1-sol', effort: 'medium',
+        duration_ms: 5_400, error_code: '', input_tokens: 6_400, output_tokens: 200, usage_available: true },
+    ],
+    ...patch,
+  }
+}
+
+export function withCodex(): Scenario {
+  const scenario = healthy()
+  const snapshot: OpsStatus = { ...codexGatewayOk as unknown as OpsStatus, generated_at: NOW.toISOString(), codex_inference: codexInference() }
+  return {
+    ...scenario,
+    home: { ...scenario.home, entries: [...scenario.home.entries, { id: 'codex-gateway', level: 'ok', reason: null,
+      checked_at: NOW.toISOString(), consecutive_failures: 0, top_signals: [], metric: null }] },
+    ops: { ...scenario.ops, apps: [...scenario.ops.apps, { entry: 'codex-gateway', reachable: true,
+      checked_at: NOW.toISOString(), status_at: NOW.toISOString(), error: null, consecutive_failures: 0, status: snapshot }] },
+  }
 }
 
 // ---- shell ----------------------------------------------------------------------------------------

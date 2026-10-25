@@ -41,6 +41,38 @@ describe('real workerd SQLite receipt persistence', () => {
       counters: { heartbeat_age_seconds: 1260 }, modes: { maintenance: false, deployment_paused: false },
     });
   });
+  it('persists content-free inference metadata through the existing owner and Ops views', async () => {
+    const h = await start();
+    const inference = {
+      started_at: '2026-10-02T23:00:00Z', observed_at: NOW,
+      model: 'gpt-6.1-sol', effort: 'medium', sdk_version: '0.163.0',
+      request_count: 1, success_count: 1, failure_count: 0, active_count: 0,
+      input_tokens: 101, output_tokens: 23, usage_reported_count: 1,
+      last_completed_at: '2026-10-02T23:59:00Z', last_duration_ms: 500, average_duration_ms: 500,
+      last_error_code: '', recent_requests: [{
+        sequence: 1, completed_at: '2026-10-02T23:59:00Z', model: 'gpt-6.1-sol', effort: 'medium',
+        duration_ms: 500, error_code: '', input_tokens: 101, output_tokens: 23, usage_available: true,
+      }],
+    };
+    const source = fixture.runtime.workloads[0];
+    if (!source) throw new Error('missing synthetic workload');
+    const key = 'codex-gateway';
+    const gateway = {
+      ...source, name: `workloads/${key}`, workload_key: key,
+      admission_state: 'unsupported', inference_status: inference,
+      release: { ...source.release,
+        desired: { ...source.release.desired, workload_key: key },
+        actual: { ...source.release.actual, workload_key: key },
+      },
+    };
+    const report = { ...fixture, runtime: { ...fixture.runtime, workloads: [gateway, ...fixture.runtime.workloads] } };
+    expect((await h.send(report)).status).toBe(200);
+    expect(await h.view()).toMatchObject({ report: { runtime: {
+      workloads: expect.arrayContaining([expect.objectContaining({ inference_status: inference })]),
+    } } });
+    expect(await h.status('codex-gateway', AT)).toMatchObject({ codex_inference: inference });
+    expect(await h.status('codex-gateway', AT + 11 * 60_000)).not.toHaveProperty('codex_inference');
+  });
   it('requires runtime evidence even when the Pod and application process look healthy', async () => {
     const h = await start();
     expect((await h.send({ ...fixture, runtime: null })).status).toBe(200);

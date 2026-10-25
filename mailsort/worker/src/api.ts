@@ -990,6 +990,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const deferred = store.count(`SELECT count(*) AS n FROM pending WHERE not_before > ?`, ctx.now);
     const month = utcDay(ctx.now).slice(0, 7);
     const claude = store.claudeUsage(month);
+    const codex = store.codexUsage(month);
+    const codexLastRequest = Number(store.getMeta('codex_usage_last_request_at') ?? 0);
     const lastRequest = Number(store.getMeta('claude_last_request_at') ?? 0);
     const nextBatch = Number(store.getMeta('next_model_at') ?? 0);
     const provider = settings.classificationProvider;
@@ -1033,6 +1035,13 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         ...(provider === 'claude' && Number.isFinite(nextBatch) && nextBatch > 0 ? { nextBatchTime: timestampFromMs(nextBatch) } : {}),
         lastErrorCode: store.getMeta('claude_error') ?? (classifierConfigured('claude', ctx.env) ? '' : 'claude_not_configured'),
         providerLimitReached: store.getMeta('claude_limited_month') === month,
+      },
+      codexUsage: {
+        model: CODEX_MODEL, effort: CLASSIFICATION_EFFORT, month,
+        inputTokens: codex.input_tokens, outputTokens: codex.output_tokens,
+        requestCount: codex.requests, successCount: codex.successes, failureCount: codex.failures,
+        usageReportedCount: codex.usage_reported,
+        ...(Number.isFinite(codexLastRequest) && codexLastRequest > 0 ? { lastRequestTime: timestampFromMs(codexLastRequest) } : {}),
       },
       aiQuotaExhausted: usage.quota_exhausted === 1,
       unembeddedExampleCount: store.count(`SELECT count(*) AS n FROM examples WHERE embedding IS NULL`),

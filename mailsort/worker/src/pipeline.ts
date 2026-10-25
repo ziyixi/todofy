@@ -524,12 +524,15 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
             body_truncated: read.bodyTruncated === true || Array.from(read.body).length > 12000,
           }));
           if (provider === 'codex') {
-            answer = await classifyWithCodex(deps.env, emails, deps.fetch, { basePrompt: prompt.baseText, personalRules: prompt.personalRules });
+            const recorded = await classifyWithCodex(deps.env, emails, deps.fetch, { basePrompt: prompt.baseText, personalRules: prompt.personalRules });
             transact(() => {
+              store.addCodexUsage(utcDay(at), true, recorded.usageAvailable ? recorded : undefined);
               store.setMeta('codex_last_request_at', String(at));
+              store.setMeta('codex_usage_last_request_at', String(at));
               store.setMeta('codex_last_success_at', String(at));
               store.deleteMeta('codex_error');
             });
+            answer = recorded;
           } else {
             const recorded = await classifyEmails(deps.env.ANTHROPIC_API_KEY ?? '', emails, deps.fetch, { basePrompt: prompt.baseText, personalRules: prompt.personalRules, cachePrompt });
             answer = recorded;
@@ -544,6 +547,11 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
         } catch (error) {
           const errorCode = error instanceof ClaudeError || error instanceof CodexError ? error.code : `${provider}_unexpected`;
           transact(() => {
+            if (error instanceof CodexError && error.attempted) {
+              store.addCodexUsage(utcDay(at), false, error.usage);
+              store.setMeta('codex_last_request_at', String(at));
+              store.setMeta('codex_usage_last_request_at', String(at));
+            }
             if (error instanceof ClaudeError && error.usage !== undefined) {
               store.addClaudeUsage(utcDay(at), error.usage);
               if (error.usage.cacheWriteTokens + error.usage.cacheReadTokens > 0) store.setMeta('claude_prompt_cache_at', String(at));

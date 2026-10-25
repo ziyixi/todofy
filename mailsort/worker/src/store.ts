@@ -22,7 +22,7 @@ import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, R
 import { senderHash } from './mask.ts';
 import { PRIORITY_LABELS } from './priority.ts';
 
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 /** The provider workspace cap is the hard boundary; this is the app's additional actual-usage stop. */
 export const CLAUDE_MONTHLY_LIMIT_MICROS = 20_000_000;
 
@@ -39,6 +39,24 @@ export const SCHEMA_V11: readonly string[] = [
   `ALTER TABLE claude_usage ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE claude_usage ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0`,
 ];
+
+export const SCHEMA_V12: readonly string[] = [
+  `CREATE TABLE codex_usage (
+    day TEXT PRIMARY KEY, requests INTEGER NOT NULL DEFAULT 0,
+    successes INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0,
+    usage_reported INTEGER NOT NULL DEFAULT 0,
+    input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0
+  )`,
+];
+
+export interface CodexUsageRow extends Record<string, SqlStorageValue> {
+  requests: number;
+  successes: number;
+  failures: number;
+  usage_reported: number;
+  input_tokens: number;
+  output_tokens: number;
+}
 
 export interface ClaudeUsageRow extends Record<string, SqlStorageValue> {
   input_tokens: number;
@@ -647,6 +665,7 @@ export class Store {
       }
       if (version < 10) for (const statement of SCHEMA_V10) this.sql.exec(statement);
       if (version < 11) for (const statement of SCHEMA_V11) this.sql.exec(statement);
+      if (version < 12) for (const statement of SCHEMA_V12) this.sql.exec(statement);
       if (version !== SCHEMA_VERSION) this.setMeta('schema_version', String(SCHEMA_VERSION));
     });
   }
@@ -779,6 +798,24 @@ export class Store {
         output_tokens = output_tokens + excluded.output_tokens, thinking_tokens = thinking_tokens + excluded.thinking_tokens,
         cost_micros = cost_micros + excluded.cost_micros, cache_write_tokens = cache_write_tokens + excluded.cache_write_tokens,
         cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens`, day, usage.inputTokens, usage.outputTokens, usage.thinkingTokens, usage.costMicros, usage.cacheWriteTokens, usage.cacheReadTokens);
+  }
+
+  /** HTTP classification attempts and returned tokens, summed for one UTC calendar month. */
+  codexUsage(month: string): CodexUsageRow {
+    return this.one<CodexUsageRow>(`SELECT coalesce(sum(requests), 0) AS requests,
+      coalesce(sum(successes), 0) AS successes, coalesce(sum(failures), 0) AS failures,
+      coalesce(sum(usage_reported), 0) AS usage_reported,
+      coalesce(sum(input_tokens), 0) AS input_tokens, coalesce(sum(output_tokens), 0) AS output_tokens
+      FROM codex_usage WHERE day >= ? AND day < ?`, `${month}-01`, `${month}-32`)
+      ?? { requests: 0, successes: 0, failures: 0, usage_reported: 0, input_tokens: 0, output_tokens: 0 };
+  }
+
+  addCodexUsage(day: string, success: boolean, usage?: { readonly inputTokens: number; readonly outputTokens: number }): void {
+    this.run(`INSERT INTO codex_usage (day, requests, successes, failures, usage_reported, input_tokens, output_tokens) VALUES (?, 1, ?, ?, ?, ?, ?)
+      ON CONFLICT(day) DO UPDATE SET requests = requests + 1, successes = successes + excluded.successes,
+        failures = failures + excluded.failures, usage_reported = usage_reported + excluded.usage_reported,
+        input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens`,
+    day, success ? 1 : 0, success ? 0 : 1, usage === undefined ? 0 : 1, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0);
   }
 
   // ---- labels -----------------------------------------------------------------------------------------------------------
@@ -942,6 +979,7 @@ export class Store {
     this.run(`DELETE FROM ledger WHERE create_time < ? AND state IN ('applied', 'failed', 'undone')`, records);
     this.run(`DELETE FROM usage WHERE day < ?`, utcDay(now - FLOW_KEPT_DAYS * DAY));
     this.run(`DELETE FROM claude_usage WHERE day < ?`, utcDay(now - FLOW_KEPT_DAYS * DAY));
+    this.run(`DELETE FROM codex_usage WHERE day < ?`, utcDay(now - FLOW_KEPT_DAYS * DAY));
     this.run(`DELETE FROM flow WHERE day < ?`, utcDay(now - FLOW_KEPT_DAYS * DAY));
     // A retired ID is free again once neither the decisions nor the flow counters can still name it.
     this.run(`DELETE FROM retired_labels WHERE retire_time < ?`, now - Math.max(DECISIONS_KEPT_MS, (FLOW_KEPT_DAYS + 1) * DAY));

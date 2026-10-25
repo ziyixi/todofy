@@ -47,6 +47,20 @@ cannot replace the baked source identity. Local runs without a baked file report
 request ID may be empty. This health check does not verify login, model access or inference.
 The independent workload, TLS routing and login mount belong to deployment configuration.
 
+## Monitor
+
+Open [Codex inference in Home](https://home.ziyixi.science/#/ops/codex-gateway) for request counts,
+successes/failures, reported tokens, latency, the installed SDK and the latest eight completed requests.
+The internal health response includes the root-proto `InferenceStatus`; the existing five-minute host observer
+forwards it through Fleet. Home retains its normal cached status reads and manual refresh. The page shows the
+actual sample time, so a cached read does not look like a new observation.
+
+Gateway totals cover the current process lifetime and reset on restart. Only validated, authenticated inference
+requests count; health and metadata checks do not. HTTP 200 with a nonempty `error_code` is a failed inference.
+`usage_available` distinguishes reported zero from missing usage. Request samples contain only time, safe model
+identifiers, effort, duration, token counts and fixed errors. These are not a billing ledger or account-wide quota.
+Mailsort separately persists its own daily/monthly classification usage in its existing database.
+
 Local synthetic checks:
 
 ```sh

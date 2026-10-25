@@ -58,9 +58,14 @@ export function App() {
   const shell: ShellFields | undefined = active.data
   const main = useRef<HTMLElement>(null)
   const firstView = useRef(true)
+  const app = route.view === 'ops' ? route.app : undefined
+  const appName = app ? registry.data?.entries.find((entry) => entry.id === app)?.name : undefined
 
   useEffect(() => {
-    document.title = route.view === 'home' ? '个人控制台' : `${tabName(route.view)} · 个人控制台`
+    document.title = route.view === 'home' ? '个人控制台' : `${appName ?? tabName(route.view)} · 个人控制台`
+  }, [route.view, appName])
+
+  useEffect(() => {
     if (firstView.current) {
       firstView.current = false
       return
@@ -68,7 +73,7 @@ export function App() {
     // A tab change is a page change for keyboard and screen-reader users: start at the new view.
     main.current?.focus({ preventScroll: true })
     window.scrollTo?.({ top: 0 })
-  }, [route.view])
+  }, [route.view, app])
 
   function skipToMain(event: MouseEvent<HTMLAnchorElement>) {
     // The hash is the router's: move focus without changing it.
@@ -154,7 +159,7 @@ export function App() {
             {route.view === 'cloudflare' && cloudflare.data ? (
               <CloudflareView registry={registry.data} cloudflare={cloudflare.data} focus={route.script} now={now} />
             ) : null}
-            {route.view === 'ops' && ops.data ? <OpsView registry={registry.data} ops={ops.data} now={now} /> : null}
+            {route.view === 'ops' && ops.data ? <OpsView registry={registry.data} ops={ops.data} app={route.app} now={now} /> : null}
           </>
         ) : null}
       </main>
@@ -162,7 +167,7 @@ export function App() {
       <footer className="footer small muted">
         <span>时区：浏览器本地（{browserTimeZone()}）</span>
         {registry.data ? <span>构建 {registry.data.build.slice(0, 7)}</span> : null}
-        <span>用量为整个 Cloudflare 账户</span>
+        <span>Cloudflare 用量为整个账户</span>
       </footer>
     </AttentionProvider>
   )

@@ -346,6 +346,21 @@ gradients, no side-stripe cards, no emoji; inline lucide-style stroke SVGs (lock
 separate button ("<name> 状态：<level>，查看详情") opening a detail sheet; skeletons of the same size
 while loading; one failing source greys only its own tile. Times in the browser time zone.
 
+### Codex inference detail
+
+`#/ops/<app>` focuses one registered app within the existing Ops tab and offers a return to `#/ops`.
+The Home Codex service row links directly to `#/ops/codex-gateway`. Its dedicated body replaces the
+generic mode, guard, counter and backup sections; process health and alert controls remain visible.
+The optional `OpsStatus.codex_inference` snapshot comes through Fleet and includes its actual observation
+time. Counts, reported tokens and durations cover the current gateway process only; a restart resets
+them. Concurrency is labelled 采样时进行中. A snapshot over one hour old is explicitly historical,
+matching the existing app-status threshold and allowing the ordinary thirty-minute Home cache interval.
+Missing snapshots and usage remain unknown, and an unused process shows zero requests without warning.
+The bounded recent-request table shows at most eight completions, models, effort, durations, outcomes,
+safe error labels and reported tokens. It contains no prompts, output or account data. On a phone it
+scrolls inside the card. The existing five-minute view cache and refresh flow are unchanged; opening
+the detail starts no inference or independent polling.
+
 ## 8. Decisions taken (owner-approved defaults)
 
 Q1 title 个人控制台 · Q2 tile = entry's own health · Q3 home keeps one line per flow and 4 mini bars ·

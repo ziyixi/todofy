@@ -54,3 +54,12 @@ describe('quota breakdown rows (UX-3)', () => {
     expect(css).toMatch(/\.breakdown-value\s*\{[^}]*flex:\s*none;[^}]*white-space:\s*nowrap/)
   })
 })
+
+describe('Codex request table on a phone', () => {
+  it('keeps the request columns inside their own scroll area and lets metric values wrap', () => {
+    expect(css).toMatch(/\.codex-request-scroll\s*\{[^}]*max-width:\s*100%/)
+    expect(css).toMatch(/\.table-wrap\s*\{[^}]*overflow-x:\s*auto/)
+    expect(css).toMatch(/\.codex-requests\s*\{[^}]*min-width:\s*640px/)
+    expect(css).toMatch(/\.codex-counters \.counter dd\s*\{[^}]*overflow-wrap:\s*anywhere/)
+  })
+})

@@ -1,0 +1,166 @@
+// Content-free process-lifetime telemetry sampled through the existing private host observer.
+// (-- api-linter: core::0142::time-field-names=disabled
+//     aip.dev/not-precedent: Preserve the observation vocabulary shared with the host runtime: started_at, completed_at and observed_at. --)
+// (-- api-linter: core::0140::prepositions=disabled
+//     aip.dev/not-precedent: These fields identify observation instants in the existing host telemetry contract. --)
+syntax = "proto3";
+
+package codex.inference.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "MonitoringProto";
+option java_package = "science.ziyixi.codex.inference.v1";
+option (common.wire.v1.formats) = {
+  name: "ModelId"
+  pattern: "[a-z0-9][a-z0-9._-]{0,63}"
+  max_length: 64
+  description: "A bounded model identifier, never instructions or arbitrary request text."
+};
+option (common.wire.v1.formats) = {
+  name: "Version"
+  pattern: "[0-9][A-Za-z0-9.+_-]{0,31}|unknown"
+  max_length: 32
+  description: "Installed SDK version or an explicit unknown value."
+};
+option (common.wire.v1.formats) = {
+  name: "ErrorCode"
+  pattern: "[a-z][a-z0-9_]{0,63}|"
+  max_length: 64
+  description: "A fixed safe failure code, empty on success. No provider exception text."
+};
+
+// Process-lifetime totals. These reset at started_at; they are not daily or account-wide usage.
+message InferenceStatus {
+  // Start of this gateway process, not the first inference.
+  google.protobuf.Timestamp started_at = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Configured default model. A request may explicitly select another model.
+  string model = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ModelId"
+  ];
+  // Fixed configured effort.
+  string effort = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "medium"
+  ];
+  // Installed SDK version; its bundled CLI uses the same version.
+  string sdk_version = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Version"
+  ];
+  // Valid authenticated inference requests accepted by this process, including active requests.
+  int32 request_count = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Completed responses without a model error code.
+  int32 success_count = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Completed or interrupted requests that failed; HTTP 200 alone is not success.
+  int32 failure_count = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Requests active at observed_at. Host observations are periodic, not a live stream.
+  int32 active_count = 8 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Sum of reported input tokens. Missing usage is excluded, not interpreted as zero consumption.
+  int32 input_tokens = 9 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Sum of reported output tokens.
+  int32 output_tokens = 10 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Completed responses for which token usage was actually reported.
+  int32 usage_reported_count = 11 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Last completed request, absent before the first completion.
+  optional google.protobuf.Timestamp last_completed_at = 12;
+  // Full gateway request duration, including SDK startup and cleanup. Absent before the first completion.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: This is an elapsed millisecond measurement, not a wall-clock timestamp. --)
+  optional double last_duration_ms = 13 [(common.wire.v1.field).minimum = 0];
+  // Mean full request duration for completed requests; absent before the first completion.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: This is an elapsed millisecond measurement, not a wall-clock timestamp. --)
+  optional double average_duration_ms = 14 [(common.wire.v1.field).minimum = 0];
+  // Last completed request's safe error, empty after success or before any completion.
+  string last_error_code = 15 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ErrorCode"
+  ];
+  // At most eight latest completions, newest first. No prompt, response, address or caller-supplied name.
+  repeated InferenceRequestSample recent_requests = 16 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 8
+  ];
+  // Actual gateway snapshot time; forwarding or reading a cached snapshot does not change it.
+  google.protobuf.Timestamp observed_at = 17 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+}
+
+// A small operational sample, unrelated to application message IDs or model output.
+message InferenceRequestSample {
+  // Monotonic process-local sequence assigned when this request starts.
+  int32 sequence = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 1
+  ];
+  // Completion time.
+  google.protobuf.Timestamp completed_at = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // Selected safe model identifier, or unknown when it was not a model identifier.
+  string model = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ModelId"
+  ];
+  // Configured effort.
+  string effort = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "medium"
+  ];
+  // Full request wall duration, measured with a monotonic clock.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: This is an elapsed millisecond measurement, not a wall-clock timestamp. --)
+  double duration_ms = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Empty for success; safe code for model, timeout, cancellation or service failure.
+  string error_code = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ErrorCode"
+  ];
+  // Reported input tokens; meaningful only when usage_available is true.
+  int32 input_tokens = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Reported output tokens; meaningful only when usage_available is true.
+  int32 output_tokens = 8 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Whether this completion supplied actual token usage, including a real zero.
+  bool usage_available = 9 [(google.api.field_behavior) = REQUIRED];
+}

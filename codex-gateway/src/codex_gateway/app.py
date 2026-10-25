@@ -5,7 +5,9 @@ import json
 import os
 import pathlib
 import re
+import time
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -21,6 +23,7 @@ from ziyixi_proto.http_routes import decode_request
 from ziyixi_proto.rpc_status import RpcError, status_body
 from ziyixi_proto.wire_json import WireJsonError, to_wire
 
+from codex_gateway.monitoring import InferenceMonitor, utc_now
 from codex_gateway.runtime import check_runtime, infer
 
 MAX_BODY_BYTES = 768 * 1024
@@ -56,10 +59,17 @@ def _baked_source_sha() -> str | None:
     return sha if isinstance(sha, str) and re.fullmatch(r"[a-f0-9]{40}", sha) else None
 
 
-def create_app(*, runner: Runner = infer, checker: Checker = check_runtime) -> FastAPI:
+def create_app(
+    *,
+    runner: Runner = infer,
+    checker: Checker = check_runtime,
+    clock: Callable[[], datetime] = utc_now,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     bindings = {item.path_template: item for item in HTTP_BINDINGS}
     source_sha = _baked_source_sha()
+    monitor = InferenceMonitor(clock=clock, monotonic=monotonic)
 
     @app.exception_handler(RpcError)
     async def rpc_error(_request: Request, error: RpcError) -> JSONResponse:
@@ -75,6 +85,7 @@ def create_app(*, runner: Runner = infer, checker: Checker = check_runtime) -> F
                 "status": "ok",
                 "source_sha": source_sha,
                 "release_request_id": os.getenv("CODEX_GATEWAY_RELEASE_REQUEST_ID", ""),
+                "inference_status": to_wire(monitor.snapshot()),
             },
             headers=PRIVATE_HEADERS,
         )
@@ -140,7 +151,7 @@ def create_app(*, runner: Runner = infer, checker: Checker = check_runtime) -> F
                 "UNAVAILABLE", "GATEWAY_NOT_CONFIGURED", "Inference is not configured"
             )
         if isinstance(message, RunInferenceRequest):
-            answer = await runner(message, pathlib.Path(home))
+            answer = await monitor.run(message, pathlib.Path(home), runner)
         else:
             answer = await checker(pathlib.Path(home))
         return JSONResponse(to_wire(answer), headers=PRIVATE_HEADERS)

@@ -12,6 +12,23 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+### Codex monitor and Mailsort usage (`codex/inference-monitor`)
+
+The owner requested a Codex inference dashboard and Codex usage totals in Mailsort. Home's dedicated
+`#/ops/codex-gateway` view reuses the existing Gateway → Platform observer → Fleet → Home path. Gateway
+keeps process-lifetime counts, reported tokens, full request latency and eight content-free recent samples;
+the page names the actual observation time and restart boundary. No prompt, response or account identity is kept.
+Mailsort's v12 schema adds a UTC-day usage table, current-month totals and 400-day cleanup in its existing DO.
+Both failed and successful HTTP attempts are counted; reported usage is separate from missing usage. Provider
+switches retain both histories, and pre-upgrade Codex usage is not guessed or reclassified.
+
+Local checks passed Gateway 29, Platform 135 (+143 subtests), Fleet 67 unit/10 workerd, Mailsort 229 unit/115
+workerd/106 UI, and Home 173 UI tests, with affected lint/typechecks/builds. Mailsort's Worker is 147.9/148 KiB
+gzip; Home UI is 168.0 KiB. Full telemetry stays inside existing 4/12/16 KiB host-response limits. The actual
+Home UI was inspected in Chrome with synthetic desktop and 390px iframe views. Shared IDL/schema and CI checks,
+branch gate and production acceptance are in progress. Existing CI already releases Fleet before VPS producers.
+Work stays in the isolated checkout; no real mail or production model operation has been used in this task yet.
+
 ### Codex 6.1 availability (`codex/codex61-runtime`)
 
 Owner requires `gpt-6.1-sol` for Mailsort and Newsletter and explicitly accepts interruption during this upgrade.

@@ -545,7 +545,8 @@ button.link {
   width: 3.5rem;
 }
 
-.two {
+.two,
+.usage-cards {
   display: grid;
   gap: var(--space-3);
 }

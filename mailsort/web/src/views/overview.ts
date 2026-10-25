@@ -1,4 +1,4 @@
-/** Overview shows classification counts, model batches and the actual reported Claude usage. */
+/** Overview shows classification counts, model batches and each provider's recorded usage. */
 import { MailFlow_Outcome, MailFlow_Stage, type MailFlow_Count } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
 import type { Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { ClassificationProvider, Mode, ServiceStatus_AuthState, type LabelReport, type ServiceStatus } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
@@ -108,6 +108,24 @@ function budget(status: ServiceStatus, now: number): HTMLElement {
   )
 }
 
+function codexUsage(status: ServiceStatus): HTMLElement {
+  const usage = status.codexUsage
+  const active = classificationProvider(status.classifier?.provider) === ClassificationProvider.CODEX
+  const title = active ? 'Codex 用量' : 'Codex 历史用量（当前未使用）'
+  if (usage === undefined) return card(title, '', el('p', { class: 'hint' }, 'Codex 用量未提供，请刷新或等待服务更新。'))
+  const missing = usage.requestCount - usage.usageReportedCount
+  return card(
+    title,
+    usage.month || '月份未提供',
+    el('p', { class: 'hint' }, `${usage.model || '模型未提供'} · ${usage.effort || 'effort 未提供'}`),
+    el('p', {}, `本月请求 ${String(usage.requestCount)} 次 · 成功 ${String(usage.successCount)} 次 · 失败 ${String(usage.failureCount)} 次`),
+    el('p', { class: 'hint' }, `已报告输入（含缓存）${String(usage.inputTokens)} token · 输出 ${String(usage.outputTokens)} token`),
+    el('p', { class: 'hint' }, `有用量报告 ${String(usage.usageReportedCount)} 次${missing > 0 ? `；${String(missing)} 次请求未返回用量，未计入 token 总计。` : '。'}`),
+    el('p', { class: 'hint' }, '仅记录本应用的请求与返回用量，升级前历史未补录；不代表 ChatGPT 账户剩余额度，不换算美元费用。'),
+    el('p', { class: 'meta' }, usage.lastRequestTime === undefined ? '尚无已记录的 Codex 请求' : `最近请求 ${when(usage.lastRequestTime)}`),
+  )
+}
+
 export async function renderOverview(ctx: ViewContext): Promise<void> {
   await frame(ctx.main, '概览', async (body) => {
     const [status, flow, labels, week] = await Promise.all([ctx.status(), api.getMailFlow({ name: 'mailFlows/today' }), allLabels(), api.getLabelReport({ name: 'labelReport' })])
@@ -130,7 +148,11 @@ export async function renderOverview(ctx: ViewContext): Promise<void> {
       ),
       el('p', { class: 'hint' }, '大字与流程图为今日累计处理记录；7 天小字及下表按最新判断计数。重判保留历史处理记录。'),
       card('今天的流程', graph.total === 0 ? '' : `共 ${String(graph.total)} 封`, sankeyChart(graph, classificationProvider(status.classifier?.provider)), graph.total === 0 ? el('p', { class: 'hint' }, '今天还没有邮件') : null),
-      el('div', { class: 'two' }, labelTable(week, labels), budget(status, ctx.host.now())),
+      el('div', { class: 'two' }, labelTable(week, labels), el('div', { class: 'usage-cards' },
+        ...(classificationProvider(status.classifier?.provider) === ClassificationProvider.CODEX
+          ? [codexUsage(status), budget(status, ctx.host.now())]
+          : [budget(status, ctx.host.now()), codexUsage(status)]),
+      )),
     )
     // Where the diagram is wider than its box (a phone), it starts at its right end: the labels, 都不是, 拿不准.
     const scroll = body.querySelector('.flow-scroll')

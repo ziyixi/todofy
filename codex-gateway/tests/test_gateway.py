@@ -139,6 +139,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 output_json='{"items": []}',
                 input_tokens=101,
                 output_tokens=23,
+                usage_available=True,
             )
 
         self.app = create_app(runner=runner)
@@ -176,8 +177,9 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self.calls[0], (RunInferenceRequest(**BODY), self.home))
         self.assertEqual(response.headers["cache-control"], "no-store")
+        health = (await self.client.get("/healthz")).json()
         self.assertEqual(
-            (await self.client.get("/healthz")).json(),
+            {key: value for key, value in health.items() if key != "inference_status"},
             {
                 "service": "codex-gateway",
                 "status": "ok",
@@ -299,6 +301,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             (answer.error_code, answer.input_tokens, answer.output_tokens),
             ("", 101, 23),
         )
+        self.assertTrue(answer.usage_available)
         self.assertTrue(sdk.closed)
         self.assertEqual(sdk.thread_args["model"], MODEL)
         self.assertEqual(sdk.thread_args["model_provider"], "openai")
@@ -338,6 +341,19 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         answer = await infer(RunInferenceRequest(**BODY), self.home, sdk=sdk)
         self.assertEqual(answer.error_code, "")
         self.assertEqual(answer.output_json, '{"items": []}')
+
+    async def test_usage_availability_survives_bad_answers_and_distinguishes_missing_usage(
+        self,
+    ):
+        sdk = FakeSdk(FakeTurn(text="invalid JSON"))
+        answer = await infer(RunInferenceRequest(**BODY), self.home, sdk=sdk)
+        self.assertEqual(answer.error_code, "codex_bad_answer")
+        self.assertTrue(answer.usage_available)
+        self.assertEqual((answer.input_tokens, answer.output_tokens), (101, 23))
+        sdk.turn.result.usage = None
+        answer = await infer(RunInferenceRequest(**BODY), self.home, sdk=sdk)
+        self.assertFalse(answer.usage_available)
+        self.assertEqual((answer.input_tokens, answer.output_tokens), (0, 0))
 
     async def test_explicit_model_is_used_without_changing_the_default(self):
         sdk = FakeSdk()

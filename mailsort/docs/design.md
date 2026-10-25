@@ -45,7 +45,7 @@ authorization and cannot read or modify the mailbox.
 | Legacy review content | 14 days after arrival |
 | Non-content decisions and write ledger; sender as salted hash | 180 days |
 | Historical replay metadata | 7 days |
-| Daily aggregate counters and returned Claude usage | 400 days |
+| Daily aggregate counters, Codex request outcomes/reported tokens and returned Claude usage | 400 days |
 | Historical masked examples and embeddings | Owner deletion, maximum 2,000 |
 | Fixed labels and Gmail identities | Until explicit app-data removal |
 | Saved base prompt and personal rules | Until replaced or app-data removal |
@@ -145,6 +145,15 @@ history. Codex uses the existing ChatGPT subscription, subject to its account/mo
 the app does not convert Codex tokens into Claude API fees. A saved login or a healthy process cannot establish
 successful model access. Verify a real synthetic inference separately.
 
+The existing SQLite store also keeps one Codex usage row per UTC day, with HTTP classification attempts, valid responses,
+failures, responses that reported usage and input/output token totals. The owner API sums only the current month's rows;
+daily cleanup removes rows after 400 days. An attempt starts when the HTTP fetch to the VPS is made, so missing local
+configuration is excluded. Each completed attempt is recorded once before Gmail writes. A bad classification still counts
+its reported tokens; network/HTTP failures without usage increment failures without inventing tokens. The gateway's
+`usage_available` distinguishes a reported zero from missing usage; a legacy positive token total also confirms a report.
+Older all-zero responses remain unknown. Historical calls before this accounting release are not reconstructed from mail
+decisions or retry counts. These are this app's observations, without subscription-price conversion or account balance.
+
 Gmail OAuth, `ANTHROPIC_API_KEY`, `CODEX_ENDPOINT_TOKEN`, `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET`
 are owner-written Worker secrets. `app.toml`, generated secret inventories and the deploy wrapper keep them out
 of GitHub release secrets and preserve them during deploy. `CODEX_ENDPOINT_URL` is a generated, non-secret deployment
@@ -168,7 +177,9 @@ initializer and consolidation state keep their original identity and resume beha
 
 概览 shows Gmail freshness separately from the hourly model schedule, the current model/effort, recorded monthly
 Claude cost/tokens, actual Claude cache reads/writes and the selected provider/config error. While Codex is selected,
-Claude figures are labelled history. `ServiceStatus.classifier` reports the selected provider, fixed model/effort,
+Claude figures are labelled history. A separate Codex card shows the UTC month's attempts, successes/failures, reported
+input/output tokens, missing-usage count and most recent request. It stays visible as history when Claude is selected;
+an older server response with no Codex record says usage is unavailable. `ServiceStatus.classifier` reports the selected provider, fixed model/effort,
 local configuration, next batch time, safe error and last successful response; configuration presence does not check
 network reachability or authentication. 分级 shows the four queues and explicit unread-batch progress. 设置 shows
 the persistent two-choice selector and editable personal rules with a collapsed base-prompt field, alongside mode/write
