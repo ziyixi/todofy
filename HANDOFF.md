@@ -12,10 +12,15 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-Active follow-up `codex/mailsort-prompt-examples` adds the owner's requested few-shot input/JSON-response examples
-to the existing base prompt. Use synthetic messages only, cover all four queues and retain editable personal-rule
-precedence. Keep the stable prefix/cache layout and all runtime limits unchanged. Next: prompt/size checks,
-live editor save/reload, branch CI and same-SHA release of the matching bundled default. No real mail rerun.
+Few-shot examples are released at `c121b02da666592b12c1c575ad48328c004b523b`, after
+[branch CI 40153945767](https://github.com/ziyixi/todofy/actions/runs/40153945767) and the
+[same-SHA main release 40154139320](https://github.com/ziyixi/todofy/actions/runs/40154139320).
+Deployment `7307508589` verifies Worker `51499494-76d0-45f6-b88d-f8efb1f23971`, with the same DO namespace.
+Three input/JSON-response pairs cover seven synthetic messages and all four priorities, within 8,897 UTF-8 bytes
+including personal rules. Current/removed personal preferences take precedence over the sample defaults.
+The new base was saved in the live editor at 02:19 UTC before that code release, then survived reload and the
+subsequent Worker deployment with the original save time and personal rules intact. No runtime code, model key,
+budget or Gmail batch changed. See [few-shot verification](docs/mailsort-claude-verification.md#few-shot-examples).
 
 Editable Mailsort prompts and cache accounting are released at `70a60d4959289ade5691f5b9a12bf0818d756009`,
 after [branch CI 40152547981](https://github.com/ziyixi/todofy/actions/runs/40152547981) and the
@@ -94,7 +99,7 @@ Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's sha
 
 ## Latest verified release
 
-Mailsort and Home now run `70a60d49`. Both are verified app releases. The classifier uses
+Mailsort now runs `c121b02d`; Home remains on `70a60d49`. Both are verified app releases. The classifier uses
 Opus 5.5 medium and an independent $20 monthly workspace limit; live mode is confirmed. The earlier Clef release
 and cancelled original-100 batch are historical records in [priority verification](docs/mailsort-priority-verification.md).
 No five-member recheck remains pending. Provider identities and completed manual progress are in

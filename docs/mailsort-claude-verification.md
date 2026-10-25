@@ -214,3 +214,31 @@ The live overview stayed in the existing configuration: Opus 5.5 medium, $20 cap
 tokens (including 3,982 thinking) and $1.090184 nominal usage. It displays actual cache reads 0 / writes 0; no real
 cache hit is claimed. No model request, mail reclassification or new key was added for verification. Synthetic
 cache responses prove accounting and request shape, not a production hit or mailbox accuracy.
+
+## Few-shot examples
+
+The owner then requested example inputs with standard responses in the base prompt. Three groups now cover
+seven synthetic messages: Daily Briefing P1, ordinary USPS preview P2 versus same-day pickup P1, a shopping receipt
+P2 versus same-brand promotion P4, and a personal weekly report P3 versus an ordinary CI failure notice P4.
+Each group has a matching `emails` input and `items` JSON response. Examples are references under the default
+personal preferences; current or removed preferences follow the current rules/general guide. No sender code
+branch, model call or new prompt-management mechanism was introduced.
+
+The combined base/rules are 8,897 UTF-8 bytes, below 12 KiB. Independent checks parsed all six JSON blocks and
+validated input/output fields, one-to-one IDs, dates and all four result values. Existing client tests (58) and
+the five real-storage prompt/cache tests passed locally. Full Mailsort and contract checks passed in
+[branch CI 40153945767](https://github.com/ziyixi/todofy/actions/runs/40153945767).
+
+The base was saved through the existing production editor at 2026-10-25 02:19 UTC, while application code still ran
+`70a60d49`. The UI reported success and reloaded with three input/response groups, unchanged personal rules and
+the new saved timestamp. This changed the effective prompt without requiring code deployment. The proof image
+contains only the status/button area, not the prompt text.
+
+The matching bundled default `c121b02da666592b12c1c575ad48328c004b523b` subsequently passed the
+[same-SHA main release 40154139320](https://github.com/ziyixi/todofy/actions/runs/40154139320).
+Only Mailsort deployed. Deployment `7307508589` and direct Cloudflare readback verify Worker
+`51499494-76d0-45f6-b88d-f8efb1f23971`, the exact SHA, unchanged namespace and preserved Claude key presence.
+After this release, the live editor still showed the original 02:19 save time, all examples and personal rules,
+8,897 bytes, a collapsed base section and no unsaved edit. Thus deployment preserved the saved prompt override.
+No production classification or cache hit was manufactured to test these examples; live accuracy remains a
+separate observation from these format/storage/release checks.
