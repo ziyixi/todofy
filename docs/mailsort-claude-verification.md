@@ -185,9 +185,32 @@ settings editor needs no new key, database, scheduler or prompt-version system.
 Local verification passed 215 Worker unit tests, 98 real workerd/SQLite cases (including CPU), 94 UI tests,
 26 config/deployment tests, the existing synthetic Wrangler smoke, Worker/UI types/lint/build and ten Home label
 tests. Website checks passed the changed privacy page/test lint/format, route types/TypeScript and 298 unit tests.
-Proto lint, API lint, breaking and schema checks passed. UI JavaScript is 60.3 KiB gzip. Tests cover persisted exact
+Proto lint, API lint, breaking and schema checks passed. The dry Worker bundle is 139.4 KiB gzip against the
+unchanged 148 KiB budget; UI JavaScript is 60.3 KiB gzip. Tests cover persisted exact
 text, etag/request replay, an empty rules field, next-call prompt use, hourly uncached and backlog/tail cached
 requests, actual cache pricing, billed invalid responses and legacy usage migration without double counting.
 
-No real model request was added for this verification. A synthetic cache response proves accounting and request
-shape, not a production cache hit or mailbox accuracy. Branch/main release and live editor proof are pending.
+Implementation `70a60d4959289ade5691f5b9a12bf0818d756009` passed the full
+[branch CI 40152547981](https://github.com/ziyixi/todofy/actions/runs/40152547981) and
+[same-SHA main release 40153166848](https://github.com/ziyixi/todofy/actions/runs/40153166848).
+Only Mailsort and Home Worker releases were selected, alongside the website dispatch. The separate
+[privacy-page release 40153219914](https://github.com/ziyixi/todofy/actions/runs/40153219914) succeeded;
+the public page actually displays editable instructions, fixed-prefix caching and prompt retention.
+
+| App | Verified GitHub Deployment | Cloudflare version |
+| --- | --- | --- |
+| Mailsort | `7307375160` | `b22c80f4-4bde-445f-b767-b7e5e47dcc77` |
+| Home | `7307385472` | `f68f77b1-8b78-4c1d-be7b-3651fcb2fb7a` |
+
+Direct provider readback matched both builds to the implementation SHA, preserved the existing Mailsort namespace,
+Claude/Gmail secret presence and absent legacy AI binding. No credentials were read back or changed.
+
+At 2026-10-25 02:09 UTC the live settings page saved the requested rules with its ordinary Save button. It showed
+success without a system confirmation. After reload, all three rules remained, the saved timestamp remained,
+the base section was collapsed and Save was disabled until another edit. The combined text size stayed 5,002 UTF-8
+bytes. The private proof image contains only the saved-status/button area, not the prompt.
+
+The live overview stayed in the existing configuration: Opus 5.5 medium, $20 cap, 209,921 input tokens, 12,525 output
+tokens (including 3,982 thinking) and $1.090184 nominal usage. It displays actual cache reads 0 / writes 0; no real
+cache hit is claimed. No model request, mail reclassification or new key was added for verification. Synthetic
+cache responses prove accounting and request shape, not a production hit or mailbox accuracy.

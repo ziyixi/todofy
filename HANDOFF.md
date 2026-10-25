@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-24 UTC. Active work, open acceptance and dated compatibility only; move completed rollout detail to
+Updated 2026-10-25 UTC. Active work, open acceptance and dated compatibility only; move completed rollout detail to
 a dated record and link it here. Rules are in [AGENTS](AGENTS.md); entry points in [README](README.md). Never put
 private content, credentials or raw production output here.
 
@@ -12,19 +12,21 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-Active branch `codex/mailsort-editable-prompt` starts from `642af008`. The owner requested editable personal
-rules for USPS Informed Delivery, Daily Briefing and shopping receipts, plus cost-aware prompt caching.
-Work stays in `/private/tmp/todofy-tasks-design`; Claude's shared checkout is untouched. Reuse the existing
-DO metadata and generated owner API, with one base/rules snapshot per model call and explicit five-minute
-cache breakpoints only for consecutive batches. Keep Opus 5.5 medium, the $20/month cap and all Gmail gates.
-The settings editor, actual cache-token accounting and matching privacy documentation are implemented.
-Local checks passed: 215 Worker unit tests, 98 workerd/CPU cases, 94 UI tests, the synthetic Wrangler smoke,
-26 deploy/config tests, proto checks and the affected Home/website checks. Dry bundle is 139.4 KiB gzip
-against the existing 148 KiB budget; UI is 60.3 KiB. Evidence is in
+Editable Mailsort prompts and cache accounting are released at `70a60d4959289ade5691f5b9a12bf0818d756009`,
+after [branch CI 40152547981](https://github.com/ziyixi/todofy/actions/runs/40152547981) and the
+[same-SHA main release 40153166848](https://github.com/ziyixi/todofy/actions/runs/40153166848).
+Mailsort Deployment `7307375160` verifies Worker `b22c80f4-4bde-445f-b767-b7e5e47dcc77`; Home Deployment
+`7307385472` verifies `f68f77b1-8b78-4c1d-be7b-3651fcb2fb7a`. Both provider builds match that SHA.
+The owner-requested USPS, Daily Briefing and shopping-receipt rules were saved through the live settings UI
+and survived reload. Future deployments retain the saved base/rules override. Opus 5.5 medium, live mode,
+the $20 cap, Gmail credentials and DO namespace are unchanged. Existing usage remains 209,921 input and
+12,525 output tokens at $1.090184; actual cache reads/writes are both zero, so no real cache hit is claimed.
+The [privacy release 40153219914](https://github.com/ziyixi/todofy/actions/runs/40153219914) succeeded and its
+public text was checked. Local checks passed 215 Worker unit, 98 workerd/CPU and 94 UI tests, synthetic
+Wrangler smoke, proto and affected Home/website checks; dry Worker/UI bundles are 139.4/60.3 KiB gzip.
+No old mail batch, model call or new key was created for acceptance. Work stayed in the isolated checkout;
+Claude's shared checkout was untouched. See
 [Claude verification](docs/mailsort-claude-verification.md#editable-prompt-and-cache-accounting).
-Next: full branch CI, same-SHA main release, then owner UI save/reload and provider
-identity readback. Do not restart earlier mail batches or create a new key for this verification. A real
-provider cache hit is not yet verified; synthetic responses cannot establish one.
 
 Recheck counting and badge freshness are fixed at `ed236228229450ac1c8b06de70a9f090d82c6da2`, after
 [branch CI 40148723336](https://github.com/ziyixi/todofy/actions/runs/40148723336) and
@@ -87,7 +89,7 @@ Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's sha
 
 ## Latest verified release
 
-Mailsort now runs `ed236228`; Home remains on `ff4b3532`. Both are verified app releases. The classifier uses
+Mailsort and Home now run `70a60d49`. Both are verified app releases. The classifier uses
 Opus 5.5 medium and an independent $20 monthly workspace limit; live mode is confirmed. The earlier Clef release
 and cancelled original-100 batch are historical records in [priority verification](docs/mailsort-priority-verification.md).
 No five-member recheck remains pending. Provider identities and completed manual progress are in
