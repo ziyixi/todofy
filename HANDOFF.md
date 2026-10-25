@@ -12,12 +12,15 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-Unread progress follow-up (`codex/mailsort-unread-progress`): the owner started the current unread batch and
-reported no visible progress. It registered 113 messages before the UTC day changed. After reset, limited live
-metadata confirmed completion: 12 applied / 101 skipped / 0 pending / 0 failures, $0.13058 nominal Claude usage and live mode.
-No batch was restarted.
-The fixes in progress are card-local visible-only progress updates, an exact daily-write resume timestamp, and
-checking already-labelled eligibility before a reached write cap. Existing budgets and request/batch identities stay.
+Unread progress fix is live at `c18f73f1985bd46eef96594914b3a3154d64f2eb`, after
+[branch CI 40146082647](https://github.com/ziyixi/todofy/actions/runs/40146082647) and
+[main release 40146726819](https://github.com/ziyixi/todofy/actions/runs/40146726819). Mailsort Deployment
+`7306499723` verifies Worker `f5b272b5-3919-454e-a4c7-57f651b646c1` and the same DO namespace. The manual card now
+updates while active/visible and shows the actual daily-cap resume time; already-labelled eligibility precedes
+Gmail write-cap holds. The owner's existing 113-message batch completed 12 applications, 101 skips and zero failures with
+$0.13058 app-recorded nominal Claude usage. The deployed status retained the original batch start time, live mode,
+Opus 5.5 medium and the $20 monthly limit. No batch was restarted or existing limits raised.
+See [Claude verification](docs/mailsort-claude-verification.md#manual-unread-progress-follow-up).
 
 The cancelled Codex/VPS Mailsort runner was removed before release and must not be resumed. The six-condition
 Claude comparison used [the original benchmark prompt](https://github.com/ziyixi/todofy/blob/511ec5063ecc1cd3602020aa2544f6cf975090f1/mailsort/prompts/priority-classification.txt)
@@ -60,10 +63,11 @@ Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's sha
 
 ## Latest verified release
 
-Mailsort and Home run `ff4b3532` after the successful main release linked above. The classifier uses Opus 5.5
-medium and an independent $20 monthly workspace limit; live mode is confirmed. The earlier Clef release and
-cancelled original-100 batch are historical records in [priority verification](docs/mailsort-priority-verification.md).
-No five-member recheck remains pending. See [Claude rollout](docs/mailsort-claude-verification.md) for provider identities.
+Mailsort now runs `c18f73f1`; Home remains on `ff4b3532`. Both are verified app releases. The classifier uses
+Opus 5.5 medium and an independent $20 monthly workspace limit; live mode is confirmed. The earlier Clef release
+and cancelled original-100 batch are historical records in [priority verification](docs/mailsort-priority-verification.md).
+No five-member recheck remains pending. Provider identities and completed manual progress are in
+[Claude rollout](docs/mailsort-claude-verification.md).
 
 Watch page evidence (`f7942fb6`) passed the complete
 [branch gate](https://github.com/ziyixi/todofy/actions/runs/39950244799) and

@@ -110,3 +110,18 @@ Two regressions were reproduced locally: the card retained its initial POST snap
 a full daily write cap prevented even already-labelled messages from reaching their skip check. The fix updates
 active visible progress every 30 seconds, consumes the fresh status immediately after Start, checks eligibility before
 write-cap waits, and returns an exact daily write-resume timestamp. Existing limits and the real batch are preserved.
+
+
+The follow-up fix `c18f73f1985bd46eef96594914b3a3154d64f2eb` passed
+[branch CI 40146082647](https://github.com/ziyixi/todofy/actions/runs/40146082647) and the exact same SHA passed
+[main release 40146726819](https://github.com/ziyixi/todofy/actions/runs/40146726819). Only Mailsort deployed;
+all other app/VPS deployment jobs were skipped. Deployment `7306499723` verifies Worker
+`f5b272b5-3919-454e-a4c7-57f651b646c1` and the unchanged DO namespace. The owner UI and metadata API showed the
+new build with the same completed 113-message batch/start time, 12 actual applications, 101 skips and zero failures.
+Mode remained live, the model remained Opus 5.5 medium, the monthly limit remained $20 and no model error was present.
+No duplicate or new batch was started to test the UI; synthetic UI tests cover the active visible refresh loop.
+
+Local verification included 199 Worker unit tests, 92 real workerd cases (including CPU), 23 focused unread UI
+cases, the existing full synthetic Wrangler smoke, type/lint/build and proto checks. The full UI suite's original
+five new regressions failed before the fix; the final branch gate also covered the additional past-timestamp case.
+Private screenshot evidence shows the deployed completed card and clarified skip/immediate-queue descriptions.
