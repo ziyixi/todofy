@@ -12,38 +12,36 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-### Mailsort provider switch and independent Codex gateway (`codex/mailsort-provider-select`)
+### Mailsort provider switch and independent Codex gateway
 
-Owner authorized implementation, source/main CI publication, independent VPS inference, precise Tunnel/Access
-routing, scoped machine credentials, existing subscription auth, synthetic tests, and activation for unclassified
-unread mail. Old labelled mail is not rechecked. An eight-hour scoped operator was installed by the owner; remove
-it after acceptance. Existing VPS Codex login status reports ChatGPT authentication. The first real synthetic
-inference returned `codex_unavailable`; Mailsort remains on Claude pending diagnosis and a successful real turn.
+Released `3e4c6b2f357b13b052c00790ac8fd0d0d3b96456` after
+[branch CI 40195966957](https://github.com/ziyixi/todofy/actions/runs/40195966957) and
+[same-source main 40196225288, attempt 2](https://github.com/ziyixi/todofy/actions/runs/40196225288/attempts/2).
+Mailsort now persistently selects **VPS Codex, `gpt-6-sol` / medium**, in live mode. The real Chrome UI and
+settings readback preserve all other settings, including daily/run write caps 150/10 and both saved prompt fields.
+A real production-client call through Access/Tunnel returned all four synthetic IDs with valid priorities in
+5.3 s (reported 6,598 input / 202 output tokens); an incorrect bearer received 401. No old-mail recheck was run.
 
-Settings/status/UI, the typed stateless gateway and concrete third-workload deployment integration are implemented.
-Mailsort remains the scheduler and Gmail writer; both providers share its saved prompt and fixed P1-P4 validation.
-Claude cost/cache history remains separate. Gateway-only releases preserve Newsletter state; reconciliation retains
-accepted identities for the original pair. Local checks passed: Mailsort 226 unit/113 workerd, UI 104,
-deployment guard 26 and Wrangler smoke; gateway 18 synthetic tests; platform/CI/infra/Home/Fleet integration
-checks are green. The Worker bundle is 145.9 KiB gzip within its existing 148 KiB budget. The bounded
-verified-release lookup retains prior success when GitHub appends inactive, fixing pre-existing reconciliation
-false failures. Real inference and activation remain pending.
-Initial source `07b331ac` passed full branch CI `40188413825`, main publication `40189217953` (a transient
-recording 404 passed on the existing job rerun), Infra apply `40189320360` and paired/gateway VPS release
-`40190513593`. The three workloads are ready and owner-only secrets are configured; inference is not yet accepted.
-Gateway-only follow-up `df8c1afc` passed branch CI `40192102516` and main `40192473630`; it distinguishes fixed
-pre-model failures without logging or state. Production confirms configuration/startup/account/skills pass, but
-the model stage still fails in two seconds with zero reported tokens. A real authless local SDK startup and
-same-argument thread creation passed. A read-only `CheckInference` RPC now reads a bounded model catalog through
-the existing machine authentication, excluding account identity and credentials; it never starts a model turn.
-Preflight `856164de` passed full branch CI `40194175478` and main `40195176037`. The production readback at
-12:57 UTC authenticated successfully and returned a complete catalog: it excludes the initially configured
-`gpt-6.1-sol` and includes `gpt-6-sol` with medium support. Correct the gateway and Mailsort expectation to
-that actual supported model, then verify real inference before activation. No automatic model fallback is added.
-`VPS_DEPLOY_ENABLED` is restored to true. `PERSONAL_CLOUD_AUTO_REPAIR` remains temporarily false; restore its
-saved original value after final acceptance, and remove the scoped operator and private preparation files.
-Work stays in the isolated checkout, with the shared checkout untouched.
+The initial desktop `gpt-6.1-sol` assumption failed in the VPS model stage. The new read-only, root-proto
+`CheckInference` RPC confirmed an authenticated complete catalog without that identifier, and `gpt-6-sol`
+with medium support. The corrected fixed model then completed real inference; no automatic model fallback was added.
+Mailsort remains the only scheduler/Gmail writer. The independent gateway uses the pinned official SDK and
+existing login PVC, without a job database or mail logs. Claude credentials, its $20 cap and usage history remain.
+Gateway-only releases retain the accepted Newsletter/platform versions; their Pods/images remained unchanged
+across the final gateway update. All four Deployments are ready and all five existing PVCs are Bound.
 
+Home's Codex row visibly says normal; fresh tool readback marks Fleet/Mailsort/Codex ok. Final
+[reconciliation 40197045485](https://github.com/ziyixi/todofy/actions/runs/40197045485) is green: VPS and Workers
+clean, Infra in sync with zero resource actions, and account registration complete. Both original GitHub switches
+are restored to true. The eight-hour sudo helper/sudoers entry and its installer were removed; private temporary
+copies were deleted. The inference-only owner credential remains in the existing private local config directory.
+No natural Codex Gmail batch was observed at acceptance (pending=0; next batch 14:14 UTC); that is separate
+from the successful real synthetic inference and does not require another automation.
+
+Checks and detailed release/cleanup evidence are in [Codex verification](docs/mailsort-codex-verification.md).
+The shared checkout was not modified. Local/runtime/UI/CPU/smoke and full shared-proto CI passed; final Worker
+bundle remains 146.1 KiB gzip inside its existing 148 KiB budget. The verified-release lookup also retains a prior
+success when GitHub appends inactive, resolving the pre-existing false reconciliation failures.
 
 ### Tasks GTD execution review
 
