@@ -86,7 +86,8 @@ two read-only purposes (both URLs are constants, not configuration):
   not made with an API token), the zone's Worker routes, and each Worker's schedules, settings and
   subdomain flags, at most 12 calls per tick on about four ticks a day. Only binding names and types are
   kept from the settings, and only the way in, resource and action from the audit log; values, addresses
-  and ids are dropped while parsing.
+  and ids are dropped while parsing. Audit writes appear under 最近账户操作 as history and do not count
+  as configuration differences. Read-only query resources are excluded even if the audit action says `create`.
 
 It is never logged, stored, echoed to the page or sent anywhere else, and unit tests check that it
 appears only in the authorization header of those requests.
@@ -119,7 +120,7 @@ analytics:
 
 If the token lacks a Workers permission, 配置漂移 shows 检查失败 and the digest reports
 `drift_unavailable` after two failed days; usage is unaffected. Without Account Settings Read only the
-changes outside CI go unchecked, and the panel says so. If the token fails (revoked, expired,
+account-operation history is unavailable, and its section says so. If the token fails (revoked, expired,
 wrong permission), the page and the digest show `usage_unavailable` after 2 h; the guard then never enters `shed` on its own (no fresh usage means no
 automatic shed) and an automatic shed already in place lapses at its `until`. Rotation is the same
 procedure with a new token.

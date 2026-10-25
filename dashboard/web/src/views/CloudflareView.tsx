@@ -35,15 +35,15 @@ import { DRIFT_CATEGORY, DRIFT_STATUS, QUOTA, USAGE_STATUS, driftErrorLabel, dri
 import { flowOf, guardedEntries, nameOf, resourceOf, unclassifiedLabel, unregisteredLabel, workerOf, type Reg } from '../lib/registry'
 import { routeHash } from '../router'
 
-/** What the drift check compares, in the IDL's order (read from the descriptors, never copied). */
-const DRIFT_CATEGORIES = wireEnum(DriftCategorySchema, DriftCategory).names
+/** Configuration categories in the IDL's order; account history is displayed separately. */
+const DRIFT_CATEGORIES = wireEnum(DriftCategorySchema, DriftCategory).names.filter((category) => category !== 'account_changes')
 
 function errorText(error: unknown): string {
   if (error instanceof ApiError) return error.requestId ? `${error.message}（请求 ${error.requestId}）` : error.message
   return '刷新失败，请稍后重试'
 }
 
-/** "刷新用量": GraphQL again, at most once a minute (the Worker enforces it too). */
+/** Refresh usage and advance the bounded drift check, at most once a minute. */
 function RefreshUsage({ data, now }: { data: CloudflareViewData; now: Date }) {
   const refresh = useRefreshCloudflare()
   const [message, setMessage] = useState<string | null>(null)
@@ -61,7 +61,13 @@ function RefreshUsage({ data, now }: { data: CloudflareViewData; now: Date }) {
   function run() {
     setMessage(null)
     refresh.mutate(undefined, {
-      onSuccess: (fresh) => setMessage(fresh.refresh.refreshed ? '用量已刷新。' : refreshDeclinedText(fresh.refresh.next_refresh_at, new Date())),
+      onSuccess: (fresh) => {
+        if (!fresh.refresh.refreshed) {
+          setMessage(refreshDeclinedText(fresh.refresh.next_refresh_at, new Date()))
+          return
+        }
+        setMessage(fresh.drift.in_progress ? '用量已刷新，配置核验进行中。' : '用量已刷新，配置核验状态见下方。')
+      },
       onError: (error) => setMessage(`刷新失败：${errorText(error)}`),
     })
   }
@@ -70,11 +76,12 @@ function RefreshUsage({ data, now }: { data: CloudflareViewData; now: Date }) {
     <div className="cf-refresh">
       <Button onClick={run} disabled={refresh.isPending || waiting} aria-describedby="cf-refresh-note" className="btn-outline-accent">
         <RefreshCw size={15} aria-hidden="true" className={refresh.isPending ? 'spin' : undefined} />
-        {refresh.isPending ? '正在刷新…' : '刷新用量'}
+        {refresh.isPending ? '正在刷新…' : '刷新用量与配置'}
       </Button>
       <span id="cf-refresh-note" className="small muted">
         {waiting ? refreshWaitText(data.refresh.next_refresh_at, new Date(Math.max(clock, now.getTime()))) : '至少间隔 60 秒'}
       </span>
+      <p className="small muted">刷新也会推进配置核验，完整检查可能需要多次刷新。</p>
       <p className="small refresh-message" role="status" aria-live="polite">
         {message}
       </p>
@@ -383,23 +390,28 @@ function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareVie
  * configs, once a day. Names, types and flags only; the Worker never sends a value.
  */
 function DriftPanel({ drift, now }: { drift: Drift; now: Date }) {
-  const status = DRIFT_STATUS[drift.status]
-  // A count an older Worker does not send (account_changes) reads as 0.
   const count = (category: (typeof DRIFT_CATEGORIES)[number]): number => drift.counts[category] ?? 0
   const total = DRIFT_CATEGORIES.reduce((sum, category) => sum + count(category), 0)
+  // Older completed snapshots used `drift` for account history alone.
+  const state = drift.status === 'ok' || drift.status === 'drift' ? (total > 0 ? 'drift' : 'ok') : drift.status
+  const status = DRIFT_STATUS[state]
+  const findings = drift.findings.filter((finding) => finding.category !== 'account_changes')
+  const accountChanges = drift.findings.filter((finding) => finding.category === 'account_changes')
+  const configOmitted = total - findings.length
+  const accountOmitted = (drift.counts.account_changes ?? 0) - accountChanges.length
   return (
     <section className="cf-section" aria-labelledby="drift-title">
       <h2 id="drift-title">配置漂移</h2>
       <div className="panel drift">
         <p className="drift-status">
-          <LevelMark level={status.level} word={drift.status === 'drift' ? `${status.label}：${total} 处` : status.label} />
+          <LevelMark level={status.level} word={state === 'drift' ? `${status.label}：${total} 处` : status.label} />
           {drift.checked_at ? (
             <span className="small muted">
               {' '}
               · 上次完成检查 <Time iso={drift.checked_at} now={now} />
             </span>
           ) : null}
-          {drift.in_progress ? <span className="small muted"> · 今天的检查进行中</span> : null}
+          {drift.in_progress ? <span className="small muted"> · 配置核验进行中{drift.checked_at ? '，下方为上次完成的结果' : ''}</span> : null}
         </p>
         {drift.status === 'not_configured' ? (
           <Notice tone="warn">未配置 Cloudflare API 令牌（CF_ANALYTICS_TOKEN），无法检查配置漂移。</Notice>
@@ -421,9 +433,6 @@ function DriftPanel({ drift, now }: { drift: Drift; now: Date }) {
           <Notice tone="info">有 {drift.zones_unchecked} 个区域的路由无法读取（该区域没有任何自定义域名可确定它）。</Notice>
         ) : null}
         {drift.truncated ? <Notice tone="info">线上列表超过检查上限，结果只覆盖了一部分。</Notice> : null}
-        {drift.audit_unchecked ? (
-          <Notice tone="warn">令牌读不了账号审计日志（需要 Account Settings Read），这次没有检查不经 CI 的改动。</Notice>
-        ) : null}
         {drift.checked_at ? (
           <ul className="drift-counts" aria-label="各类差异">
             {DRIFT_CATEGORIES.map((category) => (
@@ -433,26 +442,59 @@ function DriftPanel({ drift, now }: { drift: Drift; now: Date }) {
             ))}
           </ul>
         ) : null}
-        {drift.findings.length > 0 ? (
-          <ul className="drift-findings">
-            {drift.findings.map((finding) => (
-              <li key={`${finding.category}:${finding.script}:${finding.name}:${finding.kind}`}>
-                <span className="drift-category">{DRIFT_CATEGORY[finding.category]}</span>
-                {finding.category === 'scripts' || finding.category === 'account_changes' ? null : <code>{finding.script}</code>}
-                <code>{finding.name}</code>
-                <span className="small">{driftFindingText(finding)}</span>
-              </li>
-            ))}
-          </ul>
+        {findings.length > 0 ? (
+          <div className="table-wrap">
+            <table className="res-table drift-findings" aria-label="配置差异">
+              <thead>
+                <tr><th scope="col">类别</th><th scope="col">Worker</th><th scope="col">名称</th><th scope="col">差异</th></tr>
+              </thead>
+              <tbody>
+                {findings.map((finding) => (
+                  <tr key={`${finding.category}:${finding.script}:${finding.name}:${finding.kind}`}>
+                    <td>{DRIFT_CATEGORY[finding.category]}</td>
+                    <td>{finding.category === 'scripts' ? '—' : <code>{finding.script}</code>}</td>
+                    <th scope="row"><code>{finding.name}</code></th>
+                    <td>{driftFindingText(finding)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : null}
-        {drift.findings_omitted > 0 ? <p className="small muted">另有 {drift.findings_omitted} 处未列出。</p> : null}
+        {configOmitted > 0 ? <p className="small muted">另有 {configOmitted} 处配置差异未列出。</p> : null}
       </div>
+      <section className="panel drift" aria-labelledby="account-changes-title">
+        <h3 id="account-changes-title">最近账户操作</h3>
+        <p className="small muted">已完成检查读取的历史账户操作，不表示当前配置差异。</p>
+        {drift.checked_at ? <p className="small muted">读取于 <Time iso={drift.checked_at} now={now} /></p> : null}
+        {drift.audit_unchecked ? (
+          <Notice tone="warn">令牌读不了账号审计日志（需要 Account Settings Read），这次没有读取账户操作历史。</Notice>
+        ) : null}
+        {accountChanges.length > 0 ? (
+          <div className="table-wrap">
+            <table className="res-table drift-findings" aria-label="账户操作历史">
+              <thead><tr><th scope="col">资源</th><th scope="col">操作</th></tr></thead>
+              <tbody>
+                {accountChanges.map((finding) => (
+                  <tr key={`${finding.script}:${finding.name}`}>
+                    <th scope="row"><code>{finding.name}</code></th>
+                    <td>{driftFindingText(finding)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {accountChanges.length === 0 && !drift.audit_unchecked ? (
+          <p className="small muted">{drift.checked_at ? '此历史窗口内没有账户操作记录。' : '完成检查后显示账户操作历史。'}</p>
+        ) : null}
+        {accountOmitted > 0 ? <p className="small muted">另有 {accountOmitted} 组账户操作未列出。</p> : null}
+      </section>
       <p className="small muted">
         每天 {String(DRIFT_UTC_HOUR).padStart(2, '0')}:00 UTC 起检查一次 {drift.desired_workers} 个 Worker：Worker
         列表、自定义域名、区域路由、定时触发、绑定与密钥名称、workers.dev 与预览开关，以及个人值是否都是密钥。期望状态由各应用提交的
-        wrangler.toml 与部署脚本生成；只比较名称、类型与开关，不读取、不显示任何值。另读账号审计日志：上次检查以来不是用 API
-        令牌做的改动（控制台、wrangler 登录等；CI 只用 API 令牌）各列一次，不含查看分析和日志；谁、从哪个地址做的请到 Cloudflare
-        的审计日志里看。
+        wrangler.toml 与部署脚本生成；只比较名称、类型与开关，不读取、不显示任何值。账户操作历史来自审计日志，包含通过控制台、wrangler
+        登录等方式进行的写操作，按来源和资源汇总，不含查询操作。具体操作者和地址请到 Cloudflare 的审计日志里查看。
       </p>
     </section>
   )

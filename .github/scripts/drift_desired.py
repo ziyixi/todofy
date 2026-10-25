@@ -258,8 +258,11 @@ def wrapper_bindings() -> tuple[dict[str, list[dict]], dict[str, list[str]]]:
                 if item["kind"] in PERSONAL_KINDS:
                     personal.setdefault(worker, []).append(item["name"])
         for mode, names in secrets.items():
+            worker = secret_targets[mode]
             for name in names:
-                bindings.setdefault(secret_targets[mode], []).append(_binding(name, "secret_text", "deploy"))
+                bindings.setdefault(worker, []).append(
+                    _binding(name, "secret_text", "deploy", name in SECRET_SPECS[worker]["optional"])
+                )
     return bindings, personal
 
 

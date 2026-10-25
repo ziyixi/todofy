@@ -32,7 +32,8 @@
         {
           "name": "ACCESS_OWNER_ALIASES",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "deploy",
+          "optional": true
         },
         {
           "name": "AI",
@@ -127,7 +128,8 @@
         {
           "name": "ACCESS_OWNER_ALIASES",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "deploy",
+          "optional": true
         },
         {
           "name": "ASSETS",
@@ -202,7 +204,8 @@
         {
           "name": "ACCESS_OWNER_ALIASES",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "deploy",
+          "optional": true
         },
         {
           "name": "ACCOUNT_ID",
@@ -345,7 +348,8 @@
         {
           "name": "ACCESS_OWNER_ALIASES",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "deploy",
+          "optional": true
         },
         {
           "name": "ASSETS",
@@ -415,7 +419,8 @@
         {
           "name": "ACCESS_OWNER_ALIASES",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "deploy",
+          "optional": true
         },
         {
           "name": "ASSETS",
@@ -543,7 +548,8 @@
         {
           "name": "ACCESS_OWNER_ALIASES",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "deploy",
+          "optional": true
         },
         {
           "name": "ANTHROPIC_API_KEY",
@@ -653,7 +659,8 @@
         {
           "name": "ACCESS_OWNER_ALIASES",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "deploy",
+          "optional": true
         },
         {
           "name": "BUILD_SHA",
@@ -731,7 +738,8 @@
         {
           "name": "ACCESS_OWNER_ALIASES",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "deploy",
+          "optional": true
         },
         {
           "name": "ASSETS",
@@ -818,7 +826,8 @@
         {
           "name": "ACCESS_OWNER_ALIASES",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "deploy",
+          "optional": true
         },
         {
           "name": "ASSETS",
@@ -900,7 +909,8 @@
         {
           "name": "ACCESS_OWNER_ALIASES",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "deploy",
+          "optional": true
         },
         {
           "name": "ASSETS",
@@ -1114,7 +1124,8 @@
         {
           "name": "ACCESS_OWNER_ALIASES",
           "type": "secret_text",
-          "source": "deploy"
+          "source": "deploy",
+          "optional": true
         },
         {
           "name": "ASSETS",

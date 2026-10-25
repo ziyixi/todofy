@@ -76,7 +76,7 @@ export function useRefreshHome() {
   })
 }
 
-/** Owner refresh of the Cloudflare usage (RefreshCloudflareView, GraphQL at most once a minute). */
+/** Refresh usage and advance the bounded configuration check, at most once a minute. */
 export function useRefreshCloudflare() {
   const client = useQueryClient()
   return useMutation({

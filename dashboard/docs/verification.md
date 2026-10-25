@@ -368,6 +368,25 @@ no token, no Cloudflare or GitHub call:
 | smoke | as in 1l, on its own ports, one cron tick, every call of `web/src/api/client.ts` | 28 of 28 (every retired path now 410 `not_found` with 个人控制台已更新，请刷新页面); the dev proxy's dropped POST once more (1) |
 | old UI | `main`'s own client (`web/src/api/client.ts` and `lib/labels.ts` from `git archive origin/main`, unchanged) calling each route it knows against the same `wrangler dev` | 9 of 9 (`registry`, `home`, `home(true)`, `flows`, `cloudflare`, `cloudflare(true)`, `ops`, `setGuard`, `startCanary`) fail with HTTP 410 and the message 个人控制台已更新，请刷新页面, which the old page shows as its error text |
 
+## 1n. Local, account history and configuration differences (2026-10-25)
+
+The Cloudflare configuration total uses only the seven live-versus-code comparison categories.
+Account writes are shown separately under 最近账户操作 with the completed check's read time,
+resource and action counts; they do not create a configuration warning. The UI also handles older
+account-only `drift` snapshots without waiting for another daily check.
+
+Local checks in `dashboard/web` passed `npm test` (21 files, 181 tests), `npm run lint`,
+`npm run typecheck` and `npm run build`. The 36 Cloudflare view tests include audit-only results
+with both old and new status values, mixed configuration/history results, an empty history window,
+unreadable audit logs and a newer failed check retaining its previous result. The refresh regression
+checks that an in-progress configuration check keeps its old result and completion time after usage
+refresh succeeds, with only one call to the existing refresh endpoint. The new cases failed
+against the old UI before the implementation change. Final build validation found no cross-origin
+references and measured JavaScript at 169.3 KiB gzip within the existing budget.
+
+These are synthetic local UI checks. Production deployment and browser acceptance are separate.
+The existing reminder-dismissal flow and browser refresh rate limit are unchanged.
+
 ## 2. Production (pending)
 
 None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail

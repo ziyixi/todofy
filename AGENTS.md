@@ -68,6 +68,9 @@
 - 本地只用本地绑定与各应用 `.dev.vars`；D1 命令显式 `--local`，开发不得使用 `--remote`。
 - 分支完整通过 `CI gate` 后合并同一 green SHA。Rebase 或追加提交后重跑受影响检查；pending、cancelled 不是 green。
   正式发布只走授权的 `main` Actions；PR 不接触生产凭据，各应用保留独立 concurrency group。
+- 部署交付前等待同一 main SHA 的 `Personal cloud reconcile` 完成，核对 Worker、VPS、资源登记和
+  `Require resolved infrastructure drift` 均通过。较旧 SHA、被跳过的对账和单独的部署成功不证明当前无漂移。
+  Home 期望配置变更时，推进现有 Cloudflare 刷新直到新一轮检查完成；核对检查时间与实际差异，不能靠关闭提醒验收。
 - 发布只影响该应用及共享代码实际使用者；更新 reachability 时同步守卫。Tasks 等待 Todofy；Watch 与 Home 等待 Tasks（Home 也等待其绑定的其他 Ops 服务）。
   Worker 配置变更前运行 hostname guard；显式、精确审核主机移除/接管，不覆盖其他 Worker 或 DNS。
 - `infra/` 管理其声明范围内的 Access 与 D1/R2 存在性，变更走 gated Infra apply，不手改 dashboard。

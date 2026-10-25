@@ -317,3 +317,37 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: python3 tools/service-catalog/inventory.py
+
+  infra-result:
+    name: Require resolved infrastructure drift
+    needs: [context, infra, infra-apply]
+    if: >-
+      ${{ always() && needs.context.outputs.enabled == 'true'
+      && needs.context.outputs.operation != 'resume' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify the comparison or approved apply resolved the plan
+        env:
+          INFRA_STATE: ${{ needs.infra.outputs.state }}
+          INFRA_APPLY_RESULT: ${{ needs.infra-apply.result }}
+        run: |
+          case "$INFRA_STATE" in
+            in_sync|repaired)
+              echo 'Infrastructure reconciliation verified.' >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            needs_manual|repairable)
+              if [ "$INFRA_APPLY_RESULT" = success ]; then
+                echo 'Infrastructure reconciliation verified after reviewed apply.' >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo '有待人工处理的计划。请检查本次 Infrastructure 摘要，并使用受保护的 reviewed apply 流程。' >> "$GITHUB_STEP_SUMMARY"
+                echo '::error::Infrastructure reconciliation has an unresolved plan.'
+                exit 1
+              fi
+              ;;
+            *)
+              echo '基础设施核对未获得有效结果。请检查本次 Infrastructure job，修正后重新运行。' >> "$GITHUB_STEP_SUMMARY"
+              echo '::error::Infrastructure reconciliation has no verified result.'
+              exit 1
+              ;;
+          esac

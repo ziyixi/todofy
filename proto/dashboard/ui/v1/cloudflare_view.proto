@@ -104,11 +104,10 @@ message CloudflareView {
   ];
 }
 
-// The configuration drift check: the live account against the desired state generated from the committed
-// configs, and the account's changes since the previous check that were not made with an API token (CI
-// deploys only with API tokens). Names only, never a value.
+// The live configuration comparison and separate historical account operations. Historical operations
+// are informational and do not make configuration status drift. Names only, never a value.
 message Drift {
-  // ok or drift from the last completed check; never_checked before the first; failing when none completed and
+  // ok or drift from the last completed configuration comparison; never_checked before the first; failing when none completed and
   // the last day's attempts failed; not_configured without the token.
   State status = 1 [
     (google.api.field_behavior) = REQUIRED,
@@ -158,9 +157,9 @@ message Drift {
   enum State {
     // Never sent.
     STATE_UNSPECIFIED = 0;
-    // The last completed check found nothing.
+    // The last completed check found no configuration differences. Account history may still be present.
     STATE_OK = 1;
-    // The last completed check found differences.
+    // The last completed check found configuration differences.
     STATE_DRIFT = 2;
     // No check has run yet.
     STATE_NEVER_CHECKED = 3;
@@ -187,11 +186,11 @@ message DriftCounts {
   int32 workers_dev = 6 [(google.api.field_behavior) = REQUIRED];
   // Personal values that must be secrets.
   int32 personal = 7 [(google.api.field_behavior) = REQUIRED];
-  // Changes made outside CI.
+  // Historical account operations outside CI, separate from current configuration differences.
   int32 account_changes = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// One difference between the committed and the live configuration, names only.
+// A configuration difference or a historical account operation, names only.
 // (-- api-linter: core::0123::resource-annotation=disabled
 //     aip.dev/not-precedent: `name` is the Worker's, hostname's or binding's name that differs, not a resource name. --)
 message DriftFinding {

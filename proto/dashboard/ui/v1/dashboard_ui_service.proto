@@ -151,7 +151,7 @@ service DashboardUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // Reads the GraphQL usage again, then answers the Cloudflare view (AIP-136). Replaces
+  // Refreshes GraphQL usage and advances one bounded configuration-check batch, then answers the view (AIP-136). Replaces
   // GET /api/v2/cloudflare?refresh=1.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE

@@ -291,7 +291,7 @@ export function usageErrorLabel(code: string): string {
 
 /** The drift panel's status line (配置漂移). */
 export const DRIFT_STATUS: Readonly<Record<DriftState, { label: string; level: Level }>> = {
-  ok: { label: '与代码一致', level: 'ok' },
+  ok: { label: '无配置差异', level: 'ok' },
   drift: { label: '与代码不一致', level: 'warning' },
   never_checked: { label: '尚未检查', level: 'unknown' },
   not_configured: { label: '未配置令牌', level: 'warning' },
@@ -306,7 +306,7 @@ export const DRIFT_CATEGORY: Readonly<Record<DriftCategory, string>> = {
   bindings: '绑定与密钥',
   workers_dev: 'workers.dev / 预览',
   personal: '个人值未设为密钥',
-  account_changes: '非 CI 改动',
+  account_changes: '最近账户操作',
 }
 
 /** How an account change was authenticated (the audit log's actor.context). */
@@ -329,7 +329,7 @@ export function driftFindingText(finding: Pick<DriftFinding, 'category' | 'scrip
       const [action = '', count = '?'] = part.split(' ')
       return `${CHANGE_ACTION[action] ?? action} ${count} 次`
     })
-    return `经${CHANGE_VIA[finding.script] ?? finding.script}：${actions.join('、')}，不是 CI 做的`
+    return `经${CHANGE_VIA[finding.script] ?? finding.script}：${actions.join('、')}`
   }
   if (finding.kind === 'missing') return finding.expected ? `代码中有（${finding.expected}），线上没有` : '代码中有，线上没有'
   if (finding.kind === 'extra') return finding.actual ? `线上有（${finding.actual}），代码中没有` : '线上有，代码中没有'

@@ -12,6 +12,28 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+### Configuration drift audit false positive (`codex/fix-config-drift`)
+
+The owner requested fixing the configuration drift indication. Home's stored check at 03:30 UTC has zero
+configuration differences and three audit groups: user update, token create/delete and a DO namespace query
+misidentified by the audit API as create. The actual latest reconcile summary is `in_sync` with 42 no-op
+infrastructure resources and no planned actions; its Worker comparisons did not deploy repairs.
+Home is being corrected to keep historical account operations informational, exclude `.query` reads and
+derive config status/alerts only from the seven actual configuration categories. Existing audit records and
+reminder dismissals are retained. Legacy cached query findings are normalized at read time; no resource
+configuration, secrets, external Tasks or schedules are changed for this correction.
+The owner also requires post-work drift to be prevented by the delivery flow. The existing reconcile workflow
+now has a final infrastructure result gate: unresolved/manual plans cannot silently remain green. Home uses
+an internal desired-content hash to discard old partial comparisons and permit same-day rechecks; its existing
+Cloudflare refresh advances at most twelve drift GETs under the original limit. GET pages remain cache-only.
+Generated optional-secret flags now follow the same manifest policy as CI. Root AGENTS requires waiting for
+the matching post-deploy reconcile and a completed current Home check before delivery.
+An independent live read at 23:00 UTC compared all fourteen Workers and found zero configuration differences,
+no truncated lists and no unread zones. Final local checks passed Worker 280 unit/104 real runtime tests,
+UI 181 tests, lint/typechecks/build, 458 Changes tests, API lint and breaking checks. The refresh/fingerprint
+and final-gate cases are included. Branch CI and production verification are pending.
+Shared checkout remains untouched.
+
 ### Persistent Codex daily usage (`codex/inference-daily-usage`)
 
 The owner requires gateway statistics to survive restart and show daily requests, failures and reported tokens.

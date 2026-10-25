@@ -70,6 +70,14 @@ class DesiredState(unittest.TestCase):
                     self.assertEqual(bindings[name]["type"], "secret_text")
                     self.assertEqual(bindings[name]["source"], "manual")
 
+    def test_optional_secrets_match_the_same_policy_as_ci(self):
+        for worker, spec in drift_desired.SECRET_SPECS.items():
+            bindings = {binding["name"]: binding for binding in self.state["workers"][worker]["bindings"]}
+            for name, binding in bindings.items():
+                if binding["type"] == "secret_text" and binding["source"] == "deploy":
+                    with self.subTest(worker=worker, name=name):
+                        self.assertEqual(binding.get("optional", False), name in spec["optional"])
+
     def test_personal_values_are_named_for_the_secret_check(self):
         """A personal wrapper value sent with --var would be listed under `personal`; every wrapper now writes its
         personal values with --secrets-file, so no Worker lists one (each is a secret_text deploy binding instead)."""
@@ -82,7 +90,7 @@ class DesiredState(unittest.TestCase):
 
     def test_todofy_personal_values_are_deploy_secrets(self):
         """Todofy writes the gateway's owner addresses with --secrets-file; an empty alias list is uploaded too (as
-        unset), so both are required secret_text bindings. The core has no personal value since 2026-10-21: its
+        unset), while the manifest and CI comparison permit the alias binding to be absent. The core has no personal value since 2026-10-21: its
         retired Tasks projects are optional manual secrets until the owner deletes them. The vars it adds are the
         switches and BUILD_SHA."""
         workers = {"todofy-core": (), "todofy": ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES")}
@@ -99,7 +107,8 @@ class DesiredState(unittest.TestCase):
             bindings = {b["name"]: b for b in self.state["workers"][worker]["bindings"]}
             for name in names:
                 with self.subTest(worker=worker, name=name):
-                    self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy"})
+                    self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy",
+                                                       **({"optional": True} if name == "ACCESS_OWNER_ALIASES" else {})})
             for name in switches[worker]:
                 with self.subTest(worker=worker, name=name):
                     self.assertEqual(bindings[name], {"name": name, "type": "plain_text", "source": "deploy"})
@@ -113,7 +122,8 @@ class DesiredState(unittest.TestCase):
         bindings = {b["name"]: b for b in worker["bindings"]}
         for name in ("RECEIVE_ADDRESS", "ACCESS_OWNER", "ACCESS_OWNER_ALIASES"):
             with self.subTest(name=name):
-                self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy"})
+                self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy",
+                                                       **({"optional": True} if name == "ACCESS_OWNER_ALIASES" else {})})
         for name in ("FORCE_SEND_PAUSED", "MAINTENANCE_MODE", "BUILD_SHA"):
             with self.subTest(name=name):
                 self.assertEqual(bindings[name], {"name": name, "type": "plain_text", "source": "deploy"})
@@ -128,7 +138,8 @@ class DesiredState(unittest.TestCase):
         secrets = ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY")
         for name in secrets:
             with self.subTest(name=name):
-                self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy"})
+                self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy",
+                                                       **({"optional": True} if name == "ACCESS_OWNER_ALIASES" else {})})
         self.assertEqual(bindings["BUILD_SHA"], {"name": "BUILD_SHA", "type": "plain_text", "source": "deploy"})
         self.assertEqual({name for name, b in bindings.items() if b["source"] == "deploy"}, {*secrets, "BUILD_SHA"})
         self.assertEqual({name for name, b in bindings.items() if b["source"] == "manual"}, set())
@@ -153,7 +164,8 @@ class DesiredState(unittest.TestCase):
         self.assertEqual({name for name, binding in bindings.items() if binding["source"] == "deploy"},
                          secrets | {"BUILD_SHA"})
         for name in secrets:
-            self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy"})
+            self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy",
+                                                       **({"optional": True} if name == "ACCESS_OWNER_ALIASES" else {})})
         self.assertEqual(bindings["BUILD_SHA"], {"name": "BUILD_SHA", "type": "plain_text", "source": "deploy"})
         self.assertNotIn("TASKS_WORKER_SECRETS", bindings)
         self.assertNotIn("tasks", drift_desired.MANUAL_SECRETS)

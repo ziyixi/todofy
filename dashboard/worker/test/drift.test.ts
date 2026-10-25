@@ -187,15 +187,14 @@ describe('comparison', () => {
     expect(Object.values(DESIRED.workers).flatMap((worker) => worker.personal)).toEqual([]);
     const mailHero = new Map((DESIRED.workers['mail-hero']?.bindings ?? []).map((b) => [b.name, b]));
     for (const name of ['RECEIVE_ADDRESS', 'ACCESS_OWNER', 'ACCESS_OWNER_ALIASES']) {
-      expect(mailHero.get(name)).toEqual({ name, type: 'secret_text', source: 'deploy' });
+      expect(mailHero.get(name)).toEqual({ name, type: 'secret_text', source: 'deploy', ...(name === 'ACCESS_OWNER_ALIASES' ? { optional: true } : {}) });
     }
     // A personal value deployed as a plain var, and one not set.
     const { doc } = await fullCheck({ bindings: { 'mail-hero': { RECEIVE_ADDRESS: 'plain_text', ACCESS_OWNER_ALIASES: null } } });
     expect(doc.findings).toEqual([
-      { category: 'bindings', script: 'mail-hero', name: 'ACCESS_OWNER_ALIASES', kind: 'missing', expected: 'secret_text' },
       { category: 'bindings', script: 'mail-hero', name: 'RECEIVE_ADDRESS', kind: 'changed', expected: 'secret_text', actual: 'plain_text' },
     ]);
-    expect(driftView(doc, true, AT('03:00'))).toMatchObject({ status: 'drift', counts: { bindings: 2, personal: 0 } });
+    expect(driftView(doc, true, AT('03:00'))).toMatchObject({ status: 'drift', counts: { bindings: 1, personal: 0 } });
   });
 
   it('detects a toml change: a Custom Domain removed from the committed state is reported as extra', async () => {
@@ -302,9 +301,12 @@ describe('a run across ticks', () => {
     expect(driftPlan(AT('01:30'), null, NO_DRIFT, true)).toEqual({ kind: 'idle' });
     expect(driftPlan(AT(`${hour}:00`), null, NO_DRIFT, true)).toEqual({ kind: 'start' });
     expect(driftPlan(AT('12:00'), null, { ...NO_DRIFT, last_run_day: DAY }, true)).toEqual({ kind: 'idle' });
+    expect(driftPlan(AT('12:00'), null, { ...NO_DRIFT, last_run_day: DAY }, true, true)).toEqual({ kind: 'start' });
+    expect(driftPlan(AT('01:30'), null, NO_DRIFT, true, true)).toEqual({ kind: 'start' });
     expect(driftPlan(AT('12:00'), null, NO_DRIFT, false)).toEqual({ kind: 'idle' });
     const running = newDriftRun(AT(`${hour}:00`), NO_DRIFT);
     expect(driftPlan(AT(`${hour}:30`), running, NO_DRIFT, true)).toEqual({ kind: 'continue', run: running });
+    expect(driftPlan(AT(`${hour}:30`), running, NO_DRIFT, true, true)).toEqual({ kind: 'continue', run: running });
     expect(driftPlan(AT(`${hour}:00`) + 86_400_000, running, NO_DRIFT, true)).toEqual({ kind: 'abandon', run: running });
   });
 });
@@ -320,7 +322,7 @@ describe('changes made outside CI (the audit log)', () => {
     expect(query.getAll('actor_context')).toContain('dash');
   });
 
-  it('counts them by way in, resource and action, drops looking (analytics, log queries), and keeps no actor or id', () => {
+  it('counts them by way in, resource and action, drops read queries, and keeps no actor or id', () => {
     const entries = [
       { context: 'dash', action: 'delete', product: 'dns_records' },
       { context: 'dash', action: 'delete', product: 'dns_records' },
@@ -328,6 +330,8 @@ describe('changes made outside CI (the audit log)', () => {
       { context: 'oauth', action: 'update', product: 'workers', type: 'scripts' },
       { context: 'dash', action: 'create', product: 'analytics', type: 'query.summary' },
       { context: 'dash', action: 'create', product: 'workers', type: 'observability.telemetry.query' },
+      { context: 'dash', action: 'create', product: 'workers', type: 'durable_objects.namespaces.query' },
+      { context: 'api', action: 'update', product: 'user' },
       { context: 'api_token', action: 'update', product: 'workers', type: 'scripts' },
       { context: 'dash', action: 'view', product: 'tokens' },
       { context: 'dash', action: 'update', product: 'Weird Name!' },
@@ -335,6 +339,7 @@ describe('changes made outside CI (the audit log)', () => {
     const parsed = parseAudit(entries);
     expect(parsed).toEqual({
       changes: [
+        { via: 'api', resource: 'user', action: 'update', count: 1 },
         { via: 'dash', resource: '(other)', action: 'update', count: 1 },
         { via: 'dash', resource: 'dns_records', action: 'delete', count: 2 },
         { via: 'dash', resource: 'tokens', action: 'create', count: 1 },
@@ -361,7 +366,7 @@ describe('changes made outside CI (the audit log)', () => {
       { category: 'account_changes', script: 'oauth', name: 'workers.scripts', kind: 'extra', actual: 'update 1' },
     ]);
     expect(doc).toMatchObject({ audit_until: AT('02:00'), audit_unchecked: false });
-    expect(driftView(doc, true, AT('03:00')).status).toBe('drift');
+    expect(driftView(doc, true, AT('03:00')).status).toBe('ok');
     expect(JSON.stringify(doc)).not.toContain(SENTINEL_VALUE);
     expect(newDriftRun(AT('02:00') + 86_400_000, doc).audit_since).toBe(AT('02:00'));
   });
@@ -398,6 +403,29 @@ describe('changes made outside CI (the audit log)', () => {
     expect(olderRun).not.toHaveProperty('audit_since');
     expect(storedRun(olderRun)?.audit_since).toBe(AT('02:00') - 86_400_000);
     expect(storedRun(null)).toBeNull();
+  });
+
+  it('filters old query findings on read, counting finding groups rather than their action totals', () => {
+    const findings = [
+      { category: 'bindings' as const, script: 'alpha', name: 'KEY', kind: 'missing' as const, expected: 'secret_text' },
+      { category: 'account_changes' as const, script: 'api', name: 'user', kind: 'extra' as const, actual: 'update 1' },
+      { category: 'account_changes' as const, script: 'dash', name: 'tokens', kind: 'extra' as const, actual: 'create 1, delete 1' },
+      { category: 'account_changes' as const, script: 'dash', name: 'workers.durable_objects.namespaces.query', kind: 'extra' as const, actual: 'create 21' },
+    ];
+    const legacy: DriftDoc = { ...NO_DRIFT, checked_at: AT('02:30'), counts: countFindings(findings), findings };
+    const doc = storedDrift(legacy);
+    expect(doc.findings).toEqual(findings.slice(0, 3));
+    expect(doc.counts).toEqual({ ...legacy.counts, account_changes: 2 });
+    expect(driftView(doc, true, AT('03:00')).status).toBe('drift');
+    expect(legacy.findings).toEqual(findings);
+    expect(legacy.counts.account_changes).toBe(3);
+
+    // Counts also include groups beyond the stored finding limit; do not discard those.
+    const truncated = storedDrift({ ...legacy, counts: { ...legacy.counts, account_changes: 8 } });
+    expect(truncated.counts.account_changes).toBe(7);
+    expect(driftView(truncated, true, AT('03:00')).findings_omitted).toBe(5);
+    const auditOnly = storedDrift({ ...legacy, counts: { ...legacy.counts, bindings: 0 }, findings: findings.slice(1) });
+    expect(driftView(auditOnly, true, AT('03:00'))).toMatchObject({ status: 'ok', counts: { account_changes: 2 }, findings_omitted: 0 });
   });
 });
 

@@ -2,6 +2,9 @@
 
 import ast
 import re
+import subprocess
+import tempfile
+import textwrap
 import tomllib
 import unittest
 from pathlib import Path
@@ -134,6 +137,62 @@ class ReconcileWorkflow(unittest.TestCase):
         self.assertIn('--plan-key "$PLAN_KEY" --expect "$PLAN_EXPECT"', apply)
         self.assertIn('test "$protected" = true', apply)
         self.assertNotIn("tofu apply", apply)
+
+    def test_infrastructure_result_waits_for_review_without_running_during_resume(self):
+        block = job(self.text, "infra-result")
+        self.assertIn("needs: [context, infra, infra-apply]", block)
+        self.assertIn("always()", block)
+        self.assertIn("needs.context.outputs.enabled == 'true'", block)
+        self.assertIn("needs.context.outputs.operation != 'resume'", block)
+        self.assertIn("INFRA_STATE: ${{ needs.infra.outputs.state }}", block)
+        self.assertIn("INFRA_APPLY_RESULT: ${{ needs.infra-apply.result }}", block)
+        for forbidden in ("environment:", "permissions:", "uses:", "secrets.", "gh api"):
+            self.assertNotIn(forbidden, block)
+
+    def test_infrastructure_result_rejects_unresolved_or_unknown_states(self):
+        block = job(self.text, "infra-result")
+        script = textwrap.dedent(block.split("        run: |\n", 1)[1])
+        apply_results = ("success", "skipped", "failure", "cancelled", "")
+        cases = (
+            ("in_sync", (0, 0, 0, 0, 0)),
+            ("repaired", (0, 0, 0, 0, 0)),
+            ("needs_manual", (0, 1, 1, 1, 1)),
+            ("repairable", (0, 1, 1, 1, 1)),
+            ("", (1, 1, 1, 1, 1)),
+            ("unknown", (1, 1, 1, 1, 1)),
+            ("$(printf private_marker)", (1, 1, 1, 1, 1)),
+        )
+        for state, expected_exits in cases:
+            for apply_result, expected_exit in zip(
+                apply_results, expected_exits, strict=True
+            ):
+                with (
+                    self.subTest(state=state, apply_result=apply_result),
+                    tempfile.TemporaryDirectory() as directory,
+                ):
+                    summary = Path(directory) / "summary.md"
+                    result = subprocess.run(
+                        ["bash", "-e", "-o", "pipefail", "-c", script],
+                        env={
+                            "INFRA_STATE": state,
+                            "INFRA_APPLY_RESULT": apply_result,
+                            "GITHUB_STEP_SUMMARY": str(summary),
+                        },
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(result.returncode, expected_exit, result.stderr)
+                    message = summary.read_text()
+                    self.assertTrue(message.strip())
+                    self.assertNotIn("private_marker", message + result.stdout + result.stderr)
+                    if expected_exit == 0:
+                        self.assertIn("Infrastructure reconciliation verified", message)
+                    else:
+                        self.assertIn("::error::", result.stdout)
+                        if state in {"needs_manual", "repairable"}:
+                            self.assertIn("有待人工处理的计划", message)
+                            self.assertIn("reviewed apply", message)
 
     def test_worker_repair_reuses_last_good_recipe_and_app_locks(self):
         block = job(self.text, "workers")

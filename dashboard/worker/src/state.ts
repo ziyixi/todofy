@@ -33,7 +33,7 @@ import {
   type CanaryRecord,
 } from './canary.ts';
 import { analyticsConfigured, buildSha, canaryEnabled, canaryHour, dashboardUrl } from './config.ts';
-import { afterCall, candidates, claimDay, finalizeItems, itemKey, nextDigestDay, type Candidate } from './digest.ts';
+import { afterCall, candidates, claimDay, configurationDrift, finalizeItems, itemKey, nextDigestDay, type Candidate } from './digest.ts';
 import { NO_DIGEST, NO_META, NO_STATUS, NO_USAGE, type DigestDoc, type MetaDoc, type ProbeDoc, type StatusDoc, type UsageDoc } from './docs.ts';
 import type { Env } from './env.ts';
 import {
@@ -53,9 +53,11 @@ import {
 } from './guard.ts';
 import { mergeScripts, workerRows, withLiveInventory, type CfScriptsDoc } from './discovery.ts';
 import {
+  DESIRED,
   advanceRun,
   attemptsExhausted,
   completedDoc,
+  configurationFindings,
   driftPlan,
   driftView,
   failedDoc,
@@ -83,7 +85,7 @@ import { REGISTRY } from './registry.ts';
 import { HOUR_MS, MINUTE_MS, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';
 import { fetchUsage, type UsageErrorCode } from './usage.ts';
 import type { ViewBody } from './view-body.ts';
-import { cloudflareResponse, flowsResponse, homeResponse, opsResponse, serializeView, shell } from './views.ts';
+import { cloudflareResponse, flowsResponse, fnv1a, homeResponse, opsResponse, serializeView, shell } from './views.ts';
 
 /** Name of the single object instance. */
 export const HOME_OBJECT = 'home-v1';
@@ -150,6 +152,7 @@ export const STATUS_REFRESH_MS = OPS_LIMITS.statusMinIntervalSeconds * 1000;
 const REFRESH_MIN_MS = REFRESH_MIN_INTERVAL_SECONDS * 1000;
 const PROBE_MIN_MS = PROBE_MIN_INTERVAL_SECONDS * 1000;
 const CLOUDFLARE_REFRESH_MIN_MS = CLOUDFLARE_REFRESH_MIN_SECONDS * 1000;
+const DESIRED_HASH = fnv1a(JSON.stringify(DESIRED));
 
 /** The public_http entries the tick probes (at most one GET each per tick). */
 const PROBED: readonly (ProbeTarget & { readonly id: string })[] = REGISTRY.entries.flatMap((entry) => {
@@ -579,23 +582,33 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /**
-   * The day's drift check (drift.ts, design-v2.md §10): started by the first tick at or after
-   * DRIFT_UTC_HOUR, advanced by each tick (≤ DRIFT_CALLS_PER_TICK read-only GETs) until complete or
-   * DRIFT_MAX_ATTEMPTS attempts failed. Logs carry the outcome code and counts only.
+   * The day's drift check: started by the first tick at or after DRIFT_UTC_HOUR, or an explicit refresh.
+   * Each invocation advances ≤ DRIFT_CALLS_PER_TICK read-only GETs until complete or DRIFT_MAX_ATTEMPTS
+   * attempts failed. A changed desired state discards old partial reads once. Logs carry codes and counts only.
    */
-  private async runDrift(now: number): Promise<{ outcome: string; calls: number }> {
+  private async runDrift(now: number, recheck = false): Promise<{ outcome: string; calls: number }> {
     const configured = analyticsConfigured(this.env);
     let doc = storedDrift(this.doc<DriftDoc>('drift'));
-    let plan = driftPlan(now, storedRun(this.doc<DriftRunDoc>('drift_run')), doc, configured);
+    let pending = storedRun(this.doc<DriftRunDoc>('drift_run'));
+    const contextChanged = doc.desired_hash !== DESIRED_HASH || (pending !== null && pending.desired_hash !== DESIRED_HASH);
+    if (contextChanged) {
+      recheck ||= doc.checked_at !== null || doc.last_run_day !== null || pending !== null;
+      // Keep the last completed result and audit cursor while replacing the obsolete scheduling context.
+      doc = { ...doc, desired_hash: DESIRED_HASH, last_run_day: null, running_day: null };
+      this.putDoc('drift', doc, now);
+      this.deleteDoc('drift_run');
+      pending = null;
+    }
+    let plan = driftPlan(now, pending, doc, configured, recheck);
     if (plan.kind === 'abandon') {
       // A run of an earlier day did not finish: that day failed.
       doc = failedDoc(doc, plan.run, { code: 'incomplete', step: plan.run.account === null ? 'account' : 'script' }, now, true);
       this.putDoc('drift', doc, now);
       this.deleteDoc('drift_run');
-      plan = driftPlan(now, null, doc, configured);
+      plan = driftPlan(now, null, doc, configured, recheck);
     }
     if (plan.kind !== 'start' && plan.kind !== 'continue') return { outcome: 'idle', calls: 0 };
-    const run = plan.kind === 'start' ? newDriftRun(now, doc) : plan.run;
+    const run = plan.kind === 'start' ? newDriftRun(now, doc, DESIRED_HASH) : plan.run;
     const result = await advanceRun(run, (this.env.CF_ANALYTICS_TOKEN ?? '').trim(), this.env.ACCOUNT_ID, (url, init) => globalThis.fetch(url, init));
     if (result.run.account !== null && (run.account === null || runComplete(result.run))) {
       this.putDoc('cf_scripts', withLiveInventory(this.doc<CfScriptsDoc>('cf_scripts'), result.run.account.scripts, now), now);
@@ -604,7 +617,7 @@ export class HomeState extends DurableObject<Env> {
     if (runComplete(result.run)) {
       doc = completedDoc(doc, result.run, now);
       this.deleteDoc('drift_run');
-      outcome = totalFindings(doc.counts) === 0 ? 'ok' : 'drift';
+      outcome = configurationFindings(doc.counts) === 0 ? 'ok' : 'drift';
     } else if (result.error !== null && attemptsExhausted(result.run)) {
       doc = failedDoc(doc, result.run, result.error, now, true);
       this.deleteDoc('drift_run');
@@ -810,7 +823,7 @@ export class HomeState extends DurableObject<Env> {
 
   /**
    * A refresh of a scope (RefreshHomeView, RefreshCloudflareView); true when something was fetched. home: due statuses (10 min each) and
-   * probes; cloudflare: GraphQL (60 s). Each scope at most once per minute; the digest items are
+   * probes; cloudflare: GraphQL and one bounded drift batch (60 s). Each scope at most once per minute; the digest items are
    * rebuilt from the new data (the day's task is created only by a tick).
    */
   private async refreshScope(scope: 'home' | 'cloudflare', now: number): Promise<boolean> {
@@ -826,8 +839,9 @@ export class HomeState extends DurableObject<Env> {
     } else {
       const usage = this.doc<UsageDoc>('usage') ?? NO_USAGE;
       const due = analyticsConfigured(this.env) && (usage.last_attempt_at === null || now - usage.last_attempt_at >= CLOUDFLARE_REFRESH_MIN_MS || now < usage.last_attempt_at);
-      if (!due) return false;
-      await this.pollUsage(now);
+      if (due) await this.pollUsage(now);
+      const drift = await this.runDrift(now, true);
+      if (!due && drift.calls === 0) return false;
     }
     await this.runDigest(now, false, meta.last_tick_at);
     const current = this.doc<MetaDoc>('meta') ?? NO_META;
@@ -912,7 +926,7 @@ export class HomeState extends DurableObject<Env> {
     if (condition.code.startsWith('drift_') || condition.code === 'config_drift') {
       const drift = storedDrift(this.doc<DriftDoc>('drift'));
       const fresh = drift.checked_at !== null && now - drift.checked_at <= 48 * HOUR_MS && drift.last_error === null;
-      return fresh && (condition.code === 'config_drift' ? totalFindings(drift.counts) === 0 : drift.consecutive_failed_days === 0);
+      return fresh && (condition.code === 'config_drift' ? configurationFindings(drift.counts) === 0 : drift.consecutive_failed_days === 0);
     }
     if (condition.source === 'cloudflare' || condition.code.startsWith('usage_')) {
       const usage = this.doc<UsageDoc>('usage') ?? NO_USAGE;
@@ -1067,8 +1081,14 @@ export class HomeState extends DurableObject<Env> {
   }
 
   private digestView(digest: DigestDoc, enabled: boolean): Digest {
+    const drift = analyticsConfigured(this.env) ? configurationDrift(storedDrift(this.doc<DriftDoc>('drift'))) : null;
+    // An older digest may still contain the audit-only warning until the next tick rebuilds it.
+    const items = digest.items.flatMap((item) => {
+      if (item.source !== 'dashboard' || item.code !== 'config_drift') return [item];
+      return drift === null ? [] : [{ ...item, metrics: drift.metrics }];
+    });
     return {
-      items: this.undismissed(digest.items).slice(0, 20),
+      items: this.undismissed(items).slice(0, 20),
       enabled,
       last_sent_at: isoOrNull(digest.last_sent_at),
       last_generated_at: isoOrNull(digest.last_generated_at),

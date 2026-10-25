@@ -41,9 +41,12 @@ Besides the page it runs four jobs:
   every personal value is a secret) are compared with the desired state generated from every committed
   `wrangler.toml` and deploy wrapper (`worker/src/drift-desired.json`, by
   [`.github/scripts/drift_desired.py`](../.github/scripts/drift_desired.py)), and the account audit log is
-  read for changes since the previous check not made with an API token (a dashboard edit, a laptop deploy):
-  CI uses API tokens only. Names only; shown on the Cloudflare view and counted in the digest, never
-  published on GitHub ([`docs/design-v2.md`](docs/design-v2.md) §10).
+  read for writes since the previous check not made with an API token (a dashboard edit, a laptop deploy).
+  The seven configuration categories determine the drift status and digest warning; a clean comparison says
+  无配置差异. Account writes appear separately as 最近账户操作, with their read time, resource and action counts.
+  They remain historical information even after a later check fails. Queries are excluded, including Durable
+  Object namespace queries recorded by Cloudflare as creates. Names only; never published on GitHub
+  ([`docs/design-v2.md`](docs/design-v2.md) §10).
 - **Cross-app contract tests.** The caller side of ops-v1: only declared methods, every declared error
   code, schema-valid inputs, and the real `HomeState` against stub apps that answer with the contract
   fixtures.

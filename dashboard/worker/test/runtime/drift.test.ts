@@ -5,8 +5,14 @@
  * the Tasks stub receives. Names only: no value, id or token reaches a view or the task.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import type { CreateInboxTaskRequest } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
 import { DRIFT_CALLS_PER_TICK, DRIFT_UTC_HOUR, type CloudflareView, type OpsView } from '../../src/api-types.ts';
+import { countFindings, type DriftDoc, type DriftRunDoc } from '../../src/drift.ts';
+import type { DigestDoc } from '../../src/docs.ts';
 import { outboundPerTick } from '../../src/registry.ts';
 import { CF_API, SENTINEL_VALUE } from '../drift-fixture.ts';
 import { GRAPHQL, NOW, PROBES, SYNTHETIC_BINDINGS, startFlows, type FlowHarness } from './flows.ts';
@@ -106,13 +112,14 @@ describe('the daily drift check', () => {
 
     const ops = await view<OpsView>(h, 'ops');
     const item = ops.digest.items.find((i) => i.code === 'config_drift');
-    expect(item).toMatchObject({ source: 'dashboard', severity: 'warning', metrics: { total: 4, scripts: 1, custom_domains: 1, bindings: 1, account_changes: 1 } });
+    expect(item).toEqual(expect.objectContaining({ source: 'dashboard', severity: 'warning', metrics: { total: 3, scripts: 1, custom_domains: 1, bindings: 1 } }));
     // The next day's task lists it: counts only.
     await h.tick(Math.floor(NOW / DAY_MS) * DAY_MS);
     const tasks = (await h.callsOf('tasks', 'createInboxTask')).map((args) => args[0] as CreateInboxTaskRequest);
     expect(tasks).toHaveLength(1);
     const line = tasks[0]?.description?.split('\n').find((text) => text.includes(' · config_drift · ')) ?? '';
-    for (const metric of ['total=4', 'scripts=1', 'custom_domains=1', 'bindings=1', 'account_changes=1']) expect(line).toContain(metric);
+    for (const metric of ['total=3', 'scripts=1', 'custom_domains=1', 'bindings=1']) expect(line).toContain(metric);
+    expect(line).not.toContain('account_changes');
     const reportText = JSON.stringify(tasks);
     expect(reportText).not.toContain('RECEIVE_ADDRESS');
     expect(reportText).not.toContain('synthetic-orphan');
@@ -125,6 +132,174 @@ describe('the daily drift check', () => {
     for (const text of [JSON.stringify(cloudflare), JSON.stringify(ops), reportText]) expect(text).not.toContain('192.0.2.1');
     // No id of the API answers (account, zone, script tags, binding ids) reaches the drift panel.
     expect(JSON.stringify(cloudflare.drift)).not.toMatch(/[0-9a-f]{32}/);
+  });
+
+  it('keeps actual account history without a configuration warning, and omits read-query audit entries', async () => {
+    h = await startFlows();
+    h.cloudflare.tweaks = { audit: [
+      { context: 'api', action: 'update', product: 'user' },
+      { context: 'dash', action: 'create', product: 'tokens' },
+      { context: 'dash', action: 'delete', product: 'tokens' },
+      { context: 'dash', action: 'create', product: 'workers', type: 'durable_objects.namespaces.query' },
+    ] };
+    const start = driftHour(1);
+    for (let k = 0; k < 4; k++) await h.tick(start + k * 30 * MIN);
+    const cloudflare = await view<CloudflareView>(h, 'cloudflare');
+    expect(cloudflare.drift).toMatchObject({ status: 'ok', counts: { account_changes: 2 }, findings: [
+      { category: 'account_changes', script: 'api', name: 'user', kind: 'extra', actual: 'update 1' },
+      { category: 'account_changes', script: 'dash', name: 'tokens', kind: 'extra', actual: 'create 1, delete 1' },
+    ] });
+    expect(cloudflare.attention.items.some(item => item.code === 'config_drift')).toBe(false);
+    expect((await view<OpsView>(h, 'ops')).digest.items.some(item => item.code === 'config_drift')).toBe(false);
+  });
+
+  it('advances drift after the scope interval even when a recent cron already refreshed usage', async () => {
+    h = await startFlows({ bindings: { DEV_NOW: new Date(NOW - 2 * MIN).toISOString() } });
+    await h.refresh<CloudflareView>('cloudflare');
+    await h.tick(NOW - 30_000);
+    expect(h.analytics.requests).toHaveLength(2);
+    await h.redeploy({ DEV_NOW: new Date(NOW).toISOString() });
+    h.cloudflare.requests.splice(0);
+    h.outboundLog.splice(0);
+
+    const refreshed = await h.refresh<CloudflareView>('cloudflare');
+    expect(refreshed.body?.refresh.refreshed).toBe(true);
+    expect(refreshed.body?.drift.in_progress).toBe(true);
+    expect(h.analytics.requests).toHaveLength(2);
+    expect(h.cloudflare.requests).toHaveLength(DRIFT_CALLS_PER_TICK);
+    expect(h.outboundLog).toHaveLength(DRIFT_CALLS_PER_TICK);
+
+    expect((await h.refresh<CloudflareView>('cloudflare')).body?.refresh.refreshed).toBe(false);
+    expect(h.cloudflare.requests).toHaveLength(DRIFT_CALLS_PER_TICK);
+  });
+
+  it('corrects a legacy audit-only snapshot and current warning on first read without rewriting the stored digest', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'home-dashboard-legacy-drift-'));
+    try {
+      h = await startFlows({ persist: dir });
+      h.cloudflare.tweaks = { extraScripts: ['synthetic-orphan'] };
+      const start = driftHour(1);
+      for (let k = 0; k < 4; k++) await h.tick(start + k * 30 * MIN);
+      expect((await view<CloudflareView>(h, 'cloudflare')).attention.items.some(item => item.code === 'config_drift')).toBe(true);
+      await h.dispose();
+      h = undefined;
+
+      const files = (await readdir(dir, { recursive: true })).filter(name => name.endsWith('.sqlite'));
+      let storedDigest: { file: string; doc: string } | null = null;
+      for (const file of files) {
+        const db = new DatabaseSync(join(dir, file));
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'state'").get() === undefined) {
+          db.close();
+          continue;
+        }
+        const row = db.prepare("SELECT doc FROM state WHERE key = 'drift'").get() as { doc: string } | undefined;
+        if (row !== undefined) {
+          const findings = [
+            { category: 'account_changes' as const, script: 'api', name: 'user', kind: 'extra' as const, actual: 'update 1' },
+            { category: 'account_changes' as const, script: 'dash', name: 'tokens', kind: 'extra' as const, actual: 'create 1, delete 1' },
+            { category: 'account_changes' as const, script: 'dash', name: 'workers.durable_objects.namespaces.query', kind: 'extra' as const, actual: 'create 21' },
+          ];
+          const previous = JSON.parse(row.doc) as DriftDoc;
+          db.prepare("UPDATE state SET doc = ? WHERE key = 'drift'").run(JSON.stringify({ ...previous, counts: countFindings(findings), findings }));
+          const digestRow = db.prepare("SELECT doc FROM state WHERE key = 'digest'").get() as { doc: string };
+          const digest = JSON.parse(digestRow.doc) as DigestDoc;
+          const doc = JSON.stringify({ ...digest, items: digest.items.map(item => item.code === 'config_drift'
+            ? { ...item, metrics: { total: 3, account_changes: 3 } } : item) });
+          db.prepare("UPDATE state SET doc = ? WHERE key = 'digest'").run(doc);
+          storedDigest = { file, doc };
+        }
+        db.close();
+      }
+      expect(storedDigest).not.toBeNull();
+
+      h = await startFlows({ persist: dir });
+      const cloudflare = await view<CloudflareView>(h, 'cloudflare');
+      expect(cloudflare.drift).toMatchObject({ status: 'ok', counts: { account_changes: 2 }, findings_omitted: 0 });
+      expect(cloudflare.drift.findings.map(finding => finding.name)).toEqual(['user', 'tokens']);
+      expect(cloudflare.attention.items.some(item => item.code === 'config_drift')).toBe(false);
+      const ops = await view<OpsView>(h, 'ops');
+      expect(ops.digest.items.some(item => item.code === 'config_drift')).toBe(false);
+      expect(h.cloudflare.requests).toEqual([]);
+      expect(h.analytics.requests).toEqual([]);
+      await h.dispose();
+      h = undefined;
+      if (storedDigest === null) throw new Error('missing synthetic legacy digest');
+      const db = new DatabaseSync(join(dir, storedDigest.file));
+      expect(db.prepare("SELECT doc FROM state WHERE key = 'digest'").get()).toEqual({ doc: storedDigest.doc });
+      db.close();
+    } finally {
+      await h?.dispose();
+      h = undefined;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([undefined, 'older-desired-state'])('rechecks changed or legacy desired context (%s), then resumes it across restart within refresh limits', async (previousHash) => {
+    const dir = await mkdtemp(join(tmpdir(), 'home-dashboard-drift-context-'));
+    try {
+      h = await startFlows({ persist: dir });
+      const start = driftHour(0);
+      for (let k = 0; k < 4; k++) await h.tick(start + k * 30 * MIN);
+      const completed = (await view<CloudflareView>(h, 'cloudflare')).drift.checked_at;
+      h.cloudflare.requests.splice(0);
+      // An explicit refresh starts another check on the day already completed by cron.
+      expect((await h.refresh<CloudflareView>('cloudflare')).body?.drift).toMatchObject({ in_progress: true, checked_at: completed });
+      expect(h.cloudflare.requests.splice(0)).toHaveLength(10);
+      await h.dispose();
+      h = undefined;
+
+      const files = (await readdir(dir, { recursive: true })).filter(name => name.endsWith('.sqlite'));
+      let previousAuditUntil: number | null = null;
+      let changed = 0;
+      for (const file of files) {
+        const db = new DatabaseSync(join(dir, file));
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'state'").get() !== undefined) {
+          const doc = JSON.parse((db.prepare("SELECT doc FROM state WHERE key = 'drift'").get() as { doc: string }).doc) as DriftDoc;
+          const run = JSON.parse((db.prepare("SELECT doc FROM state WHERE key = 'drift_run'").get() as { doc: string }).doc) as DriftRunDoc;
+          if (run.account === null) throw new Error('missing synthetic partial account');
+          previousAuditUntil = doc.audit_until;
+          db.prepare("UPDATE state SET doc = ? WHERE key = 'drift'").run(JSON.stringify({ ...doc, desired_hash: previousHash }));
+          db.prepare("UPDATE state SET doc = ? WHERE key = 'drift_run'").run(JSON.stringify({ ...run, desired_hash: previousHash,
+            account: { ...run.account, scripts: [...run.account.scripts, 'old-context-only'] } }));
+          changed++;
+        }
+        db.close();
+      }
+      expect(changed).toBe(1);
+
+      h = await startFlows({ persist: dir, bindings: { DEV_NOW: new Date(NOW + MIN).toISOString() } });
+      // A GET stays cached, even when the deployed desired state has changed.
+      expect((await view<CloudflareView>(h, 'cloudflare')).drift.checked_at).toBe(completed);
+      expect(h.cloudflare.requests).toEqual([]);
+      const first = await h.refresh<CloudflareView>('cloudflare');
+      expect(first.body?.drift).toMatchObject({ in_progress: true, checked_at: completed });
+      const calls = h.cloudflare.requests.splice(0);
+      expect(calls).toHaveLength(10);
+      expect(calls.some(call => call.url.endsWith('/workers/scripts'))).toBe(true);
+      const audit = calls.find(call => call.url.includes('/logs/audit?'));
+      expect(audit).toBeDefined();
+      expect(new URL(audit?.url ?? '').searchParams.get('since')).toBe(new Date(previousAuditUntil ?? 0).toISOString());
+      expect((await h.refresh<CloudflareView>('cloudflare')).body?.refresh.refreshed).toBe(false);
+      expect(h.cloudflare.requests).toEqual([]);
+      await h.dispose();
+      h = undefined;
+
+      // A new isolate using the same desired hash continues the current run, not the discarded one.
+      h = await startFlows({ persist: dir, bindings: { DEV_NOW: new Date(NOW + 2 * MIN).toISOString() } });
+      for (const minute of [2, 3, 4]) {
+        if (minute > 2) await h.redeploy({ DEV_NOW: new Date(NOW + minute * MIN).toISOString() });
+        const refreshed = await h.refresh<CloudflareView>('cloudflare');
+        expect(h.cloudflare.requests.splice(0)).toHaveLength(DRIFT_CALLS_PER_TICK);
+        expect(refreshed.body?.drift.in_progress).toBe(minute < 4);
+      }
+      const result = (await view<CloudflareView>(h, 'cloudflare')).drift;
+      expect(result).toMatchObject({ status: 'ok', findings: [], in_progress: false, checked_at: new Date(NOW + 4 * MIN).toISOString() });
+      expect((await h.callsOf('tasks', 'createInboxTask'))).toEqual([]);
+    } finally {
+      await h?.dispose();
+      h = undefined;
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('retries a failing step on later ticks, gives the day up after three attempts, and reports drift_unavailable on the second day', async () => {

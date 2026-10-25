@@ -118,13 +118,14 @@ describe('digest items', () => {
   });
 
   it('reports configuration drift by category counts, and a drift check failing two days in a row', () => {
-    const counts = { ...NO_DRIFT.counts, personal: 4, bindings: 1 };
+    const counts = { ...NO_DRIFT.counts, personal: 4, bindings: 1, account_changes: 3 };
     const drift = { ...NO_DRIFT, checked_at: NOW - 3_600_000, counts };
     expect(candidates(input({ drift: { configured: true, doc: drift } }))).toEqual([
       { source: 'dashboard', code: 'config_drift', severity: 'warning', metrics: { total: 5, bindings: 1, personal: 4 } },
     ]);
     // Nothing without findings, before the first check, or without the token (usage_not_configured covers that).
     expect(candidates(input({ drift: { configured: true, doc: { ...drift, counts: NO_DRIFT.counts } } }))).toEqual([]);
+    expect(candidates(input({ drift: { configured: true, doc: { ...drift, counts: { ...NO_DRIFT.counts, account_changes: 3 } } } }))).toEqual([]);
     expect(candidates(input({ drift: { configured: true, doc: NO_DRIFT } }))).toEqual([]);
     expect(candidates(input({ drift: { configured: false, doc: drift } }))).toEqual([]);
     expect(candidates(input({ drift: { configured: true, doc: { ...NO_DRIFT, consecutive_failed_days: 1 } } }))).toEqual([]);

@@ -6,10 +6,9 @@ import type { OpsReportItem } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { CreateInboxTaskRequest } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
 import { DIGEST_TASK_ATTEMPTS, GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type AppErrorCode, type CanaryStage, type OpsApp, type OpsSeverity, type OpsStatus, type QuotaRow } from './api-types.ts';
 import { DRIFT_UNAVAILABLE_AFTER_DAYS } from './api-types.ts';
-import { DRIFT_CATEGORIES } from './idl.ts';
 import { CANARY_DISABLED_CODE, type CanaryRecord } from './canary.ts';
 import type { DigestDoc } from './docs.ts';
-import { totalFindings, type DriftDoc } from './drift.ts';
+import { CONFIG_DRIFT_CATEGORIES, configurationFindings, type DriftDoc } from './drift.ts';
 import { hoursLeft, reachesPercent, type DesiredGuard } from './guard.ts';
 import { isOpsCode, isOpsSource, METRICS_MAX_KEYS, OPS_APPS, REPORT_MAX_ITEMS } from './ops-client.ts';
 import { DAY_MS, HOUR_MS, MINUTE_MS, iso, isTimestamp, utcDay } from './time.ts';
@@ -102,6 +101,15 @@ export function withTickState(items: readonly OpsReportItem[], lastTickAt: numbe
   return [...rest.filter((i) => i.severity === 'critical'), item, ...rest.filter((i) => i.severity !== 'critical')];
 }
 
+/** Current configuration differences only; audit history remains on the Cloudflare view. */
+export function configurationDrift(doc: DriftDoc): Candidate | null {
+  const total = configurationFindings(doc.counts);
+  if (doc.checked_at === null || total === 0) return null;
+  const metrics: Record<string, number> = { total };
+  for (const category of CONFIG_DRIFT_CATEGORIES) if (doc.counts[category] > 0) metrics[category] = doc.counts[category];
+  return { source: 'dashboard', code: 'config_drift', severity: 'warning', metrics };
+}
+
 /** Every warning or critical condition of this tick (§5.5 table). */
 export function candidates(input: DigestInput): Candidate[] {
   const { now, usage } = input;
@@ -136,16 +144,11 @@ export function candidates(input: DigestInput): Candidate[] {
   const failed = input.digest === undefined ? null : digestTaskFailed(input.digest, now);
   if (failed !== null) out.push(failed);
 
-  // Configuration drift: counts per category only (the names stay on the Cloudflare view). A known
-  // difference is reported like any other until the live account or the committed state changes.
+  // Configuration differences persist until the live account or committed state changes.
   if (input.drift?.configured === true) {
     const doc = input.drift.doc;
-    const total = totalFindings(doc.counts);
-    if (doc.checked_at !== null && total > 0) {
-      const metrics: Record<string, number> = { total };
-      for (const category of DRIFT_CATEGORIES) if (doc.counts[category] > 0) metrics[category] = doc.counts[category];
-      out.push({ source: 'dashboard', code: 'config_drift', severity: 'warning', metrics });
-    }
+    const drift = configurationDrift(doc);
+    if (drift !== null) out.push(drift);
     if (doc.consecutive_failed_days >= DRIFT_UNAVAILABLE_AFTER_DAYS) {
       out.push({ source: 'dashboard', code: 'drift_unavailable', severity: 'warning', metrics: { consecutive_failed_days: doc.consecutive_failed_days } });
     }

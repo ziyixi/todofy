@@ -321,7 +321,7 @@ describe('Cloudflare 监控', () => {
   it('shows 配置漂移 as ok with when it was checked and what it compares', async () => {
     await showCloudflare(healthy())
     const drift = section('配置漂移')
-    expect(within(drift).getByText('与代码一致')).toBeInTheDocument()
+    expect(within(drift).getByText('无配置差异')).toBeInTheDocument()
     expect(within(drift).getByText(/上次完成检查/)).toBeInTheDocument()
     expect(within(drift).getByText(/每天 02:00 UTC 起检查一次 7 个 Worker/)).toBeInTheDocument()
     expect(within(drift).getByText(/不读取、不显示任何值/)).toBeInTheDocument()
@@ -332,9 +332,9 @@ describe('Cloudflare 监控', () => {
     await showCloudflare(configDrift())
     const drift = section('配置漂移')
     expect(within(drift).getByText('与代码不一致：4 处')).toBeInTheDocument()
-    const items = within(drift).getAllByRole('listitem').filter((li) => li.closest('.drift-findings'))
-    expect(items.map((li) => li.textContent)).toEqual([
-      'Workersynthetic-orphan线上有，代码中没有',
+    const table = within(drift).getByRole('table', { name: '配置差异' })
+    expect(within(table).getAllByRole('row').slice(1).map((row) => row.textContent)).toEqual([
+      'Worker—synthetic-orphan线上有，代码中没有',
       '自定义域名homestray.example.com线上有，代码中没有',
       '绑定与密钥watchSYNTHETIC_KEY代码中有（secret_text），线上没有',
       '个人值未设为密钥mail-heroSYNTHETIC_PERSONAL应为密钥（secret_text），线上为 plain_text',
@@ -342,22 +342,82 @@ describe('Cloudflare 监控', () => {
     expect(screen.getAllByText(/线上配置与代码不一致/).length).toBeGreaterThan(0)
   })
 
-  it('lists changes made outside CI by how and what', async () => {
+  it.each(['ok', 'drift'] as const)('keeps account-only history out of configuration warnings when the stored state is %s', async (status) => {
     const changed = healthy()
     changed.cloudflare = {
       ...changed.cloudflare,
       drift: driftView({
-        status: 'drift',
-        counts: { ...driftView().counts, account_changes: 1 },
-        findings: [{ category: 'account_changes', script: 'dash', name: 'dns_records', kind: 'extra', actual: 'create 1, delete 5' }],
+        status,
+        counts: { ...driftView().counts, account_changes: 2 },
+        findings: [
+          { category: 'account_changes', script: 'api', name: 'user', kind: 'extra', actual: 'update 1' },
+          { category: 'account_changes', script: 'dash', name: 'tokens', kind: 'extra', actual: 'create 1, delete 1' },
+        ],
       }),
     }
     await showCloudflare(changed)
     const drift = section('配置漂移')
-    const items = within(drift).getAllByRole('listitem').filter((li) => li.closest('.drift-findings'))
-    expect(items.map((li) => li.textContent)).toEqual(['非 CI 改动dns_records经控制台：新建 1 次、删除 5 次，不是 CI 做的'])
-    expect(within(drift).getByRole('list', { name: '各类差异' })).toHaveTextContent('非 CI 改动 1')
+    expect(within(drift).getByText('无配置差异').closest('.level')).toHaveClass('level-ok')
+    expect(within(drift).queryByText(/与代码不一致/)).toBeNull()
+    expect(within(drift).queryByRole('table', { name: '配置差异' })).toBeNull()
+    const categories = within(drift).getByRole('list', { name: '各类差异' })
+    expect(within(categories).getAllByRole('listitem')).toHaveLength(7)
+    expect(categories).not.toHaveTextContent(/账户操作|非 CI 改动/)
+    const history = within(drift).getByRole('region', { name: '最近账户操作' })
+    expect(history).toHaveTextContent('已完成检查读取的历史账户操作，不表示当前配置差异。')
+    expect(within(history).getByText(/读取于/)).toBeInTheDocument()
+    const table = within(history).getByRole('table', { name: '账户操作历史' })
+    expect(within(table).getAllByRole('row').slice(1).map((row) => row.textContent)).toEqual([
+      'user经API：修改 1 次',
+      'tokens经控制台：新建 1 次、删除 1 次',
+    ])
+    expect(history.querySelector('.level-warn, .level-danger')).toBeNull()
     expect(within(drift).queryByText(/读不了账号审计日志/)).toBeNull()
+  })
+
+  it('counts only configuration differences when account history is also present', async () => {
+    const changed = configDrift()
+    changed.cloudflare = {
+      ...changed.cloudflare,
+      drift: {
+        ...changed.cloudflare.drift,
+        counts: { ...changed.cloudflare.drift.counts, account_changes: 1 },
+        findings: [...changed.cloudflare.drift.findings, { category: 'account_changes', script: 'dash', name: 'tokens', kind: 'extra', actual: 'delete 1' }],
+      },
+    }
+    await showCloudflare(changed)
+    const drift = section('配置漂移')
+    expect(within(drift).getByText('与代码不一致：4 处')).toBeInTheDocument()
+    expect(within(drift).getByRole('table', { name: '配置差异' })).not.toHaveTextContent('tokens')
+    expect(within(drift).getByRole('table', { name: '账户操作历史' })).toHaveTextContent('tokens经控制台：删除 1 次')
+  })
+
+  it('shows an empty historical window separately from a clean configuration result', async () => {
+    await showCloudflare(healthy())
+    expect(within(section('配置漂移')).getByText('无配置差异')).toBeInTheDocument()
+    const history = section('最近账户操作')
+    expect(history).toHaveTextContent('此历史窗口内没有账户操作记录。')
+    expect(within(history).queryByRole('table')).toBeNull()
+  })
+
+  it('keeps old account history informational when a later check fails', async () => {
+    const failing = healthy()
+    failing.cloudflare = {
+      ...failing.cloudflare,
+      drift: driftView({
+        status: 'drift',
+        counts: { ...driftView().counts, account_changes: 1 },
+        findings: [{ category: 'account_changes', script: 'dash', name: 'tokens', kind: 'extra', actual: 'create 1' }],
+        last_error: 'http_403',
+        last_error_at: '2026-09-29T03:30:00.000Z',
+        consecutive_failed_days: 2,
+      }),
+    }
+    await showCloudflare(failing)
+    const drift = section('配置漂移')
+    expect(within(drift).getByText('无配置差异')).toBeInTheDocument()
+    expect(within(drift).getByText(/检查失败：HTTP 403：令牌无效或权限不足（连续 2 天）/)).toHaveTextContent('下方为上次完成的检查结果。')
+    expect(within(drift).getByRole('table', { name: '账户操作历史' })).toHaveTextContent('tokens经控制台：新建 1 次')
   })
 
   it('says when the token could not read the audit log', async () => {
@@ -365,6 +425,7 @@ describe('Cloudflare 监控', () => {
     unchecked.cloudflare = { ...unchecked.cloudflare, drift: driftView({ audit_unchecked: true }) }
     await showCloudflare(unchecked)
     expect(within(section('配置漂移')).getByText(/读不了账号审计日志（需要 Account Settings Read）/)).toBeInTheDocument()
+    expect(within(section('最近账户操作')).queryByText('此历史窗口内没有账户操作记录。')).toBeNull()
   })
 
   it('says when the drift check fails, keeps the last result, and when no token is configured', async () => {
@@ -386,6 +447,8 @@ describe('Cloudflare 监控', () => {
     const drift = section('配置漂移')
     expect(within(drift).getByText('未配置令牌')).toBeInTheDocument()
     expect(within(drift).queryByRole('list', { name: '各类差异' })).toBeNull()
+    expect(within(drift).queryByText('无配置差异')).toBeNull()
+    expect(within(section('最近账户操作')).getByText('完成检查后显示账户操作历史。')).toBeInTheDocument()
   })
 
   it('shows the guard read-only with a link to its actions', async () => {
@@ -413,16 +476,38 @@ describe('Cloudflare 监控', () => {
       },
     }))
     const user = userEvent.setup()
-    const button = screen.getByRole('button', { name: '刷新用量' })
+    const button = screen.getByRole('button', { name: '刷新用量与配置' })
     expect(button).toHaveAccessibleDescription('至少间隔 60 秒')
     await user.click(button)
-    await waitFor(() => expect(screen.getByText('用量已刷新。')).toHaveAttribute('role', 'status'))
+    await waitFor(() => expect(screen.getByText('用量已刷新，配置核验状态见下方。')).toHaveAttribute('role', 'status'))
     expect(calls.map((call) => call.path)).toContain(PATHS.refreshCloudflare)
     expect(within(section('账户额度')).getByRole('meter', { name: 'Workers 请求' })).toHaveAttribute('aria-valuetext', '已用 800 次，上限 100,000 次，0.8%')
 
     refreshed = false
-    await user.click(screen.getByRole('button', { name: '刷新用量' }))
+    await user.click(screen.getByRole('button', { name: '刷新用量与配置' }))
     await waitFor(() => expect(screen.getByText('刚刚刷新过，请在 1 分钟后再试。')).toBeInTheDocument())
+  })
+
+  it('does not call a usage refresh a completed configuration check while its bounded check is in progress', async () => {
+    const base = configDrift()
+    const calls = await showCloudflare((call) => ({
+      ...base,
+      cloudflare: {
+        ...base.cloudflare,
+        drift: { ...base.cloudflare.drift, in_progress: call.path === PATHS.refreshCloudflare },
+        refresh: { ...base.cloudflare.refresh, refreshed: call.path === PATHS.refreshCloudflare },
+      },
+    }))
+    const drift = section('配置漂移')
+    const checkedAt = base.cloudflare.drift.checked_at as string
+    expect(drift.querySelector(`time[datetime="${checkedAt}"]`)).not.toBeNull()
+    expect(screen.getByText('刷新也会推进配置核验，完整检查可能需要多次刷新。')).toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole('button', { name: '刷新用量与配置' }))
+    await waitFor(() => expect(screen.getByText('用量已刷新，配置核验进行中。')).toHaveAttribute('role', 'status'))
+    expect(within(drift).getByText(/配置核验进行中，下方为上次完成的结果/)).toBeInTheDocument()
+    expect(within(drift).getByText('与代码不一致：4 处')).toBeInTheDocument()
+    expect(drift.querySelector(`time[datetime="${checkedAt}"]`)).not.toBeNull()
+    expect(calls.filter((call) => call.path === PATHS.refreshCloudflare)).toHaveLength(1)
   })
 
   it('keeps the refresh button disabled until the Worker allows the next one', async () => {
@@ -431,7 +516,7 @@ describe('Cloudflare 监控', () => {
       ...base,
       cloudflare: { ...base.cloudflare, refresh: { ...base.cloudflare.refresh, next_refresh_at: new Date(NOW.getTime() + 30_000).toISOString() } },
     })
-    const button = screen.getByRole('button', { name: '刷新用量' })
+    const button = screen.getByRole('button', { name: '刷新用量与配置' })
     expect(button).toBeDisabled()
     expect(button).toHaveAccessibleDescription('1 分钟后可再次刷新')
   })

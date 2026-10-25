@@ -166,7 +166,7 @@ describe('persistent occurrence controls', () => {
     expect(task?.description).toContain(`· ${initial[20]?.source ?? ''} · ${initial[20]?.code ?? ''} ·`);
   });
 
-  it('REST drift recovery retires a dismissal even while GraphQL usage is unavailable', async () => {
+  it('REST configuration recovery retires a dismissal with account history and unavailable GraphQL usage', async () => {
     h = await start();
     const day = 86_400_000, beginning = Math.floor(NOW / day) * day + DRIFT_UTC_HOUR * 60 * MINUTE;
     const complete = async (at: number) => {
@@ -177,7 +177,8 @@ describe('persistent occurrence controls', () => {
     await complete(beginning);
     const original = managed((await home()).attention.items.find((entry) => entry.code === 'config_drift'));
     const closed = await (await change(original, 'dismiss')).json() as AttentionItem;
-    h.cloudflare.tweaks = {}; h.analytics.answer = () => new Response('synthetic unavailable', { status: 503 });
+    h.cloudflare.tweaks = { audit: [{ context: 'dash', action: 'create', product: 'tokens' }] };
+    h.analytics.answer = () => new Response('synthetic unavailable', { status: 503 });
     await complete(beginning + day);
     expect((await home()).attention.dismissed_items?.some((entry) => entry.code === 'config_drift')).not.toBe(true);
     h.cloudflare.tweaks = { extraScripts: ['synthetic-orphan'] };

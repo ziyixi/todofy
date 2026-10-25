@@ -98,6 +98,7 @@ export interface LiveAccount {
 
 /** `drift_run`: today's check while it runs across ticks. */
 export interface DriftRunDoc {
+  readonly desired_hash: string | null;
   readonly day: string;
   readonly started_at: number;
   /** The audit window is [audit_since, started_at). */
@@ -111,6 +112,8 @@ export interface DriftRunDoc {
 
 /** `drift`: the last completed check, and how the latest attempts went. */
 export interface DriftDoc {
+  /** The desired state this scheduling context belongs to; the last completed result can be older. */
+  readonly desired_hash: string | null;
   readonly checked_at: number | null;
   readonly desired_workers: number;
   readonly counts: Readonly<Record<DriftCategory, number>>;
@@ -141,8 +144,11 @@ export function runTooLarge(run: DriftRunDoc): boolean {
 }
 
 export const NO_COUNTS: Readonly<Record<DriftCategory, number>> = Object.fromEntries(DRIFT_CATEGORIES.map((c) => [c, 0])) as Record<DriftCategory, number>;
+/** Account audit history is informational; these categories describe the current configuration. */
+export const CONFIG_DRIFT_CATEGORIES = DRIFT_CATEGORIES.filter((category) => category !== 'account_changes');
 
 export const NO_DRIFT: DriftDoc = {
+  desired_hash: null,
   checked_at: null,
   desired_workers: 0,
   counts: NO_COUNTS,
@@ -161,12 +167,16 @@ export const NO_DRIFT: DriftDoc = {
 
 /** A stored `drift` document, with the fields an older version did not write. */
 export function storedDrift(doc: DriftDoc | null): DriftDoc {
-  return doc === null ? NO_DRIFT : { ...NO_DRIFT, ...doc, counts: { ...NO_COUNTS, ...doc.counts } };
+  if (doc === null) return NO_DRIFT;
+  const findings = doc.findings.filter((finding) => finding.category !== 'account_changes' || !isAuditQuery(finding.name));
+  const counts = { ...NO_COUNTS, ...doc.counts };
+  // Counts include groups beyond the stored finding limit. Subtract only the query groups removed here.
+  return { ...NO_DRIFT, ...doc, findings, counts: { ...counts, account_changes: Math.max(0, counts.account_changes - (doc.findings.length - findings.length)) } };
 }
 
 /** A stored `drift_run`; one an older version started reads the audit log of the day before it. */
-export function storedRun(run: (Omit<DriftRunDoc, 'audit_since'> & Partial<Pick<DriftRunDoc, 'audit_since'>>) | null): DriftRunDoc | null {
-  return run === null ? null : { audit_since: run.started_at - DAY_MS, ...run };
+export function storedRun(run: (Omit<DriftRunDoc, 'audit_since' | 'desired_hash'> & Partial<Pick<DriftRunDoc, 'audit_since' | 'desired_hash'>>) | null): DriftRunDoc | null {
+  return run === null ? null : { audit_since: run.started_at - DAY_MS, desired_hash: null, ...run };
 }
 
 // ---- reading the API ------------------------------------------------------------------------------
@@ -312,8 +322,9 @@ export function auditPath(accountId: string, since: number, before: number): str
 }
 
 /** What the dashboard records as a write while the owner only looks: analytics and log queries. */
-function isQuery(product: string, type: string): boolean {
-  return product === 'analytics' || type.startsWith('observability.');
+function isAuditQuery(resource: string): boolean {
+  return resource === 'analytics' || resource.startsWith('analytics.')
+    || resource.startsWith('observability.') || resource.includes('.observability.') || resource.endsWith('.query');
 }
 
 /**
@@ -332,8 +343,8 @@ export function parseAudit(result: unknown): { changes: LiveChange[]; truncated:
     const resource = isObject(item.resource) ? item.resource : {};
     const product = typeof resource.product === 'string' ? resource.product : '';
     const type = typeof resource.type === 'string' ? resource.type : '';
-    if (isQuery(product, type)) continue;
     const parts = [product, type].filter((part) => part !== '');
+    if (isAuditQuery(parts.join('.'))) continue;
     const name = parts.length > 0 && parts.every((part) => AUDIT_NAME.test(part)) ? parts.join('.') : '(other)';
     const key = `${via} ${name} ${action}`;
     counts.set(key, { via, resource: name, action, count: (counts.get(key)?.count ?? 0) + 1 });
@@ -427,20 +438,20 @@ export type DriftPlan =
   | { readonly kind: 'start' }
   | { readonly kind: 'continue'; readonly run: DriftRunDoc };
 
-/** What a tick at `now` does about drift (a run is only ever advanced by ticks). */
-export function driftPlan(now: number, run: DriftRunDoc | null, doc: DriftDoc, configured: boolean): DriftPlan {
+/** What a tick or explicit refresh does about drift; a refresh may recheck an already completed day. */
+export function driftPlan(now: number, run: DriftRunDoc | null, doc: DriftDoc, configured: boolean, recheck = false): DriftPlan {
   const day = utcDay(now);
   if (run !== null && run.day !== day) return { kind: 'abandon', run };
   if (!configured) return { kind: 'idle' };
   if (run !== null) return { kind: 'continue', run };
-  if (new Date(now).getUTCHours() < DRIFT_UTC_HOUR || doc.last_run_day === day) return { kind: 'idle' };
+  if (!recheck && (new Date(now).getUTCHours() < DRIFT_UTC_HOUR || doc.last_run_day === day)) return { kind: 'idle' };
   return { kind: 'start' };
 }
 
 /** Today's run; its audit window starts where the previous completed check's ended (at most a week back). */
-export function newDriftRun(now: number, previous: DriftDoc): DriftRunDoc {
+export function newDriftRun(now: number, previous: DriftDoc, desiredHash: string | null = null): DriftRunDoc {
   const since = Math.max(previous.audit_until ?? now - DAY_MS, now - AUDIT_LOOKBACK_MAX_MS);
-  return { day: utcDay(now), started_at: now, audit_since: since, account: null, pending: null, scripts: {}, attempts: 0 };
+  return { desired_hash: desiredHash, day: utcDay(now), started_at: now, audit_since: since, account: null, pending: null, scripts: {}, attempts: 0 };
 }
 
 export interface AdvanceResult {
@@ -565,6 +576,7 @@ export function compareDrift(desired: DesiredState, account: LiveAccount, script
   // Account changes outside CI: one finding per way in and resource, its actions with counts.
   const changes = new Map<string, DriftFinding>();
   for (const change of account.changes ?? []) {
+    if (isAuditQuery(change.resource)) continue;
     const key = `${change.via} ${change.resource}`;
     const actions = `${change.action} ${String(change.count)}`;
     const seen = changes.get(key)?.actual;
@@ -586,6 +598,10 @@ export function totalFindings(counts: Readonly<Record<DriftCategory, number>>): 
   return DRIFT_CATEGORIES.reduce((sum, category) => sum + counts[category], 0);
 }
 
+export function configurationFindings(counts: Readonly<Record<DriftCategory, number>>): number {
+  return CONFIG_DRIFT_CATEGORIES.reduce((sum, category) => sum + counts[category], 0);
+}
+
 // ---- documents and the view -----------------------------------------------------------------------
 
 /** The `drift` document after a completed run. */
@@ -594,6 +610,7 @@ export function completedDoc(previous: DriftDoc, run: DriftRunDoc, now: number, 
   const findings = compareDrift(desired, account, run.scripts);
   return {
     ...previous,
+    desired_hash: run.desired_hash,
     checked_at: now,
     desired_workers: Object.keys(desired.workers).length,
     counts: countFindings(findings),
@@ -642,7 +659,7 @@ export function driftView(doc: DriftDoc, configured: boolean, now: number): Drif
       ? doc.consecutive_failed_days > 0
         ? 'failing'
         : 'never_checked'
-      : total > 0
+      : configurationFindings(doc.counts) > 0
         ? 'drift'
         : 'ok';
   const findings = doc.findings.slice(0, DRIFT_VIEW_FINDINGS_MAX);

@@ -163,6 +163,11 @@ clean:
    protected `infra-review` environment's approval and applies that plan only while the current plan still has
    its fingerprint.
 
+Reconcile's final infrastructure gate requires `in_sync`, `repaired`, or a successful reviewed apply.
+An unresolved/manual plan is a failed result even when detection completed successfully. Finish a deployment
+handoff only after the matching main revision's reconcile verifies Workers, VPS, inventory and infrastructure.
+Home's historical account operations are informational; they do not count as configuration differences.
+
 Locally, the bootstrap writes only a missing state object and `rotate-passphrase` re-encrypts the state.
 See [infra](../infra/README.md).
 
@@ -191,6 +196,9 @@ Home's private drift state is generated from committed configs/wrappers and chec
 [test_drift_desired.py](../.github/scripts/test_drift_desired.py). Regenerate it in the same commit; it
 contains names, types and flags rather than secret values. Local development uses local bindings and
 D1 `--local`, never `--remote`, with each application's own `.dev.vars`.
+Optional secret presence follows the same manifest policy as CI. Home invalidates an unfinished comparison
+when the desired content changes, and its existing Cloudflare refresh can advance a bounded recheck on the
+same day. Complete that check and verify its timestamp instead of treating an analytics refresh as a new result.
 
 ### Production environment
 

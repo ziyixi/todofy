@@ -569,10 +569,10 @@ export function outboundPerTick(registry: RegistryDef = REGISTRY): number {
   return ops.length + probeCount(registry) + 1 + guarded.length + 2 * canaries + 1 + DRIFT_CALLS_PER_TICK;
 }
 
-/** Outbound calls of one owner refresh: status() and probes of /home, or the GraphQL of /cloudflare. */
+/** Outbound calls of one owner refresh: status() and probes of /home, or GraphQL and a drift batch of /cloudflare. */
 export function outboundPerRefresh(registry: RegistryDef = REGISTRY): number {
   const ops = registry.entries.filter((entry) => entry.status.type === 'ops_v1').length;
-  return Math.max(ops + probeCount(registry), 1);
+  return Math.max(ops + probeCount(registry), 1 + DRIFT_CALLS_PER_TICK);
 }
 
 function probeCount(registry: RegistryDef): number {
