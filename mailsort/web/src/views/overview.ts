@@ -96,7 +96,7 @@ function budget(status: ServiceStatus, now: number): HTMLElement {
     meter(usage.spentUsd, usage.limitUsd, '本月 Claude 费用', usage.providerLimitReached || exhausted ? 'danger' : ''),
     el('p', { class: 'hint' }, `本应用记录的 API 用量：输入 ${String(usage.inputTokens)} token · 输出（含思考）${String(usage.outputTokens)} token · 思考明细${usage.thinkingTokens === undefined ? '未提供' : ` ${String(usage.thinkingTokens)} token`}`),
     el('p', { class: 'hint' }, '费用按这些用量及标价估算，不含赠金、折扣或本应用以外的调用；工作区消费以 Anthropic 账单为准。'),
-    el('p', { class: 'hint' }, usage.nextBatchTime === undefined ? '下批判断时间尚未提供' : `下批判断最早在 ${relative(usage.nextBatchTime, now)}（${when(usage.nextBatchTime)}），通常约每小时一批。`),
+    el('p', { class: 'hint' }, usage.nextBatchTime === undefined ? '下批判断时间尚未提供' : `下批判断最早在 ${relative(usage.nextBatchTime, now)}（${when(usage.nextBatchTime)}）。日常新邮件自动分类通常约每小时一批。`),
     el('p', { class: 'meta' }, usage.lastRequestTime === undefined ? '尚无已记录用量的 Claude 响应' : `最近用量记录 ${when(usage.lastRequestTime)}`),
     usage.lastErrorCode === '' ? null : el('p', { class: 'hint warn' }, `最近一次请求：${claudeErrorMessage(usage.lastErrorCode)}`),
     note === '' && waiting === '' ? null : el('p', { class: 'hint' }, [note, waiting].filter((text) => text !== '').join('；')),

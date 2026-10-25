@@ -91,7 +91,7 @@ export async function renderLabels(ctx: ViewContext): Promise<void> {
       el('div', { class: 'actions' }, start),
     )
     fill(body,
-      el('p', { class: 'hint lead' }, 'Claude Opus 5.5（medium）按固定提示词分到 P1、P2、P3、P4。约每小时批量判断，分类保持原有未读状态。'),
+      el('p', { class: 'hint lead' }, 'Claude Opus 5.5（medium）按固定提示词分到 P1、P2、P3、P4。日常新邮件约每小时自动判断，分类保持原有未读状态。'),
       setup,
       result,
       unread,

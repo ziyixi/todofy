@@ -40,7 +40,7 @@ import { setVerdict } from './feedback.ts';
 import { FLOW_RANGES, readFlow } from './flow.ts';
 import { GoogleError, type GmailClient } from './gmail.ts';
 import { newEtag, shortId } from './ids.ts';
-import { createLabelMerge, labelMergeSummary, migrationActive, MergeError, resumeLabelMerge, type MergePlanItem, type MergeSummary } from './label-merge.ts';
+import { createLabelMerge, labelMergeSummary, mergeWritesToday, migrationActive, MergeError, resumeLabelMerge, type MergePlanItem, type MergeSummary } from './label-merge.ts';
 import { canonicalDecision, canonicalReview, effectiveLedgerRow } from './label-identity.ts';
 import {
   DAILY_WRITE_LIMIT_MAX,
@@ -962,7 +962,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     if (request.name !== 'serviceStatus') notFound();
     const { store } = ctx;
     const settings = readSettings(store);
-    const usage = store.usage(utcDay(ctx.now));
+    const day = utcDay(ctx.now);
+    const usage = store.usage(day);
+    const gmailWriteCapFull = usage.applied + mergeWritesToday(store, day) >= settings.dailyWriteLimit;
     const auth = authState(store, ctx.env);
     const lastSync = Number(store.getMeta('last_sync_at') ?? '');
     const alarm = await ctx.alarmAt();
@@ -986,6 +988,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       reviewCount: store.count(`SELECT count(*) AS n FROM review WHERE state = 'pending'`),
       decidedTodayCount: usage.decided,
       appliedTodayCount: usage.applied,
+      ...(gmailWriteCapFull ? { gmailWriteResumeTime: timestampFromMs(Math.floor(ctx.now / DAY) * DAY + DAY) } : {}),
       unsureTodayCount: usage.unsure,
       gmailCallTodayCount: usage.gmail_calls,
       aiCallTodayCount: usage.ai_calls,

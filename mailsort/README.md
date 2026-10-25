@@ -33,7 +33,9 @@ leaves pending mail for the next UTC month. There is no cheaper-model fallback.
 ## UI and existing data
 
 - 概览: mode, Gmail status, last check, next model batch, flow and recorded Claude usage.
-- 分级: four fixed queues, counts and explicit unread-batch progress.
+- 分级: four fixed queues, counts and explicit unread-batch progress. A manual start queues immediately; existing
+  P1-P4 mail is skipped. While an active batch is visible, progress updates every 30 seconds. It stops on completion
+  or leaving the page, and a reached daily write cap shows its UTC-reset time in the browser timezone.
 - 设置: mode, write limits and undo. Old examples, replay results and decision evidence remain readable as history.
 
 Off, shadow and live modes retain their existing meanings. Shadow records decisions without changing Gmail;

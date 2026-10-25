@@ -1,8 +1,11 @@
 /** Priority batch actions and progress, exercised through the generated owner API. */
 import { create } from '@ziyixi/proto/protobuf'
+import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import { ClaudeBudgetSchema, Mode, UnreadClassification_State, UnreadClassificationSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
-import { mountApp, type Host } from './app.ts'
+import { mountApp, type Host, type ViewContext } from './app.ts'
+import { api } from './api.ts'
 import { FakeServer, NOW, settle } from './test/fakeServer.ts'
+import { unreadClassificationCard } from './views/unread-classification.ts'
 
 const host: Host = { now: () => NOW, confirm: () => true }
 
@@ -48,7 +51,9 @@ describe('priority batch classification', () => {
     expect(ready.textContent).toContain('包括已归档邮件，排除垃圾邮件和回收站')
     expect(ready.textContent).toContain('P1 留在收件箱，P2–P4 归档')
     expect(ready.textContent).toContain('保留邮件、未读状态、星标和其他标签')
-    expect(ready.textContent).toContain('Claude 约每小时批量判断，使用配置的月度预算')
+    expect(ready.textContent).toContain('已有 P1–P4 标签的邮件会跳过')
+    expect(ready.textContent).toContain('点击后立即排队，在剩余模型预算和 Gmail 写入额度内分批处理')
+    expect(ready.textContent).not.toContain('每小时')
     expect(server.calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
   })
 
@@ -73,6 +78,23 @@ describe('priority batch classification', () => {
     expect(button(card, '刷新进度').disabled).toBe(false)
     expect(card.textContent).toContain('总数尚未确定')
     expect(server.settings).toEqual(settings)
+  })
+
+  it('immediately consumes the refreshed status after starting, without a settings request', async () => {
+    const server = liveServer()
+    const card = await open(server)
+    const fetcher = globalThis.fetch
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      const response = await fetcher(url, init)
+      if (url.endsWith('/unreadClassification:start')) server.unreadClassification = batch()
+      return response
+    })
+    button(card, '整理当前未读').click()
+    await settle()
+    expect(card.textContent).toContain('总数 100 · 待处理 60 · 已应用 30')
+    expect(card.textContent).not.toContain('总数尚未确定')
+    expect(server.calls.filter((call) => call.path === '/api/v2/serviceStatus')).toHaveLength(2)
+    expect(server.calls.some((call) => call.path.startsWith('/api/v2/settings'))).toBe(false)
   })
 
   it('requests only unread fallback P1 for rechecking and explains the cohort', async () => {
@@ -156,7 +178,7 @@ describe('priority batch classification', () => {
     expect(server.calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
   })
 
-  it('keeps scanning totals provisional and only updates batch progress on manual refresh', async () => {
+  it('keeps scanning totals provisional until the next progress refresh', async () => {
     const server = liveServer()
     server.unreadClassification = batch(UnreadClassification_State.SCANNING)
     const card = await open(server)
@@ -191,12 +213,13 @@ describe('priority batch classification', () => {
     { spentUsd: 3, providerLimitReached: true, message: 'Anthropic 工作区已达到消费上限，等待额度恢复后继续' },
   ])('shows a monthly budget or provider cap wait: $message', async ({ message, ...fields }) => {
     const server = liveServer()
-    server.status = { writeScope: true, claudeBudget: create(ClaudeBudgetSchema, { month: '2026-10', limitUsd: 20, ...fields }) }
+    server.status = { writeScope: true, gmailWriteResumeTime: timestampFromMs(NOW + 16 * 3_600_000), claudeBudget: create(ClaudeBudgetSchema, { month: '2026-10', limitUsd: 20, ...fields }) }
     server.unreadClassification = batch()
     const card = await open(server)
     expect(card.textContent).toContain(message)
     expect(card.textContent).not.toContain('本轮整理已结束')
     expect(card.textContent).not.toContain('下一个 UTC 日')
+    expect(card.textContent).not.toContain('已达本应用今日 Gmail 写入上限')
     expect(button(card, '整理当前未读').disabled).toBe(true)
   })
 
@@ -209,6 +232,38 @@ describe('priority batch classification', () => {
     expect(card.textContent).toContain('已应用 30')
     expect(card.textContent).not.toContain('预算已用完')
     expect(server.calls.every((call) => call.method === 'GET')).toBe(true)
+  })
+
+  it('shows an actual Gmail daily-cap resume time instead of calling it a model retry', async () => {
+    const server = liveServer()
+    server.status = { writeScope: true, gmailWriteResumeTime: timestampFromMs(NOW + 16 * 3_600_000) }
+    server.unreadClassification = batch()
+    const card = await open(server)
+    expect(card.textContent).toContain('已达本应用今日 Gmail 写入上限')
+    expect(card.textContent).toContain('10-02 08:00（本地时间）')
+    expect(card.textContent).toContain('每日额度于 UTC 00:00 重置')
+    expect(card.textContent).not.toContain('重试时间')
+    expect(card.textContent).not.toContain('下批判断最早在')
+    expect(server.calls.some((call) => call.path.startsWith('/api/v2/settings'))).toBe(false)
+  })
+
+  it('does not show a past eligibility timestamp as a future batch wait', async () => {
+    const server = liveServer()
+    server.status = { writeScope: true, claudeBudget: create(ClaudeBudgetSchema, { limitUsd: 20, nextBatchTime: timestampFromMs(NOW - 60_000) }) }
+    server.unreadClassification = batch()
+    const card = await open(server)
+    expect(card.textContent).toContain('后台分批整理中')
+    expect(card.textContent).toContain('进度每 30 秒自动更新')
+    expect(card.textContent).not.toContain('下批判断最早在')
+  })
+
+  it('keeps model configuration failures ahead of the daily Gmail-cap explanation', async () => {
+    const server = liveServer()
+    server.status = { writeScope: true, gmailWriteResumeTime: timestampFromMs(NOW + 16 * 3_600_000), claudeBudget: create(ClaudeBudgetSchema, { limitUsd: 20, lastErrorCode: 'claude_401' }) }
+    server.unreadClassification = batch()
+    const card = await open(server)
+    expect(card.textContent).toContain('Claude API 授权失败')
+    expect(card.textContent).not.toContain('已达本应用今日 Gmail 写入上限')
   })
 
   it('reports completion with distinct applied, skipped and failed results and allows a new batch', async () => {
@@ -282,5 +337,65 @@ describe('priority batch classification', () => {
     await settle()
     expect(card.textContent).toContain('本轮整理已结束')
     expect(button(card, '整理当前未读').disabled).toBe(false)
+  })
+})
+
+/** Local lifecycle only: the card reuses the same service-status request as the shell. */
+describe('active progress refresh', () => {
+  const leaving: (() => void)[] = []
+  afterEach(() => {
+    for (const leave of leaving.splice(0)) leave()
+  })
+
+  async function activeCard(server: FakeServer) {
+    server.install()
+    let status = api.getServiceStatus({ name: 'serviceStatus' })
+    const ctx: ViewContext = {
+      main: document.createElement('main'), host, go: () => undefined,
+      status: () => status,
+      refreshStatus: () => { status = api.getServiceStatus({ name: 'serviceStatus' }) },
+      onLeave: (cleanup) => { leaving.push(cleanup) },
+    }
+    const card = unreadClassificationCard(ctx, await status)
+    document.body.append(card)
+    return card
+  }
+
+  it('updates an active visible batch every 30 seconds and stops on completion', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const server = liveServer()
+    server.unreadClassification = batch()
+    const card = await activeCard(server)
+    server.unreadClassification = create(UnreadClassificationSchema, { ...batch(UnreadClassification_State.COMPLETED), pendingCount: 0, deferredCount: 0 })
+    await vi.advanceTimersByTimeAsync(29_999)
+    expect(card.textContent).not.toContain('本轮整理已结束')
+    expect(server.calls.filter((call) => call.path === '/api/v2/serviceStatus')).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(card.textContent).toContain('本轮整理已结束')
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(server.calls.filter((call) => call.path === '/api/v2/serviceStatus')).toHaveLength(2)
+    expect(server.calls.every((call) => call.method === 'GET')).toBe(true)
+  })
+
+  it('pauses while hidden, refreshes once on visible return and stops when the page is left', async () => {
+    vi.useFakeTimers()
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const server = liveServer()
+    server.unreadClassification = batch()
+    await activeCard(server)
+    hidden.mockReturnValue(true)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(90_000)
+    expect(server.calls.filter((call) => call.path === '/api/v2/serviceStatus')).toHaveLength(1)
+    hidden.mockReturnValue(false)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.calls.filter((call) => call.path === '/api/v2/serviceStatus')).toHaveLength(2)
+    for (const leave of leaving.splice(0)) leave()
+    await vi.advanceTimersByTimeAsync(90_000)
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(server.calls.filter((call) => call.path === '/api/v2/serviceStatus')).toHaveLength(2)
   })
 })

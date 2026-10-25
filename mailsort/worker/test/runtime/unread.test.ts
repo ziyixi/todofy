@@ -1,5 +1,6 @@
 /** Explicit unread batches through the real owner API, SQLite, Alarm pipeline and independent Gmail fake. */
 import { afterEach, expect, it } from 'vitest';
+import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { Mode, UnreadClassification_State as State } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
 import { DAY, MINUTE, op, startHarness, T0, type Harness } from './harness.ts';
@@ -90,6 +91,39 @@ it('does not spend model allowance on already graded or no-longer-unread message
   expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 2, appliedCount: 0, skippedCount: 2 });
   expect(h.up.claude.calls).toHaveLength(0);
   expect(modifies(h)).toHaveLength(0);
+});
+
+it('skips already prioritized mail at a full daily cap and defers only eligible unclassified mail', async () => {
+  await ready();
+  const settings = await h.api.getSettings({ name: 'settings' });
+  const graded = mail(1101, ['UNREAD', h.up.gmail.labelIdByName('P3') ?? '']);
+  const unclassified = mail(1102);
+  deliver(h, graded, T0 - DAY);
+  deliver(h, unclassified, T0 - DAY);
+  const original = gmailLabels(h, graded.id);
+  await h.sql(`INSERT INTO usage (day, applied) VALUES ('2026-10-01', ?) ON CONFLICT (day) DO UPDATE SET applied = excluded.applied`, settings.dailyWriteLimit);
+  await start();
+  await h.step(T0 + MINUTE);
+  expect(await progress()).toMatchObject({ state: State.RUNNING, totalCount: 2, skippedCount: 1, pendingCount: 1, deferredCount: 1, appliedCount: 0 });
+  expect(await h.sql(`SELECT message_id, not_before FROM pending`)).toEqual([{ message_id: unclassified.id, not_before: T0 + DAY }]);
+  expect(h.up.claude.calls).toEqual([]);
+  expect(modifies(h)).toEqual([]);
+  expect(gmailLabels(h, graded.id)).toEqual(original);
+  expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).gmailWriteResumeTime).toEqual(timestampFromMs(T0 + DAY));
+  expect(await h.api.getSettings({ name: 'settings' })).toEqual(settings);
+});
+
+it('reports the Gmail write resume time only when automatic and consolidation writes fill the current UTC day', async () => {
+  await ready();
+  const settings = await h.api.getSettings({ name: 'settings' });
+  const status = () => h.api.getServiceStatus({ name: 'serviceStatus' });
+  expect((await status()).gmailWriteResumeTime).toBeUndefined();
+  await h.sql(`INSERT INTO usage (day, applied) VALUES ('2026-10-01', ?) ON CONFLICT (day) DO UPDATE SET applied = excluded.applied`, settings.dailyWriteLimit - 1);
+  expect((await status()).gmailWriteResumeTime).toBeUndefined();
+  await h.sql(`INSERT INTO meta (key, value) VALUES ('merge_writes', '{"day":"2026-10-01","count":1}')`);
+  expect((await status()).gmailWriteResumeTime).toEqual(timestampFromMs(T0 + DAY));
+  await h.clock(T0 + DAY);
+  expect((await status()).gmailWriteResumeTime).toBeUndefined();
 });
 
 it('uses the remaining daily write allowance and resumes next day without changing caps or tripping the breaker', async () => {

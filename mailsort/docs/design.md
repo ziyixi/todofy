@@ -59,8 +59,9 @@ deployment ceiling and breaker can lower the owner mode. Setup or deployment doe
 
 The existing Alarm normally maintains Gmail every five minutes. A persisted `next_model_at` starts new model work
 roughly hourly. It drains pending work in batches of up to ten, one request per pass, then schedules the next hour.
-The pass stays within 40 external requests and existing run/day Gmail write caps. Reached write caps wait through
-the normal queue; a routine cap is not a breaker fault.
+The pass stays within 40 external requests and existing run/day Gmail write caps. Message eligibility and existing
+P1-P4 labels are checked before a reached write cap can defer it, so skip-only work can finish without a model or
+Gmail write. Eligible mail waits through the normal queue; a routine cap is not a breaker fault.
 
 History registers messages independently by Gmail message ID. Normal processing retains its Inbox and receipt
 cutoffs and now skips read or already-classified mail. Each unread new reply can be judged independently of other
@@ -113,7 +114,11 @@ mode/write controls and undo. Old examples, model stages and replay results are 
 
 Home's private Ops binding exposes fresh mode/auth/pending counts and Claude budget warnings. It no longer declares
 the account Workers AI guard capability: shedding unrelated free-model usage cannot switch or stop Mailsort's Claude
-model. No new public endpoint or polling timer is added. Home owns its existing warning dismissal behavior.
+model. The manual batch card consumes the fresh status after Start and reads status every 30 seconds only while
+its batch is active and visible. It cancels on hide/leave/completion and refreshes once on visible return.
+`ServiceStatus.gmail_write_resume_time` reports the next UTC midnight only when the effective daily write cap is
+full. The UI uses that timestamp for a specific local-time explanation. No new endpoint or scheduler is added.
+Home owns its existing warning dismissal behavior.
 
 ## 8. Verification and release
 

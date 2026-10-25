@@ -96,3 +96,17 @@ a Canary or creating a task. Screenshots remain private, outside Git.
 
 The earlier original-100 batch ended with 45 Gmail changes, 55 skipped and zero pending after its five unstarted
 rechecks were cancelled. They must not resume. This rollout starts no original-100 or all-unread reclassification.
+
+
+## Manual unread progress follow-up
+
+The owner started the default unread action at `2026-10-24T23:53:59.042Z`. It registered 113 messages. The initial
+page showed 113 pending and 110 deferred with no applied/skipped entries. After the UTC day boundary, the existing
+batch progressed without restart and completed: 12 actual Gmail applications, 101 skipped, zero pending/failures.
+App-recorded Claude nominal monthly cost was $0.13058, with no current model error. Only status/settings metadata
+was read; no message body, subject, sender or message ID was exported.
+
+Two regressions were reproduced locally: the card retained its initial POST snapshot until manual refresh, and
+a full daily write cap prevented even already-labelled messages from reaching their skip check. The fix updates
+active visible progress every 30 seconds, consumes the fresh status immediately after Start, checks eligibility before
+write-cap waits, and returns an exact daily write-resume timestamp. Existing limits and the real batch are preserved.

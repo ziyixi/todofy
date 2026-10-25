@@ -294,15 +294,10 @@ async function prepareMail(ctx: MailContext, messageId: string, attempts: number
   const unread = isUnreadPending(store, messageId);
   const recheckFallback = unread && unreadRechecksFallback(store);
   const recheckInitial100 = unread && unreadRechecksInitial100(store);
-  if (unread || writesLive(store, ctx.ceiling)) {
-    // Explicit batches and live sorting retain work when Gmail writes must wait. A pause or reached write cap must leave it queued.
-    const at = ctx.now();
-    const settings = readSettings(store);
-    const dayFull = store.usage(utcDay(at)).applied + mergeWritesToday(store, utcDay(at)) >= settings.dailyWriteLimit;
-    if (!writesLive(store, ctx.ceiling) || dayFull || ctx.counter.runWrites >= settings.runWriteLimit) {
-      ctx.transact(() => store.run(`UPDATE pending SET not_before = ? WHERE message_id = ?`, dayFull ? nextUtcMidnight(at) : at + ALARM_IDLE_MS, messageId));
-      return 'later';
-    }
+  if (unread && !writesLive(store, ctx.ceiling)) {
+    // A paused explicit batch must retain its members without reading their contents.
+    ctx.transact(() => store.run(`UPDATE pending SET not_before = ? WHERE message_id = ?`, ctx.now() + ALARM_IDLE_MS, messageId));
+    return 'later';
   }
   let read;
   try {
@@ -345,7 +340,16 @@ async function prepareMail(ctx: MailContext, messageId: string, attempts: number
     ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'before_install'); });
     return 'skipped';
   }
-  // Deduplication is by message ID in Store.enqueue. A new reply must receive its own urgency judgement.
+  // Ineligible mail can leave the batch even when the Gmail write allowance is exhausted.
+  if (unread || writesLive(store, ctx.ceiling)) {
+    const at = ctx.now();
+    const settings = readSettings(store);
+    const dayFull = store.usage(utcDay(at)).applied + mergeWritesToday(store, utcDay(at)) >= settings.dailyWriteLimit;
+    if (dayFull || ctx.counter.runWrites >= settings.runWriteLimit) {
+      ctx.transact(() => store.run(`UPDATE pending SET not_before = ? WHERE message_id = ?`, dayFull ? nextUtcMidnight(at) : at + ALARM_IDLE_MS, messageId));
+      return 'later';
+    }
+  }
 
   return { read, gathered: await gather(read), priorPriority: priorPriority ?? null, recheck: recheckFallback || recheckInitial100, unread, attempts };
 }

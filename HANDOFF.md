@@ -13,8 +13,9 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 ## Current work
 
 Unread progress follow-up (`codex/mailsort-unread-progress`): the owner started the current unread batch and
-reported no visible progress. It registered113 messages before the UTC day changed. After reset, limited live
-metadata confirmed12 applied/28 skipped/73 pending, a healthy Claude request and live mode. No batch was restarted.
+reported no visible progress. It registered 113 messages before the UTC day changed. After reset, limited live
+metadata confirmed completion: 12 applied / 101 skipped / 0 pending / 0 failures, $0.13058 nominal Claude usage and live mode.
+No batch was restarted.
 The fixes in progress are card-local visible-only progress updates, an exact daily-write resume timestamp, and
 checking already-labelled eligibility before a reached write cap. Existing budgets and request/batch identities stay.
 
