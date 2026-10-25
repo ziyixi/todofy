@@ -4,6 +4,10 @@ Read the root rules, [README](README.md), [design](docs/design.md) and [verifica
 
 - The web app uses the generated Tasks UI client. The Worker owns D1, validation and recurrence advancement.
 - Ordinary labels carry no GTD semantics. Native stages, areas, lead windows, flags and dependencies are task fields.
+- Goals owns annual Objective/KR definitions and manual result progress. A Task/Subtask's optional KR is independent
+  of its planning stage; Steps inherit their direct parent's KR. Task completion never writes Goal progress or
+  confirms milestones. GoalCatalog contains bounded definitions, not progress history; normal task views do not
+  fetch it. Keep source OKRs and private import inputs out of Git. See [Goals](docs/goals.md).
 - TasksApi grants generic `read` or `read-write` binding access; TaskInbox grants create-only access per `source`
   (`home`, `watch`). Do not hardcode other caller app names. Mail conversion and the Mail categories are Tasks
   features over Todofy's Mail entry (`MAIL`); Todofy owns mail content and never writes a task.

@@ -23,7 +23,7 @@ export function useTaskView(
   const visibleView = useRef("");
   const loadedPages = useRef(0);
   const loadedRows = useRef(0);
-  const isListView = !["plan", "focus", "mail", "catalog"].includes(route.page);
+  const isListView = !["goals", "plan", "focus", "mail", "catalog"].includes(route.page);
   /** One page, or, with `keepRows`, the first pages until they hold that many rows (at most five). */
   const read = useCallback(
     async (pageToken = "", keepRows = 0) => {

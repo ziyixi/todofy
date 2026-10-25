@@ -118,7 +118,11 @@ it("sends UpdateWeeklyBet with no request ID, its etag outside the masked body, 
       return answers.shift()!;
     }),
   );
-  expect(await api.setWeeklyBet(WORK)).toEqual(WORK);
+  expect(await api.setWeeklyBet(WORK)).toEqual({
+    ...WORK,
+    keyResultId: "",
+    keyResultTitle: "",
+  });
   expect(bodies[0]).toEqual({ text: "Ship the draft" });
   await expect(api.setWeeklyBet(WORK)).rejects.toEqual(
     new BetNotSaved("changed"),
@@ -151,7 +155,21 @@ it("reads the plan's Bets and leaves out an area this build does not know", asyn
     ),
   );
   expect((await api.readPlan()).weeklyBets).toEqual([
-    { weekStart: "2026-10-05", area: "personal", text: "Rest", etag: "2" },
-    { weekStart: "2026-10-12", area: "work", text: "", etag: "3" },
+    {
+      weekStart: "2026-10-05",
+      area: "personal",
+      text: "Rest",
+      etag: "2",
+      keyResultId: "",
+      keyResultTitle: "",
+    },
+    {
+      weekStart: "2026-10-12",
+      area: "work",
+      text: "",
+      etag: "3",
+      keyResultId: "",
+      keyResultTitle: "",
+    },
   ]);
 });

@@ -58,6 +58,7 @@ import type {
   PlusActions,
   PlusData,
   PlusSnapshot,
+  RenderGoalPicker,
   TimerSnapshot,
   View,
 } from "./model";
@@ -68,6 +69,7 @@ export interface PlanningAppProps {
   language: Language;
   onOpenTask: (id: string) => void;
   onSettings: () => void;
+  renderGoalPicker?: RenderGoalPicker;
   onReady?: (plan?: PlanState) => void;
   externalTaskId?: string;
   /** A confirmed task write outside this planning surface requires a fresh snapshot. */
@@ -109,6 +111,7 @@ export function App({
   language,
   onOpenTask,
   onSettings,
+  renderGoalPicker,
   onReady,
   externalTaskId,
   refreshRevision,
@@ -724,7 +727,9 @@ export function App({
           aria-label={
             data.focus.timer.status === "running" ? text.pause : text.resume
           }
-          title={data.focus.timer.status === "running" ? text.pause : text.resume}
+          title={
+            data.focus.timer.status === "running" ? text.pause : text.resume
+          }
           onClick={() =>
             commandTimer(
               data.focus.timer?.status === "running" ? "pause" : "resume",
@@ -889,6 +894,7 @@ export function App({
                     busy={busy}
                     run={run}
                     actions={planActions}
+                    renderGoalPicker={renderGoalPicker}
                   />
                   <PlanView
                     plan={data.plan}
@@ -902,6 +908,7 @@ export function App({
                     pending={pendingCards}
                     run={run}
                     actions={planActions}
+                    renderGoalPicker={renderGoalPicker}
                     editTask={openTask}
                     completeReview={(task) => complete(task, "")}
                     completeTask={(task, day) => void complete(task, day)}

@@ -9,6 +9,7 @@ import "@ziyixi/planning-ui/styles.css";
 import { api, send } from "./api";
 import type { CompletedTask } from "./useTaskActions";
 import { usePlanView } from "./usePlanView";
+import { GoalPicker } from "./components/GoalPicker";
 
 /** Focus' Pause when away, a setting of this device like Plan's view: "on", or absent for off. */
 const IDLE_PAUSE_KEY = "tasks.idle-pause";
@@ -94,6 +95,7 @@ export default function PlanningPage({
     <div className="planning-ui">
       <PlanningApp
         actions={actions}
+        renderGoalPicker={(props) => <GoalPicker {...props} />}
         refreshRevision={refreshRevision}
         review={review}
         view={page}

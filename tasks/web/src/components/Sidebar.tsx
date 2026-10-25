@@ -38,6 +38,7 @@ const navigationGroups = [
   {
     title: "Planning",
     items: [
+      { page: "goals", title: "Goals", icon: Target },
       { page: "plan", title: "Plan", icon: Target },
       { page: "focus", title: "Focus", icon: Timer },
       { page: "gtd", title: "GTD", icon: ChartLine },
@@ -121,7 +122,7 @@ export function Sidebar({
   }
   const [showArchived, setShowArchived] = useState(false);
   const active = (page: Route["page"], id = "") =>
-    route.page === page && route.id === id;
+    route.page === page && (page === "goals" || route.id === id);
   const projects = catalog.projects.filter(
     (project) => project.archived === showArchived && !project.inbox,
   );

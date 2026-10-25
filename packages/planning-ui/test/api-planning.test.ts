@@ -1,8 +1,81 @@
 import { expect, it } from "vitest";
 import { create } from "@ziyixi/proto/protobuf";
 import { TaskSchema } from "@ziyixi/proto/tasks/ui/v1/task_pb";
+import { RpcStatusError } from "@ziyixi/proto/http-client";
+import { parseStatus } from "@ziyixi/proto/rpc-status";
 import { planningTask } from "../src/api";
 import { fakeActions } from "./transport";
+
+it("preserves the server refusal when a Bet's new goal cannot be selected", async () => {
+  const status = parseStatus(400, {
+    error: {
+      code: 400,
+      status: "FAILED_PRECONDITION",
+      message: "Choose an active Key Result",
+      details: [
+        {
+          "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+          reason: "PRECONDITION_FAILED",
+          domain: "tasks.ziyixi.science",
+        },
+      ],
+    },
+  });
+  if (!status) throw new Error("Synthetic goal refusal is invalid");
+  const refusal = new RpcStatusError(status);
+  const actions = fakeActions(async () => {
+    throw refusal;
+  });
+  await expect(
+    actions.setWeeklyBet(
+      {
+        weekStart: "2026-10-12",
+        area: "work",
+        text: "Synthetic Bet",
+        etag: "1",
+        keyResultId: "inactive-result",
+      },
+      ["key_result_id"],
+    ),
+  ).rejects.toBe(refusal);
+});
+
+it("writes only the requested weekly Bet field and preserves joined goal references", async () => {
+  const requests: { url: URL; body: Record<string, unknown> }[] = [];
+  const actions = fakeActions(async (url, init) => {
+    requests.push({
+      url,
+      body: JSON.parse(String(init.body)) as Record<string, unknown>,
+    });
+    return Response.json({
+      week_start: "2026-10-12",
+      area: "work",
+      text: "Synthetic Bet",
+      key_result_id: "synthetic-result",
+      key_result_title: "Synthetic annual result",
+      etag: "2",
+    });
+  });
+  const bet = {
+    weekStart: "2026-10-12",
+    area: "work" as const,
+    text: "Synthetic Bet",
+    etag: "1",
+    keyResultId: "synthetic-result",
+  };
+  const saved = await actions.setWeeklyBet(bet);
+  expect(saved).toMatchObject({
+    keyResultId: "synthetic-result",
+    keyResultTitle: "Synthetic annual result",
+  });
+  expect(requests[0]?.url.searchParams.get("update_mask")).toBe("text");
+  await actions.setWeeklyBet({ ...saved, keyResultId: "" }, ["key_result_id"]);
+  expect(requests[1]?.url.searchParams.get("update_mask")).toBe(
+    "key_result_id",
+  );
+  // The wire profile omits default strings; the explicit mask makes this a clear.
+  expect(requests[1]?.body).not.toHaveProperty("key_result_id");
+});
 
 /** A task as Plan holds it, with Tasks' order and etag. */
 const held = (task: {

@@ -394,3 +394,70 @@ it("speaks Chinese in the owner's words", async () => {
   fireEvent.change(input, { target: { value: "写".repeat(145) } });
   expect(goals.getByText("回车保存 · Esc 取消 · 还可输入 15 字")).toBeTruthy();
 });
+
+it("sets and explicitly clears an annual goal while text edits and Keep preserve it", async () => {
+  const actions = createPrototype();
+  const save = vi.spyOn(actions, "setWeeklyBet");
+  render(
+    <App
+      actions={actions}
+      view="plan"
+      language="en"
+      onOpenTask={() => {}}
+      onSettings={() => {}}
+      renderGoalPicker={({ value, label, onChange }) => (
+        <button
+          onClick={() =>
+            onChange(
+              value ? "" : "synthetic-result",
+              value ? "" : "Synthetic annual result",
+            )
+          }
+        >
+          {label}: {value || "None"}
+        </button>
+      )}
+    />,
+  );
+  const goals = within(
+    await screen.findByRole("region", { name: "Weekly goals" }),
+  );
+  fireEvent.click(
+    goals.getByRole("button", { name: "Work associated goal: None" }),
+  );
+  await goals.findByRole("button", {
+    name: "Work associated goal: synthetic-result",
+  });
+  expect(save.mock.lastCall?.[1]).toEqual(["key_result_id"]);
+  const input = await edit(goals, `Edit work goal: ${WORK}`);
+  fireEvent.change(input, { target: { value: "Revised weekly text" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await goals.findByRole("button", {
+    name: "Edit work goal: Revised weekly text",
+  });
+  expect(save.mock.lastCall?.[0].keyResultId).toBe("synthetic-result");
+  expect(save.mock.lastCall?.[1]).toBeUndefined();
+  fireEvent.click(
+    goals.getByRole("button", { name: "Personal associated goal: None" }),
+  );
+  await goals.findByRole("button", {
+    name: "Personal associated goal: synthetic-result",
+  });
+  fireEvent.click(
+    goals.getByRole("button", { name: /^Keep last week's personal goal/u }),
+  );
+  await goals.findByRole("button", {
+    name: `Edit personal goal: ${LAST_PERSONAL}`,
+  });
+  expect(save.mock.lastCall?.[0].keyResultId).toBe("synthetic-result");
+  fireEvent.click(
+    goals.getByRole("button", {
+      name: "Work associated goal: synthetic-result",
+    }),
+  );
+  await goals.findByRole("button", { name: "Work associated goal: None" });
+  const bet = (await actions.readPlan()).weeklyBets.find(
+    (bet) => bet.area === "work" && bet.weekStart === "2026-10-12",
+  );
+  expect(bet).toMatchObject({ text: "Revised weekly text", keyResultId: "" });
+});

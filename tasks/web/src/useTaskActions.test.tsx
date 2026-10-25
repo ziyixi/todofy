@@ -15,6 +15,56 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it("keeps a Task's direct goal during date edits and omits the direct field when editing a Step", async () => {
+  const update = vi
+    .spyOn(api, "updateTask")
+    .mockImplementation(async (request) =>
+      create(TaskSchema, { ...request?.task, id: "synthetic", etag: "2" }),
+    );
+  const catalog = vi.spyOn(api, "getGoalCatalog");
+  const route = { page: "focus" as const, id: "" };
+  const { result } = renderHook(() =>
+    useTaskActions(
+      route,
+      "sort_order",
+      useTaskView(route, "", "", "sort_order", false),
+    ),
+  );
+  const task = create(TaskSchema, {
+    id: "synthetic",
+    name: "tasks/synthetic",
+    title: "Synthetic linked task",
+    kind: "task",
+    keyResultId: "synthetic-result",
+    effectiveKeyResultId: "synthetic-result",
+    etag: "1",
+  });
+  await act(() =>
+    result.current.saveTask({ ...task, dueDate: "2026-10-26" }, task),
+  );
+  expect(update.mock.lastCall?.[0]?.task?.keyResultId).toBe("synthetic-result");
+  expect(update.mock.lastCall?.[0]?.updateMask?.paths).toContain(
+    "key_result_id",
+  );
+  const step = create(TaskSchema, {
+    ...task,
+    kind: "step",
+    keyResultId: "",
+    parentId: "synthetic-parent",
+  });
+  await act(() =>
+    result.current.saveTask(
+      { ...step, description: "Updated Step description" },
+      step,
+    ),
+  );
+  expect(update.mock.lastCall?.[0]?.task).not.toHaveProperty("keyResultId");
+  expect(update.mock.lastCall?.[0]?.updateMask?.paths).not.toContain(
+    "key_result_id",
+  );
+  expect(catalog).not.toHaveBeenCalled();
+});
+
 it("refreshes the current project after a save finishes in the view we left", async () => {
   const source = create(TaskSchema, {
     id: "moving",

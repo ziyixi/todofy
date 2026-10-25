@@ -4,6 +4,7 @@ import {
 } from "@ziyixi/planning-ui/ExecutionFields";
 import { ChevronDown, Folder, Target } from "lucide-react";
 import type { PlanningDraft } from "../task-planning";
+import type { ReactNode } from "react";
 import "./task-planning.css";
 
 export function TaskPlanningFields({
@@ -11,6 +12,7 @@ export function TaskPlanningFields({
   onChange,
   onExecutionChange,
   disabled,
+  goal,
 }: {
   value: PlanningDraft;
   onChange: <K extends keyof PlanningDraft>(
@@ -19,6 +21,7 @@ export function TaskPlanningFields({
   ) => void;
   onExecutionChange: (mode: ExecutionMode) => void;
   disabled: boolean;
+  goal?: ReactNode;
 }) {
   const mode = value.quick
     ? "quick"
@@ -69,6 +72,7 @@ export function TaskPlanningFields({
           </span>
         </label>
       </div>
+      {goal && <div className="task-goal-field">{goal}</div>}
       <ExecutionFields
         mode={mode}
         routine={value.routine}

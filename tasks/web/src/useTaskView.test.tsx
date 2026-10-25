@@ -5,10 +5,24 @@ import { TaskSchema } from "@ziyixi/proto/tasks/ui/v1/task_pb";
 import { ListTasksResponseSchema } from "@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb";
 import { api } from "./api";
 import { useTaskView } from "./useTaskView";
+import { readRoute, routeHref } from "./routes";
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+it("routes Goals and its result links without loading an ordinary task view", async () => {
+  const requests = vi.spyOn(api, "listTasks");
+  const route = readRoute("#/goals/synthetic-result");
+  expect(route).toEqual({ page: "goals", id: "synthetic-result" });
+  expect(routeHref(route)).toBe("#/goals/synthetic-result");
+  const { result } = renderHook(() =>
+    useTaskView(route, "", "", "sort_order", false),
+  );
+  await result.current.read();
+  expect(requests).not.toHaveBeenCalled();
+  expect(result.current.tasks).toEqual([]);
 });
 
 it("keeps previous search results on failure without offering that query's stale next page", async () => {

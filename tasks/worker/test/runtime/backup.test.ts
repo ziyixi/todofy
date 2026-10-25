@@ -22,7 +22,13 @@ async function page(name: string, after: number, through: number) {
   if (!table) throw new Error(`Unknown table ${name}`);
   const read = await backupPage(harness.db, table, after, through);
   const bytes = read.rows.reduce((sum, row) => sum + new TextEncoder().encode(row).byteLength + 1, 0);
-  return { page: { ...read, rows: read.rows.map((row) => JSON.parse(row) as unknown[]) }, bytes };
+  return {
+    page: {
+      ...read,
+      rows: read.rows.map((row) => JSON.parse(row) as unknown[]),
+    },
+    bytes,
+  };
 }
 async function make(kind: string, body: Record<string, unknown>): Promise<{ id: string; name: string; etag: string }> {
   const response = await harness.mutate('POST', `/api/tasks/v1/${kind}?request_id=${randomUUID()}`, body);
@@ -43,23 +49,53 @@ test('the column lists are every column of every table a restore needs', async (
     expect(table.key, table.name).toEqual(info.results.filter((column) => column.pk).map((column) => column.name));
   }
   expect((await plan()).tables).toEqual(
-    BACKUP_TABLES.map((table) => ({ ...table, max_rowid: expect.any(Number) as number })),
+    BACKUP_TABLES.map((table) => ({
+      ...table,
+      max_rowid: expect.any(Number) as number,
+    })),
   );
 });
 
 test('a plan and its pages hold every row of every table', async () => {
-  const project = await make('projects', { title: 'Synthetic backup project', color: '#246fe0' });
-  const section = await make('sections', { title: 'Synthetic section', project_id: project.id });
+  const project = await make('projects', {
+    title: 'Synthetic backup project',
+    color: '#246fe0',
+  });
+  const section = await make('sections', {
+    title: 'Synthetic section',
+    project_id: project.id,
+  });
   const label = await make('labels', { title: 'Synthetic backup label' });
-  await make('filters', { title: 'Synthetic filter', query: 'today', color: '#db4035' });
+  await make('filters', {
+    title: 'Synthetic filter',
+    query: 'today',
+    color: '#db4035',
+  });
+  const objective = await make('objectives', {
+    title: 'Synthetic annual direction',
+    year: 2030,
+  });
+  const result = await make('keyResults', {
+    title: 'Synthetic annual result',
+    objective_id: objective.id,
+  });
+  await make('goalProgress', {
+    key_result_id: result.id,
+    note: 'Synthetic backup evidence',
+  });
   const parent = await make('tasks', {
+    key_result_id: result.id,
     title: 'Synthetic parent “quoted” 中文',
     description: "It's a\nmulti-line synthetic description",
     project_id: project.id,
     section_id: section.id,
     label_ids: [label.id],
   });
-  const child = await make('tasks', { title: 'Synthetic child', parent_id: parent.id, kind: 'step' });
+  const child = await make('tasks', {
+    title: 'Synthetic child',
+    parent_id: parent.id,
+    kind: 'step',
+  });
   const done = await harness.mutate('POST', `/api/tasks/v1/${child.name}:complete`, {
     etag: child.etag,
     request_id: randomUUID(),
@@ -133,7 +169,9 @@ test('a plan and its pages hold every row of every table', async () => {
 
 test('a page stops before its byte cap and always holds at least one row', async () => {
   const description = '汉字'.repeat(8000); // 16,000 characters, 48 KB of UTF-8
-  const rows = Array.from({ length: PAGE_ROWS }, (_, index) => ({ id: `cap-${String(index).padStart(3, '0')}` }));
+  const rows = Array.from({ length: PAGE_ROWS }, (_, index) => ({
+    id: `cap-${String(index).padStart(3, '0')}`,
+  }));
   await harness.db.prepare('DELETE FROM tasks').run();
   await harness.db
     .prepare(
@@ -188,7 +226,12 @@ test('a page reads only the tables and columns a plan names, and no binding or r
   // The backup runs in the jobs object (backup-runner.ts): the owner API has no route and TasksApi no method for it.
   expect((await harness.fetch('/api/tasks/v1/backup')).status).toBe(404);
   const binding = await harness.mf.getWorker('tasks-read-write');
-  expect((await binding.fetch('https://tasks.internal/backup', { method: 'POST', body: '{"table":""}' })).status).toBe(
-    404,
-  );
+  expect(
+    (
+      await binding.fetch('https://tasks.internal/backup', {
+        method: 'POST',
+        body: '{"table":""}',
+      })
+    ).status,
+  ).toBe(404);
 });

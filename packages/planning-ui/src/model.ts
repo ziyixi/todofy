@@ -1,4 +1,5 @@
 // UI state. API messages are mapped from the root generated proto in api.ts.
+import type { ReactNode } from "react";
 export type Area = "work" | "personal" | "unassigned";
 /** The two areas a week's Bets are written for. */
 export type BetArea = Exclude<Area, "unassigned">;
@@ -10,6 +11,9 @@ export type LaneId = "start" | "waiting" | "parked" | Exclude<Stage, "none">;
 export interface PlanningTask {
   id: string;
   title: string;
+  keyResultId?: string;
+  effectiveKeyResultId?: string;
+  keyResultTitle?: string;
   parentId: string;
   projectId: string;
   /** The task's content type in Tasks. */
@@ -73,16 +77,27 @@ export interface PlanState {
   /** The Review lanes the owner arranged, each first to last by task ID; a lane never arranged is absent. */
   laneOrders: Partial<Record<LaneId, string[]>>;
 }
-/** One week's Work or Personal Bet: the owner's own line of text, tied to no task. */
+/** One week's Work or Personal Bet, optionally pointing to an annual result. */
 export interface WeeklyBet {
   /** The account-local Monday of its week. */
   weekStart: string;
   area: BetArea;
   /** One line; empty means none. */
   text: string;
+  keyResultId?: string;
+  keyResultTitle?: string;
   /** Sent back to save over it; empty while the week and area have none. */
   etag: string;
 }
+export type WeeklyBetField = "text" | "key_result_id";
+/** The host supplies its lazy annual-goal picker, without adding a read to Plan. */
+export type RenderGoalPicker = (props: {
+  value: string;
+  title?: string;
+  label: string;
+  disabled: boolean;
+  onChange: (id: string, title: string) => void;
+}) => ReactNode;
 /** The plan without the task list and its dependencies. */
 export type PlanMetadata = Omit<PlanState, "tasks" | "dependencies">;
 /** The weekly review's two facts, read from Tasks when the review opens. */
@@ -283,7 +298,7 @@ export interface PlusActions {
    * Saves a Bet's text over the one with `bet.etag`. Rejects with BetNotSaved when Tasks says it
    * changed elsewhere or its week has ended.
    */
-  setWeeklyBet(bet: WeeklyBet): Promise<WeeklyBet>;
+  setWeeklyBet(bet: WeeklyBet, fields?: WeeklyBetField[]): Promise<WeeklyBet>;
   /** Appends sub-tasks under `task`; answers their IDs, in the entered order. */
   createSteps(
     task: PlanningTask,

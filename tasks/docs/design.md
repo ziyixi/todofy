@@ -137,6 +137,22 @@ the others supply Focus's day. The Tasks host reuses the generic list completion
 request proof, and count/cache invalidation. Repeated queued commands retain their first task revision and
 Focus day; a finish operation cannot become a Reopen after a fresh read.
 
+## Goals
+
+Goals adds annual Objectives and Key Results, optional current-focus months, manually confirmed milestones and
+dated progress/evidence in Tasks' existing D1. The native API is `proto/tasks/ui/v1/goals.proto`; the UI is lazy
+loaded at `#/goals` or `#/goals/<key-result-id>`. [Goals](goals.md) owns the detailed behavior and private import
+procedure; no Notion token, sync job, new service or model call is added.
+
+Task/Subtask stores `key_result_id`; a Step reads its direct parent's association. The read returns the effective
+ID and short title, without loading progress. Planning stages, dates, completion and Goals are independent.
+Weekly Bet text keeps its existing semantics and can separately select or clear a KR. GetPlan still reads its
+three statements; the joined short title avoids a catalog fetch until the owner opens the picker.
+
+GoalCatalog reads bounded annual definitions only. Selected KR details, progress pages and related tasks are
+loaded separately. Normal task list query budgets and Plan/Focus request counts remain covered by regression tests.
+All new tables/columns participate in the existing backup; older backups restore Goals empty.
+
 ## Focus completion
 
 Focus keeps one timer in Tasks (`focusTimer`): Start counts on Tasks' today, Pause and Resume keep the

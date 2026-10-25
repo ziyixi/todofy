@@ -1,0 +1,136 @@
+.goal-property {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.goal-picker-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #73796e;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.goal-picker-trigger:hover {
+  background: #f0f1ed;
+}
+.goal-picker-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.goal-picker-trigger > svg {
+  flex-shrink: 0;
+}
+.goal-reference-link {
+  flex-shrink: 0;
+  color: #6d7d5e;
+  font-size: 11px;
+}
+.goal-picker-positioner {
+  z-index: 70;
+}
+.goal-picker-popup {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  height: 320px;
+  max-height: var(--available-height);
+  overflow: hidden;
+  border: 1px solid #e1e4dc;
+  border-radius: 8px;
+  background: white;
+  color: #333;
+  box-shadow: 0 4px 20px #00000026;
+  outline: none;
+}
+.goal-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+}
+.goal-picker-search > input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  font-size: 13px;
+}
+.goal-picker-search > button {
+  display: flex;
+  padding: 3px;
+  border: 0;
+  background: transparent;
+  color: #73796e;
+  cursor: pointer;
+}
+.goal-picker-options {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 4px;
+  overscroll-behavior: contain;
+}
+.goal-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.goal-picker-option:hover,
+.goal-picker-option:focus-visible {
+  background: #f0f2ed;
+}
+.goal-picker-option > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.goal-picker-option small {
+  display: block;
+  margin-top: 3px;
+  color: #777;
+  font-size: 11px;
+}
+.goal-picker-message {
+  padding: 10px;
+  color: #777;
+  font-size: 12px;
+}
+.task-goal-field {
+  margin-bottom: 12px;
+}
+.task-inherited-goal {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 16px;
+  color: #73796e;
+  font-size: 12px;
+}
+.task-inherited-goal > a {
+  color: #6d7d5e;
+}

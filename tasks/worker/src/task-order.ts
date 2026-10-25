@@ -6,6 +6,7 @@ import { conflict, invalid, storage } from './errors.ts';
 import { commitChecked, type Check } from './focus.ts';
 import {
   checkedId,
+  goalLinks,
   childCounts,
   dependencyList,
   resourceId,
@@ -60,7 +61,7 @@ export async function reorderTasks(db: D1Database, input: ReorderTasksRequest, n
     db.batch<Record<string, unknown>>([
       db
         .prepare(
-          `SELECT ${taskProjection(false)},${childCounts},${dependencyList} FROM json_each(?) j CROSS JOIN tasks t
+          `SELECT ${taskProjection(false)},${childCounts},${goalLinks},${dependencyList} FROM json_each(?) j CROSS JOIN tasks t
           ON t.id=j.value->>'id' WHERE t.deleted_at IS NULL ORDER BY j.key`,
         )
         .bind(encoded),
@@ -75,7 +76,14 @@ export async function reorderTasks(db: D1Database, input: ReorderTasksRequest, n
       task.description = '';
       return task;
     }),
-    ...(lane ? { laneOrder: create(LaneOrderSchema, { lane: lane.lane, taskIds: lanes[lane.lane] ?? [] }) } : {}),
+    ...(lane
+      ? {
+          laneOrder: create(LaneOrderSchema, {
+            lane: lane.lane,
+            taskIds: lanes[lane.lane] ?? [],
+          }),
+        }
+      : {}),
   });
 }
 
@@ -132,7 +140,11 @@ async function write(
     now,
     ...(first
       ? { table: 'tasks' as const, id: first.id, revision: Number(first.etag) }
-      : { table: 'plan_board' as const, id: 'board', revision: board?.revision ?? 0 }),
+      : {
+          table: 'plan_board' as const,
+          id: 'board',
+          revision: board?.revision ?? 0,
+        }),
   };
   try {
     await (checks.length ? commitChecked(db, receipt, writes, checks) : commit(db, receipt, writes));

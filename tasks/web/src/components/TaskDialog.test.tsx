@@ -11,7 +11,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import { create } from "@ziyixi/proto/protobuf";
 import { TaskSchema } from "@ziyixi/proto/tasks/ui/v1/task_pb";
-import type { Catalog, Task } from "../api";
+import { api, type Catalog, type Task } from "../api";
 import { TaskDialog } from "./TaskDialog";
 
 // jsdom has no native showModal; browser regressions exercise the real Dialog.
@@ -23,7 +23,10 @@ vi.mock("./Dialog", () => ({
   ),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const catalog: Catalog = {
   projects: [],
@@ -404,4 +407,65 @@ it("leaves an actual Step executable without offering an Execution mode", () => 
   expect(
     screen.getByRole("spinbutton", { name: "Duration (minutes)" }),
   ).toBeTruthy();
+});
+
+it("keeps the direct goal on description, planning and date edits without loading the catalog", async () => {
+  const catalogRead = vi.spyOn(api, "getGoalCatalog");
+  const task = create(TaskSchema, {
+    ...original,
+    keyResultId: "synthetic-result",
+    effectiveKeyResultId: "synthetic-result",
+    keyResultTitle: "Synthetic annual result",
+  });
+  const save = vi
+    .fn<SaveTask>()
+    .mockImplementation(async (draft, current) =>
+      create(TaskSchema, { ...current!, ...draft, etag: "2" }),
+    );
+  editor(save, task);
+  expect(
+    screen.getByRole("button", { name: "Associated goal" }).textContent,
+  ).toContain("Synthetic annual result");
+  expect(catalogRead).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByRole("combobox", { name: "Planning stage" }), {
+    target: { value: "weekly" },
+  });
+  fireEvent.click(
+    description().getByRole("button", { name: "Edit description" }),
+  );
+  fireEvent.change(
+    description().getByRole("textbox", { name: "Description" }),
+    { target: { value: "Updated description" } },
+  );
+  fireEvent.click(description().getByRole("button", { name: "Done" }));
+  await waitFor(() => expect(save).toHaveBeenCalledOnce());
+  expect(save.mock.calls[0]?.[0].keyResultId).toBe("synthetic-result");
+  expect(save.mock.calls[0]?.[3]?.paths).toContain("stage");
+  expect(catalogRead).not.toHaveBeenCalled();
+});
+
+it("shows a Step's inherited goal without offering a direct assignment", async () => {
+  const read = vi.spyOn(api, "getGoalCatalog");
+  const task = create(TaskSchema, {
+    ...original,
+    kind: "step",
+    parentId: "synthetic-parent",
+    effectiveKeyResultId: "synthetic-result",
+    keyResultTitle: "Synthetic inherited result",
+  });
+  const save = vi.fn<SaveTask>().mockResolvedValue(task);
+  editor(save, task);
+  expect(
+    screen
+      .getByRole("link", { name: "Synthetic inherited result" })
+      .getAttribute("href"),
+  ).toBe("#/goals/synthetic-result");
+  expect(screen.queryByRole("button", { name: "Associated goal" })).toBeNull();
+  fireEvent.change(screen.getByRole("textbox", { name: "Task name" }), {
+    target: { value: "Updated synthetic Step" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(save).toHaveBeenCalledOnce());
+  expect(save.mock.calls[0]?.[0]).not.toHaveProperty("keyResultId");
+  expect(read).not.toHaveBeenCalled();
 });

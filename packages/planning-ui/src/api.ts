@@ -72,6 +72,9 @@ export function planningTask(task: Task): PlanningTask {
   return {
     id: task.id,
     title: task.title,
+    keyResultId: task.keyResultId,
+    effectiveKeyResultId: task.effectiveKeyResultId,
+    keyResultTitle: task.keyResultTitle,
     parentId: task.parentId,
     projectId: task.projectId,
     sectionId: task.sectionId,
@@ -140,6 +143,8 @@ function weeklyBet(bet: ApiWeeklyBet): WeeklyBet | undefined {
     weekStart: bet.weekStart,
     area: bet.area as BetArea,
     text: bet.text,
+    keyResultId: bet.keyResultId,
+    keyResultTitle: bet.keyResultTitle,
     etag: bet.etag,
   };
 }
@@ -451,23 +456,28 @@ export function createPlanningActions(transports: {
         planningFlags: [...flags],
       });
     },
-    async setWeeklyBet(bet) {
+    async setWeeklyBet(bet, fields = ["text"]) {
       let result;
       try {
         result = await tasks.updateWeeklyBet({
           weeklyBet: {
             name: `weeklyBets/${bet.weekStart}-${bet.area}`,
             text: bet.text,
+            keyResultId: bet.keyResultId ?? "",
           },
-          updateMask: { paths: ["text"] },
+          updateMask: { paths: fields },
           etag: bet.etag,
         });
       } catch (error) {
         const reason =
           error instanceof RpcStatusError ? error.status.reason : undefined;
         if (reason === "ETAG_MISMATCH") throw new BetNotSaved("changed");
-        // The only other refusal of a well-formed Bet: its week has ended.
-        if (reason === "PRECONDITION_FAILED") throw new BetNotSaved("ended");
+        // A text-only write can fail this precondition only when its week ended.
+        if (
+          reason === "PRECONDITION_FAILED" &&
+          !fields.includes("key_result_id")
+        )
+          throw new BetNotSaved("ended");
         throw error;
       }
       const saved = weeklyBet(result);

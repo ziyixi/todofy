@@ -41,12 +41,28 @@ export const BACKUP_TABLES: readonly BackupTable[] = [
     key: ['id'],
   },
   {
+    name: 'objectives',
+    columns: ['id', 'title', 'description', 'year', 'source_url', 'sort_order', 'archived', 'revision', 'created_at', 'updated_at', 'deleted_at'],
+    key: ['id'],
+  },
+  {
+    name: 'key_results',
+    columns: ['id', 'objective_id', 'title', 'floor_text', 'target_text', 'notes', 'kind', 'completed', 'milestones',
+      'focus_start_month', 'focus_end_month', 'focus_text', 'source_url', 'sort_order', 'archived', 'revision', 'created_at', 'updated_at', 'deleted_at'],
+    key: ['id'],
+  },
+  {
+    name: 'goal_progress',
+    columns: ['id', 'key_result_id', 'note', 'evidence_url', 'revision', 'created_at', 'updated_at', 'deleted_at'],
+    key: ['id'],
+  },
+  {
     name: 'tasks',
     columns: [
       'id', 'title', 'description', 'project_id', 'section_id', 'parent_id', 'label_ids', 'priority', 'sort_order',
       'due_date', 'due_datetime', 'due_timezone', 'deadline', 'duration_minutes', 'recurrence', 'completed',
       'completed_at', 'project_archived', 'completed_base_count', 'revision', 'created_at', 'updated_at', 'deleted_at',
-      'kind', 'effort', 'stage', 'committed_week', 'area', 'lead_days', 'planning_flags',
+      'kind', 'effort', 'stage', 'committed_week', 'area', 'lead_days', 'planning_flags', 'key_result_id',
     ],
     key: ['id'],
   },
@@ -90,7 +106,7 @@ export const BACKUP_TABLES: readonly BackupTable[] = [
   },
   {
     name: 'weekly_bets',
-    columns: ['week_start', 'area', 'text', 'revision', 'created_at', 'updated_at'],
+    columns: ['week_start', 'area', 'text', 'revision', 'created_at', 'updated_at', 'key_result_id'],
     key: ['week_start', 'area'],
   },
   {
@@ -159,7 +175,10 @@ export interface BackupPage {
 
 /** The plan: the applied migration, the newest change and every table with its columns and max rowid. */
 export async function planBackup(db: D1Database): Promise<BackupPlan> {
-  const [schema, changes, ...maxima] = await db.batch<{ n: number | null; name?: string }>([
+  const [schema, changes, ...maxima] = await db.batch<{
+    n: number | null;
+    name?: string;
+  }>([
     db.prepare('SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1'),
     db.prepare(changeSequence),
     ...BACKUP_TABLES.map((table) => db.prepare(`SELECT max(rowid) AS n FROM ${table.name}`)),
@@ -167,7 +186,10 @@ export async function planBackup(db: D1Database): Promise<BackupPlan> {
   return {
     schema_version: schema?.results[0]?.name ?? '',
     change_sequence: changes?.results[0]?.n ?? 0,
-    tables: BACKUP_TABLES.map((table, index) => ({ ...table, max_rowid: maxima[index]?.results[0]?.n ?? 0 })),
+    tables: BACKUP_TABLES.map((table, index) => ({
+      ...table,
+      max_rowid: maxima[index]?.results[0]?.n ?? 0,
+    })),
   };
 }
 

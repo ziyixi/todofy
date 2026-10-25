@@ -55,10 +55,19 @@ export function useTaskActions(
     planning?: ReturnType<typeof planningChanges>,
   ) {
     const planned = planning ?? { paths: [], values: {} };
+    // Steps inherit their parent's goal. Never serialize a direct assignment for them.
+    const { keyResultId, ...content } = draft;
+    const writable =
+      draft.kind === "step"
+        ? content
+        : {
+            ...content,
+            keyResultId: keyResultId ?? original?.keyResultId ?? "",
+          };
     if (
       original &&
       !planned.paths.length &&
-      Object.entries(draft).every(([field, value]) => {
+      Object.entries(writable).every(([field, value]) => {
         const current = original[field as keyof TaskDraft];
         return Array.isArray(value)
           ? Array.isArray(current) &&
@@ -75,17 +84,24 @@ export function useTaskActions(
           requestId,
           etag: original.etag,
           task: {
-            ...draft,
+            ...writable,
             ...planned.values,
             name: original.name,
             etag: original.etag,
           },
-          updateMask: { paths: [...TASK_EDIT_FIELDS, ...planned.paths] },
+          updateMask: {
+            paths: [
+              ...TASK_EDIT_FIELDS.filter(
+                (field) => field !== "key_result_id" || draft.kind !== "step",
+              ),
+              ...planned.paths,
+            ],
+          },
         })
       : await api.createTask({
           requestId,
           taskId: requestId,
-          task: { ...draft, ...planned.values },
+          task: { ...writable, ...planned.values },
         });
     taskChanged();
     if (original) list.replace(task);

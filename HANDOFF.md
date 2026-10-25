@@ -18,9 +18,13 @@ not Claude's shared checkout. Reuse Tasks D1, generated owner API, existing UI c
 Keep goal progress independent of task completion and preserve normal task-list/request budgets. Import the
 owner's current-year Notion OKR through the existing private-operator conventions after the release; no personal
 content or import payload enters Git. Source has no measured progress, so import no invented milestones or results,
-and select no real focus/commitments for the owner. Next: define the small contract, implement backend/UI/linking,
-synthetic runtime/browser/performance checks and approved-design comparison, branch CI, same-SHA main release,
-private import and live readback. No new service, Notion sync, model call or scheduler is planned.
+and select no real focus/commitments for the owner. Implementation and local acceptance are complete: 72 Worker
+unit tests, 142 native runtime cases, 96 UI tests, 327 shared-planning tests, 141 browser cases and 41 operator/deploy
+tests passed. Goals layout QA passed after the scoped typography correction; normal list and Plan read budgets
+remain unchanged. Dry Worker is 164.0 KiB gzip within the existing 165 KiB budget. Private Notion preparation
+preserves all 27 source sections across four Objectives/12 KRs. Pre-release Time Travel bookmark is recorded.
+Next: full branch CI, same-SHA main release, empty-year preflight, private import and API/UI readback. No new
+service, Notion sync, model call or scheduler was introduced. Details: [verification](docs/tasks-goals-verification.md).
 
 Few-shot examples are released at `c121b02da666592b12c1c575ad48328c004b523b`, after
 [branch CI 40153945767](https://github.com/ziyixi/todofy/actions/runs/40153945767) and the

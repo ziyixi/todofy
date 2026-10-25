@@ -1,0 +1,215 @@
+// (-- api-linter: core::0148::use-uid=disabled
+//     aip.dev/not-precedent: id is the short identity used by task links and the one-time import. --)
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: focus months and today are account-local calendar text. --)
+syntax = "proto3";
+
+package tasks.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "GoalsProto";
+option java_package = "science.ziyixi.tasks.ui.v1";
+
+// One annual direction. Archiving preserves its Key Results and progress.
+message Objective {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/Objective"
+    pattern: "objectives/{objective}"
+    singular: "objective"
+    plural: "objectives"
+  };
+
+  // objectives/{id}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Stable short identity.
+  string id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most 300 characters, with non-whitespace content.
+  string title = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Plain text or Markdown, at most 2000 characters.
+  string description = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Calendar year, 2000 through 2199. Immutable after creation.
+  int32 year = 5 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_behavior) = IMMUTABLE
+  ];
+  // Optional original source, at most 2000 characters; HTTP or HTTPS.
+  string source_url = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Finite position within the year.
+  double sort_order = 7 [(google.api.field_behavior) = OPTIONAL];
+  // Hidden from active goal choices while preserving history.
+  bool archived = 8 [(google.api.field_behavior) = OPTIONAL];
+  // Opaque revision.
+  string etag = 9 [(google.api.field_behavior) = OPTIONAL];
+  // Creation time.
+  google.protobuf.Timestamp create_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Last modification time.
+  google.protobuf.Timestamp update_time = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A manually maintained annual result, routine or exploration. Task completion never changes it.
+message KeyResult {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/KeyResult"
+    pattern: "keyResults/{key_result}"
+    singular: "keyResult"
+    plural: "keyResults"
+  };
+
+  // keyResults/{id}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Stable short identity.
+  string id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Owning Objective's short ID. Moving is allowed only within the same year.
+  string objective_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The owning Objective's calendar year.
+  int32 year = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most 300 characters, with non-whitespace content.
+  string title = 5 [(google.api.field_behavior) = OPTIONAL];
+  // The acceptable floor, at most 2000 characters; no numeric progress is inferred.
+  string floor_text = 6 [(google.api.field_behavior) = OPTIONAL];
+  // The intended result, at most 2000 characters.
+  string target_text = 7 [(google.api.field_behavior) = OPTIONAL];
+  // Plain text or Markdown, at most 8000 characters.
+  string notes = 8 [(google.api.field_behavior) = OPTIONAL];
+  // outcome, routine or exploration; empty on create means outcome.
+  string kind = 9 [(google.api.field_behavior) = OPTIONAL];
+  // Explicitly marked complete by the owner.
+  bool completed = 10 [(google.api.field_behavior) = OPTIONAL];
+  // At most 20 milestones, kept in the owner's order. Replacing the list preserves completion times by ID.
+  repeated KeyResultMilestone milestones = 11 [(google.api.field_behavior) = OPTIONAL];
+  // Current focus's first month, YYYY-MM, within this result's year; both months are set or both empty.
+  string focus_start_month = 12 [(google.api.field_behavior) = OPTIONAL];
+  // Current focus's last month, YYYY-MM, no earlier than its first month.
+  string focus_end_month = 13 [(google.api.field_behavior) = OPTIONAL];
+  // Current focus, at most 1000 characters. Clearing the focus leaves the result and its progress intact.
+  string focus_text = 14 [(google.api.field_behavior) = OPTIONAL];
+  // Optional original source, at most 2000 characters; HTTP or HTTPS.
+  string source_url = 15 [(google.api.field_behavior) = OPTIONAL];
+  // Finite position within its Objective.
+  double sort_order = 16 [(google.api.field_behavior) = OPTIONAL];
+  // This result's own archive flag; task references remain readable.
+  bool archived = 17 [(google.api.field_behavior) = OPTIONAL];
+  // Opaque revision.
+  string etag = 18 [(google.api.field_behavior) = OPTIONAL];
+  // Creation time.
+  google.protobuf.Timestamp create_time = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Last modification time.
+  google.protobuf.Timestamp update_time = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Objective is archived. Its own archived value remains independently editable.
+  bool objective_archived = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A small, manually completed milestone in a Key Result.
+message KeyResultMilestone {
+  // Stable short ID; empty for a new milestone lets the server choose one.
+  string id = 1 [(google.api.field_behavior) = OPTIONAL];
+  // At most 300 characters, with non-whitespace content.
+  string title = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Explicitly completed by the owner.
+  bool completed = 3 [(google.api.field_behavior) = OPTIONAL];
+  // When this milestone was marked complete; cleared when reopened.
+  google.protobuf.Timestamp complete_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A concise annual definition for navigation and choices; GetKeyResult reads its texts and milestones.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: this is a bounded projection of KeyResult, not a separately mutable resource. --)
+message KeyResultSummary {
+  // keyResults/{id}.
+  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Stable short identity.
+  string id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Owning Objective's short ID.
+  string objective_id = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The owning Objective's calendar year.
+  int32 year = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The result's title.
+  string title = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // outcome, routine or exploration.
+  string kind = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Explicitly marked complete by the owner.
+  bool completed = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Number of milestones.
+  int32 milestone_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Number of manually completed milestones.
+  int32 completed_milestone_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current focus's first month, YYYY-MM.
+  string focus_start_month = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current focus's last month, YYYY-MM.
+  string focus_end_month = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Current focus text.
+  string focus_text = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Original source.
+  string source_url = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Position within its Objective.
+  double sort_order = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // This result's own archive flag.
+  bool archived = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Opaque revision, also used by GetKeyResult.
+  string etag = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Creation time.
+  google.protobuf.Timestamp create_time = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Last modification time.
+  google.protobuf.Timestamp update_time = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Objective is archived.
+  bool objective_archived = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The small annual goal catalog; progress history is read separately.
+// (-- api-linter: core::0122::embedded-resource=disabled
+//     aip.dev/not-precedent: at most 20 annual Objectives are read together for this personal application. --)
+message GoalCatalog {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/GoalCatalog"
+    pattern: "goalCatalog"
+    singular: "goalCatalog"
+    plural: "goalCatalogs"
+  };
+
+  // Always goalCatalog.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The catalog's calendar year.
+  int32 year = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Tasks' today, YYYY-MM-DD.
+  string today = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The account's IANA time zone.
+  string time_zone = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most 20 Objectives, including archived ones, by sort_order and ID.
+  repeated Objective objectives = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most 100 concise Key Results, including archived ones, by sort_order and ID.
+  repeated KeyResultSummary key_results = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One dated progress note. It reports evidence without calculating numeric completion.
+message GoalProgress {
+  option (google.api.resource) = {
+    type: "tasks.ziyixi.science/GoalProgress"
+    pattern: "goalProgress/{goal_progress}"
+    singular: "goalProgress"
+    plural: "goalProgress"
+  };
+
+  // goalProgress/{id}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Stable short identity.
+  string id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Key Result's short ID; immutable after creation.
+  string key_result_id = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_behavior) = IMMUTABLE
+  ];
+  // Plain text or Markdown, at most 4000 characters, with non-whitespace content.
+  string note = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Optional evidence, at most 2000 characters; HTTP or HTTPS.
+  string evidence_url = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Opaque revision.
+  string etag = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Creation time, used to order the progress history newest first.
+  google.protobuf.Timestamp create_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Last modification time.
+  google.protobuf.Timestamp update_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

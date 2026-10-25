@@ -362,16 +362,28 @@ export function createPrototype(
       };
       return structuredClone(plan.tasks.find((task) => task.id === item.id)!);
     },
-    async setWeeklyBet(next) {
+    async setWeeklyBet(next, fields = ["text"]) {
       // As Tasks answers UpdateWeeklyBet: the saved text is a replay, only this week and the next
       // take a write, and only from the etag shown.
-      const text = betText(next.text);
       const saved = weeklyBet(plan.weeklyBets, next.weekStart, next.area);
-      if (saved.text === text) return structuredClone(saved);
+      const text = fields.includes("text") ? betText(next.text) : saved.text;
+      const keyResultId = fields.includes("key_result_id")
+        ? (next.keyResultId ?? "")
+        : saved.keyResultId;
+      if (saved.text === text && saved.keyResultId === keyResultId)
+        return structuredClone(saved);
       if (![plan.week, addDays(plan.week, 7)].includes(next.weekStart))
         throw new BetNotSaved("ended");
       if (next.etag !== saved.etag) throw new BetNotSaved("changed");
-      const bet = { ...saved, text, etag: String(Number(saved.etag || 0) + 1) };
+      const bet = {
+        ...saved,
+        text,
+        keyResultId,
+        keyResultTitle: fields.includes("key_result_id")
+          ? next.keyResultTitle
+          : saved.keyResultTitle,
+        etag: String(Number(saved.etag || 0) + 1),
+      };
       plan = { ...plan, weeklyBets: withBets(plan.weeklyBets, [bet]) };
       return structuredClone(bet);
     },
@@ -408,7 +420,9 @@ export function createPrototype(
       plan = {
         ...plan,
         tasks: plan.tasks.filter((task) => task.id !== item.id),
-        dependencies: plan.dependencies.filter((edge) => edge.taskId !== item.id && edge.prerequisiteId !== item.id),
+        dependencies: plan.dependencies.filter(
+          (edge) => edge.taskId !== item.id && edge.prerequisiteId !== item.id,
+        ),
       };
       days = days.map((day) => ({
         ...day,

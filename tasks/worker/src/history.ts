@@ -9,7 +9,7 @@ import {
   type ListChangesRequest,
   type ListCompletionsRequest,
 } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
-import { checkedId, taskMessage, taskProjection, childCounts, type TaskRow } from './model.ts';
+import { checkedId, taskMessage, taskProjection, goalLinks, childCounts, type TaskRow } from './model.ts';
 import { invalid, precondition, storage } from './errors.ts';
 import { pageSize } from './task-read.ts';
 
@@ -19,7 +19,9 @@ export async function listChanges(db: D1Database, input: ListChangesRequest, tod
     const newest = await storage(() =>
       db.prepare('SELECT max(sequence) AS sequence FROM changes').first<{ sequence: number | null }>(),
     );
-    return create(ListChangesResponseSchema, { nextPageToken: String(newest?.sequence ?? 0) });
+    return create(ListChangesResponseSchema, {
+      nextPageToken: String(newest?.sequence ?? 0),
+    });
   }
   const cursor = input.pageToken || '0';
   if (!/^\d{1,15}$/.test(cursor)) invalid('Invalid change cursor');
@@ -49,7 +51,7 @@ export async function listChanges(db: D1Database, input: ListChangesRequest, tod
     ? await storage(() =>
         db
           .prepare(
-            `SELECT ${taskProjection(false)},${childCounts} FROM tasks t WHERE t.deleted_at IS NULL AND t.id IN (SELECT value FROM json_each(?))`,
+            `SELECT ${taskProjection(false)},${childCounts},${goalLinks} FROM tasks t WHERE t.deleted_at IS NULL AND t.id IN (SELECT value FROM json_each(?))`,
           )
           .bind(JSON.stringify(ids))
           .all<TaskRow>(),

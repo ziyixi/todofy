@@ -235,7 +235,16 @@ test("create and edit receipts from before task properties existed replay withou
   const typed = createInput.task;
   if (!typed) throw new Error("Synthetic create task is missing");
   const oldShape = Object.fromEntries(
-    Object.entries(typed).filter(([key]) => key !== "kind" && key !== "effort"),
+    Object.entries(typed).filter(
+      ([key]) =>
+        ![
+          "kind",
+          "effort",
+          "keyResultId",
+          "effectiveKeyResultId",
+          "keyResultTitle",
+        ].includes(key),
+    ),
   );
   const hash = await objectReceiptHash("createTask", {
     ...createInput,
@@ -281,7 +290,14 @@ test("create and edit receipts from before task properties existed replay withou
   if (!updateTask) throw new Error("Synthetic update task is missing");
   const oldUpdate = Object.fromEntries(
     Object.entries(updateTask).filter(
-      ([key]) => key !== "kind" && key !== "effort",
+      ([key]) =>
+        ![
+          "kind",
+          "effort",
+          "keyResultId",
+          "effectiveKeyResultId",
+          "keyResultTitle",
+        ].includes(key),
     ),
   );
   const updateHash = await objectReceiptHash("updateTask", {

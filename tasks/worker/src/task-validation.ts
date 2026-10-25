@@ -29,11 +29,13 @@ export function taskValues(
     area: task.area || 'unassigned',
     lead_days: task.leadDays,
     planning_flags: JSON.stringify(task.planningFlags),
+    key_result_id: task.keyResultId,
   };
 }
 export function validateTaskFields(row: TaskRow): string[] {
   if (!['task', 'step'].includes(row.kind || 'task') || !['', 'deep', 'shallow'].includes(row.effort || ''))
     invalid('Choose a task or step and a valid effort preference');
+  if (row.kind === 'step' && row.key_result_id) invalid('A Step inherits its direct parent Key Result');
   if (row.kind === 'step' && !row.parent_id) invalid('A step needs a parent task');
   if (!row.title || row.title.length > 500 || row.description.length > 16000 || !Number.isFinite(row.sort_order))
     invalid();
@@ -123,6 +125,29 @@ export async function validateTask(db: D1Database, row: TaskRow, old?: TaskRow):
     );
     if (ancestors.results.some((a) => a.id === row.id || a.depth >= 32))
       invalid('Task hierarchy would contain a cycle or exceed 32 levels');
+  }
+  if (!old || row.key_result_id !== old.key_result_id || row.parent_id !== old.parent_id || row.kind !== old.kind) {
+    const linked =
+      row.kind === 'step'
+        ? await storage(() =>
+            db
+              .prepare(
+                `SELECT p.key_result_id AS id,k.title FROM tasks p LEFT JOIN key_results k
+          ON k.id=p.key_result_id AND k.deleted_at IS NULL WHERE p.id=? AND p.deleted_at IS NULL`,
+              )
+              .bind(row.parent_id)
+              .first<{ id: string; title: string | null }>(),
+          )
+        : row.key_result_id
+          ? await storage(() =>
+              db
+                .prepare('SELECT id,title FROM key_results WHERE id=? AND deleted_at IS NULL')
+                .bind(row.key_result_id)
+                .first<{ id: string; title: string | null }>(),
+            )
+          : null;
+    row.effective_key_result_id = linked?.id ?? '';
+    row.key_result_title = linked?.title ?? '';
   }
   if (row.kind === 'step') {
     const child = await storage(() =>

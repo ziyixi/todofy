@@ -42,7 +42,7 @@ message Plan {
   repeated string next_week_task_ids = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// One week's Work or Personal Bet: the owner's line of text, tied to no task.
+// One week's Work or Personal Bet, optionally connected to an annual Key Result.
 message WeeklyBet {
   option (google.api.resource) = {
     type: "tasks.ziyixi.science/WeeklyBet"
@@ -61,8 +61,12 @@ message WeeklyBet {
   string text = 4 [(google.api.field_behavior) = OPTIONAL];
   // The saved Bet's etag, empty while the week and area have none.
   string etag = 5 [(google.api.field_behavior) = OPTIONAL];
-  // When the text was last saved.
+  // When the text or Key Result was last saved.
   google.protobuf.Timestamp update_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Optional direct Key Result ID; independent of the Bet's text.
+  string key_result_id = 7 [(google.api.field_behavior) = OPTIONAL];
+  // The linked Key Result's current title, including archived results.
+  string key_result_title = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // The owner's order of one Review lane.

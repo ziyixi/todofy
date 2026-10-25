@@ -17,12 +17,21 @@ import { startHarness } from './harness.ts';
 
 async function syntheticOwner() {
   const generated = await crypto.subtle.generateKey(
-    { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+    {
+      name: 'RSASSA-PKCS1-v1_5',
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: 'SHA-256',
+    },
     true,
     ['sign', 'verify'],
   );
   const pair = generated as { publicKey: CryptoKey; privateKey: CryptoKey };
-  const publicKey = (await crypto.subtle.exportKey('jwk', pair.publicKey)) as { kty: string; n: string; e: string };
+  const publicKey = (await crypto.subtle.exportKey('jwk', pair.publicKey)) as {
+    kty: string;
+    n: string;
+    e: string;
+  };
   const encode = (bytes: Uint8Array) =>
     btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''))
       .replaceAll('+', '-')
@@ -34,11 +43,134 @@ async function syntheticOwner() {
   const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', pair.privateKey, new TextEncoder().encode(signed));
   return {
     jwks: {
-      keys: [{ kty: publicKey.kty, n: publicKey.n, e: publicKey.e, kid: 'synthetic-key', alg: 'RS256', use: 'sig' }],
+      keys: [
+        {
+          kty: publicKey.kty,
+          n: publicKey.n,
+          e: publicKey.e,
+          kid: 'synthetic-key',
+          alg: 'RS256',
+          use: 'sig',
+        },
+      ],
     },
     token: `${signed}.${encode(new Uint8Array(signature))}`,
   };
 }
+
+test(
+  'annual goals, detailed results and progress keep Worker CPU bounded',
+  async () => {
+    const owner = await syntheticOwner();
+    const result = await measureInIsolates(
+      COLD_ISOLATES,
+      async () => {
+        const harness = await startHarness({
+          inspectorPort: 0,
+          bypass: false,
+          jwks: owner.jwks,
+          ownerToken: owner.token,
+        });
+        const long = '合成'.repeat(1000);
+        await harness.db
+          .prepare(
+            `INSERT INTO objectives(id,title,description,year,sort_order,created_at,updated_at)
+          SELECT 'cpu-goal-o-'||value,?,?,2030,value,1,1 FROM json_each(?)`,
+          )
+          .bind('合成'.repeat(150), long, JSON.stringify(Array.from({ length: 20 }, (_, index) => index)))
+          .run();
+        const milestones = JSON.stringify(
+          Array.from({ length: 20 }, (_, index) => ({
+            id: `m${String(index)}`,
+            title: '合成'.repeat(150),
+            completed: true,
+            complete_time: '2030-04-15T10:00:00Z',
+          })),
+        );
+        await harness.db
+          .prepare(
+            `INSERT INTO key_results(id,objective_id,title,floor_text,target_text,notes,milestones,
+          focus_start_month,focus_end_month,focus_text,sort_order,created_at,updated_at)
+          SELECT 'cpu-goal-kr-'||value,'cpu-goal-o-'||(value%20),?,?,?,?,?,'2030-03','2030-06',?,value,1,1 FROM json_each(?)`,
+          )
+          .bind(
+            '合成'.repeat(150),
+            long,
+            long,
+            long.repeat(4),
+            milestones,
+            '合成'.repeat(500),
+            JSON.stringify(Array.from({ length: 100 }, (_, index) => index)),
+          )
+          .run();
+        await harness.db
+          .prepare(
+            `INSERT INTO goal_progress(id,key_result_id,note,created_at,updated_at)
+          SELECT 'cpu-goal-p-'||value,'cpu-goal-kr-0',?,value,value FROM json_each(?)`,
+          )
+          .bind(long.repeat(2), JSON.stringify(Array.from({ length: 1000 }, (_, index) => index)))
+          .run();
+        await harness.db
+          .prepare(
+            `INSERT INTO tasks(id,title,key_result_id,sort_order,created_at,updated_at)
+          SELECT 'cpu-goal-t-'||value,?,'cpu-goal-kr-'||value,value,1,1 FROM json_each(?)`,
+          )
+          .bind('合成'.repeat(150), JSON.stringify(Array.from({ length: 100 }, (_, index) => index)))
+          .run();
+        const meter = await connectCpuMeter(harness.mf, 'tasks');
+        return {
+          harness,
+          meter,
+          async dispose() {
+            meter.close();
+            await harness.dispose();
+          },
+        };
+      },
+      async ({ harness, meter }) => {
+        const read = async (path: string) => {
+          const response = await harness.fetch(path);
+          const text = await response.text();
+          expect(response.status, text.slice(0, 200)).toBe(200);
+        };
+        return [
+          await meter.measure(
+            'first authenticated annual goal catalog',
+            () => read('/api/tasks/v1/goalCatalog?year=2030'),
+            1,
+          ),
+          await meter.measure(
+            '20 Objectives and 100 concise Key Results',
+            () => read('/api/tasks/v1/goalCatalog?year=2030'),
+            7,
+          ),
+          await meter.measure(
+            'one result with full notes and 20 milestones',
+            () => read('/api/tasks/v1/keyResults/cpu-goal-kr-0'),
+            7,
+          ),
+          await meter.measure(
+            '50 maximum-length progress notes',
+            () => read('/api/tasks/v1/goalProgress?key_result_id=cpu-goal-kr-0&page_size=50'),
+            7,
+          ),
+          await meter.measure(
+            '100 tasks with joined short goal references',
+            () => read('/api/tasks/v1/tasks?view=all&page_size=100'),
+            7,
+          ),
+        ];
+      },
+    );
+    for (const measurement of result.reference.values()) {
+      console.log(JSON.stringify({ event: 'tasks_goals_cpu', ...measurement }));
+      expect(measurement.first, measurement.label).toBeLessThan(10);
+      if (measurement.label !== 'first authenticated annual goal catalog')
+        expect(measurement.median, measurement.label).toBeLessThan(8);
+    }
+  },
+  CPU_TEST_TIMEOUT_MS,
+);
 
 test(
   'large description stores keep list responses and Worker CPU bounded',
@@ -356,12 +488,18 @@ test(
                     'x-csrf-token': token,
                     cookie: (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '',
                   },
-                  body: JSON.stringify({ name: 'tasks/prerequisite-039', dependencies: wanted }),
+                  body: JSON.stringify({
+                    name: 'tasks/prerequisite-039',
+                    dependencies: wanted,
+                  }),
                 },
               );
               const body = await response.text();
               expect(response.status, body.slice(0, 200)).toBe(200);
-              const task = JSON.parse(body) as { etag: string; dependencies?: unknown[] };
+              const task = JSON.parse(body) as {
+                etag: string;
+                dependencies?: unknown[];
+              };
               expect(task.dependencies ?? []).toHaveLength(wanted.length);
               etag = task.etag;
             },
@@ -421,7 +559,14 @@ test(
             host: '127.0.0.1',
             port: 0,
             inspectorPort: 0,
-            workers: [{ name: 'warm-up', modules: true, script, compatibilityDate: '2026-09-08' }],
+            workers: [
+              {
+                name: 'warm-up',
+                modules: true,
+                script,
+                compatibilityDate: '2026-09-08',
+              },
+            ],
           }),
         );
         await mf.ready;
@@ -474,10 +619,15 @@ test(
             summary: '汉'.repeat(21845),
           })),
         );
-        const harness = await startHarness({ inspectorPort: 0, mail: todofy.handle });
+        const harness = await startHarness({
+          inspectorPort: 0,
+          mail: todofy.handle,
+        });
         // The owner's CSRF token, fetched before the meter connects.
         expect((await harness.mutate('GET', '/api/tasks/v1/mailCategories')).status).toBe(200);
-        const rows = Array.from({ length: 100 }, (_, index) => ({ id: `service-${String(index).padStart(3, '0')}` }));
+        const rows = Array.from({ length: 100 }, (_, index) => ({
+          id: `service-${String(index).padStart(3, '0')}`,
+        }));
         await harness.db
           .prepare(
             `INSERT INTO tasks(id,title,description,sort_order,created_at,updated_at) SELECT value->>'id','Synthetic mail task',?,key,?,? FROM json_each(?)`,
@@ -519,15 +669,10 @@ test(
           await meter.measure("Home's Ops.status()", status, 7),
           await meter.measure(
             'a footer search: 20 tasks with full 16,000-character descriptions',
-            () =>
-              list('view=search&query=footer-synthetic&page_size=20&include_description=true', 20),
+            () => list('view=search&query=footer-synthetic&page_size=20&include_description=true', 20),
             7,
           ),
-          await meter.measure(
-            'a service page of 100 tasks',
-            () => list('view=all&page_size=100', 100),
-            7,
-          ),
+          await meter.measure('a service page of 100 tasks', () => list('view=all&page_size=100', 100), 7),
           await meter.measure(
             'convert a mail whose summary is 64 KiB',
             async () => {
@@ -544,7 +689,7 @@ test(
             7,
           ),
           await meter.measure(
-            "TaskInbox: a task with 30 subtasks, each 16,000 units long",
+            'TaskInbox: a task with 30 subtasks, each 16,000 units long',
             async () => {
               const response = await inbox.fetch('https://inbox.internal/', {
                 method: 'POST',
@@ -552,10 +697,16 @@ test(
                   request_id: crypto.randomUUID(),
                   title: 'Synthetic CPU digest',
                   description: long,
-                  subtasks: Array.from({ length: 30 }, (_, index) => ({ title: `Item ${String(index)}`, description: long })),
+                  subtasks: Array.from({ length: 30 }, (_, index) => ({
+                    title: `Item ${String(index)}`,
+                    description: long,
+                  })),
                 }),
               });
-              const answer = (await response.json()) as { subtask_ids?: string[]; error?: string };
+              const answer = (await response.json()) as {
+                subtask_ids?: string[];
+                error?: string;
+              };
               expect(answer.error).toBeUndefined();
               expect(answer.subtask_ids).toHaveLength(30);
             },

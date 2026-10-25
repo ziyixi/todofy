@@ -26,7 +26,12 @@ export function warmUp(zone: string): Promise<void> {
   // code before an isolate's first request does.
   fromWire(
     ListTasksRequestSchema,
-    { view: 'all', page_size: 100, include_completed: true, task_ids: ['startup'] },
+    {
+      view: 'all',
+      page_size: 100,
+      include_completed: true,
+      task_ids: ['startup'],
+    },
     { strict: true },
   );
   const taskPage = warmTaskPage(zone);
@@ -74,6 +79,7 @@ function warmTaskPage(zone: string): Promise<void> {
       committed_week: '2000-01-03',
       area: 'work',
       lead_days: index % 3,
+      key_result_id: '',
       planning_flags: index % 2 ? '["quick","waiting","task"]' : '[]',
       completed: 0,
       completed_at: null,
@@ -84,7 +90,10 @@ function warmTaskPage(zone: string): Promise<void> {
       dependencies,
     }),
   );
-  const statement = { bind: () => statement, all: () => Promise.resolve({ results: rows }) };
+  const statement = {
+    bind: () => statement,
+    all: () => Promise.resolve({ results: rows }),
+  };
   const stubDb = { prepare: () => statement } as unknown as D1Database;
   return listTasks(stubDb, create(ListTasksRequestSchema, { view: 'all', pageSize: STARTUP_ROWS }), zone, 0)
     .then((page) => {

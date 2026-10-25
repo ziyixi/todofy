@@ -4,7 +4,15 @@ import { ListTasksResponseSchema, type ListTasksRequest } from '@ziyixi/proto/ta
 import { addDays, localDate, validDate } from '@ziyixi/task-dates';
 import { invalid, missing, storage } from './errors.ts';
 import { taskFilter } from './filters.ts';
-import { childCounts, dependencyList, taskProjection, checkedId, taskMessage, type TaskRow } from './model.ts';
+import {
+  goalLinks,
+  childCounts,
+  dependencyList,
+  taskProjection,
+  checkedId,
+  taskMessage,
+  type TaskRow,
+} from './model.ts';
 
 export function pageSize(value: number, fallback = 50): number {
   if (!Number.isInteger(value) || value < 0) invalid('Invalid page size');
@@ -13,7 +21,9 @@ export function pageSize(value: number, fallback = 50): number {
 export async function getTask(db: D1Database, id: string): Promise<TaskRow> {
   const row = await storage(() =>
     db
-      .prepare(`SELECT t.*,${childCounts},${dependencyList} FROM tasks t WHERE t.id=? AND t.deleted_at IS NULL`)
+      .prepare(
+        `SELECT t.*,${childCounts},${goalLinks},${dependencyList} FROM tasks t WHERE t.id=? AND t.deleted_at IS NULL`,
+      )
       .bind(checkedId(id))
       .first<TaskRow>(),
   );
@@ -28,10 +38,15 @@ export async function listTasks(db: D1Database, request: ListTasksRequest, zone:
   if (request.taskIds.length > 100) invalid('At most 100 task IDs may be requested');
   const values: (string | number)[] = [];
   let source = 'tasks t';
+  if (request.keyResultId) {
+    conditions.push("t.key_result_id=? AND t.kind='task'");
+    values.push(checkedId(request.keyResultId));
+    source = 'tasks t INDEXED BY tasks_key_result';
+  }
   if (request.taskIds.length) {
     // Each requested ID is one primary-key lookup, whatever the view's order would otherwise prefer.
     source = 'json_each(?) j CROSS JOIN tasks t ON t.id=j.value';
-    values.push(JSON.stringify([...new Set(request.taskIds.map(checkedId))]));
+    values.unshift(JSON.stringify([...new Set(request.taskIds.map(checkedId))]));
   }
   if (request.parentId) {
     conditions.push('t.parent_id=?');
@@ -114,6 +129,7 @@ export async function listTasks(db: D1Database, request: ListTasksRequest, zone:
     view,
     project: request.projectId,
     parent: request.parentId,
+    ...(request.keyResultId ? { keyResult: request.keyResultId } : {}),
     query: request.query,
     label: request.labelId,
     filter: request.filterId,
@@ -146,7 +162,7 @@ export async function listTasks(db: D1Database, request: ListTasksRequest, zone:
   const rows = await storage(() =>
     db
       .prepare(
-        `SELECT ${taskProjection(request.includeDescription)},${childCounts},${dependencyList} FROM ${source} WHERE ${conditions.join(' AND ')} ORDER BY t.${column} ${direction},t.id ${direction} LIMIT ?`,
+        `SELECT ${taskProjection(request.includeDescription)},${childCounts},${goalLinks},${dependencyList} FROM ${source} WHERE ${conditions.join(' AND ')} ORDER BY t.${column} ${direction},t.id ${direction} LIMIT ?`,
       )
       .bind(...values, size + 1)
       .all<TaskRow>(),

@@ -25,6 +25,10 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 - Visible planning stage, context, Execution choice, independent Routine switch, start-ahead window and
   Deep/Shallow effort in task details.
 - Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.
+- Goals connects annual Objectives and Key Results to weekly Bets and Tasks. Set a multi-month focus, keep
+  Floor/Ceiling text, confirm result milestones and record dated progress with evidence. Tasks/Subtasks can choose
+  a KR; Steps inherit their direct parent's association. Completing work does not automatically complete the KR.
+  Goal definitions load only on Goals or when its picker opens; ordinary task lists do not load goal history.
 - GTD (`#/gtd`) shows the daily counts of open, overdue and undated tasks and the Inbox's age, with 30-day trends and
   the latest weekly review. Tasks counts once a day after 06:00 and creates the review task on Sunday from 10:00.
 - Plan keeps the candidate columns above a full-width Committed row, with horizontal cards and completion controls for outcomes and Steps.
@@ -68,6 +72,9 @@ affect planning and survive unrelated edits; choosing a planning stage still tak
 A Step cannot contain children. Task details can add, complete, reopen or delete either kind
 of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites. A task waits
 for at most 5 tasks, the account holds at most 300 dependencies, and none may close a cycle.
+
+[Goals](docs/goals.md) describes the annual view, the optional associations and the one-time private Notion import.
+Routine and exploration goals keep their own notes; exploration has no required metrics or completion score.
 
 Completing a task completes its open children, recurring ones included. Completing a recurring task records
 one occurrence, moves its date and deadline to the next one and reopens its Subtasks and Steps for that cycle,

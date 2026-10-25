@@ -19,6 +19,10 @@ import { createFocusEntry, deleteFocusEntry, updateFocusEntry } from './focus-en
 import { convertMailItem, getMailCategories, updateMailCategories } from './mail.ts';
 import { listGtdDays } from './gtd.ts';
 import { getWeeklyReview, listWeeklyReviews } from './review.ts';
+import { getGoalCatalog, getKeyResult } from './goal-read.ts';
+import { goalId, keyResultMessage } from './goal-model.ts';
+import { createObjective, updateObjective, createKeyResult, updateKeyResult } from './goal-write.ts';
+import { listGoalProgress, createGoalProgress, updateGoalProgress, deleteGoalProgress } from './goal-progress.ts';
 
 export interface ApiContext {
   env: Env;
@@ -39,6 +43,17 @@ export const handlers: ServiceHandlers<ShapeOf<typeof TasksUiService>, ApiContex
   reopenTask: (input, { env, now }) => reopenTask(env.DB, input, now, accountZone(env)),
   duplicateTask: (input, { env, now }) => duplicateTask(env.DB, input, now, accountZone(env)),
   reorderTasks: (input, { env, now }) => reorderTasks(env.DB, input, now, accountZone(env)),
+  getGoalCatalog: (input, { env, now }) => getGoalCatalog(env.DB, input, accountZone(env), now),
+  getKeyResult: async (input, { env }) =>
+    keyResultMessage(await getKeyResult(env.DB, goalId(input.name, 'keyResults'))),
+  createObjective: (input, { env, now }) => createObjective(env.DB, input, now),
+  updateObjective: (input, { env, now }) => updateObjective(env.DB, input, now),
+  createKeyResult: (input, { env, now }) => createKeyResult(env.DB, input, now),
+  updateKeyResult: (input, { env, now }) => updateKeyResult(env.DB, input, now),
+  listGoalProgress: (input, { env }) => listGoalProgress(env.DB, input),
+  createGoalProgress: (input, { env, now }) => createGoalProgress(env.DB, input, now),
+  updateGoalProgress: (input, { env, now }) => updateGoalProgress(env.DB, input, now),
+  deleteGoalProgress: (input, { env, now }) => deleteGoalProgress(env.DB, input, now),
   getPlan: (input, { env, now }) => getPlan(env.DB, input, accountZone(env), now),
   updateWeeklyBet: (input, { env, now }) => updateWeeklyBet(env.DB, input, accountZone(env), now),
   listFocusDays: (input, { env, now }) => listFocusDays(env.DB, input, accountZone(env), now),
@@ -142,7 +157,12 @@ export const handlers: ServiceHandlers<ShapeOf<typeof TasksUiService>, ApiContex
       env.DB,
       'labels',
       LabelSchema,
-      { requestId: input.requestId, id: input.labelId, resource: input.label, request: input },
+      {
+        requestId: input.requestId,
+        id: input.labelId,
+        resource: input.label,
+        request: input,
+      },
       true,
       now,
     );

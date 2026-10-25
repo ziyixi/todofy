@@ -22,6 +22,7 @@ import type {
   PlanState,
   PlanningTask,
   PlusActions,
+  RenderGoalPicker,
 } from "./model";
 
 export interface PlanViewProps {
@@ -37,6 +38,7 @@ export interface PlanViewProps {
   pending?: ReadonlySet<string>;
   run: RunOperation;
   actions: PlusActions;
+  renderGoalPicker?: RenderGoalPicker;
   editTask: (task: PlanningTask) => void;
   onWeekChange: (weekStart: string) => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
@@ -250,6 +252,7 @@ export function PlanView(props: PlanViewProps) {
           pending={props.pending}
           run={props.run}
           actions={props.actions}
+          renderGoalPicker={props.renderGoalPicker}
           editTask={editTask}
           completeReview={props.completeReview}
           onOpenMail={props.onOpenMail}

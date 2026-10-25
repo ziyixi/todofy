@@ -1,4 +1,10 @@
-import type { BetArea, PlusActions, RunOperation, WeeklyBet } from "./model";
+import type {
+  BetArea,
+  PlusActions,
+  RunOperation,
+  WeeklyBet,
+  WeeklyBetField,
+} from "./model";
 
 /** The Bets' areas, in the order they are shown. */
 export const BET_AREAS: readonly BetArea[] = ["work", "personal"];
@@ -63,11 +69,14 @@ export async function saveBet(
   run: RunOperation,
   actions: PlusActions,
   bet: WeeklyBet,
+  fields?: WeeklyBetField[],
 ): Promise<BetOutcome> {
   let outcome: BetOutcome = "failed";
   await run(async () => {
     try {
-      const saved = await actions.setWeeklyBet(bet);
+      const saved = fields
+        ? await actions.setWeeklyBet(bet, fields)
+        : await actions.setWeeklyBet(bet);
       outcome = "saved";
       return saved;
     } catch (error) {

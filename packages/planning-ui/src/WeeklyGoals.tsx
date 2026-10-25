@@ -2,10 +2,17 @@ import { Target } from "lucide-react";
 import { useAnnouncement } from "./announce";
 import { BET_AREAS, saveBet, weeklyBet } from "./bets";
 import { BetText } from "./BetText";
+import { BetGoal } from "./BetGoal";
 import { addDays } from "./domain";
 import { betWords, words } from "./i18n";
 import { weekLabel } from "./PlanningCalendar";
-import type { Language, PlanState, PlusActions, RunOperation } from "./model";
+import type {
+  Language,
+  PlanState,
+  PlusActions,
+  RenderGoalPicker,
+  RunOperation,
+} from "./model";
 
 interface Props {
   plan: PlanState;
@@ -13,6 +20,7 @@ interface Props {
   busy: boolean;
   run: RunOperation;
   actions: PlusActions;
+  renderGoalPicker?: RenderGoalPicker;
 }
 
 /**
@@ -20,7 +28,14 @@ interface Props {
  * Tasks and tied to no task, edited in place. An empty one shows last week's, with Keep. The week
  * Week shows does not change them; next week's are written in Sunday's weekly review.
  */
-export function WeeklyGoals({ plan, language, busy, run, actions }: Props) {
+export function WeeklyGoals({
+  plan,
+  language,
+  busy,
+  run,
+  actions,
+  renderGoalPicker,
+}: Props) {
   const [announcement, setAnnouncement] = useAnnouncement();
   const zh = language === "zh";
   const text = words(language);
@@ -49,6 +64,14 @@ export function WeeklyGoals({ plan, language, busy, run, actions }: Props) {
               disabled={busy}
               save={(bet) => saveBet(run, actions, bet)}
               announce={setAnnouncement}
+            />
+            <BetGoal
+              bet={weeklyBet(plan.weeklyBets, plan.week, area)}
+              language={language}
+              disabled={busy}
+              renderGoalPicker={renderGoalPicker}
+              run={run}
+              actions={actions}
             />
           </div>
         ))}

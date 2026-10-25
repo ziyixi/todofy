@@ -40,7 +40,8 @@ export type TaskDraft = Pick<
   | "recurrence"
   | "kind"
   | "effort"
->;
+> &
+  Partial<Pick<Task, "keyResultId">>;
 export type CatalogItem = Project | Section | Label | SavedFilter;
 export type CatalogKind = "project" | "section" | "label" | "filter";
 export const EMPTY_CATALOG: Catalog = {
@@ -132,4 +133,5 @@ export const TASK_EDIT_FIELDS = [
   "recurrence",
   "kind",
   "effort",
+  "key_result_id",
 ];

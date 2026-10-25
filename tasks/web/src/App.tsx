@@ -46,6 +46,7 @@ import { TaskDialog } from "./components/TaskDialog";
 import PlanningPage, { readIdlePause } from "./PlanningPage";
 const MailPage = lazy(() => import("./MailPage"));
 const GtdPage = lazy(() => import("./GtdPage"));
+const GoalsPage = lazy(() => import("./GoalsPage"));
 const CatalogEditor = lazy(() =>
   import("./components/CatalogEditor").then((module) => ({
     default: module.CatalogEditor,
@@ -309,6 +310,7 @@ export function App() {
               focus: "Focus",
               mail: "Mail",
               gtd: "GTD",
+              goals: "Goals",
               catalog: "Labels & filters",
             }[route.page] || "Tasks";
   const editCatalog = (kind: CatalogKind, item?: CatalogItem) =>
@@ -418,6 +420,26 @@ export function App() {
                 }
               >
                 <GtdPage onOpenTask={(id) => void openTask(id)} />
+              </Suspense>
+            </ErrorBoundary>
+          ) : route.page === "goals" ? (
+            <ErrorBoundary key="goals">
+              <Suspense
+                fallback={
+                  <p className="loading-state" role="status">
+                    Loading Goals…
+                  </p>
+                }
+              >
+                <GoalsPage
+                  selectedId={route.id}
+                  refreshRevision={actions.mutationRevision}
+                  onOpenTask={(id) => void openTask(id)}
+                  onCreateTask={(keyResultId) =>
+                    setEditor({ defaults: { keyResultId } })
+                  }
+                  onCompleteTask={complete}
+                />
               </Suspense>
             </ErrorBoundary>
           ) : planningPage ? null : route.page === "catalog" ? (

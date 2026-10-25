@@ -107,6 +107,12 @@ message Task {
   bool must_start = 37 [(google.api.field_behavior) = OUTPUT_ONLY];
   // A deadline without lead days on a task that is neither active nor parked.
   bool missing_lead = 38 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Optional direct Key Result ID for a Task or Subtask. A Step stores none and inherits its direct parent's link.
+  string key_result_id = 39 [(google.api.field_behavior) = OPTIONAL];
+  // This Task's direct link, or a Step's direct parent's link.
+  string effective_key_result_id = 40 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The effective Key Result's current title, including archived results.
+  string key_result_title = 41 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One task another task waits for.

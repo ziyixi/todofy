@@ -24,7 +24,10 @@ export type Table =
   | 'filters'
   | 'focus_entries'
   | 'focus_timer'
-  | 'plan_board';
+  | 'plan_board'
+  | 'objectives'
+  | 'key_results'
+  | 'goal_progress';
 export type CatalogTable = 'projects' | 'sections' | 'labels' | 'filters';
 export interface BaseRow {
   id: string;
@@ -55,6 +58,9 @@ export interface TaskRow extends BaseRow {
   area: string;
   lead_days: number;
   planning_flags: string;
+  key_result_id: string;
+  effective_key_result_id?: string;
+  key_result_title?: string;
   completed: number;
   completed_at: number | null;
   project_archived?: number;
@@ -95,6 +101,7 @@ export const taskColumns = [
   'area',
   'lead_days',
   'planning_flags',
+  'key_result_id',
 ] as const;
 export const catalogColumns = {
   projects: ['title', 'parent_id', 'color', 'favorite', 'archived', 'inbox', 'sort_order'],
@@ -123,6 +130,11 @@ export function taskProjection(includeDescription: boolean, prefix = 't.'): stri
     )
     .join(',');
 }
+const effectiveGoal =
+  "CASE WHEN t.kind='step' THEN COALESCE((SELECT p.key_result_id FROM tasks p WHERE p.id=t.parent_id AND p.deleted_at IS NULL),'') ELSE t.key_result_id END";
+export const goalLinks = `${effectiveGoal} AS effective_key_result_id,
+  CASE WHEN (${effectiveGoal})='' THEN '' ELSE COALESCE((SELECT k.title FROM key_results k
+    WHERE k.id=(${effectiveGoal}) AND k.deleted_at IS NULL),'') END AS key_result_title`;
 export const childCounts = `(SELECT p.title FROM tasks p WHERE p.id=t.parent_id) AS parent_title,
   t.completed_base_count+(SELECT count(*) FROM completions h WHERE h.task_id=t.id AND h.imported=0) AS completed_count,
   (SELECT count(*) FROM tasks c WHERE c.parent_id=t.id AND c.deleted_at IS NULL) AS child_count,
@@ -186,6 +198,9 @@ export function taskMessage(row: TaskRow, today: string): Task {
     completed: row.completed === 1,
     archived: row.project_archived === 1,
     parentTitle: row.parent_title ?? '',
+    keyResultId: row.key_result_id || '',
+    effectiveKeyResultId: row.effective_key_result_id ?? row.key_result_id,
+    keyResultTitle: row.key_result_title ?? '',
     completedCount: row.completed_count ?? 0,
     childCount: row.child_count ?? 0,
     completedChildCount: row.completed_child_count ?? 0,

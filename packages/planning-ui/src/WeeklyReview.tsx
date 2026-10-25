@@ -3,6 +3,7 @@ import { ListChecks, X } from "lucide-react";
 import { useAnnouncement } from "./announce";
 import { BET_AREAS, saveBet, weeklyBet } from "./bets";
 import { BetText } from "./BetText";
+import { BetGoal } from "./BetGoal";
 import { addDays, displayedTitle, hasPlanningFlag, taskIndex } from "./domain";
 import { deadlineStatus } from "./deadlines";
 import { waitingTasks } from "./dependencies";
@@ -29,6 +30,7 @@ import type {
   PlanningTask,
   PlusActions,
   RunOperation,
+  RenderGoalPicker,
   WeeklyReviewFacts,
 } from "./model";
 
@@ -45,6 +47,7 @@ interface Props {
   pending?: ReadonlySet<string>;
   run: RunOperation;
   actions: PlusActions;
+  renderGoalPicker?: RenderGoalPicker;
   editTask: (task: PlanningTask) => void;
   /** This week's ticked lines and kept someday tasks, which PlanView remembers. */
   progress: ReviewProgress;
@@ -74,6 +77,7 @@ export function WeeklyReview({
   pending,
   run,
   actions,
+  renderGoalPicker,
   editTask,
   progress,
   onProgress,
@@ -464,6 +468,14 @@ export function WeeklyReview({
                       disabled={busy}
                       save={(bet) => saveBet(run, actions, bet)}
                       announce={setAnnouncement}
+                    />
+                    <BetGoal
+                      bet={weeklyBet(plan.weeklyBets, nextWeek, area)}
+                      language={language}
+                      disabled={busy}
+                      renderGoalPicker={renderGoalPicker}
+                      run={run}
+                      actions={actions}
                     />
                   </li>
                 ))}

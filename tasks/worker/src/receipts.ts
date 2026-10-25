@@ -35,7 +35,10 @@ function withoutEmpty(value: object, keys: readonly string[]): object {
 function legacyForm(method: string, input: object): object {
   const { task, resource } = input as { task?: object; resource?: object };
   if (task && (method === 'createTask' || method === 'updateTask'))
-    return { ...input, task: withoutEmpty(task, ['kind', 'effort']) };
+    return {
+      ...input,
+      task: withoutEmpty(task, ['kind', 'effort', 'keyResultId', 'effectiveKeyResultId', 'keyResultTitle']),
+    };
   if (resource && method.endsWith(':filters')) return { ...input, resource: withoutEmpty(resource, ['color']) };
   if (method === 'completeTask') return withoutEmpty(input, ['focusDay']);
   return input;
@@ -44,7 +47,11 @@ function legacyForm(method: string, input: object): object {
  * A receipt hashes its request's wire JSON. The wire form leaves unset fields out, so adding a field never
  * changes the hash of an older request. `legacyInput` is what receipts written before the wire form hashed.
  */
-export async function fingerprint(method: string, request: Message, legacyInput: object = request): Promise<RequestHash> {
+export async function fingerprint(
+  method: string,
+  request: Message,
+  legacyInput: object = request,
+): Promise<RequestHash> {
   const schema = requestSchemas.get(request.$typeName);
   if (!schema) throw new TypeError(`Not a Tasks request message: ${request.$typeName}`);
   return {

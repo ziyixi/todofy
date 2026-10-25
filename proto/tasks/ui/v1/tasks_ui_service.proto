@@ -26,6 +26,7 @@ import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 import "tasks/ui/v1/focus.proto";
+import "tasks/ui/v1/goals.proto";
 import "tasks/ui/v1/gtd.proto";
 import "tasks/ui/v1/mail.proto";
 import "tasks/ui/v1/plan.proto";
@@ -314,7 +315,7 @@ service TasksUiService {
     option (google.api.http) = {get: "/api/tasks/v1/{name=plan}"};
     option (google.api.method_signature) = "name";
   }
-  // Saves a Bet's text over the etag shown, creating it when the week and area have none. Only this week's and
+  // Saves a Bet's text or Key Result over the etag shown, creating it when the week and area have none. Only this week's and
   // the next week's Bets take a write.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
@@ -324,6 +325,91 @@ service TasksUiService {
       body: "weekly_bet"
     };
     option (google.api.method_signature) = "weekly_bet,update_mask";
+  }
+  // The annual Objectives and concise Key Results; progress history is not read.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetGoalCatalog(GetGoalCatalogRequest) returns (GoalCatalog) {
+    option (google.api.http) = {get: "/api/tasks/v1/{name=goalCatalog}"};
+    option (google.api.method_signature) = "name";
+  }
+  // A Key Result's full texts, milestones and current focus.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetKeyResult(GetKeyResultRequest) returns (KeyResult) {
+    option (google.api.http) = {get: "/api/tasks/v1/{name=keyResults/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Creates an annual Objective, at most 20 in one year.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateObjective(CreateObjectiveRequest) returns (Objective) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/objectives"
+      body: "objective"
+    };
+    option (google.api.method_signature) = "objective,objective_id";
+  }
+  // Updates or archives an Objective without changing its results or progress.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateObjective(UpdateObjectiveRequest) returns (Objective) {
+    option (google.api.http) = {
+      patch: "/api/tasks/v1/{objective.name=objectives/*}"
+      body: "objective"
+    };
+    option (google.api.method_signature) = "objective,update_mask";
+  }
+  // Creates an annual Key Result, at most 100 in one year.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateKeyResult(CreateKeyResultRequest) returns (KeyResult) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/keyResults"
+      body: "key_result"
+    };
+    option (google.api.method_signature) = "key_result,key_result_id";
+  }
+  // Updates a Key Result, its current focus or its manually maintained milestones.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateKeyResult(UpdateKeyResultRequest) returns (KeyResult) {
+    option (google.api.http) = {
+      patch: "/api/tasks/v1/{key_result.name=keyResults/*}"
+      body: "key_result"
+    };
+    option (google.api.method_signature) = "key_result,update_mask";
+  }
+  // A Key Result's progress notes, newest first, with bounded keyset pagination.
+  rpc ListGoalProgress(ListGoalProgressRequest) returns (ListGoalProgressResponse) {
+    option (google.api.http) = {get: "/api/tasks/v1/goalProgress"};
+  }
+  // Adds a dated progress note.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc CreateGoalProgress(CreateGoalProgressRequest) returns (GoalProgress) {
+    option (google.api.http) = {
+      post: "/api/tasks/v1/goalProgress"
+      body: "goal_progress"
+    };
+    option (google.api.method_signature) = "goal_progress";
+  }
+  // Edits a progress note without moving it to another result.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc UpdateGoalProgress(UpdateGoalProgressRequest) returns (GoalProgress) {
+    option (google.api.http) = {
+      patch: "/api/tasks/v1/{goal_progress.name=goalProgress/*}"
+      body: "goal_progress"
+    };
+    option (google.api.method_signature) = "goal_progress,update_mask";
+  }
+  // Soft-deletes a progress note; a replay of its request remains safe.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc DeleteGoalProgress(DeleteGoalProgressRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/tasks/v1/{name=goalProgress/*}"};
+    option (google.api.method_signature) = "name,etag";
   }
   // Turns a mail still awaiting a decision into an Inbox task, on the owner's explicit action: the mail's subject,
   // summary and a link back, and a category's label and priority. The task's ID is derived from the mail, so any
@@ -453,6 +539,8 @@ message ListTasksRequest {
   bool include_description = 12 [(google.api.field_behavior) = OPTIONAL];
   // At most 100 exact task IDs, for bounded internal consumers.
   repeated string task_ids = 13 [(google.api.field_behavior) = OPTIONAL];
+  // Optional Key Result ID; selects directly linked Tasks/Subtasks. Read their Steps through the parent query.
+  string key_result_id = 14 [(google.api.field_behavior) = OPTIONAL];
 }
 // One task page, in sort_order then ID order.
 message ListTasksResponse {
@@ -982,9 +1070,9 @@ message GetPlanRequest {
 }
 // Input to UpdateWeeklyBet.
 message UpdateWeeklyBetRequest {
-  // The Bet's name and its new text.
+  // The Bet's name and its new text or Key Result link.
   WeeklyBet weekly_bet = 1 [(google.api.field_behavior) = REQUIRED];
-  // text, the only field that changes; empty means text.
+  // text and/or key_result_id. Empty means text, preserving clients that only edit the line.
   google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
   // The etag shown, empty when the week and area had none; separate from the fields being updated.
   // (-- api-linter: core::0134::request-unknown-fields=disabled
@@ -1062,4 +1150,129 @@ message ListGtdDaysResponse {
   repeated GtdDay gtd_days = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Older days, back to the oldest counted one; empty on the last page.
   string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input to GetGoalCatalog.
+message GetGoalCatalogRequest {
+  // Always goalCatalog.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/GoalCatalog"
+  ];
+  // Calendar year, 2000 through 2199; zero means the current year in the account's time zone.
+  // (-- api-linter: core::0131::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this singleton reads the requested annual catalog. --)
+  int32 year = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+// Input to GetKeyResult.
+message GetKeyResultRequest {
+  // keyResults/{id}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/KeyResult"
+  ];
+}
+// Input to CreateObjective.
+message CreateObjectiveRequest {
+  // The annual Objective.
+  Objective objective = 1 [(google.api.field_behavior) = REQUIRED];
+  // Optional short ID; empty generates a UUID.
+  string objective_id = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+// Input to UpdateObjective.
+message UpdateObjectiveRequest {
+  // The Objective's name and changed fields.
+  Objective objective = 1 [(google.api.field_behavior) = REQUIRED];
+  // Explicit mutable fields; empty and * are refused to prevent accidental clearing.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The current etag, kept outside the masked resource.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this concurrency token survives the shared client's masked resource body. --)
+  // (-- api-linter: core::0154::no-duplicate-etag=disabled
+  //     aip.dev/not-precedent: this concurrency token survives the shared client's masked resource body. --)
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+// Input to CreateKeyResult.
+message CreateKeyResultRequest {
+  // The annual Key Result.
+  KeyResult key_result = 1 [(google.api.field_behavior) = REQUIRED];
+  // Optional short ID; empty generates a UUID.
+  string key_result_id = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+// Input to UpdateKeyResult.
+message UpdateKeyResultRequest {
+  // The result's name and changed fields.
+  KeyResult key_result = 1 [(google.api.field_behavior) = REQUIRED];
+  // Explicit mutable fields; empty and * are refused to prevent accidental clearing.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The current etag, kept outside the masked resource.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this concurrency token survives the shared client's masked resource body. --)
+  // (-- api-linter: core::0154::no-duplicate-etag=disabled
+  //     aip.dev/not-precedent: this concurrency token survives the shared client's masked resource body. --)
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+// Input to ListGoalProgress.
+message ListGoalProgressRequest {
+  // Required Key Result short ID.
+  // (-- api-linter: core::0132::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: each progress page is selected by its Key Result's short ID. --)
+  // (-- api-linter: core::0132::request-required-fields=disabled
+  //     aip.dev/not-precedent: a progress history must name one Key Result and cannot read all histories. --)
+  string key_result_id = 1 [(google.api.field_behavior) = REQUIRED];
+  // Default 20, maximum 50; a negative value is refused.
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Previous page token for the same Key Result.
+  string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+// One page of progress notes, newest first.
+message ListGoalProgressResponse {
+  // At most 50 notes.
+  repeated GoalProgress goal_progress = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Empty at the end.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// Input to CreateGoalProgress.
+// (-- api-linter: core::0133::request-id-field=disabled
+//     aip.dev/not-precedent: Tasks names each progress note; request_id preserves the exact creation response. --)
+message CreateGoalProgressRequest {
+  // The Key Result, note and optional evidence.
+  GoalProgress goal_progress = 1 [(google.api.field_behavior) = REQUIRED];
+  // One UUIDv4 or UUIDv5 for this action.
+  string request_id = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+// Input to UpdateGoalProgress.
+message UpdateGoalProgressRequest {
+  // The note's name and changed fields.
+  GoalProgress goal_progress = 1 [(google.api.field_behavior) = REQUIRED];
+  // Explicit note and/or evidence_url; empty and * are refused.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // One UUIDv4 or UUIDv5 for this action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
+  // The current etag, kept outside the masked resource.
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: this concurrency token survives the shared client's masked resource body. --)
+  // (-- api-linter: core::0154::no-duplicate-etag=disabled
+  //     aip.dev/not-precedent: this concurrency token survives the shared client's masked resource body. --)
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+// Input to DeleteGoalProgress.
+message DeleteGoalProgressRequest {
+  // goalProgress/{id}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "tasks.ziyixi.science/GoalProgress"
+  ];
+  // The note's current etag.
+  string etag = 2 [(google.api.field_behavior) = REQUIRED];
+  // One UUIDv4 or UUIDv5 for this action.
+  string request_id = 3 [(google.api.field_behavior) = OPTIONAL];
 }

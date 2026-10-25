@@ -49,6 +49,46 @@ async function copy(task: Resource, requestId = randomUUID()) {
   });
 }
 
+test.each(["task", "step"])(
+  "duplicate refuses a completed %s under a completed parent",
+  async (kind) => {
+    const parent = await make("tasks", { title: "Synthetic completed parent" });
+    const child = await make("tasks", {
+      title: "Synthetic completed child",
+      parent_id: parent.id,
+      kind,
+    });
+    const completed = await harness.mutate(
+      "POST",
+      `/api/tasks/v1/${parent.name}:complete`,
+      { etag: parent.etag, request_id: randomUUID() },
+    );
+    expect(completed.status, await completed.clone().text()).toBe(200);
+    const current = await (
+      await harness.fetch(`/api/tasks/v1/${child.name}`)
+    ).json<Resource>();
+    expect(current.completed).toBe(true);
+    const before = await harness.db
+      .prepare("SELECT count(*) AS n FROM tasks")
+      .first();
+    const request = randomUUID();
+    const rejected = await copy(current, request);
+    expect(rejected.status, await rejected.clone().text()).toBe(400);
+    expect(await rejected.json()).toMatchObject({
+      error: { status: "FAILED_PRECONDITION" },
+    });
+    expect(
+      await harness.db.prepare("SELECT count(*) AS n FROM tasks").first(),
+    ).toEqual(before);
+    expect(
+      await harness.db
+        .prepare("SELECT id FROM requests WHERE id=?")
+        .bind(request)
+        .first(),
+    ).toBeNull();
+  },
+);
+
 test("duplicate preserves the active hierarchy and full fields below its source, with one frozen receipt", async () => {
   const project = await make("projects", {
     title: "Synthetic duplicate project",

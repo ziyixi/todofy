@@ -1,4 +1,50 @@
-# Approved Tasks interface: visual QA
+# Approved Tasks interfaces: visual QA
+
+## Goals
+
+Final result: passed for the approved annual Goal/KR view and its links to Plan, Tasks and Steps.
+
+Source: [approved Goals image](docs/images/goals-approved.png). Rendered implementation:
+[desktop](docs/images/goals-qa/desktop.png), at the same 1487×1058 CSS viewport, density 1. The screenshot is a real
+local Chromium/workerd/D1 scene with four synthetic Objectives, 12 KRs, one current focus, a weekly Bet and two
+related Tasks. Both source and implementation were inspected together in the same paired-image review; body
+regions, milestone controls and nested Steps were also checked in the uncropped captures.
+
+The first comparison found a P2 readability mismatch: Goal titles, section labels, Task/Step copy and the period
+strip were smaller than the approved design. Goals-only typography now uses a 30 px page title, 27 px KR title,
+20 px section titles, 16 px primary body/Tasks and 15 px Steps; supporting text is 12–14 px. Columns changed to
+1.3:1 and the focus strip to 72 px. Existing app/sidebar styles were not changed. The final capture was compared
+again after these corrections; no actionable P0/P1/P2 visual finding remains.
+
+Fidelity surfaces:
+
+- Fonts: existing app system font retained; Goal-specific size/weight hierarchy corrected and readable.
+- Layout: period strip, left result evidence and right weekly execution match the approved grouping. The KR
+  selector and explicit result-complete control are intentional production additions for navigating all results
+  and confirming outcomes. Existing 245 px sidebar preference is retained.
+- Colours: existing warm-white, green actions, pale-green selection and neutral dividers are used.
+- Assets: existing Lucide icons and native controls; no rasterized interface or substitute decorative artwork.
+- Copy: English controls follow the existing app language; synthetic content remains clearly synthetic. Native
+  account-local completion dates read Today rather than the illustration's example date. Long Objective titles
+  wrap within the navigation and preserve full accessible text.
+
+The synthetic fixture supplies source/evidence links; the latest capture includes the Source link. Routine
+goals omit absent bounds; open exploration omits metric prompts and scores.
+
+Interaction evidence: three native Goals page cases cover saved definitions/focus/evidence and reload, progress
+deletion, Task/Step completion without Goal completion, narrow 390 px layout and draft/caret/geometry preservation
+during refresh. Three linking cases cover lazy/cached GoalPicker geometry, inheritance, explicit set/clear, Bet
+readback and Goal navigation. The complete 141-case browser suite passed, including existing drag, dates, Focus,
+request-count and cached popup tests. Root also manually recorded synthetic progress and completed a Step in the
+dedicated Chrome preview on port 18808; the Goal's milestone count and completion stayed unchanged. Console checks
+and live production proof are recorded in [rollout verification](../docs/tasks-goals-verification.md).
+
+No unresolved P3 change is required for the current scope. All captures use synthetic data; real Notion content
+and production task titles are excluded.
+
+final result: passed
+
+## Earlier approved task editor and sidebar
 
 Final result: passed for the approved task editor and sidebar. The final comparison has no open P0, P1 or P2 visual findings.
 

@@ -10,6 +10,7 @@ import { TaskDependencyFields } from "./TaskDependencyFields";
 import { useTaskPlanning } from "../useTaskPlanning";
 import { planningChanges, planningDraft } from "../task-planning";
 import { scheduledDate, scheduledTime } from "../task-schedule";
+import { GoalPicker } from "./GoalPicker";
 import "./color-detail.css";
 import "./task-dialog.css";
 
@@ -30,6 +31,7 @@ function taskDraft(task?: Task, defaults?: Partial<TaskDraft>): TaskDraft {
     recurrence: task?.recurrence ?? "",
     kind: task?.kind || "task",
     effort: task?.effort || "",
+    ...(task?.kind !== "step" && { keyResultId: task?.keyResultId ?? "" }),
     ...defaults,
   };
 }
@@ -63,6 +65,7 @@ export function TaskDialog({
   onChildAdded: () => void;
 }) {
   const [currentTask, setCurrentTask] = useState(task);
+  const [goalTitle, setGoalTitle] = useState(task?.keyResultTitle ?? "");
   // A create closes once saved; keep its form compact until then.
   const displayTask = task ? currentTask : undefined;
   const [draft, setDraft] = useState<TaskDraft>(() =>
@@ -106,6 +109,7 @@ export function TaskDialog({
         planningChanges(planning.draft, planningDraft(currentTask)),
       );
       setCurrentTask(saved);
+      setGoalTitle(saved.keyResultTitle);
       const content = taskDraft(saved);
       const nextPlanning = planningDraft(saved);
       setDraft(content);
@@ -270,7 +274,30 @@ export function TaskDialog({
               onChange={planning.patch}
               onExecutionChange={planning.setExecution}
               disabled={busy || Boolean(currentTask?.completed)}
+              goal={
+                <GoalPicker
+                  value={draft.keyResultId ?? ""}
+                  title={goalTitle}
+                  onOpenGoal={onClose}
+                  disabled={busy || Boolean(currentTask?.completed)}
+                  onChange={(id, title) => {
+                    patch("keyResultId", id);
+                    setGoalTitle(title);
+                  }}
+                />
+              }
             />
+          )}
+          {isStep && currentTask?.effectiveKeyResultId && (
+            <p className="task-inherited-goal">
+              Goal from parent:
+              <a
+                href={`#/goals/${encodeURIComponent(currentTask.effectiveKeyResultId)}`}
+                onClick={onClose}
+              >
+                {currentTask.keyResultTitle || "Linked goal"}
+              </a>
+            </p>
           )}
           {displayTask && (
             <>

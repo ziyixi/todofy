@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import {
   FOCUS_TABLES,
+  GOAL_TABLES,
   MAIL_GTD_TABLES,
   PLANNING_TABLES,
   RESTORE_ORDER,
@@ -212,9 +213,50 @@ test('a backup round-trips with its ids, revisions, sequences and labels, and a 
     assert.equal(target.prepare("SELECT sequence FROM completions WHERE id='c-new'").get().sequence, 10);
   }));
 
-const BEFORE_MAIL_GTD = RESTORE_ORDER.filter((name) => !MAIL_GTD_TABLES.includes(name));
+const BEFORE_GOALS = RESTORE_ORDER.filter((name) => !GOAL_TABLES.includes(name));
+const BEFORE_MAIL_GTD = BEFORE_GOALS.filter((name) => !MAIL_GTD_TABLES.includes(name));
 const BEFORE_PLANNING = BEFORE_MAIL_GTD.filter((name) => !PLANNING_TABLES.includes(name));
 const BEFORE_FOCUS = BEFORE_PLANNING.filter((name) => !FOCUS_TABLES.includes(name));
+
+test('a backup made before Goals restores empty goal tables and unset task and Bet links', () =>
+  withBackup((root, source) => {
+    const backup = readBackup(root);
+    const tasks = backup.section.tables.find((table) => table.name === 'tasks');
+    const bets = backup.section.tables.find((table) => table.name === 'weekly_bets');
+    assert.ok(tasks && bets);
+    const strip = (table) => {
+      const index = table.columns.indexOf('key_result_id');
+      table.columns.splice(index, 1);
+      for (const row of backup.rows.get(table.name)) delete row.key_result_id;
+    };
+    strip(tasks);
+    strip(bets);
+    const target = migrated();
+    target.exec(restoreSql(backup).sql);
+    for (const name of GOAL_TABLES) assert.equal(target.prepare(`SELECT count(*) AS n FROM ${name}`).get().n, 0);
+    assert.equal(target.prepare("SELECT count(*) AS n FROM tasks WHERE key_result_id<>''").get().n, 0);
+    assert.equal(target.prepare("SELECT count(*) AS n FROM weekly_bets WHERE key_result_id<>''").get().n, 0);
+    assert.deepEqual(dump(target), dump(source));
+  }, { tables: BEFORE_GOALS }));
+
+test('archived goals, milestone timestamps, progress and task/Bet links round-trip together', () =>
+  withBackup((root, source) => {
+    source.exec(`
+      INSERT INTO objectives(id,title,year,archived,created_at,updated_at) VALUES('goal-o','Synthetic annual direction',2030,1,1,2);
+      INSERT INTO key_results(id,objective_id,title,archived,milestones,focus_start_month,focus_end_month,focus_text,created_at,updated_at)
+        VALUES('goal-kr','goal-o','Synthetic annual result',1,'[{"id":"m1","title":"Synthetic milestone","completed":true,"complete_time":"2030-04-15T10:00:00Z"}]','2030-03','2030-06','Synthetic focus',1,2);
+      INSERT INTO goal_progress(id,key_result_id,note,evidence_url,created_at,updated_at) VALUES
+        ('goal-p','goal-kr','Synthetic evidence','https://example.test/evidence',1,2);
+      UPDATE tasks SET key_result_id='goal-kr' WHERE id='t-parent';
+      UPDATE weekly_bets SET key_result_id='goal-kr';
+    `);
+    backupOf(source, root);
+    const target = migrated();
+    const sql = restoreSql(readBackup(root)).sql;
+    target.exec(sql);
+    target.exec(sql);
+    assert.deepEqual(dump(target), dump(source));
+  }));
 
 test('a backup made before the Focus tables restores them empty, with the idle timer', () =>
   withBackup(
@@ -352,7 +394,7 @@ test('a live row whose reference is missing from the backup is refused by id', (
 test('a part that differs from its manifest is refused', () =>
   withBackup((root) => {
     const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
-    const part = manifest.tasks.tables[4].parts[0];
+    const part = manifest.tasks.tables.find((table) => table.name === 'tasks').parts[0];
     const path = join(root, 'parts', part.key);
     const data = readFileSync(path);
     data[data.length >> 1] ^= 1;
@@ -429,7 +471,7 @@ test('the CLI restores and verifies a backup made before the Focus tables', () =
       assert.equal(passed.status, 0, passed.stderr);
       assert.match(
         passed.stdout,
-        /PASS requests rows=1\/1\nPASS day_steps rows=0\/0\nPASS focus_entries rows=0\/0\nPASS focus_timer rows=1\/1\nPASS task_dependencies rows=0\/0\nPASS weekly_bets rows=0\/0\nPASS plan_board rows=1\/1\nPASS mail_settings rows=1\/1\nPASS gtd_days rows=0\/0\nPASS weekly_reviews rows=0\/0\nPASS task_inbox_routes rows=0\/0\nPASS task_inbox_days rows=0\/0\nverify PASS\n$/,
+        /PASS requests rows=1\/1\nPASS day_steps rows=0\/0\nPASS focus_entries rows=0\/0\nPASS focus_timer rows=1\/1\nPASS task_dependencies rows=0\/0\nPASS weekly_bets rows=0\/0\nPASS plan_board rows=1\/1\nPASS mail_settings rows=1\/1\nPASS gtd_days rows=0\/0\nPASS weekly_reviews rows=0\/0\nPASS task_inbox_routes rows=0\/0\nPASS task_inbox_days rows=0\/0\nPASS objectives rows=0\/0\nPASS key_results rows=0\/0\nPASS goal_progress rows=0\/0\nverify PASS\n$/,
       );
     },
     { tables: BEFORE_FOCUS, beforePlanning: true, todofy: true },
@@ -543,7 +585,7 @@ test("download reads an older backup Todofy made of Tasks by its prefix, and ref
         assert.ok(bucket.calls().every((call) => call[3].startsWith(`todofy-backups/${BACKUP}`)));
         assert.equal(readBackup(out).section.tables.length, RESTORE_ORDER.length);
 
-        const key = JSON.parse(readFileSync(join(made, 'manifest.json'), 'utf8')).tasks.tables[4].parts[0].key;
+        const key = JSON.parse(readFileSync(join(made, 'manifest.json'), 'utf8')).tasks.tables.find((table) => table.name === 'tasks').parts[0].key;
         const stored = join(bucket.store, 'todofy-backups', key);
         const data = readFileSync(stored);
         data[data.length >> 1] ^= 1;

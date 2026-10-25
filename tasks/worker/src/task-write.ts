@@ -21,6 +21,7 @@ import { checkedDay, commitChecked, type Check } from './focus.ts';
 import { COUNT_UP_SECONDS } from './focus-timer.ts';
 import { plannedRow } from './planning.ts';
 import { dependencyUpdate } from './task-dependencies.ts';
+import { selectableKeyResult } from './goal-validation.ts';
 
 /** Every column a task write stores: the client's fields and the week a commitment is for. */
 const storedColumns = [...taskColumns, 'committed_week'] as const;
@@ -118,27 +119,32 @@ export async function createTask(db: D1Database, input: CreateTaskRequest, now: 
       ? `(SELECT COALESCE(MAX(sort_order),0)+1 FROM tasks WHERE project_id=? AND parent_id=? AND section_id=? AND deleted_at IS NULL)`
       : '?',
   );
-  const write = db
-    .prepare(`INSERT INTO tasks(${columns.join(',')}) VALUES(${placeholders.join(',')})`)
-    .bind(...values);
+  const write = db.prepare(`INSERT INTO tasks(${columns.join(',')}) VALUES(${placeholders.join(',')})`).bind(...values);
   const writes = [write];
   if (append) {
     // Append and freeze its actual position in the same transaction, including concurrent creates.
-    writes.push(db.prepare(`UPDATE requests SET response=json_set(response,'$.sort_order',(SELECT sort_order FROM tasks WHERE id=?)) WHERE id=?`).bind(id, input.requestId));
-  }
-  const response = await commit(
-      db,
-      {
-        requestId: input.requestId,
-        hash,
-        table: 'tasks',
-        id,
-        revision: null,
-        response: serialize(row, today),
-        now,
-      },
-      writes,
+    writes.push(
+      db
+        .prepare(
+          `UPDATE requests SET response=json_set(response,'$.sort_order',(SELECT sort_order FROM tasks WHERE id=?)) WHERE id=?`,
+        )
+        .bind(id, input.requestId),
     );
+  }
+  const response = await commitChecked(
+    db,
+    {
+      requestId: input.requestId,
+      hash,
+      table: 'tasks',
+      id,
+      revision: null,
+      response: serialize(row, today),
+      now,
+    },
+    writes,
+    row.key_result_id ? [selectableKeyResult(row.key_result_id)] : [],
+  );
   if (!append) return result(response);
   const stored = await replay(db, input.requestId, hash);
   if (stored === null) throw new Error('Committed task receipt is missing');
@@ -173,8 +179,13 @@ export async function updateTask(db: D1Database, input: UpdateTaskRequest, now: 
     if (!paths.includes('section_id') && !updated.parent_id) updated.section_id = '';
     if (!paths.includes('parent_id')) updated.parent_id = '';
   }
-  const row = { ...plannedRow(old, updated, today, paths.includes('stage')), revision: old.revision + 1, updated_at: now };
+  const row = {
+    ...plannedRow(old, updated, today, paths.includes('stage')),
+    revision: old.revision + 1,
+    updated_at: now,
+  };
   row.recurrence = clampMonthEnd(row.recurrence, row.due_date);
+  if (row.kind === 'step' && old.kind !== 'step' && !paths.includes('key_result_id')) row.key_result_id = '';
   await validateTask(db, row, old);
   row.project_archived = 0;
   const writes = [
@@ -185,9 +196,10 @@ export async function updateTask(db: D1Database, input: UpdateTaskRequest, now: 
       .bind(...storedColumns.map((c) => row[c]), now, id),
   ];
   if (row.project_id !== old.project_id) {
-    writes.push(...await moveTaskDescendants(db, id, row.project_id, now));
+    writes.push(...(await moveTaskDescendants(db, id, row.project_id, now)));
   }
-  let checks: Check[] = [];
+  const checks: Check[] =
+    row.key_result_id && row.key_result_id !== old.key_result_id ? [selectableKeyResult(row.key_result_id)] : [];
   if (paths.includes('dependencies')) {
     const change = await dependencyUpdate(
       db,
@@ -196,7 +208,7 @@ export async function updateTask(db: D1Database, input: UpdateTaskRequest, now: 
       now,
     );
     writes.push(...change.writes);
-    checks = change.checks;
+    checks.push(...change.checks);
     row.dependencies = change.dependencies;
   }
   return result(
@@ -286,7 +298,12 @@ export async function completeTask(db: D1Database, input: CompleteTaskRequest, n
   if (old.recurrence) {
     // An imported month-end rule heals here, so this and every later occurrence keep the month's last day.
     const recurrence = clampMonthEnd(old.recurrence, old.due_date);
-    let dates = { dueDate: old.due_date, dueDatetime: old.due_datetime, dueTimezone: old.due_timezone, recurrence };
+    let dates = {
+      dueDate: old.due_date,
+      dueDatetime: old.due_datetime,
+      dueTimezone: old.due_timezone,
+      recurrence,
+    };
     try {
       dates = nextOccurrence(dates, now, zone);
     } catch {
