@@ -12,6 +12,12 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+Unread progress follow-up (`codex/mailsort-unread-progress`): the owner started the current unread batch and
+reported no visible progress. It registered113 messages before the UTC day changed. After reset, limited live
+metadata confirmed12 applied/28 skipped/73 pending, a healthy Claude request and live mode. No batch was restarted.
+The fixes in progress are card-local visible-only progress updates, an exact daily-write resume timestamp, and
+checking already-labelled eligibility before a reached write cap. Existing budgets and request/batch identities stay.
+
 The cancelled Codex/VPS Mailsort runner was removed before release and must not be resumed. The six-condition
 Claude comparison used [the original benchmark prompt](https://github.com/ziyixi/todofy/blob/511ec5063ecc1cd3602020aa2544f6cf975090f1/mailsort/prompts/priority-classification.txt)
 and cost $3.514105 at list prices before credits. Its temporary evaluation key is disabled and its local file removed.
