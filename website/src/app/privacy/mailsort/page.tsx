@@ -157,12 +157,12 @@ export default function MailsortPrivacyPage() {
           limits leave writes waiting regardless of provider.
         </p>
         <p>
-          The app also records daily Codex classification request counts, success/failure counts
-          and input/output tokens reported by the gateway, without message content. Failed results
-          include their reported tokens; requests without a usage report remain unknown. The dashboard
-          shows the current UTC month and retains these totals when providers change. These app records
-          do not estimate subscription charges or the ChatGPT account&apos;s remaining allowance;
-          calls before usage recording began are not reconstructed.
+          The app also records daily Codex classification request counts, success/failure counts and
+          input/output tokens reported by the gateway, without message content. Failed results
+          include their reported tokens; requests without a usage report remain unknown. The
+          dashboard shows the current UTC month and retains these totals when providers change.
+          These app records do not estimate subscription charges or the ChatGPT account&apos;s
+          remaining allowance; calls before usage recording began are not reconstructed.
         </p>
         <p>
           Each message is judged independently. Normal processing retains its new-mail cutoffs;

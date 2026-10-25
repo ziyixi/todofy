@@ -68,7 +68,7 @@ describe('real workerd SQLite receipt persistence', () => {
     const report = { ...fixture, runtime: { ...fixture.runtime, workloads: [gateway, ...fixture.runtime.workloads] } };
     expect((await h.send(report)).status).toBe(200);
     expect(await h.view()).toMatchObject({ report: { runtime: {
-      workloads: expect.arrayContaining([expect.objectContaining({ inference_status: inference })]),
+      workloads: report.runtime.workloads,
     } } });
     expect(await h.status('codex-gateway', AT)).toMatchObject({ codex_inference: inference });
     expect(await h.status('codex-gateway', AT + 11 * 60_000)).not.toHaveProperty('codex_inference');
