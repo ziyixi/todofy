@@ -18,7 +18,7 @@ The owner requested fixing the configuration drift indication. Home's stored che
 configuration differences and three audit groups: user update, token create/delete and a DO namespace query
 misidentified by the audit API as create. The actual latest reconcile summary is `in_sync` with 42 no-op
 infrastructure resources and no planned actions; its Worker comparisons did not deploy repairs.
-Home is being corrected to keep historical account operations informational, exclude `.query` reads and
+Home now keeps historical account operations informational, excludes `.query` reads and
 derive config status/alerts only from the seven actual configuration categories. Existing audit records and
 reminder dismissals are retained. Legacy cached query findings are normalized at read time; no resource
 configuration, secrets, external Tasks or schedules are changed for this correction.
@@ -31,8 +31,13 @@ the matching post-deploy reconcile and a completed current Home check before del
 An independent live read at 23:00 UTC compared all fourteen Workers and found zero configuration differences,
 no truncated lists and no unread zones. Final local checks passed Worker 280 unit/104 real runtime tests,
 UI 181 tests, lint/typechecks/build, 458 Changes tests, API lint and breaking checks. The refresh/fingerprint
-and final-gate cases are included. Branch CI and production verification are pending.
-Shared checkout remains untouched.
+and final-gate cases are included. Source `0a1b647f` passed [full branch CI 40243518209](https://github.com/ziyixi/todofy/actions/runs/40243518209)
+and [same-SHA main 40244731183](https://github.com/ziyixi/todofy/actions/runs/40244731183).
+The matching [post-release reconcile 40244947088](https://github.com/ziyixi/todofy/actions/runs/40244947088)
+also passed, including its new resolved-infrastructure gate. Real Chrome refreshes plus the normal cron
+completed Home's fresh fourteen-Worker check at 23:32:50 UTC (16:32 PDT): zero config findings, no error,
+truncation or unchecked zones, and in_progress=false. The UI shows the new completion time and no config
+warning; the earlier audit-only warning was not dismissed to obtain success. Shared checkout remains untouched.
 
 ### Persistent Codex daily usage (`codex/inference-daily-usage`)
 

@@ -387,10 +387,30 @@ references and measured JavaScript at 169.3 KiB gzip within the existing budget.
 These are synthetic local UI checks. Production deployment and browser acceptance are separate.
 The existing reminder-dismissal flow and browser refresh rate limit are unchanged.
 
-## 2. Production (pending)
+Production source `0a1b647fc5afd8f7d197a87ca6f415788102d643` passed
+[complete branch CI 40243518209](https://github.com/ziyixi/todofy/actions/runs/40243518209) and
+[same-SHA main release 40244731183](https://github.com/ziyixi/todofy/actions/runs/40244731183).
+Its matching [Personal cloud reconcile 40244947088](https://github.com/ziyixi/todofy/actions/runs/40244947088)
+passed all comparisons, including the new final infrastructure gate.
 
-None of these has been done; each needs the first `Dashboard deploy` on `main` (after Todofy and Mail
-Hero with ops-v1 are live) and, where stated, the owner in a browser.
+Before publication, a separate live metadata-only comparison of all fourteen Workers at 23:00 UTC found
+zero configuration differences. The latest infrastructure summary reported in_sync, 42 no-op resources
+and no planned changes. Home's three apparent differences were older account audit groups; one was a
+namespace query misclassified as create. The new code immediately displayed the two actual history groups
+separately without creating a config warning.
+
+In real Chrome, the existing Cloudflare refresh button and a normal cron advanced the same bounded check.
+At `2026-10-25T23:32:50.192Z` (16:32 PDT), Home completed a fresh fourteen-Worker comparison: status ok,
+all seven configuration counts zero, no findings, no error, no truncation, no unchecked zones, and
+in_progress=false. The page displayed the new completion time. The new audit window had no history entries;
+provider audit history was not deleted. No reminder was dismissed and no live resource was modified to force
+a green result. Worker local checks additionally passed 280 unit and 104 real workerd/SQLite tests;
+Changes passed 458 tests. Optional secret flags and cached desired-content changes follow the CI baseline.
+
+## 2. Historical initial production checklist
+
+This initial checklist is retained as an older snapshot. Its pending labels are historical; dated verification
+records above describe the deployments and checks subsequently completed.
 
 | Item | How | Status |
 | --- | --- | --- |
