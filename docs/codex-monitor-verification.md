@@ -1,5 +1,40 @@
 # Codex monitor verification
 
+## Persistent daily usage
+
+The current implementation `0e3b78ed970e87f0a2c86892d90d53f19f687f8b` passed
+[full branch CI 40237892117](https://github.com/ziyixi/todofy/actions/runs/40237892117) and
+[same-SHA main release 40238899660](https://github.com/ziyixi/todofy/actions/runs/40238899660).
+It supersedes the initial process-only statistics described below.
+
+Gateway now saves UTC completion-day aggregates and its latest eight content-free requests in
+`DATA_DIR/inference-monitor.sqlite3`. The actual Deployment reuses `platform-state` through the isolated
+`codex-gateway` subPath at `/var/lib/codex-gateway`. Platform provisions that directory as its existing user
+before Gateway deployment; the login mount is separate. No new volume, database service, root operation or
+polling loop was added. Daily rows persist, with the latest thirty recorded days returned; Home filters
+Today, 7-day and 30-day calendar ranges and shows the persistent history start. Earlier unrecorded usage is not guessed.
+
+A real synthetic 6.1 call at `2026-10-25T22:18:07.346Z` recorded one completed request, one success, zero failures,
+4,666 input / 15 output tokens and 4,511.1 ms. A separate health request reopened the SQLite file and returned
+the same daily row. The natural observation at 22:20:12 UTC reached Home after its 22:20:38 UTC refresh.
+Real Chrome checks of Today, 7-day and 30-day selectors showed the matching counts, token totals and daily row.
+Runtime status returned HTTP 200, its release was ready and its reconcile plan clean; all four VPS Deployments
+were ready. The existing reminder dismissals were preserved.
+
+Physical local database tests cover reopen, a new monitor instance, UTC midnight, failure/unknown usage and
+retained samples. Gateway passed 32 tests; Home passed 176 UI tests and its build. A thirty-day/eight-sample
+health response measured about 8 KiB, so its bounded read is 12 KiB; NodeStatus/HostReport stay at 12/16 KiB.
+No extra production restart was forced, and no real mail, task or Notion content was used for acceptance.
+
+The first staged rollout exposed an older reconcile-contract omission: three existing Gateway resource aliases
+were missing and the change-list bound was ten while the fixed resource inventory had thirteen entries.
+The new mount made that drift visible and caused `nodeStatus` to return INTERNAL. A real Planner/Service
+transition regression reproduces the failure and passes after correction. The exact two output-rule changes
+are recorded in `proto/reviewed-rules.json`; all other compatibility guards remain strict, including the
+72 existing rule self-tests. Consumers deploy before producers. No credential or sudo repair was needed.
+
+## Initial rollout
+
 Implementation `1e86e6763ab30e3614ea2afdd9f6b9e334f1371d` passed the complete
 [branch CI 40230659454](https://github.com/ziyixi/todofy/actions/runs/40230659454) and
 [same-SHA main release 40232060456](https://github.com/ziyixi/todofy/actions/runs/40232060456).

@@ -31,9 +31,16 @@ remain ready, but runtime readback exposed an older reconcile contract defect: i
 the three existing Gateway aliases and its plan bound was ten instead of thirteen. The staged Gateway manifest
 change therefore made `nodeStatus` return INTERNAL while ordinary workload reads stayed 200. The incomplete
 Actions run was stopped before Gateway deployment. The exact contract inventory correction and a real
-Planner/Service transition regression are being published; it requires no sudo or credential change. The
-reviewed rule record names only these two old/new output corrections, preserving every other compatibility check.
-Persistence production acceptance is pending. The shared checkout remains untouched.
+Planner/Service transition regression passed [full branch CI 40237892117](https://github.com/ziyixi/todofy/actions/runs/40237892117)
+and [same-SHA main 40238899660](https://github.com/ziyixi/todofy/actions/runs/40238899660), source `0e3b78ed`.
+The reviewed rule record names only these two old/new output corrections, preserving every other compatibility check.
+Runtime readback is HTTP 200, release ready and reconcile clean; all four Deployments are ready. The actual
+Gateway mounts the existing `platform-state` claim at subPath `codex-gateway`, without exposing its parent ledger.
+A real synthetic 6.1 call at 22:18 UTC recorded one success, 4,666 input / 15 output tokens and 4.5 s in SQLite.
+A separate health read reopened the same file and returned identical daily totals. The natural 22:20 UTC
+observation reached Home, whose real Today/7-day/30-day controls and daily row matched. File-reopen and restart
+behavior was tested with physical local databases; no extra production restart was forced. No real mail was
+read/reclassified and no sudo or credential change was needed. The shared checkout remains untouched.
 
 ### Codex monitor and Mailsort usage (`codex/inference-monitor`)
 
