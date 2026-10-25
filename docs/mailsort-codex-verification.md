@@ -1,8 +1,24 @@
 # Mailsort Codex verification
 
-Mailsort now persistently selects VPS Codex with `gpt-6-sol` / `medium`.
-A real synthetic inference through the production endpoint succeeded, and the saved prompts and write limits survived the switch.
-Natural Gmail classification and its mailbox effects have not yet been observed; operator cleanup is complete.
+The VPS now completes real `gpt-6.1-sol` / `medium` inference with the common Codex SDK/runtime 0.163.0.
+The default-model change for Mailsort and Newsletter is prepared for CI publication. The original 6 Sol rollout
+below records the provider switch and preserved settings; natural Gmail classification remains a separate check.
+
+## Codex 6.1 upgrade
+
+[Main release 40221852886](https://github.com/ziyixi/todofy/actions/runs/40221852886) deployed SDK/runtime 0.163.0
+for both VPS containers. The host standalone CLI was also upgraded to 0.163.0 using the verified official binary.
+Existing subscription authentication was reused without another login.
+
+At `2026-10-25T18:42:33.083Z`, an explicit 6.1 / medium request through the production endpoint completed in
+5.8 seconds, returning all four synthetic IDs exactly once with priorities P1 / P2 / P4 / P4. Reported usage was
+7,357 input and 152 output tokens. It used the saved prompt and no real mail or Gmail write.
+The model catalog also listed 6.1; the actual turn, rather than that listing, establishes this account's availability.
+
+Gateway, Mailsort and Newsletter defaults are being changed directly to 6.1. Newsletter stays in archive mode;
+its Deployment explicitly selects the model over any legacy private env setting. The gateway has an isolated
+temporary CLI home and links only the existing shared auth file, so its cache/skills refresh does not replace
+Newsletter's. The final default-model release/readback is still pending.
 
 ## Successful real inference
 

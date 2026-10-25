@@ -17,7 +17,7 @@ from ziyixi_proto.codex.inference.v1.inference_pb import (
     RunInferenceResponse,
 )
 
-MODEL = "gpt-6-sol"
+MODEL = "gpt-6.1-sol"
 EFFORT = "medium"
 TIMEOUT_SECONDS = 110
 MAX_OUTPUT_BYTES = 64 * 1024

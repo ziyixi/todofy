@@ -48,7 +48,7 @@ env CODEX_HOME="$NEWSLETTER_CODEX_HOME" "$NEWSLETTER_CODEX_BIN" \
 
 终端会打开官方登录流程。在无浏览器服务器上，最后一个命令可用 `login --device-auth`，并按提示在自己的浏览器输入一次性代码；账号或工作区可能需要先启用 device code login。服务器需使用自己的服务目录和身份，不复制本机日常使用的登录状态到多个并发主机。检查登录可在同一命令最后使用 `login status`。
 
-上述环境覆盖只作用于该子进程，不修改个人全局 Codex home。不要把 `config.toml`、hooks、plugins、自定义 skills 或个人 `AGENTS.md` 放进专用登录目录；现有总编适配器会拒绝它们。runtime 自己创建的 `skills/.system` 不要删除：升级时由 SDK 刷新其内置缓存。启动前仍拒绝符号链接、非 system 根和过大的缓存树；启动后核对物理缓存名称，并在同一 SDK 连接确认预期的五个 system 技能路径全部 disabled。旧版多出的 `plugin-creator` 缓存由新 SDK 自行移除；异常即在模型调用前失败。用户或系统的 `.agents/skills`、`/etc/codex/skills` 也不应进入此专用服务环境。默认模型为 `gpt-6-sol`，必须通过真实账号确认可用性；不会悄悄切成 API 付费或假稿。
+上述环境覆盖只作用于该子进程，不修改个人全局 Codex home。不要把 `config.toml`、hooks、plugins、自定义 skills 或个人 `AGENTS.md` 放进专用登录目录；现有总编适配器会拒绝它们。runtime 自己创建的 `skills/.system` 不要删除：升级时由 SDK 刷新其内置缓存。启动前仍拒绝符号链接、非 system 根和过大的缓存树；启动后核对物理缓存名称，并在同一 SDK 连接确认预期的五个 system 技能路径全部 disabled。旧版多出的 `plugin-creator` 缓存由新 SDK 自行移除；异常即在模型调用前失败。用户或系统的 `.agents/skills`、`/etc/codex/skills` 也不应进入此专用服务环境。默认模型为 `gpt-6.1-sol`，必须通过真实账号确认可用性；不会悄悄切成 API 付费或假稿。
 
 SDK 会把 `config.env` 合并到父进程环境。服务先清空密钥，再通过隔离 Python 启动器以精确白名单 `execve` 配套 runtime，避免空的桌面 override 被 runtime 当成有效配置。`make smoke-codex` 不使用账号或模型，在临时目录验证被污染的启动环境及连续两次启动，可发现单纯模拟 SDK 无法覆盖的握手/缓存兼容问题。
 

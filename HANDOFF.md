@@ -14,18 +14,15 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ### Codex 6.1 availability (`codex/codex61-runtime`)
 
-Owner explicitly requires `gpt-6.1-sol`; keep working `gpt-6-sol` classification until a real 6.1 turn succeeds.
-The owner also requires Newsletter to use 6.1 and every VPS Codex installation to match. Host standalone CLI
-was 0.153.4; both container SDK/runtime pins were 0.156.1. The selected common stable SDK/CLI pair is 0.163.0.
-Investigated the pinned SDK/CLI 0.156.1 and current stable paired 0.163.0. Official 0.159.1 added the 6.1 bundled
-catalog; remote client/version rollout and cache matching still require actual readback, not a bundled-list claim.
-Upgrade only the independent Gateway, isolate its temporary CLI cache/skills from Newsletter by linking just
-the existing auth.json (both pinned file stores truncate/write its inode). No login copy or new credentials.
-Phase A keeps the 6 Sol default and adds an optional explicit request model for safe 6.1 canaries. Mailsort's
-explicit current-model request is prepared in three files but excluded from that first publication, because
-the previous Gateway rejects unknown fields. After Gateway support is live, publish the explicit current-model
-caller, then switch both defaults/expectations to 6.1 only after actual synthetic inference. Preserve prompts,
-mode, budgets and old mail. Existing source/task checkout stays isolated from Claude's shared working tree.
+Owner requires `gpt-6.1-sol` for Mailsort and Newsletter and explicitly accepts interruption during this upgrade.
+The common stable SDK/CLI pair is 0.163.0. [Main SDK release 40221852886](https://github.com/ziyixi/todofy/actions/runs/40221852886)
+succeeded, and the host standalone CLI was upgraded from 0.153.4 to the same 0.163.0 using the official checked binary.
+At 18:42 UTC a real 6.1 / medium turn through the production endpoint returned all four synthetic IDs in 5.8 seconds;
+reported usage was 7,357 input / 152 output tokens. No real mail was used. This branch now switches Gateway,
+Mailsort and Newsletter defaults directly to 6.1; Newsletter's explicit Deployment env prevents a legacy secret
+from selecting its old model. Preserve archive mode, prompts, budgets and old mail. Gateway's process-private
+CLI home links only the existing auth file, keeping its cache and built-in skills separate from Newsletter.
+The model-default release and its readback are pending. The shared checkout remains untouched.
 The owner selected full-repo standard workspaces with shared manifests/locks, and verified VPS migration to
 Python 3.14 for one uv workspace. That migration is developed separately in `/private/tmp/todofy-dependency-workspaces`
 on `codex/dependency-workspaces`: root pnpm 11.25.0 catalog/lock with Node 26, root uv workspace/lock with Python 3.14,
