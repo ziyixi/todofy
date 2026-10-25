@@ -42,6 +42,7 @@ test("the Durable Object, the Ops service bindings, Tasks' create-only TaskInbox
     { binding: 'WATCH', service: 'watch', entrypoint: 'Ops' },
     { binding: 'FLEET', service: 'fleet', entrypoint: 'Ops' },
     { binding: 'NEWSLETTER', service: 'fleet', entrypoint: 'NewsletterOps' },
+    { binding: 'CODEX_GATEWAY', service: 'fleet', entrypoint: 'CodexGatewayOps' },
     { binding: 'WEBSITE_SYNC', service: 'ziyixi-notion-publish', entrypoint: 'Ops' },
     { binding: 'MAILSORT', service: 'mailsort', entrypoint: 'Ops' },
     { binding: 'RECALL', service: 'recall', entrypoint: 'Ops' },

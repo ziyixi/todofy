@@ -7,6 +7,7 @@ import todofyOk from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.jso
 import fleetOk from '../../../contracts/ops-v1/fixtures/OpsStatus/fleet-ok.json';
 import notionPublishOk from '../../../contracts/ops-v1/fixtures/OpsStatus/notion-publish-ok.json';
 import newsletterOk from '../../../contracts/ops-v1/fixtures/OpsStatus/newsletter-ok.json';
+import codexGatewayOk from '../../../contracts/ops-v1/fixtures/OpsStatus/codex-gateway-ok.json';
 import watchOk from '../../../contracts/ops-v1/fixtures/OpsStatus/watch-ok.json';
 import mailsortOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mailsort-ok.json';
 import recallOk from '../../../contracts/ops-v1/fixtures/OpsStatus/recall-ok.json';
@@ -55,7 +56,7 @@ export function withLinkOnly(registry: RegistryDef = REGISTRY): RegistryDef {
 }
 
 export function status(app: OpsApp, patch: Partial<OpsStatus> = {}, at = NOW - 2 * MIN): StatusDoc {
-  const base = { 'mail-hero': mailHeroOk, todofy: todofyOk, watch: watchOk, fleet: fleetOk, newsletter: newsletterOk, 'codex-gateway': { ...newsletterOk, app: 'codex-gateway' }, 'notion-publish': notionPublishOk, mailsort: mailsortOk, recall: recallOk, brief: briefOk, tasks: tasksOk, 'personal-mcp': personalMcpOk }[app] as OpsStatus;
+  const base = { 'mail-hero': mailHeroOk, todofy: todofyOk, watch: watchOk, fleet: fleetOk, newsletter: newsletterOk, 'codex-gateway': codexGatewayOk, 'notion-publish': notionPublishOk, mailsort: mailsortOk, recall: recallOk, brief: briefOk, tasks: tasksOk, 'personal-mcp': personalMcpOk }[app] as OpsStatus;
   const website = app === 'notion-publish' ? base.website_sync : undefined;
   const evidence = website === undefined ? {} : { website_sync: { ...website, observed_at: new Date(at).toISOString(), next_check_at: new Date(at + DAY).toISOString(), ...(website.last_check === undefined ? {} : { last_check: { ...website.last_check, checked_at: new Date(at).toISOString() } }) } };
   return { checked_at: at, ok: true, error: null, consecutive_failures: 0, status: { ...base, ...evidence, ...patch }, status_at: at };

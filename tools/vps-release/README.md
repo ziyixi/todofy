@@ -39,14 +39,14 @@ requires fresh `NodeStatus`, verified desired/actual source/digest/request ident
 running processes and accepting/unsupported admission. An acknowledged desired SHA alone cannot pass.
 Newsletter can acquire unknown business operations after admission resumes. Its explicit nonzero
 `unknown_count` and `degraded` business health are reported separately when the running image, release
-identity and admission are verified; an unhealthy process, unknown evidence or degraded unrelated workload
+identity and admission are verified; an unhealthy selected process, unknown selected evidence or degraded selected workload
 still cannot pass deployment verification.
 
-Held/failed operations stop the client immediately. Only an explicit approved main dispatch for `platform`
-or `newsletter` sets `resume_vps_release=true` and supplies `resume_source_sha`, the original release's full
+Held/failed operations stop the client immediately. An explicit approved main dispatch for `platform`,
+`newsletter` or `codex-gateway` sets `resume_vps_release=true` and supplies `resume_source_sha`, the original release's full
 source SHA. The checkout commit runs current source/contract checks, but no image is built, saved, uploaded
-or published. The client uses the original source SHA to fetch the authenticated release, validates its two
-configured aliases, source/request identity and strict digest fields, and retains those frozen targets.
+or published. The client uses the original source SHA to fetch the authenticated release, validates the paired
+runtime aliases or the single gateway alias, source/request identity and strict digest fields, and retains those frozen targets.
 Digests alone contain no repository: the daemon maps the fixed aliases to the profile owner's allowlisted
 repositories. Resume accepts no replacement image input. It reads the current etag and derives a stable
 continuation UUID for that exact revision; all later receipts and physical running observations must match
@@ -58,8 +58,8 @@ uv run --project platform --frozen python tools/vps-release/deploy.py \
   --source-sha ORIGINAL_HELD_FULL_SHA --resume
 ```
 
-Without explicit resume, `resume_source_sha` is forbidden and a new release still requires both images
-from the same tested artifact/source SHA. Missing or mismatched existing releases fail rather than being
+Without explicit resume, `resume_source_sha` is forbidden. A new paired release requires both images;
+a gateway release requires its own image from the tested artifact/source SHA. Missing or mismatched existing releases fail rather than being
 created or replaced by the resume path.
 The one overall timeout starts before Create/Get/Resume. Temporary network/429/5xx failures, including a
 daemon Recreate rollout lasting minutes, keep retrying the identical request inside that budget. Credentials,

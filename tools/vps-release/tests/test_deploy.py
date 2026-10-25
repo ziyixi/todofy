@@ -135,13 +135,22 @@ class ActionDeployment(unittest.TestCase):
             ),
         )
         requests = []
+        held = False
 
         def handler(request):
+            nonlocal held
             requests.append(request)
+            if request.method == "POST" and request.url.path.endswith(":resume"):
+                held = False
+            result = (
+                replace(response, phase="held", error_code="RELEASE_HELD")
+                if held
+                else response
+            )
             return httpx.Response(
                 200,
                 json=to_wire(
-                    snapshot if request.url.path.endswith("nodeStatus") else response
+                    snapshot if request.url.path.endswith("nodeStatus") else result
                 ),
             )
 
@@ -172,7 +181,20 @@ class ActionDeployment(unittest.TestCase):
                 NOW,
             )
         )
+        held = True
         self.assertEqual(client.execute(SHA, resume=True, gateway_only=True), response)
+        resume = next(
+            request
+            for request in requests
+            if request.method == "POST" and request.url.path.endswith(":resume")
+        )
+        self.assertEqual(
+            json.loads(resume.content),
+            {
+                "request_id": resume_id(response.name, response.etag),
+                "etag": response.etag,
+            },
+        )
 
     def client(self, handler, *, clock=None):
         transport = Transport(

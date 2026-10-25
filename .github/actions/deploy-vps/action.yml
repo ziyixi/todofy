@@ -29,6 +29,10 @@ inputs:
     description: "resume release"
     required: false
     default: ''
+  gateway-only:
+    description: Select the independent gateway when resuming frozen targets
+    required: false
+    default: 'false'
   source-sha:
     description: "source sha"
     required: false
@@ -60,6 +64,7 @@ runs:
         PLATFORM_IMAGE: ${{ inputs.platform-image }}
         CODEX_GATEWAY_IMAGE: ${{ inputs.codex-gateway-image }}
         RESUME_RELEASE: ${{ inputs.resume-release }}
+        GATEWAY_ONLY: ${{ inputs.gateway-only }}
         RELEASE_SOURCE_SHA: ${{ inputs.source-sha }}
       working-directory: .
       shell: bash -e {0}
@@ -67,6 +72,7 @@ runs:
         args=()
         if [ "$RESUME_RELEASE" = true ]; then
           args+=(--resume)
+          if [ "$GATEWAY_ONLY" = true ]; then args+=(--gateway-only); fi
         elif [ -n "$CODEX_GATEWAY_IMAGE" ]; then
           args+=(--codex-gateway-image "$CODEX_GATEWAY_IMAGE")
         else

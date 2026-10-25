@@ -30,7 +30,7 @@ runs:
         npm ci --prefix proto --no-audit --no-fund
         node proto/tools/ensure.mjs
         uv sync --project platform --locked
-    - name: Package this commit and both verified image digests
+    - name: Package this commit and three verified image digests
       env:
         NEWSLETTER_IMAGE: ${{ inputs.newsletter-image }}
         PLATFORM_IMAGE: ${{ inputs.platform-image }}

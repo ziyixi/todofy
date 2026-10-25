@@ -1,5 +1,9 @@
 name: check-codex-gateway
 description: Check and archive the independent inference image without credentials or model calls.
+inputs:
+  build-image:
+    description: Build the tested image unless resuming an existing VPS release
+    required: true
 runs:
   using: composite
   steps:
@@ -22,6 +26,7 @@ runs:
         uv run --project codex-gateway --locked ruff format --check codex-gateway/src codex-gateway/tests
         uv run --project codex-gateway --locked python -m unittest discover -s codex-gateway/tests -v
     - name: Build the tested inference image
+      if: ${{ fromJSON(inputs.build-image) }}
       working-directory: .
       shell: bash -e {0}
       run: |
@@ -35,6 +40,7 @@ runs:
         python3 tools/container-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
           --directory "$RUNNER_TEMP/codex-gateway-image"
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      if: ${{ fromJSON(inputs.build-image) }}
       with:
         name: codex-gateway-image-${{ github.sha }}
         path: ${{ runner.temp }}/codex-gateway-image/

@@ -1,5 +1,5 @@
 # One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, the links app, the watch app, Fleet,
-# Newsletter, Platform, mailsort, recall, the brief and Tasks).
+# Newsletter, Platform, Codex gateway, mailsort, recall, the brief and Tasks).
 # "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run
 # from its own directory, "Shared packages" checks packages/* (compiled into the apps), "Contracts" runs both
 # sides of mail.received.v1 and ops-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
@@ -618,7 +618,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-codex-gateway
+      - name: Run codex-gateway-checks steps
+        uses: ./.github/actions/check-codex-gateway
+        with:
+          build-image: ${{ !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release) }}
 
   gate:
     name: CI gate
@@ -850,14 +853,19 @@ jobs:
           platform-image: ${{ needs.platform-image.outputs.image }}
           codex-gateway-image: ''
           resume-release: ${{ inputs.resume_vps_release && 'true' || 'false' }}
+          gateway-only: 'false'
           source-sha: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}
 
   codex-gateway-deploy:
     name: Codex gateway deploy
-    needs: [changes, codex-gateway-image, vps-deploy, fleet-deploy, gate]
+    needs: [changes, codex-gateway-checks, codex-gateway-image, vps-deploy, fleet-deploy, gate]
     if: >-
       ${{ !cancelled() && needs.changes.result == 'success'
-      && needs.codex-gateway-image.result == 'success'
+      && (needs.codex-gateway-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.codex-gateway-checks.result == 'skipped'))
+      && ((github.event_name == 'workflow_dispatch' && inputs.resume_vps_release
+          && needs.codex-gateway-image.result == 'skipped')
+        || (!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
+          && needs.codex-gateway-image.result == 'success'))
       && (needs.vps-deploy.result == 'success' || needs.vps-deploy.result == 'skipped')
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
       && needs.gate.result == 'success' && github.ref == 'refs/heads/main'
@@ -886,8 +894,9 @@ jobs:
           newsletter-image: ''
           platform-image: ''
           codex-gateway-image: ${{ needs.codex-gateway-image.outputs.image }}
-          resume-release: 'false'
-          source-sha: ${{ github.sha }}
+          resume-release: ${{ inputs.resume_vps_release && 'true' || 'false' }}
+          gateway-only: 'true'
+          source-sha: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}
 
   todofy-deploy:
     name: Todofy deploy

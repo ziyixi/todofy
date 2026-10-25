@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 import zipfile
 from pathlib import Path
@@ -1079,12 +1080,20 @@ class Dispatch(unittest.TestCase):
                 self.assertTrue(ordinary["newsletter_deploy"])
                 self.assertTrue(ordinary["platform_publish"])
 
+    def test_gateway_resume_checks_current_code_and_resumes_only_frozen_gateway(self):
+        result = self.dispatch("codex-gateway", resume=True)
+        self.assertEqual(result, expect(F, F, T, F, F, packages=T, proto=T,
+                                       platform_check=T, codex_gateway_check=T, codex_gateway_deploy=T))
+        self.assertFalse(result["newsletter_deploy"])
+        self.assertFalse(result["platform_deploy"])
+        self.assertFalse(result["platform_publish"])
+
     def test_resume_refuses_non_dispatch_non_main_and_unrelated_apps(self):
         for event, ref, app in (
             ("push", MAIN, "platform"),
             ("workflow_dispatch", BRANCH, "platform"),
             *(("workflow_dispatch", MAIN, app) for app in ci_changes.DISPATCH
-              if app not in {"platform", "newsletter"}),
+              if app not in {"platform", "newsletter", "codex-gateway"}),
         ):
             with self.subTest(event=event, ref=ref, app=app), self.assertRaises(ValueError):
                 ci_changes.decide(event, ref, SHA, app, "", lambda b, a: [],
@@ -1491,7 +1500,7 @@ class DeployConditions(unittest.TestCase):
                         self.assertEqual(condition.count(f"needs.{need}.result == 'skipped'"), 1)
                     else:
                         self.assertIn(f"needs.{need}.result == 'success'", condition)
-                        if name == "vps-deploy" and need in {"newsletter-deploy", "codex-gateway-image", "platform-image", "vps-bootstrap-bundle"}:
+                        if (name == "vps-deploy" and need in {"newsletter-deploy", "platform-image", "vps-bootstrap-bundle"}) or (name == "codex-gateway-deploy" and need == "codex-gateway-image"):
                             self.assertIn(f"needs.{need}.result == 'skipped'", condition)
                             self.assertIn("github.event_name == 'workflow_dispatch' && inputs.resume_vps_release", condition)
                             self.assertIn("!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)", condition)
@@ -1508,12 +1517,50 @@ class DeployConditions(unittest.TestCase):
         platform = jobs["platform-checks"]
         self.assertEqual(platform.count("if: ${{ " + guard + " }}"), 2)
         self.assertIn("pytest platform/tests tools/platform-build/tests tools/vps-release/tests", platform)
+        gateway = jobs["codex-gateway-checks"]
+        self.assertEqual(gateway.count("if: ${{ " + guard + " }}"), 2)
         release = jobs["vps-deploy"]
-        self.assertIn('if [ "$RESUME_RELEASE" = true ]; then\n            args+=(--resume)\n          elif [ -n "$CODEX_GATEWAY_IMAGE" ]; then', release)
+        self.assertIn('if [ "$RESUME_RELEASE" = true ]; then\n            args+=(--resume)', release)
+        self.assertIn('if [ "$GATEWAY_ONLY" = true ]; then args+=(--gateway-only); fi', release)
+        self.assertIn("GATEWAY_ONLY: 'false'", release)
         self.assertIn('args+=(--codex-gateway-image "$CODEX_GATEWAY_IMAGE")', release)
         self.assertIn('args+=(--newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE")', release)
         self.assertIn("RELEASE_SOURCE_SHA: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}", release)
         self.assertIn('--source-sha "$RELEASE_SOURCE_SHA" --evidence-file "$RUNNER_TEMP/vps-release-evidence.json" "${args[@]}"', release)
+        gateway_release = jobs["codex-gateway-deploy"]
+        self.assertIn("GATEWAY_ONLY: 'true'", gateway_release)
+        self.assertIn("RESUME_RELEASE: ${{ inputs.resume_vps_release && 'true' || 'false' }}", gateway_release)
+        self.assertIn("RELEASE_SOURCE_SHA: ${{ inputs.resume_vps_release && inputs.resume_source_sha || github.sha }}", gateway_release)
+        self.assertIn("needs.codex-gateway-image.result == 'skipped'", self.condition(gateway_release))
+        self.assertIn("!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)", self.condition(gateway_release))
+
+    def test_release_action_passes_the_selected_frozen_resume_arguments(self):
+        action = (REPO / ".github/actions/deploy-vps/action.yml").read_text()
+        step = action.split("    - name: Request deployment and verify the physical running versions\n", 1)[1]
+        script = textwrap.dedent(step.split("      run: |\n", 1)[1].split("    - name:", 1)[0])
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "uv"
+            executable.write_text('#!/usr/bin/env python3\nimport json,sys\nprint(json.dumps(sys.argv[1:]))\n')
+            executable.chmod(0o700)
+            for gateway in (False, True):
+                environment = {
+                    "PATH": directory + os.pathsep + os.defpath,
+                    "RUNNER_TEMP": directory,
+                    "RESUME_RELEASE": "true",
+                    "GATEWAY_ONLY": "true" if gateway else "false",
+                    "RELEASE_SOURCE_SHA": BASE,
+                    "CODEX_GATEWAY_IMAGE": "",
+                    "NEWSLETTER_IMAGE": "",
+                    "PLATFORM_IMAGE": "",
+                }
+                with self.subTest(gateway=gateway):
+                    result = subprocess.run(["bash", "-e", "-c", script], env=environment,
+                                            capture_output=True, text=True, check=True, timeout=10)
+                    arguments = json.loads(result.stdout)
+                    self.assertEqual(arguments[arguments.index("--source-sha") + 1], BASE)
+                    self.assertIn("--resume", arguments)
+                    self.assertEqual("--gateway-only" in arguments, gateway)
+                    self.assertFalse({"--newsletter-image", "--platform-image", "--codex-gateway-image"} & set(arguments))
 
     def test_the_dashboard_deploys_after_the_apps_and_watch_after_tasks(self):
         # Todofy too: a failed Todofy deploy leaves Tasks deploy skipped, which alone would let Watch ship.
@@ -1601,7 +1648,7 @@ class DeployConditions(unittest.TestCase):
         self.assertNotIn("${{ secrets.", checks)
         self.assertNotIn("environment:", checks)
         self.assertNotIn("packages: write", checks)
-        self.assertIn("uses: ./.github/actions/check-codex-gateway", checks)
+        self.assertIn("uses: ./.github/actions/check-codex-gateway", WORKFLOW.read_text())
         action = (REPO / ".github/actions/check-codex-gateway/action.yml").read_text()
         self.assertNotIn("${{ secrets.", action)
         checks += action
@@ -1623,7 +1670,8 @@ class DeployConditions(unittest.TestCase):
         self.assertIn("NEWSLETTER_IMAGE: ''", deploy)
         self.assertIn("PLATFORM_IMAGE: ''", deploy)
         self.assertIn("CODEX_GATEWAY_IMAGE: ${{ needs.codex-gateway-image.outputs.image }}", deploy)
-        self.assertIn("RESUME_RELEASE: 'false'", deploy)
+        self.assertIn("RESUME_RELEASE: ${{ inputs.resume_vps_release && 'true' || 'false' }}", deploy)
+        self.assertIn("GATEWAY_ONLY: 'true'", deploy)
         bundle = blocks["vps-bootstrap-bundle"]
         self.assertIn("needs.codex-gateway-image.result == 'success'", self.condition(bundle))
         self.assertIn("--codex-gateway-image", bundle)

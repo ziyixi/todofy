@@ -550,14 +550,16 @@ def decide(
 ) -> tuple[dict[str, bool], str, str]:
     """(outputs, reason, diff base); the base is empty when there is no diff (everything runs)."""
     if resume:
-        if event != "workflow_dispatch" or ref != MAIN or app not in {"platform", "newsletter"}:
-            raise ValueError("VPS resume requires a main dispatch for platform or newsletter")
+        if event != "workflow_dispatch" or ref != MAIN or app not in {"platform", "newsletter", "codex-gateway"}:
+            raise ValueError("VPS resume requires a main dispatch for platform, newsletter or codex-gateway")
         if not re.fullmatch(r"[0-9a-f]{40}", resume_source_sha):
             raise ValueError("VPS resume requires the original release's full source SHA")
-        result = outputs(checked={"platform", "newsletter"}, deployed=(), contracts=True, packages=True, proto=True)
+        gateway = app == "codex-gateway"
+        checked = {"platform", "codex-gateway"} if gateway else {"platform", "newsletter"}
+        result = outputs(checked=checked, deployed=(), contracts=True, packages=True, proto=True)
         # Continue the authenticated daemon's immutable targets. Publishing new images here
         # could replace an existing source tag with different bytes under the same release ID.
-        result["platform_deploy"] = True
+        result["codex_gateway_deploy" if gateway else "platform_deploy"] = True
         return result, "explicit VPS resume: checks only, no image build or publication", ""
     if resume_source_sha:
         raise ValueError("A resume source SHA is only allowed for an explicit VPS resume")

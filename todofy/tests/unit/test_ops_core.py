@@ -333,6 +333,7 @@ DEPLOYMENT_MODES = {
     "watch": ["maintenance", "notifications"],
     "fleet": ["maintenance"],
     "newsletter": ["maintenance"],
+    "codex-gateway": ["maintenance"],
     "notion-publish": ["maintenance"],
     "mailsort": ["maintenance", "mode_limited"],
     "recall": ["maintenance"],

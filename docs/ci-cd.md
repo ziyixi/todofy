@@ -244,14 +244,14 @@ Cloudflare Access. Production secrets are `PLATFORM_ACCESS_CLIENT_ID`, `PLATFORM
 and `PLATFORM_DEPLOY_TOKEN`. No SSH key, cluster token, privileged kubeconfig or shell command is sent.
 The stable release UUID binds frozen targets to a source SHA. API acceptance is only the start: the client
 waits for a durable ready receipt and independently verifies fresh actual Pod/process provenance.
-A held release fails Actions and stays visible in Fleet. A main dispatch for `platform` or `newsletter`
+A held release fails Actions and stays visible in Fleet. A main dispatch for `platform`, `newsletter` or `codex-gateway`
 may set `resume_vps_release=true` and `resume_source_sha` to that original release's full SHA. It checks the
 current client source without rebuilding or publishing images, fetches the authenticated release's original
 frozen targets and continues with its current etag. Physical verification still compares those original
 digests/source/request identities. A normal release forbids `resume_source_sha`; repeated creation does not
 silently resume or replace existing targets.
 
-The daemon first suspends the daily trigger and freezes Newsletter's existing durable drain. Unknown
+For paired releases, the daemon first suspends the daily trigger and freezes Newsletter's existing durable drain. Unknown
 work requires investigation; no timeout forces a replacement or replay. It persists progress before
 self-update, resumes active checkpoints on startup, applies the new version's standard Kustomize resources,
 and verifies real image IDs, observed generations and baked process SHA/request identity. Only then does
