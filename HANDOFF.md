@@ -25,6 +25,9 @@ remain unchanged. Dry Worker is 164.0 KiB gzip within the existing 165 KiB budge
 preserves all 27 source sections across four Objectives/12 KRs. Pre-release Time Travel bookmark is recorded.
 Next: full branch CI, same-SHA main release, empty-year preflight, private import and API/UI readback. No new
 service, Notion sync, model call or scheduler was introduced. Details: [verification](docs/tasks-goals-verification.md).
+Candidate `46839255` stopped in CI only on a Mac-specific screenshot output path; application checks and the other
+140 browser cases passed. The path is corrected to Playwright's own output and the three-case journey passes.
+Production is still unchanged; run the full gate for the corrected SHA before promotion.
 
 Few-shot examples are released at `c121b02da666592b12c1c575ad48328c004b523b`, after
 [branch CI 40153945767](https://github.com/ziyixi/todofy/actions/runs/40153945767) and the

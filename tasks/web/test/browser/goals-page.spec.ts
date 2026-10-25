@@ -20,7 +20,7 @@ async function editorGeometry(dialog: Locator) {
 test("native Goals saves definitions, current focus and evidence notes across reload, then deletes a note", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
   const fixture = await seedGoalsPage(request);
   await page.goto(`/#/goals/${fixture.selected.id}`);
   await expect(
@@ -42,7 +42,7 @@ test("native Goals saves definitions, current focus and evidence notes across re
     page.getByText("示例实验的范围已确定，开始准备最小基线。", { exact: true }),
   ).toBeVisible();
   await page.screenshot({
-    path: "/private/tmp/tasks-goals-ui-qa.png",
+    path: testInfo.outputPath("goals-desktop.png"),
     fullPage: false,
   });
 

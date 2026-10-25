@@ -53,4 +53,8 @@ raw operator output must not be added to this public record.
 
 ## Release
 
+The first candidate `46839255` reached 140 passing browser cases but its remaining Goals case stopped while writing
+a QA screenshot to a Mac-only `/private/tmp` path on the Linux runner
+([run 40170239106](https://github.com/ziyixi/todofy/actions/runs/40170239106)). No production release was attempted.
+The screenshot now uses Playwright's standard per-test output path; the focused three-case journey passes again.
 Full branch CI, same-SHA main Actions release, provider identity readback and private import acceptance are pending.
