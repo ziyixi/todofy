@@ -133,6 +133,8 @@ def create_router(config, read_service):
     state_dir = Path(os.environ.get("PLATFORM_STATE_DIR", "/var/lib/personal-cloud"))
     if not state_dir.is_absolute():
         raise ValueError("invalid_state_directory")
+    # Create this as the volume owner before Gateway mounts its isolated subPath.
+    (state_dir / "codex-gateway").mkdir(mode=0o700, parents=True, exist_ok=True)
     controller = Controller(
         config,
         Store(state_dir / "releases.sqlite3"),

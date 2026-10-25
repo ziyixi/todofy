@@ -87,7 +87,8 @@ describe('首页', () => {
     expect(link).toHaveAttribute('href', '#/ops/codex-gateway')
     await userEvent.click(link)
     expect(await screen.findByRole('heading', { level: 1, name: 'Codex 推理' })).toBeInTheDocument()
-    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: '每日推理用量（UTC）' })).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: '最近完成的推理请求，最多 8 条' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'Mail Hero' })).not.toBeInTheDocument()
   })
 

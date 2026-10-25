@@ -12,6 +12,22 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+### Persistent Codex daily usage (`codex/inference-daily-usage`)
+
+The owner requires gateway statistics to survive restart and show daily requests, failures and reported tokens.
+Gateway now commits completion-day aggregates and the latest eight content-free samples to stdlib SQLite.
+It reuses `platform-state/codex-gateway` through a narrow subPath mount; Platform creates that directory as
+its existing UID before Gateway deploys. No new PVC, service, root command or deployment workflow is required.
+Process-only fields remain compatible; Home derives Today / 7-day / 30-day totals and its daily table from
+persistent rows, with the persistent history start and actual sample time visible. Unrecorded old usage is not guessed.
+
+Local checks passed Gateway 32, relevant Platform 86 (+80 subtests, two isolated-k3s cases skipped locally),
+and Home 176 UI tests with lint/typechecks/build. Physical SQLite tests cover reopen, UTC-day boundaries,
+independent instances and retained samples. The 30-day health snapshot is about 8 KiB, so only Gateway's
+existing bounded monitor read is raised to 12 KiB; NodeStatus and HostReport remain 12/16 KiB.
+Shared API lint/breaking and Changes checks passed. Branch CI, production deployment and persistence readback
+are pending. The shared checkout remains untouched.
+
 ### Codex monitor and Mailsort usage (`codex/inference-monitor`)
 
 The owner requested a Codex inference dashboard and Codex usage totals in Mailsort. Home's dedicated

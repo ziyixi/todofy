@@ -15,9 +15,11 @@ application "Home". Four hash-routed views ([`docs/design-v2.md`](docs/design-v2
   named from the registry.
 - **操作与记录 `#/ops`**: guard and canary actions, the digest and each app's full ops-v1 details.
   `#/ops/codex-gateway` opens the Codex inference detail directly from its Home service row: process
-  health, counts and reported tokens since process startup, sampled concurrency and up to eight recent
-  request outcomes. Fleet supplies bounded metadata; no request input or output is shown. Restarting
-  the gateway resets these in-memory records. The page keeps the existing cached reads and refresh controls.
+  health, persistent counts and reported tokens by UTC completion day, sampled concurrency and up to eight
+  persistent recent request outcomes. Today, seven-day and thirty-day totals use the same daily records.
+  The page shows the actual sample time and history start; pre-upgrade history is not backfilled.
+  Fleet supplies bounded metadata with no request input or output. Older gateways are explicitly labelled
+  as process-only data. The page keeps the existing cached reads and refresh controls.
 
 What exists and how it maps to Workers, resources and flows is a typed registry compiled into the
 Worker (`worker/src/registry.ts`) and served by GetRegistry (`GET /api/v1/registry`), so no hostname is in the UI

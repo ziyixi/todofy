@@ -160,7 +160,7 @@ class Reader:
                         self.transport(
                             "http://" + item.deployment + ":8080/healthz",
                             {"Accept": "application/json"},
-                            4096,
+                            12288,
                             self._remaining(deadline),
                         )
                     )

@@ -40,6 +40,17 @@ class K3sAcceptance(unittest.TestCase):
         self.assertEqual(
             pod["volumes"][0]["persistentVolumeClaim"]["claimName"], "newsletter-auth"
         )
+        self.assertEqual(
+            pod["volumes"][1]["persistentVolumeClaim"]["claimName"], "platform-state"
+        )
+        self.assertEqual(
+            pod["containers"][0]["volumeMounts"][1],
+            {
+                "name": "state",
+                "mountPath": "/var/lib/codex-gateway",
+                "subPath": "codex-gateway",
+            },
+        )
 
     def test_real_ssa_restore_noop_conflict_and_persistent_objects(self):
         directory = Path(os.environ["K3S_ACCEPTANCE_DIR"])

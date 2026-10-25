@@ -220,23 +220,47 @@ class GatewayRelease(Fixture, unittest.TestCase):
             {SHA, GATEWAY_SHA},
         )
 
-    def test_gateway_pod_uses_only_its_bearer_and_the_existing_codex_auth_volume(self):
+    def test_gateway_pod_preserves_login_and_isolates_monitor_state_in_existing_volume(
+        self,
+    ):
         resources = self.controller.renderer.render((TARGET,), GATEWAY_ID)
         self.assertEqual(len(resources), 3)
         deployment = next(item for item in resources if item["kind"] == "Deployment")
         pod = deployment["spec"]["template"]["spec"]
         self.assertFalse(pod["automountServiceAccountToken"])
         self.assertEqual(pod["securityContext"]["runAsUser"], 10001)
+        self.assertEqual(pod["securityContext"]["runAsGroup"], 10001)
+        self.assertNotIn("initContainers", pod)
         self.assertEqual(
             pod["volumes"],
             [
                 {
                     "name": "auth",
                     "persistentVolumeClaim": {"claimName": "newsletter-auth"},
-                }
+                },
+                {
+                    "name": "state",
+                    "persistentVolumeClaim": {"claimName": "platform-state"},
+                },
             ],
         )
         container = pod["containers"][0]
+        self.assertEqual(
+            container["volumeMounts"],
+            [
+                {"name": "auth", "mountPath": "/var/lib/newsletter-auth"},
+                {
+                    "name": "state",
+                    "mountPath": "/var/lib/codex-gateway",
+                    "subPath": "codex-gateway",
+                },
+            ],
+        )
+        environment = {
+            item["name"]: item["value"] for item in container["env"] if "value" in item
+        }
+        self.assertEqual(environment["CODEX_HOME"], "/var/lib/newsletter-auth")
+        self.assertEqual(environment["DATA_DIR"], "/var/lib/codex-gateway")
         self.assertEqual(container["ports"][0]["hostIP"], "127.0.0.1")
         self.assertEqual(container["ports"][0]["hostPort"], 18766)
         secrets = [

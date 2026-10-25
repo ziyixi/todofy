@@ -61,6 +61,7 @@ def _baked_source_sha() -> str | None:
 
 def create_app(
     *,
+    monitor_db: pathlib.Path,
     runner: Runner = infer,
     checker: Checker = check_runtime,
     clock: Callable[[], datetime] = utc_now,
@@ -69,7 +70,7 @@ def create_app(
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     bindings = {item.path_template: item for item in HTTP_BINDINGS}
     source_sha = _baked_source_sha()
-    monitor = InferenceMonitor(clock=clock, monotonic=monotonic)
+    monitor = InferenceMonitor(monitor_db, clock=clock, monotonic=monotonic)
 
     @app.exception_handler(RpcError)
     async def rpc_error(_request: Request, error: RpcError) -> JSONResponse:

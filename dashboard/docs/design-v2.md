@@ -352,11 +352,15 @@ while loading; one failing source greys only its own tile. Times in the browser 
 The Home Codex service row links directly to `#/ops/codex-gateway`. Its dedicated body replaces the
 generic mode, guard, counter and backup sections; process health and alert controls remain visible.
 The optional `OpsStatus.codex_inference` snapshot comes through Fleet and includes its actual observation
-time. Counts, reported tokens and durations cover the current gateway process only; a restart resets
-them. Concurrency is labelled 采样时进行中. A snapshot over one hour old is explicitly historical,
+time. Daily counts, reported tokens and total durations persist in the gateway's existing storage and
+are grouped by UTC completion day. Today is the default, with seven-day and thirty-day selections and
+a daily table, all computed from the same bounded snapshot. Counts include completed successful and failed
+requests; concurrency is separately labelled 采样时进行中. The page shows the history start and does not
+backfill earlier usage. Older snapshots without a history start explicitly remain process-only data.
+A snapshot over one hour old is explicitly historical,
 matching the existing app-status threshold and allowing the ordinary thirty-minute Home cache interval.
-Missing snapshots and usage remain unknown, and an unused process shows zero requests without warning.
-The bounded recent-request table shows at most eight completions, models, effort, durations, outcomes,
+Missing snapshots and usage remain unknown, and an unused period shows zero requests without warning.
+The persistent recent-request table shows at most eight completions, models, effort, durations, outcomes,
 safe error labels and reported tokens. It contains no prompts, output or account data. On a phone it
 scrolls inside the card. The existing five-minute view cache and refresh flow are unchanged; opening
 the detail starts no inference or independent polling.

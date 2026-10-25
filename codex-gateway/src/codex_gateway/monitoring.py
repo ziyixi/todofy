@@ -1,10 +1,9 @@
-"""Bounded, content-free inference observations for this process lifetime."""
+"""Process counters and persistent, content-free inference observations."""
 
 import asyncio
 import pathlib
 import re
 import time
-from collections import deque
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from importlib import metadata
@@ -18,6 +17,7 @@ from ziyixi_proto.codex.monitor.v1.monitor_pb import (
     InferenceStatus,
 )
 
+from codex_gateway.monitor_store import MonitorStore
 from codex_gateway.runtime import EFFORT, MODEL
 
 Runner = Callable[[RunInferenceRequest, pathlib.Path], Awaitable[RunInferenceResponse]]
@@ -50,18 +50,20 @@ def timestamp(at: datetime) -> str:
 class InferenceMonitor:
     def __init__(
         self,
+        path: pathlib.Path,
         *,
         clock: Callable[[], datetime] = utc_now,
         monotonic: Callable[[], float] = time.monotonic,
     ):
         self.clock, self.monotonic = clock, monotonic
         self.started_at = timestamp(clock())
+        self.store = MonitorStore(path, self.started_at)
         self.sdk_version = metadata.version("openai-codex")
         self.request_count = self.success_count = self.failure_count = 0
         self.active_count = self.input_tokens = self.output_tokens = 0
         self.usage_reported_count = 0
         self.total_duration_ms = 0.0
-        self.recent: deque[InferenceRequestSample] = deque(maxlen=8)
+        self.latest: InferenceRequestSample | None = None
 
     async def run(
         self, request: RunInferenceRequest, home: pathlib.Path, runner: Runner
@@ -97,23 +99,24 @@ class InferenceMonitor:
             self.input_tokens += input_tokens
             self.output_tokens += output_tokens
             self.usage_reported_count += usage_available
-            self.recent.appendleft(
-                InferenceRequestSample(
-                    sequence=sequence,
-                    completed_at=timestamp(self.clock()),
-                    model=model,
-                    effort=EFFORT,
-                    duration_ms=duration_ms,
-                    error_code=error_code,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    usage_available=usage_available,
-                )
+            sample = InferenceRequestSample(
+                sequence=sequence,
+                completed_at=timestamp(self.clock()),
+                model=model,
+                effort=EFFORT,
+                duration_ms=duration_ms,
+                error_code=error_code,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                usage_available=usage_available,
             )
+            self.latest = sample
+            self.store.record(sample)
 
     def snapshot(self) -> InferenceStatus:
-        latest = self.recent[0] if self.recent else None
+        latest = self.latest
         completed_count = self.success_count + self.failure_count
+        history_since, daily_usage, recent_requests = self.store.snapshot()
         return InferenceStatus(
             started_at=self.started_at,
             model=MODEL,
@@ -132,6 +135,8 @@ class InferenceMonitor:
             if completed_count
             else None,
             last_error_code=latest.error_code if latest else "",
-            recent_requests=tuple(self.recent),
+            recent_requests=recent_requests,
+            history_since=history_since,
+            daily_usage=daily_usage,
             observed_at=timestamp(self.clock()),
         )

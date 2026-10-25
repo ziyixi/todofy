@@ -1,4 +1,4 @@
-// Content-free process-lifetime telemetry sampled through the existing private host observer.
+// Content-free inference telemetry sampled through the existing private host observer.
 // (-- api-linter: core::0142::time-field-names=disabled
 //     aip.dev/not-precedent: Preserve the observation vocabulary shared with the host runtime: started_at, completed_at and observed_at. --)
 // (-- api-linter: core::0140::prepositions=disabled
@@ -32,8 +32,14 @@ option (common.wire.v1.formats) = {
   max_length: 64
   description: "A fixed safe failure code, empty on success. No provider exception text."
 };
+option (common.wire.v1.formats) = {
+  name: "Day"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}"
+  max_length: 10
+  description: "UTC calendar date of request completion, YYYY-MM-DD."
+};
 
-// Process-lifetime totals. These reset at started_at; they are not daily or account-wide usage.
+// Legacy process totals and persisted daily usage. Neither represents account-wide subscription quota.
 message InferenceStatus {
   // Start of this gateway process, not the first inference.
   google.protobuf.Timestamp started_at = 1 [
@@ -114,6 +120,56 @@ message InferenceStatus {
   google.protobuf.Timestamp observed_at = 17 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).non_null = true
+  ];
+  // Latest thirty recorded UTC completion days, newest first. The UI selects calendar-day ranges from these.
+  repeated InferenceDailyUsage daily_usage = 18 [(common.wire.v1.field).max_items = 30];
+  // Creation time of the persistent usage history. Absent on older process-only gateways.
+  optional google.protobuf.Timestamp history_since = 19;
+}
+
+// One persistent UTC-day aggregate; only completed requests are counted, including failures and cancellations.
+message InferenceDailyUsage {
+  // UTC calendar date of completion.
+  string day = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Day"
+  ];
+  // Completed requests, including failed requests. In-flight work is reported separately.
+  int32 request_count = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Valid successful responses.
+  int32 success_count = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Failed or cancelled completed requests.
+  int32 failure_count = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Completions whose token usage was actually reported, including a real zero.
+  int32 usage_reported_count = 5 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Sum of reported input tokens; unknown usage is excluded.
+  int32 input_tokens = 6 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Sum of reported output tokens.
+  int32 output_tokens = 7 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Sum of full completed request durations, used for the selected period's mean latency.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: Elapsed milliseconds, not an instant in wall time. --)
+  double total_duration_ms = 8 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0
   ];
 }
 

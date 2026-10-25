@@ -21,8 +21,8 @@ efforts and a pagination flag. It does not start a thread or model turn, and ret
 credentials, descriptions or cursor. A catalog entry does not prove that a model turn will succeed.
 
 Configure `CODEX_GATEWAY_TOKEN` as an inference-only bearer secret, `CODEX_HOME` as the existing login-only
-mount. At process startup the service creates a private temporary CLI home and links only the shared
-`auth.json` into it. SDK token refresh writes through that link; cache, skills and SQLite files stay out
+mount, and `DATA_DIR` as the writable monitor directory (`.data` for local runs). At process startup the
+service creates a private temporary CLI home and links only the shared `auth.json` into it. SDK token refresh writes through that link; cache, skills and SQLite files stay out
 of Newsletter's login directory. `SOURCE_SHA` is a Docker build argument baked into `build-info.json`; the release supplies
 `CODEX_GATEWAY_RELEASE_REQUEST_ID` separately. Authentication runs before reading the request body.
 The body is limited to 768 KiB, output to 64 KiB and each model operation to 110 seconds. There are no
@@ -55,11 +55,23 @@ The internal health response includes the root-proto `InferenceStatus`; the exis
 forwards it through Fleet. Home retains its normal cached status reads and manual refresh. The page shows the
 actual sample time, so a cached read does not look like a new observation.
 
-Gateway totals cover the current process lifetime and reset on restart. Only validated, authenticated inference
-requests count; health and metadata checks do not. HTTP 200 with a nonempty `error_code` is a failed inference.
-`usage_available` distinguishes reported zero from missing usage. Request samples contain only time, safe model
-identifiers, effort, duration, token counts and fixed errors. These are not a billing ledger or account-wide quota.
-Mailsort separately persists its own daily/monthly classification usage in its existing database.
+Gateway persists one summary row per completion day in UTC, including completed request, success and failure
+counts, reported-usage count, input/output tokens and total duration. A request that crosses midnight counts on
+its completion day. Summaries and the latest eight request samples survive process or app recreation in
+`DATA_DIR/inference-monitor.sqlite3`; deployment mounts an independent directory on the existing persistent
+volume. The health response exposes the latest 30 recorded days, newest first. Stored day rows remain in SQLite.
+`history_since` records when this database began observing requests. Earlier usage is unknown; upgrading does
+not reconstruct lost process counters. Startup and writes require working storage and do not fall back to memory.
+
+Only validated, authenticated inference requests count; health and metadata checks do not. HTTP 200 with a
+nonempty `error_code` is a failed inference. Completed failures, including cancellation, count even when usage
+is unavailable. An abrupt process termination before completion is not reconstructed. `usage_available` and the
+reported-usage count distinguish reported zero from missing usage. The original top-level counts, token totals,
+active work and latency fields still cover the current process lifetime and reset on restart. A sample's sequence
+is assigned when its request starts within that process, so persisted samples can repeat a sequence after restart.
+Samples contain only time, safe model identifiers, effort, duration, token counts and fixed errors. The database
+contains no prompts, responses or account identity. These observations are not a billing ledger or account-wide
+quota. Mailsort separately persists its own daily/monthly classification usage in its existing database.
 
 Local synthetic checks:
 
@@ -71,4 +83,4 @@ uv run --locked ruff check src tests
 uv run --locked ruff format --check src tests
 ```
 
-Tests use a fake SDK and an in-process ASGI client. They do not log in or call a model.
+Tests use a fake SDK, temporary SQLite files and an in-process ASGI client. They do not log in or call a model.

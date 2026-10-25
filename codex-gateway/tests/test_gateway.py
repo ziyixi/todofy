@@ -142,7 +142,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 usage_available=True,
             )
 
-        self.app = create_app(runner=runner)
+        self.app = create_app(monitor_db=self.home / "monitor.sqlite3", runner=runner)
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app), base_url="http://test"
         )
@@ -202,7 +202,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 ],
             )
 
-        app = create_app(checker=checker)
+        app = create_app(monitor_db=self.home / "monitor.sqlite3", checker=checker)
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -241,7 +241,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 },
             ),
         ):
-            app = create_app()
+            app = create_app(monitor_db=self.home / "monitor.sqlite3")
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
             ) as client:
@@ -261,7 +261,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 ),
             )
 
-        app = create_app(runner=runner)
+        app = create_app(monitor_db=self.home / "monitor.sqlite3", runner=runner)
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:

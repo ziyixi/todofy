@@ -2,7 +2,7 @@
 
 import json
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from personal_cloud.status_daemon.adapters import codex_gateway
@@ -137,7 +137,7 @@ def test_nested_samples_reject_unsafe_metadata():
         assert business.inference_status is None
 
 
-def test_eight_samples_fit_the_existing_node_and_fleet_report_budgets():
+def test_daily_history_and_samples_fit_the_existing_node_and_fleet_report_budgets():
     source = (
         Path(__file__).resolve().parents[3]
         / "contracts/fleet-report-v1/fixtures/healthy.json"
@@ -152,6 +152,22 @@ def test_eight_samples_fit_the_existing_node_and_fleet_report_budgets():
     inference["recent_requests"] = [
         {**inference["recent_requests"][0], "sequence": i, "model": "m" * 64}
         for i in range(8, 0, -1)
+    ]
+    inference["history_since"] = "2026-09-25T12:00:00Z"
+    inference["daily_usage"] = [
+        {
+            "day": (datetime(2026, 10, 25, tzinfo=UTC) - timedelta(days=i))
+            .date()
+            .isoformat(),
+            "request_count": 100,
+            "success_count": 90,
+            "failure_count": 10,
+            "usage_reported_count": 95,
+            "input_tokens": 1_000_000,
+            "output_tokens": 10_000,
+            "total_duration_ms": 500_000,
+        }
+        for i in range(30)
     ]
     gateway["inference_status"] = inference
     report["runtime"]["workloads"].insert(0, gateway)
