@@ -12,22 +12,21 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-Active branch `codex/tasks-goals` implements the owner's approved Goals screen and connects annual Objectives/KRs
-to the existing weekly Bets, Tasks and inherited Step references. Work is in `/private/tmp/todofy-tasks-design`,
-not Claude's shared checkout. Reuse Tasks D1, generated owner API, existing UI components and backup/restore.
-Keep goal progress independent of task completion and preserve normal task-list/request budgets. Import the
-owner's current-year Notion OKR through the existing private-operator conventions after the release; no personal
-content or import payload enters Git. Source has no measured progress, so import no invented milestones or results,
-and select no real focus/commitments for the owner. Implementation and local acceptance are complete: 72 Worker
-unit tests, 142 native runtime cases, 96 UI tests, 327 shared-planning tests, 141 browser cases and 41 operator/deploy
-tests passed. Goals layout QA passed after the scoped typography correction; normal list and Plan read budgets
-remain unchanged. Dry Worker is 164.0 KiB gzip within the existing 165 KiB budget. Private Notion preparation
-preserves all 27 source sections across four Objectives/12 KRs. Pre-release Time Travel bookmark is recorded.
-Next: full branch CI, same-SHA main release, empty-year preflight, private import and API/UI readback. No new
-service, Notion sync, model call or scheduler was introduced. Details: [verification](docs/tasks-goals-verification.md).
-Candidate `46839255` stopped in CI only on a Mac-specific screenshot output path; application checks and the other
-140 browser cases passed. The path is corrected to Playwright's own output and the three-case journey passes.
-Production is still unchanged; run the full gate for the corrected SHA before promotion.
+Tasks Goals is released at `fd4a82c109f9d25e903f9f058bd5e286a8b0ddc0`, after
+[full branch CI 40171075047](https://github.com/ziyixi/todofy/actions/runs/40171075047) and the
+[same-SHA main release 40171731163](https://github.com/ziyixi/todofy/actions/runs/40171731163).
+Tasks Deployment `7309929919` verifies Worker `c19ef834-faef-4d3d-a567-febb33002e79`; Personal MCP Deployment
+`7309935989` verifies `20548e78-102e-4fff-ba67-8e6c402bded9`. Direct provider readback matched both builds and
+preserved Tasks' D1, jobs namespace and backup bucket. The existing MCP tool catalog was not extended.
+The authorized private Notion import is complete: four annual Objectives and 12 KRs, all 27 source sections
+preserved and every full KR read back with zero content mismatches. Progress, milestones, focus and completions
+were not inferred. Original Bets, lane orders, next-week choices and task/catalog counts match the pre-import
+baseline. Live UI shows all four directions and all 12 picker choices; exploration has no metric prompts.
+Private plaintext input/SQL/bookmarks were deleted after verification. No production test Task was created.
+Implementation/local/CI/browser/performance/backup evidence and the initial portable-test-path correction are in
+[Goals verification](docs/tasks-goals-verification.md) and [design QA](tasks/design-qa.md#goals).
+Work stayed in the isolated checkout; Claude's shared checkout was untouched. No new service, model call or
+scheduler was added. The next natural weekly backup containing Goals has not yet been observed.
 
 Few-shot examples are released at `c121b02da666592b12c1c575ad48328c004b523b`, after
 [branch CI 40153945767](https://github.com/ziyixi/todofy/actions/runs/40153945767) and the
@@ -115,6 +114,9 @@ dedicated Watch paused and synthetic Work done. Existing hourly Work review rema
 Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's shared source checkout is untouched.
 
 ## Latest verified release
+
+Tasks and Personal MCP run `fd4a82c1`, with the approved Goals view, optional native associations and completed
+Notion definition import. The existing planning and task-completion behavior remains covered by the full suite.
 
 Mailsort now runs `c121b02d`; Home remains on `70a60d49`. Both are verified app releases. The classifier uses
 Opus 5.5 medium and an independent $20 monthly workspace limit; live mode is confirmed. The earlier Clef release
