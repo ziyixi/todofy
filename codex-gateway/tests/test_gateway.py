@@ -320,10 +320,49 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                         self.assertTrue(sdk.turn.interrupted)
         self.assertEqual(output.getvalue(), "")
 
+    async def test_rejected_login_directory_returns_only_configuration_code(self):
+        marker = "Private synthetic configuration content"
+        (self.home / "config.toml").write_text(marker)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            answer = await infer(RunInferenceRequest(**BODY), self.home, sdk=FakeSdk())
+        self.assertEqual(answer.error_code, "codex_configuration")
+        self.assertEqual(answer.output_json, "")
+        self.assertNotIn(marker, repr(answer))
+        self.assertNotIn(str(self.home), repr(answer))
+        self.assertEqual(output.getvalue(), "")
+
+    async def test_pre_model_failures_report_safe_stage_and_keep_auth_quota_priority(
+        self,
+    ):
+        marker = "Private synthetic diagnostic /synthetic/login/path"
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            for method, error, code in (
+                ("__aenter__", RuntimeError(marker), "codex_startup"),
+                ("account", RuntimeError(marker), "codex_account"),
+                ("request", ValueError(marker), "codex_skills"),
+                ("__aenter__", RuntimeError("unauthorized " + marker), "codex_auth"),
+                ("request", RuntimeError("usage_limit " + marker), "codex_quota"),
+                ("request", TimeoutError(marker), "codex_timeout"),
+            ):
+                with self.subTest(method=method, code=code):
+                    sdk = FakeSdk()
+                    with patch.object(sdk, method, side_effect=error):
+                        answer = await infer(
+                            RunInferenceRequest(**BODY), self.home, sdk=sdk
+                        )
+                    self.assertEqual(answer.error_code, code)
+                    self.assertEqual(answer.output_json, "")
+                    self.assertNotIn(marker, repr(answer))
+                    self.assertNotIn(str(self.home), repr(answer))
+                    self.assertTrue(sdk.closed)
+        self.assertEqual(output.getvalue(), "")
+
     async def test_non_subscription_auth_enabled_skills_or_tools_cannot_succeed(self):
         for sdk, code in (
             (FakeSdk(account_type="apikey"), "codex_auth"),
-            (FakeSdk(enabled_skill=True), "codex_unavailable"),
+            (FakeSdk(enabled_skill=True), "codex_skills"),
             (FakeSdk(FakeTurn(text="invalid JSON")), "codex_bad_answer"),
             (FakeSdk(FakeTurn(text='{"invalid": NaN}')), "codex_bad_answer"),
             (FakeSdk(FakeTurn(tool=True)), "codex_bad_answer"),

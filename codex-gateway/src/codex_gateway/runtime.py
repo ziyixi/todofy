@@ -167,6 +167,7 @@ async def infer(
     output = ""
     error_code = ""
     input_tokens = output_tokens = 0
+    stage = "configuration"
     try:
         if sdk is None:
             import openai_codex as sdk
@@ -176,16 +177,20 @@ async def infer(
         _login_home(home)
         with tempfile.TemporaryDirectory(prefix="codex-inference-") as directory:
             workspace = pathlib.Path(directory)
+            stage = "startup"
             client = sdk.AsyncCodex(runtime_config(sdk, home, workspace))
             async with asyncio.timeout(TIMEOUT_SECONDS):
                 await client.__aenter__()
+                stage = "account"
                 account = await client.account(refresh_token=False)
                 if (
                     getattr(getattr(account.account, "root", None), "type", None)
                     != "chatgpt"
                 ):
                     raise RuntimeError("authentication")
+                stage = "skills"
                 await _assert_no_skills(client, workspace)
+                stage = "model"
                 thread = await client.thread_start(
                     cwd=str(workspace),
                     model=MODEL,
@@ -226,10 +231,13 @@ async def infer(
         error_code = "codex_timeout"
         if turn is not None:
             await _interrupt(turn)
-    except (ValueError, TypeError):
-        error_code = "codex_bad_answer"
     except Exception as error:
-        error_code = failure_code(error)
+        if stage == "model" and isinstance(error, (ValueError, TypeError)):
+            error_code = "codex_bad_answer"
+        else:
+            error_code = failure_code(error)
+            if error_code == "codex_unavailable" and stage != "model":
+                error_code = f"codex_{stage}"
     finally:
         if client is not None:
             try:

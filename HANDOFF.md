@@ -17,17 +17,25 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 Owner authorized implementation, source/main CI publication, independent VPS inference, precise Tunnel/Access
 routing, scoped machine credentials, existing subscription auth, synthetic tests, and activation for unclassified
 unread mail. Old labelled mail is not rechecked. An eight-hour scoped operator was installed by the owner; remove
-it after acceptance. Existing VPS Codex login status reports ChatGPT authentication; real inference remains pending.
+it after acceptance. Existing VPS Codex login status reports ChatGPT authentication. The first real synthetic
+inference returned `codex_unavailable`; Mailsort remains on Claude pending diagnosis and a successful real turn.
 
 Settings/status/UI, the typed stateless gateway and concrete third-workload deployment integration are implemented.
 Mailsort remains the scheduler and Gmail writer; both providers share its saved prompt and fixed P1-P4 validation.
 Claude cost/cache history remains separate. Gateway-only releases preserve Newsletter state; reconciliation retains
 accepted identities for the original pair. Local checks passed: Mailsort 226 unit/113 workerd, UI 104,
-deployment guard 26 and Wrangler smoke; gateway 11 synthetic tests; platform/CI/infra/Home/Fleet integration
+deployment guard 26 and Wrangler smoke; gateway 13 synthetic tests; platform/CI/infra/Home/Fleet integration
 checks are green. The Worker bundle is 145.9 KiB gzip within its existing 148 KiB budget. The bounded
 verified-release lookup retains prior success when GitHub appends inactive, fixing pre-existing reconciliation
-false failures. Full branch CI, provider provisioning, bootstrap, real inference and activation remain pending.
-Work stays in the isolated checkout.
+false failures. Real inference and activation remain pending.
+Initial source `07b331ac` passed full branch CI `40188413825`, main publication `40189217953` (a transient
+recording 404 passed on the existing job rerun), Infra apply `40189320360` and paired/gateway VPS release
+`40190513593`. The three workloads are ready and owner-only secrets are configured; inference is not yet accepted.
+Gateway-only follow-up adds fixed pre-model failure codes, using the existing error field without new logging,
+routes or state. A real authless local SDK startup/account/skills check passed; production stages are next.
+`VPS_DEPLOY_ENABLED` is restored to true. `PERSONAL_CLOUD_AUTO_REPAIR` remains temporarily false; restore its
+saved original value after final acceptance, and remove the scoped operator and private preparation files.
+Work stays in the isolated checkout, with the shared checkout untouched.
 
 
 ### Tasks GTD execution review

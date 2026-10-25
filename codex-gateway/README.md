@@ -9,6 +9,9 @@ The request carries `instructions`, `input_json` and `output_schema_json`. An in
 the fixed model/effort, output JSON, reported token counts and a safe `error_code`. Model failures return
 HTTP 200 with an empty output and one of `codex_auth`, `codex_quota`, `codex_timeout`,
 `codex_unavailable` or `codex_bad_answer`. Transport/configuration errors use the shared RPC Status body.
+Failures before a model turn identify only their stage: `codex_configuration`, `codex_startup`,
+`codex_account` or `codex_skills`. Authentication, quota and timeout codes take precedence. These codes
+never include vendor error text, local paths or request content.
 
 Configure `CODEX_GATEWAY_TOKEN` as an inference-only bearer secret, `CODEX_HOME` as the existing login-only
 mount. `SOURCE_SHA` is a Docker build argument baked into `build-info.json`; the release supplies
