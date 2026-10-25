@@ -86,11 +86,12 @@ One Worker serves static UI assets and a generated owner API backed by the exist
 the root `codex.inference.v1` wire contract. The Worker and existing DO retain Gmail, settings, pending work and
 write-ledger ownership. The gateway adds no database or scheduler.
 
-From `worker/`, with Node 26:
+From the repository root, with Node 26 and the shared workspace toolchain:
 
 ```sh
-npm ci
-(cd ../web && npm ci && npm run build)
+pnpm install --frozen-lockfile
+cd mailsort/worker
+(cd ../web && npm run build)
 npm run lint && npm run typecheck && npm test
 npm run test:runtime
 npm run test:smoke

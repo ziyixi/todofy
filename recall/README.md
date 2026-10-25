@@ -69,10 +69,11 @@ disconnection or missing files are shown in the detail. Existing visits and text
 
 ## Develop
 
-From `worker/` (Node 26; the pinned toolchains are in each package's lockfile):
+From the repository root (Node 26; versions and the lockfile are shared):
 
 ```sh
-npm ci && (cd ../web && npm ci) && (cd ../extension && npm ci)
+pnpm install --frozen-lockfile
+cd recall/worker
 npm run lint && npm run typecheck && npm test   # unit tests (Node): shared/, query building, snippets, the feed's and
                                                 # the archive's lines, the Dropbox client, the machine tokens
 npm run test:runtime                            # workerd: a real RecallState and R2, a fake Dropbox, the owner API,

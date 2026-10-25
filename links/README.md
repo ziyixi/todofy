@@ -61,8 +61,9 @@ any app on the phone: public ones always, private ones in the browser that holds
 ## Develop
 
 ```sh
-cd links/worker && npm ci && cd ../web && npm ci   # npm ci also generates the proto code (proto/tools/ensure.mjs)
-cd ../web && npm run build                          # web/dist, which the Worker serves
+pnpm install --frozen-lockfile                     # shared dependencies and proto generation
+cd links/web
+npm run build                          # web/dist, which the Worker serves
 cp ../.dev.vars.example ../.dev.vars                # synthetic values only
 cd ../worker
 npx --no-install wrangler d1 migrations apply DB --local --config ../wrangler.toml   # local D1 only, never --remote

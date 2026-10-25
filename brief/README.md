@@ -43,10 +43,11 @@ silence. Each model call is costed from its usage against the monthly budget (шо
 
 ## Develop
 
-From `worker/` (Node 26; the pinned toolchain is in the lockfile):
+From the repository root (Node 26; the toolchain uses the shared lockfile):
 
 ```sh
-npm ci
+pnpm install --frozen-lockfile
+cd brief/worker
 npm run lint && npm run typecheck && npm test   # unit tests: registry, schedule, feeds, grounding, the SDK over a fake stream, render, ledger, ops-v1 golden bytes
 npm run test:runtime                            # workerd: a real BriefState, a synthetic web, fake Claude, Workers AI and Resend; CPU and rows at the bounds
 node --test ../deploy/test/*.test.mjs
@@ -57,7 +58,7 @@ Resend, with a fake Opus that writes plausible Chinese items from the packets it
 overstated number for the repair, and exactly one send. `UPDATE_GOLDEN=1 npx vitest run test/render.test.ts` rewrites
 the golden emails (`test/golden/`), only for an intended change of the render.
 
-From `web/`: `npm ci`, then `npm run lint && npm run typecheck && npm test` (the views against a fake of the owner API
+From `web/`, using the same workspace installation: `npm run lint && npm run typecheck && npm test` (the views against a fake of the owner API
 on the shared transcoder, the layout rules a phone depends on, no request but to its own origin) and `npm run build`
 (the JavaScript budget in `scripts/js-budget.mjs`). `npm run dev` serves the UI with Vite and proxies `/api` to the
 Worker's `npm run dev`.

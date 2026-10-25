@@ -94,10 +94,7 @@ It does not send a timed notification. Effort is a task property, so it needs no
 From the repository root, install the shared packages and the app:
 
 ```sh
-npm ci --prefix packages/planning-ui
-npm ci --prefix packages/task-dates
-npm ci --prefix tasks/worker
-npm ci --prefix tasks/web
+pnpm install --frozen-lockfile
 npm run build --prefix tasks/web
 cd tasks/worker
 node test/runtime/dev-server.ts

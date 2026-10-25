@@ -69,10 +69,11 @@ The feed keeps 30 days or 500 events; `CURSOR_EXPIRED` requires explicit reconci
 
 ## Develop
 
-From `worker/` (Node 26; the pinned toolchains are in each package's lockfile):
+From the repository root (Node 26; versions and the lockfile are shared):
 
 ```sh
-npm ci && (cd ../web && npm ci)
+pnpm install --frozen-lockfile
+cd watch/worker
 npm run lint && npm run typecheck && npm test   # unit tests (Node)
 npm run test:runtime                            # workerd: real WatchState, synthetic sites, CPU
 (cd ../web && npm run lint && npm run typecheck && npm test && npm run build)

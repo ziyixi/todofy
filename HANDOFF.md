@@ -22,7 +22,11 @@ reported usage was 7,357 input / 152 output tokens. No real mail was used. This 
 Mailsort and Newsletter defaults directly to 6.1; Newsletter's explicit Deployment env prevents a legacy secret
 from selecting its old model. Preserve archive mode, prompts, budgets and old mail. Gateway's process-private
 CLI home links only the existing auth file, keeping its cache and built-in skills separate from Newsletter.
-The model-default release and its readback are pending. The shared checkout remains untouched.
+Default-model commit `b4365194` passed [branch CI 40222677321](https://github.com/ziyixi/todofy/actions/runs/40222677321)
+and [same-SHA main 40223093443](https://github.com/ziyixi/todofy/actions/runs/40223093443). The gateway's actual
+default is 6.1 / medium; a second real synthetic turn at 18:57 UTC succeeded in 5.4 seconds, and the actual
+Newsletter Deployment selects 6.1. All four Deployments are ready. No real Newsletter generation/send or
+old-mail reclassification was started. The shared checkout remains untouched.
 The owner selected full-repo standard workspaces with shared manifests/locks, and verified VPS migration to
 Python 3.14 for one uv workspace. That migration is developed separately in `/private/tmp/todofy-dependency-workspaces`
 on `codex/dependency-workspaces`: root pnpm 11.25.0 catalog/lock with Node 26, root uv workspace/lock with Python 3.14,

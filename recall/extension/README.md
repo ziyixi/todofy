@@ -66,16 +66,17 @@ gh release download recall-extension-v<version> --repo ziyixi/todofy --dir <a ne
 npm run install-extension -- <that folder>/recall-extension-v<version>.zip
 ```
 
-or from a build of its own:
+or build it locally from the repository root:
 
 ```sh
-npm ci
+pnpm install --frozen-lockfile
+cd recall/extension
 npm run build                 # desktop folder/ZIP, plus dist/orion/ and dist/recall-orion-<commit>.zip
 npm run install-extension     # into ~/recall-extension (or: -- <folder or zip> [--target <folder>])
 ```
 
 `install-extension` takes this package's build, a build folder or zip, a release's zip or the CI artifact
-`recall-extension-<sha>.zip` as downloaded; it needs no `npm ci`. It unpacks beside the target, checks the files, the
+`recall-extension-<sha>.zip` as downloaded; it needs no dependency installation. It unpacks beside the target, checks the files, the
 version and the key, swaps the folders with two renames (the old one becomes `~/recall-extension.prev`) and writes
 `BUILD` last. The running extension reloads into the new build on its next tick, so an update needs nothing from the
 owner. Keep the folder outside Google Drive (a cloud-only file there would fail to load) and in the same place, so

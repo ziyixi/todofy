@@ -355,7 +355,7 @@ work offline (`pnpm install --frozen-lockfile --offline`, `uv sync --offline`).
 ```sh
 cd proto
 pnpm install --frozen-lockfile                                   # the toolchain and this folder's test tools
-pnpm run generate                         # regenerate now (any app's npm install / uv sync also does it)
+pnpm run generate                         # regenerate now (workspace pnpm install / uv sync also does it)
 pnpm run lint                             # buf format + buf lint
 pnpm run api-lint                         # Google's api-linter (needs Go; tools/api-linter/go.mod)
 pnpm run breaking -- "$(git merge-base HEAD origin/main)"   # buf breaking + the profile rules

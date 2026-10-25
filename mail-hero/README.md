@@ -21,12 +21,14 @@ flowchart LR
 
 ## 开发与部署
 
-需要 Node.js 26 和 npm。生产配置是提交的 [`wrangler.toml`](wrangler.toml)（顶层即生产）；个人值与运维开关不提交，由 CI 部署时经 `deploy/deploy-vars.mjs` 注入。本地开发只用本地绑定，把 [`.dev.vars.example`](.dev.vars.example) 复制为 `.dev.vars`。
+需要 Node.js 26 与仓库根目录固定的 pnpm。生产配置是提交的 [`wrangler.toml`](wrangler.toml)（顶层即生产）；个人值与运维开关不提交，由 CI 部署时经 `deploy/deploy-vars.mjs` 注入。本地开发只用本地绑定，把 [`.dev.vars.example`](.dev.vars.example) 复制为 `.dev.vars`。
+
+以下命令从单仓库根目录执行：
 
 ```sh
-npm --prefix web ci
+pnpm install --frozen-lockfile
+cd mail-hero
 npm --prefix web run build
-npm --prefix cloudflare ci
 npm --prefix cloudflare run typecheck
 npm --prefix cloudflare test
 ```

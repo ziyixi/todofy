@@ -62,8 +62,8 @@ nothing holds mail content.
 ## Checks (as CI's `Dashboard checks` runs them)
 
 ```sh
+pnpm install --frozen-lockfile
 cd dashboard
-npm ci --prefix worker && npm ci --prefix web
 node --test deploy/test/*.test.mjs                      # needs worker/node_modules (reads wrangler.toml with wrangler)
 (cd worker && npm run lint && npm run typecheck && npm test && npm run test:runtime)
 (cd web && npm run lint && npm run typecheck && npm test && npm run build)

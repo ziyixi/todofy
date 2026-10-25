@@ -21,7 +21,7 @@ Fresh ≤10分钟，stale ≤20分钟，之后 missing；k3s 或节点失联也�
 `cloudflared_platform` 仅在 `FLEET_EXPECT_PLATFORM_TUNNEL=true` 时监督。只有真实部署 daemon 的当前 ACK 和 SHA、image、request ID
 匹配，且 Newsletter worker 健康、gate active 时，部署才就绪。Pod ready 不替代 provider 业务成功。
 
-本地分别在 `worker/`、`web/` 运行 `npm ci`、lint/typecheck/test。Worker 另运行 `test:runtime`，web 另 build。
+本地先在仓库根目录运行一次 `pnpm install --frozen-lockfile`，再分别在 `worker/`、`web/` 运行 lint/typecheck/test。Worker 另运行 `test:runtime`，web 另 build。
 Observer 随平台镜像包含共享 proto；在 platform 环境运行 `python -m unittest discover -s tests/observer`，全是合成数据。
 生产只能通过 main Actions 发布；首次 Access/身份配置与 VPS 更新由根部署流程管理。
 

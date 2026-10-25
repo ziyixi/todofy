@@ -85,10 +85,11 @@ MCP 2.0 (`2026-07-28`). There is no Agents framework, server-side model call, D1
 
 ## Development and release
 
-From `worker/`, use Node 26:
+From the repository root, use Node 26:
 
 ```sh
-npm ci
+pnpm install --frozen-lockfile
+cd personal-mcp/worker
 npm run lint
 npm run typecheck
 npm test

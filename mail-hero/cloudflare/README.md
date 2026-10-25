@@ -41,11 +41,12 @@ Do not add `[limits] cpu_ms = 30000` to the ordinary Free Worker to imitate Paid
 
 ## Local checks
 
-Use Node.js 26. From the repository root, build the UI with `npm --prefix web ci` and `npm --prefix web run build`. Then:
+Use Node.js 26. From the repository root, install the shared workspace once, build the UI, then run the Worker checks:
 
 ```sh
-cd cloudflare
-npm ci
+pnpm install --frozen-lockfile
+npm --prefix mail-hero/web run build
+cd mail-hero/cloudflare
 npm run typecheck
 npm test
 npx wrangler d1 migrations apply DB --local --config ../wrangler.toml

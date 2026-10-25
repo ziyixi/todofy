@@ -352,7 +352,7 @@ other applications' blocks; without it the plan holds a `create` and the bootstr
 
 ```sh
 cd <a clean checkout of the branch>
-npm ci --prefix mail-hero/cloudflare                    # the admin helper's wrangler
+pnpm install --frozen-lockfile                         # shared tools, including the admin helper's wrangler
 umask 077; mkdir -p ~/.config/todofy-infra
 openssl rand -base64 32 > ~/.config/todofy-infra/state-passphrase    # copy it into the password manager
 CLOUDFLARE_API_TOKEN="$(cat ~/.config/mail-hero/cloudflare-bootstrap-20260926.token)" \

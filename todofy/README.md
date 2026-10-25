@@ -155,17 +155,18 @@ of `Intents`, `Planning` and `MailApi` are gone.
 ## Local development
 
 Prerequisites: Node 26 (`.nvmrc`), uv 0.12.10; Python 3.14 is fetched by uv. No Cloudflare account or
-credentials are needed. Run every command from this `todofy/` directory of the monorepo; the only file read
-from outside it is the shared `mail.received.v1` contract in `../contracts/mail-received-v1`.
+credentials are needed. From the repository root, install the shared workspaces once, then run the app checks
+from `todofy/`.
 
 ```sh
-npm ci --no-audit --no-fund
-uv sync --locked
+pnpm install --frozen-lockfile
+uv sync --locked --package todofy
+cd todofy
 uv run ruff check worker tests tools deploy && uv run ruff format --check worker tests tools deploy
 uv run pytest tests/unit tests/fakes tools deploy        # host tests
-(cd gateway && npm ci --no-audit --no-fund && npm run lint && npm run typecheck && npm test)
+(cd gateway && npm run lint && npm run typecheck && npm test)
 (cd gateway && npm run test:runtime)                     # the gateway in workerd: owner API CPU per request
-(cd web && npm ci --no-audit --no-fund && npm run typecheck && npm test && npm run build)
+(cd web && npm run typecheck && npm test && npm run build)
 uv run pytest tests/runtime                               # real workerd, gateway + core, D1, DO, alarms, cron (~9 min)
 ```
 
