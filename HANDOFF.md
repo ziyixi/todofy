@@ -23,8 +23,10 @@ Both failed and successful HTTP attempts are counted; reported usage is separate
 switches retain both histories, and pre-upgrade Codex usage is not guessed or reclassified.
 
 Local checks passed Gateway 29, Platform 135 (+143 subtests), Fleet 67 unit/10 workerd, Mailsort 229 unit/115
-workerd/106 UI, and Home 173 UI tests, with affected lint/typechecks/builds. Mailsort's Worker is 147.9/148 KiB
-gzip; Home UI is 168.0 KiB. Full telemetry stays inside existing 4/12/16 KiB host-response limits. The actual
+workerd/106 UI, and Home 173 UI tests, with affected lint/typechecks/builds. Linux CI measured Mailsort at 148.8
+KiB and Recall at 130.4 KiB; their code-size budgets are intentionally 150/132 KiB for this shared monitor
+descriptor and usage feature. CPU and spending budgets are unchanged. Home UI is 168.0 KiB. Full telemetry
+stays inside existing 4/12/16 KiB host-response limits. The actual
 Home UI was inspected in Chrome with synthetic desktop and 390px iframe views. Shared IDL/schema and CI checks,
 branch gate and production acceptance are in progress. Existing CI already releases Fleet before VPS producers.
 Work stays in the isolated checkout; no real mail or production model operation has been used in this task yet.

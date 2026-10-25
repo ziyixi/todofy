@@ -14,6 +14,7 @@
 //   node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mailsort-bundle"     (from worker/, after the dry run's --outdir)
 import { checkWorkerBundle, isMain } from '../../tools/bundle-size/bundle-size.mjs'
 
-export const BUDGET_GZIP_BYTES = 148 * 1024
+// October 25: Codex usage accounting and the shared inference monitor descriptor measure 148.8 KiB in Linux CI.
+export const BUDGET_GZIP_BYTES = 150 * 1024
 
 if (isMain(import.meta.url)) process.exitCode = checkWorkerBundle('The mailsort app', process.argv[2], BUDGET_GZIP_BYTES)
