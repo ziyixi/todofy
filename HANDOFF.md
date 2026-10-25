@@ -12,20 +12,19 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-### Tasks GTD execution review (`codex/tasks-gtd-review`)
+### Tasks GTD execution review
 
-The owner approved Overview, Completion and Time. Work stays in isolated `/private/tmp/todofy-tasks-design`,
-based on remote main `f5dc372d`; Claude's shared tree is untouched. Focus Week/Month statistics move into GTD;
-daily execution, editable records and timers stay in Focus. No Decide again queue or mail-cleanup pressure.
-Metric definitions and historical limits are in [GTD](tasks/docs/gtd.md).
-
-Local checks: Worker 72 unit/152 runtime, planning-ui 321, web 112 and the full 141 Chromium journeys passed.
-The final report/date-default check passed separately; root-proto/source-consumer gates run in branch CI. The lazy GTD chunk is
-about 5.6 KiB gzip; Worker size is 167.1 KiB, with its documented ratchet raised to 175 KiB for this feature.
-CPU limits are unchanged. No paid plan, dependency, model call, service or scheduler was added. Branch CI,
-same-SHA release and live read-only acceptance remain pending. Native Chrome visual QA passed; see
-[tasks/design-qa.md](tasks/design-qa.md#gtd-execution-review).
-
+Released `cb6e8c810c1f836decd2cdee9beb8708ada32699` after full
+[branch CI 40176734141](https://github.com/ziyixi/todofy/actions/runs/40176734141) and
+[same-SHA main 40177554343](https://github.com/ziyixi/todofy/actions/runs/40177554343).
+Overview, Completion and Time replace the mail-oriented GTD page; Focus retains daily execution and timers.
+Tasks Deployment `7310763434` verifies `0a056945-5c9c-4f62-b61a-25bee85a6394`; MCP Deployment `7310771205`
+verifies `d1193235-0f02-40b7-8389-31de93f4d227`. Migration 0010 is applied with no pending migration, and the
+existing D1/bucket identities remain. Native Chrome read-only acceptance passed. No real Task/time writes
+were invoked and the shared checkout stayed untouched. Metric definitions, tests, visual/performance evidence
+and the first-week historical limit are in [GTD verification](docs/tasks-gtd-verification.md) and
+[GTD](tasks/docs/gtd.md). No new service, dependency, secret, paid plan or scheduler was introduced.
+The next natural weekly production backup containing the new tables remains unobserved.
 
 Tasks Goals is released at `fd4a82c109f9d25e903f9f058bd5e286a8b0ddc0`, after
 [full branch CI 40171075047](https://github.com/ziyixi/todofy/actions/runs/40171075047) and the
@@ -130,8 +129,9 @@ Work used the isolated checkout `/private/tmp/todofy-tasks-design`; Claude's sha
 
 ## Latest verified release
 
-Tasks and Personal MCP run `fd4a82c1`, with the approved Goals view, optional native associations and completed
-Notion definition import. The existing planning and task-completion behavior remains covered by the full suite.
+Tasks and Personal MCP run `cb6e8c81`, with GTD execution review and daily-only Focus. The approved Goals view,
+optional native associations and imported definitions remain intact. Source/version, full-suite and live evidence
+are in [GTD verification](docs/tasks-gtd-verification.md).
 
 Mailsort now runs `c121b02d`; Home remains on `70a60d49`. Both are verified app releases. The classifier uses
 Opus 5.5 medium and an independent $20 monthly workspace limit; live mode is confirmed. The earlier Clef release
