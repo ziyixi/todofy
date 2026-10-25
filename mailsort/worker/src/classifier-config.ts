@@ -1,5 +1,5 @@
 /** The two classification choices; scheduling, prompt and Gmail writes stay in the existing pipeline. */
-export const CODEX_MODEL = 'gpt-6-sol';
+export const CODEX_MODEL = 'gpt-6.1-sol';
 export const CLASSIFICATION_EFFORT = 'medium';
 
 /** Only deployment configuration supplies this URL; the UI never accepts arbitrary destinations. */

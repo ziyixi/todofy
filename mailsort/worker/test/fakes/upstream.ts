@@ -82,7 +82,7 @@ export class FakeUpstream {
       if (this.codex.status !== 200) return new Response('Synthetic private gateway failure.', { status: this.codex.status });
       const items = this.codex.badItems ? [] : emails.map(email => ({ id: email.id, bucket: this.codex.bucket, reason: 'Synthetic reading priority.' }));
       return Response.json(toWire(RunInferenceResponseSchema, create(RunInferenceResponseSchema, {
-        model: 'gpt-6-sol', effort: 'medium', outputJson: this.codex.errorCode ? '' : JSON.stringify({ items }),
+        model: 'gpt-6.1-sol', effort: 'medium', outputJson: this.codex.errorCode ? '' : JSON.stringify({ items }),
         inputTokens: 1200, outputTokens: 120, errorCode: this.codex.errorCode,
       })));
     }

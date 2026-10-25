@@ -440,7 +440,7 @@ class CodexEditor:
     def __init__(
         self,
         codex_home: pathlib.Path,
-        model: str = "gpt-6-sol",
+        model: str = "gpt-6.1-sol",
         *,
         timeout_seconds: float = 840,
     ) -> None:

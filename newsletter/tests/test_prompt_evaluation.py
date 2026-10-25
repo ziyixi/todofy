@@ -217,7 +217,7 @@ async def test_case_inputs_outputs_latest_usage_and_private_modes_are_durable(
     assert len(harness.calls) == 2
     assert len({call[-1] for call in harness.calls}) == 2
     assert all(
-        home == harness.home and model == "gpt-6-sol" and timeout == 300
+        home == harness.home and model == "gpt-6.1-sol" and timeout == 300
         for home, model, timeout in harness.constructors
     )
     # Cumulative 120 -> 180 snapshots replace one another, never sum to 300.
@@ -508,4 +508,6 @@ def test_cli_uses_only_explicit_configuration_not_environment_or_dotenv(
         == 0
     )
     assert received[0]["codex_home"] == tmp_path / "explicit-auth"
-    assert received[0]["model"] == "gpt-6-sol" and received[0]["timeout"] == 300
+    assert (
+        received[0]["model"] == "gpt-6.1-sol" and received[0]["timeout"] == 300
+    )

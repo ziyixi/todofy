@@ -240,7 +240,7 @@ describe('priority batch classification', () => {
     const server = liveServer()
     server.status = {
       writeScope: true,
-      classifier: create(ClassifierStatusSchema, { provider: ClassificationProvider.CODEX, model: 'gpt-6-sol', effort: 'medium', configured: true, nextBatchTime: timestampFromMs(NOW + 1_800_000) }),
+      classifier: create(ClassifierStatusSchema, { provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: true, nextBatchTime: timestampFromMs(NOW + 1_800_000) }),
       claudeBudget: create(ClaudeBudgetSchema, { limitUsd: 20, spentUsd: 20, providerLimitReached: true, lastErrorCode: 'claude_spend_limit', nextBatchTime: timestampFromMs(NOW + 3_600_000) }),
     }
     server.unreadClassification = batch()

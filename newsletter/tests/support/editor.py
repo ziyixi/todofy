@@ -298,7 +298,7 @@ def fake_sdk(
 def live_editor(
     tmp_path: pathlib.Path,
     *,
-    model: str = "gpt-6-sol",
+    model: str = "gpt-6.1-sol",
     timeout_seconds: float = 840,
 ) -> editor.CodexEditor:
     """Build a real editor with an isolated empty authentication directory."""

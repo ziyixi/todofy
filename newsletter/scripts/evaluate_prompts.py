@@ -314,7 +314,7 @@ async def evaluate(
     output: pathlib.Path,
     codex_home: pathlib.Path,
     allow_model_calls: bool,
-    model: str = "gpt-6-sol",
+    model: str = "gpt-6.1-sol",
     timeout: float = 300,
     editor_factory: Callable[
         ..., newsletter_editor.CodexEditor
@@ -490,7 +490,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--suite", required=True, type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--codex-home", required=True, type=pathlib.Path)
-    parser.add_argument("--model", default="gpt-6-sol")
+    parser.add_argument("--model", default="gpt-6.1-sol")
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--allow-model-calls", action="store_true")
     args = parser.parse_args(argv)

@@ -342,12 +342,12 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_model_is_used_without_changing_the_default(self):
         sdk = FakeSdk()
         answer = await infer(
-            RunInferenceRequest(**BODY, model="gpt-6.1-sol"), self.home, sdk=sdk
+            RunInferenceRequest(**BODY, model="gpt-6-sol"), self.home, sdk=sdk
         )
-        self.assertEqual(sdk.thread_args["model"], "gpt-6.1-sol")
-        self.assertEqual(answer.model, "gpt-6.1-sol")
+        self.assertEqual(sdk.thread_args["model"], "gpt-6-sol")
+        self.assertEqual(answer.model, "gpt-6-sol")
         self.assertEqual(answer.error_code, "")
-        self.assertEqual(MODEL, "gpt-6-sol")
+        self.assertEqual(MODEL, "gpt-6.1-sol")
 
     async def test_model_failures_are_safe_typed_results_without_content_in_logs(self):
         output = io.StringIO()

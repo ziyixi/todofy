@@ -58,7 +58,7 @@ class Settings:
     recipient_email: str = ""
     from_email: str = ""
     codex_home: pathlib.Path | None = None
-    model: str = "gpt-6-sol"
+    model: str = "gpt-6.1-sol"
     todofy_backend: str = "disabled"
     todofy_base_url: str = "https://daily.ziyixi.science"
     todofy_user: str = dataclasses.field(default="", repr=False)
@@ -116,7 +116,7 @@ class Settings:
             codex_home=pathlib.Path(os.environ["NEWSLETTER_CODEX_HOME"])
             if os.getenv("NEWSLETTER_CODEX_HOME")
             else None,
-            model=os.getenv("NEWSLETTER_MODEL", "gpt-6-sol"),
+            model=os.getenv("NEWSLETTER_MODEL", "gpt-6.1-sol"),
             todofy_backend=os.getenv("NEWSLETTER_TODOFY", "disabled"),
             todofy_base_url=os.getenv(
                 "TODO_API_BASE", "https://daily.ziyixi.science"

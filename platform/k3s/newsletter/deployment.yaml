@@ -34,6 +34,8 @@ spec:
             - secretRef:
                 name: newsletter-settings
           env:
+            - name: NEWSLETTER_MODEL
+              value: gpt-6.1-sol
             - name: NEWSLETTER_DATA_DIR
               value: /var/lib/newsletter
             - name: CODEX_HOME

@@ -21,7 +21,7 @@ Choose either provider in **设置 → 分类引擎**:
 | Choice | Fixed model | Authentication |
 | --- | --- | --- |
 | Claude API | Opus 5.5, medium | Dedicated Anthropic workspace API key |
-| VPS Codex | `gpt-6-sol`, medium | Existing ChatGPT subscription login on the owner's VPS |
+| VPS Codex | `gpt-6.1-sol`, medium | Existing ChatGPT subscription login on the owner's VPS |
 
 The Codex model and effort were checked against the production VPS catalog; inference requires separate verification.
 The choice is saved in the existing settings row and survives reload and deployment. Legacy settings use Claude
@@ -58,7 +58,7 @@ shows actual cache reads/writes, and cost uses their separate prices. There is n
 This explicit cache policy applies only to Claude.
 
 Codex uses the independent [gateway](../codex-gateway/README.md), with the official
-[Python SDK](https://learn.chatgpt.com/docs/codex-sdk) pinned to `openai-codex==0.156.1`.
+[Python SDK](https://learn.chatgpt.com/docs/codex-sdk) pinned to `openai-codex==0.163.0`.
 It accepts one synchronous structured-inference request, has no Gmail access or saved jobs, and starts no autonomous
 work. It shares only the existing login PVC with Newsletter; it does not import Newsletter code or invoke its workflows.
 The model gets masked data without business tools or web access. The gateway requires ChatGPT subscription auth,

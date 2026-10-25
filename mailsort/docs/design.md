@@ -17,8 +17,8 @@ the selected synchronous inference call; it has no Gmail credentials, saved jobs
 only generated wire types, never Worker implementation.
 
 The [gateway](../../codex-gateway/README.md) uses the official
-[Codex Python SDK](https://learn.chatgpt.com/docs/codex-sdk), pinned to `openai-codex==0.156.1` and its runtime.
-Each request creates a temporary workspace and an ephemeral thread, fixes `gpt-6-sol` at medium effort, and
+[Codex Python SDK](https://learn.chatgpt.com/docs/codex-sdk), pinned to `openai-codex==0.163.0` and its runtime.
+Each request creates a temporary workspace and an ephemeral thread, fixes `gpt-6.1-sol` at medium effort, and
 requires the mounted ChatGPT subscription account. It has no API-key fallback. Only the existing authentication
 PVC is shared with Newsletter; there is no Newsletter source import, workflow call or shared business state.
 Operational tools, web access, plugins, MCP and skills are disabled; the gateway verifies disabled skills before
@@ -84,7 +84,7 @@ Off stops Gmail/model work; shadow records model decisions without Gmail changes
 deployment ceiling and breaker can lower the owner mode. Setup or deployment does not raise it or replay old mail.
 
 `Settings.classification_provider` persists one of two choices: Claude API (`claude-opus-5-5`, medium) or VPS Codex
-(`gpt-6-sol`, medium). A missing legacy field means Claude until the owner chooses otherwise. Both use the same
+(`gpt-6.1-sol`, medium). A missing legacy field means Claude until the owner chooses otherwise. Both use the same
 saved prompt snapshot. The existing mask, etag and request-ID handling protects a switch; it preserves mode,
 breaker, write limits, prompt and Claude accounting history. The existing Alarm can resume pending work with the
 chosen provider. A switch does not start an unread/recheck batch, rewrite classified history or enable automatic fallback.
