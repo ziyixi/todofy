@@ -8,8 +8,11 @@ import tempfile
 from importlib import metadata
 from typing import Any
 
+from openai_codex.generated.v2_all import ModelListResponse
 from openai_codex.types import ReasoningEffort
 from ziyixi_proto.codex.inference.v1.inference_pb import (
+    CheckInferenceResponse,
+    InferenceModel,
     RunInferenceRequest,
     RunInferenceResponse,
 )
@@ -156,6 +159,77 @@ async def _assert_no_skills(client: Any, workspace: pathlib.Path) -> None:
         raise RuntimeError("codex_unavailable")
     if result.data[0].errors or any(skill.enabled for skill in result.data[0].skills):
         raise RuntimeError("codex_unavailable")
+
+
+async def check_runtime(
+    home: pathlib.Path, *, sdk: Any = None
+) -> CheckInferenceResponse:
+    """Read existing subscription and model metadata without creating a thread."""
+    client = None
+    authenticated = False
+    models = ()
+    has_more_models = False
+    error_code = ""
+    stage = "configuration"
+    try:
+        if sdk is None:
+            import openai_codex as sdk
+
+            if metadata.version("openai-codex") != SDK_VERSION:
+                raise RuntimeError("codex_unavailable")
+        _login_home(home)
+        with tempfile.TemporaryDirectory(prefix="codex-preflight-") as directory:
+            workspace = pathlib.Path(directory)
+            stage = "startup"
+            client = sdk.AsyncCodex(runtime_config(sdk, home, workspace))
+            async with asyncio.timeout(TIMEOUT_SECONDS):
+                await client.__aenter__()
+                stage = "account"
+                account = await client.account(refresh_token=False)
+                if (
+                    getattr(getattr(account.account, "root", None), "type", None)
+                    != "chatgpt"
+                ):
+                    raise RuntimeError("authentication")
+                authenticated = True
+                stage = "model"
+                catalog = await client._client.request(
+                    "model/list",
+                    {"includeHidden": True, "limit": 100},
+                    response_model=ModelListResponse,
+                )
+                models = tuple(
+                    InferenceModel(
+                        id=item.id,
+                        model=item.model,
+                        supported_efforts=tuple(
+                            option.reasoning_effort.value
+                            for option in item.supported_reasoning_efforts
+                        ),
+                    )
+                    for item in catalog.data[:100]
+                )
+                has_more_models = bool(catalog.next_cursor) or len(catalog.data) > 100
+    except TimeoutError:
+        error_code = "codex_timeout"
+    except Exception as error:
+        error_code = failure_code(error)
+        if error_code == "codex_unavailable" and stage != "model":
+            error_code = f"codex_{stage}"
+    finally:
+        if client is not None:
+            try:
+                await asyncio.wait_for(client.close(), timeout=5)
+            except Exception:
+                pass
+    return CheckInferenceResponse(
+        model=MODEL,
+        effort=EFFORT,
+        authenticated=authenticated,
+        models=models,
+        has_more_models=has_more_models,
+        error_code=error_code,
+    )
 
 
 async def infer(

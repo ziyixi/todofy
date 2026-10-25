@@ -12,6 +12,16 @@ option java_package = "science.ziyixi.codex.inference.v1";
 
 // A single model turn. This service has no persisted job resource or autonomous follow-up work.
 service InferenceService {
+  // Reads subscription authentication and model metadata without starting a model turn.
+  // (-- api-linter: core::0136::http-uri-suffix=disabled
+  //     aip.dev/not-precedent: This fixed stateless machine endpoint has no resource name. --)
+  rpc CheckInference(CheckInferenceRequest) returns (CheckInferenceResponse) {
+    option (google.api.http) = {
+      post: "/api/codex/v1/inference:check"
+      body: "*"
+    };
+  }
+
   // Runs one structured-output turn; retries belong to the calling application.
   // (-- api-linter: core::0136::http-uri-suffix=disabled
   //     aip.dev/not-precedent: This fixed stateless machine endpoint has no resource name. --)
@@ -21,6 +31,35 @@ service InferenceService {
       body: "*"
     };
   }
+}
+
+// A read-only preflight; no thread, job or model output is created.
+message CheckInferenceRequest {}
+
+// Bounded subscription metadata, excluding account identity and credentials.
+message CheckInferenceResponse {
+  // Configured model.
+  string model = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Configured reasoning effort.
+  string effort = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether the existing login is a ChatGPT subscription login.
+  bool authenticated = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most 100 model entries; availability does not prove a successful model turn.
+  repeated InferenceModel models = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether this first model page was incomplete; cursors never leave the service.
+  bool has_more_models = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Fixed safe failure code, empty when metadata was read successfully.
+  string error_code = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Model identifiers and supported reasoning settings from the pinned SDK.
+message InferenceModel {
+  // Identifier accepted by the SDK model picker.
+  string id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Model identifier reported by the provider.
+  string model = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Supported effort names.
+  repeated string supported_efforts = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Inputs are untrusted data; the runtime never grants them tools or application credentials.

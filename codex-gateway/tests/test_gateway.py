@@ -15,6 +15,8 @@ import codex_cli_bin
 import httpx
 from openai_codex.generated.v2_all import ThreadItem
 from ziyixi_proto.codex.inference.v1.inference_pb import (
+    CheckInferenceResponse,
+    InferenceModel,
     RunInferenceRequest,
     RunInferenceResponse,
 )
@@ -183,6 +185,44 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 "release_request_id": "",
             },
         )
+
+    async def test_readonly_preflight_uses_the_same_auth_and_generated_contract(self):
+        calls = []
+
+        async def checker(home):
+            calls.append(home)
+            return CheckInferenceResponse(
+                model=MODEL,
+                effort="medium",
+                authenticated=True,
+                models=[
+                    InferenceModel(id=MODEL, model=MODEL, supported_efforts=["medium"])
+                ],
+            )
+
+        app = create_app(checker=checker)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            path = "/api/codex/v1/inference:check"
+            denied = await client.post(path, json={})
+            self.assertEqual(denied.status_code, 401)
+            self.assertEqual(calls, [])
+            headers = {"authorization": "Bearer synthetic-inference-token"}
+            response = await client.post(path, json={}, headers=headers)
+            self.assertEqual(response.status_code, 200)
+            typed = from_wire(
+                CheckInferenceResponse, response.json(), strict=True
+            ).message
+            self.assertTrue(typed.authenticated)
+            self.assertEqual(typed.models[0].supported_efforts, ("medium",))
+            self.assertEqual(calls, [self.home])
+            invalid = await client.post(
+                path, json={"instructions": "not a preflight field"}, headers=headers
+            )
+            self.assertEqual(invalid.status_code, 400)
+            self.assertEqual(calls, [self.home])
+            self.assertEqual(self.calls, [])
 
     async def test_health_uses_baked_source_identity_and_release_request_id(self):
         baked = self.home / "build-info.json"

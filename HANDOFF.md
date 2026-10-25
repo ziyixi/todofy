@@ -24,15 +24,19 @@ Settings/status/UI, the typed stateless gateway and concrete third-workload depl
 Mailsort remains the scheduler and Gmail writer; both providers share its saved prompt and fixed P1-P4 validation.
 Claude cost/cache history remains separate. Gateway-only releases preserve Newsletter state; reconciliation retains
 accepted identities for the original pair. Local checks passed: Mailsort 226 unit/113 workerd, UI 104,
-deployment guard 26 and Wrangler smoke; gateway 13 synthetic tests; platform/CI/infra/Home/Fleet integration
+deployment guard 26 and Wrangler smoke; gateway 18 synthetic tests; platform/CI/infra/Home/Fleet integration
 checks are green. The Worker bundle is 145.9 KiB gzip within its existing 148 KiB budget. The bounded
 verified-release lookup retains prior success when GitHub appends inactive, fixing pre-existing reconciliation
 false failures. Real inference and activation remain pending.
 Initial source `07b331ac` passed full branch CI `40188413825`, main publication `40189217953` (a transient
 recording 404 passed on the existing job rerun), Infra apply `40189320360` and paired/gateway VPS release
 `40190513593`. The three workloads are ready and owner-only secrets are configured; inference is not yet accepted.
-Gateway-only follow-up adds fixed pre-model failure codes, using the existing error field without new logging,
-routes or state. A real authless local SDK startup/account/skills check passed; production stages are next.
+Gateway-only follow-up `df8c1afc` passed branch CI `40192102516` and main `40192473630`; it distinguishes fixed
+pre-model failures without logging or state. Production confirms configuration/startup/account/skills pass, but
+the model stage still fails in two seconds with zero reported tokens. A real authless local SDK startup and
+same-argument thread creation passed. A read-only `CheckInference` RPC now reads a bounded model catalog through
+the existing machine authentication, excluding account identity and credentials; it never starts a model turn.
+It is awaiting CI/publication and actual metadata readback, followed by successful real inference before activation.
 `VPS_DEPLOY_ENABLED` is restored to true. `PERSONAL_CLOUD_AUTO_REPAIR` remains temporarily false; restore its
 saved original value after final acceptance, and remove the scoped operator and private preparation files.
 Work stays in the isolated checkout, with the shared checkout untouched.

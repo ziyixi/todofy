@@ -12,6 +12,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from ziyixi_proto.codex.inference.v1.inference_pb import (
     HTTP_BINDINGS,
+    CheckInferenceRequest,
+    CheckInferenceResponse,
     RunInferenceRequest,
     RunInferenceResponse,
 )
@@ -19,12 +21,13 @@ from ziyixi_proto.http_routes import decode_request
 from ziyixi_proto.rpc_status import RpcError, status_body
 from ziyixi_proto.wire_json import WireJsonError, to_wire
 
-from codex_gateway.runtime import infer
+from codex_gateway.runtime import check_runtime, infer
 
 MAX_BODY_BYTES = 768 * 1024
 BUILD_INFO_FILE = pathlib.Path(__file__).with_name("build-info.json")
 PRIVATE_HEADERS = {"cache-control": "no-store", "x-content-type-options": "nosniff"}
 Runner = Callable[[RunInferenceRequest, pathlib.Path], Awaitable[RunInferenceResponse]]
+Checker = Callable[[pathlib.Path], Awaitable[CheckInferenceResponse]]
 
 
 def _object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -53,9 +56,9 @@ def _baked_source_sha() -> str | None:
     return sha if isinstance(sha, str) and re.fullmatch(r"[a-f0-9]{40}", sha) else None
 
 
-def create_app(*, runner: Runner = infer) -> FastAPI:
+def create_app(*, runner: Runner = infer, checker: Checker = check_runtime) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    binding = next(item for item in HTTP_BINDINGS if item.rpc == "RunInference")
+    bindings = {item.path_template: item for item in HTTP_BINDINGS}
     source_sha = _baked_source_sha()
 
     @app.exception_handler(RpcError)
@@ -77,6 +80,7 @@ def create_app(*, runner: Runner = infer) -> FastAPI:
         )
 
     async def run(request: Request) -> JSONResponse:
+        binding = bindings[request.url.path]
         token = os.getenv("CODEX_GATEWAY_TOKEN", "").strip()
         if not token:
             raise RpcError(
@@ -112,14 +116,14 @@ def create_app(*, runner: Runner = infer) -> FastAPI:
             message = decode_request(
                 binding, request.url.path, request.query_params.multi_items(), decoded
             )
-            if (
-                not isinstance(message, RunInferenceRequest)
-                or not message.instructions.strip()
-            ):
+            if isinstance(message, RunInferenceRequest):
+                if not message.instructions.strip():
+                    raise ValueError("invalid inference request")
+                _json(message.input_json)
+                if not isinstance(_json(message.output_schema_json), dict):
+                    raise ValueError("schema must be an object")
+            elif not isinstance(message, CheckInferenceRequest):
                 raise ValueError("invalid inference request")
-            _json(message.input_json)
-            if not isinstance(_json(message.output_schema_json), dict):
-                raise ValueError("schema must be an object")
         except (UnicodeError, ValueError, WireJsonError, RecursionError):
             raise RpcError(
                 "INVALID_ARGUMENT",
@@ -135,8 +139,12 @@ def create_app(*, runner: Runner = infer) -> FastAPI:
             raise RpcError(
                 "UNAVAILABLE", "GATEWAY_NOT_CONFIGURED", "Inference is not configured"
             )
-        answer = await runner(message, pathlib.Path(home))
+        if isinstance(message, RunInferenceRequest):
+            answer = await runner(message, pathlib.Path(home))
+        else:
+            answer = await checker(pathlib.Path(home))
         return JSONResponse(to_wire(answer), headers=PRIVATE_HEADERS)
 
-    app.add_api_route(binding.path_template, run, methods=[binding.method])
+    for binding in HTTP_BINDINGS:
+        app.add_api_route(binding.path_template, run, methods=[binding.method])
     return app

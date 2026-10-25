@@ -13,6 +13,11 @@ Failures before a model turn identify only their stage: `codex_configuration`, `
 `codex_account` or `codex_skills`. Authentication, quota and timeout codes take precedence. These codes
 never include vendor error text, local paths or request content.
 
+`POST /api/codex/v1/inference:check` uses the same bearer and Access identity. It reads the existing
+subscription login and one bounded model-catalog page, returning only model identifiers, supported
+efforts and a pagination flag. It does not start a thread or model turn, and returns no account identity,
+credentials, descriptions or cursor. A catalog entry does not prove that a model turn will succeed.
+
 Configure `CODEX_GATEWAY_TOKEN` as an inference-only bearer secret, `CODEX_HOME` as the existing login-only
 mount. `SOURCE_SHA` is a Docker build argument baked into `build-info.json`; the release supplies
 `CODEX_GATEWAY_RELEASE_REQUEST_ID` separately. Authentication runs before reading the request body.
