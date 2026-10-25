@@ -31,7 +31,7 @@ class ObserverTests(unittest.TestCase):
             {
                 "sequence": sequence,
                 "receipt_id": "fixture",
-                "observation_time": dt.datetime.now(dt.timezone.utc).isoformat(),
+                "observation_time": dt.datetime.now(dt.UTC).isoformat(),
             }
         ).encode()
 
@@ -171,9 +171,7 @@ class ObserverTests(unittest.TestCase):
             (root / "contracts/fleet-report-v1/fixtures/healthy.json").read_text()
         )["runtime"]
         now = (
-            dt.datetime.now(dt.timezone.utc)
-            .isoformat(timespec="seconds")
-            .replace("+00:00", "Z")
+            dt.datetime.now(dt.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
         )
         value["observed_at"] = now
         for workload in value["workloads"]:

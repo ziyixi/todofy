@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
@@ -12,9 +12,7 @@ from .config import Workload
 
 
 def timestamp(at: datetime) -> str:
-    return (
-        at.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-    )
+    return at.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _object(value: object) -> dict:

@@ -108,7 +108,7 @@ def runtime_status(env: dict[str, str]) -> dict[str, object] | None:
         keys = [item["workload_key"] for item in value["workloads"]]
         if len(set(keys)) != len(keys) or keys != sorted(keys):
             return None
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.UTC)
         snapshots = [value["observed_at"]]
         for workload in value["workloads"]:
             key = workload["workload_key"]
@@ -124,7 +124,7 @@ def runtime_status(env: dict[str, str]) -> dict[str, object] | None:
                 [workload["observed_at"], workload["release"]["observed_at"]]
             )
         for timestamp in snapshots:
-            observed = dt.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            observed = dt.datetime.fromisoformat(timestamp)
             age = (now - observed).total_seconds()
             if age < -120 or age > 60:
                 return None
@@ -245,7 +245,7 @@ def observe(env: dict[str, str], sequence: int) -> bytes:
         "epoch": int(env.get("FLEET_HOST_EPOCH", "1")),
         "sequence": sequence,
         "receipt_id": str(uuid.uuid4()),
-        "observation_time": dt.datetime.now(dt.timezone.utc)
+        "observation_time": dt.datetime.now(dt.UTC)
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z"),
         "daemons": legacy_daemons(selected),

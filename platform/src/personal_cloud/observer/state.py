@@ -60,9 +60,9 @@ def run(env: dict[str, str]) -> None:
         pending = state.get("pending")
         if pending:
             observed = dt.datetime.fromisoformat(
-                json.loads(pending)["observation_time"].replace("Z", "+00:00")
+                json.loads(pending)["observation_time"]
             )
-            if (dt.datetime.now(dt.timezone.utc) - observed).total_seconds() > 540:
+            if (dt.datetime.now(dt.UTC) - observed).total_seconds() > 540:
                 pending = None
         if not pending:
             sequence = state["sequence"] + 1

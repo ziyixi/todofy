@@ -6,6 +6,7 @@
     "postinstall": "node ../proto/tools/ensure.mjs"
   },
   "devDependencies": {
+    "workerd": "catalog:",
     "wrangler": "catalog:"
   },
   "engines": {

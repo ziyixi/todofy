@@ -1,7 +1,7 @@
 """Fixed bounded observations; this reader never mutates resources or executes commands."""
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from ziyixi_proto.http_routes import decode_json_body
@@ -87,7 +87,7 @@ class Reader:
         ca_file: str = CA_FILE,
         kube_client=None,
         transport=read_json,
-        clock=lambda: datetime.now(timezone.utc),
+        clock=lambda: datetime.now(UTC),
         monotonic=time.monotonic,
     ):
         self.config, self.monitor_token, self.process_request_id = (

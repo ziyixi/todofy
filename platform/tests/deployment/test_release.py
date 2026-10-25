@@ -6,7 +6,7 @@ import threading
 import unittest
 from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -31,7 +31,7 @@ from ziyixi_proto.platform.runtime.v1 import runtime_service_pb as api
 from ziyixi_proto.rpc_status import RpcError
 from ziyixi_proto.wire_json import from_wire, to_wire
 
-AT = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
+AT = datetime(2026, 10, 2, 12, tzinfo=UTC)
 STAMP = "2026-10-02T12:00:00Z"
 SHA = "a" * 40
 REQUEST = "89f6feb1-4287-4f22-a374-76b9e9c2b1c0"

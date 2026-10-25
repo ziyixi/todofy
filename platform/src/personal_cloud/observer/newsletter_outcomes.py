@@ -37,9 +37,7 @@ def outcomes(value: dict) -> dict:
         ):
             raise ObserverError("NEWSLETTER_OUTCOMES_INVALID")
         try:
-            timestamp = dt.datetime.fromisoformat(
-                delivery["time"].replace("Z", "+00:00")
-            )
+            timestamp = dt.datetime.fromisoformat(delivery["time"])
             if timestamp.tzinfo is None:
                 raise ValueError
             normalized = (

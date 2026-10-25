@@ -3,7 +3,7 @@
 import hashlib
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 from ziyixi_proto.wire_json import from_wire, to_wire
@@ -67,7 +67,7 @@ class Planner:
         kube,
         admission,
         *,
-        clock=lambda: datetime.now(timezone.utc),
+        clock=lambda: datetime.now(UTC),
         monotonic=time.monotonic,
         source_sha=None,
     ):

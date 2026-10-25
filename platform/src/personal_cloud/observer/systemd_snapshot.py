@@ -88,10 +88,8 @@ def read() -> dict[str, dict[str, str]]:
                 strict=True,
             ).message
         )
-        observed = dt.datetime.fromisoformat(
-            value["observation_time"].replace("Z", "+00:00")
-        )
-        age = (dt.datetime.now(dt.timezone.utc) - observed).total_seconds()
+        observed = dt.datetime.fromisoformat(value["observation_time"])
+        age = (dt.datetime.now(dt.UTC) - observed).total_seconds()
         if not -FUTURE_TOLERANCE_SECONDS <= age <= MAX_AGE_SECONDS:
             READ_CODE = "STALE" if age > MAX_AGE_SECONDS else "FUTURE"
             return unknown
@@ -121,7 +119,7 @@ def write(diagnostics=None) -> None:
     """No application configuration or credentials are read by this init command."""
     diagnostics = diagnostics if diagnostics is not None else []
     value = {
-        "observation_time": dt.datetime.now(dt.timezone.utc)
+        "observation_time": dt.datetime.now(dt.UTC)
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z"),
         "configured_daemons": {},

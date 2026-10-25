@@ -9,7 +9,7 @@ import os
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from subprocess import CompletedProcess
 from types import SimpleNamespace
@@ -46,7 +46,7 @@ class ReaderTests(unittest.TestCase):
         self.calls = []
         self.existing = {}
         self.expiration = (
-            (datetime.now(timezone.utc) + timedelta(hours=1))
+            (datetime.now(UTC) + timedelta(hours=1))
             .replace(microsecond=0)
             .isoformat()
             .replace("+00:00", "Z")

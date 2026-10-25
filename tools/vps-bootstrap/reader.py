@@ -7,7 +7,7 @@ import pwd
 import re
 import stat
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import host
@@ -353,16 +353,16 @@ def _token(namespace):
         "READER_TOKEN_INVALID",
     )
     try:
-        expires = datetime.fromisoformat(expiration.replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(expiration)
     except ValueError:
         raise BootstrapError("READER_TOKEN_INVALID") from None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     require(
         expires.tzinfo is not None
         and now < expires <= now + timedelta(seconds=EXPIRATION_SECONDS + 60),
         "READER_TOKEN_INVALID",
     )
-    return token, expires.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return token, expires.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def install_reader(namespace: str) -> str:

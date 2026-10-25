@@ -42,6 +42,11 @@ Gateway's 21, Platform's 131 (+143 subtests), Todofy's 1,255 and two build-conte
 dependency selections install on 3.14; Linux amd64 wheel-only resolution passed. Full Linux image builds,
 the branch CI and production readback are pending. The shared Google Drive checkout remains untouched.
 
+The first full workspace CI exposed a missing direct `workerd` test dependency under pnpm's isolated layout
+and Python 3.14 lint updates. Both are fixed; the real local Pyodide server now starts/stops and caches its bundle.
+The selected historical website source also restores its own Node version before the existing legacy install.
+These fixes preserve the checked build/release paths without adding another dependency manager or runtime fallback.
+
 ### Mailsort provider switch and independent Codex gateway
 
 Released `3e4c6b2f357b13b052c00790ac8fd0d0d3b96456` after

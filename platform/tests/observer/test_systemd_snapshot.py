@@ -18,7 +18,7 @@ from ziyixi_proto.wire_json import from_wire, to_wire
 
 class SnapshotTests(unittest.TestCase):
     def value(self, age=0):
-        observed = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=age)
+        observed = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=age)
         return {
             "observation_time": observed.isoformat(timespec="seconds").replace(
                 "+00:00", "Z"

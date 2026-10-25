@@ -4,7 +4,7 @@ import json
 import sys
 import unittest
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
@@ -18,7 +18,7 @@ SHA = "a" * 40
 DIGEST = "sha256:" + "b" * 64
 IMAGE = "ghcr.io/example/todofy-newsletter@" + DIGEST
 REQUEST = "a233fd9a-19d5-4f61-960d-884e1a490b8a"
-AT = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)
+AT = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
 CONFIG = Workload(
     "newsletter", "newsletter", "newsletter", "newsletter-release", "newsletter"
 )

@@ -1,7 +1,7 @@
 """Durable, single-operation reconciliation; restart resumes checkpoints, never held work."""
 
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ziyixi_proto.common.errors.v1.errors_pb import CommonReason
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
@@ -34,7 +34,7 @@ class Controller:
         *,
         source_sha=baked_source_sha,
         process_request_id="",
-        clock=lambda: datetime.now(timezone.utc),
+        clock=lambda: datetime.now(UTC),
     ):
         self.config, self.store, self.kube, self.admission, self.renderer = (
             config,
@@ -239,7 +239,7 @@ class Controller:
         )
 
     def _timed_out(self, record):
-        at = datetime.fromisoformat(record.updated.replace("Z", "+00:00"))
+        at = datetime.fromisoformat(record.updated)
         return (self.clock() - at).total_seconds() > WAIT_SECONDS
 
     def _snapshot(self):
@@ -268,8 +268,7 @@ class Controller:
             desired = value.release.desired
             try:
                 age = (
-                    self.clock()
-                    - datetime.fromisoformat(value.observed_at.replace("Z", "+00:00"))
+                    self.clock() - datetime.fromisoformat(value.observed_at)
                 ).total_seconds()
             except ValueError:
                 return False
