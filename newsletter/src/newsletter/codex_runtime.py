@@ -21,13 +21,12 @@ import newsletter.errors as errors
 if TYPE_CHECKING:
     import openai_codex
 
-SDK_VERSION = "0.156.1"
+SDK_VERSION = "0.163.0"
 
 
 SYSTEM_SKILLS = (
     "imagegen",
     "openai-docs",
-    "plugin-creator",
     "review-agent",
     "skill-creator",
     "skill-installer",
@@ -77,7 +76,7 @@ def skill_paths(codex_home: pathlib.Path) -> set[str]:
 
 def runtime_overrides(codex_home: pathlib.Path) -> tuple[str, ...]:
     """Disable local tools and skills in the dedicated research runtime."""
-    # Pinned 0.156.1 requires SKILL.md paths (not skill directories). This also
+    # Pinned 0.163.0 requires SKILL.md paths (not skill directories). This also
     # covers a fresh home, before the runtime auto-installs its system skills.
     entries = [
         "{path=" + json.dumps(path, ensure_ascii=False) + ",enabled=false}"
@@ -95,7 +94,7 @@ async def assert_no_skills(
     # Keep the optional SDK out of offline command imports.
     import openai_codex.generated.v2_all as v2_all  # noqa: PLC0415
 
-    # High-level 0.156.1 has no skills-list convenience method; use its typed
+    # High-level 0.163.0 has no skills-list convenience method; use its typed
     # transport. This read cannot invoke a skill or change its configuration.
     result = await client._client.request(  # noqa: SLF001
         "skills/list",
@@ -111,6 +110,13 @@ async def assert_no_skills(
         raise errors.EditorError("configuration")
     if {skill.path.root for skill in entry.skills} != skill_paths(codex_home):
         raise errors.EditorError("configuration")
+    # The SDK replaces its own previous-version system cache during startup.
+    # Check pinned names only after that migration, before any model turn.
+    system = codex_home / "skills" / ".system"
+    if system.exists():
+        allowed = {*SYSTEM_SKILLS, ".codex-system-skills.marker"}
+        if any(child.name not in allowed for child in system.iterdir()):
+            raise errors.EditorError("configuration")
 
 
 CONFIG_OVERRIDES = (
@@ -198,8 +204,8 @@ def check_codex_home(
 
 
 def _check_skill_cache(absolute: pathlib.Path) -> None:
-    # The runtime itself populates skills/.system. Keep that cache, disable all
-    # pinned entries, then verify their effective state before any model turn.
+    # The runtime owns the system cache and migrates old bundled names. Reject
+    # unsafe paths before startup; assert_no_skills checks names afterwards.
     skills = absolute / "skills"
     if skills.is_symlink() or (skills.exists() and not skills.is_dir()):
         raise errors.EditorError("configuration")
@@ -210,9 +216,6 @@ def _check_skill_cache(absolute: pathlib.Path) -> None:
         if system.is_symlink() or (system.exists() and not system.is_dir()):
             raise errors.EditorError("configuration")
         if system.exists():
-            allowed = {*SYSTEM_SKILLS, ".codex-system-skills.marker"}
-            if any(child.name not in allowed for child in system.iterdir()):
-                raise errors.EditorError("configuration")
             for index, child in enumerate(system.rglob("*")):
                 if index > 2000 or child.is_symlink():
                     raise errors.EditorError("configuration")

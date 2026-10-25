@@ -19,13 +19,12 @@ from ziyixi_proto.codex.inference.v1.inference_pb import (
 
 MODEL = "gpt-6-sol"
 EFFORT = "medium"
-SDK_VERSION = "0.156.1"
+SDK_VERSION = "0.163.0"
 TIMEOUT_SECONDS = 110
 MAX_OUTPUT_BYTES = 64 * 1024
 SYSTEM_SKILLS = (
     "imagegen",
     "openai-docs",
-    "plugin-creator",
     "review-agent",
     "skill-creator",
     "skill-installer",
@@ -44,7 +43,7 @@ CONFIG_OVERRIDES = (
     *(
         f"features.{name}=false"
         for name in (
-            # 0.156.1 ignores unified_exec opt-outs; this switch disables command tools.
+            # The pinned runtime's shell_tool switch disables command tools.
             "shell_tool",
             "hooks",
             "apps",
@@ -236,6 +235,7 @@ async def infer(
     request: RunInferenceRequest, home: pathlib.Path, *, sdk: Any = None
 ) -> RunInferenceResponse:
     """Use subscription login, a temporary workspace and one bounded model turn."""
+    model = request.model or MODEL
     turn = None
     client = None
     output = ""
@@ -267,7 +267,7 @@ async def infer(
                 stage = "model"
                 thread = await client.thread_start(
                     cwd=str(workspace),
-                    model=MODEL,
+                    model=model,
                     model_provider="openai",
                     sandbox=sdk.Sandbox.read_only,
                     approval_mode=sdk.ApprovalMode.deny_all,
@@ -319,7 +319,7 @@ async def infer(
             except Exception:
                 pass
     return RunInferenceResponse(
-        model=MODEL,
+        model=model,
         effort=EFFORT,
         output_json=output if not error_code else "",
         input_tokens=input_tokens,

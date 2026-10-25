@@ -99,6 +99,7 @@ newsletter-trigger --send --timeout 7200
 ## 开发与维护
 
 项目采用 Python、FastAPI 和 SQLite，使用 uv 管理依赖。SQLite 保存完整运行记录和发送账本，Notion 是便于阅读的副本，不会把手工修改同步回服务。
+Codex Python SDK 与配套 CLI 精确锁定为 0.163.0；内置技能缓存由 SDK 升级，服务在模型调用前仍核对五个预期 system 技能全部禁用。升级不改变模型配置、运行开关、提示词或历史记录。
 
 ```sh
 make check    # Ruff、mypy、结构检查和离线测试；与 CI 相同

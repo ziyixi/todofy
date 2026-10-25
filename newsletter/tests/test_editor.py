@@ -5,6 +5,7 @@ import copy
 import dataclasses
 import json
 import pathlib
+import shutil
 
 import pytest
 
@@ -502,7 +503,7 @@ async def test_runtime_created_system_skills_allow_repeated_start(
 
 
 @pytest.mark.parametrize("kind", ["custom", "unknown_system", "symlink"])
-async def test_skill_cache_rejects_custom_unknown_or_symlink(
+async def test_skill_cache_rejects_custom_unknown_or_symlink_before_model(
     tmp_path, fake_sdk, kind
 ):
     adapter = editor.live_editor(tmp_path)
@@ -516,7 +517,35 @@ async def test_skill_cache_rejects_custom_unknown_or_symlink(
         (system / "imagegen").symlink_to(tmp_path, target_is_directory=True)
     with pytest.raises(newsletter_errors.EditorError) as exc:
         await run(adapter, tmp_path / "job")
-    assert exc.value.code == "configuration" and not fake_sdk.started
+    assert exc.value.code == "configuration"
+    if kind == "unknown_system":
+        assert fake_sdk.started and fake_sdk.closed
+        assert fake_sdk.thread_options is None
+    else:
+        assert not fake_sdk.started
+
+
+async def test_runtime_migrates_previous_system_cache_before_name_validation(
+    tmp_path, fake_sdk, monkeypatch
+):
+    adapter = editor.live_editor(tmp_path)
+    system = adapter.codex_home / "skills" / ".system"
+    for name in (*codex_runtime.SYSTEM_SKILLS, "plugin-creator"):
+        (system / name).mkdir(parents=True)
+        (system / name / "SKILL.md").write_text("synthetic cached skill")
+    client_type = codex_runtime.load_sdk().AsyncCodex
+    enter = client_type.__aenter__
+
+    async def migrate(client):
+        await enter(client)
+        shutil.rmtree(system / "plugin-creator")
+        return client
+
+    monkeypatch.setattr(client_type, "__aenter__", migrate)
+    text, _, _ = await run(adapter, tmp_path / "job")
+    assert json.loads(text)["review"]["passed"]
+    assert not (system / "plugin-creator").exists()
+    assert fake_sdk.skills_checked and fake_sdk.closed
 
 
 @pytest.mark.parametrize(

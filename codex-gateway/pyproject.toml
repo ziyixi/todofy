@@ -10,7 +10,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi==0.141.1",
   "uvicorn==0.52.4",
-  "openai-codex==0.156.1",
+  "openai-codex==0.163.0",
   "ziyixi-proto",
 ]
 

@@ -12,6 +12,25 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+### Codex 6.1 availability (`codex/codex61-runtime`)
+
+Owner explicitly requires `gpt-6.1-sol`; keep working `gpt-6-sol` classification until a real 6.1 turn succeeds.
+The owner also requires Newsletter to use 6.1 and every VPS Codex installation to match. Host standalone CLI
+was 0.153.4; both container SDK/runtime pins were 0.156.1. The selected common stable SDK/CLI pair is 0.163.0.
+Investigated the pinned SDK/CLI 0.156.1 and current stable paired 0.163.0. Official 0.159.1 added the 6.1 bundled
+catalog; remote client/version rollout and cache matching still require actual readback, not a bundled-list claim.
+Upgrade only the independent Gateway, isolate its temporary CLI cache/skills from Newsletter by linking just
+the existing auth.json (both pinned file stores truncate/write its inode). No login copy or new credentials.
+Phase A keeps the 6 Sol default and adds an optional explicit request model for safe 6.1 canaries. Mailsort's
+explicit current-model request is prepared in three files but excluded from that first publication, because
+the previous Gateway rejects unknown fields. After Gateway support is live, publish the explicit current-model
+caller, then switch both defaults/expectations to 6.1 only after actual synthetic inference. Preserve prompts,
+mode, budgets and old mail. Existing source/task checkout stays isolated from Claude's shared working tree.
+The owner selected full-repo standard workspaces with shared manifests/locks, and verified VPS migration to
+Python 3.14 for one uv workspace. That migration is developed separately in `/private/tmp/todofy-dependency-workspaces`
+on `codex/dependency-workspaces`: root pnpm 11.25.0 catalog/lock with Node 26, root uv workspace/lock with Python 3.14,
+and corresponding CI/build updates. Do not treat this as merely comparing two duplicated dependency pins.
+
 ### Mailsort provider switch and independent Codex gateway
 
 Released `3e4c6b2f357b13b052c00790ac8fd0d0d3b96456` after

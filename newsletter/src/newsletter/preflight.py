@@ -302,7 +302,7 @@ async def _check_codex(
                     }
                     if cursor is not None:
                         params["cursor"] = cursor
-                    # SDK 0.156.1's public models() omits pagination parameters.
+                    # SDK 0.163.0's public models() omits pagination parameters.
                     result = await client._client.request(  # noqa: SLF001
                         "model/list",
                         params,

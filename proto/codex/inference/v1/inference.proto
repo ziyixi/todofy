@@ -70,6 +70,8 @@ message RunInferenceRequest {
   string input_json = 2 [(google.api.field_behavior) = REQUIRED];
   // JSON Schema for the final model response.
   string output_schema_json = 3 [(google.api.field_behavior) = REQUIRED];
+  // Explicit model identifier; empty uses the service default. No automatic fallback is applied.
+  string model = 4 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // A completed attempt. An error leaves output_json empty; the caller must not apply a partial result.

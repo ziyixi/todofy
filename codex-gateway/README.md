@@ -1,13 +1,14 @@
 # Codex gateway
 
-Private, synchronous structured inference through `openai-codex==0.156.1` and its pinned runtime.
+Private, synchronous structured inference through `openai-codex==0.163.0` and its pinned runtime.
 The fixed model is `gpt-6-sol`, with medium effort, confirmed in the VPS model catalog.
 The service uses the subscription login mounted at
 `CODEX_HOME`; it checks the SDK account type and does not use an API key or another model.
 
 `POST /api/codex/v1/inference:run` uses the generated `codex.inference.v1` wire JSON contract.
-The request carries `instructions`, `input_json` and `output_schema_json`. An inference response carries
-the fixed model/effort, output JSON, reported token counts and a safe `error_code`. Model failures return
+The request carries `instructions`, `input_json`, `output_schema_json` and an optional explicit `model`.
+An empty model uses the service default; there is no automatic model fallback. An inference response carries
+the selected model and fixed effort, output JSON, reported token counts and a safe `error_code`. Model failures return
 HTTP 200 with an empty output and one of `codex_auth`, `codex_quota`, `codex_timeout`,
 `codex_unavailable` or `codex_bad_answer`. Transport/configuration errors use the shared RPC Status body.
 Failures before a model turn identify only their stage: `codex_configuration`, `codex_startup`,
@@ -20,7 +21,9 @@ efforts and a pagination flag. It does not start a thread or model turn, and ret
 credentials, descriptions or cursor. A catalog entry does not prove that a model turn will succeed.
 
 Configure `CODEX_GATEWAY_TOKEN` as an inference-only bearer secret, `CODEX_HOME` as the existing login-only
-mount. `SOURCE_SHA` is a Docker build argument baked into `build-info.json`; the release supplies
+mount. At process startup the service creates a private temporary CLI home and links only the shared
+`auth.json` into it. SDK token refresh writes through that link; cache, skills and SQLite files stay out
+of Newsletter's login directory. `SOURCE_SHA` is a Docker build argument baked into `build-info.json`; the release supplies
 `CODEX_GATEWAY_RELEASE_REQUEST_ID` separately. Authentication runs before reading the request body.
 The body is limited to 768 KiB, output to 64 KiB and each model operation to 110 seconds. There are no
 saved jobs or automatic retries. Each request has a temporary workspace and an ephemeral thread.
