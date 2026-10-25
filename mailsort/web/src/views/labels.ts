@@ -21,7 +21,7 @@ function priorityRow(priority: (typeof PRIORITIES)[number], label: Label | undef
     el('span', { class: 'leaf-name' }, el('span', {}, priority.title)),
     el('span', { class: 'priority-policy' }, priority.policy),
     problem === undefined ? null : el('span', { class: 'meta' }, problem),
-    count === 0 ? null : el('span', { class: 'leaf-count', title: '最近 7 天分到此级的邮件' }, `7 天 ${String(count)} 封`),
+    el('span', { class: 'leaf-count', id: `count-${priority.id}`, title: '最近 7 天分到此级的邮件', hidden: count === 0 }, `7 天 ${String(count)} 封`),
   )
   const row = el('li', { class: 'leaf priority-row' }, el('div', { class: 'leaf-row' }, main), detail)
   main.addEventListener('click', () => {
@@ -50,9 +50,28 @@ export async function renderLabels(ctx: ViewContext): Promise<void> {
     const setup = el('section', { class: 'card priority-setup', 'aria-label': '启用分级' })
     const result = el('p', { class: 'hint', role: 'status', hidden: true })
     const start = button('启用 P1–P4 分级', () => void initialize(), { class: 'primary' })
-    const unread = unreadClassificationCard(ctx, status)
     const list = el('ul', { class: 'label-list', 'aria-label': '分级' })
     const counts = new Map((report?.labels ?? []).map((row) => [row.label, row.autoCount]))
+    const countHint = el('p', { class: 'hint warn label-count-hint', role: 'status', hidden: report !== null }, '分级数量未刷新，请稍后重试。')
+    const refreshCounts = async () => {
+      try {
+        const answer = await api.getLabelReport({ name: 'labelReport' })
+        counts.clear()
+        for (const row of answer.labels) counts.set(row.label, row.autoCount)
+        for (const priority of PRIORITIES) {
+          const badge = list.querySelector<HTMLElement>(`#count-${priority.id}`)
+          const count = counts.get(`labels/${priority.id}`) ?? 0
+          if (badge !== null) {
+            badge.textContent = `7 天 ${String(count)} 封`
+            badge.hidden = count === 0
+          }
+        }
+        countHint.hidden = true
+      } catch {
+        countHint.hidden = false
+      }
+    }
+    const unread = unreadClassificationCard(ctx, status, refreshCounts)
     const paint = () => {
       setup.hidden = ready
       unread.hidden = !ready
@@ -97,6 +116,7 @@ export async function renderLabels(ctx: ViewContext): Promise<void> {
       unread,
       el('div', { class: 'label-list-box' },
         el('div', { class: 'label-list-head' }, el('span', {}, '4 个优先级'), el('span', {}, '最近 7 天')),
+        countHint,
         list,
       ),
     )

@@ -125,3 +125,22 @@ Local verification included 199 Worker unit tests, 92 real workerd cases (includ
 cases, the existing full synthetic Wrangler smoke, type/lint/build and proto checks. The full UI suite's original
 five new regressions failed before the fix; the final branch gate also covered the additional past-timestamp case.
 Private screenshot evidence shows the deployed completed card and clarified skip/immediate-queue descriptions.
+
+
+## Recheck result counters and priority badge freshness
+
+The owner then ran the original-100 recheck at `2026-10-25T00:31:22.597Z`. It completed with 52 confirmed Gmail
+applications and 48 legacy skipped results. A fresh seven-day report showed P1=3, P2=3, P3=10, P4=99; the P2 category
+was present on the server, while the page's badge map remained its old snapshot.
+
+Source and synthetic regressions confirmed that a successful same-priority Claude rejudgment updated evidence and
+usage without a Gmail write but was counted as skipped. The output now separates `unchanged_count` from true
+`skipped_count`, deriving the distinction from existing metadata only in explicit recheck modes. There is no
+storage migration, model rerun or change to the selected cohort, owner guards or budgets.
+
+The labels page refreshes the existing report after its existing status refresh, updating badge nodes in place.
+Tests cover a P2 badge changing 0 to 3, preserved expanded details/focus and a report failure remaining separate from
+batch-status success. The action is named “重判最初100封” to make its earliest original cohort explicit.
+Local checks passed 199 Worker unit tests, 93 real workerd cases, 86 UI tests, types/lint/build, the synthetic Wrangler
+smoke and proto checks. A regression proves 100 messages all sent to Claude can yield unchanged 100 / skipped 0 with no
+Gmail writes; actual owner/Spam/Trash exclusions still skip and do not reach the model. Release proof follows.

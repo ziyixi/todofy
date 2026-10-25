@@ -74,7 +74,7 @@ describe('priority batch classification', () => {
     expect(calls[0]?.body?.['recheck_initial100']).toBeUndefined()
     expect(start.disabled).toBe(true)
     expect(button(card, '重判保底 P1').disabled).toBe(true)
-    expect(button(card, '重判原100封').disabled).toBe(true)
+    expect(button(card, '重判最初100封').disabled).toBe(true)
     expect(button(card, '刷新进度').disabled).toBe(false)
     expect(card.textContent).toContain('总数尚未确定')
     expect(server.settings).toEqual(settings)
@@ -91,7 +91,7 @@ describe('priority batch classification', () => {
     })
     button(card, '整理当前未读').click()
     await settle()
-    expect(card.textContent).toContain('总数 100 · 待处理 60 · 已应用 30')
+    expect(card.textContent).toContain('总数 100 · 待处理 60 · 已改标 30')
     expect(card.textContent).not.toContain('总数尚未确定')
     expect(server.calls.filter((call) => call.path === '/api/v2/serviceStatus')).toHaveLength(2)
     expect(server.calls.some((call) => call.path.startsWith('/api/v2/settings'))).toBe(false)
@@ -114,7 +114,7 @@ describe('priority batch classification', () => {
     expect(calls[0]?.headers['x-csrf-token']).toBe('csrf-token')
     expect(recheck.disabled).toBe(true)
     expect(button(card, '整理当前未读').disabled).toBe(true)
-    expect(button(card, '重判原100封').disabled).toBe(true)
+    expect(button(card, '重判最初100封').disabled).toBe(true)
     expect(button(card, '刷新进度').disabled).toBe(false)
   })
 
@@ -122,10 +122,12 @@ describe('priority batch classification', () => {
     const server = liveServer()
     const settings = { ...server.settings }
     const card = await open(server)
-    expect(card.textContent).toContain('新分级启用后最早自动分级的100封，包括已读和已归档邮件')
+    expect(card.textContent).toContain('当前分级启用后最早成功自动分级的100封')
+    expect(card.textContent).toContain('固定按原始分级顺序选择')
+    expect(card.textContent).toContain('包括已读和已归档邮件')
     expect(card.textContent).toContain('跳过已手动调整的邮件，保留已读状态')
-    expect(card.textContent).toContain('重判后级别未变时只更新判断证据，计入已跳过，不写入 Gmail')
-    const recheck = button(card, '重判原100封')
+    expect(card.textContent).toContain('重判未变表示已完成分析，只更新判断证据，不再写入 Gmail')
+    const recheck = button(card, '重判最初100封')
     recheck.click()
     expect(recheck.disabled).toBe(true)
     expect(button(card, '整理当前未读').disabled).toBe(true)
@@ -154,7 +156,7 @@ describe('priority batch classification', () => {
     const card = await open(server)
     const start = button(card, '整理当前未读')
     const recheck = button(card, '重判保底 P1')
-    const recheckInitial = button(card, '重判原100封')
+    const recheckInitial = button(card, '重判最初100封')
     expect(recheckInitial.disabled).toBe(false)
     expect(start.disabled).toBe(false)
     expect(recheck.disabled).toBe(false)
@@ -191,7 +193,7 @@ describe('priority batch classification', () => {
     button(card, '刷新进度').click()
     await settle()
     expect(card.textContent).toContain('后台分批整理中')
-    expect(card.textContent).toContain('总数 100 · 待处理 60 · 已应用 30 · 已跳过 8 · 失败 2 · 暂缓 5')
+    expect(card.textContent).toContain('总数 100 · 待处理 60 · 已改标 30 · 重判未变 0 · 未重判跳过 8 · 失败 2 · 暂缓 5')
     expect(card.textContent).not.toContain('总数尚未确定')
     expect(server.calls.filter((call) => call.path === '/api/v2/serviceStatus')).toHaveLength(2)
     expect(server.calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
@@ -229,7 +231,7 @@ describe('priority batch classification', () => {
     server.unreadClassification = batch()
     const card = await open(server)
     expect(card.textContent).toContain('Claude 用量未提供，请刷新进度或等待服务更新')
-    expect(card.textContent).toContain('已应用 30')
+    expect(card.textContent).toContain('已改标 30')
     expect(card.textContent).not.toContain('预算已用完')
     expect(server.calls.every((call) => call.method === 'GET')).toBe(true)
   })
@@ -271,8 +273,8 @@ describe('priority batch classification', () => {
     server.unreadClassification = create(UnreadClassificationSchema, { ...batch(UnreadClassification_State.COMPLETED), totalCount: 40, pendingCount: 0, deferredCount: 0 })
     const card = await open(server)
     expect(card.textContent).toContain('本轮整理已结束')
-    expect(card.textContent).toContain('总数 40 · 待处理 0 · 已应用 30 · 已跳过 8 · 失败 2 · 暂缓 0')
-    expect(card.textContent).not.toContain('已应用 40')
+    expect(card.textContent).toContain('总数 40 · 待处理 0 · 已改标 30 · 重判未变 0 · 未重判跳过 8 · 失败 2 · 暂缓 0')
+    expect(card.textContent).not.toContain('已改标 40')
     expect(button(card, '整理当前未读').disabled).toBe(false)
     button(card, '整理当前未读').click()
     await settle()
@@ -280,10 +282,19 @@ describe('priority batch classification', () => {
     expect(button(card, '整理当前未读').disabled).toBe(true)
   })
 
+  it('distinguishes 100 completed same-grade judgments from untouched skips', async () => {
+    const server = liveServer()
+    server.unreadClassification = create(UnreadClassificationSchema, { name: 'unreadClassification', state: UnreadClassification_State.COMPLETED, totalCount: 100, unchangedCount: 100 })
+    const card = await open(server)
+    expect(card.textContent).toContain('总数 100 · 待处理 0 · 已改标 0 · 重判未变 100 · 未重判跳过 0 · 失败 0 · 暂缓 0')
+    expect(card.textContent).toContain('重判未变表示已完成分析')
+    expect(card.textContent).not.toContain('未重判跳过 100')
+  })
+
   it.each([
     { label: '整理当前未读', recheckFallback: undefined, recheckInitial100: undefined },
     { label: '重判保底 P1', recheckFallback: true, recheckInitial100: undefined },
-    { label: '重判原100封', recheckFallback: undefined, recheckInitial100: true },
+    { label: '重判最初100封', recheckFallback: undefined, recheckInitial100: true },
   ])('retries $label after a lost response with the same action identity and scope', async ({ label, recheckFallback, recheckInitial100 }) => {
     const server = liveServer()
     const card = await open(server)
@@ -327,7 +338,7 @@ describe('priority batch classification', () => {
     server.statusFails = true
     button(card, '刷新进度').click()
     await settle()
-    expect(card.textContent).toContain('已应用 30')
+    expect(card.textContent).toContain('已改标 30')
     expect(card.textContent).toContain('状态读取失败')
     expect(button(card, '整理当前未读').disabled).toBe(true)
     expect(button(card, '刷新进度').disabled).toBe(false)

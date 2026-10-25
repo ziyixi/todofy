@@ -12,12 +12,12 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-Recheck results follow-up (`codex/mailsort-recheck-results`): the owner reports too many skipped messages during
-original-100 rejudgment and no visible P2. Read-only live metadata showed 100 selected, 41 applied / 39 skipped / 20
-pending and three P2 in a fresh report. Source confirms successful same-grade Claude rejudgments were counted as
-skipped; priority badges were never refreshed with progress. The fix derives an unchanged count from existing
-metadata, corrects true-skip counts, and patches fresh report badges in place. No prompt, cohort, guard or limit
-changes and no additional model rerun are planned.
+Recheck results fix (`codex/mailsort-recheck-results`) is implemented and locally verified, awaiting branch CI.
+The owner's original-100 run at `2026-10-25T00:31:22.597Z` completed with legacy counters 52 applied/48 skipped;
+a fresh report has three P2. Successful same-grade judgments were misleadingly included in skipped, and priority
+badges never refreshed. The fix derives unchanged from existing metadata, makes skipped mean true exclusions and
+patches report badges in place after progress updates. No storage migration, prompt/cohort/guard/limit change or
+new model rerun. Local checks: 199 unit tests, 93 workerd cases, 86 UI tests, types/lint/build/smoke and proto checks.
 
 Unread progress fix is live at `c18f73f1985bd46eef96594914b3a3154d64f2eb`, after
 [branch CI 40146082647](https://github.com/ziyixi/todofy/actions/runs/40146082647) and

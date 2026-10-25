@@ -117,8 +117,10 @@ the account Workers AI guard capability: shedding unrelated free-model usage can
 model. The manual batch card consumes the fresh status after Start and reads status every 30 seconds only while
 its batch is active and visible. It cancels on hide/leave/completion and refreshes once on visible return.
 `ServiceStatus.gmail_write_resume_time` reports the next UTC midnight only when the effective daily write cap is
-full. The UI uses that timestamp for a specific local-time explanation. No new endpoint or scheduler is added.
-Home owns its existing warning dismissal behavior.
+full. The UI uses that timestamp for a specific local-time explanation. No new endpoint or scheduler is added. Recheck progress derives `unchanged_count` from existing batch/decision
+metadata and excludes it from `skipped_count`; a successful same-grade judgment is not an unprocessed exclusion.
+Labels refreshes its existing report after status updates and patches count spans in place, preserving focus and
+expanded details. Home owns its existing warning dismissal behavior.
 
 ## 8. Verification and release
 

@@ -22,16 +22,20 @@ function scanOf(store: Store): UnreadScan | null {
 export function unreadProgress(store: Store, now: number): UnreadClassification | undefined {
   const scan = scanOf(store);
   if (scan === null) return undefined;
-  const counts = store.one<{ total: number; pending: number; applied: number; skipped: number; failed: number; deferred: number }>(
+  const counts = store.one<{ total: number; pending: number; applied: number; skipped: number; failed: number; deferred: number; unchanged: number }>(
     `SELECT count(*) AS total,
       coalesce(sum(b.state = 'pending' AND (b.ledger_id IS NULL OR l.state = 'intended')), 0) AS pending,
       coalesce(sum(l.apply_time IS NOT NULL), 0) AS applied,
       coalesce(sum(b.state = 'skipped'), 0) AS skipped,
       coalesce(sum(b.state = 'failed' OR (b.state = 'pending' AND l.state = 'failed')), 0) AS failed,
-      coalesce(sum(b.state = 'pending' AND p.not_before > ?), 0) AS deferred
-     FROM unread_batch b LEFT JOIN ledger l ON l.id = b.ledger_id LEFT JOIN pending p ON p.message_id = b.message_id`, now,
+      coalesce(sum(b.state = 'pending' AND p.not_before > ?), 0) AS deferred,
+      coalesce(sum(b.state = 'skipped' AND b.ledger_id IS NULL AND d.decider = 'claude'
+        AND d.outcome = 'applied' AND d.decided_at >= ?), 0) AS unchanged
+     FROM unread_batch b LEFT JOIN ledger l ON l.id = b.ledger_id LEFT JOIN pending p ON p.message_id = b.message_id
+       LEFT JOIN decisions d ON d.message_id = b.message_id`, now, scan.startedAt,
   );
   const pending = counts?.pending ?? 0;
+  const unchanged = scan.recheckFallback || scan.recheckInitial100 ? counts?.unchanged ?? 0 : 0;
   let state: UnreadClassification_State = UnreadClassification_State.SCANNING;
   if (scan.listed) state = pending > 0 ? UnreadClassification_State.RUNNING : UnreadClassification_State.COMPLETED;
   return create(UnreadClassificationSchema, {
@@ -41,7 +45,9 @@ export function unreadProgress(store: Store, now: number): UnreadClassification 
     totalCount: counts?.total ?? 0,
     pendingCount: pending,
     appliedCount: counts?.applied ?? 0,
-    skippedCount: counts?.skipped ?? 0,
+    // Stored skipped rows include successful unchanged rechecks; keep the API outcomes distinct.
+    skippedCount: (counts?.skipped ?? 0) - unchanged,
+    unchangedCount: unchanged,
     failedCount: counts?.failed ?? 0,
     deferredCount: counts?.deferred ?? 0,
   });

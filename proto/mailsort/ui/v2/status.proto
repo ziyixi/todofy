@@ -234,12 +234,15 @@ message UnreadClassification {
   int32 pending_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Gmail writes confirmed applied, including a later ordinary undo.
   int32 applied_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Ineligible, owner-adjusted, unchanged on recheck, gone or excluded messages.
+  // Messages not rejudged: ineligible, owner-adjusted, gone or excluded.
+  // Corrected to exclude successful same-priority rechecks, reported by unchanged_count.
   int32 skipped_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Messages with a terminal read/model/write failure; never counted as successful classification.
   int32 failed_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Pending messages waiting for their next eligible time, including daily quota deferral.
   int32 deferred_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Successful Claude rechecks whose priority stayed the same, without a new Gmail write.
+  int32 unchanged_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // What the pipeline may do.

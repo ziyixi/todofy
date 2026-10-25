@@ -1,20 +1,20 @@
 /** Fixed priority rows and the one-time setup, against the shared API transcoder. */
 import { Label_GmailState } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
 import { create } from '@ziyixi/proto/protobuf'
-import { LabelCountSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import { LabelCountSchema, Mode, UnreadClassification_State, UnreadClassificationSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { mountApp, type Host } from './app.ts'
 import { example, FakeServer, label, NOW, settle } from './test/fakeServer.ts'
 
 const asked = vi.fn(() => true)
 const host: Host = { now: () => NOW, confirm: asked }
 
-async function open(server: FakeServer): Promise<HTMLElement> {
+async function open(server: FakeServer, settleUi = true): Promise<HTMLElement> {
   server.install()
   window.history.replaceState(null, '', '/labels')
   const root = document.createElement('div')
   document.body.append(root)
   await mountApp(root, host)
-  await settle()
+  if (settleUi) await settle()
   return root
 }
 
@@ -66,7 +66,82 @@ describe('fixed priorities', () => {
     expect(root.querySelectorAll('.priority-row')).toHaveLength(4)
     expect(root.textContent).not.toContain('Old topic')
     expect([...root.querySelectorAll('.priority-row .meta')].map((node) => node.textContent)).toEqual(Array<string>(4).fill('等待初始化'))
-    expect(root.querySelector('.leaf-count')).toBeNull()
+    expect(root.querySelector('.leaf-count:not([hidden])')).toBeNull()
+  })
+
+  it('refreshes zero-to-three badges in place without closing details or moving focus', async () => {
+    const server = new FakeServer()
+    server.report = []
+    const root = await open(server)
+    const p2 = expand(root, 'P2')
+    const detail = p2.querySelector('.detail')
+    const main = p2.querySelector('.leaf-main')
+    const badge = p2.querySelector<HTMLElement>('.leaf-count')
+    expect(badge?.hidden).toBe(true)
+    server.report = [create(LabelCountSchema, { label: 'labels/p2', autoCount: 3 })]
+    const refresh = button(root, '刷新进度')
+    refresh.focus()
+    refresh.click()
+    await settle()
+    expect(row(root, 'P2')).toBe(p2)
+    expect(p2.querySelector('.detail')).toBe(detail)
+    expect(p2.querySelector('.leaf-main')).toBe(main)
+    expect(main?.getAttribute('aria-expanded')).toBe('true')
+    expect(p2.querySelector('.leaf-count')).toBe(badge)
+    expect(badge?.textContent).toBe('7 天 3 封')
+    expect(badge?.hidden).toBe(false)
+    expect(document.activeElement).toBe(refresh)
+    expect(server.calls.filter((call) => call.path === '/api/v2/labelReport')).toHaveLength(2)
+    expect(server.calls.every((call) => call.method === 'GET')).toBe(true)
+  })
+
+  it('refreshes badges on the existing active-batch timer without navigation', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const server = new FakeServer()
+    server.settings = { ...server.settings, effectiveMode: Mode.LIVE, mode: Mode.LIVE }
+    server.status = { writeScope: true }
+    server.report = []
+    server.unreadClassification = create(UnreadClassificationSchema, { name: 'unreadClassification', state: UnreadClassification_State.RUNNING, totalCount: 100, pendingCount: 100 })
+    const root = await open(server, false)
+    const p2 = expand(root, 'P2')
+    const main = p2.querySelector<HTMLButtonElement>('.leaf-main')
+    const detail = p2.querySelector('.detail')
+    main?.focus()
+    server.report = [create(LabelCountSchema, { label: 'labels/p2', autoCount: 3 })]
+    server.unreadClassification = create(UnreadClassificationSchema, { name: 'unreadClassification', state: UnreadClassification_State.COMPLETED, totalCount: 100, appliedCount: 3, unchangedCount: 97 })
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(window.location.pathname).toBe('/labels')
+    expect(row(root, 'P2')).toBe(p2)
+    expect(p2.querySelector('.detail')).toBe(detail)
+    expect(main?.getAttribute('aria-expanded')).toBe('true')
+    expect(document.activeElement).toBe(main)
+    expect(p2.querySelector('.leaf-count')?.textContent).toBe('7 天 3 封')
+    expect(root.querySelector('.unread-progress')?.textContent).toContain('重判未变 97')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(server.calls.filter((call) => call.path === '/api/v2/labelReport')).toHaveLength(2)
+    expect(server.calls.filter((call) => call.path === '/api/v2/serviceStatus')).toHaveLength(2)
+  })
+
+  it('keeps fresh progress when only the badge report fails, and clears the stale-count hint on recovery', async () => {
+    const server = new FakeServer()
+    server.report = [create(LabelCountSchema, { label: 'labels/p2', autoCount: 2 })]
+    const root = await open(server)
+    server.reportFails = true
+    server.unreadClassification = create(UnreadClassificationSchema, { name: 'unreadClassification', state: UnreadClassification_State.COMPLETED, totalCount: 3, appliedCount: 3 })
+    button(root, '刷新进度').click()
+    await settle()
+    expect(root.querySelector('.unread-progress')?.textContent).toContain('已改标 3')
+    expect(row(root, 'P2').querySelector('.leaf-count')?.textContent).toBe('7 天 2 封')
+    expect(root.querySelector<HTMLElement>('.label-count-hint')?.hidden).toBe(false)
+    expect(root.querySelector('.label-count-hint')?.textContent).toContain('分级数量未刷新')
+    expect(root.querySelector('.unread-progress')?.textContent).not.toContain('状态读取失败')
+    server.reportFails = false
+    server.report = [create(LabelCountSchema, { label: 'labels/p2', autoCount: 3 })]
+    button(root, '刷新进度').click()
+    await settle()
+    expect(row(root, 'P2').querySelector('.leaf-count')?.textContent).toBe('7 天 3 封')
+    expect(root.querySelector<HTMLElement>('.label-count-hint')?.hidden).toBe(true)
   })
 
   it('loads historical examples only on request and keeps them read-only across folding', async () => {

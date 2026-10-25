@@ -126,6 +126,20 @@ it('reports the Gmail write resume time only when automatic and consolidation wr
   expect((await status()).gmailWriteResumeTime).toBeUndefined();
 });
 
+it('keeps an ordinary unread exclusion separate from rechecks even when an existing decision shares its start time', async () => {
+  await ready();
+  const graded = mail(1103, ['UNREAD', h.up.gmail.labelIdByName('P4') ?? '']);
+  deliver(h, graded, T0 - DAY);
+  await h.sql(`INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, label_id, decider)
+    VALUES (?, ?, ?, ?, 'applied', 'p4', 'claude')`, graded.id, graded.id, T0 - DAY, T0 + MINUTE);
+  await h.clock(T0 + MINUTE);
+  await start();
+  await h.step(T0 + 2 * MINUTE);
+  expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 1, skippedCount: 1, unchangedCount: 0, appliedCount: 0 });
+  expect(h.up.claude.calls).toEqual([]);
+  expect(modifies(h)).toEqual([]);
+});
+
 it('uses the remaining daily write allowance and resumes next day without changing caps or tripping the breaker', async () => {
   await ready();
   for (let i = 401; i <= 403; i++) deliver(h, mail(i), T0 - DAY);
@@ -247,7 +261,7 @@ it.each([false, true])('refreshes a historical fallback P1 without a Gmail write
   await start(op(), true);
   await h.step(T0 + 3 * MINUTE);
 
-  expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 1, skippedCount: 1, appliedCount: 0, failedCount: 0 });
+  expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 1, skippedCount: 0, unchangedCount: 1, appliedCount: 0, failedCount: 0 });
   expect(await decision(h, message.id)).toMatchObject({ outcome: 'applied', label_id: 'p1', top_label: 'p1', unsure_reason: '', current_labels: '["p1"]', decided_at: T0 + 3 * MINUTE });
   expect(await h.sql(`SELECT id, state, superseded FROM ledger WHERE message_id = ?`, message.id)).toEqual(originalLedger);
   expect(await h.sql(`SELECT n FROM flow WHERE outcome IN ('archived', 'kept_in_inbox')`)).toEqual([{ n: 1 }]);
@@ -345,7 +359,7 @@ it('rechecks the original 100 successful identities without substituting a later
   expect(h.up.claude.calls).toHaveLength(0);
   await setMode(h, Mode.LIVE);
   for (let pass = 6; pass <= 23; pass++) await h.step(T0 + pass * MINUTE);
-  expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 100, skippedCount: 100, appliedCount: 0, failedCount: 0 });
+  expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 100, skippedCount: 0, unchangedCount: 100, appliedCount: 0, failedCount: 0 });
   expect(h.up.claude.calls.flat()).toHaveLength(100);
   expect(modifies(h)).toHaveLength(0);
   expect(h.up.gmail.calls.filter(call => new URL(call.url).pathname.endsWith('/messages'))).toHaveLength(0);
@@ -379,7 +393,7 @@ it('refreshes a same-P4 result without undoing the owner read or Inbox position 
   const ledger = await h.sql(`SELECT id, state, superseded FROM ledger WHERE message_id = ?`, message.id);
   await start(op(), false, true);
   await h.step(T0 + 3 * MINUTE);
-  expect(await progress()).toMatchObject({ totalCount: 1, skippedCount: 1, appliedCount: 0, failedCount: 0 });
+  expect(await progress()).toMatchObject({ totalCount: 1, skippedCount: 0, unchangedCount: 1, appliedCount: 0, failedCount: 0 });
   expect(await decision(h, message.id)).toMatchObject({ label_id: 'p4', outcome: 'applied', current_labels: '["p4"]', decided_at: T0 + 3 * MINUTE });
   expect(await h.sql(`SELECT id, state, superseded FROM ledger WHERE message_id = ?`, message.id)).toEqual(ledger);
   expect(gmailLabels(h, message.id)).toEqual(before);
@@ -404,10 +418,11 @@ it('rechecks read mail but skips owner priority changes, explicit verdicts, Spam
   const unchanged = messages.slice(1).map(message => gmailLabels(h, message.id));
   const calls = h.up.claude.calls.length;
   h.up.claude.bucket = 'P2';
+  await h.clock(T0 + 3 * MINUTE);
   await start(op(), false, true);
   await h.step(T0 + 3 * MINUTE);
-  expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 6, appliedCount: 1, skippedCount: 5, failedCount: 0 });
-  expect(h.up.claude.calls.slice(calls)).toHaveLength(1);
+  expect(await progress()).toMatchObject({ state: State.COMPLETED, totalCount: 6, appliedCount: 1, skippedCount: 5, unchangedCount: 0, failedCount: 0 });
+  expect(h.up.claude.calls.slice(calls).flat().map(item => item.id)).toEqual([mail(921).id]);
   expect(gmailLabels(h, mail(921).id)).toEqual([h.up.gmail.labelIdByName('P2') ?? '']);
   expect(messages.slice(1).map(message => gmailLabels(h, message.id))).toEqual(unchanged);
 });

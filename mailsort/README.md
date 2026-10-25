@@ -62,6 +62,10 @@ node --test ../deploy/test/*.test.mjs
 ```
 
 Runtime and smoke tests use workerd/SQLite and fake Gmail/Claude endpoints with synthetic data.
+Batch results separate confirmed Gmail changes, successful rechecks that kept the same grade, and messages
+excluded before judgment. Priority badges refresh with batch progress. “重判最初100封” means the original earliest
+successfully graded cohort, including read/archive mail, rather than the newest 100 unread messages.
+
 UI checks in `web/`: `npm run lint && npm run typecheck && npm test && npm run build`.
 See [design](docs/design.md) and [collaboration rules](AGENTS.md).
 
