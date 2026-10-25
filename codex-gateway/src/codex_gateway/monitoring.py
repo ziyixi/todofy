@@ -13,7 +13,7 @@ from ziyixi_proto.codex.inference.v1.inference_pb import (
     RunInferenceRequest,
     RunInferenceResponse,
 )
-from ziyixi_proto.codex.inference.v1.monitoring_pb import (
+from ziyixi_proto.codex.monitor.v1.monitor_pb import (
     InferenceRequestSample,
     InferenceStatus,
 )

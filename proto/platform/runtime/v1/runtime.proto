@@ -2,7 +2,7 @@
 syntax = "proto3";
 package platform.runtime.v1;
 
-import "codex/inference/v1/monitoring.proto";
+import "codex/monitor/v1/monitor.proto";
 import "common/wire/v1/wire.proto";
 import "google/api/field_behavior.proto";
 import "google/api/field_info.proto";
@@ -222,7 +222,7 @@ message WorkloadStatus {
   // Content-free gateway observation, present only when the configured adapter supplies it.
   // (-- api-linter: core::0215::foreign-type-reference=disabled
   //     aip.dev/not-precedent: Share the inference observation with Fleet and Home without a second DTO. --)
-  optional codex.inference.v1.InferenceStatus inference_status = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  optional codex.monitor.v1.InferenceStatus inference_status = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One durable asynchronous deployment. Only targets are accepted during creation; the daemon rejects

@@ -15,7 +15,7 @@ from ziyixi_proto.codex.inference.v1.inference_pb import (
     RunInferenceRequest,
     RunInferenceResponse,
 )
-from ziyixi_proto.codex.inference.v1.monitoring_pb import InferenceStatus
+from ziyixi_proto.codex.monitor.v1.monitor_pb import InferenceStatus
 from ziyixi_proto.wire_json import from_wire, to_wire
 
 from codex_gateway.app import create_app

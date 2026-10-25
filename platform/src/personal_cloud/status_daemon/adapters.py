@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from importlib.resources import files
 
-from ziyixi_proto.codex.inference.v1.monitoring_pb import InferenceStatus
+from ziyixi_proto.codex.monitor.v1.monitor_pb import InferenceStatus
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 from ziyixi_proto.wire_json import WireJsonError, from_wire
 

@@ -23,7 +23,7 @@
 // the apps' own UI URLs only. The rules below make that a check rather than a convention: every name is a `Code`
 // (never free text, an address or a subject), metrics, modes and counters are numbers or booleans, and the only
 // URLs are `HttpsUrl`s without a query.
-// The optional Codex observation uses bounded model/version identifiers from monitoring.proto and carries no
+// The optional Codex observation uses bounded model/version identifiers from the monitor contract and carries no
 // instructions, model output or account identity.
 //
 // Google's api-linter runs on this file (scripts/api-lint.sh). The rules it cannot meet without changing ops-v1's
@@ -53,7 +53,7 @@ syntax = "proto3";
 
 package ops.v1;
 
-import "codex/inference/v1/monitoring.proto";
+import "codex/monitor/v1/monitor.proto";
 import "common/wire/v1/wire.proto";
 import "google/api/field_behavior.proto";
 import "website/sync/v1/sync.proto";
@@ -253,7 +253,7 @@ message OpsStatus {
   // Gateway process-lifetime telemetry; absent on other apps and older host observations.
   // (-- api-linter: core::0215::foreign-type-reference=disabled
   //     aip.dev/not-precedent: Forward the bounded shared inference observation without duplicating fields. --)
-  optional codex.inference.v1.InferenceStatus codex_inference = 13;
+  optional codex.monitor.v1.InferenceStatus codex_inference = 13;
 }
 
 // An app's health.

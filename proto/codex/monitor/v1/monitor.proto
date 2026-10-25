@@ -5,15 +5,15 @@
 //     aip.dev/not-precedent: These fields identify observation instants in the existing host telemetry contract. --)
 syntax = "proto3";
 
-package codex.inference.v1;
+package codex.monitor.v1;
 
 import "common/wire/v1/wire.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/timestamp.proto";
 
 option java_multiple_files = true;
-option java_outer_classname = "MonitoringProto";
-option java_package = "science.ziyixi.codex.inference.v1";
+option java_outer_classname = "MonitorProto";
+option java_package = "science.ziyixi.codex.monitor.v1";
 option (common.wire.v1.formats) = {
   name: "ModelId"
   pattern: "[a-z0-9][a-z0-9._-]{0,63}"
