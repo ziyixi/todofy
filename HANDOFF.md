@@ -12,6 +12,16 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+Active branch `codex/tasks-goals` implements the owner's approved Goals screen and connects annual Objectives/KRs
+to the existing weekly Bets, Tasks and inherited Step references. Work is in `/private/tmp/todofy-tasks-design`,
+not Claude's shared checkout. Reuse Tasks D1, generated owner API, existing UI components and backup/restore.
+Keep goal progress independent of task completion and preserve normal task-list/request budgets. Import the
+owner's current-year Notion OKR through the existing private-operator conventions after the release; no personal
+content or import payload enters Git. Source has no measured progress, so import no invented milestones or results,
+and select no real focus/commitments for the owner. Next: define the small contract, implement backend/UI/linking,
+synthetic runtime/browser/performance checks and approved-design comparison, branch CI, same-SHA main release,
+private import and live readback. No new service, Notion sync, model call or scheduler is planned.
+
 Few-shot examples are released at `c121b02da666592b12c1c575ad48328c004b523b`, after
 [branch CI 40153945767](https://github.com/ziyixi/todofy/actions/runs/40153945767) and the
 [same-SHA main release 40154139320](https://github.com/ziyixi/todofy/actions/runs/40154139320).
