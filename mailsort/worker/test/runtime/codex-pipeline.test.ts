@@ -54,6 +54,7 @@ describe('Codex priority pipeline', () => {
       expect(await decision(h, input.id)).toMatchObject({ outcome: 'applied', label_id: bucket.toLowerCase(), decider: 'codex', model: 'gpt-6-sol', confidence: null, probabilities: '{}', probabilities2: '{}' });
     }
     expect(h.up.codex.calls).toHaveLength(4);
+    expect(h.up.codex.requests.every(request => request.model === 'gpt-6-sol')).toBe(true);
     expect(h.up.claude.calls).toEqual([]);
     expect(h.up.ai.calls).toEqual([]);
     expect(await h.sql(`SELECT requests FROM claude_usage`)).toEqual([]);

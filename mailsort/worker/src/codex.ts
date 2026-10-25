@@ -55,6 +55,7 @@ export async function classifyWithCodex(
       instructions: [prompt.basePrompt, prompt.personalRules].filter(text => text.trim()).join('\n\n'),
       inputJson: JSON.stringify({ emails }),
       outputSchemaJson: JSON.stringify(CLASSIFICATION_OUTPUT_SCHEMA),
+      model: CODEX_MODEL,
     });
     if (answer.errorCode) {
       if (answer.errorCode === 'codex_auth') throw new CodexConfigurationError('codex_auth');

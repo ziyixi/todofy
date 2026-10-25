@@ -46,6 +46,7 @@ describe('the Mailsort Codex inference client', () => {
     expect(request?.headers.get('CF-Access-Client-Id')).toBe('synthetic-access-id');
     expect(request?.headers.get('CF-Access-Client-Secret')).toBe('synthetic-access-secret');
     const body = await request?.json<Record<string, string>>();
+    expect(body?.['model']).toBe('gpt-6-sol');
     expect(body?.['instructions']).toBe(`${PROMPT.basePrompt}\n\n${PROMPT.personalRules}`);
     expect(JSON.parse(body?.['input_json'] ?? '{}')).toEqual({ emails: EMAILS });
     const schema: unknown = JSON.parse(body?.['output_schema_json'] ?? '{}');
