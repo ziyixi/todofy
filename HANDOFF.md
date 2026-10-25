@@ -12,6 +12,16 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+Active branch `codex/mailsort-editable-prompt` starts from `642af008`. The owner requested editable personal
+rules for USPS Informed Delivery, Daily Briefing and shopping receipts, plus cost-aware prompt caching.
+Work stays in `/private/tmp/todofy-tasks-design`; Claude's shared checkout is untouched. Reuse the existing
+DO metadata and generated owner API, with one base/rules snapshot per model call and explicit five-minute
+cache breakpoints only for consecutive batches. Keep Opus 5.5 medium, the $20/month cap and all Gmail gates.
+The settings editor, actual cache-token accounting and matching privacy documentation are in progress.
+Next: synthetic/local checks, full branch CI, same-SHA main release, then owner UI save/reload and provider
+identity readback. Do not restart earlier mail batches or create a new key for this verification. A real
+provider cache hit is not yet verified; synthetic responses cannot establish one.
+
 Recheck counting and badge freshness are fixed at `ed236228229450ac1c8b06de70a9f090d82c6da2`, after
 [branch CI 40148723336](https://github.com/ziyixi/todofy/actions/runs/40148723336) and
 [main release 40149463353](https://github.com/ziyixi/todofy/actions/runs/40149463353). Deployment `7306876510`
