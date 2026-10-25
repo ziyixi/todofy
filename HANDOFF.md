@@ -36,7 +36,10 @@ pre-model failures without logging or state. Production confirms configuration/s
 the model stage still fails in two seconds with zero reported tokens. A real authless local SDK startup and
 same-argument thread creation passed. A read-only `CheckInference` RPC now reads a bounded model catalog through
 the existing machine authentication, excluding account identity and credentials; it never starts a model turn.
-It is awaiting CI/publication and actual metadata readback, followed by successful real inference before activation.
+Preflight `856164de` passed full branch CI `40194175478` and main `40195176037`. The production readback at
+12:57 UTC authenticated successfully and returned a complete catalog: it excludes the initially configured
+`gpt-6.1-sol` and includes `gpt-6-sol` with medium support. Correct the gateway and Mailsort expectation to
+that actual supported model, then verify real inference before activation. No automatic model fallback is added.
 `VPS_DEPLOY_ENABLED` is restored to true. `PERSONAL_CLOUD_AUTO_REPAIR` remains temporarily false; restore its
 saved original value after final acceptance, and remove the scoped operator and private preparation files.
 Work stays in the isolated checkout, with the shared checkout untouched.

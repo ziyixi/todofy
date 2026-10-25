@@ -71,9 +71,9 @@ describe('classification provider settings and status', () => {
     await h.sql(`INSERT INTO claude_usage (day, requests, input_tokens, output_tokens, cost_micros) VALUES ('2026-10-01', 1, 500, 100, 20000000)`);
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
     expect(status).toMatchObject({
-      decisionModel: 'gpt-6.1-sol',
+      decisionModel: 'gpt-6-sol',
       classifier: {
-        provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: false,
+        provider: ClassificationProvider.CODEX, model: 'gpt-6-sol', effort: 'medium', configured: false,
         nextBatchTime: timestampFromMs(T0 + HOUR), lastSuccessTime: timestampFromMs(T0 - HOUR),
       },
       claudeBudget: { model: 'claude-opus-5-5', spentUsd: 20, providerLimitReached: true, lastErrorCode: 'claude_spend_limit' },

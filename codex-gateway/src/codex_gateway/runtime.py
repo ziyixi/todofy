@@ -17,7 +17,7 @@ from ziyixi_proto.codex.inference.v1.inference_pb import (
     RunInferenceResponse,
 )
 
-MODEL = "gpt-6.1-sol"
+MODEL = "gpt-6-sol"
 EFFORT = "medium"
 SDK_VERSION = "0.156.1"
 TIMEOUT_SECONDS = 110

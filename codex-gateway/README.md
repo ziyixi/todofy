@@ -1,7 +1,8 @@
 # Codex gateway
 
 Private, synchronous structured inference through `openai-codex==0.156.1` and its pinned runtime.
-The fixed model is `gpt-6.1-sol`, with medium effort. The service uses the subscription login mounted at
+The fixed model is `gpt-6-sol`, with medium effort, confirmed in the VPS model catalog.
+The service uses the subscription login mounted at
 `CODEX_HOME`; it checks the SDK account type and does not use an API key or another model.
 
 `POST /api/codex/v1/inference:run` uses the generated `codex.inference.v1` wire JSON contract.

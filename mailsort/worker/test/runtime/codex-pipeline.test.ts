@@ -51,7 +51,7 @@ describe('Codex priority pipeline', () => {
       deliver(h, input, at + MINUTE);
       expect(await h.step(at + 2 * MINUTE)).toMatchObject({ decided: 1, applied: 1 });
       expect(gmailLabels(h, input.id)).toEqual(['UNREAD', 'STARRED', owner, h.up.gmail.labelIdByName(bucket), ...(bucket === 'P1' ? ['INBOX'] : [])].sort());
-      expect(await decision(h, input.id)).toMatchObject({ outcome: 'applied', label_id: bucket.toLowerCase(), decider: 'codex', model: 'gpt-6.1-sol', confidence: null, probabilities: '{}', probabilities2: '{}' });
+      expect(await decision(h, input.id)).toMatchObject({ outcome: 'applied', label_id: bucket.toLowerCase(), decider: 'codex', model: 'gpt-6-sol', confidence: null, probabilities: '{}', probabilities2: '{}' });
     }
     expect(h.up.codex.calls).toHaveLength(4);
     expect(h.up.claude.calls).toEqual([]);
@@ -61,7 +61,7 @@ describe('Codex priority pipeline', () => {
     expect(flow.counts.filter(row => row.stage === MailFlow_Stage.CODEX).reduce((sum, row) => sum + row.mailCount, 0)).toBe(4);
     expect(flow.counts.some(row => row.stage === MailFlow_Stage.CLAUDE)).toBe(false);
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
-    expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: true, lastErrorCode: '', lastSuccessTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
+    expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CODEX, model: 'gpt-6-sol', effort: 'medium', configured: true, lastErrorCode: '', lastSuccessTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
     await h.clock(T0 + 3 * HOUR + 3 * MINUTE);
     await h.api.startUnreadClassification({ name: 'unreadClassification', recheckInitial100: true, requestId: op() });
     await h.step(T0 + 3 * HOUR + 4 * MINUTE);
@@ -108,7 +108,7 @@ describe('Codex priority pipeline', () => {
     expect(h.up.codex.calls).toEqual([]);
     expect(modifies(h)).toEqual([]);
     expect(await h.step(T0 + 3 * MINUTE)).toMatchObject({ decided: 1, applied: 1 });
-    expect(await decision(h, mail(21).id)).toMatchObject({ decider: 'codex', model: 'gpt-6.1-sol' });
+    expect(await decision(h, mail(21).id)).toMatchObject({ decider: 'codex', model: 'gpt-6-sol' });
     expect(await h.sql(`SELECT * FROM claude_usage`)).toEqual(usage);
     const flow = await h.api.getMailFlow({ name: 'mailFlows/today' });
     expect(flow.counts.filter(row => row.stage === MailFlow_Stage.DEFERRED).reduce((sum, row) => sum + row.mailCount, 0)).toBe(0);

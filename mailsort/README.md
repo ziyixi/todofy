@@ -21,8 +21,9 @@ Choose either provider in **设置 → 分类引擎**:
 | Choice | Fixed model | Authentication |
 | --- | --- | --- |
 | Claude API | Opus 5.5, medium | Dedicated Anthropic workspace API key |
-| VPS Codex | `gpt-6.1-sol`, medium | Existing ChatGPT subscription login on the owner's VPS |
+| VPS Codex | `gpt-6-sol`, medium | Existing ChatGPT subscription login on the owner's VPS |
 
+The Codex model and effort were checked against the production VPS catalog; inference requires separate verification.
 The choice is saved in the existing settings row and survives reload and deployment. Legacy settings use Claude
 until the owner switches. Both providers use the same saved prompt; switching preserves mode, breaker, write limits
 and Claude usage history. It affects the next batch without starting an unread batch or reclassifying labelled mail.

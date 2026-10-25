@@ -348,7 +348,7 @@ describe('概览', () => {
 
   it('uses Codex in an empty-day diagram when it is the selected provider', async () => {
     const s = new FakeServer()
-    s.status = { classifier: create(ClassifierStatusSchema, { provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: true }) }
+    s.status = { classifier: create(ClassifierStatusSchema, { provider: ClassificationProvider.CODEX, model: 'gpt-6-sol', effort: 'medium', configured: true }) }
     const root = await open(s, '/overview')
     const nodes = [...root.querySelectorAll('.flow-node')].map((node) => node.textContent)
     expect(nodes).toContain('VPS Codex0')

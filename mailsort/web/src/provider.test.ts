@@ -88,12 +88,12 @@ describe('classification provider', () => {
     const server = new FakeServer()
     server.settings.classificationProvider = ClassificationProvider.CODEX
     server.status = { classifier: create(ClassifierStatusSchema, {
-      provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: false,
+      provider: ClassificationProvider.CODEX, model: 'gpt-6-sol', effort: 'medium', configured: false,
       lastErrorCode: 'codex_not_configured', nextBatchTime: timestampFromMs(NOW + 3_600_000),
     }) }
     const root = await open(server)
     const text = card(root).textContent
-    expect(text).toContain('VPS Codex · gpt-6.1-sol · medium')
+    expect(text).toContain('VPS Codex · gpt-6-sol · medium')
     expect(text).toContain('尚未配置，下一批无法分类')
     expect(text).toContain('VPS Codex 尚未配置')
     expect(text).toContain('下批判断最早在 1 小时后')
@@ -105,12 +105,12 @@ describe('classification provider', () => {
     const server = new FakeServer()
     server.status = {
       deferredCount: 4,
-      classifier: create(ClassifierStatusSchema, { provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: true, nextBatchTime: timestampFromMs(NOW + 1_800_000), lastSuccessTime: timestampFromMs(NOW - 300_000) }),
+      classifier: create(ClassifierStatusSchema, { provider: ClassificationProvider.CODEX, model: 'gpt-6-sol', effort: 'medium', configured: true, nextBatchTime: timestampFromMs(NOW + 1_800_000), lastSuccessTime: timestampFromMs(NOW - 300_000) }),
       claudeBudget: create(ClaudeBudgetSchema, { model: 'claude-opus-5-5', effort: 'medium', month: '2026-10', limitUsd: 20, spentUsd: 20, providerLimitReached: true, lastErrorCode: 'claude_spend_limit', nextBatchTime: timestampFromMs(NOW + 3_600_000) }),
     }
     const root = await open(server, '/overview')
     const classifier = card(root)
-    expect(classifier.textContent).toContain('VPS Codex · gpt-6.1-sol · medium')
+    expect(classifier.textContent).toContain('VPS Codex · gpt-6-sol · medium')
     expect(classifier.textContent).toContain('已配置')
     expect(classifier.textContent).toContain('下批判断最早在 30 分钟后')
     expect(classifier.textContent).toContain('最近成功')

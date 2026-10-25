@@ -24,7 +24,7 @@ type ResponseFields = Partial<Omit<RunInferenceResponse, '$typeName' | '$unknown
 
 function response(overrides: ResponseFields = {}): Response {
   return Response.json(toWire(RunInferenceResponseSchema, create(RunInferenceResponseSchema, {
-    model: 'gpt-6.1-sol', effort: 'medium', outputJson: JSON.stringify({ items: ITEMS }), inputTokens: 1200, outputTokens: 120, ...overrides,
+    model: 'gpt-6-sol', effort: 'medium', outputJson: JSON.stringify({ items: ITEMS }), inputTokens: 1200, outputTokens: 120, ...overrides,
   })));
 }
 const answer = (overrides: ResponseFields = {}): typeof fetch => vi.fn<typeof fetch>().mockResolvedValue(response(overrides));
@@ -54,7 +54,7 @@ describe('the Mailsort Codex inference client', () => {
       properties: { items: { items: { required: ['id', 'bucket', 'reason'], additionalProperties: false, properties: { bucket: { enum: ['P1', 'P2', 'P3', 'P4'] } } } } },
     });
     expect(JSON.stringify(body)).not.toContain(ENV.CODEX_ENDPOINT_TOKEN);
-    expect(result).toEqual({ model: 'gpt-6.1-sol', items: ITEMS, inputTokens: 1200, outputTokens: 120 });
+    expect(result).toEqual({ model: 'gpt-6-sol', items: ITEMS, inputTokens: 1200, outputTokens: 120 });
     expect(result).not.toHaveProperty('costMicros');
   });
 
@@ -91,7 +91,7 @@ describe('the Mailsort Codex inference client', () => {
       await expect(classifyWithCodex(ENV, EMAILS, answer(fields), PROMPT)).rejects.toMatchObject({ code: 'codex_bad_model' });
     }
     await expect(classifyWithCodex(ENV, EMAILS, answer({ inputTokens: -1 }), PROMPT)).rejects.toMatchObject({ code: 'codex_bad_usage' });
-    const malformedWire = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ model: 'gpt-6.1-sol', effort: 'medium', input_tokens: '1200', output_json: JSON.stringify({ items: ITEMS }) }));
+    const malformedWire = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ model: 'gpt-6-sol', effort: 'medium', input_tokens: '1200', output_json: JSON.stringify({ items: ITEMS }) }));
     await expect(classifyWithCodex(ENV, EMAILS, malformedWire, PROMPT)).rejects.toMatchObject({ code: 'codex_bad_answer' });
   });
 
