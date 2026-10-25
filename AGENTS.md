@@ -27,7 +27,7 @@
   它的继任者 Brief 是另建的 Worker，替换与 Newsletter 的退役由 owner 另行决定。
 - 应用从不互相导入代码、配置或测试工具。允许共享的只有 `contracts/`、`proto/`、`packages/`；
   `tools/` 只供测试、构建和部署脚本使用，生产源码与包不得导入应用或这些工具。
-- `packages/<name>` 以 `file:` 依赖写进使用者的 package.json 和 lockfile，编译进各应用；不是独立服务。
+- `packages/<name>` 以 `workspace:*` 写进使用者的 package.json，依赖由根 `pnpm-lock.yaml` 锁定，编译进各应用；不是独立服务。
   `edge-auth` 保持零运行时依赖，不在应用里复制 JWT、CSRF 或私有响应头实现。
 - Cookie、token 来源、邮箱匹配、nbf、开发绕过、密钥派生和错误映射属于应用行为；改前核对
   [edge-auth SPEC §4、§5.4](packages/edge-auth/SPEC.md)。
@@ -38,6 +38,8 @@
 
 - Cloudflare owner API 遵循 [proto 规则与 HTTP APIs](proto/README.md#http-apis)：IDL、固定版本的工具链和手写运行时只在 `proto/`。
   使用共享转码器、类型化客户端和 wire JSON profile，不另写重复接口类型或默认 ProtoJSON。
+- Node 外部依赖版本统一在根 pnpm catalog，Python 统一在根 pyproject/uv.lock；不新增成员锁文件。
+  Node 26 与 Python 3.14 的解释器和 workspace 安装命令见 [依赖管理](docs/dependencies.md)。
 - 生成代码不提交；安装与检查前脚本运行 `ensure.mjs`，Python 由构建后端生成。应用不自带 protobuf runtime；
   通过 `@ziyixi/proto/protobuf` 使用唯一版本。新增语言/包使用者同步 `PROTO_USERS`、`PROTO_PACKAGES`。
 - Access JWT、Origin、mutation CSRF 必须在转码器读取正文之前验证。机器接口有独立鉴权，不能隐式继承 owner 权限。

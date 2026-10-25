@@ -13,7 +13,7 @@ backend-path = ["."]
 name = "ziyixi-proto"
 version = "0.0.0"
 description = "Generated wire JSON types of the proto/ IDL and their stdlib-only codec"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 # Stdlib only: it runs on Pyodide inside Python Workers. Keep this list empty.
 dependencies = []
 
@@ -32,7 +32,12 @@ cache-keys = [
   { file = "../buf.yaml" },
   { file = "../buf.lock" },
   { file = "../buf.gen.yaml" },
-  { file = "../package-lock.json" },
+  { file = "../../pnpm-lock.yaml" },
+  { file = "../../pnpm-workspace.yaml" },
+  { file = "../../package.json" },
+  { file = "../../.python-version" },
+  { file = "../package.json" },
+  { file = "../ts/package.json" },
   { file = "../tools/ensure.mjs" },
   { file = "../tools/gen_py.py" },
   { file = "../tools/gen_wire_ts.py" },

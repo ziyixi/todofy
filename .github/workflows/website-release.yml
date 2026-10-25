@@ -105,9 +105,17 @@ jobs:
           result = json.loads(subprocess.check_output(["python3", "tools/cloud-config/outputs.py"]))
           print("SITE_URL=" + result["website_url"])
           PYTHON
+      - name: Install the selected Node workspaces
+        if: hashFiles('pnpm-lock.yaml') != ''
+        uses: ./.github/actions/setup-workspace
+        with:
+          root: .
+          filters: 'ziyixi-personal-website...'
       - name: Install the shared proto toolchain
+        if: hashFiles('pnpm-lock.yaml') == ''
         run: npm ci --prefix ../proto --no-audit --no-fund
       - name: Install the pinned pnpm and locked dependencies
+        if: hashFiles('pnpm-lock.yaml') == ''
         run: |
           corepack enable
           pnpm install --frozen-lockfile

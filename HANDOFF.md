@@ -31,6 +31,20 @@ Python 3.14 for one uv workspace. That migration is developed separately in `/pr
 on `codex/dependency-workspaces`: root pnpm 11.25.0 catalog/lock with Node 26, root uv workspace/lock with Python 3.14,
 and corresponding CI/build updates. Do not treat this as merely comparing two duplicated dependency pins.
 
+### Shared dependency workspaces (`codex/dependency-workspaces`)
+
+The owner selected standard workspaces for the entire repository, including moving VPS Python to 3.14.
+All 29 Node packages now use the root pnpm catalog/lock; five Python members use the root uv constraints/lock
+and Python 3.14.7. CI installs from those same locks, retains independent app releases, and tracks root inputs
+in build/source identities. The three VPS images keep separate application dependencies and root build contexts.
+The setup and dependency update commands are in [dependencies](docs/dependencies.md).
+
+Local checks passed 27 Node typechecks, 21 lint runs, 3,522 Vitest cases, 204 Mail Hero cases and 12 builds.
+Proto passed 459 TypeScript and 110 Python cases. Python 3.14 passed Newsletter's 2,322 tests and mypy,
+Gateway's 21, Platform's 131 (+143 subtests), Todofy's 1,255 and two build-context cases. All three production
+dependency selections install on 3.14; Linux amd64 wheel-only resolution passed. Full Linux image builds,
+the branch CI and production readback are pending. The shared Google Drive checkout remains untouched.
+
 ### Mailsort provider switch and independent Codex gateway
 
 Released `3e4c6b2f357b13b052c00790ac8fd0d0d3b96456` after

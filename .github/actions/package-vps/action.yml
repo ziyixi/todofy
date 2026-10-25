@@ -16,20 +16,27 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+    - name: Install the selected Node workspaces
+      uses: ./.github/actions/setup-workspace
       with:
-        node-version: '26'
+        root: .
+        filters: ''
     - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
         version: '0.12.10'
-        working-directory: platform
+        cache-dependency-glob: |
+          uv.lock
+          pyproject.toml
+          .python-version
+          **/pyproject.toml
+        cache-suffix: todofy-personal-cloud
+        working-directory: .
     - name: Install the locked bundle renderer
       working-directory: .
       shell: bash -e {0}
       run: |
-        npm ci --prefix proto --no-audit --no-fund
         node proto/tools/ensure.mjs
-        uv sync --project platform --locked
+        uv sync --package todofy-personal-cloud --locked
     - name: Package this commit and three verified image digests
       env:
         NEWSLETTER_IMAGE: ${{ inputs.newsletter-image }}
@@ -38,7 +45,7 @@ runs:
       working-directory: .
       shell: bash -e {0}
       run: |
-        uv run --project platform --locked python tools/vps-bootstrap/prepare.py --sha "$GITHUB_SHA" \
+        uv run --package todofy-personal-cloud --locked python tools/vps-bootstrap/prepare.py --sha "$GITHUB_SHA" \
           --newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE" \
           --codex-gateway-image "$CODEX_GATEWAY_IMAGE" \
           --output "$RUNNER_TEMP/vps-bootstrap-bundle"

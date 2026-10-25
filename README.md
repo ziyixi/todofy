@@ -16,7 +16,8 @@ Home is the daily starting point. Services run and release independently, sharin
 | Tasks | 主任务库、子任务与 Plan/Focus / Primary task store, subtasks and Plan/Focus | Cloudflare Worker + D1, desktop PWA | [tasks/](tasks/README.md) |
 | Links | 私人短链接 / Personal short links | Cloudflare Worker + D1 | [links/](links/README.md) |
 | Watch | 网页变化收件箱 / Web change inbox | Cloudflare Worker + DO | [watch/](watch/README.md) |
-| Mailsort | Gmail 自动分拣 / Gmail sorting by label | Cloudflare Worker + DO + Workers AI | [mailsort/](mailsort/README.md) |
+| Mailsort | Gmail 自动分拣 / Gmail priority sorting | Cloudflare Worker + DO, Claude API or VPS Codex | [mailsort/](mailsort/README.md) |
+| Codex Gateway | 私有结构化推理 / Private structured inference | VPS k3s, independent image | [codex-gateway/](codex-gateway/README.md) |
 | Recall | 浏览记录、全文搜索与 Dropbox 归档 / Browsing record, full-text search and an archive in Dropbox (synced to the NAS) | Cloudflare Worker + DO + R2, Chrome extension | [recall/](recall/README.md) |
 | Brief | 每日研究前沿与世界简报、周六深读 / Daily research and world brief, a Saturday deep read | Cloudflare Worker + DO + Workers AI, Claude API | [brief/](brief/README.md) |
 | Website | Notion 驱动的个人网站 / Personal website from Notion | Cloudflare static assets + relay | [website/](website/README.md) |
@@ -28,11 +29,11 @@ Tasks 是任务与规划入口，也保存 Focus 的每日队列与计时；Todo
 Tasks is the task and planning app and owns Focus's daily queues and timers. Todofy handles mail and daily reminders.
 Todoist was the one-time migration source of 2026-10-17; no code reads or writes it now.
 
-Cloudflare 托管日常应用；VPS 的 k3s 运行 Newsletter 和独立的部署 daemon。
+Cloudflare 托管日常应用；VPS 的 k3s 运行 Newsletter、Codex Gateway 和独立的部署 daemon。
 GitHub Actions 主动通过鉴权 API 更新经测试的镜像，Fleet 和 Home 查看实际运行状态。
 发布状态、业务健康和观察数据的新鲜度分别显示。首次安装和数据恢复见 [重建说明](docs/rebuild.md)。
 
-Cloudflare hosts the daily applications. VPS k3s runs Newsletter and an independent deployment daemon.
+Cloudflare hosts the daily applications. VPS k3s runs Newsletter, Codex Gateway and an independent deployment daemon.
 Actions pushes tested images through an authenticated API; Fleet and Home show observed runtime state.
 Release progress, business health and observation freshness stay separate. See [rebuild](docs/rebuild.md).
 
@@ -42,8 +43,13 @@ Release progress, business health and observation freshness stay separate. See [
    Read HANDOFF for active work, merge order, outstanding verification and owner actions.
 2. 阅读根 [AGENTS.md](AGENTS.md)，以及目标应用自己的规则与 README。
    Read the repository rules and the target application's instructions and README.
-3. 进入目标应用目录，按它的说明安装、开发与检查；本地只使用本地绑定和合成数据。
-   Work in the application's directory; follow its commands and use local bindings and synthetic data.
+3. 在根 workspace 安装依赖，再进入目标应用目录开发与检查；本地只使用本地绑定和合成数据。
+   Install dependencies at the workspace root, then run the application's scripts with local bindings and synthetic data.
+
+全仓共用 Node 26 / pnpm catalog 与一个 Node 锁文件、Python 3.14 / uv workspace 与一个 Python 锁文件。
+安装和版本更新命令见 [依赖管理](docs/dependencies.md)。
+
+The repository shares one pnpm catalog/lock and one uv workspace/lock. See [dependencies](docs/dependencies.md).
 
 ```sh
 cd mail-hero    # 或 / or todofy, tasks, dashboard, links, watch, mailsort, recall, brief, website, newsletter, fleet, platform

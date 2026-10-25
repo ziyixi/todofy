@@ -293,7 +293,7 @@ async def _collect(
     # Pinned SDK implements stream as an async generator, but annotates the
     # narrower AsyncIterator surface; aclosing also needs its aclose method.
     async with contextlib.aclosing(
-        cast("AsyncGenerator[codex_models.Notification, None]", turn.stream())
+        cast("AsyncGenerator[codex_models.Notification]", turn.stream())
     ) as events:
         async for event in events:
             payload = _plain(event.payload)

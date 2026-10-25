@@ -1,11 +1,11 @@
 UV ?= uv
-RUN := $(UV) run --locked --extra codex
+RUN := $(UV) run --locked --package personal-newsletter --extra codex
 ARTIFACT_DIR ?= .artifacts
 
 .PHONY: setup lock-check test lint format typecheck check build smoke smoke-codex demo serve proto-check
 
 setup:
-	$(UV) sync --locked --extra codex
+	$(UV) sync --locked --package personal-newsletter --extra codex
 
 lock-check:
 	$(UV) lock --check
@@ -27,7 +27,7 @@ typecheck:
 check: lock-check lint typecheck test
 
 build: lock-check
-	$(UV) build --out-dir $(ARTIFACT_DIR)/dist
+	$(UV) build --package personal-newsletter --out-dir $(ARTIFACT_DIR)/dist
 
 smoke:
 	$(RUN) python scripts/smoke_http.py

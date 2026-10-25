@@ -19,7 +19,6 @@ from ziyixi_proto.codex.inference.v1.inference_pb import (
 
 MODEL = "gpt-6-sol"
 EFFORT = "medium"
-SDK_VERSION = "0.163.0"
 TIMEOUT_SECONDS = 110
 MAX_OUTPUT_BYTES = 64 * 1024
 SYSTEM_SKILLS = (
@@ -174,7 +173,9 @@ async def check_runtime(
         if sdk is None:
             import openai_codex as sdk
 
-            if metadata.version("openai-codex") != SDK_VERSION:
+            if metadata.version("openai-codex") != metadata.version(
+                "openai-codex-cli-bin"
+            ):
                 raise RuntimeError("codex_unavailable")
         _login_home(home)
         with tempfile.TemporaryDirectory(prefix="codex-preflight-") as directory:
@@ -246,7 +247,9 @@ async def infer(
         if sdk is None:
             import openai_codex as sdk
 
-            if metadata.version("openai-codex") != SDK_VERSION:
+            if metadata.version("openai-codex") != metadata.version(
+                "openai-codex-cli-bin"
+            ):
                 raise RuntimeError("codex_unavailable")
         _login_home(home)
         with tempfile.TemporaryDirectory(prefix="codex-inference-") as directory:

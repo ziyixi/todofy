@@ -6,7 +6,7 @@ matches fails at once, not at the next infra/ change. No OpenTofu and no network
 HCL structure, and regexes read the locals maps ("Infra checks" also runs `tofu validate`). Needs Python 3.11+
 (tomllib), as CI's ubuntu-24.04 python3 has; with an older python3 the module is skipped locally (under
 GitHub Actions a missing tomllib is an error):
-    uv run --no-project --python 3.12 --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts
+    uv run --locked --only-group ci python -m unittest discover -s .github/scripts
 
 What they keep true (infra/README.md):
 - infra_guard.py finds nothing: only the four resource types of the monorepo boundary, each with its own
@@ -44,7 +44,7 @@ except ModuleNotFoundError:
         raise
     raise unittest.SkipTest(
         f"test_infra_config needs Python 3.11+ (tomllib), this is {sys.version.split()[0]}: "
-        "uv run --no-project --python 3.12 --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts"
+        "uv run --locked --only-group ci python -m unittest discover -s .github/scripts"
     ) from None
 
 import infra_guard  # noqa: E402  (same directory; unittest discover puts it on sys.path)

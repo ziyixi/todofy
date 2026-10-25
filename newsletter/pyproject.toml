@@ -1,33 +1,26 @@
 [build-system]
-requires = ["setuptools==84.0.0"]
+requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "personal-newsletter"
 version = "0.1.0"
 description = "One private service for research intake, editorial work, and reviewed newsletters"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.14"
 dependencies = [
-  "fastapi==0.141.1", "uvicorn==0.52.4", "httpx==0.28.1",
-  "protobuf==7.36.1", "jinja2==3.1.6", "pillow==12.3.0", "PyYAML==6.0.3",
-  "ziyixi-protos==0.1.0.dev7",
+  "fastapi", "uvicorn", "httpx",
+  "protobuf", "jinja2", "pillow", "pyyaml", "packaging",
+  "ziyixi-protos",
 ]
 
 [project.optional-dependencies]
-codex = ["openai-codex==0.163.0"]
+codex = ["openai-codex"]
 
 [dependency-groups]
 dev = [
-  "pytest==9.1.1", "pytest-asyncio==1.4.0", "ruff==0.16.6",
-  "mypy==2.3.1", "types-protobuf==7.35.1.20260827",
-  "types-PyYAML==6.0.12.20260906",
+  "pytest", "pytest-asyncio", "ruff",
+  "mypy", "types-protobuf", "types-pyyaml",
 ]
-
-[tool.uv]
-required-version = "==0.12.10"
-
-[tool.uv.sources]
-ziyixi-protos = {url = "https://github.com/ziyixi/protos/releases/download/python-v0.1.0.dev7/ziyixi_protos-0.1.0.dev7-py3-none-any.whl"}
 
 [project.scripts]
 newsletter = "newsletter.cli:main"
@@ -46,7 +39,8 @@ asyncio_mode = "auto"
 cache_dir = ".artifacts/cache/pytest"
 
 [tool.ruff]
-target-version = "py312"
+# Keep parenthesised exception tuples; the interpreter is Python 3.14.
+target-version = "py313"
 line-length = 80
 cache-dir = ".artifacts/cache/ruff"
 exclude = [".venv"]
@@ -80,7 +74,7 @@ known-first-party = ["newsletter", "tests"]
 "tests/conftest.py" = ["D1"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 cache_dir = ".artifacts/cache/mypy"
 files = ["src/newsletter", "scripts", "tests/support"]
 check_untyped_defs = true

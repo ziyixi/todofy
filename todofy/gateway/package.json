@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Todofy edge gateway (Worker \"todofy\"): routing, auth and assets; the work runs in todofy-core.",
   "engines": {
-    "node": ">=26"
+    "node": "26.x"
   },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
@@ -19,18 +19,18 @@
     "lint": "eslint ."
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260929.1",
-    "@eslint/js": "10.0.1",
-    "@types/node": "26.6.3",
-    "esbuild": "0.28.1",
-    "eslint": "10.11.0",
-    "miniflare": "5.20260926.0-alpha",
-    "typescript": "5.9.3",
-    "typescript-eslint": "8.71.0",
-    "vitest": "4.1.11"
+    "@cloudflare/workers-types": "catalog:",
+    "@eslint/js": "catalog:",
+    "@types/node": "catalog:",
+    "esbuild": "catalog:",
+    "eslint": "catalog:",
+    "miniflare": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
+    "vitest": "catalog:"
   },
   "dependencies": {
-    "@ziyixi/edge-auth": "file:../../packages/edge-auth",
-    "@ziyixi/proto": "file:../../proto/ts"
+    "@ziyixi/edge-auth": "workspace:*",
+    "@ziyixi/proto": "workspace:*"
   }
 }

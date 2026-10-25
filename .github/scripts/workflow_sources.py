@@ -66,6 +66,18 @@ def expand_actions(block, root=ROOT):
             inner = inner.replace(
                 "inputs.required", required.removeprefix("${{ ").removesuffix(" }}")
             )
+        guard = re.search(r"^        if: (.+)$", step, re.M)
+        if guard:
+            # The shared installer has no per-step guard; its composite call supplies it.
+            guarded = []
+            for child in steps(inner):
+                if not re.search(r"^        if:", child, re.M):
+                    first, rest = child.split("\n", 1)
+                    child = first + "\n        if: " + guard.group(1) + "\n" + rest
+                guarded.append(child)
+            inner = "".join(guarded)
+        # Composite actions can share the small workspace installer.
+        inner = expand_actions("    steps:\n" + inner, root).split("    steps:\n", 1)[1]
         expanded.append(inner)
     return header + "    steps:\n" + "".join(expanded)
 

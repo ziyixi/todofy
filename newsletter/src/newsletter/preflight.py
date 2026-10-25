@@ -28,6 +28,7 @@ import types
 from typing import cast, TYPE_CHECKING
 
 import httpx
+import packaging.requirements as packaging_requirements
 import ziyixi_protos.newsletter.editorial_pb2 as editorial_pb2
 
 import newsletter.adapters as adapters
@@ -137,25 +138,19 @@ def check_proto_dependency() -> None:
 
 
 def _check_resources() -> None:
-    if sys.version_info[:2] != (3, 12):
+    if sys.version_info[:2] != (3, 14):
         raise PreflightError("PYTHON_VERSION_UNSUPPORTED")
-    # Read pins from the installed application's own metadata, not another
-    # hand-maintained dependency list. Optional Codex is checked when enabled.
+    # The root workspace lock pins installations. Check the installed package's
+    # declared requirements here; optional Codex is checked when enabled.
     declared = importlib_metadata.distribution("personal-newsletter").requires
     if not declared:
         raise PreflightError("PACKAGE_METADATA_UNAVAILABLE")
     for requirement in declared:
-        pin, _, marker = requirement.partition(";")
-        if marker.strip() in {'extra == "codex"', "extra == 'codex'"}:
+        parsed = packaging_requirements.Requirement(requirement)
+        if parsed.marker and not parsed.marker.evaluate({"extra": ""}):
             continue
-        match = re.fullmatch(
-            r"([A-Za-z0-9_.-]+)==([A-Za-z0-9_.+-]+)", pin.strip()
-        )
-        if (
-            marker
-            or match is None
-            or importlib_metadata.version(match[1]) != match[2]
-        ):
+        installed_version = importlib_metadata.version(parsed.name)
+        if not parsed.specifier.contains(installed_version, prereleases=True):
             raise PreflightError("DEPENDENCY_VERSION_MISMATCH")
     check_proto_dependency()
     package = resources.files("newsletter")
@@ -190,18 +185,15 @@ def _runtime_files() -> tuple[pathlib.Path, pathlib.Path]:
     # Mock startup must not require the optional live Codex runtime package.
     import codex_cli_bin  # type: ignore[import-untyped]  # noqa: PLC0415
 
-    if (
-        importlib_metadata.version("openai-codex") != codex_runtime.SDK_VERSION
-        or importlib_metadata.version("openai-codex-cli-bin")
-        != codex_runtime.SDK_VERSION
-    ):
+    sdk_version = importlib_metadata.version("openai-codex")
+    if importlib_metadata.version("openai-codex-cli-bin") != sdk_version:
         raise PreflightError("CODEX_VERSION_MISMATCH")
     executable = pathlib.Path(codex_cli_bin.bundled_codex_path())
     host = executable.with_name("codex-code-mode-host")
     metadata = json.loads(
         executable.parent.parent.joinpath("codex-package.json").read_text()
     )
-    if metadata.get("version") != codex_runtime.SDK_VERSION:
+    if metadata.get("version") != sdk_version:
         raise PreflightError("CODEX_VERSION_MISMATCH")
     installed = importlib_metadata.distribution("openai-codex-cli-bin")
     records = {str(record): record for record in installed.files or ()}
@@ -331,35 +323,34 @@ async def _get_json(
     provider: str,
 ) -> newsletter_types.Payload:
     async with asyncio.timeout(HTTP_TIMEOUT):
-        async with httpx.AsyncClient(
-            transport=transport,
-            follow_redirects=False,
-            trust_env=False,
-            timeout=HTTP_TIMEOUT,
-            headers={"Accept": "application/json", **(headers or {})},
-        ) as client:
-            async with client.stream("GET", url) as response:
-                if response.status_code in {401, 403}:
-                    raise PreflightError(provider + "_AUTH_FAILED")
-                if (
-                    response.status_code == 429
-                    or 500 <= response.status_code < 600
-                ):
-                    raise PreflightError(provider + "_TEMPORARILY_UNAVAILABLE")
-                if response.status_code != 200:
-                    raise PreflightError(provider + "_UNAVAILABLE")
-                if (
-                    response.headers.get("content-type", "")
-                    .split(";", 1)[0]
-                    .strip()
-                    != "application/json"
-                ):
+        async with (
+            httpx.AsyncClient(
+                transport=transport,
+                follow_redirects=False,
+                trust_env=False,
+                timeout=HTTP_TIMEOUT,
+                headers={"Accept": "application/json", **(headers or {})},
+            ) as client,
+            client.stream("GET", url) as response,
+        ):
+            if response.status_code in {401, 403}:
+                raise PreflightError(provider + "_AUTH_FAILED")
+            if response.status_code == 429 or 500 <= response.status_code < 600:
+                raise PreflightError(provider + "_TEMPORARILY_UNAVAILABLE")
+            if response.status_code != 200:
+                raise PreflightError(provider + "_UNAVAILABLE")
+            if (
+                response.headers.get("content-type", "")
+                .split(";", 1)[0]
+                .strip()
+                != "application/json"
+            ):
+                raise PreflightError(provider + "_INVALID_RESPONSE")
+            content = bytearray()
+            async for chunk in response.aiter_bytes():
+                if len(content) + len(chunk) > MAX_RESPONSE_BYTES:
                     raise PreflightError(provider + "_INVALID_RESPONSE")
-                content = bytearray()
-                async for chunk in response.aiter_bytes():
-                    if len(content) + len(chunk) > MAX_RESPONSE_BYTES:
-                        raise PreflightError(provider + "_INVALID_RESPONSE")
-                    content.extend(chunk)
+                content.extend(chunk)
     try:
         value = json.loads(content)
     except ValueError:

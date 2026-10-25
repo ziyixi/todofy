@@ -1,3 +1,2 @@
-include .python-version uv.lock
 # The source distribution is an installable package, not a partial test checkout.
 prune tests

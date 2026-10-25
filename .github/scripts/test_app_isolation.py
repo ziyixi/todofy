@@ -8,7 +8,7 @@ deploy nothing (ci_changes.classify). The website is stricter: of the shared cod
 For every app of the service catalog this resolves
 - the relative imports of its TypeScript and JavaScript files (static, re-export, side-effect, dynamic, require),
 - the paths its Python files add to sys.path or load with importlib's spec_from_file_location, and
-- the local dependencies of its package.json files (file:, link:), the "paths" and "extends" of its tsconfig files
+- the local dependencies of its package.json files (workspace:, file:, link:), the "paths" and "extends" of its tsconfig files
   and the path sources and workspace members of its pyproject.toml files,
 and requires every target to lie in the app itself or in a directory the app may use. A bare specifier is an installed
 package (covered by the package.json check) or a path alias. tsconfig "paths" are checked to stay in the app; the vite
@@ -18,6 +18,7 @@ Python 3.11+ (tomllib), as CI's ubuntu-24.04 python3 has; standard library only.
 """
 
 import ast
+from functools import cache
 import json
 import os
 import re
@@ -33,7 +34,7 @@ except ModuleNotFoundError:
         raise
     raise unittest.SkipTest(
         f"test_app_isolation needs Python 3.11+ (tomllib), this is {sys.version.split()[0]}: "
-        "uv run --no-project --python 3.12 --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts"
+        "uv run --locked --only-group ci python -m unittest discover -s .github/scripts"
     ) from None
 
 REPO = Path(__file__).resolve().parents[2]
@@ -224,6 +225,15 @@ def jsonc(text: str) -> dict:
     return json.loads(re.sub(rf"({JSON_STRING})|,(\s*[}}\]])", lambda m: m.group(1) or m.group(2), text))
 
 
+@cache
+def workspace_packages() -> dict[str, Path]:
+    return {
+        json.loads((REPO / name).read_text())["name"]: REPO / name.parent
+        for name in tracked_files()
+        if name.name == "package.json"
+    }
+
+
 def local_dependencies(name: PurePosixPath) -> list[tuple[str, Path]]:
     """(what, absolute target) of every local dependency, path alias or extended config a manifest declares."""
     path = REPO / name
@@ -235,6 +245,8 @@ def local_dependencies(name: PurePosixPath) -> list[tuple[str, Path]]:
                 local = re.fullmatch(r"(?:file|link):(.+)", spec)
                 if local:
                     found.append((package, path.parent / local.group(1)))
+                elif spec.startswith("workspace:"):
+                    found.append((package, workspace_packages()[package]))
     elif re.fullmatch(r"tsconfig[\w.-]*\.json", name.name):
         data = jsonc(path.read_text())
         options = data.get("compilerOptions", {})
@@ -246,11 +258,24 @@ def local_dependencies(name: PurePosixPath) -> list[tuple[str, Path]]:
             if extended.startswith("."):
                 found.append(("extends", path.parent / extended))
     elif name.name == "pyproject.toml":
-        uv = tomllib.loads(path.read_text()).get("tool", {}).get("uv", {})
+        data = tomllib.loads(path.read_text())
+        uv = data.get("tool", {}).get("uv", {})
         for package, source in uv.get("sources", {}).items():
             if isinstance(source, dict) and "path" in source:
                 found.append((package, path.parent / source["path"]))
         found += [("workspace", path.parent / member) for member in uv.get("workspace", {}).get("members", [])]
+        root_uv = tomllib.loads((REPO / "pyproject.toml").read_text())["tool"]["uv"]
+        members = {
+            tomllib.loads((REPO / member / "pyproject.toml").read_text())["project"]["name"]: REPO / member
+            for member in root_uv["workspace"]["members"]
+        }
+        dependencies = [*data.get("project", {}).get("dependencies", [])]
+        for group in data.get("dependency-groups", {}).values():
+            dependencies.extend(item for item in group if isinstance(item, str))
+        for dependency in dependencies:
+            package = re.split(r"[\s<>=!~;\[]", dependency, maxsplit=1)[0]
+            if package in members:
+                found.append((package, members[package]))
     return [(what, Path(os.path.normpath(target))) for what, target in found]
 
 

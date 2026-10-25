@@ -1,33 +1,28 @@
 [build-system]
-requires = ["setuptools==84.0.0"]
+requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "personal-codex-gateway"
 version = "0.1.0"
 description = "Private synchronous structured inference through the pinned Codex SDK"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.14"
 dependencies = [
-  "fastapi==0.141.1",
-  "uvicorn==0.52.4",
-  "openai-codex==0.163.0",
+  "fastapi",
+  "uvicorn",
+  "openai-codex",
   "ziyixi-proto",
 ]
 
 [dependency-groups]
-dev = ["httpx==0.28.1", "ruff==0.16.6"]
-
-[tool.uv]
-required-version = "==0.12.10"
-
-[tool.uv.sources]
-ziyixi-proto = { path = "../proto/python" }
+dev = ["httpx", "ruff"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.ruff]
-target-version = "py312"
+# Keep parenthesised exception tuples; the interpreter is Python 3.14.
+target-version = "py313"
 line-length = 88
 
 [tool.ruff.lint]

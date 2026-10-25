@@ -123,7 +123,12 @@ class CompositeActions(unittest.TestCase):
                         self.assertEqual(step["shell"], "bash -e {0}")
                         self.assertTrue(step["working-directory"])
                     if "uses" in step:
-                        self.assertRegex(step["uses"], r"^[\w./-]+@[0-9a-f]{40}$")
+                        if step["uses"].startswith("./"):
+                            self.assertEqual(step["uses"], "./.github/actions/setup-workspace")
+                            installer = workflow_data(ROOT / step["uses"] / "action.yml")
+                            self.assertEqual(set(step["with"]), set(installer["inputs"]))
+                        else:
+                            self.assertRegex(step["uses"], r"^[\w./-]+@[0-9a-f]{40}$")
                     self.assertNotEqual(
                         step.get("with", {}).get("persist-credentials"), "true"
                     )

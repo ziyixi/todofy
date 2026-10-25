@@ -4,15 +4,15 @@ NODE ?= node
 PNPM ?= pnpm
 PORT ?= 3000
 
-# Use Node 24 for every child process, including pnpm and Next.js. A Homebrew
+# Use Node 26 for every child process, including pnpm and Next.js. A Homebrew
 # alternative is scoped to this Make invocation; the login shell is unchanged.
 LOCAL_NODE_BIN := $(shell \
-	if [ "$$("$(NODE)" -p 'process.versions.node.split(".")[0]' 2>/dev/null)" = 24 ]; then \
+	if [ "$$("$(NODE)" -p 'process.versions.node.split(".")[0]' 2>/dev/null)" = 26 ]; then \
 	  "$(NODE)" -p 'require("node:path").dirname(process.execPath)'; \
 	elif command -v brew >/dev/null 2>&1; then \
-	  node_prefix=$$(brew --prefix node@24 2>/dev/null); \
+	  node_prefix=$$(brew --prefix node@26 2>/dev/null); \
 	  if [ -x "$$node_prefix/bin/node" ] && \
-	     [ "$$("$$node_prefix/bin/node" -p 'process.versions.node.split(".")[0]')" = 24 ]; then \
+	     [ "$$("$$node_prefix/bin/node" -p 'process.versions.node.split(".")[0]')" = 26 ]; then \
 	    printf '%s' "$$node_prefix/bin"; \
 	  fi; \
 	fi)
@@ -39,10 +39,10 @@ check-runtime:
 	@set -eu; \
 	version=$$("$(NODE)" --version 2>/dev/null || true); \
 	case "$$version" in \
-	  v24.*) ;; \
+	  v26.*) ;; \
 	  *) printf '%s\n' \
-	    "This project requires Node 24.x; found $${version:-no Node installation}." \
-	    'On macOS: brew install node@24, then rerun the same make command.' \
+	    "This project requires Node 26.x; found $${version:-no Node installation}." \
+	    'On macOS: brew install node@26, then rerun the same make command.' \
 	    'With nvm: nvm install && nvm use.' >&2; exit 1 ;; \
 	esac; \
 	if ! command -v "$(PNPM)" >/dev/null 2>&1; then \

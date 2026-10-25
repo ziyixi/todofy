@@ -14,7 +14,7 @@ make smoke
 make smoke-codex
 ```
 
-`make setup` 按 `.python-version`（Python 3.12.14）和唯一的 `uv.lock` 执行锁定安装，包含 Codex extra、dev 工具组及 GitHub Release 分发的 `ziyixi-protos==0.1.0.dev7`；可能下载解释器或依赖，但不会访问账号。`make check` 覆盖锁一致性、Ruff 80列/Google公开文档/模块导入、AST结构门禁、严格mypy与离线测试；`make format` 单独格式化Python。发布包与loopback服务另用上面的build/smoke。`make proto-check` 校验已安装公共 wheel 的代码、stub、descriptor hash、来源清单及发行版本；不依赖 sibling protos 仓库或 protoc，也不在 newsletter 内生成代码。不能运行的验收项单独标记，不应通过跳过来宣称完整通过。
+`make setup` 按仓库根 `.python-version`（Python 3.14.7）和唯一的 `uv.lock` 选择 Newsletter 成员安装，包含 Codex extra、dev 工具组及 GitHub Release 分发的 `ziyixi-protos==0.1.0.dev7`；可能下载解释器或依赖，但不会访问账号。`make check` 覆盖锁一致性、Ruff 80列/Google公开文档/模块导入、AST结构门禁、严格mypy与离线测试；`make format` 单独格式化Python。发布包与loopback服务另用上面的build/smoke。`make proto-check` 校验已安装公共 wheel 的代码、stub、descriptor hash、来源清单及发行版本；不依赖 sibling protos 仓库或 protoc，也不在 newsletter 内生成代码。不能运行的验收项单独标记，不应通过跳过来宣称完整通过。
 
 这里的 `make build` 只构建 Python 包，不发布镜像。Docker 验收须另行检查 daemon、构建和运行：镜像只在构建阶段从同一锁安装运行依赖及 Codex extra，不带 dev 工具，不在服务启动时解析或下载依赖。锁定工具链不会搬动或读取已有 `.env` 和专用登录缓存。
 

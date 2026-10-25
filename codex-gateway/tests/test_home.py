@@ -1,5 +1,6 @@
 """Real synthetic files only; no login data, runtime process or model call."""
 
+import contextlib
 import os
 import pathlib
 import sqlite3
@@ -41,7 +42,12 @@ class PrivateCliHome(unittest.TestCase):
                 )
                 private_skill.parent.mkdir(parents=True)
                 private_skill.write_text("gateway skill")
-                with sqlite3.connect(home / "state.sqlite") as database:
+                with (
+                    contextlib.closing(
+                        sqlite3.connect(home / "state.sqlite")
+                    ) as database,
+                    database,
+                ):
                     database.execute("CREATE TABLE synthetic (id INTEGER)")
                 # The pinned file store opens with truncate/write, preserving the inode.
                 with (home / "auth.json").open("w") as target:

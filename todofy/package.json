@@ -6,6 +6,9 @@
     "postinstall": "node ../proto/tools/ensure.mjs"
   },
   "devDependencies": {
-    "wrangler": "4.142.0"
+    "wrangler": "catalog:"
+  },
+  "engines": {
+    "node": "26.x"
   }
 }

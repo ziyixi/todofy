@@ -1,51 +1,17 @@
 #!/usr/bin/env node
 /**
- * Makes the generated code of proto/ current (proto/README.md, How it works). Generated code is never
- * committed; this script produces it, and every way into the repository runs it:
+ * Generates the shared TypeScript/Python wire code from the pinned root pnpm workspace.
+ * Root/app lifecycle scripts and the Python build backend call this entrypoint. Generated
+ * package directories and proto/.generated.json are never committed.
  *
- * - `npm ci` / `npm install` in an app that depends on `@ziyixi/proto` (its `postinstall`),
- * - `uv sync` / `uv run` in a Python app that depends on `ziyixi-proto` (the package's build backend,
- *   proto/python/build_backend.py, runs it whenever uv rebuilds the package),
- * - `npm run generate|test|typecheck` in proto/ and the "Proto checks" CI job.
+ * The stamp hashes the IDL, generator inputs, workspace catalog/manifests and root lockfile,
+ * plus every generated output. A current toolchain and stamp need no network. Missing tools
+ * are restored with a frozen, filtered pnpm install with lifecycle scripts disabled, so this
+ * generator cannot recursively enter itself while holding its existing generation lock.
  *
- * It writes:
- *   proto/ts/<package path>/*_pb.ts                         protobuf-es (buf.gen.yaml)
- *   proto/ts/<package path>/*_wire.ts                       tools/gen_wire_ts.py (the binding contracts' JSON types)
- *   proto/python/src/ziyixi_proto/<package path>/*_pb.py    tools/gen_py.py
- * and a stamp, proto/.generated.json: a hash of every input (the .proto files, buf.yaml, buf.lock,
- * buf.gen.yaml, package-lock.json, which pins buf, protoc-gen-es and the runtime, this script and the
- * Python generators gen_py.py, gen_wire_ts.py and wire_rules.py) and of every output file (proto/python/build_backend.py checks it the same way).
- *
- * It first checks that proto/node_modules holds every package package-lock.json pins at that version: the
- * generated code imports the protobuf-es runtime from there, the only copy in the repository, so a deleted
- * node_modules must be restored even when the generated files are current. When both match it does
- * nothing and needs no network (about 0.1 s), so repeated installs are fast and work offline. Otherwise
- * it installs the whole lockfile (`npm ci`, the only step that needs network: proto's own tests and the
- * editor need its devDependencies too; buf also fetches the locked googleapis module once into its
- * cache), generates into a temporary directory and moves the result in, all under a lock, so parallel
- * installs cannot interleave.
- *
- * The lock (proto/.generate.lock/owner.json) names its holder's pid and host. A run that finds the lock
- * held by a pid that no longer runs on this host (Ctrl-C, a killed install) takes it over at once and
- * removes the temporary directories the dead run left; a lock it cannot check (another host, no owner)
- * is taken over once it is LOCK_STALE_MS old. A waiter says whom it waits for, and waits longer than
- * LOCK_STALE_MS, so it always outlives an abandoned lock.
- *
- * Every directory under proto/ts and proto/python/src/ziyixi_proto is generated (gitignored); every file
- * there is hand-written. A regeneration replaces those directories.
- *
- *   node tools/ensure.mjs                         generate if the stamp does not match
- *   node tools/ensure.mjs --force                 always regenerate
- *   node tools/ensure.mjs --check-deterministic   ensure, then generate twice more into temporary
- *                                                 directories: all three must be byte-identical, and the
- *                                                 stamp's .proto files must be exactly buf's module files
- *
- * Environment: PROTO_PYTHON selects the Python that runs the generators (default python3, python on Windows; the
- * build backend passes its own interpreter).
- *
- * Every tool starts without a shell, so the same code runs on Windows (toolCommands): buf is its JavaScript
- * entry point run by this Node.js, not the node_modules/.bin shim, and so is npm on Windows (npm.cmd cannot
- * be spawned without a shell); buf.gen.yaml starts protoc-gen-es the same way.
+ * Lock ownership, stale-owner recovery and atomic output replacement are shared with the
+ * Python backend. PROTO_PYTHON selects its interpreter. Tool commands use Node entrypoints
+ * rather than shell shims, including on Windows.
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -61,10 +27,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { hostname } from 'node:os';
+import { createRequire } from 'node:module';
 import { dirname, join, relative, sep, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PROTO = dirname(dirname(fileURLToPath(import.meta.url)));
+const ROOT = dirname(PROTO);
+const require = createRequire(import.meta.url);
 const STAMP = join(PROTO, '.generated.json');
 const LOCK = join(PROTO, '.generate.lock');
 const OWNER = join(LOCK, 'owner.json');
@@ -73,7 +42,7 @@ const TEMP_PREFIX = '.generate-';
 const TARGETS = { ts: join(PROTO, 'ts'), py: join(PROTO, 'python', 'src', 'ziyixi_proto') };
 /** Not part of the buf module (keep equal to buf.yaml `excludes`; --check-deterministic compares). */
 const EXCLUDED = new Set(['node_modules', 'python', 'scripts', 'test', 'testdata', 'tools', 'ts']);
-const INPUT_FILES = ['buf.yaml', 'buf.lock', 'buf.gen.yaml', 'package-lock.json', 'tools/ensure.mjs', 'tools/gen_py.py', 'tools/gen_wire_ts.py', 'tools/wire_rules.py'];
+const INPUT_FILES = ['buf.yaml', 'buf.lock', 'buf.gen.yaml', 'package.json', 'ts/package.json', '../package.json', '../pnpm-workspace.yaml', '../pnpm-lock.yaml', '../.python-version', 'tools/ensure.mjs', 'tools/gen_py.py', 'tools/gen_wire_ts.py', 'tools/wire_rules.py'];
 const STAMP_VERSION = 1;
 /** A lock whose holder cannot be checked (another host, no owner file yet) is abandoned at this age. */
 const LOCK_STALE_MS = 600_000;
@@ -120,7 +89,7 @@ function generatedFiles(root, dir = root) {
   if (!existsSync(dir)) return [];
   const found = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === '__pycache__') continue;
+    if (entry.name === '__pycache__' || entry.name === 'node_modules') continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) found.push(...generatedFiles(root, path));
     else if (dir !== root) found.push(toPosix(relative(PROTO, path)));
@@ -169,51 +138,60 @@ function run(command, args, options = {}) {
   return result.stdout;
 }
 
-/**
- * How to start npm, buf and Python without a shell on `platform`: [command, leading arguments]. buf's
- * bin script runs on `execPath` (this Node.js). Use npm_execpath only when it names npm-cli.js: pnpm
- * also sets that variable for an app's postinstall. Otherwise use `npm` from PATH, except on Windows,
- * where PATH has only npm.cmd, which cannot be spawned without a shell: there it is the npm-cli.js
- * installed next to node.exe
- * (uv's build of ziyixi-proto). Exported for the tests.
- */
+/** Resolve the root-pinned interpreter without invoking a package build or another manager. */
+function pythonCommand(env) {
+  if (env.PROTO_PYTHON) return env.PROTO_PYTHON;
+  const version = readFileSync(join(ROOT, '.python-version'), 'utf8').trim();
+  const result = spawnSync('uv', ['--no-cache', 'python', 'find', version], { cwd: ROOT, env: cleanEnv(), encoding: 'utf8' });
+  if (result.error || result.status !== 0 || !result.stdout.trim()) {
+    throw new EnsureError(`Python ${version} is required: install uv, then run "uv python install" at the repository root before generating proto code`);
+  }
+  return result.stdout.trim();
+}
+
+/** Start pinned pnpm, buf and Python without a shell, including from uv's build backend. */
 export function toolCommands({ platform = process.platform, execPath = process.execPath, env = process.env } = {}) {
-  const fromNpm = env.npm_execpath ?? '';
+  const fromManager = env.npm_execpath ?? '';
   let npm = ['npm', []];
-  if (/(?:^|[\\/])npm-cli\.js$/.test(fromNpm)) npm = [execPath, [fromNpm]];
+  if (/(?:^|[\\/])npm-cli\.js$/.test(fromManager)) npm = [execPath, [fromManager]];
   else if (platform === 'win32') npm = [execPath, [win32.join(win32.dirname(execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')]];
+  const manager = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).packageManager;
+  const pnpm = /(?:^|[\\/])pnpm\.(?:cjs|mjs)$/.test(fromManager)
+    ? [execPath, [fromManager]]
+    : [npm[0], [...npm[1], 'exec', '--yes', `--package=${manager}`, '--', 'pnpm']];
   return {
-    npm,
+    pnpm,
     buf: [execPath, [join(PROTO, 'node_modules', '@bufbuild', 'buf', 'bin', 'buf')]],
-    python: [env.PROTO_PYTHON || (platform === 'win32' ? 'python' : 'python3'), []],
+    python: [pythonCommand(env), []],
   };
 }
 
-/** True when proto/node_modules holds every direct dependency at the version package-lock.json pins. */
+/** The toolchain and runtime both declare catalog-pinned packages in the root workspace. */
 function toolchainCurrent() {
-  const lock = JSON.parse(readFileSync(join(PROTO, 'package-lock.json'), 'utf8'));
-  const root = lock.packages?.[''] ?? {};
-  const names = Object.keys({ ...root.dependencies, ...root.devDependencies });
-  return (
-    names.length > 0 &&
-    names.every((name) => {
-      const want = lock.packages?.[`node_modules/${name}`]?.version;
-      try {
-        return want !== undefined && JSON.parse(readFileSync(join(PROTO, 'node_modules', name, 'package.json'), 'utf8')).version === want;
-      } catch {
-        return false;
-      }
-    })
-  );
+  try {
+    const { load } = require('js-yaml');
+    const { catalog } = load(readFileSync(join(ROOT, 'pnpm-workspace.yaml'), 'utf8'));
+    return [PROTO, join(PROTO, 'ts')].every((directory) => {
+      const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
+      const packages = { ...manifest.dependencies, ...manifest.devDependencies };
+      return Object.keys(packages).length > 0 && Object.entries(packages).every(([name, spec]) => {
+        const expected = spec === 'catalog:' ? catalog[name] : spec;
+        const installed = JSON.parse(readFileSync(join(directory, 'node_modules', name, 'package.json'), 'utf8'));
+        return installed.version === expected;
+      });
+    });
+  } catch {
+    return false;
+  }
 }
 
-/** Installs the whole lockfile unless node_modules already matches it. */
+/** Restore only the shared toolchain/runtime, using the one root lock and no install hooks. */
 function ensureToolchain() {
   if (toolchainCurrent()) return;
-  log('installing the pinned toolchain (npm ci in proto/)');
-  const [npm, prefix] = toolCommands().npm;
-  run(npm, [...prefix, 'ci', '--no-audit', '--no-fund']);
-  if (!toolchainCurrent()) throw new EnsureError('npm ci in proto/ did not install the versions package-lock.json pins');
+  log('installing the pinned workspace toolchain (pnpm frozen install)');
+  const [pnpm, prefix] = toolCommands().pnpm;
+  run(pnpm, [...prefix, '--filter', '@ziyixi/proto-toolchain', '--filter', '@ziyixi/proto', 'install', '--frozen-lockfile', '--ignore-scripts'], { cwd: ROOT });
+  if (!toolchainCurrent()) throw new EnsureError('pnpm did not install the catalog-pinned toolchain and runtime; run pnpm install --frozen-lockfile at the repository root');
 }
 
 function buf(args, options) {
@@ -245,7 +223,7 @@ function generateInto(dir) {
 function install(dir) {
   for (const [lang, target] of Object.entries(TARGETS)) {
     for (const entry of readdirSync(target, { withFileTypes: true })) {
-      if (entry.isDirectory()) rmSync(join(target, entry.name), { recursive: true, force: true });
+      if (entry.isDirectory() && entry.name !== 'node_modules') rmSync(join(target, entry.name), { recursive: true, force: true });
     }
     for (const name of readdirSync(join(dir, lang))) renameSync(join(dir, lang, name), join(target, name));
   }

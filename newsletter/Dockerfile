@@ -1,18 +1,25 @@
 FROM ghcr.io/astral-sh/uv:0.12.10@sha256:2bb3ebca0a796a155094a27773d290c4b074572e6107f171d88d086682fd2500 AS uv
-FROM python:3.12.14-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254 AS base
+FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 AS base
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 
 FROM base AS builder
 COPY --from=uv /uv /usr/local/bin/uv
-ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1
-WORKDIR /opt/newsletter
-COPY pyproject.toml uv.lock .python-version MANIFEST.in ./
+ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 \
+    UV_PROJECT_ENVIRONMENT=/opt/newsletter/.venv
+WORKDIR /opt/workspace
+COPY pyproject.toml uv.lock .python-version ./
+COPY newsletter/pyproject.toml ./newsletter/pyproject.toml
+COPY codex-gateway/pyproject.toml ./codex-gateway/pyproject.toml
+COPY platform/pyproject.toml ./platform/pyproject.toml
+COPY todofy/pyproject.toml ./todofy/pyproject.toml
+COPY proto/python/pyproject.toml ./proto/python/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --extra codex --no-install-project
-COPY src ./src
+    uv sync --locked --package personal-newsletter --no-dev --extra codex --no-install-workspace
+COPY newsletter/MANIFEST.in ./newsletter/MANIFEST.in
+COPY newsletter/src ./newsletter/src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --extra codex --no-editable
+    uv sync --locked --package personal-newsletter --no-dev --extra codex --no-editable
 
 FROM base AS runtime
 ARG BUILD_SHA=""

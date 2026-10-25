@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Todofy owner UI, served by the Worker from ../uiassets/dist.",
   "engines": {
-    "node": ">=26"
+    "node": "26.x"
   },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
@@ -19,25 +19,25 @@
     "build": "tsc --noEmit && vite build && node scripts/js-budget.mjs"
   },
   "dependencies": {
-    "@tanstack/react-query": "5.104.0",
-    "@ziyixi/proto": "file:../../proto/ts",
-    "lucide-react": "1.48.0",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "react-router": "7.18.4"
+    "@tanstack/react-query": "catalog:",
+    "@ziyixi/proto": "workspace:*",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-router": "catalog:"
   },
   "devDependencies": {
-    "@testing-library/dom": "10.4.2",
-    "@testing-library/jest-dom": "6.10.0",
-    "@testing-library/react": "16.3.3",
-    "@testing-library/user-event": "14.6.7",
-    "@types/node": "26.6.3",
-    "@types/react": "19.3.0",
-    "@types/react-dom": "19.3.0",
-    "@vitejs/plugin-react": "5.2.0",
-    "jsdom": "27.4.0",
-    "typescript": "5.9.3",
-    "vite": "7.3.6",
-    "vitest": "4.1.11"
+    "@testing-library/dom": "catalog:",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
   }
 }

@@ -3,23 +3,22 @@ description: "check-contracts; called by the repository workflow."
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+    - name: Install the selected Node workspaces
+      uses: ./.github/actions/setup-workspace
       with:
-        node-version: '26'
-        cache: npm
-        cache-dependency-path: |
-          mail-hero/cloudflare/package-lock.json
-          todofy/gateway/package-lock.json
-          dashboard/worker/package-lock.json
-          watch/worker/package-lock.json
-          fleet/worker/package-lock.json
-          mailsort/worker/package-lock.json
-          recall/worker/package-lock.json
-          proto/package-lock.json
+        root: .
+        filters: 'mail-hero-native... todofy... todofy-gateway... home-dashboard-worker... watch-worker... fleet-worker... mailsort-worker... recall-worker...'
     - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
         version: '0.12.10'
-        working-directory: todofy
+        cache-dependency-glob: |
+          uv.lock
+          pyproject.toml
+          .python-version
+          **/pyproject.toml
+          todofy/pylock.toml
+        cache-suffix: todofy
+        working-directory: .
         enable-cache: true
     # ops-v1's JSON Schema is generated from proto/ops/v1/ops.proto: a hand edit, or an IDL change without
     # `npm run schema`, fails here (the Python steps below give every fixture the reference validator's verdict on it).
@@ -27,7 +26,6 @@ runs:
       working-directory: proto
       shell: bash -e {0}
       run: |
-        npm ci --no-audit --no-fund
         npm run check:schema
     # Producer: Mail Hero's parser and payload builder (the generated mail.received.v1 message, written by the wire
     # codec) must still emit every golden fixture byte for byte; the generated schema's "not blank" differs from the
@@ -38,7 +36,6 @@ runs:
       working-directory: mail-hero/cloudflare
       shell: bash -e {0}
       run: |
-        npm ci
         node --test test/contract-fixtures.test.mjs test/contract-schema-dialect.test.mjs test/ops-golden.test.mjs test/native-ops.test.mjs
     # Consumer: Todofy validates every fixture (current and legacy) against the schema and parses it with the generated
     # codec; the generated mail.received.v1 schema gives the frozen hand-written one's verdict, and the parser the frozen
@@ -51,8 +48,8 @@ runs:
       working-directory: todofy
       shell: bash -e {0}
       run: |
-        uv sync --locked
-        uv run pytest tests/unit/test_mail_hero_compat.py tests/unit/test_contract.py tests/unit/test_machine_api.py \
+        uv sync --locked --package todofy
+        uv run --locked --package todofy pytest tests/unit/test_mail_hero_compat.py tests/unit/test_contract.py tests/unit/test_machine_api.py \
           tests/unit/test_mail_received_schema_legacy.py tests/unit/test_mail_received_parser_legacy.py \
           tests/unit/test_ops_contract.py tests/unit/test_ops_core.py tests/unit/test_ops_golden.py \
           tests/unit/test_report_wire.py tests/unit/test_report_schemas.py tests/unit/test_report_schema_legacy.py
@@ -62,7 +59,6 @@ runs:
       working-directory: todofy/gateway
       shell: bash -e {0}
       run: |
-        npm ci --no-audit --no-fund
         npx --no-install vitest run test/ops.test.ts
     # Caller: the dashboard calls only the methods of each app's generated ops-v1 services, handles every
     # declared error code plus timeouts and invalid output, accepts the valid fixtures and refuses the
@@ -73,7 +69,6 @@ runs:
       working-directory: dashboard/worker
       shell: bash -e {0}
       run: |
-        npm ci --no-audit --no-fund
         npx --no-install vitest run test/ops-client.test.ts test/ops-golden.test.ts test/guard.test.ts test/canary.test.ts test/digest.test.ts
     # ops-v1: the watch app's status and guard answers keep their golden bytes and the contract's watch fixtures, pass
     # the generated schema, and carry counts and codes only. Host only; Watch checks runs the Ops entrypoint over a
@@ -82,7 +77,6 @@ runs:
       working-directory: watch/worker
       shell: bash -e {0}
       run: |
-        npm ci --no-audit --no-fund
         npx --no-install vitest run test/ops-golden.test.ts
 
     # ops-v1: mailsort's status and guard answers keep their golden bytes and the contract's mailsort fixtures, pass the
@@ -91,7 +85,6 @@ runs:
       working-directory: mailsort/worker
       shell: bash -e {0}
       run: |
-        npm ci --no-audit --no-fund
         npx --no-install vitest run test/ops-golden.test.ts
 
     # ops-v1: recall's status answers keep their golden bytes and the contract's recall fixtures, pass the generated
@@ -100,7 +93,6 @@ runs:
       working-directory: recall/worker
       shell: bash -e {0}
       run: |
-        npm ci --no-audit --no-fund
         npx --no-install vitest run test/ops-golden.test.ts
 
     # Both ends of the signed content-free report validate the synthetic telemetry contract.
@@ -109,5 +101,4 @@ runs:
       working-directory: fleet/worker
       shell: bash -e {0}
       run: |
-        npm ci --no-audit --no-fund
         npm test -- --run test/report.test.ts

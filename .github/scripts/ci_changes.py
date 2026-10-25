@@ -205,6 +205,11 @@ INFRA = ("infra/", "tools/infra-plan-summary/")
 # These are source inputs to checked generators, not deployable Worker bundles. Generated app source changes are
 # classified through their own app directory; editing the central inputs alone cannot publish production.
 CLOUD_CONFIG = {"config/cloud.toml", "config/resources.toml", "config/account-resources.toml"}
+# Both package managers share one root lock. These inputs can change every member's resolved dependencies,
+# including the Node toolchain that generates the Python proto package before its image build.
+NODE_WORKSPACE_INPUTS = {"package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml"}
+PYTHON_WORKSPACE_INPUTS = {"pyproject.toml", "uv.lock", ".python-version"}
+PYTHON_WORKSPACE_APPS = {"newsletter", "codex-gateway", "platform", "todofy"}
 # Reviewed test directories outside production entrypoints and image inputs. Do not replace this with
 # a filename glob: fixtures and files named "test" inside production source can be shipped. Newsletter's
 # Docker COPY/.dockerignore and Platform's minimal context exclude their tests; Todofy's Python base_dir
@@ -231,7 +236,7 @@ APP_TEST_DIRECTORIES = (
     "personal-mcp/worker/test/",
     "personal-mcp/deploy/test/",
 )
-# packages/<name>/ -> the apps whose Workers compile it in (a "file:../../packages/<name>" dependency).
+# packages/<name>/ -> the apps whose Workers compile its workspace dependency in.
 PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
@@ -471,6 +476,11 @@ def proto_users(paths: list[str]) -> tuple[set[str], set[str]]:
 def classify(paths: Iterable[str]) -> dict[str, bool]:
     paths = [path for path in paths if path]
     apps = {app for app in APPS if any(path.startswith(f"{app}/") for path in paths)}
+    # ensure.mjs uses the shared Python interpreter to generate code for every Node consumer too.
+    node_workspace = bool(NODE_WORKSPACE_INPUTS.intersection(paths)) or ".python-version" in paths
+    python_workspace = bool(PYTHON_WORKSPACE_INPUTS.intersection(paths))
+    workspace_apps = (set(PROTO_USERS) if node_workspace else set()) | (PYTHON_WORKSPACE_APPS if python_workspace else set())
+    apps.update(workspace_apps)
     # A Newsletter release also tests and publishes the independent monitor image from this source SHA.
     if "newsletter" in apps:
         apps.add("platform")
@@ -478,6 +488,7 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     direct_deploys = {app for app in apps if any(path.startswith(f"{app}/") and path != f"{app}/app.toml"
                        and not path.startswith(APP_TEST_DIRECTORIES)
                        and not (app in {"newsletter", "platform", "codex-gateway"} and path.endswith(".md")) for path in paths)}
+    direct_deploys.update(workspace_apps)
     if "newsletter" in direct_deploys:
         direct_deploys.add("platform")
     # This shared promotion tool owns both tested-image publications. Its executable changes need fresh tested
@@ -501,8 +512,8 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     bundled = {app for path in paths for app in BUNDLED_BY.get(path, ())}
     # website/relay/ is its own Worker: it deploys itself, not the site (unless the site's own files, or a
     # package counted as used by it, changed too).
-    relay = any(path.startswith(RELAY) for path in paths)
-    site = any(path.startswith("website/") and not path.startswith(RELAY) for path in paths)
+    relay = node_workspace or any(path.startswith(RELAY) for path in paths)
+    site = node_workspace or any(path.startswith("website/") and not path.startswith(RELAY) for path in paths)
     site |= any("website" in PACKAGE_USERS.get(name, APPS) for name in compiled)
     proto_checked, proto_deployed = proto_users(paths)
     package_deploys = {app for name in compiled for app in PACKAGE_USERS.get(name, APPS)}
@@ -514,11 +525,11 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
         checked=APPS if shared else apps | documented | proto_checked,
         deployed=deployed,
         contracts=bool((apps - NO_CONTRACTS) | documented | proto_checked) or shared,
-        packages=bool(package_names) or ci,
+        packages=bool(package_names) or ci or node_workspace,
         relay=relay,
         infra=any(path.startswith((".github/", *INFRA)) for path in paths),
-        proto=ci or bool(proto_checked) or any(path.startswith(PROTO_READS) for path in paths),
-        extension=any(path.startswith(EXTENSION) for path in paths),
+        proto=ci or node_workspace or python_workspace or bool(proto_checked) or any(path.startswith(PROTO_READS) for path in paths),
+        extension=node_workspace or any(path.startswith(EXTENSION) for path in paths),
     )
 
 

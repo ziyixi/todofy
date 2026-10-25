@@ -77,6 +77,33 @@ def test_runtime_environment_does_not_invent_missing_system_keys():
     )
 
 
+@pytest.mark.parametrize(
+    "versions",
+    [
+        {},
+        {"openai-codex": "1.2.3", "openai-codex-cli-bin": "1.2.4"},
+    ],
+)
+def test_optional_sdk_load_rejects_missing_or_mismatched_runtime(
+    monkeypatch, versions
+):
+    def version(name):
+        if name not in versions:
+            raise codex_runtime.metadata.PackageNotFoundError(name)
+        return versions[name]
+
+    def unexpected_import(_):
+        raise AssertionError("Do not load a missing or mismatched SDK")
+
+    monkeypatch.setattr(codex_runtime.metadata, "version", version)
+    monkeypatch.setattr(
+        codex_runtime.importlib, "import_module", unexpected_import
+    )
+    with pytest.raises(errors.EditorError) as error:
+        codex_runtime.load_sdk()
+    assert error.value.code == "configuration"
+
+
 def test_sdk_overlay_then_final_environment_does_not_mutate_parent(
     monkeypatch, parent_environment
 ):

@@ -10,38 +10,34 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+    - name: Install the selected Node workspaces
+      uses: ./.github/actions/setup-workspace
       with:
-        node-version-file: todofy/.nvmrc
-        cache: npm
-        cache-dependency-path: |
-          todofy/package-lock.json
-          todofy/gateway/package-lock.json
-          todofy/web/package-lock.json
-          proto/package-lock.json
+        root: .
+        filters: 'todofy... todofy-gateway... todofy-web...'
     - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
         version: '0.12.10'
-        working-directory: todofy
-        enable-cache: true
-        # pylock.toml pins the Workers SDK that `pywrangler sync` installs through uv.
         cache-dependency-glob: |
           uv.lock
           pyproject.toml
-          pylock.toml
+          .python-version
+          **/pyproject.toml
+          todofy/pylock.toml
+        cache-suffix: todofy
+        working-directory: .
+        enable-cache: true
+        # pylock.toml pins the Workers SDK that `pywrangler sync` installs through uv.
     # The tests serve the real UI build (without it the harness would serve a placeholder page), and
     # the gateway's own dependencies are bundled into every test server.
     - name: Install locked dependencies and build the UI the tests serve
       working-directory: todofy
       shell: bash -e {0}
       run: |
-        npm ci --no-audit --no-fund
-        uv sync --locked
-        npm ci --prefix gateway --no-audit --no-fund
-        npm ci --prefix web --no-audit --no-fund
+        uv sync --locked --package todofy
         npm run build --prefix web
     # The Pyodide bundle workerd downloads (~14 MB) into the harness's disk cache. Exact key, no
-    # restore-keys: a hit is a directory saved by a passing shard of the same workerd (package-lock), the
+    # restore-keys: a hit is a directory saved by a passing shard of the same workerd (root pnpm lock), the
     # same launcher (harness.py) and the same test configs, so test_routing's cached-bundle check means
     # what it means on a cold cache. On a miss, the next step downloads it through that launcher and
     # fails if the launcher did not cache it. Only the runtime shards use this cache; no deploy does.
@@ -49,19 +45,19 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: todofy/.wrangler/pyodide-cache
-        key: todofy-pyodide-${{ runner.os }}-${{ hashFiles('todofy/package-lock.json', 'todofy/tests/runtime/harness.py', 'todofy/wrangler.test.toml', 'todofy/gateway/wrangler.test*.toml') }}
+        key: todofy-pyodide-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'todofy/tests/runtime/harness.py', 'todofy/wrangler.test.toml', 'todofy/gateway/wrangler.test*.toml') }}
     # Once, before the pytest-xdist processes start: `pywrangler sync` (the vendored python_modules/
     # every server shares) and one server start and stop through the harness, so the Pyodide bundle is
     # in the disk cache (up to 3 tries; a slow download is not a test failure). It runs no test.
     - name: Prepare the test servers
       working-directory: todofy
       shell: bash -e {0}
-      run: uv run python -m tests.runtime.warm_up
+      run: uv run --locked --package todofy python -m tests.runtime.warm_up
     - name: Plan this shard
       working-directory: todofy
       shell: bash -e {0}
       run: |
-        uv run pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"
+        uv run --locked --package todofy pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"
         python3 ../.github/scripts/pytest_shards.py --collected "$RUNNER_TEMP/collected.txt" \
           --durations ../.github/scripts/todofy-runtime-durations.json --workers 4 \
           --serial ../.github/scripts/todofy-runtime-serial.txt --serial-out "$RUNNER_TEMP/serial-files.txt" \
@@ -80,12 +76,12 @@ runs:
       run: |
         mkdir -p "$RUNNER_TEMP/junit"
         status=0
-        uv run pytest -n 4 --dist loadfile --no-loadscope-reorder -o junit_family=xunit2 \
+        uv run --locked --package todofy pytest -n 4 --dist loadfile --no-loadscope-reorder -o junit_family=xunit2 \
           --junitxml="$RUNNER_TEMP/junit/runtime-${{ inputs.shard-index }}.xml" \
           --basetemp="$RUNNER_TEMP/pytest" $(cat "$RUNNER_TEMP/shard-files.txt") || status=$?
         # Guarded: pytest without paths would run every testpath.
         if [ -s "$RUNNER_TEMP/serial-files.txt" ]; then
-          uv run pytest -o junit_family=xunit2 \
+          uv run --locked --package todofy pytest -o junit_family=xunit2 \
             --junitxml="$RUNNER_TEMP/junit/runtime-${{ inputs.shard-index }}-serial.xml" \
             --basetemp="$RUNNER_TEMP/pytest-serial" $(cat "$RUNNER_TEMP/serial-files.txt") || status=$?
         fi

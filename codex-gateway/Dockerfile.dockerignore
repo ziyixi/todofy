@@ -1,7 +1,15 @@
 **
+!pyproject.toml
+!uv.lock
+!.python-version
+!newsletter/
+!newsletter/pyproject.toml
+!platform/
+!platform/pyproject.toml
+!todofy/
+!todofy/pyproject.toml
 !codex-gateway/
 !codex-gateway/pyproject.toml
-!codex-gateway/uv.lock
 !codex-gateway/src/
 !codex-gateway/src/**
 !proto/

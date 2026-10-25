@@ -3,12 +3,12 @@
 python3 -m unittest discover -s .github/scripts (the Changes job, every push, which Proto checks needs). Standard
 library only.
 
-- One version: buf, protoc-gen-es and the protobuf-es runtime are pinned exactly, in proto/package.json and
-  its lockfile only; the runtime equals the generator's version and is installed once. No app has its own
+- One version: buf, protoc-gen-es and the protobuf-es runtime use exact root catalog versions and one
+  workspace lock; the runtime equals the generator's version. No app has its own
   @bufbuild/protobuf: apps import the runtime from @ziyixi/proto/protobuf, which resolves proto's copy, so
   every bundle holds exactly the runtime the generator targets.
-- Wiring: every TypeScript user depends on "file:<...>/proto/ts" and runs proto/tools/ensure.mjs as its
-  postinstall; every Python user takes ziyixi-proto from proto/python as a non-editable path source.
+- Wiring: every TypeScript user links @ziyixi/proto with workspace:* and runs proto/tools/ensure.mjs as its
+  postinstall; every Python user takes ziyixi-proto from the root workspace as a non-editable source.
 - Freshness: every npm script that compiles, tests, type-aware lints, bundles or serves the generated code (tsc,
   vitest, eslint, wrangler, vite) in a TypeScript user, or in a package whose sources import a user's sources, runs
   ensure.mjs first as its pre-script, so a pull or branch switch that changes a .proto file cannot leave stale
@@ -36,6 +36,8 @@ import subprocess
 import sys
 import unicodedata
 import unittest
+
+import yaml
 from pathlib import Path
 
 try:
@@ -45,7 +47,7 @@ except ModuleNotFoundError:
         raise
     raise unittest.SkipTest(
         f"test_proto needs Python 3.11+ (tomllib), this is {sys.version.split()[0]}: "
-        "uv run --no-project --python 3.12 --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts"
+        "uv run --locked --only-group ci python -m unittest discover -s .github/scripts"
     ) from None
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -78,7 +80,7 @@ def tracked(pattern: str) -> list[Path]:
         check=True,
         capture_output=True,
     ).stdout.decode()
-    return [REPO / name for name in out.split("\0") if name and not SKIP_PARTS & set(Path(name).parts)]
+    return [REPO / name for name in out.split("\0") if name and (REPO / name).is_file() and not SKIP_PARTS & set(Path(name).parts)]
 
 
 def app_of(path: Path) -> str:
@@ -86,7 +88,7 @@ def app_of(path: Path) -> str:
 
 
 def consuming_apps(manifest: Path) -> set[str]:
-    """A shared package's descriptors ship in its file: consumers, not in a separate deployed app."""
+    """A shared package's descriptors ship in its workspace consumers, not a separate deployed app."""
     if app_of(manifest) != "packages":
         return {app_of(manifest)}
     result = set()
@@ -247,40 +249,40 @@ def py_bundled(data: dict) -> bool:
 class OneVersion(unittest.TestCase):
     def setUp(self):
         self.manifest = json.loads((PROTO / "package.json").read_text())
-        self.lock = json.loads((PROTO / "package-lock.json").read_text())
+        self.catalog = yaml.safe_load((REPO / "pnpm-workspace.yaml").read_text())["catalog"]
+        self.lock = yaml.safe_load((REPO / "pnpm-lock.yaml").read_text())
 
-    def test_the_toolchain_is_pinned_exactly_in_proto_only(self):
+    def test_the_toolchain_is_pinned_in_the_shared_catalog(self):
         pins = self.manifest["dependencies"]
         for name in TOOLCHAIN:
             with self.subTest(package=name):
-                self.assertRegex(pins.get(name, ""), EXACT, f"{name} must be an exact version in proto/package.json")
-                self.assertEqual(self.lock["packages"][f"node_modules/{name}"]["version"], pins[name])
-        self.assertEqual(self.lock["packages"][""]["dependencies"], pins)
+                self.assertEqual(pins[name], "catalog:")
+                self.assertRegex(self.catalog[name], rf"^{EXACT.pattern}$")
+                self.assertEqual(self.lock["catalogs"]["default"][name]["version"], self.catalog[name])
+                self.assertEqual(self.lock["importers"]["proto"]["dependencies"][name]["version"].split("(", 1)[0], self.catalog[name])
 
     def test_the_runtime_is_the_generators_version(self):
-        pins = self.manifest["dependencies"]
-        self.assertEqual(pins[RUNTIME], pins["@bufbuild/protoc-gen-es"])
-        generator = self.lock["packages"]["node_modules/@bufbuild/protoc-gen-es"]
-        self.assertEqual(generator["dependencies"][RUNTIME], pins[RUNTIME])
+        self.assertEqual(self.catalog[RUNTIME], self.catalog["@bufbuild/protoc-gen-es"])
+        version = self.lock["importers"]["proto"]["dependencies"]["@bufbuild/protoc-gen-es"]["version"]
+        generator = self.lock["snapshots"]["@bufbuild/protoc-gen-es@" + version]
+        dependencies = {**generator.get("dependencies", {}), **generator.get("optionalDependencies", {})}
+        self.assertEqual(dependencies[RUNTIME], self.catalog[RUNTIME])
 
-    def test_the_runtime_is_installed_once(self):
-        copies = [
-            key
-            for key in self.lock["packages"]
-            if key == f"node_modules/{RUNTIME}" or key.endswith(f"/node_modules/{RUNTIME}")
-        ]
-        self.assertEqual(copies, [f"node_modules/{RUNTIME}"])
+    def test_the_lock_has_one_runtime_version(self):
+        copies = [key for key in self.lock["packages"] if key.startswith(RUNTIME + "@")]
+        self.assertEqual(copies, [RUNTIME + "@" + self.catalog[RUNTIME]])
+        runtime = self.lock["importers"]["proto/ts"]["dependencies"][RUNTIME]
+        self.assertEqual(runtime, {"specifier": "catalog:", "version": self.catalog[RUNTIME]})
 
     def test_no_app_has_its_own_runtime_or_generator(self):
-        """An app's own copy would be a second runtime in its bundle, at a version nobody checks."""
-        for path in [*tracked("*package.json"), *tracked("*package-lock.json")]:
+        """Only proto owns the runtime; applications import it through @ziyixi/proto/protobuf."""
+        for path in tracked("*package.json"):
             if app_of(path) == "proto":
                 continue
             with self.subTest(file=str(path.relative_to(REPO))):
                 text = path.read_text()
                 for name in TOOLCHAIN:
                     self.assertNotIn(f'"{name}"', text, f"import it from {TS_PACKAGE}/protobuf instead")
-                    self.assertNotIn(f"node_modules/{name}", text)
 
 
 class ApiLinter(unittest.TestCase):
@@ -346,63 +348,30 @@ class Users(unittest.TestCase):
     def test_typescript_users_link_the_package_and_generate_on_install(self):
         users = ts_users()
         self.assertTrue(users, "no TypeScript user of @ziyixi/proto")
+        lock = yaml.safe_load((REPO / "pnpm-lock.yaml").read_text())
         for manifest, data in users.items():
             with self.subTest(manifest=str(manifest.relative_to(REPO))):
                 spec = data.get("dependencies", {}).get(TS_PACKAGE) or data["devDependencies"][TS_PACKAGE]
-                self.assertTrue(spec.startswith("file:"), spec)
-                self.assertEqual((manifest.parent / spec.removeprefix("file:")).resolve(), PROTO / "ts")
+                self.assertEqual(spec, "workspace:*")
                 postinstall = data.get("scripts", {}).get("postinstall", "")
                 match = re.fullmatch(r"node (\S+/tools/ensure\.mjs)", postinstall)
                 self.assertIsNotNone(
                     match, f"postinstall must be exactly `node <...>/proto/tools/ensure.mjs`: {postinstall!r}"
                 )
-                self.assertEqual((manifest.parent / match.group(1)).resolve(), PROTO / "tools" / "ensure.mjs")
-                if data.get("packageManager", "").startswith("pnpm@"):
-                    # pnpm file: copies a package; the explicit native override must keep generated sources
-                    # and the one runtime in proto/'s canonical tree, as npm's file: symlink does.
-                    target = "link:" + spec.removeprefix("file:")
-                    workspace = (manifest.parent / "pnpm-workspace.yaml").read_text()
-                    self.assertRegex(workspace, rf"(?m)^overrides:\n  ['\"]?{re.escape(TS_PACKAGE)}['\"]?: ['\"]?{re.escape(target)}['\"]?$")
-                    lock = (manifest.parent / "pnpm-lock.yaml").read_text()
-                    importer = lock.split("\nimporters:\n", 1)[1].split("\npackages:\n", 1)[0]
-                    dependency = re.search(rf"(?m)^      ['\"]{re.escape(TS_PACKAGE)}['\"]:\n        specifier: ([^\n]+)\n        version: ([^\n]+)$", importer)
-                    self.assertIsNotNone(dependency, "the pnpm importer must lock the shared proto dependency")
-                    self.assertEqual(dependency.group(1), target)
-                    self.assertEqual(dependency.group(2), target)
-                    self.assertNotIn(f"{TS_PACKAGE}@file:", lock, "pnpm must not copy the canonical proto package")
-                else:
-                    lock = json.loads((manifest.parent / "package-lock.json").read_text())
-                    self.assertEqual(
-                        lock["packages"][f"node_modules/{TS_PACKAGE}"],
-                        {"resolved": spec.removeprefix("file:"), "link": True},
-                    )
+                self.assertEqual((manifest.parent / match.group(1)).resolve(), ENSURE)
+                importer = lock["importers"][manifest.parent.relative_to(REPO).as_posix()]
+                dependencies = {**importer.get("dependencies", {}), **importer.get("devDependencies", {})}
+                dependency = dependencies[TS_PACKAGE]
+                self.assertEqual(dependency["specifier"], "workspace:*")
+                self.assertTrue(dependency["version"].startswith("link:"))
+                self.assertEqual((manifest.parent / dependency["version"].removeprefix("link:")).resolve(), PROTO / "ts")
 
-    def test_jobs_that_install_a_user_key_their_npm_cache_on_the_proto_lockfile(self):
-        """Installing a TypeScript user runs proto/tools/ensure.mjs, which installs proto/'s own packages: a job whose npm
-        cache is keyed on a user's lockfile must also key it on proto/package-lock.json, or a proto lockfile change
-        restores a stale cache and downloads proto's packages on every run."""
-        user_locks = {str((manifest.parent / "package-lock.json").relative_to(REPO)) for manifest in ts_users()}
-        lines = effective_ci().splitlines()
-        blocks = []
-        for index, line in enumerate(lines):
-            key, _, value = line.strip().partition("cache-dependency-path:")
-            if key != "" or not _:
-                continue
-            if value.strip() not in ("|", ""):
-                blocks.append((index + 1, {value.strip()}))
-                continue
-            indent = len(line) - len(line.lstrip())
-            paths = set()
-            for follow in lines[index + 1 :]:
-                if not follow.strip() or len(follow) - len(follow.lstrip()) <= indent:
-                    break
-                paths.add(follow.strip())
-            blocks.append((index + 1, paths))
-        self.assertTrue(blocks, "no cache-dependency-path in ci.yml")
-        for line_number, paths in blocks:
-            if paths & user_locks:
-                with self.subTest(line=line_number):
-                    self.assertIn("proto/package-lock.json", paths, sorted(paths))
+    def test_the_workspace_install_caches_the_shared_root_lock(self):
+        action = (REPO / ".github/actions/setup-workspace/action.yml").read_text()
+        self.assertIn("/pnpm-lock.yaml", action)
+        self.assertIn("pnpm \"${args[@]}\" install --frozen-lockfile", action)
+        self.assertIn("--filter @ziyixi/proto-toolchain", action)
+        self.assertFalse(tracked("*package-lock.json"))
 
     def test_scripts_that_read_the_generated_code_regenerate_it_first(self):
         users = ts_users()
@@ -449,19 +418,20 @@ class Users(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertNotRegex(command, READS_GENERATED)
 
-    def test_python_users_build_the_package_from_proto_not_editable(self):
+    def test_python_users_build_the_shared_workspace_package_not_editable(self):
         users = py_users()
         self.assertTrue(users, "no Python user of ziyixi-proto")
+        workspace = tomllib.loads((REPO / "pyproject.toml").read_text())["tool"]["uv"]
+        self.assertEqual(workspace["sources"][PY_PACKAGE], {"workspace": True, "editable": False})
+        self.assertIn("proto/python", workspace["workspace"]["members"])
+        lock = tomllib.loads((REPO / "uv.lock").read_text())
+        package = next(package for package in lock["package"] if package["name"] == PY_PACKAGE)
+        self.assertEqual(package["source"], {"directory": "proto/python"})
         for pyproject, data in users.items():
             with self.subTest(pyproject=str(pyproject.relative_to(REPO))):
-                source = data["tool"]["uv"]["sources"][PY_PACKAGE]
-                # pywrangler vendors [project] dependencies from this same source: a Worker needs the files.
-                self.assertEqual(set(source), {"path"}, "a plain path source: not editable, no other keys")
-                self.assertEqual((pyproject.parent / source["path"]).resolve(), PROTO / "python")
-                lock = (pyproject.parent / "uv.lock").read_text()
-                self.assertIn(
-                    f'name = "{PY_PACKAGE}"\nversion = "0.0.0"\nsource = {{ directory = "{source["path"]}" }}', lock
-                )
+                self.assertIn(pyproject.parent.relative_to(REPO).as_posix(), workspace["workspace"]["members"])
+                self.assertNotIn(PY_PACKAGE, data.get("tool", {}).get("uv", {}).get("sources", {}))
+                self.assertFalse((pyproject.parent / "uv.lock").exists())
 
     def test_a_python_worker_regenerates_when_its_node_toolchain_installs(self):
         """pywrangler vendors ziyixi-proto from proto/'s source tree inside Pyodide, which cannot generate,
@@ -516,7 +486,8 @@ class Users(unittest.TestCase):
         platform = REPO / "platform/pyproject.toml"
         data = tomllib.loads(platform.read_text())
         self.assertTrue(py_bundled(data))
-        self.assertEqual(data["tool"]["uv"]["sources"][PY_PACKAGE], {"path": "../proto/python"})
+        workspace = tomllib.loads((REPO / "pyproject.toml").read_text())["tool"]["uv"]
+        self.assertEqual(workspace["sources"][PY_PACKAGE], {"workspace": True, "editable": False})
         self.assertEqual(data["project"]["scripts"]["personal-cloud"], "personal_cloud.__main__:main")
         self.assertFalse((platform.parent / "wrangler.toml").exists())
         self.assertTrue(all(source.is_relative_to(platform.parent / "src") for source in py_production_sources(platform)))

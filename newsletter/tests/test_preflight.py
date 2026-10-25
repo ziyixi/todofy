@@ -673,10 +673,17 @@ async def test_modified_proto_fails_before_any_provider(settings, monkeypatch):
         await preflight.preflight(settings)
 
 
-async def test_dependency_version_drift_fails_before_any_provider(
+async def test_unsatisfied_installed_requirement_fails_before_any_provider(
     settings, monkeypatch
 ):
-    monkeypatch.setattr(metadata, "version", lambda _: "0.0.0")
+    distribution = metadata.distribution
+
+    def declared_requirements(name):
+        if name == "personal-newsletter":
+            return types.SimpleNamespace(requires=["fastapi>=999"])
+        return distribution(name)
+
+    monkeypatch.setattr(metadata, "distribution", declared_requirements)
     with pytest.raises(
         preflight.PreflightError, match="DEPENDENCY_VERSION_MISMATCH"
     ):

@@ -41,7 +41,7 @@ synchronize task stores or own server state. CSS is compiled into Tasks and scop
 `.planning-ui`; Tasks' layout owns the outer width and spacing. The mini timer's own stylesheet
 (`src/mini-timer.css`) goes only into its window, with the page's computed tokens.
 
-Run `npm ci`, `npm run typecheck` and `npm test`. The unit suite in `test/` covers the components, the
+Run `pnpm install --frozen-lockfile`, `pnpm run typecheck` and `pnpm test`. The unit suite in `test/` covers the components, the
 domain rules and the API mapping over a fake transport; Tasks' Playwright journeys
 (`tasks/web/test/browser/planning-*.spec.ts`) cover them in the browser. The behaviour and the API used
 for each operation are described in [docs/interface.md](docs/interface.md).

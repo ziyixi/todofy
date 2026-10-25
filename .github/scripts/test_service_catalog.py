@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 if sys.version_info < (3, 11) and os.environ.get("GITHUB_ACTIONS") != "true":
-    raise unittest.SkipTest("The service catalog requires Python 3.11+; use uv run --no-project --python 3.12")
+    raise unittest.SkipTest("The service catalog requires Python 3.11+; use uv run --locked --only-group ci python")
 
 
 def load_tests(loader, tests, pattern):

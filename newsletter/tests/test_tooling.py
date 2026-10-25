@@ -16,15 +16,18 @@ import urllib.parse as parse
 import tests.support.workflows as workflows
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+WORKSPACE = ROOT.parent
 
 
-def read_config(name: str) -> dict:
-    return tomllib.loads((ROOT / name).read_text())
+def read_config(name: str, root: pathlib.Path = ROOT) -> dict:
+    return tomllib.loads((root / name).read_text())
 
 
 def test_uv_is_the_only_lock_and_direct_pins_match_resolution():
     project = read_config("pyproject.toml")
-    lock = read_config("uv.lock")
+    workspace = read_config("pyproject.toml", WORKSPACE)
+    lock = read_config("uv.lock", WORKSPACE)
+    assert not (ROOT / "uv.lock").exists()
     assert not (ROOT / "requirements.lock").exists()
     assert "dev" not in project["project"].get("optional-dependencies", {})
     assert "codex" in project["project"]["optional-dependencies"]
@@ -37,13 +40,18 @@ def test_uv_is_the_only_lock_and_direct_pins_match_resolution():
     resolved = {
         (package["name"], package["version"]) for package in lock["package"]
     }
-    for requirement in declared:
-        name, version = requirement.split("==")
+    constraints = dict(
+        item.split("==")
+        for item in workspace["tool"]["uv"]["constraint-dependencies"]
+    )
+    for name in declared:
+        assert re.fullmatch(r"[A-Za-z0-9_.-]+", name)
+        version = constraints[name]
         assert (re.sub(r"[-_.]+", "-", name.lower()), version) in resolved
 
 
 def test_registry_artifacts_are_hash_locked():
-    for package in read_config("uv.lock")["package"]:
+    for package in read_config("uv.lock", WORKSPACE)["package"]:
         if "registry" not in package["source"]:
             continue
         artifacts = [*package.get("wheels", [])]
@@ -57,11 +65,11 @@ def test_registry_artifacts_are_hash_locked():
 
 
 def test_python_and_uv_versions_are_shared_by_local_ci_and_docker():
-    project = read_config("pyproject.toml")
-    python_version = (ROOT / ".python-version").read_text().strip()
-    assert re.fullmatch(r"3\.12\.\d+", python_version)
-    assert project["project"]["requires-python"] == ">=3.12,<3.13"
-    assert read_config("uv.lock")["requires-python"] == "==3.12.*"
+    project = read_config("pyproject.toml", WORKSPACE)
+    python_version = (WORKSPACE / ".python-version").read_text().strip()
+    assert re.fullmatch(r"3\.14\.\d+", python_version)
+    assert project["project"]["requires-python"] == ">=3.14,<3.15"
+    assert read_config("uv.lock", WORKSPACE)["requires-python"] == "==3.14.*"
     uv_version = project["tool"]["uv"]["required-version"].removeprefix("==")
     assert re.fullmatch(r"\d+\.\d+\.\d+", uv_version)
 
@@ -77,7 +85,7 @@ def test_python_and_uv_versions_are_shared_by_local_ci_and_docker():
         for step in steps
         if step.get("uses", "").startswith("astral-sh/setup-uv@")
     )
-    assert uv["with"]["working-directory"] == "newsletter"
+    assert uv["with"].get("working-directory", ".") == "."
     assert uv["with"]["version"] == uv_version
 
 
@@ -96,10 +104,14 @@ def test_mypy_checks_service_without_vendoring_proto_artifacts():
 
 
 def test_public_proto_uses_a_hash_locked_github_release_not_local_source():
-    project = read_config("pyproject.toml")
+    project = read_config("pyproject.toml", WORKSPACE)
+    assert (
+        "ziyixi-protos"
+        in read_config("pyproject.toml")["project"]["dependencies"]
+    )
     declaration = next(
         item
-        for item in project["project"]["dependencies"]
+        for item in project["tool"]["uv"]["constraint-dependencies"]
         if item.startswith("ziyixi-protos==")
     )
     package_version = declaration.split("==", 1)[1]
@@ -114,7 +126,7 @@ def test_public_proto_uses_a_hash_locked_github_release_not_local_source():
     assert not url.username and not url.password and not url.query
     locked = next(
         item
-        for item in read_config("uv.lock")["package"]
+        for item in read_config("uv.lock", WORKSPACE)["package"]
         if item["name"] == "ziyixi-protos"
     )
     assert locked["version"] == package_version
@@ -144,7 +156,7 @@ def test_make_has_one_locked_install_and_shared_quality_gate():
 def test_docker_context_only_allows_build_inputs():
     rules = [
         line.strip()
-        for line in (ROOT / ".dockerignore").read_text().splitlines()
+        for line in (ROOT / "Dockerfile.dockerignore").read_text().splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
     assert rules[0] == "**"
@@ -154,11 +166,21 @@ def test_docker_context_only_allows_build_inputs():
         "pyproject.toml",
         "uv.lock",
         ".python-version",
-        "MANIFEST.in",
-        "Dockerfile",
-        "src/",
-        "src/newsletter/",
-        "src/newsletter/**",
+        "codex-gateway/",
+        "codex-gateway/pyproject.toml",
+        "platform/",
+        "platform/pyproject.toml",
+        "todofy/",
+        "todofy/pyproject.toml",
+        "proto/",
+        "proto/python/",
+        "proto/python/pyproject.toml",
+        "newsletter/",
+        "newsletter/pyproject.toml",
+        "newsletter/MANIFEST.in",
+        "newsletter/src/",
+        "newsletter/src/newsletter/",
+        "newsletter/src/newsletter/**",
     }
     assert "**/__pycache__/" in rules and "**/*.pyc" in rules
 
@@ -175,7 +197,8 @@ def test_docker_installs_locked_production_environment_and_starts_directly():
             for option in ("--locked", "--no-dev", "--extra codex")
         )
         # A dependency-cache stage may deliberately omit the project entirely.
-        assert "--no-install-project" in line or "--no-editable" in line
+        assert "--no-install-workspace" in line or "--no-editable" in line
+        assert "--package personal-newsletter" in line
     assert "--no-editable" in install_lines[-1]
     runtime = re.split(r"(?im)^FROM ", dockerfile)[-1]
     assert re.search(r"(?m)^USER (?!root\b|0\b)\S+", runtime)

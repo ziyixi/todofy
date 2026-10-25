@@ -1,8 +1,0 @@
-# Keep the one proto toolchain/runtime in the parent directory; file: remains the manifest contract.
-overrides:
-  "@ziyixi/proto": "link:../proto/ts"
-# Native binaries from the pinned registry packages used by Next.js and Wrangler.
-allowBuilds:
-  esbuild: true
-  unrs-resolver: true
-  workerd: true

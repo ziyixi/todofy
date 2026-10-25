@@ -194,11 +194,24 @@ const commands: Record<string, () => Promise<void>> = {
     await output("commit", sha);
   },
 
-  /** The newest commit that touched website/: the code part of the release identity. */
+  /** The newest commit that touched the website or its shared build inputs. */
   async "code-sha"() {
-    const { stdout } = await execFileAsync("git", ["log", "-1", "--format=%H", "--", "."], {
-      cwd: root,
-    });
+    const { stdout } = await execFileAsync(
+      "git",
+      [
+        "log",
+        "-1",
+        "--format=%H",
+        "--",
+        ".",
+        "../proto",
+        "../package.json",
+        "../pnpm-workspace.yaml",
+        "../pnpm-lock.yaml",
+        "../.python-version",
+      ],
+      { cwd: root },
+    );
     const sha = stdout.trim();
     if (!/^[0-9a-f]{40}$/.test(sha))
       throw new ReleaseError("Could not resolve the website commit.");

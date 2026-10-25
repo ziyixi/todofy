@@ -6,7 +6,13 @@ runs:
     - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
         version: '0.12.10'
-        working-directory: newsletter
+        cache-dependency-glob: |
+          uv.lock
+          pyproject.toml
+          .python-version
+          **/pyproject.toml
+        cache-suffix: personal-newsletter
+        working-directory: .
         enable-cache: true
     - name: Install deterministic CJK test fonts
       working-directory: newsletter
@@ -21,4 +27,4 @@ runs:
         make smoke-codex
         make smoke
         make build
-        uv run --locked --extra codex python scripts/smoke_wheel.py
+        uv run --locked --package personal-newsletter --extra codex python scripts/smoke_wheel.py

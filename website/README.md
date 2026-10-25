@@ -19,8 +19,9 @@ the files in `docs/` supersede them.
 
 ## Local development
 
-Use Node 24 and the pnpm version declared in `package.json` (`corepack enable`, or `make` picks a Homebrew
-`node@24`). Run `make install` once.
+Use Node 26 and pnpm 11.25.0, declared in the root `package.json`. The root workspace catalog and
+`pnpm-lock.yaml` are shared by every Node project. Run `make install` once; it discovers that workspace.
+`make` can select an existing Homebrew `node@26` for its child processes.
 
 For your real Notion articles, configure `NOTION_TOKEN` and `NOTION_DATA_SOURCE_ID` in `.env.local`, then:
 

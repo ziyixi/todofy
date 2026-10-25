@@ -9,25 +9,18 @@ dependencies = ["ziyixi-proto"]
 
 [dependency-groups]
 dev = [
-    "workers-py==1.17.4",
-    "pytest==9.1.1",
-    "pytest-xdist==3.8.0",
-    "httpx==0.28.1",
-    "cryptography==50.0.1",
-    "jsonschema==4.26.0",
-    "pyyaml==6.0.3",
-    "ruff==0.16.9",
+    "workers-py",
+    "pytest",
+    "pytest-xdist",
+    "httpx",
+    "cryptography",
+    "jsonschema",
+    "pyyaml",
+    "ruff",
 ]
 
 [tool.uv]
 package = false
-
-[tool.uv.sources]
-# Built by proto/python/build_backend.py, which generates the modules first (never committed). Not editable:
-# pywrangler vendors [project] dependencies from this same source, and a Worker needs the files, not a .pth.
-# `uv sync` must run before `pywrangler sync`: pywrangler builds the wheel inside Pyodide, which cannot run
-# the generator, so the build there only checks that the generated files are current.
-ziyixi-proto = { path = "../proto/python" }
 
 [tool.ruff]
 line-length = 120

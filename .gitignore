@@ -1,6 +1,12 @@
 # Each app keeps its own .gitignore (mail-hero/.gitignore, todofy/.gitignore).
 .DS_Store
 node_modules/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+*.egg-info/
 .wrangler/
 tasks/web/dist/
 tasks/web/test-results/

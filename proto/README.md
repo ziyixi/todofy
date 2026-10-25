@@ -150,17 +150,17 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
    files under their package path), the pinned toolchain and the hand-written codec runtimes. Apps never
    keep a copy of any of it.
 2. **Generated code is never committed.** It is gitignored. The commands developers already run
-   generate it: `npm ci` / `npm install` in a TypeScript app (its `postinstall`), `uv sync` / `uv run` in
+   generate it: `pnpm install --frozen-lockfile` at the repository root (the workspace postinstall), `uv sync` / `uv run` in
    Todofy (the build of `ziyixi-proto`), and CI. A missing generated directory never breaks dependency
    resolution: the package manifests are committed, only the files their exports point at are generated.
 3. **One version.** buf, protoc-gen-es and the protobuf-es runtime are pinned once, exactly, in
-   `package.json` and `package-lock.json` here. No app has its own `@bufbuild/protobuf`: an app imports the
+   the root `pnpm-workspace.yaml` catalog and `pnpm-lock.yaml`. No app has its own `@bufbuild/protobuf`: an app imports the
    runtime from `@ziyixi/proto/protobuf`, which resolves this folder's copy, so every bundle holds exactly
    the runtime the generator targets. `.github/scripts/test_proto.py` enforces it (and the wiring below).
    Generation is deterministic; CI generates twice and compares. googleapis has two pins, bumped together:
    `buf.lock` (what buf compiles the module and generates the TypeScript against) and the genproto Go code compiled
    into api-linter (`tools/api-linter/go.mod`, through which it interprets the `google.api` annotations);
-   `tools/api-linter/googleapis`, run first by `npm run api-lint`, fails unless every googleapis file the module
+   `tools/api-linter/googleapis`, run first by `pnpm run api-lint`, fails unless every googleapis file the module
    imports is the same in both.
 4. **Lint and breaking.** `buf lint` uses `STANDARD` (AIP-aligned: `_UNSPECIFIED` zero values, enum prefixes,
    `lower_snake_case`, versioned packages) and `COMMENTS` (every element documented); exceptions are written
@@ -229,7 +229,7 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
 | `retired.json` | The published elements deleted on purpose (rule 6), which `tools/retired.py` keeps deleted and leaves out of the breaking checks' base |
 | `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
 | `<package path>/*.proto` | One directory per proto package: `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `mailsort/ui/v2/*.proto` is `mailsort.ui.v2`, mailsort's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `mailhero/ui/v2/*.proto` is `mailhero.ui.v2`, Mail Hero's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1); `todofy/ui/v1/*.proto` is `todofy.ui.v1`, Todofy's owner API; `recall/ui/v1/*.proto` is `recall.ui.v1`, recall's owner API, `recall/ingest/v1/ingest.proto` is `recall.ingest.v1`, the upload of recall's browser extension, and `recall/archive/v1/archive.proto` is `recall.archive.v1`, recall's change feed and archive records (`contracts/recall-archive-v1`, whose fixtures `test/recall-archive.test.ts` round-trips); recall's Worker serves all three; `brief/ui/v1/*.proto` is `brief.ui.v1`, the brief's owner API; `tasks/ui/v1/*.proto` is `tasks.ui.v1`, Tasks' owner API and its generic `TasksApi` binding, and `tasks/inbox/v1/task_inbox.proto` is `tasks.inbox.v1`, Tasks' create-only `TaskInbox` binding; `todofy/mail/v1/mail_service.proto` is `todofy.mail.v1`, Todofy's private Mail entry |
-| `package.json`, `package-lock.json` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
+| `package.json`, `../pnpm-workspace.yaml`, `../pnpm-lock.yaml` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/watch/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the packages of `WIRE_PACKAGES` the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
 | `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
@@ -237,7 +237,7 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
 | `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`, `todofy.report.v1` and `todofy.ui.v1` for Todofy's UI and the fixtures of its tests, `dashboard.ui.v1`, whose views the dashboard's Worker builds and its UI renders as wire JSON, `tasks.inbox.v1`, the `TaskInbox` binding Home and Watch call, and `recall.ingest.v1`, the uploads recall's browser extension builds as plain objects without a runtime dependency): each message's JSON as a producer writes it, a union narrowed by its discriminator, a type of another file of these packages as a type-only import of that file's module, each service as a binding's methods (none for a service with `google.api.http` bindings: an HTTP API is called through the client), and the `WireTypes` entries that type `toWire`'s answer |
 | `tools/gen_schema.py`, `tools/schema.mjs` | A contract's JSON Schema from its IDL (`SCHEMAS`: `ops.v1` writes the `$defs` document `contracts/ops-v1/ops-v1.schema.json`, with `ALIASES` keeping the `$defs` names it had before; `todofy.report.v1` writes `todofy/api/summary-v1.schema.json` and `recommendation-v1.schema.json`, each the self-contained schema of one message, `Target.root`, described by the IDL's comments; a target marked
 `Target.open` is a consumer's schema (mail.received.v1's, and recall.archive.v1's `$defs` document `contracts/recall-archive-v1/recall-archive-v1.schema.json`), every object open to unknown properties as a lenient read is, a union whose discriminator is an open enum given one more branch for a value it does not know (the fields' own rules, no case), and the relations
-`any_match` and `present_when` are written as `anyOf` and `allOf`/`if`/`then`), run by `tools/schema.mjs` (no shell, the tools of `ensure.mjs`; the image keeps its source info for those comments); `npm run schema` rewrites them, `npm run check:schema` (Proto checks, Contracts and this folder's `npm test`) fails when one differs; both name what must be regenerated after a changed schema (`Target.then`, for a generator that copies one; none does since Todofy's UI reads its types from todofy.ui.v1) |
+`any_match` and `present_when` are written as `anyOf` and `allOf`/`if`/`then`), run by `tools/schema.mjs` (no shell, the tools of `ensure.mjs`; the image keeps its source info for those comments); `pnpm run schema` rewrites them, `pnpm run check:schema` (Proto checks, Contracts and this folder's `pnpm test`) fails when one differs; both name what must be regenerated after a changed schema (`Target.then`, for a generator that copies one; none does since Todofy's UI reads its types from todofy.ui.v1) |
 | `tools/wire_rules.py` | The value rules of `common/wire/v1` as the generators read them from a buf image, and the check that refuses a rule that cannot apply where it is written (every package) |
 | `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
 | `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
@@ -248,22 +248,19 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
 | `testdata/filter-cases.json` | The AIP-160 subset of `ts/filter.ts`: 29 filters and their literals or refusal, 4 search-box texts and their quoted filter. Mail Hero's restriction parser (`mail-hero/cloudflare/src/native/api-filter.ts`) runs it too (`test/api-filter.test.mjs`) |
 | `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process); `test/ensure.test.ts` runs `tools/ensure.mjs` on a copy of this folder (a deleted toolchain, an abandoned lock, the commands Windows needs) |
 
-Every directory directly inside `ts/` and `python/src/ziyixi_proto/` is generated (`.gitignore`); every
-file there is hand-written.
+Package directories inside `ts/` and `python/src/ziyixi_proto/` are generated (`.gitignore`); top-level
+files and the workspace-managed `ts/node_modules/` are preserved.
 
 ## How it works
 
-`tools/ensure.mjs` checks two things: that `node_modules/` holds every package `package-lock.json` pins,
-at that version (the generated code imports the protobuf-es runtime from there, so a deleted
-`proto/node_modules` is restored even when the generated files are current), and that its inputs (every
-`.proto` file, `buf.yaml`, `buf.lock`, `buf.gen.yaml`, `package-lock.json`, itself, `gen_py.py`, `gen_wire_ts.py` and `wire_rules.py`) and every
-generated file still match the stamp `.generated.json`. When both hold it exits in about 0.1 s without
-touching the network. Otherwise, under a lock, it installs the whole lockfile (`npm ci`: the generator, the
-runtime and this folder's test and editor types), runs `buf generate`, then `buf build` piped into `gen_py.py`
-(the Python modules) and `gen_wire_ts.py` (the binding contracts' wire JSON types next to protobuf-es's output) into a
-temporary directory, moves the result into `ts/` and `python/src/ziyixi_proto/`, and writes the stamp. It
-strips the calling npm's settings from the environment, so `npm ci --prefix watch/worker` cannot redirect the
-nested install.
+`tools/ensure.mjs` checks that both the generator toolchain and TypeScript runtime have their
+catalog-pinned dependencies installed, and that the IDL, generator inputs, workspace manifests/catalog,
+root lockfile and generated outputs still match `.generated.json`. A current installation and stamp
+need no network. Missing dependencies are restored by a root frozen pnpm install filtered to the shared
+toolchain/runtime, with lifecycle scripts disabled to avoid recursively entering the generator.
+Under its existing lock it runs `buf generate`, then `buf build` piped into `gen_py.py` and
+`gen_wire_ts.py`, replaces only generated package directories and writes the stamp. The actual pnpm
+workspace links, including `proto/ts/node_modules`, remain intact.
 
 The lock (`.generate.lock/owner.json`) names its holder's pid and host. Parallel installs wait for it and
 say whom they wait for. A run interrupted by Ctrl-C or killed leaves the lock behind; the next run sees
@@ -272,21 +269,22 @@ directories. A lock it cannot check (another host on a shared disk, or one witho
 over after 10 minutes; a waiter gives up only after 15.
 
 Every tool starts without a shell, so the same steps run on Windows: buf is its JavaScript entry point run
-by the current `node`, as is npm on Windows (`npm.cmd` cannot be spawned without a shell), and
-`buf.gen.yaml` starts `protoc-gen-es` as `node <its entry point>`. `gen_py.py` runs on `PROTO_PYTHON` (the
-build backend passes its own interpreter), else `python3`, or `python` on Windows. Only the macOS and Linux
+by the current `node`, as is the invoking pnpm entrypoint, and
+`buf.gen.yaml` starts `protoc-gen-es` as `node <its entry point>`. `gen_py.py` runs on `PROTO_PYTHON` when
+the build backend supplies its interpreter; otherwise `uv python find` resolves the root `.python-version`.
+Run `uv python install` at the repository root before the first pnpm installation. Only the macOS and Linux
 paths are exercised (locally and in CI); the shell scripts under `scripts/` are for CI and need a POSIX
 shell.
 
-**TypeScript.** An app declares `"@ziyixi/proto": "file:../../proto/ts"` and `"postinstall": "node
-../../proto/tools/ensure.mjs"`. npm links `node_modules/@ziyixi/proto` to `proto/ts` whether or not anything
-is generated, then the postinstall generates. Every npm script that compiles, tests, lints with types, bundles
+**TypeScript.** An app declares `"@ziyixi/proto": "workspace:*"` and `"postinstall": "node
+../../proto/tools/ensure.mjs"`. pnpm links `node_modules/@ziyixi/proto` to `proto/ts` whether or not anything
+is generated, then the postinstall generates. Every pnpm script that compiles, tests, lints with types, bundles
 or serves the generated code (`tsc`, `vitest`, `eslint` through typescript-eslint's project service, `wrangler`,
 `vite`) has a `pre<script>` that runs the same command, in the app and in any package that imports the app's
-sources, so `npm run typecheck`, `npm run lint`, `npm test` or `npm run dev` after a pull or a branch switch that
+sources, so `pnpm run typecheck`, `pnpm run lint`, `pnpm test` or `pnpm run dev` after a pull or a branch switch that
 changed a `.proto` file regenerates first instead of using stale types (`test_proto.py` requires those scripts).
 Generated files import `@bufbuild/protobuf`, which Node, TypeScript, vitest and
-wrangler's esbuild resolve from the real path, `proto/node_modules`: one copy for every app, no `paths`,
+wrangler's esbuild resolve through the runtime package's explicit catalog dependency: one pnpm store version for every app, no `paths`,
 `dedupe` or alias settings. Measured on 2026-10-01 with the first proposer's production dry-run: its `index.js` grew from
 166,530 to 336,996 bytes (gzip 44,365 to 79,211; wrangler's upload total 162.63 to 329.10 KiB, gzip 43.45 to
 77.70 KiB), of which the protobuf-es runtime is about 145 KB (descriptor decoding: `descriptor_pb`, the
@@ -323,7 +321,7 @@ vendors from, without generated code. A generation rewrites the stamp, so the ne
 more (ensure.mjs finds nothing to do). One case no key can catch: a clean when the cached wheel was built
 while the stamp was missing too (only one `uv` command since a fresh clone). So the source tree has two
 more guards: Todofy's `package.json` runs `ensure.mjs` as its postinstall (every pywrangler command needs
-that `npm ci` for wrangler, and a clean removes `node_modules/` too), and its runtime test harness runs
+that `pnpm install --frozen-lockfile` for wrangler, and a clean removes `node_modules/` too), and its runtime test harness runs
 `ensure.mjs` before `pywrangler sync`.
 
 ```python
@@ -341,7 +339,7 @@ processes; the backend then only verifies the stamp (which `uv sync` on the host
 change, so Todofy's runtime test harness compares the vendored copy with the installed one and forces a
 sync when they differ (after running `ensure.mjs`); for `pywrangler dev` by hand after an IDL
 change, run `uv run pywrangler sync --force`. If Pyodide's build still reports that the generated code is
-not current, run `npm run ensure` here and retry.
+not current, run `pnpm run ensure` here and retry.
 
 **Editors.** After the app's install, VS Code resolves every import: TypeScript through the linked package
 (the generated `.ts` files are real files under `proto/ts`), Python through the installed package in
@@ -350,21 +348,21 @@ install put this folder's whole lockfile (vitest, Node and Workers types) in `pr
 
 **Offline.** Only the first generation needs the network (npm for the toolchain, buf.build once for the
 locked googleapis module, which buf caches in `~/.cache/buf`). After that, reinstalls and regeneration
-work offline (`npm ci --offline`, `uv sync --offline`).
+work offline (`pnpm install --frozen-lockfile --offline`, `uv sync --offline`).
 
 ## Common tasks
 
 ```sh
 cd proto
-npm ci                                   # the toolchain and this folder's test tools
-npm run generate                         # regenerate now (any app's npm install / uv sync also does it)
-npm run lint                             # buf format + buf lint
-npm run api-lint                         # Google's api-linter (needs Go; tools/api-linter/go.mod)
-npm run breaking -- "$(git merge-base HEAD origin/main)"   # buf breaking + the profile rules
-npm run selftest                         # the rules still bite
-npm run check:deterministic              # generate twice more, compare with the installed output
-npm run schema                           # rewrite the contracts' generated JSON Schemas (check:schema compares)
-npm run typecheck && npm test            # both codecs (TypeScript, then Python 3.14 through uv)
+pnpm install --frozen-lockfile                                   # the toolchain and this folder's test tools
+pnpm run generate                         # regenerate now (any app's npm install / uv sync also does it)
+pnpm run lint                             # buf format + buf lint
+pnpm run api-lint                         # Google's api-linter (needs Go; tools/api-linter/go.mod)
+pnpm run breaking -- "$(git merge-base HEAD origin/main)"   # buf breaking + the profile rules
+pnpm run selftest                         # the rules still bite
+pnpm run check:deterministic              # generate twice more, compare with the installed output
+pnpm run schema                           # rewrite the contracts' generated JSON Schemas (check:schema compares)
+pnpm run typecheck && pnpm test            # both codecs (TypeScript, then Python 3.14 through uv)
 ```
 
 After editing a `.proto` file or `wire-json.ts`/`wire_json.py`, a TypeScript app's next `npm run
@@ -389,9 +387,9 @@ typecheck|test|dev` regenerates first (its pre-scripts); Todofy's next `uv run` 
    every enum its consumers branch on without a default. A contract other apps call over a service binding gets wire JSON types: add its package to
    `WIRE_PACKAGES` in `tools/gen_wire_ts.py` (and `positional` on a method that takes plain arguments). A contract
    with a published JSON Schema generates it: add a `Target` to `SCHEMAS` in `tools/gen_schema.py` (with `root` for
-   the self-contained schema of one message, and `then` for a generator that copies it) and run `npm run schema`,
+   the self-contained schema of one message, and `then` for a generator that copies it) and run `pnpm run schema`,
    then what its `then` names, if anything.
-3. `npm run lint && npm run api-lint` until clean, then `npm run generate`.
+3. `pnpm run lint && pnpm run api-lint` until clean, then `pnpm run generate`.
 4. Add the contract's fixtures to `test/` and `test/python/` (round trip byte for byte, a strict read refusing every
    invalid fixture, a lenient read tolerating what its consumers do), and a new kind of field or rule to
    `testdata/wire-profile-cases.json` first.
@@ -505,7 +503,7 @@ schema and `validate.mjs`, budget 108 KiB), the links app 68.4 → 71.9 KiB (it 
 codec's rule checker and the `common/wire/v1` descriptors come with the runtime, budget 82 KiB); todofy-core's upload 505.9 → 530.3 KiB (gzip 143.8 →
 148.8 KiB: `ops_pb.py` and the rule tables); the gateway imports types only (38.8 → 38.7 KiB). CPU, in
 milliseconds of the reference machine: Mail Hero's `Ops` entrypoint (a Worker request, 10 ms on Free), the
-isolate's first `status()` 3.1-5.2 → 5.0-7.1 ms (24 serial runs; the test, run alone by `npm run test:cpu`, holds
+isolate's first `status()` 3.1-5.2 → 5.0-7.1 ms (24 serial runs; the test, run alone by `pnpm run test:cpu`, holds
 the median of three fresh isolates, 5.4-6.6 ms, under 8 ms: about a quarter of Free's 10 ms is left, about half
 before), warm medians at most 2.2 ms (`mail-hero/cloudflare/test/cpu/native-ops-cpu.test.mjs`); the dashboard's cron tick, which reads every answer
 inside HomeState (a Durable Object invocation, 30 s on Free), the isolate's first tick 6.2-7.3 → 9.4-11.5 ms
@@ -737,8 +735,8 @@ dataclasses; its upload 554.1 → 633.4 KiB (gzip 153.6 → 168.4: the `todofy.u
 
 **Adding a UI API.**
 
-1. Write `<app>/ui/v1/*.proto` by the conventions above; `npm run lint && npm run api-lint` until clean.
-2. Add the app's UI package (its `web/`) as a TypeScript user: `"@ziyixi/proto": "file:../../proto/ts"` in
+1. Write `<app>/ui/v1/*.proto` by the conventions above; `pnpm run lint && pnpm run api-lint` until clean.
+2. Add the app's UI package (its `web/`) as a TypeScript user: `"@ziyixi/proto": "workspace:*"` in
    `dependencies`, the `postinstall` and the pre-scripts (Rules); the Worker is one already if it uses proto.
 3. Worker: `new HttpTranscoder(<App>UiService, handlers, { domain, maxBodyBytes, authorize, localize })` after
    authentication; keep the app's error copy as `localize` (for its own reasons and `CommonReason`), wrap each
@@ -765,11 +763,11 @@ Python twin already supports every kind these APIs use.
 
 The **Proto checks** job (`.github/workflows/ci.yml`) runs when `proto/`, `.github/` or `tools/` changed, when a
 contract this folder's tests read changed (`PROTO_READS`: `contracts/ops-v1/` and `contracts/mail-received-v1/`, among
-others, whose fixtures both codecs round-trip and check), or on a dispatch: `npm ci`, `npm run lint`, `npm run api-lint` (Go from `tools/api-linter/go.mod` via
+others, whose fixtures both codecs round-trip and check), or on a dispatch: `pnpm install --frozen-lockfile`, `pnpm run lint`, `pnpm run api-lint` (Go from `tools/api-linter/go.mod` via
 `actions/setup-go`; the googleapis check of rule 3 first), `scripts/breaking.sh` against the **Changes** job's `base`
 output (the commit of the last successful `main` run on `main`, the merge base with `origin/main` on a
 branch; the checkout has `fetch-depth: 0`), the rules self-test, the determinism check, the generated JSON Schemas
-(`npm run check:schema`, also in `Contracts`, which a hand edit of a schema under `contracts/` triggers),
+(`pnpm run check:schema`, also in `Contracts`, which a hand edit of a schema under `contracts/` triggers),
 and both codecs' typecheck and tests. `test_proto.py` (one version, wiring, the deploy maps) runs in the Changes job,
 which every other job needs. When Changes has no base (it runs everything: first run, unusable base, dispatch),
 `breaking.sh` compares with `HEAD~1` and says so in the log; a base that predates `proto/` has nothing to break. The job is in `CI gate`'s needs and in
@@ -785,7 +783,7 @@ todofy-core vendors the wheel). A language's runtime and generator reach that la
 TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
 options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
 `todofy/report/` Todofy, `todofy/ui/` Todofy, `todofy/mail/` and `tasks/inbox/` the apps that serve or call them, `mailhero/webhook/` Mail Hero and Todofy, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `mailsort/ui/` mailsort, `recall/ui/`, `recall/ingest/` and `recall/archive/` recall, `brief/ui/` the brief, `dashboard/ui/` the dashboard, `ops/` the apps with an `Ops` entrypoint or caller (Mail Hero, the dashboard, Todofy, the watch app, mailsort, recall, the brief and the website relay), `common/errors/` and `prototest/` none);
-the module and toolchain files (`buf.yaml`, `buf.lock`, `package-lock.json`, `tools/ensure.mjs`) and any path
+the module and toolchain files (`buf.yaml`, `buf.lock`, the root `pnpm-lock.yaml`, `tools/ensure.mjs`) and any path
 not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
 generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,
 which their own rules map), the api-linter tool module, check configs and Markdown reach none. `test_proto.py` derives
@@ -811,11 +809,11 @@ signed host receipt; it does not copy release fields. Both packages are shipped 
 and both have generated TypeScript wire types. Contract and privacy/evidence semantics are in
 [platform-runtime-v1](../contracts/platform-runtime-v1/README.md).
 
-The VPS package depends on `ziyixi-proto` through the plain local `../proto/python` path, like the Python
+The VPS package depends on `ziyixi-proto` through the root uv workspace, like the Python
 Worker. Its independently released OCI image includes generated code, the shared stdlib codec runtime
 and locked application libraries. Kubernetes runs the daemon and a five-minute observer CronJob; the
 production host needs no application Python packages, standalone executable, Node.js or `.proto` compiler.
-The Linux amd64 image supplies Python 3.12; its build runs this pinned toolchain first. A code/image change
+The Linux amd64 image supplies Python 3.14; its build runs this pinned toolchain first. A code/image change
 is separate from Newsletter's image/release.
 
 Python HTTP services get a generated `HTTP_BINDINGS` table in each `*_service_pb` module. Entries contain

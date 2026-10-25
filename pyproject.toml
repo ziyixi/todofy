@@ -1,0 +1,48 @@
+[project]
+name = "todofy-workspace"
+version = "0.1.0"
+requires-python = ">=3.14,<3.15"
+
+[dependency-groups]
+ci = ["pyyaml"]
+
+[tool.uv]
+package = false
+required-version = "==0.12.10"
+constraint-dependencies = [
+  "cryptography==50.0.1",
+  "fastapi==0.141.1",
+  "httpx==0.28.1",
+  "jeepney==0.9.0",
+  "jinja2==3.1.6",
+  "jsonschema==4.26.0",
+  "kubernetes==36.0.3",
+  "mypy==2.3.1",
+  "openai-codex==0.163.0",
+  "packaging==26.3",
+  "pillow==12.3.0",
+  "protobuf==7.36.1",
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "pytest-xdist==3.8.0",
+  "pyyaml==6.0.3",
+  "ruff==0.16.9",
+  "types-protobuf==7.35.1.20260827",
+  "types-pyyaml==6.0.12.20260906",
+  "uvicorn==0.52.4",
+  "workers-py==1.17.4",
+  "ziyixi-protos==0.1.0.dev7",
+]
+build-constraint-dependencies = ["setuptools==84.0.0"]
+
+[tool.uv.workspace]
+members = ["newsletter", "codex-gateway", "platform", "todofy", "proto/python"]
+
+[tool.uv.sources]
+# Workers vendor real package files, rather than an editable .pth reference.
+ziyixi-proto = { workspace = true, editable = false }
+ziyixi-protos = { url = "https://github.com/ziyixi/protos/releases/download/python-v0.1.0.dev7/ziyixi_protos-0.1.0.dev7-py3-none-any.whl" }
+
+[tool.ruff]
+# Python 3.14 runs the code; retain the existing parenthesised exception style.
+target-version = "py313"

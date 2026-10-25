@@ -49,7 +49,7 @@ No application imports another application's code, configuration or test tools. 
 | --- | --- | --- |
 | `proto/` | IDL, generated types, wire JSON codecs, HTTP transcoder/client | Compiled into each actual user; generated directories are not committed |
 | `contracts/` | Consumer semantics, schemas, golden fixtures and dependency-free value rules | Only explicitly mapped runtime files are bundled |
-| `packages/edge-auth/` | Access JWT, signed double-submit CSRF, private headers | Compiled via `file:` dependency; Web Crypto, no runtime dependencies |
+| `packages/edge-auth/` | Access JWT, signed double-submit CSRF, private headers | Compiled via `workspace:*` dependency; Web Crypto, no runtime dependencies |
 | `packages/planning-ui/` | Existing Plan, Focus and Mail components | Compiled into Tasks; typed transports and navigation callbacks |
 | `packages/task-dates/` | Date previews and recurrence advancement | Compiled into Tasks; reused by its explicit import tool |
 | `tools/` | Tests, builds and deployment checks | Never imported by production application source |

@@ -4,7 +4,8 @@
 不改现有 Python DAG、模型或发送账本来配合发布。SQLite 是权威运行状态，Notion
 是异步副本。原料、模型输出、URL 与供应商响应均为不可信内容。
 
-镜像固定 `ghcr.io/ziyixi/todofy-newsletter`，构建 context 为 `newsletter/`。CI 位于根
+镜像固定 `ghcr.io/ziyixi/todofy-newsletter`，构建 context 为仓库根，Dockerfile 为 `newsletter/Dockerfile`，
+仅复制本应用源码和根 workspace 元数据。Python 3.14.7、依赖版本与 lock 统一在仓库根；成员保持各自依赖职责。CI 位于根
 `.github/workflows/`，不添加此目录下的嵌套 Actions。本次保留锁定的外部
 `ziyixi-protos==0.1.0.dev7` 依赖；共享 proto 迁移须另行设计，不顺带替换。
 

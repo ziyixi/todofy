@@ -18,7 +18,7 @@ import unittest
 if sys.version_info < (3, 11) and os.environ.get("GITHUB_ACTIONS") != "true":
     raise unittest.SkipTest(
         f"test_drift_desired needs Python 3.11+ (tomllib), this is {sys.version.split()[0]}: "
-        "uv run --no-project --python 3.12 --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts"
+        "uv run --locked --only-group ci python -m unittest discover -s .github/scripts"
     )
 if shutil.which("node") is None and os.environ.get("GITHUB_ACTIONS") != "true":
     raise unittest.SkipTest("test_drift_desired needs Node.js to import the JavaScript deploy-vars wrappers")

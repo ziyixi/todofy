@@ -65,7 +65,7 @@ def main() -> None:
     with tarfile.open(sdists[0]) as sdist:
         names = sdist.getnames()
         prefix = names[0].split("/")[0]
-        for name in ("uv.lock", ".python-version", "MANIFEST.in"):
+        for name in ("pyproject.toml", "MANIFEST.in"):
             member_file = sdist.extractfile(prefix + "/" + name)
             if (
                 member_file is None
@@ -107,6 +107,8 @@ def main() -> None:
             uv,
             "export",
             "--locked",
+            "--package",
+            "personal-newsletter",
             "--no-dev",
             "--extra",
             "codex",

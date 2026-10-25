@@ -61,8 +61,13 @@ def build(sha: str, output: Path) -> None:
     )
     # A minimal Docker context excludes repository data, private config and build caches.
     for relative in (
+        "pyproject.toml",
+        "uv.lock",
+        ".python-version",
+        "newsletter/pyproject.toml",
+        "codex-gateway/pyproject.toml",
         "platform/pyproject.toml",
-        "platform/uv.lock",
+        "todofy/pyproject.toml",
         "proto/python/pyproject.toml",
     ):
         target = output / relative

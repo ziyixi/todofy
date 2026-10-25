@@ -117,7 +117,7 @@ def _metadata() -> str:
         f"Name: {NAME.replace('_', '-')}\n"
         f"Version: {VERSION}\n"
         "Summary: Generated wire JSON types of the proto/ IDL and their stdlib-only codec\n"
-        "Requires-Python: >=3.12\n"
+        "Requires-Python: >=3.14\n"
     )
 
 

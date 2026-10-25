@@ -15,7 +15,7 @@ the one check that needs a real login is in §9.
 
 - **Form.** `@ziyixi/edge-auth`: TypeScript source, `"type": "module"`, `"private": true`,
   `"exports": {".": "./src/index.ts"}`, no `dependencies` (Web Crypto only). It is **not** a Worker: no
-  service binding, no extra hop, no deploy of its own. Each app compiles it in through a `file:`
+  service binding, no extra hop, no deploy of its own. Each app compiles it in through a `workspace:`
   dependency (§6), so npm never asks a registry for it.
 - **What it owns.** Access JWT verification (JWKS fetch and cache), signed double-submit CSRF (issue
   and verify), the private-response header helper, and the primitives these need: HMAC key import and
@@ -313,15 +313,10 @@ Not observable for real Access tokens or tokens an app issued:
 
 ## 6. Consumption and source rules
 
-Each app depends on `"@ziyixi/edge-auth": "file:../../packages/edge-auth"` in its own `package.json`
-and lockfile (`npm install ../../packages/edge-auth` from the app directory). `npm ci` recreates the
-symlink; tsc, esbuild (wrangler, Miniflare harnesses), Node type stripping (Mail Hero's
-`node --test`) and vitest all compile the same source; imports are `from '@ziyixi/edge-auth'` with no
-tool configuration. The lockfile gains `"../../packages/edge-auth": {name, version}` and
-`"node_modules/@ziyixi/edge-auth": {resolved, link: true}`; the package's own dev dependencies are
-metadata there and are not installed. Rejected: npm workspaces (one root lockfile instead of each
-app's own), a deep relative import (depth-dependent, no manifest entry), tsconfig `paths` + wrangler
-`alias` (two configs per app, invisible to Node's test runner).
+Each app declares `"@ziyixi/edge-auth": "workspace:*"` in its own manifest. The root pnpm
+workspace and single lockfile link the canonical package source; each app's bundler compiles it into
+its independent Worker. tsc, esbuild, Node type stripping and vitest resolve the same source through
+the standard workspace link, without tsconfig paths, bundler aliases or another service.
 
 The package compiles under every app's toolchain, so its source:
 
@@ -329,23 +324,22 @@ The package compiles under every app's toolchain, so its source:
   properties; `erasableSyntaxOnly`);
 - uses no DOM-only type names (`KeyUsage`, `BufferSource`), because Todofy has no DOM lib, and types
   Web Crypto byte arrays as `Uint8Array<ArrayBuffer>`, because Mail Hero's DOM lib rejects
-  `ArrayBufferLike`; `npm run typecheck` checks both lib sets (`tsconfig.json` ES2024,
+  `ArrayBufferLike`; `pnpm run typecheck` checks both lib sets (`tsconfig.json` ES2024,
   `tsconfig.dom.json` ES2022 + DOM);
 - uses no Node-only or workerd-only API (`Buffer`, `crypto.subtle.timingSafeEqual`);
 - keeps state only in objects the app creates (`createAccessVerifier`).
 
-Its dev dependencies are pinned to the Todofy gateway's versions (TypeScript 5.9.3, vitest 4.1.11,
-`@cloudflare/workers-types` 5.20260929.1).
+Its dev dependencies use the same root catalog as every application.
 
 ## 7. CI
 
 `.github/scripts/ci_changes.py` maps each package to the apps that compile it in
 (`PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks"), ...}`).
 Any change inside
-`packages/edge-auth/` (this file included) runs the `Shared packages` job (`npm ci`, `npm run
-typecheck`, `npm test` in every `packages/*/`) and **checks and deploys** every user; an unmapped
+`packages/edge-auth/` (this file included) runs the `Shared packages` job (`pnpm install --frozen-lockfile`, `npm run
+typecheck`, `pnpm test` in every `packages/*/`) and **checks and deploys** every user; an unmapped
 package counts as used by every app. `test_ci_changes.py` fails until `PACKAGE_USERS` matches every
-`"file:../../packages/<name>"` dependency. `CI gate` requires `Shared packages` when it ran. No
+`"workspace:*"` dependency. `CI gate` requires `Shared packages` when it ran. No
 production secret reaches the package job.
 
 ## 8. Tests

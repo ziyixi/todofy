@@ -21,9 +21,6 @@ import newsletter.errors as errors
 if TYPE_CHECKING:
     import openai_codex
 
-SDK_VERSION = "0.163.0"
-
-
 SYSTEM_SKILLS = (
     "imagegen",
     "openai-docs",
@@ -36,7 +33,9 @@ SYSTEM_SKILLS = (
 def load_sdk() -> types.ModuleType:
     """Load only the pinned optional SDK; normalize missing dependencies."""
     try:
-        if metadata.version("openai-codex") != SDK_VERSION:
+        if metadata.version("openai-codex") != metadata.version(
+            "openai-codex-cli-bin"
+        ):
             raise errors.EditorError("configuration")
         return importlib.import_module("openai_codex")
     except (ImportError, metadata.PackageNotFoundError):

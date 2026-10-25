@@ -406,39 +406,41 @@ class Todofy:
             )
         try:
             async with asyncio.timeout(self._timeout):
-                async with httpx.AsyncClient(
-                    auth=self._auth,
-                    transport=self._transport,
-                    timeout=self._timeout,
-                    follow_redirects=False,
-                    trust_env=False,
-                    headers={"Accept": "application/json"},
-                ) as client:
-                    async with client.stream("GET", self._url) as response:
-                        if response.status_code in {401, 403}:
-                            return unavailable_digest(
-                                "todofy_auth_failed", fetched_at
-                            )
-                        if response.status_code != 200:
-                            return unavailable_digest(
-                                "todofy_unavailable", fetched_at
-                            )
-                        if (
-                            response.headers.get("content-type", "")
-                            .split(";", 1)[0]
-                            .strip()
-                            != "application/json"
-                        ):
+                async with (
+                    httpx.AsyncClient(
+                        auth=self._auth,
+                        transport=self._transport,
+                        timeout=self._timeout,
+                        follow_redirects=False,
+                        trust_env=False,
+                        headers={"Accept": "application/json"},
+                    ) as client,
+                    client.stream("GET", self._url) as response,
+                ):
+                    if response.status_code in {401, 403}:
+                        return unavailable_digest(
+                            "todofy_auth_failed", fetched_at
+                        )
+                    if response.status_code != 200:
+                        return unavailable_digest(
+                            "todofy_unavailable", fetched_at
+                        )
+                    if (
+                        response.headers.get("content-type", "")
+                        .split(";", 1)[0]
+                        .strip()
+                        != "application/json"
+                    ):
+                        return unavailable_digest(
+                            "todofy_invalid_response", fetched_at
+                        )
+                    content = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        if len(content) + len(chunk) > _MAX_RESPONSE_BYTES:
                             return unavailable_digest(
                                 "todofy_invalid_response", fetched_at
                             )
-                        content = bytearray()
-                        async for chunk in response.aiter_bytes():
-                            if len(content) + len(chunk) > _MAX_RESPONSE_BYTES:
-                                return unavailable_digest(
-                                    "todofy_invalid_response", fetched_at
-                                )
-                            content.extend(chunk)
+                        content.extend(chunk)
             result = _decode(bytes(content), fetched_at, self._mode, self._top)
             contracts.validate_personal_digest(result)
             return result

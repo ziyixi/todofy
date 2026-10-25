@@ -44,7 +44,9 @@ def test_image_context_identity_and_reviewed_manifest_asset(tmp_path):
         item["kind"] in {"Deployment", "CronJob", "ConfigMap", "Service"}
         for item in resources["items"]
     )
-    assert (tmp_path / "artifact/platform/uv.lock").is_file()
+    assert (tmp_path / "artifact/uv.lock").is_file()
+    assert (tmp_path / "artifact/pyproject.toml").is_file()
+    assert not (tmp_path / "artifact/platform/uv.lock").exists()
     assert (tmp_path / "artifact/proto/python/pyproject.toml").is_file()
 
 

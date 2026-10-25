@@ -5,9 +5,8 @@
   "type": "module",
   "description": "Ziyi Xi's personal academic and engineering website.",
   "engines": {
-    "node": "24.x"
+    "node": "26.x"
   },
-  "packageManager": "pnpm@11.25.0",
   "scripts": {
     "content:prepare": "node --import tsx scripts/content/prepare.ts",
     "content:prepare:empty": "node --import tsx scripts/content/prepare.ts --source=empty --baseline=tests/fixtures/baseline-empty.json",
@@ -35,34 +34,34 @@
     "prestart": "node ../proto/tools/ensure.mjs"
   },
   "dependencies": {
-    "@notionhq/client": "5.26.0",
-    "katex": "0.18.7",
-    "next": "16.3.5",
-    "photoswipe": "5.4.4",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "react-photoswipe-gallery": "4.1.2",
-    "sharp": "0.35.4",
-    "shiki": "4.4.3",
-    "zod": "4.6.5",
-    "@ziyixi/proto": "file:../proto/ts"
+    "@notionhq/client": "catalog:",
+    "katex": "catalog:",
+    "next": "catalog:",
+    "photoswipe": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-photoswipe-gallery": "catalog:",
+    "sharp": "catalog:",
+    "shiki": "catalog:",
+    "zod": "catalog:",
+    "@ziyixi/proto": "workspace:*"
   },
   "devDependencies": {
-    "@axe-core/playwright": "4.13.0",
-    "@playwright/test": "1.63.0",
-    "@types/katex": "0.16.8",
-    "@types/node": "24.10.1",
-    "@types/react": "19.3.0",
-    "@types/react-dom": "19.3.0",
-    "eslint": "9.39.1",
-    "eslint-config-next": "16.3.5",
-    "eslint-config-prettier": "10.1.8",
-    "prettier": "3.9.8",
-    "smol-toml": "1.9.0",
-    "tsx": "4.23.15",
-    "typescript": "6.0.3",
-    "vitest": "5.0.1",
-    "wrangler": "4.142.0",
-    "@cloudflare/workers-types": "5.20260929.1"
+    "@axe-core/playwright": "catalog:",
+    "@playwright/test": "catalog:",
+    "@types/katex": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "eslint": "catalog:",
+    "eslint-config-next": "catalog:",
+    "eslint-config-prettier": "catalog:",
+    "prettier": "catalog:",
+    "smol-toml": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:",
+    "@cloudflare/workers-types": "catalog:"
   }
 }

@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Plan, Focus and Mail categories UI for Tasks.",
   "engines": {
-    "node": ">=26"
+    "node": "26.x"
   },
   "exports": {
     ".": "./src/index.ts",
@@ -60,27 +60,27 @@
     "pretest": "node ../../proto/tools/ensure.mjs"
   },
   "dependencies": {
-    "@dnd-kit/collision": "0.3.2",
-    "@dnd-kit/dom": "0.3.2",
-    "@dnd-kit/react": "0.3.2",
-    "@ziyixi/proto": "file:../../proto/ts",
-    "lucide-react": "1.8.0"
+    "@dnd-kit/collision": "catalog:",
+    "@dnd-kit/dom": "catalog:",
+    "@dnd-kit/react": "catalog:",
+    "@ziyixi/proto": "workspace:*",
+    "lucide-react": "catalog:"
   },
   "peerDependencies": {
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react": "catalog:",
+    "react-dom": "catalog:"
   },
   "devDependencies": {
-    "@types/react": "19.2.14",
-    "@types/react-dom": "19.2.3",
-    "@types/node": "26.6.3",
-    "@testing-library/react": "16.3.2",
-    "jsdom": "29.1.1",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "typescript": "5.9.3",
-    "vitest": "4.1.11",
-    "@vitejs/plugin-react": "6.1.2",
-    "vite": "8.3.4"
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@types/node": "catalog:",
+    "@testing-library/react": "catalog:",
+    "jsdom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "vite": "catalog:"
   }
 }

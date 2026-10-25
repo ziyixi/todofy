@@ -8,18 +8,18 @@
     ".": "./src/index.ts"
   },
   "engines": {
-    "node": ">=26"
+    "node": "26.x"
   },
   "dependencies": {
-    "chrono-node": "2.9.0",
-    "rrule": "2.8.1"
+    "chrono-node": "catalog:",
+    "rrule": "catalog:"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
-    "vitest": "4.1.11"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

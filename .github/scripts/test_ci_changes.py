@@ -1241,22 +1241,23 @@ class RealGit(unittest.TestCase):
 
 class PackageUsers(unittest.TestCase):
     """PACKAGE_USERS must match the repository: every packages/<name>/ directory is registered, and each
-    lists exactly the apps with a "file:" dependency on it (a missing app would never be redeployed)."""
+    lists exactly the apps with a workspace dependency on it (a missing app would never be redeployed)."""
 
     def file_dependents(self):
         found = {}
+        packages = {
+            json.loads(manifest.read_text())["name"]: manifest.parent.name
+            for manifest in (REPO / "packages").glob("*/package.json")
+        }
         for manifest in REPO.glob("*/**/package.json"):
             relative = manifest.relative_to(REPO)
             if "node_modules" in relative.parts or relative.parts[0] == "packages":
                 continue
             data = json.loads(manifest.read_text())
             for section in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
-                for spec in data.get(section, {}).values():
-                    if not spec.startswith("file:"):
-                        continue
-                    target = (manifest.parent / spec.removeprefix("file:")).resolve().relative_to(REPO)
-                    if target.parts[0] == "packages":
-                        found.setdefault(target.parts[1], set()).add(relative.parts[0])
+                for package, spec in data.get(section, {}).items():
+                    if package in packages and spec == "workspace:*":
+                        found.setdefault(packages[package], set()).add(relative.parts[0])
         return found
 
     def test_every_package_directory_is_registered(self):
@@ -1956,9 +1957,13 @@ class WebsiteRelease(unittest.TestCase):
         block = jobs["release"]
         self.assertIn("    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'\n", block)
         pin = block.index("- name: Check out the newest main commit that passed the CI gate\n")
+        workspace = block.index("- name: Install the selected Node workspaces\n")
         install = block.index("- name: Install the pinned pnpm and locked dependencies\n")
         toolchain = block.index("- name: Install the shared proto toolchain\n")
         self.assertLess(pin, toolchain)
+        self.assertLess(pin, workspace)
+        self.assertLess(workspace, toolchain)
+        self.assertIn("if: hashFiles('pnpm-lock.yaml') != ''", block[workspace:toolchain])
         self.assertLess(toolchain, install)
         self.assertIn("npm ci --prefix ../proto --no-audit --no-fund", block[toolchain:install])
         self.assertNotIn("secrets.", block[toolchain:install])
@@ -2089,7 +2094,7 @@ class TodofyJobs(unittest.TestCase):
 
     def pytest_commands(self, job):
         """Every pytest command of a job, with its continuation lines."""
-        commands = re.findall(r"^ +(uv run pytest (?:.*\\\n)*.*)$", self.code(self.blocks[job]), re.MULTILINE)
+        commands = re.findall(r"^ +(uv run --locked --package todofy pytest (?:.*\\\n)*.*)$", self.code(self.blocks[job]), re.MULTILINE)
         self.assertTrue(commands, job)
         return commands
 
@@ -2119,17 +2124,17 @@ class TodofyJobs(unittest.TestCase):
     def test_the_static_job_keeps_every_check_but_the_runtime_suite(self):
         block = self.blocks["todofy-static"]
         for command in (
-            "npm ci --no-audit --no-fund\n          uv sync --locked",
-            "uv run ruff check worker tests tools deploy",
-            "uv run ruff format --check worker tests tools deploy",
-            "uv run pytest tests/unit tests/fakes tools deploy",
+            "uv sync --locked --package todofy",
+            "uv run --locked --package todofy ruff check worker tests tools deploy",
+            "uv run --locked --package todofy ruff format --check worker tests tools deploy",
+            "uv run --locked --package todofy pytest tests/unit tests/fakes tools deploy",
             "npm run lint\n          npm run typecheck\n          npm test\n          npm run test:runtime",
-            "npm ci --no-audit --no-fund\n          npm run typecheck\n          npm test\n          npm run build",
-            'uv run python deploy/deploy_vars.py secrets core "$RUNNER_TEMP/todofy-core-secrets.json"',
-            'uv run python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"',
-            "uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml",
+            "npm run typecheck\n          npm test\n          npm run build",
+            'uv run --locked --package todofy python deploy/deploy_vars.py secrets core "$RUNNER_TEMP/todofy-core-secrets.json"',
+            'uv run --locked --package todofy python deploy/deploy_vars.py secrets gateway "$RUNNER_TEMP/todofy-gateway-secrets.json"',
+            "uv run --locked --package todofy python deploy/deploy_vars.py exec core -- uv run --locked --package todofy pywrangler deploy --dry-run --config wrangler.toml",
             '--secrets-file "$RUNNER_TEMP/todofy-core-secrets.json" --outdir "$RUNNER_TEMP/todofy-core-bundle"',
-            "uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run",
+            "uv run --locked --package todofy python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run",
             'node deploy/bundle-size.mjs "$RUNNER_TEMP/todofy-gateway-bundle"',
             'test -d "$RUNNER_TEMP/todofy-core-bundle/python_modules/workers"',
         ):
@@ -2144,7 +2149,7 @@ class TodofyJobs(unittest.TestCase):
         self.assertIn(f"    name: Todofy runtime (${{{{ matrix.shard }}}}/{len(shards)})\n", block)
         self.assertIn("      fail-fast: false\n", block)
         # The plan comes from pytest's own collection and GitHub's matrix position, never a hand-kept list.
-        self.assertIn('uv run pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"', block)
+        self.assertIn('uv run --locked --package todofy pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"', block)
         self.assertIn('--index "${{ strategy.job-index }}" --total "${{ strategy.job-total }}"', block)
         self.assertIn('$(cat "$RUNNER_TEMP/shard-files.txt")', block)
         self.assertIn('--junitxml="$RUNNER_TEMP/junit/runtime-${{ strategy.job-index }}.xml"', block)
@@ -2161,16 +2166,17 @@ class TodofyJobs(unittest.TestCase):
         block = self.code(self.blocks["todofy-runtime"])
         run = [command for command in self.pytest_commands("todofy-runtime") if " -n " in command]
         self.assertEqual(len(run), 1)
-        processes = re.findall(r"^uv run pytest -n (\d+) --dist loadfile --no-loadscope-reorder ", run[0])
+        processes = re.findall(r"^uv run --locked --package todofy pytest -n (\d+) --dist loadfile --no-loadscope-reorder ", run[0])
         self.assertEqual(len(processes), 1, run[0])
         # The plan balances the same number of processes per shard that pytest-xdist starts.
         self.assertEqual(re.findall(r"--workers (\d+)\b", block), processes)
         self.assertNotRegex(run[0], r"--dist[ =](?!loadfile)")
         pyproject = (REPO / "todofy" / "pyproject.toml").read_text()
         self.assertIn('addopts = "-ra --import-mode=importlib --dist loadfile --no-loadscope-reorder"', pyproject)
-        self.assertIn('"pytest-xdist==', pyproject)
+        self.assertIn('"pytest-xdist"', pyproject)
+        self.assertIn('"pytest-xdist==', (REPO / 'pyproject.toml').read_text())
         # One `pywrangler sync` and the Pyodide download happen before the xdist processes start.
-        self.assertLess(block.index("uv run python -m tests.runtime.warm_up"), block.index(run[0]))
+        self.assertLess(block.index("uv run --locked --package todofy python -m tests.runtime.warm_up"), block.index(run[0]))
 
     def test_the_serial_files_run_alone_after_the_xdist_run(self):
         """todofy-runtime-serial.txt: the plan writes this shard's share, one plain pytest process runs it
@@ -2200,7 +2206,7 @@ class TodofyJobs(unittest.TestCase):
         self.assertIn("uses: actions/cache@", step)
         self.assertIn("path: todofy/.wrangler/pyodide-cache", step)
         self.assertNotIn("restore-keys", step)
-        for keyed in ("todofy/package-lock.json", "todofy/tests/runtime/harness.py", "todofy/wrangler.test.toml"):
+        for keyed in ("pnpm-lock.yaml", "todofy/tests/runtime/harness.py", "todofy/wrangler.test.toml"):
             self.assertIn(f"'{keyed}'", step)
         # Only the shards use it: nothing that deploys restores it.
         for job, other in self.blocks.items():
@@ -2221,7 +2227,7 @@ class TodofyJobs(unittest.TestCase):
         block = self.blocks["todofy-checks"]
         self.assertEqual(re.findall(r"--shards (\d+)\b", block), [str(len(self.shards()))])
         self.assertIn("pattern: todofy-runtime-junit-*", block)
-        self.assertIn('uv run pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"', block)
+        self.assertIn('uv run --locked --package todofy pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"', block)
         self.assertIn("python3 ../.github/scripts/pytest_completeness.py", block)
         self.assertIn("--expected-skips ../.github/scripts/todofy-runtime-expected-skips.txt", block)
         # A test file that vanishes at collection, and a serial file run under xdist, both fail the check.
@@ -2234,7 +2240,7 @@ class TodofyJobs(unittest.TestCase):
 
     def test_no_test_retry_plugin_is_installed(self):
         """A retried test would hide flakiness (and show up twice in the shards' results)."""
-        lock = (REPO / "todofy" / "uv.lock").read_text()
+        lock = (REPO / "uv.lock").read_text()
         for plugin in ("pytest-rerunfailures", "flaky", "pytest-retry", "pytest-randomly"):
             with self.subTest(plugin=plugin):
                 self.assertNotIn(f'name = "{plugin}"', lock)

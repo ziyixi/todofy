@@ -3,7 +3,7 @@
 The auth code compiled into every Worker in this repository (the Todofy gateway, Mail Hero and the home
 dashboard): Cloudflare Access JWT verification, signed double-submit CSRF and the private response
 headers. It is TypeScript source with no runtime dependencies (Web Crypto only). It is not a separate
-Worker: each app depends on it with `"@ziyixi/edge-auth": "file:../../packages/edge-auth"` and its
+Worker: each app depends on it with `"@ziyixi/edge-auth": "workspace:*"` and its
 bundler compiles it in.
 
 [`SPEC.md`](SPEC.md) is the design: the security rules every app gets (§2), the formats that must not
@@ -26,9 +26,9 @@ and each app maps it to its own status, code and message.
 
 ```sh
 cd packages/edge-auth
-npm ci
-npm run typecheck   # against Todofy's lib set (ES2024) and Mail Hero's (ES2022 + DOM)
-npm test            # vitest
+pnpm install --frozen-lockfile
+pnpm run typecheck   # against Todofy's lib set (ES2024) and Mail Hero's (ES2022 + DOM)
+pnpm test            # vitest
 ```
 
 CI runs the same three commands in the `Shared packages` job. Any change in this directory also checks

@@ -38,7 +38,7 @@ make setup
 make demo
 ```
 
-`make setup` 安装锁定的 Python 3.12 环境和依赖。演示完成后，打开终端给出的 `preview.html` 路径即可查看样张；文件保存在 `.artifacts/` 下。
+`make setup` 按仓库根 `uv.lock` 安装 Python 3.14.7 环境和 Newsletter 依赖；虚拟环境共用于根 `.venv/`。演示完成后，打开终端给出的 `preview.html` 路径即可查看样张；文件保存在 `.artifacts/` 下。
 
 **演示使用示例材料，不需要密钥，也不会调用模型、写 Notion 或发送邮件。** 生成的 `.eml` 只是本地邮件文件。
 
