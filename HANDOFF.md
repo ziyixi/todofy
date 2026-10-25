@@ -27,9 +27,16 @@ workerd/106 UI, and Home 173 UI tests, with affected lint/typechecks/builds. Lin
 KiB and Recall at 130.4 KiB; their code-size budgets are intentionally 150/132 KiB for this shared monitor
 descriptor and usage feature. CPU and spending budgets are unchanged. Home UI is 168.0 KiB. Full telemetry
 stays inside existing 4/12/16 KiB host-response limits. The actual
-Home UI was inspected in Chrome with synthetic desktop and 390px iframe views. Shared IDL/schema and CI checks,
-branch gate and production acceptance are in progress. Existing CI already releases Fleet before VPS producers.
-Work stays in the isolated checkout; no real mail or production model operation has been used in this task yet.
+Home UI was inspected in Chrome with synthetic desktop and 390px iframe views. Released
+`1e86e6763ab30e3614ea2afdd9f6b9e334f1371d` after the complete
+[branch CI 40230659454](https://github.com/ziyixi/todofy/actions/runs/40230659454) and
+[same-SHA main 40232060456](https://github.com/ziyixi/todofy/actions/runs/40232060456), both successful.
+Existing CI released Fleet before the VPS producers. A real synthetic 6.1 turn on the VPS private endpoint
+recorded one success, 4,671 input / 15 output tokens and 3.6 s latency. The natural host observer's 20:50 UTC
+snapshot reached the deployed Home page after its 20:51 UTC refresh, with matching counters and recent row.
+All four VPS Deployments are ready, with zero Pod restarts. Mailsort's real status API exposes the new monthly
+usage at zero until a new classification request; no old usage was guessed or mail reclassified.
+Detailed evidence: [Codex monitor verification](docs/codex-monitor-verification.md). The shared checkout remains untouched.
 
 ### Codex 6.1 availability (`codex/codex61-runtime`)
 
