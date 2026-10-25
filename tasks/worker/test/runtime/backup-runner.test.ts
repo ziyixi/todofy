@@ -274,7 +274,10 @@ test("the jobs object runs the first backup from Home's status, Ops reports it, 
   expect(status.signals.map((signal) => signal.code)).not.toContain('backup_failed');
   const latest = await json<{ key: string }>(LATEST);
   const manifest = await json<Manifest>(`${latest.key}${MANIFEST}`);
-  expect(manifest.tasks.tables.find((table) => table.name === 'tasks')?.rows).toBe(TASK_ROWS);
+  // The real jobs object may also create this week's review before planning the backup.
+  const taskRows = await harness.db.prepare('SELECT COUNT(*) AS n FROM tasks').first<number>('n');
+  expect(taskRows).toBeGreaterThanOrEqual(TASK_ROWS);
+  expect(manifest.tasks.tables.find((table) => table.name === 'tasks')?.rows).toBe(taskRows);
   const after = (await (await jobs.fetch('https://jobs.internal/')).json()) as { backup: { status: string } };
   expect(after.backup.status).toBe('ok');
 
@@ -289,7 +292,7 @@ test("the jobs object runs the first backup from Home's status, Ops reports it, 
     const downloaded = tool('download', '--out', restore, '--local', '--persist-to', harness.persistTo);
     expect(downloaded.status, downloaded.stderr).toBe(0);
     expect(downloaded.stdout).toContain(`backup ${latest.key}\n`);
-    expect(downloaded.stdout).toMatch(new RegExp(`\\nPASS tasks rows=${String(TASK_ROWS)} parts=\\d+\\n`));
+    expect(downloaded.stdout).toMatch(new RegExp(`\\nPASS tasks rows=${String(taskRows)} parts=\\d+\\n`));
     const config = join(work, 'restore.toml');
     const configured = tool('config', '--database-name', 'tasks-restore', '--database-id', randomUUID(), '--out', config);
     expect(configured.status, configured.stderr).toBe(0);
@@ -300,7 +303,7 @@ test("the jobs object runs the first backup from Home's status, Ops reports it, 
     wrangler('d1', 'execute', 'DB', ...target, '--file', join(work, 'restore.sql'));
     const verified = tool('verify', '--in', restore, ...target);
     expect(verified.status, verified.stdout + verified.stderr).toBe(0);
-    expect(verified.stdout).toContain(`PASS tasks rows=${String(TASK_ROWS)}/${String(TASK_ROWS)}\n`);
+    expect(verified.stdout).toContain(`PASS tasks rows=${String(taskRows)}/${String(taskRows)}\n`);
     expect(verified.stdout.trim().split('\n').at(-1)).toBe('verify PASS');
   } finally {
     await rm(work, { recursive: true, force: true });
