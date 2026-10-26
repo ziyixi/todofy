@@ -70,7 +70,7 @@ describe('the shell', () => {
     expect(tabs.map((a) => a.getAttribute('href'))).toEqual(['/overview', '/labels', '/settings'])
     expect(root.querySelector('.tabs .chip')).toBeNull()
     const line = root.querySelector('.status-line')
-    expect([...(line?.children ?? [])].map((part) => part.textContent)).toEqual(['影子', 'Gmail ✓ 只读', '下次检查 5 分钟后'])
+    expect([...(line?.children ?? [])].map((part) => part.textContent)).toEqual(['影子', 'Gmail ✓ 只读', '下次 Gmail 维护 5 分钟后'])
     expect(root.textContent).toContain('找不到这个页面')
   })
 
@@ -148,7 +148,7 @@ describe('historical review', () => {
 describe('设置', () => {
   it('has mode, undo and read-only model history', async () => {
     const root = await open(new FakeServer(), '/settings')
-    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '分类引擎', '分类提示词', '撤销', '历史效果检查'])
+    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '分类引擎', '自动分类间隔', '分类提示词', '撤销', '历史效果检查'])
     expect(root.querySelectorAll('input[type="number"]').length).toBe(0)
     expect(root.querySelector('[aria-label="模式"] [aria-pressed="true"]')?.textContent).toBe('影子')
     expect(root.textContent).toContain('只判断和记录，不改 Gmail')

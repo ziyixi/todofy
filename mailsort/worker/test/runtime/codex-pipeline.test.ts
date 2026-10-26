@@ -7,7 +7,7 @@ import { ClassificationPromptSchema } from '@ziyixi/proto/mailsort/ui/v2/prompt_
 import { ClassificationProvider, Mode, SettingsSchema, UnreadClassification_State } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { PRIORITY_LABELS } from '../../src/priority.ts';
 import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
-import { CODEX_ENDPOINT } from '../fakes/upstream.ts';
+import { CODEX_ENDPOINT, ORIGINAL_URL_HEADER } from '../fakes/upstream.ts';
 import { HOUR, MINUTE, op, startHarness, T0, type Harness } from './harness.ts';
 import { checkGoogleCalls, decision, deliver, gmailLabels, modifies, setMode } from './helpers.ts';
 
@@ -40,6 +40,46 @@ const mail = (i: number, fields: Partial<SyntheticMail> = {}): SyntheticMail => 
 afterEach(async () => { checkGoogleCalls(h); await h.dispose(); });
 
 describe('Codex priority pipeline', () => {
+  it('uses the saved interval for new automatic batches while Gmail maintenance stays at five minutes', async () => {
+    await initialize();
+    await select(ClassificationProvider.CODEX);
+    let release!: () => void;
+    let started!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const requested = new Promise<void>(resolve => { started = resolve; });
+    const handle = h.up.handle.bind(h.up);
+    h.up.handle = async (request) => {
+      if ((request.headers.get(ORIGINAL_URL_HEADER) ?? request.url) === CODEX_ENDPOINT) {
+        started();
+        await held;
+      }
+      return handle(request);
+    };
+    deliver(h, mail(91), T0 + MINUTE);
+    const running = h.step(T0 + 2 * MINUTE);
+    await requested;
+    // A settings save stays responsive while the existing classifier request is in flight.
+    const current = await h.api.getSettings({ name: 'settings' });
+    await h.api.updateSettings({
+      settings: create(SettingsSchema, { name: 'settings', classificationIntervalMinutes: 60, etag: current.etag }),
+      updateMask: { paths: ['classification_interval_minutes'] }, requestId: op(),
+    });
+    release();
+    expect(await running).toMatchObject({ decided: 1, applied: 1, next: T0 + 7 * MINUTE });
+    deliver(h, mail(92), T0 + 3 * MINUTE);
+    await h.step(T0 + 6 * MINUTE);
+    expect(h.up.codex.calls).toHaveLength(1);
+    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier).toMatchObject({
+      classificationIntervalMinutes: 60, nextBatchTime: timestampFromMs(T0 + 62 * MINUTE),
+    });
+    await h.step(T0 + 61 * MINUTE);
+    expect(h.up.codex.calls).toHaveLength(1);
+    expect(await h.step(T0 + 62 * MINUTE)).toMatchObject({ decided: 1, applied: 1 });
+    expect(h.up.codex.calls).toHaveLength(2);
+    expect(h.up.claude.calls).toEqual([]);
+    expect(h.up.codex.calls.flat().map(email => email.id)).toEqual([mail(91).id, mail(92).id]);
+  });
+
   it('applies all four priorities, records Codex flow and counts unchanged explicit rechecks correctly', async () => {
     await initialize();
     await select(ClassificationProvider.CODEX);

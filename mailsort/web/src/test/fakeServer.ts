@@ -120,7 +120,7 @@ export class FakeServer {
   reportFails = false
   /** Fields of GetServiceStatus that a test sets (the rest as below; review_count counts the pending items). */
   status: Partial<ServiceStatus> = {}
-  settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, etag: 's1' })
+  settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, classificationIntervalMinutes: 15, runWriteLimit: 10, dailyWriteLimit: 150, dailyNeuronBudget: 7000, etag: 's1' })
   settingsSaveFails = false
   classificationPrompt = create(ClassificationPromptSchema, { name: 'classificationPrompt', baseText: '按 P1、P2、P3、P4 判断合成邮件。', personalRules: '合成个人规则。', etag: 'initial' })
   promptReadFails = false
@@ -295,6 +295,7 @@ export class FakeServer {
         if (paths.includes('daily_neuron_budget')) next.dailyNeuronBudget = request.settings.dailyNeuronBudget
         if (paths.includes('run_write_limit')) next.runWriteLimit = request.settings.runWriteLimit
         if (paths.includes('classification_provider')) next.classificationProvider = request.settings.classificationProvider
+        if (paths.includes('classification_interval_minutes')) next.classificationIntervalMinutes = request.settings.classificationIntervalMinutes
         next.effectiveMode = next.breakerTripped ? Mode.SHADOW : next.mode
         this.settings = next
         return Promise.resolve(this.settings)

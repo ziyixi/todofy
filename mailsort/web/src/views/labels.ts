@@ -110,7 +110,7 @@ export async function renderLabels(ctx: ViewContext): Promise<void> {
       el('div', { class: 'actions' }, start),
     )
     fill(body,
-      el('p', { class: 'hint lead' }, 'Claude Opus 5.5（medium）按当前提示词分到 P1、P2、P3、P4。日常新邮件约每小时自动判断，分类保持原有未读状态。'),
+      el('p', { class: 'hint lead' }, '按当前分类引擎和提示词分到 P1、P2、P3、P4。自动分类间隔可在设置中调整，分类保持原有未读状态。'),
       setup,
       result,
       unread,

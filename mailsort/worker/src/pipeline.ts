@@ -24,6 +24,7 @@ import {
   HISTORY_PAGE_SIZE,
   HISTORY_PAGES_MAX,
   INSTALL_GRACE_MS,
+  MINUTE,
   MAIL_ATTEMPTS_MAX,
   MAIL_SUBREQUESTS,
   RESYNC_MAX,
@@ -34,7 +35,7 @@ import {
 import { readMessage, type ReadMessage } from './mime.ts';
 import { P1_ID, PRIORITY_IDS, priorityGmailIds, priorityStartedAt } from './priority.ts';
 import { Budget, noteGoogleError, noteTokenOk, openSession, writeScope } from './session.ts';
-import { effectiveMode, readSettings } from './settings.ts';
+import { adoptClassificationInterval, effectiveMode, readSettings } from './settings.ts';
 import { CLAUDE_MONTHLY_LIMIT_MICROS, utcDay, type Store } from './store.ts';
 import { decisionForRecheck, fallbackP1, finishUnread, isUnreadPending, scanUnread, unreadRechecksFallback, unreadRechecksInitial100 } from './unread.ts';
 import { executeWrites, intend, type WriteContext, type WriteGate } from './writes.ts';
@@ -436,7 +437,7 @@ export function retain(store: Store, now: number): void {
 export async function runPass(deps: PassDeps): Promise<PassResult> {
   const { store, transact } = deps;
   const now = deps.now();
-  const settings = readSettings(store);
+  const settings = transact(() => adoptClassificationInterval(store, now));
   const mode = effectiveMode(settings, modeCeiling(deps.env));
   const provider = settings.classificationProvider;
   const idle = now + ALARM_IDLE_MS;
@@ -588,9 +589,15 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
           if (outcome === 'stop') { stopped = true; code = 'gmail_stopped'; }
         }
       }
-      // One persisted cadence: keep draining the pending backlog, then wait about an hour before a new batch starts.
+      // Keep draining accepted pending work; only an empty queue begins the configured normal interval.
       const pending = store.count(`SELECT count(*) AS n FROM pending`);
-      transact(() => { store.setMeta('next_model_at', String(pending > 0 ? Math.max(deps.now(), store.one<{ at: number }>(`SELECT min(not_before) AS at FROM pending`)?.at ?? deps.now()) : deps.now() + HOUR)); });
+      transact(() => {
+        const at = deps.now();
+        const nextAt = pending > 0
+          ? Math.max(at, store.one<{ at: number }>('SELECT min(not_before) AS at FROM pending')?.at ?? at)
+          : at + readSettings(store).classificationIntervalMinutes * MINUTE;
+        store.setMeta('next_model_at', String(nextAt));
+      });
       if (pending > 0 && store.due(deps.now(), 1).length > 0 && code === 'ok') backlog = true;
     }
     applied += counter.applied;

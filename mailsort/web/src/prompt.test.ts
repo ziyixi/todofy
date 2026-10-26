@@ -123,7 +123,7 @@ describe('classification prompt editor', () => {
     server.promptReadFails = true
     const root = await open(server)
     const card = editor(root)
-    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '分类引擎', '分类提示词', '撤销', '历史效果检查'])
+    expect([...root.querySelectorAll('h2')].map((node) => node.textContent)).toEqual(['模式', '分类引擎', '自动分类间隔', '分类提示词', '撤销', '历史效果检查'])
     expect(card.textContent).toContain('提示词读取失败')
     expect(button(card, '保存').disabled).toBe(true)
     expect(field(card, 'personal').readOnly).toBe(true)

@@ -35,7 +35,7 @@ describe('classification provider settings and status', () => {
   });
 
   it('preserves a future schedule and deferred work when the selected provider stays the same', async () => {
-    await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', '{"classificationProvider":"codex"}'), ('next_model_at', ?)`, String(T0 + HOUR));
+    await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', '{"classificationProvider":"codex","classificationIntervalMinutes":60}'), ('next_model_at', ?)`, String(T0 + HOUR));
     await h.sql(`INSERT INTO pending (message_id, added_at, not_before, deferred) VALUES ('synthetic-held', ?, ?, ?)`, T0, T0 + HOUR, T0);
     const current = await h.api.getSettings({ name: 'settings' });
     await h.api.updateSettings({

@@ -288,7 +288,7 @@ describe('概览', () => {
     expect(root.textContent).toContain('缓存有效期为 5 分钟，连续批次可能命中')
     expect(root.textContent).toContain('不含赠金、折扣或本应用以外的调用')
     expect(root.textContent).toContain('下批判断最早在 1 小时后')
-    expect(root.querySelector('.status-line')?.textContent).toContain('下次检查 5 分钟后')
+    expect(root.querySelector('.status-line')?.textContent).toContain('下次 Gmail 维护 5 分钟后')
     expect(s.calls.filter((call) => call.path === '/api/v2/serviceStatus')).toHaveLength(1)
   })
 
@@ -321,7 +321,7 @@ describe('概览', () => {
     const root = await open(new FakeServer(), '/overview')
     expect(root.textContent).toContain('输入总计（含缓存）24000 token')
     expect(root.textContent).toContain('缓存读取 0 token · 缓存写入 0 token')
-    expect(root.textContent).toContain('相隔约一小时的单批通常不会命中')
+    expect(root.textContent).toContain('间隔超过 5 分钟的单批通常不会命中')
     expect(root.textContent).not.toContain('节省')
   })
 

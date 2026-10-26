@@ -89,10 +89,17 @@ saved prompt snapshot. The existing mask, etag and request-ID handling protects 
 breaker, write limits, prompt and Claude accounting history. The existing Alarm can resume pending work with the
 chosen provider. A switch does not start an unread/recheck batch, rewrite classified history or enable automatic fallback.
 
-## 4. Hourly batches
+## 4. Automatic batch interval
 
-The existing Alarm normally maintains Gmail every five minutes. A persisted `next_model_at` starts new model work
-roughly hourly. It drains pending work in batches of up to ten, one request per pass, then schedules the next hour.
+The existing Alarm normally maintains Gmail every five minutes. `Settings.classification_interval_minutes` persists
+one of 5, 15, 30 or 60 minutes, with 15 as the default for both providers. A persisted `next_model_at` gates new model
+work. It drains pending work in batches of up to ten, one request per pass; an empty queue then begins the selected
+interval. The next interval uses the latest saved choice, including a save while a model request is in flight.
+
+A future ordinary wait adjusts by the difference between the old and new intervals. Due backlog, pending retries,
+write-cap waits and selected-provider quota holds keep their schedules and `not_before` values. The first Alarm or
+settings save adopts a missing legacy interval once, converting an ordinary 60-minute wait to 15 minutes and
+persisting the field. Later reads and Alarms do not repeatedly move it. No new scheduler or table is introduced.
 The pass stays within 40 external requests and existing run/day Gmail write caps. Message eligibility and existing
 P1-P4 labels are checked before a reached write cap can defer it, so skip-only work can finish without a model or
 Gmail write. Eligible mail waits through the normal queue; a routine cap is not a breaker fault.
@@ -175,14 +182,14 @@ initializer and consolidation state keep their original identity and resume beha
 
 ## 7. UI and Ops
 
-概览 shows Gmail freshness separately from the hourly model schedule, the current model/effort, recorded monthly
+概览 shows Gmail freshness separately from the configured classification interval and next-batch time, the current model/effort, recorded monthly
 Claude cost/tokens, actual Claude cache reads/writes and the selected provider/config error. While Codex is selected,
 Claude figures are labelled history. A separate Codex card shows the UTC month's attempts, successes/failures, reported
 input/output tokens, missing-usage count and most recent request. It stays visible as history when Claude is selected;
 an older server response with no Codex record says usage is unavailable. `ServiceStatus.classifier` reports the selected provider, fixed model/effort,
 local configuration, next batch time, safe error and last successful response; configuration presence does not check
 network reachability or authentication. 分级 shows the four queues and explicit unread-batch progress. 设置 shows
-the persistent two-choice selector and editable personal rules with a collapsed base-prompt field, alongside mode/write
+the persistent provider and 5/15/30/60-minute interval selectors, the fresh next-batch time and editable personal rules with a collapsed base-prompt field, alongside mode/write
 controls and undo. Saving updates that card in place; a prompt-load failure leaves other settings usable.
 Old examples, model stages and replay results are labelled history.
 
@@ -200,7 +207,7 @@ expanded details. Home owns its existing warning dismissal behavior.
 
 Use synthetic Gmail/Claude/Codex endpoints, the independent Gmail operation table, real workerd/SQLite, the generated
 owner API and the existing local Wrangler smoke. Cover batch ID validation, all four Gmail outcomes, preserved
-read/star/other labels, already-classified skips, hourly cadence, actual usage, monthly reset/wait, auth/provider
+read/star/other labels, already-classified skips, default and configured cadence, retry/quota schedule preservation, actual usage, monthly reset/wait, auth/provider
 failure and ordinary write-cap waits. Cover provider persistence, legacy defaults, selected-provider errors, no fallback
 and preserved mode/breaker/prompt/budget history. CPU tests must reach the active batched model path. Gateway checks
 use the shared Python wire codec, a fake SDK and offline pinned-feature inspection. Frozen contract fixtures

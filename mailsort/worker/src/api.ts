@@ -67,7 +67,7 @@ import { replaySummary } from './replay.ts';
 import { initializePriorities } from './priority-setup.ts';
 import { prioritySetup, priorityStartedAt } from './priority.ts';
 import { authState, type Budget, writeScope } from './session.ts';
-import { effectiveMode, readSettings, writeSettings, type ClassificationProviderName, type SettingsValue } from './settings.ts';
+import { CLASSIFICATION_INTERVAL_MINUTES, effectiveMode, readSettings, writeSettings, type ClassificationProviderName, type SettingsValue } from './settings.ts';
 import { CLAUDE_MONTHLY_LIMIT_MICROS, utcDay, type DecisionRow, type LabelRow, type LedgerRow, type ReviewRow, type Store } from './store.ts';
 import { startUnread, unreadProgress } from './unread.ts';
 import { ensureGmailLabel, executeWrites, hasSublabels, intend, intendUndo, linkGmailLabel, setNameTaken, undoable, userLabelsByName, type WriteContext } from './writes.ts';
@@ -412,6 +412,7 @@ function settingsMessage(ctx: ApiContext, value: SettingsValue): Settings {
     name: 'settings',
     mode: MODES[value.mode],
     classificationProvider: CLASSIFICATION_PROVIDERS[value.classificationProvider],
+    classificationIntervalMinutes: value.classificationIntervalMinutes,
     effectiveMode: MODES[effectiveMode(value, ctx.ceiling)],
     runWriteLimit: value.runWriteLimit,
     dailyWriteLimit: value.dailyWriteLimit,
@@ -1021,6 +1022,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       decisionModel: model,
       classifier: {
         provider: CLASSIFICATION_PROVIDERS[provider], model, effort: CLASSIFICATION_EFFORT, configured,
+        classificationIntervalMinutes: settings.classificationIntervalMinutes,
         lastErrorCode: store.getMeta(`${provider}_error`) ?? (configured ? '' : `${provider}_not_configured`),
         ...(Number.isFinite(nextBatch) && nextBatch > 0 ? { nextBatchTime: timestampFromMs(nextBatch) } : {}),
         ...(Number.isFinite(lastSuccess) && lastSuccess > 0 ? { lastSuccessTime: timestampFromMs(lastSuccess) } : {}),
@@ -1109,7 +1111,10 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           if (provider === null) throw sortError('INVALID_SETTINGS');
           next = { ...next, classificationProvider: provider };
         } else if (path === 'run_write_limit') next = { ...next, runWriteLimit: integer(input.runWriteLimit, 1, RUN_WRITE_LIMIT_MAX) };
-        else if (path === 'daily_write_limit') next = { ...next, dailyWriteLimit: integer(input.dailyWriteLimit, 1, DAILY_WRITE_LIMIT_MAX) };
+        else if (path === 'classification_interval_minutes') {
+          if (!CLASSIFICATION_INTERVAL_MINUTES.includes(input.classificationIntervalMinutes)) throw sortError('INVALID_SETTINGS');
+          next = { ...next, classificationIntervalMinutes: input.classificationIntervalMinutes };
+        } else if (path === 'daily_write_limit') next = { ...next, dailyWriteLimit: integer(input.dailyWriteLimit, 1, DAILY_WRITE_LIMIT_MAX) };
         else if (path === 'daily_neuron_budget') next = { ...next, dailyNeuronBudget: integer(input.dailyNeuronBudget, NEURON_BUDGET_MIN, NEURON_BUDGET_MAX) };
         else if (!['name', 'etag', 'effective_mode', 'breaker_tripped', 'breaker_reason'].includes(path)) bad('update_mask names an unknown field');
       }

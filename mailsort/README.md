@@ -14,7 +14,8 @@ There are no reminders, automatic resurfacing or task creation.
 
 ## Classification
 
-The existing Durable Object Alarm checks Gmail and maintenance every five minutes. Roughly hourly, it classifies
+The existing Durable Object Alarm checks Gmail and maintenance every five minutes. Normal automatic classification
+defaults to a 15-minute interval, configurable in 设置 → 自动分类间隔 as 5, 15, 30 or 60 minutes. It classifies
 pending unread, unclassified mail in bounded batches of up to ten, with one model request per batch.
 Choose either provider in **设置 → 分类引擎**:
 
@@ -29,6 +30,8 @@ until the owner switches. Both providers use the same saved prompt; switching pr
 and Claude usage history. It affects the next batch without starting an unread batch or reclassifying labelled mail.
 There is no automatic provider or model fallback.
 
+The interval is persisted for both providers. Saving adjusts a future ordinary wait; retries, quota waits and
+accepted backlog keep their own schedules. Older settings adopt 15 minutes once without reclassifying old mail.
 Backlog continues over subsequent Alarm calls within existing request and write caps. Normal history sync
 retains its new-mail Inbox/receipt cutoff; the explicit unread action also covers older and archived mail.
 
@@ -53,7 +56,7 @@ leaves Claude work pending for the next UTC month. These limits apply only while
 cache records remain visible as history while Codex is selected.
 
 Consecutive batches can reuse five-minute Claude prompt caches. Only the stable base/rules prefix is marked;
-emails and evaluation times follow it. Ordinary hourly single batches do not request a cache write. The usage card
+emails and evaluation times follow it. Ordinary scheduled single batches do not request a cache write. The usage card
 shows actual cache reads/writes, and cost uses their separate prices. There is no prewarming or extra API call.
 This explicit cache policy applies only to Claude.
 
@@ -76,7 +79,7 @@ preserve both providers' history on a switch and do not estimate subscription co
 - 分级: four fixed queues, counts and explicit unread-batch progress. A manual start queues immediately; existing
   P1-P4 mail is skipped. While an active batch is visible, progress updates every 30 seconds. It stops on completion
   or leaving the page, and a reached daily write cap shows its UTC-reset time in the browser timezone.
-- 设置: the persistent two-provider selector, personal rules, a collapsed base-prompt editor, mode, write limits and undo. Old examples, replay results and decision evidence remain readable as history.
+- 设置: the persistent provider and interval choices, next classification time, personal rules, a collapsed base-prompt editor, mode, write limits and undo. Old examples, replay results and decision evidence remain readable as history.
 
 Off, shadow and live modes retain their existing meanings. Shadow records decisions without changing Gmail;
 live applies them. The deployment ceiling can lower the owner's mode. Existing labelled mail is not automatically

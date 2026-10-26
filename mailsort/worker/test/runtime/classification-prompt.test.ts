@@ -62,7 +62,7 @@ it('validates UTF-8 size and masks, accepts escaped prompt bodies above16KiB, an
   expect(tooLarge.status).toBe(400);
 });
 
-it('uses saved prompt text on the next request without rejudging prior mail and leaves hourly single batches uncached', async () => {
+it('uses saved prompt text on the next request without rejudging prior mail and leaves scheduled single batches uncached', async () => {
   await ready();
   deliver(h, input(1), T0 + MINUTE);
   await h.step(T0 + 2 * MINUTE);

@@ -46,3 +46,7 @@ No default duration is invented, and stored estimates, queue dates and recorded 
 Task deletion confirmations focus their Delete action: Enter activates that button, Escape cancels the
 confirmation and returns focus to its trigger. These keys are scoped to the confirmation, so they do not
 submit the underlying task form or close its editor. Pointer deletion keeps the same confirmation.
+
+This behavior is deployed from `f3a689fa519977f824b3045b4649fff6d9c5cc94`. The complete branch gate,
+same-source production release and matching configuration reconcile passed. Dated evidence is in
+[refinement verification](refinement-verification.md#2026-10-26-planning-and-task-details).

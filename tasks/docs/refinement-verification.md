@@ -228,3 +228,22 @@ Local combined checks, same-SHA branch/main release and production inspection ar
 Actual Chrome with a synthetic local task shows the default collapsed date controls:
 
 ![Date picker with optional Time and Repeat entries](images/compact-date.png)
+
+## 2026-10-26 planning and task details
+
+Released `f3a689fa519977f824b3045b4649fff6d9c5cc94` after [complete branch CI](https://github.com/ziyixi/todofy/actions/runs/40254268612)
+and [same-source main release](https://github.com/ziyixi/todofy/actions/runs/40255033152).
+All 152 native Chromium cases, 158 real D1/runtime cases and the existing CPU/read/render-work bounds passed.
+The [matching post-release reconcile](https://github.com/ziyixi/todofy/actions/runs/40255267212) also passed,
+including resource registration, VPS and the resolved-infrastructure gate. Tasks deployment 7322171388
+verified Worker version `34954a3f-6fd1-43b7-b02d-e483d00e801a` at 01:38:17 UTC.
+
+Synthetic browser journeys verified final-prerequisite completion and Deadline windows surfacing work in
+Parked, acknowledgement after reload, and waiting tasks/descendants hidden throughout Plan while Focus queues
+remain intact. They also verified successful Save return navigation, first/cached dependency geometry,
+read-only reverse links, configured Quick clock/timezone after a real D1 queue drag, no Quick estimate prompt,
+and Enter/Escape deletion with no underlying Save or unintended delete from a title input.
+
+No owner task content was read and no production task mutations were invoked for acceptance. No database
+migration, extra scheduling service or default Quick duration was introduced.
+See [planning readiness](planning-readiness.md) for the current behavior.

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { PRIORITY_LABELS } from '../../src/priority.ts';
 import { MAILS, message, type SyntheticMail } from '../fakes/fixtures.ts';
-import { DAY, HOUR, MINUTE, startHarness, T0, type Harness } from './harness.ts';
+import { DAY, MINUTE, startHarness, T0, type Harness } from './harness.ts';
 import { checkGoogleCalls, decision, deliver, gmailLabels, modifies, setMode } from './helpers.ts';
 
 let h: Harness;
@@ -36,7 +36,7 @@ describe('Claude priority pipeline', () => {
     expect(await h.sql(`SELECT id FROM review`)).toEqual([]);
   });
 
-  it('starts roughly hourly, drains ten per request, and reaches a run cap without switching to shadow', async () => {
+  it('defaults to 15 minutes, drains ten per request, and reaches a run cap without switching to shadow', async () => {
     await initialize();
     await h.sql(`UPDATE meta SET value = json_set(value, '$.runWriteLimit', 10) WHERE key = 'settings'`);
     for (let i = 1; i <= 21; i++) deliver(h, mail(i), T0 + MINUTE);
@@ -48,7 +48,9 @@ describe('Claude priority pipeline', () => {
     deliver(h, mail(22), T0 + 5 * MINUTE);
     await h.step(T0 + 9 * MINUTE);
     expect(h.up.claude.calls).toHaveLength(3);
-    await h.step(T0 + HOUR + 4 * MINUTE);
+    await h.step(T0 + 18 * MINUTE);
+    expect(h.up.claude.calls).toHaveLength(3);
+    await h.step(T0 + 19 * MINUTE);
     expect(h.up.claude.calls).toHaveLength(4);
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
     expect(status.claudeBudget).toMatchObject({ model: 'claude-opus-5-5', effort: 'medium', month: '2026-10', limitUsd: 20, spentUsd: 0.0288, inputTokens: 4800, outputTokens: 480, thinkingTokens: 160 });

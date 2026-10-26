@@ -6,7 +6,7 @@ import { ClassificationProvider, Mode, ServiceStatus_AuthState, SettingsSchema, 
 import { api, errorMessage, newRequestId, withRetry } from '../api.ts'
 import { card, segmented } from '../components.ts'
 import { button, el, toast } from '../dom.ts'
-import { BREAKER_REASONS, classificationProvider, classificationProviderName, labelText, MODE_HINTS, MODE_NAMES, ms } from '../format.ts'
+import { BREAKER_REASONS, classificationProvider, classificationProviderName, labelText, MODE_HINTS, MODE_NAMES, ms, relative, when } from '../format.ts'
 import type { Host, ViewContext } from '../app.ts'
 import { replayCard } from './replay.ts'
 import { promptCard } from './prompt.ts'
@@ -18,6 +18,7 @@ const PROVIDERS: readonly (readonly [ClassificationProvider, string])[] = [
   [ClassificationProvider.CLAUDE, 'Claude API'],
   [ClassificationProvider.CODEX, 'VPS Codex'],
 ]
+const CLASSIFICATION_INTERVALS = [5, 15, 30, 60].map((minutes) => [minutes, `${String(minutes)} 分钟`] as const)
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -120,6 +121,36 @@ function providerCard(settings: Settings, status: ServiceStatus | null, ctx: Vie
     el('p', { class: 'hint' }, '切换从下一批生效；已分类邮件不重判。'),
     classifierDetails(status, ctx.host.now(), selected),
     feedback,
+  )
+}
+
+function intervalCard(settings: Settings, status: ServiceStatus | null, ctx: ViewContext, reload: () => Promise<void>): HTMLElement {
+  const selected = settings.classificationIntervalMinutes || 15
+  let saving = false
+  const save = async (minutes: number) => {
+    if (saving || minutes === selected) return
+    saving = true
+    for (const control of choices.querySelectorAll('button')) control.disabled = true
+    try {
+      await act((requestId) => api.updateSettings({
+        settings: create(SettingsSchema, { name: 'settings', classificationIntervalMinutes: minutes, etag: settings.etag }),
+        updateMask: { paths: ['classification_interval_minutes', 'etag'] }, requestId,
+      }), `自动分类间隔已设为 ${String(minutes)} 分钟`, async () => {
+        ctx.refreshStatus()
+        await reload()
+      })
+    } finally {
+      saving = false
+      for (const control of choices.querySelectorAll('button')) control.disabled = false
+    }
+  }
+  const choices = segmented('自动分类间隔', CLASSIFICATION_INTERVALS, selected, (minutes) => void save(minutes))
+  const next = status?.classifier === undefined && classificationProvider(settings.classificationProvider) === ClassificationProvider.CLAUDE
+    ? status?.claudeBudget?.nextBatchTime : status?.classifier?.nextBatchTime
+  return card(
+    '自动分类间隔', '', choices,
+    el('p', { class: 'hint' }, 'Gmail 维护检查仍每 5 分钟运行。积压批次、失败重试和额度等待沿用各自的时间。'),
+    el('p', { class: 'hint' }, next === undefined ? '下批判断时间尚未提供' : `下批判断最早在 ${relative(next, ctx.host.now())}（${when(next)}）。`),
   )
 }
 
@@ -245,6 +276,6 @@ export async function renderSettings(ctx: ViewContext): Promise<void> {
   const reload: () => Promise<void> = await frame(ctx.main, '设置', async (body) => {
     // The header's status (its grant) only adds a line: without it the page still works.
     const [settings, labels, status] = await Promise.all([api.getSettings({ name: 'settings' }), allLabels(), ctx.status().catch(() => null)])
-    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), providerCard(settings, status, ctx, () => reload()), prompt, undoCard(labels, ctx.host), await replayCard(labels))
+    body.replaceChildren(modeCard(settings, status, ctx, () => reload()), providerCard(settings, status, ctx, () => reload()), intervalCard(settings, status, ctx, () => reload()), prompt, undoCard(labels, ctx.host), await replayCard(labels))
   })
 }

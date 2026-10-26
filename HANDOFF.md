@@ -12,36 +12,42 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-### Tasks readiness, save navigation and reverse dependencies (`codex/parked-ready-tasks`)
+### Mailsort automatic classification interval (`codex/mailsort-interval`)
 
-Owner requested dependency completion and open Deadline windows to surface in the existing Parked area,
-explicit Save to close or return to the previous task, read-only reverse dependency titles, and then hiding
-all waiting work from Plan. Follow-up requests remove Quick estimate prompts, show its configured clock
-time in the calendar and make deletion confirmations respond to Enter/Escape. Explicit Waiting/Blocked and
-unfinished dependencies hide that task and its
-descendants in Review, Week/trays/calendar; no Waiting column or review jump remains. Focus data is unchanged.
-Automatic Parked membership is read-derived, including tasks with a saved stage: no migration or automatic
-task write is added. Start/stage drag uses the existing Active acknowledgement. Dates and Focus queues stay
-unchanged; automatic cards precede and remain visible above the three-card manual backlog. Focus's hint
-includes completed prerequisites and opens Parked. The old start order key remains readable but no separate
-Start now column is shown. Native GetTask adds output-only Task.dependents (tag 42) through the existing
-reverse index; ListTasks omits it. Plan uses its loaded graph. Duplicate responses clear both edge directions.
-Explicit Save navigates back through task IDs with a fresh parent read; description Done stays inline.
-Quick retains the existing due_datetime/due_timezone in the UI mapping; its calendar card shows configured
-HH:mm or Quick when untimed, with no Estimate prompt or unknown-count warning. Existing stored estimates,
-dates, queues and records remain intact. The existing clock formatter is shared, without another dependency.
-A small Tasks-only focus/key hook makes native Enter confirm deletion and Escape cancel it at the three
-existing confirmation sites, without submitting Save or installing global keyboard bindings.
-Local checks passed planning UI 338 tests (including 2,000-task and visibility-cache work bounds), Tasks web
-117, Worker 72 unit/29 selected real D1 tests, the fullest-planning CPU case, relevant lint/types/build and
-proto API lint/breaking. The earlier 32 affected Chromium cases passed; the two follow-ups passed eight Quick/
-refinement and five keyboard-deletion cases. The full 152-case Chromium run passed 151; its sole obsolete
-Waiting-column assertion was updated and all 12 layout cases then passed. Final branch CI reruns all 152;
-branch/main release checks remain pending. The first complete branch run passed the other 21 checks and
-all 158 real D1/runtime cases; its sole browser failure was a local screenshot path absent on Linux.
-The screenshot now uses testInfo.outputPath, and both readiness journeys passed again locally.
-No production tasks were changed for this work.
-Behavior: [planning readiness](tasks/docs/planning-readiness.md).
+The owner requested a 15-minute classification interval and an editable dashboard setting. This branch uses the
+existing Mailsort settings row and Alarm: choices 5/15/30/60 minutes, default 15, shared by Claude and Codex.
+Gmail maintenance remains five minutes. A normal future wait adjusts on save; retries, deferred work and provider
+quota holds retain their deadlines. Missing legacy settings adopt 15 once. Settings and Overview distinguish the
+classification interval/next batch from the next Gmail maintenance check. Mode, provider, prompts, cache policy,
+write caps, history and mail eligibility retain their existing behavior. No mailbox or production changes were made.
+Local checks passed Worker 236 unit/119 real workerd SQLite cases, web 111 tests, relevant lint/typechecks, UI
+build/budget and the existing Wrangler smoke with synthetic Gmail/Claude/Codex. The delayed Codex request
+regression confirms that a pass begun at 15 minutes schedules its next batch at the saved 60-minute interval.
+Proto format/lint, 75-file API lint, breaking checks against f3a689fa and generated-schema checks passed.
+The local Worker bundle is 148.7 KiB gzip within the existing 150 KiB budget; Linux CI remains authoritative.
+Root review, branch CI and release remain pending.
+
+### Tasks planning and detail update (released)
+
+Source `f3a689fa519977f824b3045b4649fff6d9c5cc94` passed the complete
+[branch CI 40254268612](https://github.com/ziyixi/todofy/actions/runs/40254268612), including 152 Chromium cases,
+and [same-SHA main 40255033152](https://github.com/ziyixi/todofy/actions/runs/40255033152).
+[Post-release reconcile 40255267212](https://github.com/ziyixi/todofy/actions/runs/40255267212) passed the complete
+Worker comparison, account registration, VPS and resolved-infrastructure gate.
+GitHub Tasks deployment 7322171388 records verified success at 2026-10-26 01:38:17 UTC;
+Worker version is `34954a3f-6fd1-43b7-b02d-e483d00e801a`. Personal MCP released the same source as required.
+
+Completed prerequisites and open Deadline windows surface inactive work in Parked, without changing stored
+stages or queues. Plan hides waiting tasks and their descendants across Review, Week, Quick and calendar;
+Focus data stays intact. Start/stage drag acknowledges readiness with the existing Active flag. Native details
+have read-only Dependents through the indexed GetTask projection (Task tag 42); ordinary lists do not expand it.
+Explicit Save closes or returns to the previous task; description Done stays inline. Quick shows its configured
+clock instead of unknown duration, retains clock editing and has no Estimate prompt. Enter/Escape operate only
+within deletion confirmations. No scheduler, database migration or production task mutation was added.
+Local checks also passed planning UI 338, Tasks web 117, Worker 72 unit and relevant runtime/CPU checks;
+CI passed all 158 real D1/runtime cases. Acceptance used synthetic data, not owner task content.
+Behavior and evidence: [planning readiness](tasks/docs/planning-readiness.md),
+[refinement verification](tasks/docs/refinement-verification.md#2026-10-26-planning-and-task-details).
 
 ### Configuration drift audit false positive (`codex/fix-config-drift`)
 
