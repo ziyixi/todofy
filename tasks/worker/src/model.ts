@@ -3,6 +3,7 @@ import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import {
   TaskSchema,
   TaskDependencySchema,
+  TaskDependentSchema,
   ProjectSchema,
   SectionSchema,
   LabelSchema,
@@ -70,6 +71,8 @@ export interface TaskRow extends BaseRow {
   completed_child_count?: number;
   /** JSON from `dependencyList`: [{prerequisite_id,title,done}], oldest first. */
   dependencies?: string;
+  /** GetTask's indexed reverse links, not part of ordinary task lists. */
+  dependents?: string;
 }
 export interface CatalogRow extends BaseRow {
   parent_id?: string;
@@ -216,6 +219,11 @@ export function taskMessage(row: TaskRow, today: string): Task {
         done: Boolean(value.done),
       }),
     ),
+    dependents: row.dependents
+      ? (JSON.parse(row.dependents) as { task_id: string; title: string }[]).map((value) =>
+          create(TaskDependentSchema, { taskId: value.task_id, title: value.title }),
+        )
+      : [],
     boardStage: planning.boardStage,
     mustStart: planning.mustStart,
     missingLead: planning.missingLead,

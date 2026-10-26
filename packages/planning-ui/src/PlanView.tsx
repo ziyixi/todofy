@@ -51,7 +51,7 @@ export interface PlanViewProps {
   onOpenGtd?: () => void;
   /** Each new positive value opens the weekly review (the review task's link); a mount with one starts with it. */
   reviewing?: number;
-  /** Opened from Focus's quiet line: Review, with Start now focused. */
+  /** Opened from Focus's quiet line: Review, with Parked focused. */
   showStart?: boolean;
   onStartShown?: () => void;
   /** Plan's remembered view, read once when Plan mounts. */
@@ -64,10 +64,7 @@ export interface PlanViewProps {
  * (its own stage lane keeps it); Week's Add steps input.
  */
 const JUMPS = {
-  start: [
-    '.review-lane[data-lane="start"]',
-    '.review-draggable[data-state="start"] .planning-outcome-card',
-  ],
+  start: ['.review-lane[data-lane="parked"]'],
   waiting: [
     '.review-lane[data-lane="waiting"]',
     '.review-draggable[data-state="waiting"] .planning-outcome-card',

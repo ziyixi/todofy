@@ -233,10 +233,6 @@ test("label selection floats above details and quick add without expanding eithe
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
   await expect(dialog).not.toBeVisible();
   const saved = await (
     await request.get(`/api/tasks/v1/tasks/${task.id}`)

@@ -1,7 +1,6 @@
 import {
-  deadlineState,
   deadlineStatus,
-  isDue,
+  planningReadiness,
   startStatus,
   type StatusText,
 } from "./deadlines";
@@ -22,8 +21,8 @@ import type { LaneId, Language, PlanState, PlanningTask, Stage } from "./model";
 export type { LaneId } from "./model";
 export type BoardLanes = Record<LaneId, PlanningTask[]>;
 
-/** What a card says besides its title and area: that it waits, or that it should start. */
-export type CardState = "waiting" | "start";
+/** A card's waiting, deadline-window or completed-prerequisite reason. */
+export type CardState = "waiting" | "start" | "ready";
 
 /**
  * Waiting wins, as in the board's lanes: a @waiting task past its deadline waits, and so does one
@@ -34,22 +33,18 @@ export function cardState(
   task: PlanningTask,
   today: string,
   waitsFor: readonly PlanningTask[] = [],
+  dependenciesDone = false,
 ): CardState | undefined {
   if (waits(task) || waitsFor.length) return "waiting";
-  const state = deadlineState(task, today);
-  return state && isDue(state) ? "start" : undefined;
+  const ready = planningReadiness(task, today, false, dependenciesDone);
+  return ready === "dependencies" ? "ready" : ready ? "start" : undefined;
 }
 
 /**
- * Every task in at most one lane (owner, 2026-10-16). First (2026-10-17), a task set aside with the
- * literal `parked` label is in Parked whatever else it has, while the account has that label. An
- * outcome with its own stage label stays in that lane, and its card says it waits or should start.
- * Otherwise a waiting task (a label, or a dependency that holds) is in Waiting and one that should
- * start is in Start now, also when only the 7-day date rule made it a Week candidate; the other
- * date-rule candidates stay in Week. A step has no card in its outcome's lane, even with the same
- * stage label, so one that waits or should start has its own card in Waiting or Start now. Each
- * lane follows the owner's stored order (inLaneOrder), and otherwise Start now lists the earliest
- * deadline first, then the higher priority; Waiting and Parked the longest untouched first.
+ * One card per task. Ready tasks surface in Parked before the manually parked backlog, without
+ * rewriting their stages. Picking one up uses the existing active flag. Remaining tasks keep
+ * their stage, Waiting or date-candidate lane. The old start key remains readable in lane orders;
+ * the board no longer displays a separate Start now lane.
  */
 export function boardLanes(
   plan: Pick<PlanState, "tasks" | "dependencies" | "laneOrders">,
@@ -65,29 +60,47 @@ export function boardLanes(
     committed: [],
   };
   const parked = (task: PlanningTask) => isParked(task);
-  lanes.parked = byUntouched(plan.tasks.filter(parked));
-  const outcomes = planningOutcomes(plan.tasks).filter((task) => !parked(task));
+  const index = dependencyIndex(plan);
+  const state = (task: PlanningTask) =>
+    cardState(
+      task,
+      today,
+      index.waitingFor.get(task.id),
+      index.done.has(task.id),
+    );
+  const ready = plan.tasks
+    .filter((task) => {
+      const ready = state(task);
+      return ready === "start" || ready === "ready";
+    })
+    .sort(
+      (a, b) =>
+        (a.deadline || "9999").localeCompare(b.deadline || "9999") ||
+        b.priority - a.priority,
+    );
+  const readyIds = new Set(ready.map((task) => task.id));
+  lanes.parked = [
+    ...inLaneOrder("start", ready, plan.laneOrders.parked),
+    ...inLaneOrder(
+      "parked",
+      byUntouched(plan.tasks.filter(parked)),
+      plan.laneOrders.parked,
+    ),
+  ];
+  const outcomes = planningOutcomes(plan.tasks).filter(
+    (task) => !parked(task) && !readyIds.has(task.id),
+  );
   const staged = new Set(
     outcomes.filter((task) => !isDateCandidate(task)).map((task) => task.id),
   );
-  const { waitingFor } = dependencyIndex(plan);
-  const state = (task: PlanningTask) =>
-    cardState(task, today, waitingFor.get(task.id));
   for (const task of outcomes)
     if (staged.has(task.id) || !state(task))
       lanes[task.stage as Exclude<Stage, "none">].push(task);
   for (const task of waitingTasks(plan))
     if (!staged.has(task.id) && !parked(task)) lanes.waiting.push(task);
-  lanes.start = plan.tasks
-    .filter(
-      (task) =>
-        !staged.has(task.id) && !parked(task) && state(task) === "start",
-    )
-    .sort(
-      (a, b) => a.deadline.localeCompare(b.deadline) || b.priority - a.priority,
-    );
   for (const lane of Object.keys(lanes) as LaneId[])
-    lanes[lane] = inLaneOrder(lane, lanes[lane], plan.laneOrders[lane]);
+    if (lane !== "parked")
+      lanes[lane] = inLaneOrder(lane, lanes[lane], plan.laneOrders[lane]);
   return lanes;
 }
 
@@ -106,6 +119,12 @@ export function cardStatus(
   waitsFor: readonly PlanningTask[] = [],
 ): StatusText[] {
   if (state === "start") return [startStatus(task.deadline, today, language)];
+  if (state === "ready")
+    return [
+      {
+        text: language === "zh" ? "前置任务已完成" : "Prerequisites completed",
+      },
+    ];
   const untouched = waitsFor.length
     ? waitingForStatus(waitsFor, language)
     : { text: untouchedText(task, language) };

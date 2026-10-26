@@ -67,6 +67,7 @@ export function App() {
   const [editor, setEditor] = useState<{
     task?: Task;
     defaults?: Partial<TaskDraft>;
+    previous?: string[];
   }>();
   const [catalogEditor, setCatalogEditor] = useState<{
     kind: CatalogKind;
@@ -125,6 +126,7 @@ export function App() {
   // errors give way to the reload prompt.
   const outdated = useOutdated();
   const taskOpenSequence = useRef(0);
+  const editorSequence = taskOpenSequence.current;
   const searchRef = useRef<HTMLInputElement>(null);
   const currentRoute = useRef(route);
   currentRoute.current = route;
@@ -199,20 +201,28 @@ export function App() {
       },
     });
   }, [catalog, loadCatalog]);
-  const openTask = useCallback(async (id: string, fromLink = false) => {
-    const request = ++taskOpenSequence.current;
-    try {
-      // ListTasks omits full descriptions; GetTask answers the whole task, planning facts included.
-      const task = await api.getTask({ name: `tasks/${id}` });
-      if (request === taskOpenSequence.current) setEditor({ task });
-    } catch (reason) {
-      // A link to a task that does not open, such as one deleted since, would otherwise fail on every reload.
-      // An opened link stays until its editor closes, so a reload meanwhile reopens the task.
-      if (fromLink) removeQueryParameter("task");
-      if (request === taskOpenSequence.current)
-        setNotice(describeError(reason));
-    }
-  }, []);
+  const openTask = useCallback(
+    async (id: string, fromLink = false, previous?: string[]) => {
+      const request = ++taskOpenSequence.current;
+      try {
+        // ListTasks omits full descriptions; GetTask answers the whole task, planning facts included.
+        const task = await api.getTask({ name: `tasks/${id}` });
+        if (request === taskOpenSequence.current) setEditor({ task, previous });
+      } catch (reason) {
+        // A link to a task that does not open, such as one deleted since, would otherwise fail on every reload.
+        // An opened link stays until its editor closes, so a reload meanwhile reopens the task.
+        if (fromLink) removeQueryParameter("task");
+        if (request === taskOpenSequence.current)
+          setNotice(describeError(reason));
+      }
+    },
+    [],
+  );
+  function closeTaskEditor() {
+    taskOpenSequence.current++;
+    setEditor(undefined);
+    removeQueryParameter("task");
+  }
   useEffect(() => {
     const id = new URL(window.location.href).searchParams.get("task");
     if (id) void openTask(id, true);
@@ -517,15 +527,29 @@ export function App() {
               task={editor.task}
               defaults={editor.defaults}
               catalog={catalog}
-              onClose={() => {
-                taskOpenSequence.current++;
-                setEditor(undefined);
-                removeQueryParameter("task");
+              onClose={closeTaskEditor}
+              onSaveComplete={async () => {
+                if (editorSequence !== taskOpenSequence.current) return;
+                const previous = editor.previous?.at(-1);
+                if (!previous) {
+                  closeTaskEditor();
+                  return;
+                }
+                // Return on a fresh reply so edited children and the parent's write baseline are current.
+                const request = ++taskOpenSequence.current;
+                const task = await api.getTask({ name: `tasks/${previous}` });
+                if (request === taskOpenSequence.current)
+                  setEditor({ task, previous: editor.previous?.slice(0, -1) });
               }}
               onSave={saveTask}
               onDelete={deleteTask}
               onComplete={complete}
-              onOpen={(id) => void openTask(id)}
+              onOpen={(id) =>
+                void openTask(id, false, [
+                  ...(editor.previous ?? []),
+                  ...(editor.task ? [editor.task.id] : []),
+                ])
+              }
             />
           </ErrorBoundary>
         )}

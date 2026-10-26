@@ -6,7 +6,7 @@ export type BetArea = Exclude<Area, "unassigned">;
 export type Stage = "none" | "quarterly" | "monthly" | "weekly" | "committed";
 export type View = "plan" | "focus";
 export type Language = "en" | "zh";
-/** The Review board's lanes, left to right: Start now, Waiting, Parked, the four planning stages. */
+/** Review's lanes; start remains a readable legacy order key, without a displayed column. */
 export type LaneId = "start" | "waiting" | "parked" | Exclude<Stage, "none">;
 export interface PlanningTask {
   id: string;

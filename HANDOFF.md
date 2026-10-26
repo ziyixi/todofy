@@ -12,6 +12,22 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+### Tasks readiness, save navigation and reverse dependencies (`codex/parked-ready-tasks`)
+
+Owner requested dependency completion and open Deadline windows to surface in the existing Parked area,
+explicit Save to close or return to the previous task, and read-only reverse dependency titles.
+Automatic Parked membership is read-derived, including tasks with a saved stage: no migration or automatic
+task write is added. Start/stage drag uses the existing Active acknowledgement. Dates and Focus queues stay
+unchanged; automatic cards precede and remain visible above the three-card manual backlog. Focus's hint
+includes completed prerequisites and opens Parked. The old start order key remains readable but no separate
+Start now column is shown. Native GetTask adds output-only Task.dependents (tag 42) through the existing
+reverse index; ListTasks omits it. Plan uses its loaded graph. Duplicate responses clear both edge directions.
+Explicit Save navigates back through task IDs with a fresh parent read; description Done stays inline.
+Local checks currently passed planning UI 329 tests, Tasks web 115, Worker 72 unit/29 selected real D1 tests,
+the existing fullest-planning CPU case, relevant lint/types/build and proto API lint/breaking. Final browser
+integration and branch/main release checks are pending; no production tasks were changed for this work.
+Behavior: [planning readiness](tasks/docs/planning-readiness.md).
+
 ### Configuration drift audit false positive (`codex/fix-config-drift`)
 
 The owner requested fixing the configuration drift indication. Home's stored check at 03:30 UTC has zero

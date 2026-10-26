@@ -160,7 +160,8 @@ test("Task goal assignments survive description, stage and date edits; Steps inh
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await expect(dialog).not.toBeVisible();
+  await page.getByText(task.title, { exact: true }).click();
   await expect(trigger).toContainText(goal.title);
   await dialog
     .getByRole("combobox", { name: "Planning stage", exact: true })
@@ -208,7 +209,9 @@ test("Task goal assignments survive description, stage and date edits; Steps inh
   await stepDialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
-  await expect(stepDialog.locator(".task-save-status")).toHaveText("Saved");
+  await expect(stepDialog).not.toBeVisible();
+  await page.goto(`/?task=${step.id}#/inbox`);
+  await expect(stepDialog).toBeVisible();
   expect(
     (await (await request.get(`/api/tasks/v1/tasks/${step.id}`)).json())
       .effective_key_result_id,
@@ -222,7 +225,7 @@ test("Task goal assignments survive description, stage and date edits; Steps inh
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await expect(dialog).not.toBeVisible();
   expect(
     (await (await request.get(`/api/tasks/v1/tasks/${task.id}`)).json())
       .key_result_id ?? "",

@@ -180,6 +180,26 @@ export function TaskDependencyFields({
           <Plus size={13} /> Add dependency
         </button>
       )}
+      <div className="task-dependents" aria-label="Dependent tasks">
+        <h3>
+          <Link2 size={13} /> Dependents
+        </h3>
+        {task.dependents.length ? (
+          task.dependents.map((dependent) => (
+            <div className="task-dependency-row" key={dependent.taskId}>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => onOpen(dependent.taskId)}
+              >
+                {dependent.title || "Referenced task"}
+              </button>
+            </div>
+          ))
+        ) : (
+          <p className="muted child-empty">No tasks depend on this task.</p>
+        )}
+      </div>
     </section>
   );
 }

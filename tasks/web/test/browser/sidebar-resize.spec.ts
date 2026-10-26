@@ -254,10 +254,6 @@ test("task edits and property popups remain usable in narrow and short windows",
     await save.scrollIntoViewIfNeeded();
     await expectInsideWindow(page, save);
     await save.click();
-    await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-    await dialog
-      .getByRole("button", { name: "Close dialog", exact: true })
-      .click();
     await expect(dialog).not.toBeVisible();
     const response = await request.get(`/api/tasks/v1/tasks/${task.id}`);
     const saved = await response.json();

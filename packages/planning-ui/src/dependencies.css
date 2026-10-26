@@ -7,6 +7,9 @@
 .plus-dependencies h3:focus {
   outline: none;
 }
+.plus-dependents {
+  margin-top: 16px;
+}
 .plus-dependency-list {
   list-style: none;
   padding: 0;

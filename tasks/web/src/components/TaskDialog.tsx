@@ -41,6 +41,7 @@ export function TaskDialog({
   catalog,
   defaults,
   onClose,
+  onSaveComplete = onClose,
   onSave,
   onDelete,
   onOpen,
@@ -51,6 +52,8 @@ export function TaskDialog({
   catalog: Catalog;
   defaults?: Partial<TaskDraft>;
   onClose: () => void;
+  /** Return to the previous view after an explicit Save has succeeded. */
+  onSaveComplete?: () => void | Promise<void>;
   /** One write of the task, after which the host reads the list, the catalog and Plan again. */
   onSave: (
     draft: TaskDraft,
@@ -89,12 +92,16 @@ export function TaskDialog({
   const executable = isStep || planning.draft.singleAction;
   const patch = <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
-  async function save() {
+  async function save(closeAfterSave = false) {
     if (!draft.title.trim() || busy) return false;
     setBusy(true);
     setSavedDraft(undefined);
     setError("");
     try {
+      if (closeAfterSave && saveComplete) {
+        await onSaveComplete();
+        return true;
+      }
       // Content and planning are one write of the task, under its etag.
       const saved = await onSave(
         {
@@ -115,8 +122,9 @@ export function TaskDialog({
       setDraft(content);
       planning.setDraft(nextPlanning);
       saveRequestId.current = crypto.randomUUID();
-      if (task) setSavedDraft({ content, planning: nextPlanning });
-      else onClose();
+      if (!task) onClose();
+      else if (closeAfterSave) await onSaveComplete();
+      else setSavedDraft({ content, planning: nextPlanning });
       return true;
     } catch (reason) {
       setError(describeError(reason));
@@ -127,7 +135,7 @@ export function TaskDialog({
   }
   function submit(event: FormEvent) {
     event.preventDefault();
-    void save();
+    void save(true);
   }
   async function previewDate() {
     if (!dateText.trim()) return;

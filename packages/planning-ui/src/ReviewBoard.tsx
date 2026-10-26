@@ -26,6 +26,7 @@ import {
 } from "./drag-announcements";
 import {
   areaColor,
+  isParked,
   outcomeArea,
   outcomeSteps,
   PARKED_LABEL,
@@ -76,6 +77,8 @@ export interface OutcomeCardProps {
   pending?: boolean;
   /** On the Review board: the tasks it waits for that are not done (dependencies.ts). */
   waitsFor?: readonly PlanningTask[];
+  /** At least one prerequisite, with all of them complete. */
+  dependenciesDone?: boolean;
   /** In Parked: how long Todoist has not changed it, in place of the step counts. */
   untouched?: boolean;
   onClick: () => void;
@@ -98,6 +101,7 @@ export function OutcomeCard({
   selected = false,
   pending = false,
   waitsFor,
+  dependenciesDone = false,
   untouched = false,
   onClick,
   onOpen,
@@ -111,7 +115,9 @@ export function OutcomeCard({
         ? "未设优先级"
         : "No priority";
   const title = displayedTitle(task.title);
-  const state = today ? cardState(task, today, waitsFor) : undefined;
+  const state = today
+    ? cardState(task, today, waitsFor, dependenciesDone)
+    : undefined;
   // A parked card that waits still says so; otherwise its untouched days, when Todoist says.
   const untouchedLine =
     untouched && !state ? untouchedText(task, language) : "";
@@ -226,11 +232,9 @@ interface Props {
 const PARKED_SHOWN = 3;
 
 /**
- * Start now, Waiting, Parked and the four stage lanes, with the same lanes and cards. Start now
- * and Waiting show only when they have cards and take no drops: a card dragged from Start now into
- * a stage lane takes that stage and is marked in progress in one write; one from Waiting takes only
- * the stage. Parked always shows and takes any card: it sets the card aside, and a card dragged out
- * of it into a stage lane takes that stage and is no longer set aside. Inside every lane a card
+ * Waiting, Parked and the four stage lanes. Ready tasks surface in Parked: a drag into a stage
+ * also marks them in progress, as Start does. A manually parked task leaves its parked flag behind
+ * when moved to a stage; a drop into Parked still sets it aside. Inside every lane a card
  * dropped on another card takes its place: Tasks keeps the lane's order, and the order of
  * the moved card's siblings follows (not for Waiting and Parked).
  */
@@ -288,8 +292,7 @@ export function ReviewBoard({
     lanes[id].filter(
       (task) => area === "all" || effectiveArea(task, plan.tasks) === area,
     );
-  // Stage and Parked lanes accept a planning change. Start now and Waiting take no stage changes
-  // and show only with cards.
+  // Stage and Parked lanes accept a planning change; Waiting is shown only with cards.
   const columns: {
     id: LaneId;
     title: string;
@@ -380,10 +383,16 @@ export function ReviewBoard({
         if (!column || (!column.stage && to !== "parked")) return;
         const parking = to === "parked";
         const stage: Stage = column.stage ?? "none";
-        // Start now is acknowledged by the drag: the stage and the in-progress label in one write.
-        const active = from === "start" && !parking;
-        // Parked's label goes with any move out of it; into it, the label alone does it all.
-        const parked = parking ? true : from === "parked" ? false : undefined;
+        // Picking up an automatically surfaced card acknowledges it in the existing stage write.
+        const active =
+          (from === "start" || (from === "parked" && !isParked(task))) &&
+          !parking;
+        // Only manual parking owns a parked flag; automatic readiness is read-derived.
+        const parked = parking
+          ? true
+          : from === "parked" && isParked(task)
+            ? false
+            : undefined;
         const update = parking
           ? { parked: true }
           : {
@@ -462,6 +471,7 @@ export function ReviewBoard({
                 today={currentDate}
                 language={language}
                 waitsFor={dependencyIndex(plan).waitingFor.get(task.id)}
+                dependenciesDone={dependencyIndex(plan).done.has(task.id)}
                 onClick={() => {}}
               />
             </div>
@@ -539,11 +549,14 @@ function ReviewLane({
           : "after"
       : undefined;
   const text = words(language);
-  // Parked shows its first cards; the rest wait behind "more".
+  // Every ready card is visible; only the manual backlog folds after its first three.
   const [expanded, setExpanded] = useState(false);
-  const cards =
-    lane === "parked" && !expanded ? tasks.slice(0, PARKED_SHOWN) : tasks;
-  const hidden = tasks.length - PARKED_SHOWN;
+  const visible =
+    lane === "parked"
+      ? tasks.filter((task) => !isParked(task)).length + PARKED_SHOWN
+      : tasks.length;
+  const cards = !expanded ? tasks.slice(0, visible) : tasks;
+  const hidden = tasks.length - visible;
   return (
     <section
       ref={ref}
@@ -661,9 +674,10 @@ function DraggableOutcome({
   const text = words(language);
   const title = displayedTitle(task.title);
   const waitsFor = dependencyIndex(plan).waitingFor.get(task.id);
-  const state = cardState(task, today, waitsFor);
+  const dependenciesDone = dependencyIndex(plan).done.has(task.id);
+  const state = cardState(task, today, waitsFor, dependenciesDone);
   // Start marks the task in progress.
-  const startable = state === "start" && onStart;
+  const startable = (state === "start" || state === "ready") && onStart;
   return (
     <div
       ref={ref}
@@ -691,6 +705,7 @@ function DraggableOutcome({
         language={language}
         pending={pending}
         waitsFor={waitsFor}
+        dependenciesDone={dependenciesDone}
         untouched={lane === "parked"}
         onClick={() => editTask(task)}
       />

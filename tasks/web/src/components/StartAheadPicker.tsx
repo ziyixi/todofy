@@ -57,8 +57,8 @@ export function StartAheadPicker({
       </span>
       <small>
         {deadline
-          ? "Appears in Start now before the deadline."
-          : "Add a deadline to enable Start now."}
+          ? "Appears in Parked when the start window opens."
+          : "Add a deadline to set its start window."}
       </small>
     </label>
   );

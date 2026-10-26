@@ -534,7 +534,7 @@ function FocusDay({
           {language === "zh" ? "专注已完成" : "focus completed"}
         </p>
       )}
-      {isToday && due.past + due.window > 0 && (
+      {isToday && due.past + due.window + due.dependencies > 0 && (
         <button
           className="planning-runway plus-focus-runway"
           title={text.showInPlan}

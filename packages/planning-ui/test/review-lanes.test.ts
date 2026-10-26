@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { addDays } from "../src/domain";
 import { committedOutcomes } from "../src/planning-outcomes";
+import { withStage } from "../src/plan-updates";
 import { quickTasks } from "../src/weekly-review";
 import {
   boardLanes,
@@ -50,7 +51,7 @@ function laneIds(
   ) as Record<LaneId, string[]>;
 }
 
-it("gives every task at most one lane: its own stage, then Waiting, then Start now, then the date rule", () => {
+it("surfaces unstarted tasks in Parked once, keeping waiting and other stages in their lanes", () => {
   const tasks = [
     task("staged-start", {
       stage: "committed",
@@ -102,15 +103,15 @@ it("gives every task at most one lane: its own stage, then Waiting, then Start n
     task("no-lead", { deadline: on(40), missingLead: true }),
   ];
   expect(laneIds(tasks)).toEqual({
-    start: ["past", "dated-start", "step"],
-    parked: [],
+    start: [],
+    parked: ["past", "dated-start", "step", "staged-start"],
     quarterly: [],
     monthly: ["staged-wait"],
     weekly: ["dated", "week"],
-    committed: ["staged-start"],
+    committed: [],
     waiting: ["dated-wait", "blocked", "past-wait", "step-wait"],
   });
-  // A staged card says it waits or should start; the others say so in their lanes.
+  // The automatic Parked card keeps its start status, including one with a saved stage.
   expect(
     Object.fromEntries(tasks.map((item) => [item.id, cardState(item, TODAY)])),
   ).toEqual({
@@ -131,7 +132,7 @@ it("gives every task at most one lane: its own stage, then Waiting, then Start n
   });
 });
 
-it("orders Start now by deadline, then priority, and Waiting by the longest untouched", () => {
+it("orders automatic Parked cards by deadline then priority, and Waiting by the longest untouched", () => {
   const ids = laneIds([
     task("visa", { deadline: on(5), mustStart: true }),
     task("claim", { deadline: on(1), mustStart: true }),
@@ -147,13 +148,13 @@ it("orders Start now by deadline, then priority, and Waiting by the longest unto
       updatedAt: "2026-10-01T09:00:00Z",
     }),
   ]);
-  expect([ids.start, ids.waiting]).toEqual([
+  expect([ids.parked, ids.waiting]).toEqual([
     ["report", "claim-p1", "claim", "visa"],
     ["contract", "quote", "unknown"],
   ]);
 });
 
-it("puts a parked task in Parked before every other rule, only while the account has the label", () => {
+it("keeps manually parked tasks in Parked regardless of their stages and waiting state", () => {
   const tasks = [
     task("plain", {
       planningFlags: ["parked"],
@@ -207,7 +208,7 @@ it("lists the commitments Review's Committed lane shows, none of them parked", (
   ).toEqual(["kept", "waits"]);
 });
 
-it("lists each lane in the owner's stored order first, the rest after it in the lane's own order", () => {
+it("puts newly ready tasks before arranged automatic cards and the manual Parked backlog", () => {
   const tasks = [
     task("claim", { deadline: on(1), mustStart: true }),
     task("report", { deadline: on(-2), mustStart: true }),
@@ -237,16 +238,82 @@ it("lists each lane in the owner's stored order first, the rest after it in the 
       // A task no longer in the lane is skipped; one never arranged follows the arranged ones.
       committed: ["three", "gone", "one"],
       waiting: ["quote"],
-      parked: ["idea", "plan"],
-      // In Start now the rest come first: a task that has just become due is its news.
-      start: ["visa", "claim"],
+      // Manual cards keep their saved order; a new automatic card comes before old ready cards.
+      parked: ["idea", "visa", "plan", "claim", "gone"],
+      start: ["claim", "visa"],
     }),
   ).toMatchObject({
     committed: ["three", "one", "two"],
     waiting: ["quote", "contract"],
-    parked: ["idea", "plan"],
-    start: ["report", "visa", "claim"],
+    parked: ["report", "visa", "claim", "idea", "plan"],
+    start: [],
   });
+});
+
+it("surfaces both readiness reasons once without changing a saved stage, dates or flags", () => {
+  const item = task("ready", {
+    stage: "committed",
+    explicitStage: "committed",
+    deadline: on(3),
+    due: on(1),
+    leadDays: 7,
+    mustStart: true,
+    planningFlags: ["routine"],
+  });
+  const plan: PlanState = {
+    tasks: [item],
+    dependencies: [
+      { taskId: item.id, prerequisiteId: "completed", done: true },
+    ],
+    laneOrders: { committed: [item.id] },
+    today: TODAY,
+    week: "2026-10-12",
+    timezone: "America/Los_Angeles",
+    weeklyBets: [],
+    nextWeekTaskIds: [],
+  };
+  const before = structuredClone(plan);
+  const lanes = boardLanes(plan, TODAY);
+  expect(lanes.parked).toEqual([item]);
+  expect(lanes.parked[0]).toBe(item);
+  expect(
+    Object.values(lanes)
+      .flat()
+      .filter((task) => task.id === item.id),
+  ).toHaveLength(1);
+  expect(plan).toEqual(before);
+  expect(cardState(item, TODAY, [], true)).toBe("start");
+
+  // Picking it up acknowledges either reason with the existing In progress flag.
+  const pickedUp = withStage(plan, item.id, "monthly", true);
+  expect(boardLanes(pickedUp, TODAY)).toMatchObject({
+    parked: [],
+    monthly: [pickedUp.tasks[0]],
+  });
+  expect(pickedUp.tasks[0]).toMatchObject({
+    stage: "monthly",
+    explicitStage: "monthly",
+    planningFlags: ["routine", "active"],
+    deadline: item.deadline,
+    due: item.due,
+    leadDays: item.leadDays,
+  });
+  expect(pickedUp.dependencies).toBe(plan.dependencies);
+  // A fresh read still has the completed dependency; it must not surface again.
+  const reloaded = structuredClone(pickedUp);
+  expect(boardLanes(reloaded, TODAY).parked).toEqual([]);
+  expect(cardState(reloaded.tasks[0]!, TODAY, [], true)).toBeUndefined();
+});
+
+it("names completed prerequisites as the reason when no deadline is ready", () => {
+  const item = task("ready");
+  expect(cardState(item, TODAY, [], true)).toBe("ready");
+  expect(cardStatus(item, "ready", TODAY, "en")).toEqual([
+    { text: "Prerequisites completed" },
+  ]);
+  expect(cardStatus(item, "ready", TODAY, "zh")).toEqual([
+    { text: "前置任务已完成" },
+  ]);
 });
 
 it("says each card's one status: how long is left, or how long untouched with the deadline", () => {
@@ -286,7 +353,7 @@ it("says each card's one status: how long is left, or how long untouched with th
     ],
     [[{ text: "12 天未变动" }], [{ text: "No change in 12 days" }]],
     [
-      // Past its deadline, the board's one red wording, as in Start now.
+      // Past its deadline, the board's one red wording, including in Parked.
       [{ text: "1 天内有变动" }, { text: "", danger: "已过 2 天" }],
       [{ text: "Changed within a day" }, { text: "", danger: "2 days late" }],
     ],
@@ -306,10 +373,9 @@ it("says each card's one status: how long is left, or how long untouched with th
  * The client half of the filter consistency gate (Todofy's tests/unit/test_plus.py checks the
  * server half). From the API's fields alone, every task a replaced filter shows is on the board:
  * one with a `waiting` or `blocked` label in Waiting or in its own stage lane saying it waits; one
- * Todofy marks must start in Start now or in its own stage lane saying it should start; an
- * `active` one may stay off the board. Top-level tasks and steps of a committed outcome alike: a
- * step with its outcome's stage has no card in that lane, so it has one in Waiting or Start now.
- * While the account has the label, every `parked` task is in Parked, and only there.
+ * Tasks marks must start in Parked, including explicitly staged tasks; an active one may stay off
+ * the board. A waiting step with its outcome's stage has no card in that stage lane, so it has one
+ * in Waiting. Every manually parked task is in Parked and only there.
  */
 it("shows every task the API marks for a replaced deadline, waiting or parked filter on the board", () => {
   const marks = ["waiting", "blocked", "active", "parked"];

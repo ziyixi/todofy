@@ -59,10 +59,6 @@ test("Date and Deadline explain accepted input in task details and contextual ch
   await details
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
-  await expect(details.locator(".task-save-status")).toHaveText("Saved");
-  await details
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
   await expect(details).not.toBeVisible();
   let saved = await (
     await request.get(`/api/tasks/v1/tasks/${task.id}`)

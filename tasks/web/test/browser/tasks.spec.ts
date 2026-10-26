@@ -144,10 +144,7 @@ test("quick add, edit, complete and reopen persist through page reload", async (
     .getByRole("textbox", { name: "Task name", exact: true })
     .fill("Synthetic edited review task");
   await details.getByRole("button", { name: "Save changes" }).click();
-  await expect(details.locator(".task-save-status")).toHaveText("Saved");
-  await details
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
+  await expect(details).not.toBeVisible();
   await page
     .getByRole("button", {
       name: "Complete Synthetic edited review task",
@@ -213,12 +210,8 @@ test("steps remain attached and date preview keeps deadline independent", async 
     dialog.getByRole("button", { name: "Deadline", exact: true }),
   ).toHaveText("Dec 31");
   await dialog.getByRole("button", { name: "Save changes" }).click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
-  await expect(dialog).not.toBeVisible();
-  await page.goto(`/?task=${parent.id}#/inbox`);
+  await expect(dialog.getByRole("textbox", { name: "Task name", exact: true })).toHaveValue(parent.title);
+
   await dialog
     .getByRole("button", {
       name: "Synthetic step under two hours",
@@ -271,10 +264,6 @@ test("moving a timed date preserves the local clock time across daylight saving"
     dialog.getByRole("button", { name: "Save changes" }),
   ).toBeEnabled();
   await dialog.getByRole("button", { name: "Save changes" }).click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
   await expect(dialog).not.toBeVisible();
   const saved = await (await request.get(`/api/tasks/v1/${task.name}`)).json();
   expect(saved.due_date).toBe("2026-11-03");
@@ -565,10 +554,6 @@ test("task descriptions render Markdown, edit and persist without loading remote
   ).toHaveAttribute("href", "https://example.org/updated");
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
-    .click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
     .click();
   await expect(dialog).not.toBeVisible();
   await page.goto(`/?task=${parent.id}#/inbox`);

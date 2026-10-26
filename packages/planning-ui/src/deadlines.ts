@@ -48,8 +48,29 @@ export function isDue(state: DeadlineState): boolean {
   return state.kind === "past" || state.kind === "window";
 }
 
+export type PlanningReadiness = "past" | "window" | "dependencies";
+
+/** Why an unstarted task belongs in Parked until the owner picks it up. */
+export function planningReadiness(
+  task: PlanningTask,
+  today: string,
+  waitingFor = false,
+  dependenciesDone = false,
+): PlanningReadiness | undefined {
+  if (
+    waitingFor ||
+    ["waiting", "blocked", "active", "parked"].some((flag) =>
+      hasPlanningFlag(task, flag),
+    )
+  )
+    return undefined;
+  const state = deadlineState(task, today);
+  if (state?.kind === "past" || state?.kind === "window") return state.kind;
+  return dependenciesDone ? "dependencies" : undefined;
+}
+
 /**
- * Tasks that should start, as the Review board's cards say, with nothing open planned in these
+ * Ready tasks in Parked with nothing open planned in these
  * queues: neither the task nor any of its steps. A waiting task past its deadline waits there, by
  * label or by dependency, so it is not counted. Each task is counted once.
  */
@@ -58,7 +79,7 @@ export function unplannedDue(
   days: readonly DayQueue[],
   today: string,
   dependencies: readonly TaskDependency[] = [],
-): { past: number; window: number } {
+): { past: number; window: number; dependencies: number } {
   const scheduled = new Set(
     days.flatMap((day) =>
       day.taskIds.filter((id) => !day.completedTaskIds.includes(id)),
@@ -78,17 +99,16 @@ export function unplannedDue(
       planned.add(task.id);
     }
   }
-  const counts = { past: 0, window: 0 };
+  const counts = { past: 0, window: 0, dependencies: 0 };
   const index = dependencyIndex({ tasks, dependencies });
   for (const task of tasks) {
-    const state = deadlineState(task, today);
-    if (
-      state &&
-      isDue(state) &&
-      !isWaiting(task, index) &&
-      !planned.has(task.id)
-    )
-      counts[state.kind as "past" | "window"]++;
+    const reason = planningReadiness(
+      task,
+      today,
+      isWaiting(task, index),
+      index.done.has(task.id),
+    );
+    if (reason && !planned.has(task.id)) counts[reason]++;
   }
   return counts;
 }
@@ -231,9 +251,9 @@ export function detailStatus(
   return { text: windowText(days, language) };
 }
 
-/** The quiet Focus line: "1 项已过截止、1 项已到启动窗口，这周还没有安排". */
+/** Focus's quiet line names the readiness reasons that still have no weekly arrangement. */
 export function unplannedText(
-  counts: { past: number; window: number },
+  counts: { past: number; window: number; dependencies: number },
   language: Language,
 ): string {
   const zh = language === "zh";
@@ -244,6 +264,10 @@ export function unplannedText(
       (zh
         ? `${counts.window} 项已到启动窗口`
         : `${counts.window} in ${counts.window === 1 ? "its" : "their"} start window`),
+    counts.dependencies > 0 &&
+      (zh
+        ? `${counts.dependencies} 项前置任务已完成`
+        : `${counts.dependencies} with prerequisites completed`),
   ].filter(Boolean);
   return zh
     ? `${parts.join("、")}，这周还没有安排`

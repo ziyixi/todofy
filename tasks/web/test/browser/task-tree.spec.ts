@@ -102,10 +102,6 @@ test("subtasks start folded and load only on expansion, with nested steps, editi
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
   await expect(dialog).not.toBeVisible();
   await expect(
     list.getByText("Synthetic tree edited child", { exact: true }),
@@ -385,81 +381,37 @@ test("task details reorder both subtasks and steps by dragging and keep the save
   }
 });
 
-test("saving existing tasks, subtasks and steps preserves the editor, scroll and fresh write baseline", async ({
+test("saving directly opened tasks, subtasks and steps closes each editor and reopens a fresh baseline", async ({
   page,
   request,
 }) => {
   const create = await creator(request);
-  const parent = await create({
-    title: `Synthetic persistent editor ${crypto.randomUUID()}`,
-  });
-  const child = await create({
-    title: "Synthetic editable subtask",
-    parent_id: parent.id,
-  });
-  const step = await create({
-    title: "Synthetic editable step",
-    parent_id: parent.id,
-    kind: "step",
-    duration_minutes: 30,
-  });
-  await page.setViewportSize({ width: 1280, height: 620 });
+  const parent = await create({ title: `Synthetic saving parent ${crypto.randomUUID()}` });
+  const child = await create({ title: "Synthetic saving subtask", parent_id: parent.id });
+  const step = await create({ title: "Synthetic saving step", parent_id: parent.id, kind: "step", duration_minutes: 30 });
   let patches = 0;
   page.on("request", (r) => {
-    if (
-      r.method() === "PATCH" &&
-      new URL(r.url()).pathname.startsWith("/api/tasks/")
-    )
+    if (r.method() === "PATCH" && new URL(r.url()).pathname.startsWith("/api/tasks/"))
       patches++;
   });
-  for (const [task, role] of [
-    [parent, "Task details"],
-    [child, "Task details"],
-    [step, "Step details"],
-  ] as const) {
-    await page.goto(`/?task=${task.id}#/inbox`);
+  for (const [task, role] of [[parent, "Task details"], [child, "Task details"], [step, "Step details"]] as const) {
     const dialog = page.getByRole("dialog", { name: role, exact: true });
-    const title = dialog.getByRole("textbox", {
-      name: "Task name",
-      exact: true,
-    });
-    await title.fill(`${task.title} edited`);
-    const body = dialog.locator(".task-edit-body");
-    const scroll = await body.evaluate((el) => {
-      el.scrollTop = 90;
-      return el.scrollTop;
-    });
-    const frame = await dialog.boundingBox();
-    const save = dialog.getByRole("button", {
-      name: "Save changes",
-      exact: true,
-    });
-    const saveFrame = await save.boundingBox();
-    await save.click();
-    await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-    expect(await dialog.boundingBox()).toEqual(frame);
-    expect(await save.boundingBox()).toEqual(saveFrame);
-    expect(await body.evaluate((el) => el.scrollTop)).toBe(scroll);
-    await title.fill(`${task.title} edited twice`);
-    await expect(dialog.locator(".task-save-status")).toHaveText("");
-    await save.click();
-    await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-    const before = await (
-      await request.get(`/api/tasks/v1/tasks/${task.id}`)
-    ).json();
-    expect(before.title).toBe(`${task.title} edited twice`);
+    const title = dialog.getByRole("textbox", { name: "Task name", exact: true });
+    for (const suffix of ["edited", "edited twice"]) {
+      await page.goto(`/?task=${task.id}#/inbox`);
+      await title.fill(`${task.title} ${suffix}`);
+      await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
+      await expect(dialog).not.toBeVisible();
+      expect((await (await request.get(`/api/tasks/v1/tasks/${task.id}`)).json()).title)
+        .toBe(`${task.title} ${suffix}`);
+    }
+    const before = await (await request.get(`/api/tasks/v1/tasks/${task.id}`)).json();
     const writes = patches;
-    await save.click();
-    await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-    expect(patches).toBe(writes);
-    const after = await (
-      await request.get(`/api/tasks/v1/tasks/${task.id}`)
-    ).json();
-    expect(after.etag).toBe(before.etag);
-    await dialog
-      .getByRole("button", { name: "Close dialog", exact: true })
-      .click();
+    await page.goto(`/?task=${task.id}#/inbox`);
+    await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
     await expect(dialog).not.toBeVisible();
+    expect(patches).toBe(writes);
+    expect((await (await request.get(`/api/tasks/v1/tasks/${task.id}`)).json()).etag).toBe(before.etag);
   }
 });
 

@@ -20,6 +20,8 @@ interface Resource {
   completed?: boolean;
   child_count?: number;
   completed_count?: number;
+  dependencies?: { prerequisite_id: string; title: string }[];
+  dependents?: { task_id: string; title: string }[];
 }
 async function make(
   kind: string,
@@ -48,6 +50,50 @@ async function copy(task: Resource, requestId = randomUUID()) {
     request_id: requestId,
   });
 }
+
+test("duplicate and its frozen receipt exclude both directions of dependency links", async () => {
+  const prerequisite = await make("tasks", {
+    title: "Synthetic source prerequisite",
+  });
+  const source = await make("tasks", { title: "Synthetic dependency source" });
+  const waiter = await make("tasks", { title: "Synthetic source dependent" });
+  for (const [task, id] of [
+    [source, prerequisite.id],
+    [waiter, source.id],
+  ] as const) {
+    const response = await harness.mutate(
+      "PATCH",
+      `/api/tasks/v1/${task.name}?etag=${task.etag}&request_id=${randomUUID()}&update_mask=dependencies`,
+      { dependencies: [{ prerequisite_id: id }] },
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+  }
+  const current = await (
+    await harness.fetch(`/api/tasks/v1/${source.name}`)
+  ).json<Resource>();
+  expect(current.dependencies).toEqual([
+    { prerequisite_id: prerequisite.id, title: prerequisite.title },
+  ]);
+  expect(current.dependents).toEqual([
+    { task_id: waiter.id, title: waiter.title },
+  ]);
+  const requestId = randomUUID();
+  const response = await copy(current, requestId);
+  expect(response.status, await response.clone().text()).toBe(200);
+  const duplicate = await response.json<Resource>();
+  expect(duplicate.dependencies ?? []).toEqual([]);
+  expect(duplicate.dependents ?? []).toEqual([]);
+  const read = await (
+    await harness.fetch(`/api/tasks/v1/${duplicate.name}`)
+  ).json<Resource>();
+  expect(read.dependencies ?? []).toEqual([]);
+  expect(read.dependents ?? []).toEqual([]);
+  expect(await (await copy(current, requestId)).json()).toEqual(duplicate);
+  const original = await (
+    await harness.fetch(`/api/tasks/v1/${source.name}`)
+  ).json<Resource>();
+  expect(original.dependents).toEqual(current.dependents);
+});
 
 test.each(["task", "step"])(
   "duplicate refuses a completed %s under a completed parent",

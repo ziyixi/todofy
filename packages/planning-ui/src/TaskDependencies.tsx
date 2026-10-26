@@ -60,6 +60,14 @@ export function TaskDependencies({
   const open = index.waitingFor.get(task.id) ?? [];
   const done = index.done.get(task.id) ?? [];
   const waiters = index.waiters.get(task.id) ?? [];
+  const dependentIds = new Set(
+    dependencies
+      .filter((edge) => edge.prerequisiteId === task.id)
+      .map((edge) => edge.taskId),
+  );
+  const dependents = tasks.filter((candidate) =>
+    dependentIds.has(candidate.id),
+  );
   // Every prerequisite the task has, done or not: a write sends the whole set.
   const own = dependencies
     .filter((dependency) => dependency.taskId === task.id)
@@ -297,6 +305,35 @@ export function TaskDependencies({
           {text.addDependency}
         </button>
       )}
+      <div
+        className="plus-dependents"
+        aria-label={language === "zh" ? "依赖此任务" : "Dependent tasks"}
+      >
+        <div className="plus-section-title">
+          <h3>{language === "zh" ? "依赖此任务" : "Dependents"}</h3>
+        </div>
+        {dependents.length ? (
+          <ul className="plus-dependency-list">
+            {dependents.map((dependent) => (
+              <li className="plus-dependency" key={dependent.id}>
+                <button
+                  type="button"
+                  className="plus-text-button plus-dependency-title"
+                  onClick={() => onOpen(dependent.id)}
+                >
+                  {displayedTitle(dependent.title)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="plus-muted plus-dependency-note">
+            {language === "zh"
+              ? "没有任务依赖此任务。"
+              : "No tasks depend on this task."}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

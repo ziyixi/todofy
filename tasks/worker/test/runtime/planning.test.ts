@@ -21,6 +21,7 @@ import { localDate } from '@ziyixi/task-dates';
 import { listFocusDays } from '../../src/focus.ts';
 import { getPlan, updateWeeklyBet } from '../../src/plan.ts';
 import { mondayOf } from '../../src/planning.ts';
+import { getTask } from '../../src/task-read.ts';
 import { createTask, updateTask } from '../../src/task-write.ts';
 import { startHarness, type Harness } from './harness.ts';
 
@@ -55,6 +56,7 @@ interface Task {
   must_start?: boolean;
   missing_lead?: boolean;
   dependencies?: Dependency[];
+  dependents?: { task_id: string; title: string }[];
   completed?: boolean;
   completed_count?: number;
 }
@@ -276,11 +278,19 @@ test('dependencies are added and removed as a set, with titles and done, and tou
     { prerequisite_id: budget.id, title: 'Synthetic budget' },
   ]);
   expect((await read(waiter)).dependencies).toEqual(both.dependencies);
+  expect((await read(venue)).dependents).toEqual([{ task_id: waiter.id, title: waiter.title }]);
   const list = await (
     await harness.fetch(`/api/tasks/v1/tasks?view=all&task_ids=${waiter.id}`)
   ).json<{ tasks: Task[] }>();
   expect(list.tasks[0]?.dependencies).toEqual(both.dependencies);
+  expect(list.tasks[0]?.dependents ?? []).toEqual([]);
+  const venueList = await (
+    await harness.fetch(`/api/tasks/v1/tasks?view=all&task_ids=${venue.id}`)
+  ).json<{ tasks: Task[] }>();
+  expect(venueList.tasks[0]?.id).toBe(venue.id);
+  expect(venueList.tasks[0]?.dependents ?? []).toEqual([]);
   const one = await waitsFor(both, budget.id);
+  expect((await read(venue)).dependents ?? []).toEqual([]);
   expect(one.dependencies).toEqual([{ prerequisite_id: budget.id, title: 'Synthetic budget' }]);
   expect(await edges(waiter.id)).toEqual([
     { prerequisite_id: venue.id, baseline_count: 0, deleted: 1 },
@@ -456,6 +466,8 @@ test('completing a waiter and deleting a prerequisite take their dependencies aw
   const second = await make({ title: 'Synthetic second prerequisite' });
   await waitsFor(child, first.id);
   const waiting = await waitsFor(parent, second.id);
+  expect((await read(first)).dependents).toEqual([{ task_id: child.id, title: child.title }]);
+  expect((await read(second)).dependents).toEqual([{ task_id: parent.id, title: parent.title }]);
   // Completing the parent completes the child too: both wait for nothing any more.
   const done = await harness.mutate('POST', `/api/tasks/v1/${parent.name}:complete`, {
     etag: waiting.etag,
@@ -463,6 +475,8 @@ test('completing a waiter and deleting a prerequisite take their dependencies aw
   });
   expect(done.status).toBe(200);
   expect((await done.json<Task>()).dependencies ?? []).toEqual([]);
+  expect((await read(first)).dependents ?? []).toEqual([]);
+  expect((await read(second)).dependents ?? []).toEqual([]);
   expect([...(await edges(parent.id)), ...(await edges(child.id))].every((edge) => edge.deleted)).toBe(true);
   const other = await make({ title: 'Synthetic other waiter' });
   const linked = await waitsFor(other, first.id);
@@ -473,6 +487,96 @@ test('completing a waiter and deleting a prerequisite take their dependencies aw
   expect(removed.status).toBe(200);
   expect((await read(linked)).dependencies ?? []).toEqual([]);
   expect((await edges(other.id)).every((edge) => edge.deleted)).toBe(true);
+});
+
+test('reverse links show current direct dependents and disappear when their edge or task is deleted', async () => {
+  const prerequisite = await make({ title: 'Synthetic reverse prerequisite' });
+  const direct = await waitsFor(await make({ title: 'Synthetic direct waiter' }), prerequisite.id);
+  const downstream = await waitsFor(await make({ title: 'Synthetic transitive waiter' }), direct.id);
+  expect((await read(prerequisite)).dependents).toEqual([{ task_id: direct.id, title: direct.title }]);
+  expect((await read(direct)).dependents).toEqual([{ task_id: downstream.id, title: downstream.title }]);
+  const renamed = await saved(direct, { title: 'Synthetic renamed direct waiter' });
+  expect((await read(prerequisite)).dependents).toEqual([{ task_id: direct.id, title: renamed.title }]);
+  const unlinked = await waitsFor(renamed);
+  expect((await read(prerequisite)).dependents ?? []).toEqual([]);
+  const linked = await waitsFor(unlinked, prerequisite.id);
+  const removed = await harness.mutate(
+    'DELETE',
+    `/api/tasks/v1/${linked.name}?etag=${linked.etag}&request_id=${randomUUID()}`,
+  );
+  expect(removed.status).toBe(200);
+  expect((await read(prerequisite)).dependents ?? []).toEqual([]);
+});
+
+test('archiving and restoring a dependent project hides and restores its reverse links', async () => {
+  const created = await harness.mutate('POST', `/api/tasks/v1/projects?request_id=${randomUUID()}`, {
+    title: 'Synthetic reverse-link project',
+  });
+  expect(created.status).toBe(200);
+  const project = await created.json<{ id: string; name: string; etag: string }>();
+  const prerequisite = await make({ title: 'Synthetic outside prerequisite' });
+  const waiter = await waitsFor(
+    await make({ title: 'Synthetic project waiter', project_id: project.id }),
+    prerequisite.id,
+  );
+  expect((await read(prerequisite)).dependents).toEqual([{ task_id: waiter.id, title: waiter.title }]);
+  let current = project;
+  for (const archived of [true, false]) {
+    const response = await harness.mutate(
+      'PATCH',
+      `/api/tasks/v1/${current.name}?request_id=${randomUUID()}&update_mask=archived&etag=${current.etag}`,
+      { archived },
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+    current = await response.json<typeof project>();
+    expect((await read(prerequisite)).dependents ?? []).toEqual(
+      archived ? [] : [{ task_id: waiter.id, title: waiter.title }],
+    );
+  }
+});
+
+test('GetTask filters stale reverse edges by dependent state and seeks the existing prerequisite index', async () => {
+  const prerequisite = await make({ title: 'Synthetic indexed prerequisite' });
+  const waiter = await waitsFor(await make({ title: 'Synthetic retained edge' }), prerequisite.id);
+  for (const column of ['completed', 'deleted_at', 'project_archived'] as const) {
+    // Historical/stale edges cannot expose a hidden task even before edge cleanup runs.
+    await harness.db.prepare(`UPDATE tasks SET ${column}=1 WHERE id=?`).bind(waiter.id).run();
+    expect((await read(prerequisite)).dependents ?? []).toEqual([]);
+    await harness.db
+      .prepare(`UPDATE tasks SET ${column}=? WHERE id=?`)
+      .bind(column === 'deleted_at' ? null : 0, waiter.id)
+      .run();
+  }
+  expect((await read(prerequisite)).dependents).toEqual([{ task_id: waiter.id, title: waiter.title }]);
+  let statement = '';
+  const traced = {
+    prepare(sql: string) {
+      statement = sql;
+      return harness.db.prepare(sql);
+    },
+  } as D1Database;
+  await getTask(traced, prerequisite.id);
+  const plan = await harness.db
+    .prepare(`EXPLAIN QUERY PLAN ${statement}`)
+    .bind(prerequisite.id)
+    .all<{ detail: string }>();
+  const detail = plan.results.map((row) => row.detail).join('\n');
+  expect(detail).toMatch(/SEARCH d USING INDEX task_dependencies_prerequisite \(prerequisite_id=\?\)/);
+  expect(detail).not.toMatch(/SCAN d\b/);
+});
+
+test('client-supplied dependents cannot create or replace reverse links', async () => {
+  const real = await make({ title: 'Synthetic real dependent' });
+  const task = await make({
+    title: 'Synthetic copied task',
+    dependents: [{ task_id: real.id, title: 'Synthetic fabricated reverse link' }],
+  });
+  expect(task.dependents ?? []).toEqual([]);
+  expect((await read(task)).dependents ?? []).toEqual([]);
+  expect(await edges(real.id)).toEqual([]);
+  const waiter = await waitsFor(real, task.id);
+  expect(await reason(await patch(await read(task), { dependents: [] }))).toBe('BAD_REQUEST');
+  expect((await read(task)).dependents).toEqual([{ task_id: waiter.id, title: waiter.title }]);
 });
 
 test("a Review lane's order is saved with no positions, and with positions in the same write", async () => {

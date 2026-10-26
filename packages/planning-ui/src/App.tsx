@@ -193,7 +193,7 @@ export function App({
     };
   }, []);
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
-  // Focus's quiet line opens Plan at Start now.
+  // Focus's quiet line opens Plan at Parked.
   const [showStart, setShowStart] = useState(false);
   // Focus opens today unless statistics chose a day. An empty date follows Tasks' today at midnight.
   const [focusDate, setFocusDate] = useState(focusDay ?? "");

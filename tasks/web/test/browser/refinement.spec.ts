@@ -230,10 +230,6 @@ test("ordinary task planning, effort and deadline lead are visible and survive s
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
   await expect(dialog).not.toBeVisible();
   // Content and planning are one write of the task in D1.
   const saved = await savedTask(request, task.id);
@@ -319,14 +315,13 @@ test("Execution changes Quick to Standalone to Steps, preserving Routine and exi
   await dialog.getByLabel("Time", { exact: true }).fill("14:15");
   await dialog.locator(".schedule-popup").press("Escape");
   await save.click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await expect(dialog).not.toBeVisible();
   const quick = await savedTask(request, task.id);
   expect(quick.planning_flags).toEqual([
     "quick", "waiting", "active", "onhold", "routine", "task",
   ]);
   expect(quick.duration_minutes).toBe(45);
   expect(quick.due_datetime).toBeTruthy();
-  await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
   await openTask(page, task.id);
   await checkedMode("Quick");
   await expect(estimate).toHaveValue("45");
@@ -338,11 +333,12 @@ test("Execution changes Quick to Standalone to Steps, preserving Routine and exi
   await expect(timeOptions).toBeVisible();
   await dialog.locator(".schedule-popup").press("Escape");
   await save.click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).planning_flags).toEqual([
     "waiting", "active", "onhold", "routine", "task",
   ]);
 
+  await openTask(page, task.id);
   await execution.getByText("Steps", { exact: true }).click();
   await checkedMode("Steps");
   await expect(estimate).toHaveCount(0);
@@ -351,12 +347,11 @@ test("Execution changes Quick to Standalone to Steps, preserving Routine and exi
   await expect(dialog.getByLabel("Time", { exact: true })).toHaveCount(0);
   await dialog.locator(".schedule-popup").press("Escape");
   await save.click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await expect(dialog).not.toBeVisible();
   const steps = await savedTask(request, task.id);
   expect(steps.planning_flags).toEqual(["waiting", "active", "onhold", "routine"]);
   expect(steps.duration_minutes).toBe(45);
   expect(steps.due_datetime).toBe(quick.due_datetime);
-  await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
   await openTask(page, task.id);
   await checkedMode("Steps");
   await expect(estimate).toHaveCount(0);
@@ -435,10 +430,6 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).recurrence).toBe(
     "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR",
@@ -474,10 +465,6 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).recurrence).toBe("every! 2 weeks");
   await openTask(page, task.id);
@@ -505,10 +492,6 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await date.click();
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
-    .click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
     .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).recurrence).toBe(
@@ -584,10 +567,6 @@ test("repeat controls save calendar rules while only steps expose a clock time",
   await stepDate.click();
   await stepDialog
     .getByRole("button", { name: "Save changes", exact: true })
-    .click();
-  await expect(stepDialog.locator(".task-save-status")).toHaveText("Saved");
-  await stepDialog
-    .getByRole("button", { name: "Close dialog", exact: true })
     .click();
   await expect(stepDialog).not.toBeVisible();
   const timed = await savedTask(request, step.id);
@@ -703,11 +682,12 @@ test("legacy manual flags survive unrelated edits, while choosing a stage unpark
     .getByText("Standalone", { exact: true })
     .click();
   await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).planning_flags).toEqual([
     "waiting", "parked", "onhold", "routine", "task",
   ]);
 
+  await openTask(page, task.id);
   await stage.selectOption("committed");
   await dialog.getByRole("button", { name: "Deadline", exact: true }).click();
   await dialog
@@ -720,7 +700,7 @@ test("legacy manual flags survive unrelated edits, while choosing a stage unpark
   await expect(amount).toBeDisabled();
   await expect(amount).toHaveValue("");
   await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await expect(dialog).not.toBeVisible();
   const cleared = await savedTask(request, task.id);
   expect(cleared.deadline || "").toBe("");
   expect(cleared.stage).toBe("committed");
@@ -731,7 +711,6 @@ test("legacy manual flags survive unrelated edits, while choosing a stage unpark
     area: "personal",
     effort: "deep",
   });
-  await dialog.getByRole("button", { name: "Close dialog", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await openTask(page, task.id);
   await expect(stage).toHaveValue("committed");

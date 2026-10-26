@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { App } from "../src/App";
+import { TaskDependencies } from "../src/TaskDependencies";
 import { createPrototype } from "./fixture";
 import type { PlusActions } from "../src/model";
 
@@ -147,7 +148,9 @@ it("adds a dependency from the search field with the keyboard, greys a cycle and
     ),
   );
   expect(set).toHaveBeenLastCalledWith(release, []);
-  expect(within(section(editor)).queryByRole("listitem")).toBeNull();
+  expect(
+    section(editor).querySelector(":scope > .plus-dependency-list"),
+  ).toBeNull();
 });
 
 it("says when what it waits for is done, and stops at five", async () => {
@@ -298,4 +301,50 @@ it("leaves composing Enter and arrow keys to the input method before selecting a
       restart: false,
     }),
   );
+});
+
+it("shows reverse dependency links as read-only titles and opens the chosen dependent", async () => {
+  const actions = createPrototype();
+  const { plan } = await actions.load();
+  const prerequisite = plan.tasks.find((task) => task.id === "research")!;
+  const onOpen = vi.fn();
+  const setDependencies = vi.spyOn(actions, "setDependencies");
+  const props = {
+    task: prerequisite,
+    tasks: plan.tasks,
+    dependencies: [
+      { taskId: "release", prerequisiteId: prerequisite.id, done: false },
+      { taskId: "notes", prerequisiteId: prerequisite.id, done: true },
+      { taskId: "not-active", prerequisiteId: prerequisite.id, done: false },
+    ],
+    language: "en" as const,
+    busy: false,
+    run: vi.fn(),
+    actions,
+    onOpen,
+    announce: vi.fn(),
+  };
+  const { rerender } = render(<TaskDependencies {...props} />);
+  const section = screen
+    .getByRole("heading", { name: "Dependents" })
+    .closest<HTMLElement>(".plus-dependents")!;
+  const reverse = within(section);
+  expect(
+    reverse.getAllByRole("button").map((button) => button.textContent),
+  ).toEqual([
+    "Ship the small website refresh",
+    "Organize the experiment notes",
+  ]);
+  expect(reverse.queryByRole("button", { name: /Add|Remove/u })).toBeNull();
+  fireEvent.click(
+    reverse.getByRole("button", { name: "Ship the small website refresh" }),
+  );
+  expect(onOpen).toHaveBeenCalledExactlyOnceWith("release");
+  expect(setDependencies).not.toHaveBeenCalled();
+  rerender(<TaskDependencies {...props} language="zh" dependencies={[]} />);
+  const empty = screen
+    .getByRole("heading", { name: "依赖此任务" })
+    .closest<HTMLElement>(".plus-dependents")!;
+  expect(within(empty).getByText("没有任务依赖此任务。")).toBeTruthy();
+  expect(within(empty).queryByRole("button")).toBeNull();
 });

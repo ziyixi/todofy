@@ -51,7 +51,8 @@ rows until their replacement arrives; collapsed branches make no background read
 
 Row metadata separates native `#...` properties from real labels with a divider and tag icons. Planning
 facts come with each row, so they never arrive after it. Opening a child branch reads only that branch, and
-opening a task reads it once (GetTask), with its dependencies.
+opening a task reads it once (GetTask), with both dependency directions. Reverse links use the existing
+prerequisite index and are omitted from ListTasks; opening the section makes no extra request.
 
 The parent editor also saves Subtask and Step ordering on drag/drop within each group. The drop line
 supports insertion before or after another child and changes only `sort_order`. It uses custom child
@@ -73,7 +74,7 @@ project moves preserve descendants. Saved filters have no inferred drop semantic
 
 Title, description and visible planning options stay in the main editor. Project, Date, Deadline, Start ahead,
 priority, labels and Effort occupy the narrow property rail. Start ahead accepts days or weeks before the
-Deadline and feeds Plan Review's Start now lane; it does not schedule a notification. `effort` is empty, `deep`
+Deadline and feeds Plan Review's Parked area; it does not schedule a notification. `effort` is empty, `deep`
 or `shallow` in Tasks and does not change ordinary labels. Clock time and estimate controls appear only for
 executable items. Untouched imported timed values remain stored.
 
@@ -90,10 +91,10 @@ A failed save keeps the description editor open with its draft. The editor, Plan
 renderer load with the app, so their first open waits for no chunk or Suspense reveal. The renderer omits
 remote images and raw HTML, and opens links only on a user click. A failed completion shows its reason inside
 the open editor.
-Existing saves keep the editor open with the returned write baseline and unchanged frame/scroll; an
-unchanged save writes nothing. The Save action shows a check and Saved until the next draft change,
-with a polite announcement and a fixed button width. Creation, completion and deletion retain their
-existing close behavior.
+Explicit Save closes a root task editor or returns to the previous task on its small navigation history.
+Returning reads that task afresh so child changes and its etag are current. Only one dialog is mounted.
+Description Done stays inline with Saved feedback; unchanged Save writes nothing. A Save whose editor
+was already closed cannot navigate over a newer editor. Creation, completion and deletion keep their behavior.
 
 Quick Add opens with `Q`; `Ctrl/Cmd+Enter` saves, Escape and backdrop close the dialog. Create actions retain
 their request identity after a lost response. Lists support selection, batch completion/move and custom
@@ -118,6 +119,12 @@ removes the edges at both ends; completing one removes the edges of what it wait
 once completed, in an archived project (until the project is back) or, when it repeats, completed again since the
 edge was added. A set that keeps an edge keeps it as it is, done or not, so Plan waits for a recurring
 prerequisite's next completion by removing it and adding it again.
+
+Completed prerequisites and open Deadline windows surface inactive tasks in Review's Parked area without
+changing their stored stages, dates or Focus queues. Start or dragging a surfaced task to a stage acknowledges
+it with the existing active flag. Manual Parked remains a separate stored choice. Both task editors show
+read-only Dependents with clickable titles; only the dependent task's Depends on editor changes the edge.
+See [planning readiness](planning-readiness.md).
 
 Plan's weekly goals (`weekly_bets`, one line per week and area, this and next week writable) and the owner's
 order of each Review lane (`plan_board`, one document) are read by GetPlan with next week's commitments, in

@@ -3,13 +3,14 @@ import {
   deadlineState,
   deadlineStatus,
   detailStatus,
+  planningReadiness,
   spokenDeadline,
   startStatus,
   unplannedDue,
   unplannedText,
 } from "../src/deadlines";
 import { addDays, displayedTitle } from "../src/domain";
-import type { PlanningTask } from "../src/model";
+import type { PlanningTask, TaskDependency } from "../src/model";
 
 // The design's synthetic "today", a Thursday.
 const TODAY = "2026-10-15";
@@ -34,7 +35,11 @@ const on = (days: number) => addDays(TODAY, days);
 it("gives each task with a deadline the first matching state, from Todofy's flags", () => {
   const states = [
     task("none", { mustStart: true }),
-    task("parked", { deadline: on(-2), planningFlags: ["parked"], mustStart: true }),
+    task("parked", {
+      deadline: on(-2),
+      planningFlags: ["parked"],
+      mustStart: true,
+    }),
     task("active", { deadline: on(12), planningFlags: ["active"] }),
     // @active with @blocked is not in progress: Todofy's in-progress deadline query excludes it.
     task("blockedActive", {
@@ -140,7 +145,11 @@ it("counts tasks that should start once, unless the task or an open step is plan
     task("noLead", { deadline: on(2), missingLead: true }),
     task("active", { deadline: on(2), planningFlags: ["active"] }),
     // Todofy marks a waiting task past its deadline must start, but the board shows it in Waiting.
-    task("waiting", { deadline: on(-2), planningFlags: ["waiting"], mustStart: true }),
+    task("waiting", {
+      deadline: on(-2),
+      planningFlags: ["waiting"],
+      mustStart: true,
+    }),
   ];
   const days = [
     {
@@ -151,19 +160,126 @@ it("counts tasks that should start once, unless the task or an open step is plan
     { date: on(1), taskIds: ["step"], completedTaskIds: [] },
   ];
   const counts = unplannedDue(tasks, days, TODAY);
-  expect(counts).toEqual({ past: 1, window: 2 });
+  expect(counts).toEqual({ past: 1, window: 2, dependencies: 0 });
   expect(unplannedText(counts, "zh")).toBe(
     "1 项已过截止、2 项已到启动窗口，这周还没有安排",
   );
-  expect(unplannedText({ past: 1, window: 1 }, "en")).toBe(
+  expect(unplannedText({ past: 1, window: 1, dependencies: 0 }, "en")).toBe(
     "1 past deadline and 1 in its start window, not planned this week",
   );
-  expect(unplannedText({ past: 0, window: 2 }, "zh")).toBe(
+  expect(unplannedText({ past: 0, window: 2, dependencies: 0 }, "zh")).toBe(
     "2 项已到启动窗口，这周还没有安排",
   );
-  expect(unplannedText({ past: 0, window: 2 }, "en")).toBe(
+  expect(unplannedText({ past: 0, window: 2, dependencies: 0 }, "en")).toBe(
     "2 in their start window, not planned this week",
   );
+});
+
+it("uses the native start-window boundary and gives the deadline priority over completed dependencies", () => {
+  const later = task("window", { kind: "task", deadline: on(7), leadDays: 7 });
+  expect(detailStatus(later, later.deadline, 7, on(-1), "en")).toEqual({
+    text: "Start window: Thu, Oct 15",
+  });
+  expect(detailStatus(later, later.deadline, 7, TODAY, "en")).toEqual({
+    text: "Start window open · 7 days left",
+  });
+  // The native API refresh marks mustStart once that day arrives.
+  expect(planningReadiness(later, on(-1))).toBeUndefined();
+  const opened = { ...later, mustStart: true };
+  expect(planningReadiness(opened, TODAY)).toBe("window");
+  expect(planningReadiness(opened, TODAY, false, true)).toBe("window");
+  expect(
+    planningReadiness(
+      task("late", { deadline: on(-1), mustStart: true }),
+      TODAY,
+      false,
+      true,
+    ),
+  ).toBe("past");
+  expect(planningReadiness(task("plain"), TODAY)).toBeUndefined();
+  expect(planningReadiness(task("ready"), TODAY, false, true)).toBe(
+    "dependencies",
+  );
+});
+
+it("keeps holding dependencies, waiting, active and manual Parked out of automatic readiness", () => {
+  const ready = task("ready", {
+    deadline: on(2),
+    leadDays: 7,
+    mustStart: true,
+  });
+  expect(planningReadiness(ready, TODAY, true, true)).toBeUndefined();
+  for (const flag of ["waiting", "blocked", "active", "parked"])
+    expect(
+      planningReadiness(
+        { ...ready, planningFlags: [flag] },
+        TODAY,
+        false,
+        true,
+      ),
+      flag,
+    ).toBeUndefined();
+});
+
+it("counts dependency-ready tasks once and excludes them when they or an open descendant are queued", () => {
+  const tasks = [
+    task("ready"),
+    task("planned"),
+    task("parent"),
+    task("step", { parentId: "parent" }),
+    task("completed-step-parent"),
+    task("completed-step", { parentId: "completed-step-parent" }),
+    task("both", { deadline: on(2), leadDays: 7, mustStart: true }),
+    task("partial"),
+    task("prerequisite"),
+    task("ordinary"),
+    ...["active", "waiting", "parked"].map((flag) =>
+      task(flag, { planningFlags: [flag] }),
+    ),
+  ];
+  const dependencies: TaskDependency[] = [
+    ...[
+      "ready",
+      "planned",
+      "parent",
+      "completed-step-parent",
+      "both",
+      "partial",
+      "active",
+      "waiting",
+      "parked",
+    ].map((taskId) => ({
+      taskId,
+      prerequisiteId: "completed",
+      done: true,
+    })),
+    { taskId: "partial", prerequisiteId: "prerequisite", done: false },
+  ];
+  const days = [
+    {
+      date: TODAY,
+      taskIds: ["planned", "step", "completed-step"],
+      completedTaskIds: ["completed-step"],
+    },
+  ];
+  expect(unplannedDue(tasks, days, TODAY, dependencies)).toEqual({
+    past: 0,
+    window: 1,
+    dependencies: 2,
+  });
+  expect(unplannedText({ past: 0, window: 0, dependencies: 2 }, "en")).toBe(
+    "2 with prerequisites completed, not planned this week",
+  );
+  expect(unplannedText({ past: 0, window: 0, dependencies: 2 }, "zh")).toBe(
+    "2 项前置任务已完成，这周还没有安排",
+  );
+  expect(days).toEqual([
+    {
+      date: TODAY,
+      taskIds: ["planned", "step", "completed-step"],
+      completedTaskIds: ["completed-step"],
+    },
+  ]);
 });
 
 it("hides legacy key suffixes with spaces in Plus's own views", () => {

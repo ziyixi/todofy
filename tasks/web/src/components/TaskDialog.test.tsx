@@ -76,6 +76,72 @@ it("renders saved Markdown on the first render without a raw-source fallback", (
   expect(screen.queryByText(/\[the guide\]/)).toBeNull();
 });
 
+it("closes an existing task only after explicit Save succeeds", async () => {
+  let confirmSave!: (task: Task) => void;
+  const save = vi.fn<SaveTask>(
+    () =>
+      new Promise((resolve) => {
+        confirmSave = resolve;
+      }),
+  );
+  const { onClose } = editor(save);
+  fireEvent.change(screen.getByRole("textbox", { name: "Task name" }), {
+    target: { value: "Synthetic changed task" },
+  });
+  const button = screen.getByRole("button", { name: "Save changes" });
+  fireEvent.click(button);
+  expect(save).toHaveBeenCalledOnce();
+  expect(onClose).not.toHaveBeenCalled();
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(button);
+  expect(save).toHaveBeenCalledOnce();
+  await act(async () =>
+    confirmSave(
+      create(TaskSchema, {
+        ...original,
+        title: "Synthetic changed task",
+        etag: "2",
+      }),
+    ),
+  );
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
+it("keeps an existing draft open when explicit Save fails", async () => {
+  const save = vi
+    .fn<SaveTask>()
+    .mockRejectedValue(new Error("synthetic failure"));
+  const { onClose } = editor(save);
+  fireEvent.change(screen.getByRole("textbox", { name: "Task name" }), {
+    target: { value: "Synthetic unsaved task" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toContain("Could not confirm"),
+  );
+  expect(
+    (screen.getByRole("textbox", { name: "Task name" }) as HTMLTextAreaElement)
+      .value,
+  ).toBe("Synthetic unsaved task");
+  expect(onClose).not.toHaveBeenCalled();
+});
+
+it("explicit Save after a successful Done closes without another save callback", async () => {
+  const save = vi.fn<SaveTask>().mockResolvedValue(original);
+  const { onClose } = editor(save);
+  fireEvent.click(
+    description().getByRole("button", { name: "Edit description" }),
+  );
+  fireEvent.click(description().getByRole("button", { name: "Done" }));
+  await waitFor(() =>
+    expect(screen.getByRole("status").textContent).toBe("Saved"),
+  );
+  expect(onClose).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  expect(save).toHaveBeenCalledOnce();
+});
+
 it("Done waits for the save, then shows the saved Markdown and uses its returned etag", async () => {
   let confirmSave!: (task: Task) => void;
   const save = vi
@@ -143,9 +209,7 @@ it("Done waits for the save, then shows the saved Markdown and uses its returned
   fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
   expect(save.mock.calls[1]?.[1]?.etag).toBe("2");
-  await waitFor(() =>
-    expect(screen.getByRole("status").textContent).toBe("Saved"),
-  );
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   unmount();
   editor(async () => saved, saved);
   expect(description().getByRole("heading", { name: "Reading" })).toBeTruthy();
@@ -181,11 +245,14 @@ it("keeps the description draft editable on a failed Done and reports no success
   expect(onClose).not.toHaveBeenCalled();
 });
 
-it("keeps Save feedback on unchanged interaction and clears it when a field changes", async () => {
+it("keeps Done feedback on unchanged interaction and clears it when a field changes", async () => {
   const save = vi.fn<SaveTask>().mockResolvedValue(original);
   editor(save);
   const saveButton = screen.getByRole("button", { name: "Save changes" });
-  fireEvent.click(saveButton);
+  fireEvent.click(
+    description().getByRole("button", { name: "Edit description" }),
+  );
+  fireEvent.click(description().getByRole("button", { name: "Done" }));
   await waitFor(() =>
     expect(screen.getByRole("status").textContent).toBe("Saved"),
   );
@@ -307,9 +374,7 @@ it("maps each Execution choice atomically while Routine and hidden saved flags s
       Boolean(screen.queryByRole("spinbutton", { name: "Duration (minutes)" })),
     ).toBe(mode !== "Steps");
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toBe("Saved"),
-    );
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(index + 1));
     const flags = save.mock.calls[index]?.[3]?.values.planningFlags || [];
     expect(flags).toEqual([
       ...(mode !== "Steps" ? ["task"] : []),
@@ -322,7 +387,7 @@ it("maps each Execution choice atomically while Routine and hidden saved flags s
     expect(save.mock.calls[index]?.[3]?.paths).toContain("planning_flags");
     expect(save.mock.calls[index]?.[1]?.etag).toBe(String(index + 1));
   }
-  expect(onClose).not.toHaveBeenCalled();
+  expect(onClose).toHaveBeenCalledTimes(3);
 });
 
 it("preserves a legacy Quick's no-op mask and only changes Routine when toggled", async () => {
@@ -340,7 +405,7 @@ it("preserves a legacy Quick's no-op mask and only changes Routine when toggled"
         etag: "2",
       }),
     );
-  editor(save, task);
+  const { onClose } = editor(save, task);
   expect(
     (
       screen.getByRole("radio", {
@@ -349,9 +414,7 @@ it("preserves a legacy Quick's no-op mask and only changes Routine when toggled"
     ).checked,
   ).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-  await waitFor(() =>
-    expect(screen.getByRole("status").textContent).toBe("Saved"),
-  );
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   expect(save.mock.calls[0]?.[3]?.paths).toEqual([]);
   fireEvent.click(screen.getByRole("switch", { name: "Routine" }));
   fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -376,14 +439,12 @@ it("keeps an imported parked flag on an unrelated edit and clears it only when c
         etag: String(Number(current?.etag || 0) + 1),
       }),
     );
-  editor(save, task);
+  const { onClose } = editor(save, task);
   fireEvent.change(screen.getByRole("textbox", { name: "Task name" }), {
     target: { value: "Synthetic renamed task" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-  await waitFor(() =>
-    expect(screen.getByRole("status").textContent).toBe("Saved"),
-  );
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   expect(save.mock.calls[0]?.[3]?.paths).toEqual([]);
   expect(save.mock.calls[0]?.[3]?.values.planningFlags).toEqual(["parked"]);
   fireEvent.change(screen.getByRole("combobox", { name: "Planning stage" }), {

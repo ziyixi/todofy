@@ -59,7 +59,7 @@ it("commits a candidate in one action and moves it into the committed group", as
   expect(update.mock.calls[0]?.[1]).toEqual({ stage: "committed" });
   expect(load).toHaveBeenCalledOnce();
 });
-it("shows a step's own start window in Start now while its parent occupies the commitment quota", async () => {
+it("shows a step's own start window in Parked while its parent occupies the commitment quota", async () => {
   const actions = createPrototype();
   const { plan, focus, days } = await actions.load();
   const child = plan.tasks.find((task) => task.id === "copy")!;
@@ -83,9 +83,9 @@ it("shows a step's own start window in Start now while its parent occupies the c
       completeReview={vi.fn()}
     />,
   );
-  const start = within(screen.getByRole("region", { name: "Start now" }));
+  const parked = within(screen.getByRole("region", { name: "Parked" }));
   // Its area, in its name and edge colour, comes from its parent.
-  const card = start.getByRole("button", {
+  const card = parked.getByRole("button", {
     name: "Write the introduction, Work, No priority, Deadline tomorrow, Wed, Oct 14",
   });
   expect(card.style.getPropertyValue("--area-color")).toBe(

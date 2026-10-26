@@ -77,7 +77,12 @@ it("opens Review with four real stages and keeps an unplanned task outside the c
   const committed = within(screen.getByRole("region", { name: "Committed" }));
   expect(
     committed.getAllByRole("button", { name: /No priority/u }),
-  ).toHaveLength(4);
+  ).toHaveLength(3);
+  expect(
+    within(screen.getByRole("region", { name: "Parked" })).getByRole("button", {
+      name: /^Prepare the next research check-in, Work, No priority/u,
+    }),
+  ).toBeTruthy();
   expect(screen.queryByText("Independent unplanned task")).toBeNull();
   expect(screen.getByText("3/5 work · 1/3 personal")).toBeTruthy();
 });
@@ -615,9 +620,7 @@ it("opens the checklist again for each new review request, also after it was clo
   expect(region()).toBeNull();
   rerender(<PlanView {...data} reviewing={1} />);
   expect(region()).toBeTruthy();
-  fireEvent.click(
-    within(region()!).getByRole("button", { name: "Close" }),
-  );
+  fireEvent.click(within(region()!).getByRole("button", { name: "Close" }));
   expect(region()).toBeNull();
   // The same request again changes nothing; the next one opens it.
   rerender(<PlanView {...data} reviewing={1} />);

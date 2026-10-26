@@ -113,6 +113,17 @@ message Task {
   string effective_key_result_id = 40 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The effective Key Result's current title, including archived results.
   string key_result_title = 41 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Open, unarchived tasks that depend on this task, oldest link first (at most 300 account-wide).
+  // Included by GetTask and task writes; list reads leave it empty.
+  repeated TaskDependent dependents = 42 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A task whose prerequisites include this task. Edited only through that task's dependencies.
+message TaskDependent {
+  // The dependent task's ID.
+  string task_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its current title.
+  string title = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One task another task waits for.

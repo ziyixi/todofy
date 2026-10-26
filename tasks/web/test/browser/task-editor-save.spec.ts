@@ -7,7 +7,11 @@ import {
 
 test.use({ serviceWorkers: "block", viewport: { width: 1440, height: 1000 } });
 
-async function createTask(request: APIRequestContext, description: string) {
+async function createTask(
+  request: APIRequestContext,
+  description: string,
+  fields: Record<string, unknown> = {},
+) {
   const { token } = await (await request.get("/api/tasks/csrf")).json();
   const response = await request.post(
     `/api/tasks/v1/tasks?request_id=${crypto.randomUUID()}`,
@@ -17,6 +21,7 @@ async function createTask(request: APIRequestContext, description: string) {
         title: `Synthetic editor feedback ${crypto.randomUUID()}`,
         description,
         kind: "task",
+        ...fields,
       },
     },
   );
@@ -215,66 +220,238 @@ test("failed Done keeps its description draft open and reports no Saved state", 
   expect(saved.etag).toBe(task.etag);
 });
 
-test("Save shows a stable Saved confirmation until an edit and keeps the cached editor geometry", async ({
+test("explicit Save closes after confirmation and a cached reopen saves with the fresh baseline", async ({
   page,
   request,
 }, testInfo) => {
   const task = await createTask(
     request,
-    "## Synthetic saved notes\n\n[Read the guide](https://example.org/guide).\n\n" +
-      Array.from(
-        { length: 14 },
-        (_, index) => `- Synthetic saved item ${String(index + 1)}`,
-      ).join("\n"),
+    "## Synthetic saved notes\n\n[Read the guide](https://example.org/guide).",
   );
-  await page.goto(`/?task=${task.id}#/inbox`);
-  const dialog = page.getByRole("dialog", {
-    name: "Task details",
-    exact: true,
+  let writes = 0;
+  page.on("request", (event) => {
+    if (
+      event.method() === "PATCH" &&
+      new URL(event.url()).pathname === `/api/tasks/v1/tasks/${task.id}`
+    )
+      writes++;
   });
-  await expect(
-    dialog.getByRole("heading", { name: "Synthetic saved notes", exact: true }),
-  ).toBeVisible();
+  await page.goto(`/?task=${task.id}#/inbox`);
+  const dialog = page.getByRole("dialog", { name: "Task details", exact: true });
   const title = dialog.getByRole("textbox", { name: "Task name", exact: true });
   const changedTitle = `${task.title} saved`;
   await title.fill(changedTitle);
-  await dialog.locator(".task-edit-body").evaluate((body) => {
-    body.scrollTop = 80;
-  });
-  const before = await geometry(dialog);
-  const saveButton = dialog.getByRole("button", {
-    name: "Save changes",
-    exact: true,
-  });
-  await saveButton.click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
-  await expect(saveButton).toHaveText("Saved");
-  expect(await geometry(dialog)).toEqual(before);
-  // Reading the unchanged description must not remove the confirmation.
   await dialog
-    .getByRole("heading", { name: "Synthetic saved notes", exact: true })
+    .getByRole("button", { name: "Save changes", exact: true })
     .click();
-  await expect(saveButton).toHaveText("Saved");
-  expect(await geometry(dialog)).toEqual(before);
-  await page.screenshot({
-    path: testInfo.outputPath("task-footer-save-confirmation.png"),
-  });
-  await dialog
-    .getByRole("button", { name: "Close dialog", exact: true })
-    .click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page).not.toHaveURL(/task=/u);
+  expect(writes).toBe(1);
+  expect(
+    (await (await request.get(`/api/tasks/v1/tasks/${task.id}`)).json()).title,
+  ).toBe(changedTitle);
   await page.getByText(changedTitle, { exact: true }).click();
   await expect(
     dialog.getByRole("heading", { name: "Synthetic saved notes", exact: true }),
   ).toBeVisible();
-  await title.fill(`${changedTitle} again`);
-  await dialog.locator(".task-edit-body").evaluate((body) => {
-    body.scrollTop = 80;
-  });
   const reopened = await geometry(dialog);
-  await saveButton.click();
-  await expect(saveButton).toHaveText("Saved");
+  const frames = await dialog.evaluate(async (element) => {
+    const snapshots: unknown[] = [];
+    for (let frame = 0; frame < 8; frame++) {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      const bounds = element.getBoundingClientRect();
+      const properties = element
+        .querySelector(".task-properties")!
+        .getBoundingClientRect();
+      const body = element.querySelector(".task-edit-body")!;
+      snapshots.push({
+        top: bounds.top,
+        height: bounds.height,
+        propertyTop: properties.top,
+        scroll: body.scrollTop,
+      });
+    }
+    return snapshots;
+  });
+  expect(new Set(frames.map((frame) => JSON.stringify(frame))).size).toBe(1);
   expect(await geometry(dialog)).toEqual(reopened);
-  await title.fill(`${changedTitle} draft`);
-  await expect(dialog.locator(".task-save-status")).toHaveText("");
-  await expect(saveButton).toHaveText("Save changes");
+  await page.screenshot({
+    path: testInfo.outputPath("task-save-cached-reopen.png"),
+  });
+  await title.fill(`${changedTitle} again`);
+  await title.press("Control+Enter");
+  await expect(dialog).toHaveCount(0);
+  expect(writes).toBe(2);
+  expect(
+    (await (await request.get(`/api/tasks/v1/tasks/${task.id}`)).json()).title,
+  ).toBe(`${changedTitle} again`);
+});
+
+test("failed explicit Save keeps the task draft open", async ({
+  page,
+  request,
+}) => {
+  const task = await createTask(request, "Synthetic original description.");
+  await page.goto(`/?task=${task.id}#/inbox`);
+  const dialog = page.getByRole("dialog", { name: "Task details", exact: true });
+  await page.route(`**/api/tasks/v1/tasks/${task.id}?**`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    await route.fulfill({ status: 503, body: "" });
+  });
+  const title = dialog.getByRole("textbox", { name: "Task name", exact: true });
+  await title.fill("Synthetic unsaved title");
+  await dialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(dialog.getByRole("alert")).toContainText("Could not confirm");
+  await expect(title).toHaveValue("Synthetic unsaved title");
+  await expect(title).toBeEnabled();
+  expect(
+    (await (await request.get(`/api/tasks/v1/tasks/${task.id}`)).json()).title,
+  ).toBe(task.title);
+});
+
+test("a delayed child Save cannot replace the task opened after closing its editor", async ({
+  page,
+  request,
+}) => {
+  const parent = await createTask(request, "Synthetic previous parent.");
+  const child = await createTask(request, "Synthetic delayed child.", {
+    parent_id: parent.id,
+  });
+  const other = await createTask(request, "Synthetic next task.");
+  let parentReads = 0;
+  page.on("request", (event) => {
+    if (
+      event.method() === "GET" &&
+      new URL(event.url()).pathname === `/api/tasks/v1/tasks/${parent.id}`
+    )
+      parentReads++;
+  });
+  await page.goto(`/?task=${parent.id}#/inbox`);
+  const dialog = page.getByRole("dialog", { name: "Task details", exact: true });
+  await dialog.getByRole("button", { name: child.title, exact: true }).click();
+  let release!: () => void;
+  let started!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const requested = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  await page.route(`**/api/tasks/v1/tasks/${child.id}?**`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    started();
+    await held;
+    await route.continue();
+  });
+  await dialog
+    .getByRole("textbox", { name: "Task name", exact: true })
+    .fill(`${child.title} saved late`);
+  await dialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await requested;
+  await dialog
+    .getByRole("button", { name: "Close dialog", exact: true })
+    .click();
+  await page.getByText(other.title, { exact: true }).click();
+  const title = dialog.getByRole("textbox", { name: "Task name", exact: true });
+  await expect(title).toHaveValue(other.title);
+  release();
+  await expect(page.locator(".notice")).toContainText("Task saved");
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  await expect(title).toHaveValue(other.title);
+  expect(parentReads).toBe(1);
+  expect(
+    (await (await request.get(`/api/tasks/v1/tasks/${child.id}`)).json()).title,
+  ).toBe(`${child.title} saved late`);
+});
+
+test("saving a Step returns to its Subtask, then saving the Subtask returns to its parent", async ({
+  page,
+  request,
+}, testInfo) => {
+  const parent = await createTask(request, "Synthetic parent notes.");
+  const child = await createTask(request, "Synthetic child notes.", {
+    parent_id: parent.id,
+  });
+  const step = await createTask(request, "Synthetic step notes.", {
+    parent_id: child.id,
+    kind: "step",
+  });
+  const writes: string[] = [];
+  const reads: string[] = [];
+  page.on("request", (event) => {
+    const path = new URL(event.url()).pathname;
+    if (!path.startsWith("/api/tasks/v1/tasks/")) return;
+    if (event.method() === "PATCH") writes.push(path);
+    if (event.method() === "GET") reads.push(path);
+  });
+  await page.goto(`/?task=${parent.id}#/inbox`);
+  const taskDialog = page.getByRole("dialog", {
+    name: "Task details",
+    exact: true,
+  });
+  await taskDialog.getByRole("button", { name: child.title, exact: true }).click();
+  await expect(
+    taskDialog.getByRole("textbox", { name: "Task name", exact: true }),
+  ).toHaveValue(child.title);
+  await taskDialog.getByRole("button", { name: step.title, exact: true }).click();
+  const stepDialog = page.getByRole("dialog", {
+    name: "Step details",
+    exact: true,
+  });
+  await stepDialog
+    .getByRole("textbox", { name: "Task name", exact: true })
+    .fill(`${step.title} saved`);
+  await stepDialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(stepDialog).toHaveCount(0);
+  await expect(
+    taskDialog.getByRole("textbox", { name: "Task name", exact: true }),
+  ).toHaveValue(child.title);
+  await expect(
+    taskDialog.getByRole("button", {
+      name: `${step.title} saved`,
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await taskDialog
+    .getByRole("textbox", { name: "Task name", exact: true })
+    .fill(`${child.title} saved`);
+  await taskDialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(
+    taskDialog.getByRole("textbox", { name: "Task name", exact: true }),
+  ).toHaveValue(parent.title);
+  await expect(
+    taskDialog.getByRole("button", {
+      name: `${child.title} saved`,
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("task-save-returned-parent.png"),
+  });
+  await taskDialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(taskDialog).toHaveCount(0);
+  expect(writes).toEqual([
+    `/api/tasks/v1/tasks/${step.id}`,
+    `/api/tasks/v1/tasks/${child.id}`,
+  ]);
+  expect(reads.filter((path) => path.endsWith(`/${parent.id}`))).toHaveLength(2);
+  expect(reads.filter((path) => path.endsWith(`/${child.id}`))).toHaveLength(2);
 });

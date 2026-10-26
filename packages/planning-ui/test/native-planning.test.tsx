@@ -80,9 +80,9 @@ it("puts native states in the existing lanes and keeps tags unchanged on a stage
     { ...plan, tasks: [task, waiting, parked] },
     "2026-10-17",
   );
-  expect(lanes.start.map((row) => row.id)).toEqual([task.id]);
+  expect(lanes.start).toEqual([]);
   expect(lanes.waiting.map((row) => row.id)).toEqual([waiting.id]);
-  expect(lanes.parked.map((row) => row.id)).toEqual([parked.id]);
+  expect(lanes.parked.map((row) => row.id)).toEqual([task.id, parked.id]);
   expect(waits(waiting)).toBe(true);
   expect(quickTasks({ ...plan, tasks: [quick] }, "2026-10-17")).toEqual([
     quick,
@@ -309,9 +309,7 @@ it("follows saved execution and Routine, honors busy and leaves Step controls un
   }) as HTMLInputElement;
   expect(quick.checked).toBe(true);
   expect(quick.disabled).toBe(true);
-  expect((screen.getByRole("switch") as HTMLInputElement).disabled).toBe(
-    true,
-  );
+  expect((screen.getByRole("switch") as HTMLInputElement).disabled).toBe(true);
   rerender(
     <TaskEditor
       {...props}
@@ -351,7 +349,14 @@ it("switches Quick to Standalone or Steps atomically while Routine changes indep
   const saved = {
     ...task,
     kind: "task" as const,
-    planningFlags: ["quick", "active", "waiting", "onhold", "parked", "routine"],
+    planningFlags: [
+      "quick",
+      "active",
+      "waiting",
+      "onhold",
+      "parked",
+      "routine",
+    ],
   };
   render(
     <TaskEditor

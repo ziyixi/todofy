@@ -52,8 +52,10 @@ or Quick appears among calendar candidates. Both task editors use the controlled
 switch. The parent maps the choice to `task`/`quick` flags without changing the task's kind or other flags.
 Planning state is the task's saved stage and its planning flags (`waiting`, `parked`, `active`, …), never its
 ordinary tags. Manual In progress, Waiting, On hold and Parked controls are absent from task editors; persisted
-flags, dependencies and Plan's existing Start/drag actions retain their behavior. The start-ahead field
-accepts 0–365 calendar days and Start now opens exactly that many days before the deadline.
+flags and dependencies remain readable. The start-ahead field accepts 0–365 calendar days. Open deadline
+windows and completed prerequisites surface inactive tasks in Parked. Start or dragging to a stage acknowledges
+readiness through the existing active flag; manual parking keeps its own flag. Both dependency directions are
+visible, with Dependents read-only. See [readiness](../../tasks/docs/planning-readiness.md).
 
 Focus keeps its day queues, the one timer and time records in Tasks (`proto/tasks/ui/v1/focus.proto`). The
 timer counts up by default or runs a 25/50-minute pomodoro; Start counts on Tasks' today and keeps the step's

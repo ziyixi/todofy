@@ -55,6 +55,7 @@ export async function duplicateTask(
     updated_at: now,
     committed_week: "",
     dependencies: "[]",
+    dependents: "[]",
   };
   await validateTask(db, row);
   const columns = ["id", ...taskColumns, "created_at", "updated_at"];

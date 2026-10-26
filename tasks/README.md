@@ -20,7 +20,7 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 - Collapsed inline subtasks in main lists; expand to edit, complete or reorder children without opening their parent.
 - Drag a task's title or row: the edges insert beside a task, the middle makes it a subtask. Drag Subtasks or Steps within their own list in the parent editor; the order is saved on drop.
 - Each row normally has one completion circle. Select task in its menu, or Ctrl/Cmd/Shift-click, enters bulk selection with checkboxes in the same position.
-- Existing editors stay open after Save, with a check and Saved confirmation. Description Done saves the current draft and immediately renders Markdown. Main-list subtasks can move to another parent or become independent; Steps stay in details and execution views.
+- Save closes the task editor; saving a Subtask or Step opened from another task returns to that previous task. Description Done saves inline and immediately renders Markdown. Main-list subtasks can move to another parent or become independent; Steps stay in details and execution views.
 - Drag to a sidebar project/Inbox to move, a label to add it, or Today to schedule. Native task properties appear separately from ordinary labels.
 - Visible planning stage, context, Execution choice, independent Routine switch, start-ahead window and
   Deep/Shallow effort in task details.
@@ -86,8 +86,9 @@ Repeat uses frequency, interval and calendar controls; imported custom rules rem
 A monthly or yearly rule anchored after the 28th uses the month's last day when that date does not exist, and
 task rows show every rule in words.
 Date keeps Time and Repeat collapsed until selected; existing settings remain visible as compact summaries.
-Start ahead uses days or weeks before the real Deadline and places the task in Plan Review's Start now lane.
-It does not send a timed notification. Effort is a task property, so it needs no technical label.
+Start ahead uses days or weeks before the real Deadline. Its open window and completed prerequisites surface
+the task in Plan Review's Parked area, ready to arrange. This does not send a timed notification or change dates.
+[Readiness and task navigation](docs/planning-readiness.md) describes acknowledgement and reverse dependencies. Effort is a task property, so it needs no technical label.
 
 ## Local development
 

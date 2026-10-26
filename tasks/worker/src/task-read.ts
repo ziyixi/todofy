@@ -22,7 +22,12 @@ export async function getTask(db: D1Database, id: string): Promise<TaskRow> {
   const row = await storage(() =>
     db
       .prepare(
-        `SELECT t.*,${childCounts},${goalLinks},${dependencyList} FROM tasks t WHERE t.id=? AND t.deleted_at IS NULL`,
+        `SELECT t.*,${childCounts},${goalLinks},${dependencyList},
+        (SELECT json_group_array(json_object('task_id',task_id,'title',title)) FROM
+          (SELECT d.task_id,w.title FROM task_dependencies d JOIN tasks w ON w.id=d.task_id
+          WHERE d.prerequisite_id=t.id AND d.deleted_at IS NULL AND w.deleted_at IS NULL
+          AND w.completed=0 AND w.project_archived=0 ORDER BY d.created_at,d.rowid)) AS dependents
+        FROM tasks t WHERE t.id=? AND t.deleted_at IS NULL`,
       )
       .bind(checkedId(id))
       .first<TaskRow>(),

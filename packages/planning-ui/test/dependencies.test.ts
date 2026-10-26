@@ -260,7 +260,7 @@ it("puts a task that waits only for another task in Waiting, and one with a stag
         cards.map((card) => card.id),
       ]),
     );
-  // It would start (its window is open), but it waits: Waiting, not Start now.
+  // Its deadline window is open, but an unfinished prerequisite keeps it in Waiting.
   expect(
     ids(boardLanes(plan([waitsFor("invite", "venue")]), TODAY)),
   ).toMatchObject({
@@ -284,7 +284,7 @@ it("puts a task that waits only for another task in Waiting, and one with a stag
     TODAY,
   );
   expect(ids(lanes)).toMatchObject({ waiting: [], committed: ["invite"] });
-  // Once the venue is gone from the list (completed or deleted), the task is ready: Start now again.
+  // Once the venue is done, the task surfaces in Parked with its deadline reason.
   expect(
     ids(
       boardLanes(
@@ -293,14 +293,59 @@ it("puts a task that waits only for another task in Waiting, and one with a stag
       ),
     ),
   ).toMatchObject({
-    start: ["invite"],
+    start: [],
+    parked: ["invite"],
     waiting: [],
   });
   // Nor does Focus's quiet line count a task that waits.
   const due = (dependencies: TaskDependency[]) =>
     unplannedDue([venue, invite], [], TODAY, dependencies);
-  expect(due([waitsFor("invite", "venue")])).toEqual({ past: 0, window: 0 });
-  expect(due([])).toEqual({ past: 0, window: 1 });
+  expect(due([waitsFor("invite", "venue")])).toEqual({
+    past: 0,
+    window: 0,
+    dependencies: 0,
+  });
+  expect(due([])).toEqual({ past: 0, window: 1, dependencies: 0 });
+});
+
+it("surfaces a task only after all of its prerequisites are done, including a recurring one still listed", () => {
+  const invite = task("invite", { stage: "monthly", explicitStage: "monthly" });
+  const venue = task("venue");
+  const weekly = task("weekly", { recurring: true, completedCount: 4 });
+  const tasks = [invite, venue, weekly];
+  const show = (dependencies: TaskDependency[]) =>
+    boardLanes({ tasks, dependencies, laneOrders: {} }, TODAY);
+
+  expect(show([]).parked).toEqual([]);
+  const partial = [
+    waitsFor("invite", "venue", { done: true }),
+    waitsFor("invite", "weekly"),
+  ];
+  expect(show(partial).parked).toEqual([]);
+  expect(show(partial).monthly).toEqual([invite]);
+  const completed = partial.map((edge) => ({ ...edge, done: true }));
+  const lanes = show(completed);
+  expect(lanes.parked).toEqual([invite]);
+  expect(lanes.monthly).toEqual([]);
+  expect(
+    Object.values(lanes)
+      .flat()
+      .filter((item) => item.id === invite.id),
+  ).toHaveLength(1);
+  expect(invite).toMatchObject({ stage: "monthly", explicitStage: "monthly" });
+  const index = dependencyIndex({ tasks, dependencies: completed });
+  expect(index.waitingFor.has(invite.id)).toBe(false);
+  expect(index.done.get(invite.id)).toHaveLength(2);
+  expect(
+    cardState(
+      invite,
+      TODAY,
+      index.waitingFor.get(invite.id),
+      index.done.has(invite.id),
+    ),
+  ).toBe("ready");
+  // Completing another occurrence does not silently add a new prerequisite cycle.
+  expect(show(completed).parked).toEqual([invite]);
 });
 
 it("merges a dependency write's answer, and the waiting task's new etag, without reading again", async () => {

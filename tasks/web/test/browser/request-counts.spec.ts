@@ -150,7 +150,7 @@ test("a dialog save on a list page writes once and reads the list and the catalo
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await expect(dialog).not.toBeVisible();
   await settled(page);
   expect(sent.sort()).toEqual([
     "GET /api/tasks/v1/catalog",

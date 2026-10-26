@@ -39,8 +39,7 @@ test("saving unchanged task and planning fields writes nothing and does not relo
   await dialog
     .getByRole("button", { name: "Save changes", exact: true })
     .click();
-  await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".task-save-status")).toHaveText("Saved");
+  await expect(dialog).not.toBeVisible();
   const after = await (
     await request.get(`/api/tasks/v1/tasks/${task.id}`)
   ).json();

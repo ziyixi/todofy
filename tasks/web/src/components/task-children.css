@@ -137,3 +137,6 @@
   font-size: 10px;
   font-weight: 400;
 }
+.task-dependents {
+  margin-top: 16px;
+}
