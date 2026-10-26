@@ -25,7 +25,12 @@ build/budget and the existing Wrangler smoke with synthetic Gmail/Claude/Codex. 
 regression confirms that a pass begun at 15 minutes schedules its next batch at the saved 60-minute interval.
 Proto format/lint, 75-file API lint, breaking checks against f3a689fa and generated-schema checks passed.
 The local Worker bundle is 148.7 KiB gzip within the existing 150 KiB budget; Linux CI remains authoritative.
-Root review, branch CI and release remain pending.
+Root review is complete; branch CI and release remain pending.
+
+The first full CI attempt's unchanged report-Alarm fixture timed out; its local module passed 4/4 and all runtime
+shards passed on the same-SHA rerun. The initial tick cause is unconfirmed. The collector then read an older
+failed JUnit artifact alongside the new same-name artifact. The existing uploader now uses its native overwrite
+option so reruns replace that shard's report; no Todofy application or timeout was changed for this issue.
 
 ### Tasks planning and detail update (released)
 

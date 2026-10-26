@@ -92,6 +92,7 @@ runs:
       with:
         name: todofy-runtime-junit-${{ inputs.shard-index }}
         path: ${{ runner.temp }}/junit/
+        overwrite: true
         if-no-files-found: error
         retention-days: 7
     # Every test server's workerd log (synthetic data only), for a failed shard.
