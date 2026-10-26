@@ -21,8 +21,10 @@ Saturday explicit commitments can carry to next week; Sunday choices belong to t
 Monday causes no further rollover. Existing Sunday review tasks retain ISO history IDs and now describe
 reviewing last week/planning this week, with their actual rolling-seven-day statistics unchanged.
 Shared planning343, web121 plus calendar/shortcut5, Worker73 and real-D1 planning/GTD29 passed locally;
-current types/build/lint/proto-format and6 targeted browser journeys passed. Branch/main CI and matching
-reconcile remain the publication gate. No production task state was changed for acceptance.
+Current types/build/lint/proto-format and6 targeted browser journeys passed. The complete local browser run
+passed154/155; its only remaining assertion indexed today from Monday. That test now verifies Sunday first
+and selects the actual today bar; its full time-record journey passes in isolation. No application code changed
+for that assertion. Same-SHA full branch/main CI and matching reconcile remain the publication gate. No production task state was changed for acceptance.
 
 ### Tasks executable estimate parity (`codex/tasks-next-step-estimate`)
 

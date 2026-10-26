@@ -314,9 +314,8 @@ test("Focus statistics open GTD Time, and its calendar returns to editable daily
   await expect(totals).toHaveText(["1h 5m", "45m", "20m"]);
   const bars = page.locator(".gtd-time .plus-focus-bars > button");
   await expect(bars).toHaveCount(7);
-  const todayBar = bars.nth(
-    (new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7,
-  );
+  await expect(bars.first()).toHaveAccessibleName(/^Sun,/u);
+  const todayBar = page.locator(".gtd-time .plus-focus-bars > button.is-today");
   await expect(todayBar).toHaveAccessibleName(
     /: 1h 5m recorded, Work 45m, Personal 20m$/u,
   );
