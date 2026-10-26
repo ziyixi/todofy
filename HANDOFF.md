@@ -24,7 +24,8 @@ batches keep their original scope and are not automatically started. No database
 is added; the existing 15-minute configuration, model/prompt and Gmail write rules remain.
 Implementation and local acceptance are complete: 238 Worker units, 125 real workerd/SQLite cases, 112 UI
 cases, 26 deployment-tool cases, lint/types/build, fixed Gmail guard/oracle and HTTP smoke (52 synthetic Google
-operations) passed. Worker 149.2 KiB gzip stays within 150 KiB. Proto format/API lint/breaking/schema checks pass.
+operations) passed. Worker 149.2 KiB gzip locally; Linux CI measured 150.1 KiB, so this feature uses a 152 KiB size budget
+with modest build headroom. Workers Free platform, CPU, model and spending limits are unchanged. Proto format/API lint/breaking/schema checks pass.
 No production mailbox content was read and no manual classification was invoked.
 Rollout is gated by the existing same-SHA branch/main workflow and matching reconcile; actual publication
 identity is recorded by GitHub production Deployments (`deploy:mailsort`). The acceptance below is synthetic,

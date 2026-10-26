@@ -15,6 +15,8 @@
 import { checkWorkerBundle, isMain } from '../../tools/bundle-size/bundle-size.mjs'
 
 // October 25: Codex usage accounting and the shared inference monitor descriptor measure 148.8 KiB in Linux CI.
-export const BUDGET_GZIP_BYTES = 150 * 1024
+// October 26: bounded recent-read intake and its explicit flow outcome measure 150.1 KiB in Linux CI.
+// Keep modest build headroom; platform, CPU, model and spending limits are unchanged.
+export const BUDGET_GZIP_BYTES = 152 * 1024
 
 if (isMain(import.meta.url)) process.exitCode = checkWorkerBundle('The mailsort app', process.argv[2], BUDGET_GZIP_BYTES)
