@@ -273,9 +273,11 @@ it("keeps the latest week after navigating away and back while an older full ref
   const actions = createPrototype();
   const stale = await actions.load();
   const latest = structuredClone(stale.days);
-  latest[2]!.taskIds.push("copy");
+  latest.find((day) => day.date === "2026-10-14")!.taskIds.push("copy");
   // A step done that day, which only the week's own read names.
-  latest[2]!.completedTaskIds.push("past-step");
+  latest
+    .find((day) => day.date === "2026-10-14")!
+    .completedTaskIds.push("past-step");
   const named = {
     "past-step": {
       title: "Synthetic step done this week",
@@ -286,7 +288,7 @@ it("keeps the latest week after navigating away and back while an older full ref
   };
   const originalDays = actions.loadDays;
   actions.loadDays = vi.fn(async (week) =>
-    week === "2026-10-12"
+    week === "2026-10-11"
       ? { days: structuredClone(latest), tasks: named, today: "2026-10-13" }
       : originalDays(week),
   );
@@ -401,7 +403,7 @@ it("names another week's done steps from that week's read", async () => {
   const originalDays = actions.loadDays;
   actions.loadDays = vi.fn(async (week) => {
     const range = await originalDays(week);
-    if (week !== "2026-10-19") return range;
+    if (week !== "2026-10-18") return range;
     range.days[0]!.completedTaskIds = ["done-next-week"];
     range.tasks["done-next-week"] = {
       title: "Synthetic step done next Monday",

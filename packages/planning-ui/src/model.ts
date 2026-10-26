@@ -65,13 +65,14 @@ export interface TaskDependency {
 }
 export interface PlanState {
   tasks: PlanningTask[];
+  /** Stable Monday ID; the displayed week starts on the preceding Sunday. */
   week: string;
   timezone: string;
   /**
    * Tasks' today, which Plan's week, lanes and statuses count from, as Focus does (FocusState.date).
    */
   today: string;
-  /** Commitments chosen on this week's Sunday, which Monday's rollover keeps. */
+  /** Commitments chosen on this week's Saturday, which Sunday's rollover keeps. */
   nextWeekTaskIds: string[];
   /** Every dependency of the listed tasks, IDs only. */
   dependencies: TaskDependency[];
@@ -291,7 +292,7 @@ export interface PlusActions {
   /** The weekly review's two facts for the week starting `week` (Tasks' GetWeeklyReview). */
   readWeeklyReview?(week: string): Promise<WeeklyReviewFacts>;
   /**
-   * The week from `weekStart`, Monday to Sunday: its days, with every task they name (done steps,
+   * The week from the actual Sunday date `weekStart` (not its Monday resource ID), through Saturday: its days, with every task they name (done steps,
    * which Plan's list leaves out, among them).
    */
   loadDays(weekStart: string): Promise<FocusRange>;

@@ -296,7 +296,7 @@ test("create/update capture each committed week atomically and replay does not d
   };
   const leave = update("weekly", "2030-11-05");
   task = await updateTask(harness.db, leave.input, at(leave.day), ZONE);
-  const next = update("committed", "2030-11-10"); // Sunday commits to next week.
+  const next = update("committed", "2030-11-10"); // Sunday commits to the new current week.
   task = await updateTask(harness.db, next.input, at(next.day), ZONE);
   await updateTask(harness.db, next.input, at(next.day), ZONE);
   const memberships = await harness.db
@@ -357,8 +357,8 @@ test("date, area and singleton validation reject unbounded or ambiguous reads", 
     at("2030-11-07"),
   );
   expect([current.startDay, current.endDay]).toEqual([
-    "2030-11-04",
-    "2030-11-10",
+    "2030-11-03",
+    "2030-11-09",
   ]);
   await expect(report("2030-11-01", "2030-12-02")).rejects.toThrow("1 to 31");
   await expect(report("2030-11-02", "2030-11-01")).rejects.toThrow("1 to 31");

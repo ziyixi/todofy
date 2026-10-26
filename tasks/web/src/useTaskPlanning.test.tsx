@@ -71,7 +71,7 @@ it("parks without a stage or in progress, and a stage or in progress takes it ou
 it("adds only the changed planning paths to the dialog's one write", () => {
   const base = planningDraft(task);
   expect(planningChanges(base, base).paths).toEqual([]);
-  // A Sunday area edit sends no stage, so it never keeps a commitment for next week.
+  // A Saturday area edit sends no stage, so it never keeps a commitment for next week.
   expect(planningChanges({ ...base, area: "personal" }, base)).toMatchObject({
     paths: ["area"],
     values: { area: "personal" },

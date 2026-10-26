@@ -5,7 +5,7 @@ import type {
 import {
   addDays,
   formattedMinutes,
-  mondayOf,
+  planningWeekStart,
   monthStart,
 } from "@ziyixi/planning-ui/domain";
 
@@ -13,7 +13,7 @@ export type GtdTab = "overview" | "completion" | "time";
 export type GtdPeriod = "week" | "month";
 export function reportRange(period: GtdPeriod, day: string): [string, string] {
   return period === "week"
-    ? [mondayOf(day), addDays(mondayOf(day), 6)]
+    ? [planningWeekStart(day), addDays(planningWeekStart(day), 6)]
     : [monthStart(day), addDays(monthStart(day, 1), -1)];
 }
 export function dateRangeLabel(

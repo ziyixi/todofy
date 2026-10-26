@@ -9,7 +9,7 @@ export interface PlanViewState {
   /** Review's area filter. */
   area: Area | "all";
   /**
-   * The weekly review of one account week (its Monday): open or not, the ticked lines and the
+   * The weekly review of one account week (its stable Monday ID): open or not, the ticked lines and the
    * someday tasks kept.
    */
   review: { week: string; open: boolean; lines: number[]; kept: string[] };

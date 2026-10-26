@@ -107,7 +107,7 @@ it("shows month totals from saved areas and opens only this month's elapsed days
   expect(chart.querySelectorAll(".plus-focus-month-day")).toHaveLength(35);
   expect(
     [...chart.querySelectorAll(".is-outside")].map((cell) => cell.textContent),
-  ).toEqual(["28", "29", "30", "1"]);
+  ).toEqual(["27", "28", "29", "30"]);
   expect(
     [...chart.querySelectorAll(".is-future")].map((cell) => cell.textContent),
   ).toEqual(["26", "27", "28", "29", "30", "31"]);

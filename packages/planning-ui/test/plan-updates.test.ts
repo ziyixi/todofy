@@ -185,14 +185,14 @@ it("shows a saved estimate as its prediction did, with the etag the next write n
   ).toEqual([undefined, 0]);
 });
 
-it("mirrors Sunday's next-week choices from confirmed planning writes until the next read", async () => {
-  const sunday = await createPrototype(false, "2026-10-18").load();
+it("mirrors Saturday's next-week choices from confirmed planning writes until the next read", async () => {
+  const saturday = await createPrototype(false, "2026-10-17").load();
   const task = (id: string) =>
-    sunday.plan.tasks.find((item) => item.id === id)!;
-  const ids = (data: typeof sunday) => data.plan.nextWeekTaskIds;
+    saturday.plan.tasks.find((item) => item.id === id)!;
+  const ids = (data: typeof saturday) => data.plan.nextWeekTaskIds;
   // A commitment chosen on the last day is kept; a write that leaves it uncommitted is not.
   const committed = { ...task("tools"), stage: "committed" as const };
-  const kept = withNextWeek(sunday, { stage: "committed" }, committed);
+  const kept = withNextWeek(saturday, { stage: "committed" }, committed);
   expect(ids(kept)).toEqual(["tools"]);
   const walk = { ...task("walk"), stage: "committed" as const };
   const both = withNextWeek(kept, { stage: "committed" }, walk);
@@ -205,7 +205,7 @@ it("mirrors Sunday's next-week choices from confirmed planning writes until the 
     "walk",
     "tools",
   ]);
-  expect(ids(withNextWeek(sunday, {}, task("notes")))).toEqual([]);
+  expect(ids(withNextWeek(saturday, {}, task("notes")))).toEqual([]);
   // Any other day changes nothing.
   const tuesday = await createPrototype().load();
   expect(withNextWeek(tuesday, { stage: "committed" }, committed)).toBe(

@@ -60,7 +60,7 @@ test('the review shows counts, trends, what stands out and links, never a task t
       '上次回顾：2026-10-18 完成（6 天前）',
       '本周重点：收件箱里超过 30 天的 2 项：逐个决定 做 / 委派 / 删除',
       '本周重点：逾期比上周多 2 项：重排日期，或删掉不再做的',
-      '步骤：清空收件箱 → 看逾期与无日期 → 看项目与等待 → 想想下周',
+      '回顾上一周，安排本周。步骤：清空收件箱 → 看逾期与无日期 → 看项目与等待 → 安排本周',
       '周回顾：https://tasks.example.test/?review=1   GTD：https://tasks.example.test/#/gtd',
       '',
     ].join('\n'),

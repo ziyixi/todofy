@@ -95,7 +95,7 @@ function line(review: ReturnType<typeof openReview>, name: string) {
 
 it("names ISO weeks by their Thursday, across year ends", () => {
   expect(isoWeek("2026-10-12")).toBe("2026-W42");
-  expect(isoWeek("2026-10-18")).toBe("2026-W42");
+  expect(isoWeek("2026-10-17")).toBe("2026-W42");
   expect(isoWeek("2026-12-28")).toBe("2026-W53");
   expect(isoWeek("2027-01-03")).toBe("2026-W53");
   expect(isoWeek("2027-01-04")).toBe("2027-W01");
@@ -295,7 +295,7 @@ it("counts the remaining review lines and keeps ticks through Plan's view, for t
   ).toBeNull();
   expect(line(review, "Commitments not planned").textContent).toContain("2");
   expect(line(review, "Someday").textContent).toContain("2");
-  // Before Sunday line 5 only says where the choice will be, with nothing to tick.
+  // Before Saturday line 5 only says where the choice will be, with nothing to tick.
   expect(
     review.queryByRole("checkbox", {
       name: "Reviewed: Next week's commitments and goals",
@@ -303,7 +303,7 @@ it("counts the remaining review lines and keeps ticks through Plan's view, for t
   ).toBeNull();
   expect(
     review.getByText(
-      "On Sunday, choose commitments to keep and write next week's goals here",
+      "On Saturday, choose commitments to keep and write next week's goals here",
     ),
   ).toBeTruthy();
   expect(review.queryByRole("list", { name: "Next week's goals" })).toBeNull();
@@ -514,12 +514,12 @@ it("Plan steps also works while Week is open, folded, on another commitment and 
   );
 });
 
-it("keeps this week's commitments for next week only on Sunday, when clicked", async () => {
-  const actions = createPrototype(false, "2026-10-18");
+it("keeps this week's commitments for next week only on Saturday, when clicked", async () => {
+  const actions = createPrototype(false, "2026-10-17");
   const update = vi.spyOn(actions, "updateTask");
   renderApp(actions);
   await screen.findByRole("region", { name: "Committed" });
-  // A commitment saved on Sunday from the board is kept already: no second write is offered.
+  // A commitment saved on Saturday from the board is kept already: no second write is offered.
   fireEvent.click(
     screen.getByRole("button", { name: /^Try the new charting library,/u }),
   );
@@ -536,7 +536,7 @@ it("keeps this week's commitments for next week only on Sunday, when clicked", a
   fireEvent.click(editor.getByRole("button", { name: "Close" }));
   const review = openReview();
   const next = within(line(review, "Next week's commitments and goals"));
-  expect(next.getByText(/chosen in Plan on Sunday/u)).toBeTruthy();
+  expect(next.getByText(/chosen in Plan on Saturday/u)).toBeTruthy();
   // Release, research, notes and desk are this week's; the charting library is kept.
   fireEvent.click(
     next.getByRole("button", { name: "Choose commitments to keep (4)" }),
@@ -580,8 +580,8 @@ it("keeps this week's commitments for next week only on Sunday, when clicked", a
   ]);
 });
 
-it("writes next week's two Bets in Sunday's fifth line, apart from the commitments", async () => {
-  const actions = createPrototype(false, "2026-10-18");
+it("writes next week's two Bets in Saturday's fifth line, apart from the commitments", async () => {
+  const actions = createPrototype(false, "2026-10-17");
   const save = vi.spyOn(actions, "setWeeklyBet");
   const update = vi.spyOn(actions, "updateTask");
   renderApp(actions);

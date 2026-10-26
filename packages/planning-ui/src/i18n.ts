@@ -13,7 +13,7 @@ const en = {
   monthly: "This month",
   none: "No plan",
   reset:
-    "Unfinished commitments return to candidates on Monday; those chosen in Plan on Sunday stay for next week.",
+    "Unfinished commitments return to candidates on Sunday; those chosen in Plan on Saturday stay for next week.",
   softLimit: "Above your usual limit. Keep it if this week needs it.",
   candidates: "candidates",
   startNow: "Start now",
@@ -132,8 +132,8 @@ const en = {
   removeDoneDependencies: "Remove the done dependencies",
   removedDoneDependencies: "Removed the done dependencies",
   weeklyReview: "Weekly review",
-  sundayRule:
-    "Commitments chosen in Plan on Sunday stay for next week; the rest reset on Monday as usual. Goals are saved for each week and never cleared.",
+  saturdayRule:
+    "Commitments chosen in Plan on Saturday stay for next week; the rest reset on Sunday as usual. Goals are saved for each week and never cleared.",
   // Focus's logged time and its records.
   est: (minutes: string) => `Est. ${minutes}`,
   logged: (time: string) => `${time} logged`,
@@ -185,7 +185,7 @@ const zh: typeof en = {
   weekly: "本周有余力再做",
   monthly: "本月待选",
   none: "暂不安排",
-  reset: "每周一，未完成的承诺会回到待选；在 Plan 中周日选的承诺会留到下周。",
+  reset: "每周日，未完成的承诺会回到待选；在 Plan 中周六选的承诺会留到下周。",
   softLimit: "超过平常的数量。这周需要的话可以保留。",
   candidates: "待选",
   startNow: "该开始",
@@ -301,8 +301,8 @@ const zh: typeof en = {
   removeDoneDependencies: "移除已完成的依赖",
   removedDoneDependencies: "已移除已完成的依赖",
   weeklyReview: "周回顾",
-  sundayRule:
-    "在 Plan 中周日选的承诺会留到下周，其余的周一照常重置。目标按周保存，不会被清除。",
+  saturdayRule:
+    "在 Plan 中周六选的承诺会留到下周，其余的周日照常重置。目标按周保存，不会被清除。",
   est: (minutes: string) => `预计 ${minutes}`,
   logged: (time: string) => `已用 ${time}`,
   otherTime: "其他用时",
@@ -345,7 +345,7 @@ export function words(language: Language): typeof en {
 
 /**
  * The copy of one Bet line: `week` is "this" for the Plan's own week, "next" for the line that
- * Sunday's weekly review writes.
+ * Saturday's weekly review writes.
  */
 export function betWords(
   language: Language,

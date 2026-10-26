@@ -108,7 +108,7 @@ export function TaskMenuItems({
 }) {
   const today = todayDate(new Date(), catalog.timeZone || undefined);
   const weekday = new Date(`${today}T12:00:00`).getDay();
-  const nextWeek = shiftDate(today, (8 - weekday) % 7 || 7);
+  const nextWeek = shiftDate(today, (7 - weekday) % 7 || 7);
   function run(operation: Promise<unknown>) {
     void operation.catch((reason) => actions.setNotice(describeError(reason)));
   }

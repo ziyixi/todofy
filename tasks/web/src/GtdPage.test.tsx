@@ -25,8 +25,8 @@ const props = {
   onOpenDay: vi.fn(),
 };
 function report(
-  startDay = "2026-10-19",
-  endDay = "2026-10-25",
+  startDay = "2026-10-25",
+  endDay = "2026-10-31",
   area = "",
 ): GtdReport {
   return create(GtdReportSchema, {
@@ -196,7 +196,7 @@ it("keeps the rendered task node during refresh and never replaces a newer range
   await act(async () => finish(report()));
   expect(
     screen.getByRole("navigation", { name: "GTD date range" }).textContent,
-  ).toContain("Oct 12 – 18, 2026");
+  ).toContain("Oct 18 – 24, 2026");
   expect(screen.getByRole("button", { name: "Synthetic weekly outcome" })).toBe(
     task,
   );
@@ -254,8 +254,8 @@ it("keeps empty, failed and retry states useful without a misleading zero comple
   vi.mocked(api.getGtdReport).mockResolvedValue(
     create(GtdReportSchema, {
       name: "gtdReport",
-      startDay: "2026-10-19",
-      endDay: "2026-10-25",
+      startDay: "2026-10-25",
+      endDay: "2026-10-31",
       today: "2026-10-25",
       timeZone: "America/Los_Angeles",
     }),
@@ -270,8 +270,8 @@ it("keeps empty, failed and retry states useful without a misleading zero comple
 
 it("navigates calendar ranges across month/year boundaries without changing the anchor week", () => {
   expect(reportRange("week", "2026-01-01")).toEqual([
-    "2025-12-29",
-    "2026-01-04",
+    "2025-12-28",
+    "2026-01-03",
   ]);
   expect(reportRange("month", "2028-02-15")).toEqual([
     "2028-02-01",

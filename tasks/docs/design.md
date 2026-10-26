@@ -108,8 +108,10 @@ available for planning writes. Cross-project moves preserve descendants and upda
 Native planning stages, areas, lead windows and status flags are task columns (migration `0006_planning.sql`),
 written by the same UpdateTask as the task's content under one etag; ordinary labels remain content
 classifications. The rules are the Worker's (`worker/src/planning.ts`): a commitment is for a week
-(`committed_week`, the next one when chosen on a Sunday) and reads as `weekly` once that week has ended, with
-no write; newly parking a task clears its stage and `active`; Quick implies Standalone action; no deadline means
+(`committed_week`, a stable Monday ID, the next one when chosen on Saturday) and reads as `weekly` once that week has ended, with
+no write. Planning weeks run Sunday through Saturday in the account time zone; Saturday midnight starts the new week,
+Sunday choices belong to it and Monday causes no extra rollover. Stored Monday goal/history IDs and daily queue dates stay unchanged;
+newly parking a task clears its stage and `active`; Quick implies Standalone action; no deadline means
 no start-ahead days. Each Task answers its rolled `stage`, Review's lane (`board_stage`), `must_start` and
 `missing_lead` for Tasks' today.
 The facts, dependencies, goals and lane orders Todofy kept before this were copied in once on 2026-10-20

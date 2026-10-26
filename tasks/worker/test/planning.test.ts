@@ -13,6 +13,8 @@ import {
   MAX_LANE_TASKS,
   membershipWeek,
   mondayOf,
+  planningWeekId,
+  planningWeekStart,
   plannedRow,
   planningView,
   rolledStage,
@@ -23,6 +25,7 @@ import {
 
 const TODAY = '2026-10-13'; // a Tuesday
 const WEEK = '2026-10-12';
+const SATURDAY = '2026-10-17';
 const SUNDAY = '2026-10-18';
 const NEXT = '2026-10-19';
 
@@ -50,7 +53,7 @@ describe('stages', () => {
 
   test.each([
     ['committed this week', { stage: 'committed', committed_week: WEEK }, 'committed'],
-    ['committed for next week on Sunday', { stage: 'committed', committed_week: NEXT }, 'committed'],
+    ['committed for next week on Saturday', { stage: 'committed', committed_week: NEXT }, 'committed'],
     ['a commitment for an ended week rolls over', { stage: 'committed', committed_week: '2026-10-05' }, 'weekly'],
     ['other stages never roll over', { stage: 'monthly', committed_week: '' }, 'monthly'],
   ])('%s', (_, fields, stage) => {
@@ -154,19 +157,19 @@ describe('writes', () => {
   });
 
   test('only a commitment chosen on the last day waits for the next week', () => {
-    expect(membershipWeek(SUNDAY, WEEK)).toBe(NEXT);
-    for (const today of [WEEK, '2026-10-14', '2026-10-17']) expect(membershipWeek(today, WEEK)).toBe(WEEK);
-    expect(write(row(), { stage: 'committed' }, true, SUNDAY).committed_week).toBe(NEXT);
+    expect(membershipWeek(SATURDAY, WEEK)).toBe(NEXT);
+    for (const today of [WEEK, '2026-10-14', '2026-10-16']) expect(membershipWeek(today, WEEK)).toBe(WEEK);
+    expect(write(row(), { stage: 'committed' }, true, SATURDAY).committed_week).toBe(NEXT);
     expect(write(row(), { stage: 'committed' }, true, TODAY).committed_week).toBe(WEEK);
     // In progress as well, it is still a commitment for the next week.
-    expect(write(row({ flags: ['active'] }), { stage: 'committed' }, true, SUNDAY).committed_week).toBe(NEXT);
+    expect(write(row({ flags: ['active'] }), { stage: 'committed' }, true, SATURDAY).committed_week).toBe(NEXT);
   });
 
-  test('a Sunday choice never moves back, and other writes that Sunday keep it', () => {
+  test('a Saturday choice never moves back, and other writes that Saturday keep it', () => {
     const chosen = row({ stage: 'committed', committed_week: NEXT });
-    expect(write(chosen, { flags: ['active'] }, false, SUNDAY).committed_week).toBe(NEXT);
-    expect(write(chosen, { area: 'work' }, false, SUNDAY).committed_week).toBe(NEXT);
-    expect(write(chosen, { stage: 'committed' }, true, SUNDAY).committed_week).toBe(NEXT);
+    expect(write(chosen, { flags: ['active'] }, false, SATURDAY).committed_week).toBe(NEXT);
+    expect(write(chosen, { area: 'work' }, false, SATURDAY).committed_week).toBe(NEXT);
+    expect(write(chosen, { stage: 'committed' }, true, SATURDAY).committed_week).toBe(NEXT);
     expect(write(chosen, { stage: 'committed' }, true, '2026-10-14').committed_week).toBe(NEXT);
   });
 
@@ -295,4 +298,19 @@ describe('the Review board', () => {
     // A lane this build does not know is dropped.
     expect(arrangeLane({ later: ['9'] }, 'start', ['1'])).toEqual({ start: ['1'] });
   });
+});
+
+// The account calendar starts Sunday while resource/storage keys remain Mondays.
+test('Saturday midnight rolls the planning week once, with no Monday rollover', () => {
+  const old = row({ stage: 'committed', committed_week: WEEK });
+  expect(planningWeekId(SATURDAY)).toBe(WEEK);
+  expect(planningWeekStart(SATURDAY)).toBe('2026-10-11');
+  expect(planningWeekId(SUNDAY)).toBe(NEXT);
+  expect(planningWeekStart(SUNDAY)).toBe(SUNDAY);
+  expect(planningWeekId(NEXT)).toBe(NEXT);
+  expect(planningView(old, SATURDAY).stage).toBe('committed');
+  expect(planningView(old, SUNDAY).stage).toBe('weekly');
+  const chosen = plannedRow(row(), row({ stage: 'committed' }), SUNDAY, true);
+  expect(chosen.committed_week).toBe(NEXT);
+  expect(planningView(chosen, NEXT).stage).toBe('committed');
 });

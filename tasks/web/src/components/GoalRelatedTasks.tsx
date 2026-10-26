@@ -7,6 +7,7 @@ import {
   MoreHorizontal,
   Plus,
 } from "lucide-react";
+import { planningWeekStart } from "@ziyixi/planning-ui/domain";
 import type { Plan } from "@ziyixi/proto/tasks/ui/v1/plan_pb";
 import { api, describeError, type Task } from "../api";
 
@@ -90,7 +91,9 @@ export function GoalRelatedTasks({
               month: "short",
               day: "numeric",
               timeZone: "UTC",
-            }).format(new Date(`${plan.weekStart}T12:00:00Z`))}
+            }).format(
+              new Date(`${planningWeekStart(plan.weekStart)}T12:00:00Z`),
+            )}
           </p>
         )}
         {bets?.length ? (

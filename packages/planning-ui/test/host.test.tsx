@@ -107,7 +107,7 @@ it("retries a failed completion from another view with its first request ID and 
   const load = actions.load;
   actions.load = async (week) => {
     const data = await load(week);
-    data.days[0]!.taskIds.push("copy");
+    data.days.find((day) => day.date === "2026-10-12")!.taskIds.push("copy");
     return data;
   };
   const complete = vi

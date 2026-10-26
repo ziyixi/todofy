@@ -87,3 +87,5 @@ contribute to unknown-estimate counters. Existing stored estimates and time reco
 Ordinary labels do not imply planning properties.
 Quick's existing Due selection and order also respect its Deadline start window: future windows stay
 hidden, zero lead opens on the deadline day, and active work remains eligible.
+
+Plan, Focus and weekly calendars run Sunday through Saturday in the account time zone. The stable week ID remains the Monday after that Sunday, so saved weekly goals and history keep their identities. Saturday choices may be kept for next week; other unfinished commitments return to Week at Sunday 00:00, with no second rollover on Monday.

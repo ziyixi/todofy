@@ -18,7 +18,7 @@ export function DateCalendar({
   const grid = useRef<HTMLDivElement>(null);
   const first = `${month}-01`;
   const firstDay = new Date(`${first}T12:00:00`);
-  const start = shiftDate(first, -((firstDay.getDay() + 6) % 7));
+  const start = shiftDate(first, -firstDay.getDay());
   const days = Array.from({ length: 42 }, (_, index) =>
     shiftDate(start, index),
   );
@@ -35,15 +35,9 @@ export function DateCalendar({
     let next = "";
     if (step !== undefined) next = shiftDate(date, step);
     else if (event.key === "Home")
-      next = shiftDate(
-        date,
-        -((new Date(`${date}T12:00:00`).getDay() + 6) % 7),
-      );
+      next = shiftDate(date, -new Date(`${date}T12:00:00`).getDay());
     else if (event.key === "End")
-      next = shiftDate(
-        date,
-        6 - ((new Date(`${date}T12:00:00`).getDay() + 6) % 7),
-      );
+      next = shiftDate(date, 6 - new Date(`${date}T12:00:00`).getDay());
     if (!next) return;
     event.preventDefault();
     setMonth(next.slice(0, 7));
@@ -87,7 +81,7 @@ export function DateCalendar({
         ref={grid}
       >
         <div role="row" className="calendar-week">
-          {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((day) => (
+          {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
             <span role="columnheader" className="calendar-weekday" key={day}>
               {day}
             </span>

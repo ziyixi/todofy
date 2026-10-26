@@ -315,10 +315,10 @@ test("on touch a card drags after a 250ms hold, and a quick swipe on it scrolls 
   page,
 }) => {
   const { today } = await openPlan(page);
-  // An adjacent day stays in the three-day calendar window; Sunday uses Saturday to stay in this week.
+  // An adjacent day stays in the three-day calendar window; Saturday uses Friday to stay in this week.
   const day = addDays(
     today,
-    new Date(`${today}T12:00:00Z`).getUTCDay() === 0 ? -1 : 1,
+    new Date(`${today}T12:00:00Z`).getUTCDay() === 6 ? -1 : 1,
   );
   await week(page);
   // Playwright has no touch drag: Chromium's own touch input, through the DevTools protocol.

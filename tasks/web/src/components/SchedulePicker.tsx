@@ -120,7 +120,7 @@ export function SchedulePicker({
     },
     {
       label: "Next week",
-      date: shiftDate(today, (8 - weekday) % 7 || 7),
+      date: shiftDate(today, (7 - weekday) % 7 || 7),
       Icon: CalendarArrowUp,
       color: "#a146ba",
     },

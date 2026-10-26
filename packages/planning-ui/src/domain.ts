@@ -171,6 +171,15 @@ export function mondayOf(date: string): string {
   return addDays(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7));
 }
 
+/** The stable Monday ID of a Sunday-to-Saturday planning week. */
+export function planningWeekId(day: string): string {
+  return mondayOf(addDays(day, 1));
+}
+/** The Sunday that starts a planning week. Stored week IDs remain Mondays. */
+export function planningWeekStart(day: string): string {
+  return addDays(planningWeekId(day), -1);
+}
+
 /** The first day of the month `months` after a date's month. */
 export function monthStart(date: string, months = 0): string {
   const value = new Date(`${date.slice(0, 7)}-01T12:00:00Z`);

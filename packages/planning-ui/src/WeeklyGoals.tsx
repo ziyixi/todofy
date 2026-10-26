@@ -26,7 +26,7 @@ interface Props {
 /**
  * This account week's Work and Personal Bets: one line of the owner's own text each, kept by
  * Tasks and tied to no task, edited in place. An empty one shows last week's, with Keep. The week
- * Week shows does not change them; next week's are written in Sunday's weekly review.
+ * Week shows does not change them; next week's are written in Saturday's weekly review.
  */
 export function WeeklyGoals({
   plan,

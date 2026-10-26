@@ -102,3 +102,12 @@ it("formats configured wall clocks with a 24-hour midnight and daylight-saving t
     "01:30",
   );
 });
+
+it("keeps Monday week IDs while calendar ranges start on Sunday across year and DST dates", async () => {
+  const { planningWeekId, planningWeekStart } = await import("../src/domain");
+  expect(planningWeekId("2026-10-24")).toBe("2026-10-19");
+  expect(planningWeekId("2026-10-25")).toBe("2026-10-26");
+  expect(planningWeekId("2026-10-26")).toBe("2026-10-26");
+  expect(planningWeekStart("2027-01-01")).toBe("2026-12-27");
+  expect(planningWeekStart("2026-11-01")).toBe("2026-11-01");
+});

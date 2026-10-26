@@ -12,14 +12,29 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+### Tasks Sunday planning week (`codex/tasks-next-step-estimate`)
+
+Owner chose Sunday as the first calendar day and Saturday-to-Sunday 00:00 account-local rollover.
+Plan/Focus/GTD and date-picker/Next week shortcuts now use Sunday-Saturday daily ranges. Stored Monday week
+IDs, weekly goals, review history and date-based queues stay intact; no data migration or new scheduler.
+Saturday explicit commitments can carry to next week; Sunday choices belong to the new current week and
+Monday causes no further rollover. Existing Sunday review tasks retain ISO history IDs and now describe
+reviewing last week/planning this week, with their actual rolling-seven-day statistics unchanged.
+Shared planning343, web121 plus calendar/shortcut5, Worker73 and real-D1 planning/GTD29 passed locally;
+current types/build/lint/proto-format and6 targeted browser journeys passed. Branch/main CI and matching
+reconcile remain the publication gate. No production task state was changed for acceptance.
+
 ### Tasks executable estimate parity (`codex/tasks-next-step-estimate`)
 
 Steps, Standalone and Quick use the same estimate panel in Plan and Focus; native task details expose the
 optional estimate for all three. Presets and custom whole minutes save through the existing duration-only
 write. Kind, parent, execution flags, queues and configured Quick calendar time remain unchanged. Outcomes
 with child Steps retain their full planning editor. No schema change, default duration or task migration is added.
-Local checks passed 341 shared planning tests, 120 Tasks web tests and five focused real-D1 Chromium
-cases (all three executable kinds, Quick calendar dragging and outcome write etags); lint/types/build pass. Publication is gated by same-SHA branch/main CI and matching Personal cloud reconcile;
+Local estimate checks passed shared planning341, native web120 and5 focused real-D1 Chromium cases.
+The first branch CI40285051232 caught an editor-mode replacement on Execution change (153/155 browser cases passed).
+The open editor now keeps its controls/draft/focus until close; reopening uses the saved execution kind.
+Both original failing journeys and all executable estimate/clock cases pass (6/6); the added App regression
+failed before the fix and passes now. Shared planning343, lint/types/build pass on the combined source. Publication is gated by same-SHA branch/main CI and matching Personal cloud reconcile;
 actual release identity is recorded by GitHub production Deployments; no production tasks were read or edited.
 
 

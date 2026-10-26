@@ -193,7 +193,7 @@ export function registerTaskTools(server: McpServer, env: TaskToolEnv, writes: T
 
   server.registerTool('plan_get', {
     title: 'Read Plan',
-    description: 'Read weekly goals, saved lane orders, next-week commitment IDs, one page of active task planning facts and daily queues. Native stage/board_stage/must_start are Tasks’ facts. Follow task_page.next_page_token for more tasks. This answer does not derive the complete UI candidate lanes. Omitting both day fields reads the current week.',
+    description: 'Read weekly goals, saved lane orders, next-week commitment IDs, one page of active task planning facts and daily queues. Native stage/board_stage/must_start are Tasks’ facts. Follow task_page.next_page_token for more tasks. This answer does not derive the complete UI candidate lanes. Omitting both day fields reads the current Sunday–Saturday week in the account timezone.',
     inputSchema: z.strictObject({ page_size: pageSize, page_token: pageToken, start_day: optionalDay, end_day: optionalDay }),
     annotations: readOnly,
   }, input => answer(async () => {
@@ -221,7 +221,7 @@ export function registerTaskTools(server: McpServer, env: TaskToolEnv, writes: T
 
   server.registerTool('focus_get', {
     title: 'Read Focus',
-    description: 'Read 1–7 days of queues and time records plus the current Focus timer. Omitting both day fields reads the current week. Timer access is read-only.',
+    description: 'Read 1–7 days of queues and time records plus the current Focus timer. Omitting both day fields reads the current Sunday–Saturday week in the account timezone. Timer access is read-only.',
     inputSchema: z.strictObject({ start_day: optionalDay, end_day: optionalDay }),
     annotations: readOnly,
   }, input => answer(async () => {

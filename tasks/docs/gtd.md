@@ -65,3 +65,5 @@ Use the existing Worker, planning-ui, web and Chromium checks. Cover real Step c
 Routine/Standalone grouping, inherited area versus saved time area, DST boundaries, incomplete plan history,
 bounded detail with full totals, tab/range reuse and calendar navigation to editable Focus records. Existing
 CRUD, timer, mini timer, away-pause and backup checks remain required.
+
+Weekly report ranges and calendar rows run Sunday through Saturday in the account time zone. Commitment membership uses the existing Monday IDs for those weeks; historical rows and calendar-day records are not rewritten.

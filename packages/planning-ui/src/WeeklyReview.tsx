@@ -64,7 +64,7 @@ interface Props {
 /**
  * Four weekly review lines with counts and jump targets, and another while deadlines lack a
  * start-ahead choice. It only guides: every write is one of the owner's existing single-task
- * actions, made when clicked, or on Sunday next week's two Bets.
+ * actions, made when clicked, or on Saturday next week's two Bets.
  */
 export function WeeklyReview({
   plan: completePlan,
@@ -107,10 +107,10 @@ export function WeeklyReview({
   const someday = oldestUntouched(plan.tasks, SOMEDAY_LABELS).filter(
     (task) => task.stage !== "monthly" && !progress.kept.includes(task.id),
   );
-  const sunday = isLastDay(plan.week, today);
+  const saturday = isLastDay(plan.week, today);
   const nextWeek = addDays(plan.week, 7);
   const chosen = new Set(plan.nextWeekTaskIds);
-  const commitments = sunday ? weekChoices(plan) : [];
+  const commitments = saturday ? weekChoices(plan) : [];
   const toKeep = commitments.filter((task) => !chosen.has(task.id));
   // The review task Tasks created and the mail still pending in Todofy, read from Tasks when it opens.
   const [facts, setFacts] = useState<WeeklyReviewFacts>();
@@ -376,12 +376,12 @@ export function WeeklyReview({
             )}
           </>,
         )}
-        {sunday ? (
+        {saturday ? (
           line(
             5,
             zh ? "下周承诺与目标" : "Next week's commitments and goals",
             <>
-              <span className="weekly-review-note">{text.sundayRule}</span>
+              <span className="weekly-review-note">{text.saturdayRule}</span>
               {commitments.length > 0 &&
                 toggle(
                   5,
@@ -410,7 +410,7 @@ export function WeeklyReview({
                             aria-label={`${keep}: ${title}`}
                             onClick={async () => {
                               const index = toKeep.indexOf(task);
-                              // Sends the commitment again, which on Sunday keeps it for next week.
+                              // Sends the commitment again, which on Saturday keeps it for next week.
                               if (
                                 await run(() =>
                                   actions.updateTask(task, {
@@ -429,7 +429,7 @@ export function WeeklyReview({
                   })}
                 </ul>
               )}
-              {/* Next week's Bets, written here only: Monday's "Keep" is the one way to carry one on. */}
+              {/* Next week's Bets, written here only: Sunday's "Keep" is the one way to carry one on. */}
               <ul
                 className="weekly-review-items weekly-review-bets"
                 aria-label={zh ? "下周目标" : "Next week's goals"}
@@ -459,7 +459,7 @@ export function WeeklyReview({
             </>,
           )
         ) : (
-          // Nothing to tick before Sunday: only where the choice will be.
+          // Nothing to tick before Saturday: only where the choice will be.
           <li className="weekly-review-later">
             <div className="weekly-review-line">
               <strong>
@@ -467,8 +467,8 @@ export function WeeklyReview({
               </strong>
               <span className="weekly-review-note">
                 {zh
-                  ? "周日可在这里选留到下周的承诺，并写下周目标"
-                  : "On Sunday, choose commitments to keep and write next week's goals here"}
+                  ? "周六可在这里选留到下周的承诺，并写下周目标"
+                  : "On Saturday, choose commitments to keep and write next week's goals here"}
               </span>
             </div>
           </li>

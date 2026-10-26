@@ -1,5 +1,5 @@
 import { BetNotSaved, betText, weeklyBet, withBets } from "../src/bets";
-import { addDays } from "../src/domain";
+import { addDays, planningWeekStart } from "../src/domain";
 import { withLaneOrder } from "../src/plan-updates";
 import type {
   DayPlan,
@@ -304,7 +304,7 @@ export function createPrototype(
     return structuredClone({ days: range, tasks, today });
   }
   return {
-    async load(week = plan.week) {
+    async load(week = planningWeekStart(plan.week)) {
       focus = { ...focus, ...days.find((day) => day.date === focus.date)! };
       return structuredClone({ plan, focus, days: weekDays(week) });
     },

@@ -1,7 +1,7 @@
 /**
  * Planning rules (migrations/0006_planning.sql, proto/tasks/ui/v1/task.proto fields 31-38 and plan.proto), pure
  * functions ported from Todofy's core/plus.py (native branch), core/native_plan.py and core/plan.py. Days are
- * account-local YYYY-MM-DD; `today` is Tasks' today and `week` its Monday.
+ * account-local YYYY-MM-DD; `today` is Tasks' today and `week` its stable Monday ID.
  */
 import { addDays, daysBetween } from '@ziyixi/task-dates';
 import { invalid, precondition } from './errors.ts';
@@ -36,10 +36,18 @@ export interface PlanningRow {
 export function mondayOf(day: string): string {
   return addDays(day, -((new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7));
 }
+/** The stable Monday ID of a Sunday-to-Saturday planning week. */
+export function planningWeekId(day: string): string {
+  return mondayOf(addDays(day, 1));
+}
+/** The Sunday that starts a planning week. Stored week IDs remain Mondays. */
+export function planningWeekStart(day: string): string {
+  return addDays(planningWeekId(day), -1);
+}
 export function flagsOf(row: Pick<PlanningRow, 'planning_flags'>): string[] {
   return JSON.parse(row.planning_flags) as string[];
 }
-/** The stored stage after the Monday rollover: a commitment for a week that has ended is weekly. */
+/** The stored stage after the Saturday-to-Sunday rollover: a commitment for a week that has ended is weekly. */
 export function rolledStage(row: Pick<PlanningRow, 'stage' | 'committed_week'>, week: string): string {
   return row.stage === 'committed' && row.committed_week < week ? 'weekly' : row.stage;
 }
@@ -58,7 +66,7 @@ export interface PlanningView {
   /** A deadline without lead days, on a task that is neither active nor parked. */
   missingLead: boolean;
 }
-/** A day's Monday and the day seven days on, which every row's planning fields on that day count from. */
+/** A day's planning week ID and the day seven days on, which every row's planning fields on that day count from. */
 interface PlanningDay {
   today: string;
   week: string;
@@ -70,7 +78,7 @@ let lastDay: PlanningDay | undefined;
  * validates them, so the last day's are kept (they depend on `today` only).
  */
 function planningDay(today: string): PlanningDay {
-  if (lastDay?.today !== today) lastDay = { today, week: mondayOf(today), horizon: addDays(today, 7) };
+  if (lastDay?.today !== today) lastDay = { today, week: planningWeekId(today), horizon: addDays(today, 7) };
   return lastDay;
 }
 export function planningView(row: PlanningRow, today: string): PlanningView {
@@ -115,7 +123,7 @@ export function plannedRow<T extends PlanningRow>(old: PlanningRow, next: T, tod
   if (!(AREAS as readonly string[]).includes(next.area)) invalid('Choose work, personal or unassigned');
   if (!Number.isInteger(next.lead_days) || next.lead_days < 0 || next.lead_days > MAX_LEAD_DAYS)
     invalid(`Start ahead takes 0 to ${String(MAX_LEAD_DAYS)} days`);
-  const week = mondayOf(today);
+  const week = planningWeekId(today);
   let flags = checkedFlags(flagsOf(next));
   let stage = stageWritten ? next.stage : rolledStage(old, week);
   if (flags.includes('parked') && !flagsOf(old).includes('parked')) {
@@ -136,11 +144,11 @@ export function plannedRow<T extends PlanningRow>(old: PlanningRow, next: T, tod
   };
 }
 /**
- * The week a commitment made today is for: on the week's last day, Sunday, a commitment is a choice for the next
- * week, so Monday's rollover leaves it in place.
+ * The week a commitment made today is for: on Saturday, the last day, a commitment is a choice for the next
+ * week, so Sunday's rollover leaves it in place.
  */
 export function membershipWeek(today: string, week: string): string {
-  return today === addDays(week, 6) ? addDays(week, 7) : week;
+  return today === addDays(week, 5) ? addDays(week, 7) : week;
 }
 
 /** A dependency as the rules see it: the task that waits and its prerequisite. */

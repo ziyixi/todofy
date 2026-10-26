@@ -1,5 +1,5 @@
 /**
- * Planning in Tasks (migrations/0006_planning.sql) over workerd's real D1: planning masks, the Monday rollover with an
+ * Planning in Tasks (migrations/0006_planning.sql) over workerd's real D1: planning masks, the Sunday rollover with an
  * injected clock, GetPlan, dependencies and their in-batch guard, a Review lane's order and Bets. Synthetic rows only.
  */
 import { randomUUID } from 'node:crypto';
@@ -14,15 +14,17 @@ import {
   CreateTaskRequestSchema,
   GetPlanRequestSchema,
   ListFocusDaysRequestSchema,
+  MoveFocusStepRequestSchema,
   UpdateTaskRequestSchema,
   UpdateWeeklyBetRequestSchema,
 } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { localDate } from '@ziyixi/task-dates';
-import { listFocusDays } from '../../src/focus.ts';
+import { listFocusDays, moveFocusStep } from '../../src/focus.ts';
 import { getPlan, updateWeeklyBet } from '../../src/plan.ts';
-import { mondayOf } from '../../src/planning.ts';
+import { planningWeekId, planningWeekStart } from '../../src/planning.ts';
 import { getTask } from '../../src/task-read.ts';
 import { createTask, updateTask } from '../../src/task-write.ts';
+import { taskMessage } from '../../src/model.ts';
 import { startHarness, type Harness } from './harness.ts';
 
 const ZONE = 'America/Los_Angeles';
@@ -155,7 +157,7 @@ test('planning fields are written by mask under the etag, replay exactly and ref
   expect(await read(cleared)).toEqual(cleared);
 });
 
-test('a commitment reads as weekly the Monday after its week, and a Sunday choice is for the next week', async () => {
+test('a commitment reads as weekly the Sunday after its week, and a Saturday choice is for the next week', async () => {
   const commit = (title: string, now: number) =>
     createTask(
       harness.db,
@@ -164,7 +166,7 @@ test('a commitment reads as weekly the Monday after its week, and a Sunday choic
       ZONE,
     );
   const tuesday = await commit('Synthetic Tuesday commitment', at('2030-04-16'));
-  const sunday = await commit('Synthetic Sunday choice', at('2030-04-21'));
+  const sunday = await commit('Synthetic Saturday choice', at('2030-04-20'));
   const weeks = await harness.db
     .prepare('SELECT id,committed_week FROM tasks WHERE id IN (?,?) ORDER BY committed_week')
     .bind(tuesday.id, sunday.id)
@@ -175,8 +177,8 @@ test('a commitment reads as weekly the Monday after its week, and a Sunday choic
   ]);
   const plan = async (day: string) =>
     getPlan(harness.db, create(GetPlanRequestSchema, { name: 'plan' }), ZONE, at(day));
-  // On Sunday the Sunday choice is next week's; on Monday it is this week's, and the Tuesday one has rolled over.
-  expect((await plan('2030-04-21')).nextWeekTaskIds).toContain(sunday.id);
+  // On Saturday the new choice is next week's; on Monday it is current and the Tuesday one has rolled over.
+  expect((await plan('2030-04-20')).nextWeekTaskIds).toContain(sunday.id);
   const monday = await plan('2030-04-22');
   expect(monday.nextWeekTaskIds).not.toContain(sunday.id);
   const update = (id: string, etag: string, mask: string, task: Record<string, unknown>, now: number) =>
@@ -196,14 +198,14 @@ test('a commitment reads as weekly the Monday after its week, and a Sunday choic
   expect([edited.stage, edited.boardStage]).toEqual(['weekly', 'weekly']);
   const stored = await harness.db.prepare('SELECT stage,committed_week FROM tasks WHERE id=?').bind(tuesday.id).first();
   expect(stored).toEqual({ stage: 'weekly', committed_week: '' });
-  // The Sunday choice still reads as committed that Monday, and a write keeps its week.
+  // The Saturday choice still reads as committed that Monday, and a write keeps its week.
   const kept = await update(sunday.id, sunday.etag, 'area', { area: 'personal' }, at('2030-04-22'));
   expect(kept.stage).toBe('committed');
 });
 
 test('GetPlan reads the Bets of three weeks, the arranged lanes and next week, in one batch', async () => {
   const today = localDate(Date.now(), ZONE);
-  const week = mondayOf(today);
+  const week = planningWeekId(today);
   // The body is the masked Bet, as the shared client sends it; the etag is a request field.
   const bet = (name: string, text: string, etag = '') =>
     harness.mutate('PATCH', `/api/tasks/v1/weeklyBets/${name}?update_mask=text&etag=${etag}`, { text });
@@ -234,7 +236,7 @@ test('GetPlan reads the Bets of three weeks, the arranged lanes and next week, i
   }>();
   expect(plan).toMatchObject({ name: 'plan', today, week_start: week, time_zone: ZONE });
   expect(plan.weekly_bets.map((value) => value.name)).toEqual([
-    `weeklyBets/${mondayOf(localDate(Date.now() - 7 * 86_400_000, ZONE))}-personal`,
+    `weeklyBets/${planningWeekId(localDate(Date.now() - 7 * 86_400_000, ZONE))}-personal`,
     `weeklyBets/${week}-work`,
   ]);
 });
@@ -614,20 +616,106 @@ test("a Review lane's order is saved with no positions, and with positions in th
 test("ListFocusDays without a range reads the week of Tasks' today", async () => {
   const sunday = await listFocusDays(harness.db, create(ListFocusDaysRequestSchema, {}), ZONE, at('2030-04-21'));
   expect(sunday.days.map((day) => day.day)).toEqual([
-    '2030-04-15',
-    '2030-04-16',
-    '2030-04-17',
-    '2030-04-18',
-    '2030-04-19',
-    '2030-04-20',
     '2030-04-21',
+    '2030-04-22',
+    '2030-04-23',
+    '2030-04-24',
+    '2030-04-25',
+    '2030-04-26',
+    '2030-04-27',
   ]);
   expect(sunday.today).toBe('2030-04-21');
   // The generated client sends the two REQUIRED days, empty.
   const response = await harness.fetch('/api/tasks/v1/focusDays?start_day=&end_day=');
   expect(response.status, await response.clone().text()).toBe(200);
   const week = await response.json<{ days: { day: string }[]; today: string }>();
-  expect(week.days[0]?.day).toBe(mondayOf(week.today));
+  expect(week.days[0]?.day).toBe(planningWeekStart(week.today));
   expect(week.days).toHaveLength(7);
   expect(await reason(await harness.fetch('/api/tasks/v1/focusDays?start_day=2030-04-15'))).toBe('BAD_REQUEST');
+});
+
+test('Pacific Saturday midnight advances the planning ID, preserves goals and queues, and Monday does not roll again', async () => {
+  const saturday = Date.parse('2030-04-21T06:59:59Z');
+  const sunday = Date.parse('2030-04-21T07:00:00Z');
+  const monday = Date.parse('2030-04-22T07:00:00Z');
+  expect(localDate(saturday, ZONE)).toBe('2030-04-20');
+  expect(localDate(sunday, ZONE)).toBe('2030-04-21');
+  const task = await createTask(
+    harness.db,
+    fromWire(CreateTaskRequestSchema, {
+      task: {
+        title: 'Synthetic retained Saturday choice',
+        stage: 'committed',
+        planning_flags: ['task'],
+      },
+      request_id: randomUUID(),
+    }).message,
+    saturday,
+    ZONE,
+  );
+  await moveFocusStep(
+    harness.db,
+    create(MoveFocusStepRequestSchema, {
+      taskId: task.id,
+      destinationDay: '2030-04-22',
+      requestId: randomUUID(),
+    }),
+    saturday,
+  );
+  const goalName = 'weeklyBets/2030-04-22-work';
+  const oldGoal = await harness.db
+    .prepare("SELECT revision FROM weekly_bets WHERE week_start='2030-04-22' AND area='work'")
+    .first<{ revision: number }>();
+  const goal = await updateWeeklyBet(
+    harness.db,
+    fromWire(UpdateWeeklyBetRequestSchema, {
+      weekly_bet: { name: goalName, text: 'Synthetic saved next week goal' },
+      update_mask: 'text',
+      etag: oldGoal ? String(oldGoal.revision) : '',
+    }).message,
+    ZONE,
+    saturday,
+  );
+  const planAt = (now: number) => getPlan(harness.db, create(GetPlanRequestSchema, { name: 'plan' }), ZONE, now);
+  expect((await planAt(saturday)).weekStart).toBe('2030-04-15');
+  expect((await planAt(saturday)).nextWeekTaskIds).toContain(task.id);
+  for (const now of [sunday, monday]) {
+    const plan = await planAt(now);
+    expect(plan.weekStart).toBe('2030-04-22');
+    expect(plan.nextWeekTaskIds).not.toContain(task.id);
+    expect(plan.weeklyBets.find((bet) => bet.name === goalName)).toEqual(goal);
+    const days = await listFocusDays(harness.db, create(ListFocusDaysRequestSchema, {}), ZONE, now);
+    expect(days.days[0]?.day).toBe('2030-04-21');
+    expect(days.days.at(-1)?.day).toBe('2030-04-27');
+    expect(days.days.find((day) => day.day === '2030-04-22')?.taskIds).toContain(task.id);
+  }
+  const stored = await getTask(harness.db, task.id);
+  expect([stored.stage, stored.committed_week]).toEqual(['committed', '2030-04-22']);
+  const earlier = await createTask(
+    harness.db,
+    fromWire(CreateTaskRequestSchema, {
+      task: { title: 'Synthetic expired weekly choice', stage: 'committed' },
+      request_id: randomUUID(),
+    }).message,
+    at('2030-04-16'),
+    ZONE,
+  );
+  const earlierRow = await getTask(harness.db, earlier.id);
+  expect(taskMessage(earlierRow, localDate(saturday, ZONE)).stage).toBe('committed');
+  expect(taskMessage(earlierRow, localDate(sunday, ZONE)).stage).toBe('weekly');
+  const chosen = await createTask(
+    harness.db,
+    fromWire(CreateTaskRequestSchema, {
+      task: {
+        title: 'Synthetic Sunday current-week choice',
+        stage: 'committed',
+      },
+      request_id: randomUUID(),
+    }).message,
+    sunday,
+    ZONE,
+  );
+  const chosenRow = await getTask(harness.db, chosen.id);
+  expect(chosenRow.committed_week).toBe('2030-04-22');
+  expect(taskMessage(chosenRow, localDate(monday, ZONE)).stage).toBe('committed');
 });

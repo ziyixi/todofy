@@ -38,7 +38,7 @@ export interface SeedTask {
 }
 /** What a planning test runs on: its tasks in D1, Tasks' today, and every request the page sent. */
 export interface PlanningState {
-  /** Tasks' today and its week's Monday, by the dev server's clock. */
+  /** Tasks' today and its stable Monday planning-week ID, by the dev server's clock. */
   today: string;
   week: string;
   /** The page's requests that reach Todofy (reachesTodofy). */
@@ -155,7 +155,7 @@ export async function stubPlanning(
   const today = await tasksToday();
   const state: PlanningState = {
     today,
-    week: mondayOf(today),
+    week: planningWeekId(today),
     requests: [],
     tasksRequests: [],
   };
@@ -413,13 +413,20 @@ export const addDays = (day: string, days: number) =>
 export function mondayOf(day: string): string {
   return addDays(day, -((new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7));
 }
+/** Stable week IDs remain Mondays; calendar ranges begin on the preceding Sunday. */
+function planningWeekId(day: string): string {
+  return mondayOf(addDays(day, 1));
+}
+function planningWeekStart(day: string): string {
+  return addDays(planningWeekId(day), -1);
+}
 /** Tasks' today: the day Focus shows, the timer counts on and an empty focus_day settles. */
 export async function tasksToday(): Promise<string> {
   return String((await readFocus("2026-01-05", "2026-01-05")).today);
 }
-/** The days of `today`'s week other than today, Monday first. */
+/** The days of `today`'s week other than today, Sunday first. */
 export function otherDays(today: string): string[] {
-  const week = mondayOf(today);
+  const week = planningWeekStart(today);
   return [0, 1, 2, 3, 4, 5, 6]
     .map((offset) => addDays(week, offset))
     .filter((day) => day !== today);
@@ -491,11 +498,11 @@ async function seedFocus(queues: Record<string, string[]>): Promise<void> {
       ))!.today,
     );
     const weeks = new Set(
-      [today, ...Object.keys(queues)].map((day) => mondayOf(day)),
+      [today, ...Object.keys(queues)].map((day) => planningWeekStart(day)),
     );
-    for (const monday of weeks) {
+    for (const weekStart of weeks) {
       const read = (await api.read(
-        `/api/tasks/v1/focusDays?start_day=${monday}&end_day=${addDays(monday, 6)}`,
+        `/api/tasks/v1/focusDays?start_day=${weekStart}&end_day=${addDays(weekStart, 6)}`,
       ))!;
       for (const day of read.days as Json[])
         for (const id of [

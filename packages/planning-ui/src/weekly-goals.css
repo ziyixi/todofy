@@ -162,7 +162,7 @@
   }
 }
 
-/* Next week's two Bets in Sunday's weekly review, at the review's own text size. */
+/* Next week's two Bets in Saturday's weekly review, at the review's own text size. */
 .weekly-review-items.weekly-review-bets li > .weekly-review-bet-area {
   flex: none;
   min-width: 3em;

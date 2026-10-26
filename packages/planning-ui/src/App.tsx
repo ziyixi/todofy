@@ -19,7 +19,12 @@ import {
   RefreshCw,
   Square,
 } from "lucide-react";
-import { displayedTitle, elapsed, isSchedulable } from "./domain";
+import {
+  displayedTitle,
+  elapsed,
+  isSchedulable,
+  planningWeekStart,
+} from "./domain";
 import { words } from "./i18n";
 import { readableDate, weekLabel } from "./PlanningCalendar";
 import {
@@ -155,9 +160,10 @@ export function App({
     () => new Set(pending.flatMap((change) => change.pending)),
     [pending],
   );
-  // An empty week follows the server's current week, including a Monday rollover while away.
+  // An empty week follows the server's current week, including a Sunday rollover while away.
   const displayedWeek = useRef(
-    snapshot && snapshot.data.days[0]?.date !== snapshot.data.plan.week
+    snapshot &&
+      snapshot.data.days[0]?.date !== planningWeekStart(snapshot.data.plan.week)
       ? (snapshot.data.days[0]?.date ?? "")
       : "",
   );
@@ -193,6 +199,10 @@ export function App({
     };
   }, []);
   const [selectedId, setSelectedId] = useState(externalTaskId ?? "");
+  const [selectedPanel, setSelectedPanel] = useState<{
+    id: string;
+    executable: boolean;
+  }>();
   // Focus's quiet line opens Plan at Parked.
   const [showStart, setShowStart] = useState(false);
   // Focus opens today unless statistics chose a day. An empty date follows Tasks' today at midnight.
@@ -228,7 +238,7 @@ export function App({
   const openedAt = useRef(0);
   const opener = useRef<HTMLElement | null>(null);
   const text = words(language);
-  // A confirmed planning write on Sunday also changes next week's choices, which only ReadPlan lists.
+  // A confirmed planning write on Saturday also changes next week's choices, which only ReadPlan lists.
   const planActions = useMemo<PlusActions>(
     () => ({
       ...actions,
@@ -253,7 +263,6 @@ export function App({
       if (settled !== writes.current.settled) return false;
       if (read < reads.current.shown) return true;
       reads.current.shown = read;
-      if (!displayedWeek.current) displayedWeek.current = next.plan.week;
       loadedAt.current = Date.now();
       remembered.current = false;
       // A week shown since this read started stays, with the tasks its read named.
@@ -603,7 +612,10 @@ export function App({
   function changeWeek(week: string): Promise<void> {
     const request = ++weekRequest.current;
     const settled = writes.current.settled;
-    displayedWeek.current = week;
+    displayedWeek.current =
+      week === planningWeekStart(latestData.current?.plan.week ?? week)
+        ? ""
+        : week;
     setWeekLoading(true);
     return actions.loadDays(week).then(
       (range) => {
@@ -652,7 +664,15 @@ export function App({
     });
   }
   const selected = data?.plan.tasks.find((task) => task.id === selectedId);
-  const selectedExecutable = selected?.kind && isSchedulable(selected);
+  // Capture the first available task read for this open. An Execution write must not replace
+  // the editor and discard its draft; closing and opening again chooses from the saved task.
+  if (!selectedId && selectedPanel) setSelectedPanel(undefined);
+  else if (selected && selectedPanel?.id !== selected.id)
+    setSelectedPanel({
+      id: selected.id,
+      executable: Boolean(selected.kind && isSchedulable(selected)),
+    });
+  const selectedExecutable = selectedPanel?.executable;
   // A task whose stage drag waits still carries its old etag, so its editor waits too.
   const selectedPending = Boolean(
     selected && pendingCards.has(pendingTask(selected.id)),
@@ -847,7 +867,10 @@ export function App({
                 <CalendarDays size={13} />
                 {data
                   ? view === "plan"
-                    ? weekLabel(data.days[0]?.date ?? data.plan.week, language)
+                    ? weekLabel(
+                        data.days[0]?.date ?? planningWeekStart(data.plan.week),
+                        language,
+                      )
                     : readableDate(focusDate || data.focus.date, language)
                   : ""}
                 {data && <span> · {data.plan.timezone}</span>}
@@ -929,7 +952,7 @@ export function App({
                   focus={data.focus}
                   // The quiet line looks at this week's queues; while Plan shows another week, at today's.
                   days={
-                    data.days[0]?.date === data.plan.week
+                    data.days[0]?.date === planningWeekStart(data.plan.week)
                       ? data.days
                       : [data.focus]
                   }

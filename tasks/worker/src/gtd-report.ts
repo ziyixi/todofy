@@ -14,7 +14,7 @@ import {
 } from "@ziyixi/task-dates";
 import { checkedArea, checkedDay } from "./focus.ts";
 import { invalid, storage } from "./errors.ts";
-import { mondayOf } from "./planning.ts";
+import { planningWeekId, planningWeekStart } from "./planning.ts";
 
 export const REPORT_TASKS = 100;
 const routine = (
@@ -91,7 +91,9 @@ export async function getGtdReport(
 ) {
   if (input.name !== "gtdReport") invalid("The report is named gtdReport");
   const defaultWeek =
-    !input.startDay && !input.endDay ? mondayOf(localDate(now, zone)) : "";
+    !input.startDay && !input.endDay
+      ? planningWeekStart(localDate(now, zone))
+      : "";
   const start = defaultWeek || checkedDay(input.startDay, "start_day");
   const end = defaultWeek
     ? addDays(defaultWeek, 6)
@@ -118,8 +120,8 @@ export async function getGtdReport(
     endAt,
     start,
     end,
-    mondayOf(start),
-    mondayOf(end),
+    planningWeekId(start),
+    planningWeekId(end),
     area,
   ];
   const [marker, completionDays, timeDays, planCounts, progress] =
@@ -205,7 +207,8 @@ export async function getGtdReport(
     ?.started_at;
   const completeHistory =
     startedAt !== undefined &&
-    mondayOf(start) >= addDays(mondayOf(localDate(startedAt, zone)), 7);
+    planningWeekId(start) >=
+      addDays(planningWeekId(localDate(startedAt, zone)), 7);
   const plan = planCounts?.results[0] as {
     task_count: number;
     step_count: number;

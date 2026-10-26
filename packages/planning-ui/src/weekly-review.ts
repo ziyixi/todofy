@@ -87,7 +87,7 @@ export function unscheduledCommitments(
   );
 }
 
-/** This week's commitments, the choices Sunday's review can keep for next week. */
+/** This week's commitments, the choices Saturday's review can keep for next week. */
 export function weekChoices(plan: PlanState): PlanningTask[] {
   return committedOutcomes(plan);
 }
@@ -154,9 +154,9 @@ export function quickTray(
   );
 }
 
-/** Whether `today` is the last day of the account week starting on `week`. */
+/** Whether `today` is Saturday in the account week identified by the Monday ID `week`. */
 export function isLastDay(week: string, today: string): boolean {
-  return addDays(week, 6) === today;
+  return addDays(week, 5) === today;
 }
 
 /** The ISO week (2026-W42) of a YYYY-MM-DD date. */

@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import type { GtdReport } from "@ziyixi/proto/tasks/ui/v1/gtd_pb";
-import { addDays, mondayOf, monthStart } from "@ziyixi/planning-ui/domain";
+import {
+  addDays,
+  planningWeekStart,
+  monthStart,
+} from "@ziyixi/planning-ui/domain";
 import { api, describeError } from "./api";
 import { todayDate } from "./dates";
 import { GtdOverview, GtdCompletion } from "./gtd/GtdCompletion";
@@ -86,7 +90,7 @@ export default function GtdPage({
   }
   const thisPeriod =
     period === "week"
-      ? mondayOf(today) === startDay
+      ? planningWeekStart(today) === startDay
       : today.slice(0, 7) === startDay.slice(0, 7);
   return (
     <section className="gtd-page" aria-label="GTD progress and time">

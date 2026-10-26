@@ -186,6 +186,58 @@ it.each(["step", "standalone", "quick"] as const)(
   },
 );
 
+it("keeps an open planning editor and its draft when execution changes, then reopens the executable panel", async () => {
+  const actions = native();
+  const updateTask = actions.updateTask.bind(actions);
+  vi.spyOn(actions, "updateTask").mockImplementation(async (task, update) => ({
+    ...(await updateTask(task, update)),
+    kind: task.kind,
+  }));
+  render(
+    <App
+      actions={actions}
+      view="plan"
+      language="en"
+      externalTaskId="release"
+      onOpenTask={vi.fn()}
+      onSettings={vi.fn()}
+    />,
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Ship the small website refresh",
+  });
+  const field = within(dialog).getByRole<HTMLTextAreaElement>("textbox", {
+    name: "Add steps",
+  });
+  fireEvent.change(field, { target: { value: "Synthetic unsaved step" } });
+  const quick = within(dialog).getByRole<HTMLInputElement>("radio", {
+    name: "Quick",
+  });
+  quick.focus();
+  fireEvent.click(quick);
+  await waitFor(() => expect(quick.checked).toBe(true));
+  await waitFor(() => expect(quick.disabled).toBe(false));
+  expect(within(dialog).getByRole("radio", { name: "Quick" })).toBe(quick);
+  expect(within(dialog).getByRole("textbox", { name: "Add steps" })).toBe(
+    field,
+  );
+  expect(field.value).toBe("Synthetic unsaved step");
+  expect(document.activeElement).toBe(quick);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  fireEvent.click(
+    document.querySelector<HTMLButtonElement>('[data-outcome-id="release"]')!,
+  );
+  const reopened = await screen.findByRole("dialog", {
+    name: "Ship the small website refresh",
+  });
+  expect(
+    within(reopened).queryByRole("radiogroup", { name: "Execution" }),
+  ).toBeNull();
+  expect(
+    within(reopened).getByRole("spinbutton", { name: "Estimate" }),
+  ).toBeTruthy();
+});
+
 /** The step as Plan holds it, whose etag the estimate write goes under. */
 const copy = expect.objectContaining({ id: "copy", etag: expect.any(String) });
 

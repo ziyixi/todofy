@@ -931,7 +931,7 @@ message PreviewDateResponse {
 // (-- api-linter: core::0132::request-unknown-fields=disabled
 //     aip.dev/not-precedent: the range of days is the read; a day has no page order to resume. --)
 message ListFocusDaysRequest {
-  // The first day, YYYY-MM-DD. Empty, with an empty end_day, reads the week (Monday to Sunday) of Tasks' today.
+  // The first day, YYYY-MM-DD. Empty, with an empty end_day, reads the week (Sunday to Saturday) of Tasks' today.
   // (-- api-linter: core::0132::request-required-fields=disabled
   //     aip.dev/not-precedent: the range of days is the read; without it there is nothing to list. --)
   string start_day = 1 [(google.api.field_behavior) = REQUIRED];
@@ -1168,7 +1168,7 @@ message GetGtdReportRequest {
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "tasks.ziyixi.science/GtdReport"
   ];
-  // First included account-local day, YYYY-MM-DD. Omitting both bounds selects the current week.
+  // First included account-local day, YYYY-MM-DD. Omitting both bounds selects the current Sunday-to-Saturday week.
   string start_day = 2 [(google.api.field_behavior) = OPTIONAL];
   // Last included account-local day; at most 31 days from start_day, inclusive.
   string end_day = 3 [(google.api.field_behavior) = OPTIONAL];

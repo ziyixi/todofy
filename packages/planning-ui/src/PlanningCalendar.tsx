@@ -8,9 +8,11 @@ import {
   X,
 } from "lucide-react";
 import {
+  addDays,
   clockTime,
   displayedTitle,
   formattedMinutes,
+  planningWeekStart,
   hasPlanningFlag,
   taskIndex,
 } from "./domain";
@@ -81,7 +83,7 @@ export function PlanningCalendar({
     Math.max(0, dayIndex - 1),
     Math.max(0, days.length - 3),
   );
-  const week = days[0]?.date ?? plan.week;
+  const week = days[0]?.date ?? planningWeekStart(plan.week);
   const range = dateFormat(language, "range").formatRange(
     dayDate(week),
     dayDate(days.at(-1)?.date ?? week),
@@ -113,8 +115,8 @@ export function PlanningCalendar({
           </button>
           <button
             className="planning-current-week"
-            disabled={week === plan.week}
-            onClick={() => onWeekChange(plan.week)}
+            disabled={week === planningWeekStart(plan.week)}
+            onClick={() => onWeekChange(planningWeekStart(plan.week))}
           >
             {language === "zh" ? "回本周" : "This week"}
           </button>
@@ -605,10 +607,11 @@ export function monthDay(date: string, language: Language): string {
       : "monthDayYear";
   return dateFormat(language, style).format(dayDate(date));
 }
-/** "Week 42 · from Oct 12" or "第 42 周 · 10月12日起", with the ISO week number. */
+/** "Week 42 · from Oct 11" or "第 42 周 · 10月11日起", with the stable Monday ID's ISO week number. */
 export function weekLabel(weekStart: string, language: Language): string {
-  const week = Number(isoWeek(weekStart).split("-W")[1]);
-  const from = monthDay(weekStart, language);
+  const start = planningWeekStart(weekStart);
+  const week = Number(isoWeek(addDays(start, 1)).split("-W")[1]);
+  const from = monthDay(start, language);
   return language === "zh"
     ? `第 ${week} 周 · ${from}起`
     : `Week ${week} · from ${from}`;

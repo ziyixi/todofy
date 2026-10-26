@@ -184,7 +184,7 @@ export function reviewBody(facts: ReviewFacts, now: number): string {
       : `上次回顾：${new Date(facts.lastDone).toISOString().slice(0, 10)} 完成（${String(Math.max(Math.floor((now - facts.lastDone) / DAY_MS), 0))} 天前）`,
   );
   lines.push(...focus(facts).map((line) => `本周重点：${line}`));
-  lines.push('步骤：清空收件箱 → 看逾期与无日期 → 看项目与等待 → 想想下周');
+  lines.push('回顾上一周，安排本周。步骤：清空收件箱 → 看逾期与无日期 → 看项目与等待 → 安排本周');
   lines.push(`周回顾：${facts.origin}/?review=1   GTD：${facts.origin}/#/gtd`);
   const body = `${lines.join('\n')}\n`;
   const bytes = new TextEncoder().encode(body);

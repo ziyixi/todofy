@@ -251,7 +251,7 @@ export function PlanView(props: PlanViewProps) {
       </div>
       {reviewing && (
         <WeeklyReview
-          // Ticks belong to one week; a Monday rollover starts the next week's list.
+          // Ticks belong to one week; a Sunday rollover starts the next week's list.
           key={plan.week}
           progress={weekProgress}
           onProgress={(next) => setProgress({ week: plan.week, ...next })}

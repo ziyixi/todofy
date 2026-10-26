@@ -316,7 +316,8 @@ test("Execution changes Quick to Standalone to Steps, preserving Routine and exi
   await execution.getByText("Quick", { exact: true }).click();
   await checkedMode("Quick");
   // Scheduling controls follow the draft immediately, before any save.
-  await expect(estimate).toHaveCount(0);
+  await expect(estimate).toBeVisible();
+  await expect(estimate).toHaveValue("45");
   await date.click();
   await expect(timeOptions).toBeVisible();
   await timeOptions.click();
@@ -337,7 +338,8 @@ test("Execution changes Quick to Standalone to Steps, preserving Routine and exi
   expect(quick.due_datetime).toBeTruthy();
   await openTask(page, task.id);
   await checkedMode("Quick");
-  await expect(estimate).toHaveCount(0);
+  await expect(estimate).toBeVisible();
+  await expect(estimate).toHaveValue("45");
 
   await execution.getByText("Standalone", { exact: true }).click();
   await checkedMode("Standalone");

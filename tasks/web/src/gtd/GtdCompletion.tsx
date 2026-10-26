@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { GtdReport } from "@ziyixi/proto/tasks/ui/v1/gtd_pb";
-import { mondayOf } from "@ziyixi/planning-ui/domain";
+import { planningWeekStart } from "@ziyixi/planning-ui/domain";
 import { loggedTime, progressGroups, type GtdPeriod } from "./model";
 import { CompletionMetrics } from "./GtdMetrics";
 import { Routine, StepRow, TaskRow } from "./GtdProgress";
@@ -24,7 +24,7 @@ function CompletionBars({
     { label: string; tasks: number; steps: number }
   >();
   for (const day of report.days) {
-    const key = period === "week" ? day.day : mondayOf(day.day);
+    const key = period === "week" ? day.day : planningWeekStart(day.day);
     const label = new Intl.DateTimeFormat("en-US", {
       timeZone: "UTC",
       ...(period === "week"

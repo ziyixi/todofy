@@ -17,7 +17,7 @@ import type { GetPlanRequest, UpdateWeeklyBetRequest } from '@ziyixi/proto/tasks
 import { localDate, validDate } from '@ziyixi/task-dates';
 import { conflict, invalid, precondition, storage } from './errors.ts';
 import { selectableKeyResult, validateKeyResultLink } from './goal-validation.ts';
-import { BET_AREAS, betText, betWeeks, betWritable, LANES, mondayOf, type Lanes } from './planning.ts';
+import { BET_AREAS, betText, betWeeks, betWritable, LANES, mondayOf, planningWeekId, type Lanes } from './planning.ts';
 
 /** The most next-week choices a plan lists. */
 const NEXT_WEEK_TASKS = 100;
@@ -54,7 +54,7 @@ export function laneOrders(lanes: Lanes): LaneOrder[] {
 export async function getPlan(db: D1Database, input: GetPlanRequest, zone: string, now: number) {
   if (input.name !== 'plan') invalid('The plan is named plan');
   const today = localDate(now, zone);
-  const week = mondayOf(today);
+  const week = planningWeekId(today);
   const [bets, board, chosen] = await storage(() =>
     db.batch<Record<string, unknown>>([
       db
@@ -124,7 +124,7 @@ export async function updateWeeklyBet(db: D1Database, input: UpdateWeeklyBetRequ
   const keyResultId = paths.includes('key_result_id') ? bet.keyResultId : current.keyResultId;
   // A replay compares the values this write owns, and preserves whatever an unmasked field now contains.
   if (current.text === text && current.keyResultId === keyResultId) return current;
-  if (!betWritable(week, mondayOf(localDate(now, zone))))
+  if (!betWritable(week, planningWeekId(localDate(now, zone))))
     precondition("Only this week's and next week's goals can be changed");
   if (input.etag !== current.etag) conflict();
   const changedLink = keyResultId && keyResultId !== current.keyResultId;

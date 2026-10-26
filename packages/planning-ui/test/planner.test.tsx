@@ -141,8 +141,8 @@ it("keeps week navigation usable during a save without changing the current comm
   expect((next as HTMLButtonElement).disabled).toBe(false);
   fireEvent.click(previous);
   fireEvent.click(next);
-  expect(data.onWeekChange).toHaveBeenNthCalledWith(1, "2026-10-05");
-  expect(data.onWeekChange).toHaveBeenNthCalledWith(2, "2026-10-19");
+  expect(data.onWeekChange).toHaveBeenNthCalledWith(1, "2026-10-04");
+  expect(data.onWeekChange).toHaveBeenNthCalledWith(2, "2026-10-18");
   expect(screen.getByText("3/5 work · 1/3 personal")).toBeTruthy();
 });
 

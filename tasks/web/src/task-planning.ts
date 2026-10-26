@@ -30,7 +30,7 @@ export function planningDraft(task?: Task): PlanningDraft {
 }
 /**
  * The planning paths a dialog save adds to its one UpdateTask, with their values: only what the owner changed, so
- * that a Sunday area edit never keeps a commitment for next week.
+ * that a Saturday area edit never keeps a commitment for next week.
  */
 export function planningChanges(
   draft: PlanningDraft,

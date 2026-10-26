@@ -5,7 +5,7 @@ import {
   addDays,
   displayedTitle,
   formattedMinutes,
-  mondayOf,
+  planningWeekStart,
   monthStart,
 } from "@ziyixi/planning-ui/domain";
 import { readableDate, shortDay } from "@ziyixi/planning-ui/PlanningCalendar";
@@ -176,8 +176,8 @@ function TimeMonth({
   const byDay = new Map(report.days.map((day) => [day.day, day]));
   const cells: string[] = [];
   for (
-    let date = mondayOf(first);
-    date <= addDays(mondayOf(last), 6);
+    let date = planningWeekStart(first);
+    date <= addDays(planningWeekStart(last), 6);
     date = addDays(date, 1)
   )
     cells.push(date);

@@ -31,14 +31,14 @@ message Plan {
   string time_zone = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Tasks' today, YYYY-MM-DD.
   string today = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The Monday of today's week, YYYY-MM-DD.
+  // The stable Monday ID of today's Sunday-to-Saturday planning week, YYYY-MM-DD; its Sunday is the day before.
   string week_start = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The Work and Personal Bets of the previous, this and the next week, at most six, by week then area; a week and
   // area with none is absent.
   repeated WeeklyBet weekly_bets = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The Review lanes the owner arranged, in board order, each first to last; a lane never arranged is absent.
   repeated LaneOrder lane_orders = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // At most 100 open tasks committed for a later week: a commitment chosen on this week's Sunday.
+  // At most 100 open tasks committed for a later week: a commitment chosen on this week's Saturday.
   repeated string next_week_task_ids = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
@@ -53,7 +53,7 @@ message WeeklyBet {
 
   // weeklyBets/{week_start}-{area}, for example weeklyBets/2026-10-19-work.
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
-  // The Monday of its week.
+  // The stable Monday ID of its Sunday-to-Saturday planning week.
   string week_start = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // work or personal.
   string area = 3 [(google.api.field_behavior) = OUTPUT_ONLY];

@@ -203,7 +203,7 @@ message WeeklyReview {
     STATE_FAILED = 3;
   }
 
-  // weeklyReviews/{weekly_review}: the Monday of the ISO week, YYYY-MM-DD, as Plan.week_start.
+  // weeklyReviews/{weekly_review}: the Monday of the historical ISO review week, YYYY-MM-DD. Planning week IDs remain Mondays too.
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
   // The review's state.
   State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];

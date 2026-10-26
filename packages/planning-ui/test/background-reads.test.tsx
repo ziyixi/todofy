@@ -246,16 +246,16 @@ it("paints remembered data at once on re-entry and re-reads it in the background
 
 it("keeps a remembered other week but follows the server's current week after a rollover", async () => {
   const actions = createPrototype();
-  const browsed = await actions.load("2026-10-19");
-  const ended = await actions.load("2026-10-05");
+  const browsed = await actions.load("2026-10-18");
+  const ended = await actions.load("2026-10-04");
   ended.plan.week = "2026-10-05";
   const dates = () =>
     [...document.querySelectorAll(".planning-calendar-day")].map((day) =>
       day.getAttribute("data-date"),
     );
   for (const [snapshot, first] of [
-    [browsed, "2026-10-19"],
-    [ended, "2026-10-12"],
+    [browsed, "2026-10-18"],
+    [ended, "2026-10-11"],
   ] as const) {
     render(
       <App
