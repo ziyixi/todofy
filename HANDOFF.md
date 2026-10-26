@@ -35,8 +35,9 @@ existing confirmation sites, without submitting Save or installing global keyboa
 Local checks passed planning UI 338 tests (including 2,000-task and visibility-cache work bounds), Tasks web
 117, Worker 72 unit/29 selected real D1 tests, the fullest-planning CPU case, relevant lint/types/build and
 proto API lint/breaking. The earlier 32 affected Chromium cases passed; the two follow-ups passed eight Quick/
-refinement and five keyboard-deletion cases. Final 152-case browser integration and branch/main release
-checks are pending. No production tasks were changed for this work.
+refinement and five keyboard-deletion cases. The full 152-case Chromium run passed 151; its sole obsolete
+Waiting-column assertion was updated and all 12 layout cases then passed. Final branch CI reruns all 152;
+branch/main release checks remain pending. No production tasks were changed for this work.
 Behavior: [planning readiness](tasks/docs/planning-readiness.md).
 
 ### Configuration drift audit false positive (`codex/fix-config-drift`)

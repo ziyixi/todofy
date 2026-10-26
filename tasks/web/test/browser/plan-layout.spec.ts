@@ -51,7 +51,7 @@ const LONG_OUTCOME =
   "Migrate day queues off the old planner into Tasks D1 without losing the week's arrangement";
 
 /**
- * Eleven commitments (Work, Personal and one Unassigned), six Review lanes and a long Quick list,
+ * Eleven commitments (Work, Personal and one Unassigned), four candidate columns and a long Quick list,
  * dated from Tasks' today.
  */
 const tasks = (today: string): SeedTask[] => [
@@ -90,8 +90,7 @@ const tasks = (today: string): SeedTask[] => [
   task("qa", "Learn Rust for Workers", { stage: "quarterly" }),
   task("ma", "Photo book 2026", { area: "personal", stage: "monthly" }),
   task("wk", "Call grandma", { area: "personal", stage: "weekly" }),
-  // Two waiting tasks whose statuses have two parts, the deadline first, and a parked one: with
-  // them Review has six lanes, five columns at 1440.
+  // Waiting tasks are retained in Tasks, including overdue ones, but never appear in Plan.
   task("venue", "Hear back about the venue quote", {
     planning_flags: ["waiting"],
     deadline: addDays(today, 9),
@@ -209,41 +208,28 @@ for (const width of WIDTHS)
       expect(new Set(commitments.map((card) => card.top)).size).toBe(3);
   });
 
-test("a two-part status puts its deadline first, on one line", async ({
+test("waiting tasks stay outside Plan even when overdue, and Parked status stays on one line", async ({
   page,
 }) => {
-  const today = await openPlan(page, 1440);
-  // "Oct 22", with the year when it is not this one.
-  const due = addDays(today, 9);
-  const deadline = new Date(`${due}T12:00:00Z`).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    ...(due.slice(0, 4) === today.slice(0, 4) ? {} : { year: "numeric" }),
-    timeZone: "UTC",
-  });
-  const waiting = page.getByRole("region", { name: "Waiting" });
-  const status = (title: string) =>
-    waiting
-      .getByRole("button", { name: new RegExp(`^${title},`, "u") })
-      .locator(".planning-outcome-status");
-  await expect(status("Hear back about the venue quote")).toHaveText(
-    new RegExp(`^Deadline ${deadline} · No change in \\d+ days$`, "u"),
-  );
-  await expect(status("Lab access approval")).toHaveText(
-    /^2 days late · No change in \d+ days$/u,
-  );
+  await openPlan(page, 1440);
   await expect(
-    page
-      .getByRole("region", { name: "Parked" })
-      .locator(".planning-outcome-status"),
-  ).toHaveText(/^No change in \d+ days$/u);
+    page.getByRole("region", { name: "Waiting", exact: true }),
+  ).toHaveCount(0);
+  for (const id of ["venue", "visa"])
+    await expect(page.locator(`[data-outcome-id="${id}"]`)).toHaveCount(0);
+  const status = page
+    .getByRole("region", { name: "Parked", exact: true })
+    .locator(".planning-outcome-status");
+  await expect(status).toHaveText(/^No change in \d+ days$/u);
+  expect(
+    await status.evaluate(
+      (element) =>
+        element.getBoundingClientRect().height <=
+        Number.parseFloat(getComputedStyle(element).lineHeight) + 1,
+    ),
+  ).toBe(true);
   // The area is in the name and the colour, not a word on the card.
   await expect(page.locator(".planning-outcome-context")).toHaveCount(0);
-  await expect(
-    waiting.getByRole("button", {
-      name: /^Hear back about the venue quote, Work, No priority, /u,
-    }),
-  ).toBeVisible();
 });
 
 test("a cut outcome title shows in full on hover, and a title that fits never does", async ({
