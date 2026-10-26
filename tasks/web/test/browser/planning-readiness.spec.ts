@@ -23,7 +23,7 @@ async function drag(page: Page, source: Locator, target: Locator) {
 test("completed prerequisites and deadline windows surface in Parked, and planning acknowledges them", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
   const today = await tasksToday();
   const deadline = addDays(today, 3);
   const manual: SeedTask[] = Array.from({ length: 5 }, (_, n) => ({
@@ -104,7 +104,7 @@ test("completed prerequisites and deadline windows surface in Parked, and planni
   await expect(ready).toBeVisible();
   await expect(ready).toContainText("Prerequisites completed");
   await expect(parked.locator(".planning-outcome-card")).toHaveCount(5); // Two ready plus three manual.
-  await page.screenshot({ path: "/private/tmp/todofy-parked-ready.png" });
+  await page.screenshot({ path: testInfo.outputPath("parked-ready.png") });
   const savedBefore = await (
     await request.get("/api/tasks/v1/tasks/readiness-after")
   ).json();

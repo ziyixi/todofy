@@ -37,7 +37,10 @@ Local checks passed planning UI 338 tests (including 2,000-task and visibility-c
 proto API lint/breaking. The earlier 32 affected Chromium cases passed; the two follow-ups passed eight Quick/
 refinement and five keyboard-deletion cases. The full 152-case Chromium run passed 151; its sole obsolete
 Waiting-column assertion was updated and all 12 layout cases then passed. Final branch CI reruns all 152;
-branch/main release checks remain pending. No production tasks were changed for this work.
+branch/main release checks remain pending. The first complete branch run passed the other 21 checks and
+all 158 real D1/runtime cases; its sole browser failure was a local screenshot path absent on Linux.
+The screenshot now uses testInfo.outputPath, and both readiness journeys passed again locally.
+No production tasks were changed for this work.
 Behavior: [planning readiness](tasks/docs/planning-readiness.md).
 
 ### Configuration drift audit false positive (`codex/fix-config-drift`)
