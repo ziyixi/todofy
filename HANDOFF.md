@@ -16,7 +16,9 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 Owner requested dependency completion and open Deadline windows to surface in the existing Parked area,
 explicit Save to close or return to the previous task, read-only reverse dependency titles, and then hiding
-all waiting work from Plan. Explicit Waiting/Blocked and unfinished dependencies hide that task and its
+all waiting work from Plan. Follow-up requests remove Quick estimate prompts, show its configured clock
+time in the calendar and make deletion confirmations respond to Enter/Escape. Explicit Waiting/Blocked and
+unfinished dependencies hide that task and its
 descendants in Review, Week/trays/calendar; no Waiting column or review jump remains. Focus data is unchanged.
 Automatic Parked membership is read-derived, including tasks with a saved stage: no migration or automatic
 task write is added. Start/stage drag uses the existing Active acknowledgement. Dates and Focus queues stay
@@ -25,12 +27,16 @@ includes completed prerequisites and opens Parked. The old start order key remai
 Start now column is shown. Native GetTask adds output-only Task.dependents (tag 42) through the existing
 reverse index; ListTasks omits it. Plan uses its loaded graph. Duplicate responses clear both edge directions.
 Explicit Save navigates back through task IDs with a fresh parent read; description Done stays inline.
-Local checks passed planning UI 333 tests (including the 2,000-task and visibility-cache work bounds),
-Tasks web 115, Worker 72 unit/29 selected real D1 tests, the existing fullest-planning CPU case,
-relevant lint/types/build and proto API lint/breaking. The latest 32 affected Chromium cases passed,
-including hidden waiting descendants with unchanged Focus, final-prerequisite readiness, reverse links,
-first/cached geometry and Save return navigation. Branch/main release checks remain pending;
-no production tasks were changed for this work.
+Quick retains the existing due_datetime/due_timezone in the UI mapping; its calendar card shows configured
+HH:mm or Quick when untimed, with no Estimate prompt or unknown-count warning. Existing stored estimates,
+dates, queues and records remain intact. The existing clock formatter is shared, without another dependency.
+A small Tasks-only focus/key hook makes native Enter confirm deletion and Escape cancel it at the three
+existing confirmation sites, without submitting Save or installing global keyboard bindings.
+Local checks passed planning UI 338 tests (including 2,000-task and visibility-cache work bounds), Tasks web
+117, Worker 72 unit/29 selected real D1 tests, the fullest-planning CPU case, relevant lint/types/build and
+proto API lint/breaking. The earlier 32 affected Chromium cases passed; the two follow-ups passed eight Quick/
+refinement and five keyboard-deletion cases. Final 152-case browser integration and branch/main release
+checks are pending. No production tasks were changed for this work.
 Behavior: [planning readiness](tasks/docs/planning-readiness.md).
 
 ### Configuration drift audit false positive (`codex/fix-config-drift`)

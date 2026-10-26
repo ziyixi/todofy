@@ -91,6 +91,8 @@ export function planningTask(task: Task): PlanningTask {
     priority: 5 - (task.priority || 4),
     deadline: task.deadline,
     due: task.dueDate,
+    ...(task.dueDatetime ? { dueDatetime: task.dueDatetime } : {}),
+    ...(task.dueTimezone ? { dueTimezone: task.dueTimezone } : {}),
     leadDays: task.leadDays,
     estimatedMinutes: task.durationMinutes || undefined,
     etag: task.etag,

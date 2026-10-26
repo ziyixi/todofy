@@ -31,6 +31,9 @@ export interface PlanningTask {
   deadline: string;
   leadDays: number;
   due: string;
+  /** The configured clock time, independent of the Focus day queue. */
+  dueDatetime?: string;
+  dueTimezone?: string;
   estimatedMinutes?: number;
   etag: string;
   mustStart: boolean;

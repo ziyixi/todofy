@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  clockTime,
   displayedTitle,
   effectiveArea,
   startDate,
@@ -89,4 +90,15 @@ it("keeps a committed child visible below a weekly parent", () => {
     ["parent", "weekly"],
     ["child", "committed"],
   ]);
+});
+
+it("formats configured wall clocks with a 24-hour midnight and daylight-saving time", () => {
+  expect(clockTime("2026-10-13T00:05:00Z", "UTC", "en")).toBe("00:05");
+  expect(clockTime("2026-10-13T04:25:00Z", "Asia/Tokyo", "zh")).toBe("13:25");
+  expect(clockTime("2026-11-01T08:30:00Z", "America/Los_Angeles", "en")).toBe(
+    "01:30",
+  );
+  expect(clockTime("2026-11-01T09:30:00Z", "America/Los_Angeles", "en")).toBe(
+    "01:30",
+  );
 });

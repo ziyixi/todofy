@@ -19,6 +19,7 @@ import {
   displayedTitle,
   effectiveArea,
   formattedMinutes,
+  hasPlanningFlag,
   taskIndex,
 } from "./domain";
 import { AddStep } from "./AddStep";
@@ -799,7 +800,9 @@ function TrayStep({
       >
         <FullTitle text={title} />
         <small>
-          {task.estimatedMinutes === undefined ? (
+          {hasPlanningFlag(task, "quick") ? (
+            text.executionQuick
+          ) : task.estimatedMinutes === undefined ? (
             text.unknown
           ) : (
             <span

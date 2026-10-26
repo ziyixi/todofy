@@ -37,3 +37,12 @@ Verification uses synthetic tasks: readiness before/after the last prerequisite,
 one-card deduplication, acknowledgement after reload, unchanged dates/queues, read-only reverse links and
 Save return navigation. Tests live in the shared planning suite, Tasks' real D1 planning/copy/read-budget
 tests and `tasks/web/test/browser/planning-readiness.spec.ts` plus `task-editor-save.spec.ts`.
+
+Quick does not ask for an estimate in either task editor. Its configured date/time remains editable; calendar
+cards show the configured wall-clock time in the task's timezone (otherwise the account timezone). An untimed
+Quick shows Quick instead of an unknown duration, and missing Quick estimates do not count as unknown.
+No default duration is invented, and stored estimates, queue dates and recorded time remain intact.
+
+Task deletion confirmations focus their Delete action: Enter activates that button, Escape cancels the
+confirmation and returns focus to its trigger. These keys are scoped to the confirmation, so they do not
+submit the underlying task form or close its editor. Pointer deletion keeps the same confirmation.

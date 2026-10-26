@@ -16,6 +16,7 @@ import { StartAheadPicker } from "./StartAheadPicker";
 interface Props {
   children?: ReactNode;
   executable: boolean;
+  quick: boolean;
   leadDays: number;
   onLeadChange: (days: number) => void;
   task?: Task;
@@ -38,6 +39,7 @@ interface Props {
 export function TaskFields({
   children,
   executable,
+  quick,
   leadDays,
   onLeadChange,
   task,
@@ -243,7 +245,7 @@ export function TaskFields({
               <ChevronDown size={12} aria-hidden="true" />
             </span>
           </label>
-          {executable && (
+          {executable && !quick && (
             <label className="task-effort-field">
               <span className="property-heading">Estimate</span>
               <span className="task-select-control task-estimate-control">

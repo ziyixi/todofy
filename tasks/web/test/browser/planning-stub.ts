@@ -25,6 +25,8 @@ export interface SeedTask {
   deadline?: string;
   lead_days?: number;
   due_date?: string;
+  due_datetime?: string;
+  due_timezone?: string;
   duration_minutes?: number;
   /** Tasks' order: 1 is P1. */
   priority?: number;
@@ -124,6 +126,8 @@ const SEEDED: readonly (keyof SeedTask)[] = [
   "deadline",
   "lead_days",
   "due_date",
+  "due_datetime",
+  "due_timezone",
   "duration_minutes",
   "priority",
   "sort_order",

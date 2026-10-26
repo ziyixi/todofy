@@ -46,7 +46,11 @@ const original = create(TaskSchema, {
 });
 type SaveTask = ComponentProps<typeof TaskDialog>["onSave"];
 
-function editor(onSave: SaveTask, task = original) {
+function editor(
+  onSave: SaveTask,
+  task = original,
+  onDelete: ComponentProps<typeof TaskDialog>["onDelete"] = async () => {},
+) {
   const onClose = vi.fn();
   return {
     onClose,
@@ -56,7 +60,7 @@ function editor(onSave: SaveTask, task = original) {
         catalog={catalog}
         onSave={onSave}
         onClose={onClose}
-        onDelete={async () => {}}
+        onDelete={onDelete}
         onComplete={async () => undefined}
         onOpen={() => {}}
         onChildAdded={() => {}}
@@ -74,6 +78,49 @@ it("renders saved Markdown on the first render without a raw-source fallback", (
     description().getByRole("link", { name: "the guide" }).getAttribute("href"),
   ).toBe("https://example.org/guide");
   expect(screen.queryByText(/\[the guide\]/)).toBeNull();
+});
+
+it("focuses task deletion confirmation and Escape returns to its trigger without saving or closing", () => {
+  const save = vi.fn<SaveTask>().mockResolvedValue(original);
+  const remove = vi.fn().mockResolvedValue(undefined);
+  const { onClose } = editor(save, original, remove);
+  const trigger = screen.getByRole("button", { name: "Delete" });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const confirm = screen.getByRole("button", { name: "Delete task" });
+  expect(document.activeElement).toBe(confirm);
+  fireEvent.keyDown(confirm, { key: "Escape" });
+  expect(screen.queryByRole("button", { name: "Delete task" })).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+  expect(save).not.toHaveBeenCalled();
+  expect(remove).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+});
+
+it("ignores held and composing Enter in deletion and sends one pending delete without saving", async () => {
+  const save = vi.fn<SaveTask>().mockResolvedValue(original);
+  let finishDelete!: () => void;
+  const remove = vi.fn(
+    () => new Promise<void>((resolve) => { finishDelete = resolve; }),
+  );
+  const { onClose } = editor(save, original, remove);
+  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+  const confirm = screen.getByRole("button", { name: "Delete task" });
+  expect(fireEvent.keyDown(confirm, { key: "Enter", repeat: true })).toBe(false);
+  expect(
+    fireEvent.keyDown(confirm, { key: "Enter", isComposing: true }),
+  ).toBe(false);
+  fireEvent.keyDown(confirm, { key: "Escape", isComposing: true });
+  expect(screen.getByRole("button", { name: "Delete task" })).toBe(confirm);
+  expect(remove).not.toHaveBeenCalled();
+  // jsdom does not synthesize button activation from Enter; Chromium covers that native default.
+  fireEvent.click(confirm);
+  fireEvent.click(confirm);
+  expect(remove).toHaveBeenCalledOnce();
+  expect(save).not.toHaveBeenCalled();
+  expect((confirm as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => finishDelete());
+  expect(onClose).toHaveBeenCalledOnce();
 });
 
 it("closes an existing task only after explicit Save succeeds", async () => {
@@ -372,7 +419,7 @@ it("maps each Execution choice atomically while Routine and hidden saved flags s
     ).toHaveLength(1);
     expect(
       Boolean(screen.queryByRole("spinbutton", { name: "Duration (minutes)" })),
-    ).toBe(mode !== "Steps");
+    ).toBe(mode === "Standalone");
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(index + 1));
     const flags = save.mock.calls[index]?.[3]?.values.planningFlags || [];

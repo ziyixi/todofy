@@ -90,8 +90,9 @@ test("parent editors keep subtasks and executable steps separate and can delete 
     name: "Add subtask",
     exact: true,
   });
-  await expect(dialog.getByRole("textbox", { name: /^New (step|subtask)$/ }))
-    .toHaveCount(0);
+  await expect(
+    dialog.getByRole("textbox", { name: /^New (step|subtask)$/ }),
+  ).toHaveCount(0);
   expect((await steps.boundingBox())!.y).toBeLessThan(
     (await subtasks.boundingBox())!.y,
   );
@@ -273,6 +274,7 @@ test("Execution changes Quick to Standalone to Steps, preserving Routine and exi
     `Synthetic execution modes ${crypto.randomUUID()}`,
     {
       due_date: "2030-01-02",
+      duration_minutes: 45,
       planning_flags: ["active", "waiting", "onhold", "routine"],
     },
   );
@@ -291,11 +293,18 @@ test("Execution changes Quick to Standalone to Steps, preserving Routine and exi
     name: "Time options",
     exact: true,
   });
-  const save = dialog.getByRole("button", { name: "Save changes", exact: true });
+  const save = dialog.getByRole("button", {
+    name: "Save changes",
+    exact: true,
+  });
   const checkedMode = async (name: string) => {
     await expect(execution.getByRole("radio")).toHaveCount(3);
-    await expect(execution.getByRole("radio", { checked: true })).toHaveCount(1);
-    await expect(execution.getByRole("radio", { name, exact: true })).toBeChecked();
+    await expect(execution.getByRole("radio", { checked: true })).toHaveCount(
+      1,
+    );
+    await expect(
+      execution.getByRole("radio", { name, exact: true }),
+    ).toBeChecked();
     await expect(routine).toBeChecked();
   };
   await checkedMode("Steps");
@@ -307,8 +316,7 @@ test("Execution changes Quick to Standalone to Steps, preserving Routine and exi
   await execution.getByText("Quick", { exact: true }).click();
   await checkedMode("Quick");
   // Scheduling controls follow the draft immediately, before any save.
-  await expect(estimate).toBeVisible();
-  await estimate.fill("45");
+  await expect(estimate).toHaveCount(0);
   await date.click();
   await expect(timeOptions).toBeVisible();
   await timeOptions.click();
@@ -318,24 +326,34 @@ test("Execution changes Quick to Standalone to Steps, preserving Routine and exi
   await expect(dialog).not.toBeVisible();
   const quick = await savedTask(request, task.id);
   expect(quick.planning_flags).toEqual([
-    "quick", "waiting", "active", "onhold", "routine", "task",
+    "quick",
+    "waiting",
+    "active",
+    "onhold",
+    "routine",
+    "task",
   ]);
   expect(quick.duration_minutes).toBe(45);
   expect(quick.due_datetime).toBeTruthy();
   await openTask(page, task.id);
   await checkedMode("Quick");
-  await expect(estimate).toHaveValue("45");
+  await expect(estimate).toHaveCount(0);
 
   await execution.getByText("Standalone", { exact: true }).click();
   await checkedMode("Standalone");
   await expect(estimate).toBeVisible();
+  await expect(estimate).toHaveValue("45");
   await date.click();
   await expect(timeOptions).toBeVisible();
   await dialog.locator(".schedule-popup").press("Escape");
   await save.click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).planning_flags).toEqual([
-    "waiting", "active", "onhold", "routine", "task",
+    "waiting",
+    "active",
+    "onhold",
+    "routine",
+    "task",
   ]);
 
   await openTask(page, task.id);
@@ -349,7 +367,12 @@ test("Execution changes Quick to Standalone to Steps, preserving Routine and exi
   await save.click();
   await expect(dialog).not.toBeVisible();
   const steps = await savedTask(request, task.id);
-  expect(steps.planning_flags).toEqual(["waiting", "active", "onhold", "routine"]);
+  expect(steps.planning_flags).toEqual([
+    "waiting",
+    "active",
+    "onhold",
+    "routine",
+  ]);
   expect(steps.duration_minutes).toBe(45);
   expect(steps.due_datetime).toBe(quick.due_datetime);
   await openTask(page, task.id);
@@ -670,10 +693,13 @@ test("legacy manual flags survive unrelated edits, while choosing a stage unpark
     exact: true,
   });
   for (const name of ["In progress", "Waiting", "On hold", "Parked"])
-    await expect(dialog.getByRole("checkbox", { name, exact: true })).toHaveCount(0);
+    await expect(
+      dialog.getByRole("checkbox", { name, exact: true }),
+    ).toHaveCount(0);
   await expect(stage).toHaveValue("none");
-  await expect(dialog.getByRole("switch", { name: "Routine", exact: true }))
-    .toBeChecked();
+  await expect(
+    dialog.getByRole("switch", { name: "Routine", exact: true }),
+  ).toBeChecked();
   await dialog
     .getByRole("combobox", { name: "Task context", exact: true })
     .selectOption("personal");
@@ -681,10 +707,16 @@ test("legacy manual flags survive unrelated edits, while choosing a stage unpark
     .getByRole("radiogroup", { name: "Execution", exact: true })
     .getByText("Standalone", { exact: true })
     .click();
-  await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   expect((await savedTask(request, task.id)).planning_flags).toEqual([
-    "waiting", "parked", "onhold", "routine", "task",
+    "waiting",
+    "parked",
+    "onhold",
+    "routine",
+    "task",
   ]);
 
   await openTask(page, task.id);
@@ -699,13 +731,20 @@ test("legacy manual flags survive unrelated edits, while choosing a stage unpark
   });
   await expect(amount).toBeDisabled();
   await expect(amount).toHaveValue("");
-  await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
   await expect(dialog).not.toBeVisible();
   const cleared = await savedTask(request, task.id);
   expect(cleared.deadline || "").toBe("");
   expect(cleared.stage).toBe("committed");
   expect(cleared.lead_days ?? 0).toBe(0);
-  expect(cleared.planning_flags).toEqual(["waiting", "onhold", "routine", "task"]);
+  expect(cleared.planning_flags).toEqual([
+    "waiting",
+    "onhold",
+    "routine",
+    "task",
+  ]);
   expect(cleared).toMatchObject({
     due_date: "2030-03-15",
     area: "personal",
@@ -716,10 +755,12 @@ test("legacy manual flags survive unrelated edits, while choosing a stage unpark
   await expect(stage).toHaveValue("committed");
   await expect(amount).toBeDisabled();
   await expect(amount).toHaveValue("");
-  await expect(dialog.getByRole("radio", { name: "Standalone", exact: true }))
-    .toBeChecked();
-  await expect(dialog.getByRole("switch", { name: "Routine", exact: true }))
-    .toBeChecked();
+  await expect(
+    dialog.getByRole("radio", { name: "Standalone", exact: true }),
+  ).toBeChecked();
+  await expect(
+    dialog.getByRole("switch", { name: "Routine", exact: true }),
+  ).toBeChecked();
 });
 
 test("the initial children read finishes before adding, so new children cannot be overwritten", async ({

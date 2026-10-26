@@ -381,7 +381,9 @@ function FocusDay({
         (id) => !day.taskIds.includes(id) && !day.completedTaskIds.includes(id),
       );
   const session = focus.timer?.day === day.date ? focus : undefined;
-  const unknown = queue.filter((id) => !minutesOf(id)).length;
+  const unknown = queue.filter(
+    (id) => !minutesOf(id) && !byId.get(id)?.planningFlags?.includes("quick"),
+  ).length;
   let stepLabel = language === "zh" ? "个步骤" : "steps";
   if (language === "en" && queue.length === 1) stepLabel = "step";
   // A hint only: something that should have started has nothing planned this week.

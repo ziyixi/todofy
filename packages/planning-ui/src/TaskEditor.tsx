@@ -343,7 +343,7 @@ export function TaskEditor({
             ))}
           </select>
         </label>
-        {isSchedulable(task) && (
+        {isSchedulable(task) && execution !== "quick" && (
           <label>
             {text.estimate}
             <select

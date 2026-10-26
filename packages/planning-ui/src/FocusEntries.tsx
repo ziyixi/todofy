@@ -8,6 +8,7 @@ import {
 } from "react";
 import { Plus, X } from "lucide-react";
 import {
+  clockTime,
   effectiveArea,
   formattedMinutes,
   taskIndex,
@@ -59,33 +60,6 @@ export function recordArea(
 
 /** The margin the popover keeps from the window's edges. */
 const EDGE = 16;
-
-const clocks = new Map<string, Intl.DateTimeFormat>();
-/** "09:40", in the account's time zone. */
-function clockTime(iso: string, timezone: string, language: Language) {
-  const key = `${language}:${timezone}`;
-  let format = clocks.get(key);
-  if (!format) {
-    const options: Intl.DateTimeFormatOptions = {
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    };
-    try {
-      format = new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en", {
-        ...options,
-        timeZone: timezone,
-      });
-    } catch {
-      format = new Intl.DateTimeFormat(
-        language === "zh" ? "zh-CN" : "en",
-        options,
-      );
-    }
-    clocks.set(key, format);
-  }
-  return format.format(new Date(iso));
-}
 
 interface Props {
   taskId: string;

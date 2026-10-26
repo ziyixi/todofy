@@ -6,6 +6,7 @@ import { taskDropOrder } from "../task-order";
 import "./task-children.css";
 import { TaskDragProvider } from "./TaskDrag";
 import { TaskChildRow } from "./TaskChildRow";
+import { useDeleteConfirmation } from "../useDeleteConfirmation";
 
 export function TaskChildren({
   task,
@@ -40,6 +41,9 @@ export function TaskChildren({
   const [minutes, setMinutes] = useState(30);
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [deleting, setDeleting] = useState("");
+  const deletion = useDeleteConfirmation(Boolean(deleting), busy, () =>
+    setDeleting(""),
+  );
   // A successful add renews requestId; return to the re-enabled composer for the next item.
   useEffect(() => {
     if (adding) input.current?.focus();
@@ -116,6 +120,7 @@ export function TaskChildren({
     }
   }
   async function remove(child: Task) {
+    if (busy) return;
     onBusy(true);
     onError("");
     try {
@@ -245,7 +250,11 @@ export function TaskChildren({
                   onDelete={() => setDeleting(child.id)}
                   confirmation={
                     deleting === child.id && (
-                      <div className="child-delete-confirm" role="alert">
+                      <div
+                        className="child-delete-confirm"
+                        role="alert"
+                        onKeyDown={deletion.onKeyDown}
+                      >
                         <span>
                           Delete this {kind === "step" ? "step" : "subtask"}
                           {child.childCount ? " and its children" : ""}?
@@ -258,6 +267,7 @@ export function TaskChildren({
                           Keep
                         </button>
                         <button
+                          ref={deletion.confirmButton}
                           type="button"
                           className="text-button danger"
                           disabled={busy}

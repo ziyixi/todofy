@@ -527,3 +527,23 @@ it("sends planning switches as Task.planning_flags over the task's own, and only
     },
   ]);
 });
+
+it("preserves the native scheduled clock and time zone separately from its date and estimate", () => {
+  const task = create(TaskSchema, {
+    id: "timed-quick",
+    title: "Synthetic timed Quick",
+    dueDate: "2026-10-13",
+    dueDatetime: "2026-10-13T04:25:00Z",
+    dueTimezone: "Asia/Tokyo",
+    planningFlags: ["quick", "task"],
+    durationMinutes: 20,
+  });
+  expect(planningTask(task)).toMatchObject({
+    due: task.dueDate,
+    dueDatetime: task.dueDatetime,
+    dueTimezone: task.dueTimezone,
+    estimatedMinutes: 20,
+    planningFlags: ["quick", "task"],
+  });
+  expect(task.durationMinutes).toBe(20);
+});

@@ -82,6 +82,8 @@ Review／Week、Review 的领域过滤、本周周回顾是否展开及勾选、
 
 ### 任务执行方式
 
+Quick 不再要求估时，两处任务编辑器都隐藏 Estimate，日期中的具体时间仍可设置。日历优先显示任务已设的时刻（按任务时区，未设时按账户时区）；未设具体时刻的 Quick 写 Quick，不显示“?”，也不计入未估时数量。已有估时和用时记录保留，不自动填一个固定时长。
+
 原生任务详情和 Plan 的任务编辑器共用 `ExecutionFields`（`src/ExecutionFields.tsx`）：Execution 的分段单选为 Steps、Standalone、Quick，旁边是独立的 Routine 开关。Steps 安排任务下的小步骤，清除 `task`、`quick`；Standalone 直接安排任务，设置 `task` 并清除 `quick`；Quick 同时设置两项。这不会改变 `kind`，已有 `quick` 也按可独立安排处理。
 
 任务编辑器不再提供进行中、等待中、暂缓或搁置的手动开关。保存的 `active`、`waiting`、`onhold`、`parked` 保留原有含义，修改 Execution、Routine 或其他无关字段时不清除它们。选择规划范围仍移出搁置；看板的“开始”和拖动、依赖与截止日期规则照旧。原生详情的 Steps、Subtasks 各在标题行提供 Add step、Add subtask，展开对应输入框。

@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import {
   displayedTitle,
   formattedMinutes,
+  hasPlanningFlag,
   taskAncestors,
   taskIndex,
 } from "./domain";
@@ -220,7 +221,11 @@ export function FocusBlock({
           {/* The card's one time number: what is logged, ticking while its session runs. */}
           <div className="plus-focus-block-footer">
             <span className="plus-focus-estimate">
-              {minutes ? text.est(formattedMinutes(minutes)) : text.unknown}
+              {task && hasPlanningFlag(task, "quick")
+                ? text.executionQuick
+                : minutes
+                  ? text.est(formattedMinutes(minutes))
+                  : text.unknown}
             </span>
             {records && (
               <>

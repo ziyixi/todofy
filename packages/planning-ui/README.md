@@ -81,6 +81,9 @@ Plan's outcome, Step, Quick and calendar checkboxes complete like Focus, in one 
 day: calendar cards pass their own day, the rest Focus's. A retry resends the first request ID and day. A completed calendar
 Step stays in its day after the open ones, in Focus's done style, outside the day's total; its title opens Tasks' own
 dialog, where it can be reopened. Quick actions always qualify as standalone, even when an older
-response contains only the Quick flag. Ordinary labels do not imply planning properties.
+response contains only the Quick flag. Quick has no Estimate editor. Calendar cards preserve the task's
+configured clock time and timezone; an untimed Quick shows Quick, not an unknown estimate. Quick does not
+contribute to unknown-estimate counters. Existing stored estimates and time records are retained.
+Ordinary labels do not imply planning properties.
 Quick's existing Due selection and order also respect its Deadline start window: future windows stay
 hidden, zero lead opens on the deadline day, and active work remains eligible.

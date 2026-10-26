@@ -12,6 +12,7 @@ import { type Catalog, type Task, describeError } from "../api";
 import { TaskMetadata } from "./TaskMetadata";
 import { TaskRowDropZones, useTaskDrag } from "./TaskDrag";
 import { Dialog } from "./Dialog";
+import { useDeleteConfirmation } from "../useDeleteConfirmation";
 import {
   TaskMenuChooser,
   TaskMenuItems,
@@ -68,6 +69,9 @@ export function TaskRow({
   }>();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const deletion = useDeleteConfirmation(confirmDelete, deleting, () =>
+    setConfirmDelete(false),
+  );
   const [deleteError, setDeleteError] = useState("");
   const deleteRequest = useRef("");
   function openProperty(property: TaskMenuProperty) {
@@ -76,7 +80,7 @@ export function TaskRow({
     if (anchor) setChooser({ property, anchor });
   }
   async function remove() {
-    if (!menuActions) return;
+    if (!menuActions || deleting) return;
     setDeleting(true);
     setDeleteError("");
     try {
@@ -253,7 +257,7 @@ export function TaskRow({
               {deleteError}
             </p>
           )}
-          <footer className="dialog-footer">
+          <footer className="dialog-footer" onKeyDown={deletion.onKeyDown}>
             <span className="spacer" />
             <button
               type="button"
@@ -263,6 +267,7 @@ export function TaskRow({
               Cancel
             </button>
             <button
+              ref={deletion.confirmButton}
               type="button"
               className="danger-button"
               disabled={deleting}

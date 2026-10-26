@@ -7,6 +7,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PlanView } from "../src/PlanView";
+import { TaskEditor } from "../src/TaskEditor";
+import { FocusView } from "../src/FocusView";
 import { addDays } from "../src/domain";
 import { quickTasks, quickTray } from "../src/weekly-review";
 import { createPrototype } from "./fixture";
@@ -257,4 +259,128 @@ it("shows no Quick line without a quick task to plan", async () => {
   );
   fireEvent.click(screen.getByRole("tab", { name: "一周安排" }));
   expect(screen.queryByRole("region", { name: "快速事项" })).toBeNull();
+});
+
+it("shows a scheduled Quick's configured clock in its task zone, with account fallback and no missing-estimate count", async () => {
+  const actions = createPrototype();
+  const data = await actions.load();
+  data.plan.timezone = "UTC";
+  data.plan.tasks = [
+    task("clock", {
+      due: TODAY,
+      dueDatetime: `${TODAY}T04:25:00Z`,
+      dueTimezone: "Asia/Tokyo",
+    }),
+    task("fallback", { due: TODAY, dueDatetime: `${TODAY}T04:25:00Z` }),
+    task("untimed"),
+    task("ordinary", { planningFlags: [], kind: "step", estimatedMinutes: 45 }),
+    task("unknown", { planningFlags: [], kind: "step" }),
+  ];
+  const tasks = data.plan.tasks.map((task) => task.id);
+  data.days = data.days.map((day) => ({
+    ...day,
+    taskIds: day.date === TODAY ? tasks : [],
+    completedTaskIds: [],
+  }));
+  const before = structuredClone(data);
+  render(
+    <PlanView
+      plan={data.plan}
+      days={data.days}
+      focusTasks={{}}
+      currentDate={TODAY}
+      language="en"
+      busy={false}
+      actions={actions}
+      run={vi.fn()}
+      editTask={vi.fn()}
+      onWeekChange={vi.fn()}
+      completeTask={vi.fn()}
+      completeReview={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("tab", { name: "Week" }));
+  const day = document.querySelector(
+    `.planning-calendar-day[data-date="${TODAY}"]`,
+  )!;
+  const meta = (id: string) =>
+    day.querySelector(
+      `[data-task-id="${id}"] .planning-calendar-step-meta strong`,
+    )!.textContent;
+  expect(meta("clock")).toBe("13:25");
+  expect(meta("fallback")).toBe("04:25");
+  expect(meta("untimed")).toBe("Quick");
+  expect(meta("ordinary")).toBe("45m");
+  expect(meta("unknown")).toBe("?");
+  expect(day.querySelector(".planning-day-heading small")!.textContent).toBe(
+    "45m + 1 ?",
+  );
+  expect(data).toEqual(before);
+});
+
+it("hides Quick's Estimate editor and preserves a stored estimate when changing back to Standalone", async () => {
+  const actions = createPrototype();
+  const quick = task("quick", {
+    kind: "task",
+    planningFlags: ["quick", "task"],
+    estimatedMinutes: 25,
+  });
+  const props = {
+    task: quick,
+    tasks: [quick],
+    dependencies: [],
+    language: "en" as const,
+    busy: false,
+    actions,
+    run: vi.fn(),
+    todayTaskIds: [],
+    today: TODAY,
+    addFocus: vi.fn(),
+    onOpenTask: vi.fn(),
+  };
+  const { rerender } = render(<TaskEditor {...props} />);
+  expect(
+    screen.queryByRole("combobox", { name: "Estimate: Synthetic quick" }),
+  ).toBeNull();
+  const standalone = { ...quick, planningFlags: ["task"] };
+  rerender(<TaskEditor {...props} task={standalone} tasks={[standalone]} />);
+  expect(
+    screen.getByRole("combobox", { name: "Estimate: Synthetic quick" }),
+  ).toHaveProperty("value", "25");
+  expect(quick.estimatedMinutes).toBe(25);
+});
+
+it("does not count an active Quick without an estimate as unknown in Focus", async () => {
+  const actions = createPrototype();
+  const data = await actions.load();
+  const quick = task("quick", {
+    kind: "task",
+    planningFlags: ["quick", "task", "active"],
+  });
+  data.plan.tasks = [quick];
+  data.focus.taskIds = [quick.id];
+  data.focus.estimates = {};
+  data.focus.entries = [];
+  render(
+    <FocusView
+      plan={data.plan}
+      focus={data.focus}
+      language="en"
+      busy={false}
+      actions={actions}
+      run={vi.fn()}
+      onOpenTask={vi.fn()}
+      editTask={vi.fn()}
+      complete={vi.fn()}
+      onOpenPlan={vi.fn()}
+      onTimer={vi.fn()}
+    />,
+  );
+  expect(
+    document.querySelector(".plus-focus-totals")!.textContent,
+  ).not.toContain("unknown");
+  expect(document.querySelector(".plus-focus-estimate")!.textContent).toBe(
+    "Quick",
+  );
+  expect(data.focus.estimates).toEqual({});
 });

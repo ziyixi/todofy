@@ -1,4 +1,4 @@
-import type { Area, FocusState, PlanningTask } from "./model";
+import type { Area, FocusState, Language, PlanningTask } from "./model";
 
 /** Planning flags never derive from ordinary tags. */
 export function hasPlanningFlag(task: PlanningTask, flag: string): boolean {
@@ -176,4 +176,31 @@ export function monthStart(date: string, months = 0): string {
   const value = new Date(`${date.slice(0, 7)}-01T12:00:00Z`);
   value.setUTCMonth(value.getUTCMonth() + months);
   return value.toISOString().slice(0, 10);
+}
+
+const clocks = new Map<string, Intl.DateTimeFormat>();
+/** "09:40", in the requested task or account time zone. */
+export function clockTime(iso: string, timezone: string, language: Language) {
+  const key = `${language}:${timezone}`;
+  let format = clocks.get(key);
+  if (!format) {
+    const options: Intl.DateTimeFormatOptions = {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    };
+    try {
+      format = new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en", {
+        ...options,
+        timeZone: timezone,
+      });
+    } catch {
+      format = new Intl.DateTimeFormat(
+        language === "zh" ? "zh-CN" : "en",
+        options,
+      );
+    }
+    clocks.set(key, format);
+  }
+  return format.format(new Date(iso));
 }

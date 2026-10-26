@@ -7,7 +7,13 @@ import {
   GripVertical,
   X,
 } from "lucide-react";
-import { displayedTitle, formattedMinutes, taskIndex } from "./domain";
+import {
+  clockTime,
+  displayedTitle,
+  formattedMinutes,
+  hasPlanningFlag,
+  taskIndex,
+} from "./domain";
 import { dragHandle } from "./drag-announcements";
 import { areaColor, outcomeArea, outcomeForTask } from "./planning-outcomes";
 import { pendingStep } from "./plan-updates";
@@ -239,11 +245,16 @@ function CalendarDay({
   });
   // The open steps, which the heading's total counts; the steps done from this day stay after them.
   const ids = day.taskIds.filter((id) => !day.completedTaskIds.includes(id));
+  const tasks = taskIndex(plan.tasks);
   const estimate = (id: string) =>
-    taskIndex(plan.tasks).get(id)?.estimatedMinutes ??
-    focusTasks[id]?.estimatedMinutes;
+    tasks.get(id)?.estimatedMinutes ?? focusTasks[id]?.estimatedMinutes;
   const minutes = ids.reduce((sum, id) => sum + (estimate(id) ?? 0), 0);
-  const unknown = ids.filter((id) => estimate(id) === undefined).length;
+  const unknown = ids.filter((id) => {
+    const task = tasks.get(id);
+    return (
+      estimate(id) === undefined && (!task || !hasPlanningFlag(task, "quick"))
+    );
+  }).length;
   return (
     <section
       className={`planning-calendar-day ${day.date === today ? "is-today" : ""} ${selected ? "is-selected" : ""} ${inWindow ? "is-window" : ""} ${isDropTarget ? "is-over" : ""}`}
@@ -347,6 +358,10 @@ function CalendarStep({
     data: { date: day.date, beforeId: id },
   });
   const minutes = task?.estimatedMinutes ?? focusTask?.estimatedMinutes;
+  const time = task?.dueDatetime
+    ? clockTime(task.dueDatetime, task.dueTimezone || plan.timezone, language)
+    : "";
+  const quick = task && hasPlanningFlag(task, "quick");
   // A task Plan does not list names its parent as Tasks' Focus read does.
   const parent = outcome
     ? outcome.id === id
@@ -420,7 +435,12 @@ function CalendarStep({
       <div className="planning-calendar-step-meta">
         <span title={parent}>{parent}</span>
         <strong>
-          {minutes === undefined ? "?" : formattedMinutes(minutes)}
+          {time ||
+            (quick
+              ? words(language).executionQuick
+              : minutes === undefined
+                ? "?"
+                : formattedMinutes(minutes))}
         </strong>
       </div>
     </article>

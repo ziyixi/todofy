@@ -11,6 +11,7 @@ import { useTaskPlanning } from "../useTaskPlanning";
 import { planningChanges, planningDraft } from "../task-planning";
 import { scheduledDate, scheduledTime } from "../task-schedule";
 import { GoalPicker } from "./GoalPicker";
+import { useDeleteConfirmation } from "../useDeleteConfirmation";
 import "./color-detail.css";
 import "./task-dialog.css";
 
@@ -86,6 +87,9 @@ export function TaskDialog({
   const saveRequestId = useRef(crypto.randomUUID());
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const deletion = useDeleteConfirmation(confirmDelete, busy, () =>
+    setConfirmDelete(false),
+  );
   const [preview, setPreview] = useState("");
   const [dateText, setDateText] = useState("");
   const isStep = draft.kind === "step";
@@ -214,7 +218,7 @@ export function TaskDialog({
     }
   }
   async function remove() {
-    if (!currentTask) return;
+    if (!currentTask || busy) return;
     setBusy(true);
     setError("");
     try {
@@ -273,6 +277,7 @@ export function TaskDialog({
           finish={finish}
           onOpen={onOpen}
           executable={executable}
+          quick={planning.draft.quick}
           leadDays={planning.draft.leadDays}
           onLeadChange={(value) => planning.patch("leadDays", value)}
         >
@@ -380,15 +385,22 @@ export function TaskDialog({
         </footer>
       </form>
       {confirmDelete && (
-        <div className="delete-confirm" role="alert">
+        <div
+          className="delete-confirm"
+          role="alert"
+          onKeyDown={deletion.onKeyDown}
+        >
           <p>Delete this {isStep ? "step" : "task and its children"}?</p>
           <button
+            type="button"
             className="secondary-button"
             onClick={() => setConfirmDelete(false)}
           >
             Keep task
           </button>
           <button
+            ref={deletion.confirmButton}
+            type="button"
             className="danger-button"
             disabled={busy}
             onClick={() => void remove()}
