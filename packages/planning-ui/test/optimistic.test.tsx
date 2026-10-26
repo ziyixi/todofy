@@ -561,33 +561,24 @@ it("acknowledges an automatic Parked card by dragging it into a stage lane in on
   );
 });
 
-it("moves a Waiting card into a stage lane with its stage only, still waiting", async () => {
+it("hides waiting tasks and sends no write for a stale drag of one into a stage", async () => {
   const actions = createPrototype();
   const writes = hold(actions, "updateTask");
   await mountPlan(actions);
   const venue = (await actions.load()).plan.tasks.find(
     (task) => task.id === "venue",
   )!;
-  await drop({ task: venue, lane: "waiting" }, { lane: "weekly" });
-  expect(writes.map((write) => write.args[1])).toEqual([{ stage: "weekly" }]);
-  expect(laneTitles("Week")).toContain("Hear back about the venue quote");
-  expect(laneTitles("Waiting")).toEqual(["Lab access approval"]);
-  await act(() => writes[0]!.confirm());
-  const saved = (await actions.load()).plan.tasks.find(
-    (task) => task.id === "venue",
-  )!;
-  expect(saved).toMatchObject({
-    explicitStage: "weekly",
-    planningFlags: ["waiting"],
-  });
-  // In its stage lane the card still says it waits.
+  expect(screen.queryByRole("region", { name: "Waiting" })).toBeNull();
   expect(
-    within(screen.getByRole("region", { name: "Week" }))
-      .getByRole("button", { name: /^Hear back about the venue quote,/u })
-      .getAttribute("aria-label"),
-  ).toMatch(
-    /^Hear back about the venue quote, Work, No priority, No change in \d+ days$/u,
-  );
+    screen.queryByRole("button", {
+      name: /^Hear back about the venue quote,/u,
+    }),
+  ).toBeNull();
+  await drop({ task: venue, lane: "waiting" }, { lane: "weekly" });
+  expect(writes).toHaveLength(0);
+  expect(
+    (await actions.load()).plan.tasks.find((task) => task.id === venue.id),
+  ).toEqual(venue);
 });
 
 /** Two steps of the committed research check-in: one waits, one should start. */
@@ -627,14 +618,18 @@ it("writes nothing for a step dropped into its outcome's lane, where it would co
   await mountPlan(actions);
   const step = async (id: string) =>
     (await actions.load()).plan.tasks.find((task) => task.id === id)!;
-  expect(laneTitles("Waiting")).toContain("Hear back from the reviewer");
+  expect(
+    screen.queryByRole("button", { name: /^Hear back from the reviewer,/u }),
+  ).toBeNull();
   // Committed, it would still be a step of the research card, so it would still wait.
   await drop(
     { task: await step("reply"), lane: "waiting" },
     { lane: "committed" },
   );
   expect(writes).toHaveLength(0);
-  expect(laneTitles("Waiting")).toContain("Hear back from the reviewer");
+  expect(
+    screen.queryByRole("button", { name: /^Hear back from the reviewer,/u }),
+  ).toBeNull();
   // Marked in progress as well, the ready step leaves Parked even when it joins its outcome.
   expect(laneTitles("Parked")).toContain("Draft the check-in slides");
   await drop(
@@ -645,13 +640,15 @@ it("writes nothing for a step dropped into its outcome's lane, where it would co
     { stage: "committed", active: true },
   ]);
   expect(laneTitles("Parked")).not.toContain("Draft the check-in slides");
-  // Into another stage, the waiting step becomes a card of its own there, queued after the first.
+  // A hidden waiting step cannot be staged by a stale drag into another lane either.
   await drop(
     { task: await step("reply"), lane: "waiting" },
     { lane: "weekly" },
   );
-  expect(laneTitles("Week")).toContain("Hear back from the reviewer");
-  expect(laneTitles("Waiting")).not.toContain("Hear back from the reviewer");
+  expect(writes).toHaveLength(1);
+  expect(
+    screen.queryByRole("button", { name: /^Hear back from the reviewer,/u }),
+  ).toBeNull();
 });
 
 /** `change` edits each read. */
@@ -928,7 +925,7 @@ it("sends the whole lane's order when an area filter hides some of its cards", a
   ]);
 });
 
-it("lets Parked accept planning cards while Waiting accepts only its own lane's cards", async () => {
+it("keeps Parked and the stages as drop targets and omits Waiting", async () => {
   const actions = createPrototype(true);
   await mountPlan(actions);
   const accepts = (id: string, lane: string) => {
@@ -937,8 +934,8 @@ it("lets Parked accept planning cards while Waiting accepts only its own lane's 
       ? accept({ data: { lane } })
       : accept === "review-outcome";
   };
-  const lanes = ["parked", "waiting", "weekly", "committed"];
-  expect(lanes.filter((from) => accepts("venue", from))).toEqual(["waiting"]);
+  const lanes = ["parked", "quarterly", "monthly", "weekly", "committed"];
+  expect(screen.queryByRole("region", { name: "Waiting" })).toBeNull();
   expect(lanes.filter((from) => accepts("claim", from))).toEqual(lanes);
   expect(accepts("cleanup", "parked")).toBe(true);
 });

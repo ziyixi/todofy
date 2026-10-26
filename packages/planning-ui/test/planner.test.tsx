@@ -478,7 +478,7 @@ it("remembers Week, its commitment and fold, and this week's review when Plan mo
   );
   fireEvent.click(screen.getByRole("button", { name: "Committed" }));
   fireEvent.click(screen.getByRole("button", { name: "Weekly review" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Reviewed: Waiting" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Reviewed: Someday" }));
   const review = { week: "2026-10-12", open: true, lines: [], kept: [] };
   // Each change sends only its own field.
   expect(store.patches).toEqual([
@@ -487,7 +487,7 @@ it("remembers Week, its commitment and fold, and this week's review when Plan mo
     { commitment: "research" },
     { committedFolded: true },
     { review },
-    { review: { ...review, lines: [2] } },
+    { review: { ...review, lines: [4] } },
   ]);
   first.unmount();
 
@@ -509,7 +509,7 @@ it("remembers Week, its commitment and fold, and this week's review when Plan mo
       .getAttribute("aria-expanded"),
   ).toBe("false");
   expect(
-    screen.getByRole("checkbox", { name: "Reviewed: Waiting" }),
+    screen.getByRole("checkbox", { name: "Reviewed: Someday" }),
   ).toHaveProperty("checked", true);
   // Review's area filter is back as it was left.
   fireEvent.click(screen.getByRole("tab", { name: "Review" }));

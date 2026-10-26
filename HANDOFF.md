@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-25 UTC. Active work, open acceptance and dated compatibility only; move completed rollout detail to
+Updated 2026-10-26 UTC. Active work, open acceptance and dated compatibility only; move completed rollout detail to
 a dated record and link it here. Rules are in [AGENTS](AGENTS.md); entry points in [README](README.md). Never put
 private content, credentials or raw production output here.
 
@@ -15,7 +15,9 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 ### Tasks readiness, save navigation and reverse dependencies (`codex/parked-ready-tasks`)
 
 Owner requested dependency completion and open Deadline windows to surface in the existing Parked area,
-explicit Save to close or return to the previous task, and read-only reverse dependency titles.
+explicit Save to close or return to the previous task, read-only reverse dependency titles, and then hiding
+all waiting work from Plan. Explicit Waiting/Blocked and unfinished dependencies hide that task and its
+descendants in Review, Week/trays/calendar; no Waiting column or review jump remains. Focus data is unchanged.
 Automatic Parked membership is read-derived, including tasks with a saved stage: no migration or automatic
 task write is added. Start/stage drag uses the existing Active acknowledgement. Dates and Focus queues stay
 unchanged; automatic cards precede and remain visible above the three-card manual backlog. Focus's hint
@@ -23,11 +25,12 @@ includes completed prerequisites and opens Parked. The old start order key remai
 Start now column is shown. Native GetTask adds output-only Task.dependents (tag 42) through the existing
 reverse index; ListTasks omits it. Plan uses its loaded graph. Duplicate responses clear both edge directions.
 Explicit Save navigates back through task IDs with a fresh parent read; description Done stays inline.
-Local checks currently passed planning UI 329 tests, Tasks web 115, Worker 72 unit/29 selected real D1 tests,
-the existing fullest-planning CPU case, relevant lint/types/build and proto API lint/breaking. The 146-case
-Chromium run passed 143 before three obsolete assertions/waits were corrected; all 18 cases in those files
-then passed, including the delayed-Save navigation guard. Native readiness and reverse-link journeys passed
-in the full run. Branch/main release checks remain pending; no production tasks were changed for this work.
+Local checks passed planning UI 333 tests (including the 2,000-task and visibility-cache work bounds),
+Tasks web 115, Worker 72 unit/29 selected real D1 tests, the existing fullest-planning CPU case,
+relevant lint/types/build and proto API lint/breaking. The latest 32 affected Chromium cases passed,
+including hidden waiting descendants with unchanged Focus, final-prerequisite readiness, reverse links,
+first/cached geometry and Save return navigation. Branch/main release checks remain pending;
+no production tasks were changed for this work.
 Behavior: [planning readiness](tasks/docs/planning-readiness.md).
 
 ### Configuration drift audit false positive (`codex/fix-config-drift`)

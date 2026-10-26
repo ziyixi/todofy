@@ -120,11 +120,10 @@ const announced = () =>
   document.querySelector('.review-board > .plus-sr-only[role="status"]')!
     .textContent;
 
-it("puts Waiting and automatic Parked left of the four stage lanes, with nothing stacked under the board", async () => {
+it("puts automatic Parked left of the four stage lanes and hides waiting tasks", async () => {
   const { props } = await setup();
   const view = render(<PlanView {...props} />);
   expect(laneNames()).toEqual([
-    "Waiting",
     "Parked",
     "Quarter",
     "Month",
@@ -133,7 +132,7 @@ it("puts Waiting and automatic Parked left of the four stage lanes, with nothing
   ]);
   expect(
     document.querySelector(".review-lanes")!.getAttribute("data-lanes"),
-  ).toBe("6");
+  ).toBe("5");
   // Automatic Parked: title and one status, earliest deadline first; screen readers also hear the
   // area, which the card's edge shows, and the date the status does not say.
   expect(cards("Parked")).toEqual([
@@ -158,13 +157,16 @@ it("puts Waiting and automatic Parked left of the four stage lanes, with nothing
       (item) => item.textContent,
     ),
   ).toEqual(["2 days late"]);
-  // The former Start now lane is empty; Waiting takes no drops.
   expect(screen.queryByRole("region", { name: "Start now" })).toBeNull();
-  expect(lane("Waiting").querySelector(".review-lane-header small")).toBe(null);
-  expect(cards("Waiting")).toEqual([
-    "Hear back about the venue quote, Work, No priority, No change in 11 days",
-    "Lab access approval, Work, No priority, No change in 3 days",
-  ]);
+  expect(screen.queryByRole("region", { name: "Waiting" })).toBeNull();
+  expect(
+    screen.queryByRole("button", {
+      name: /^Hear back about the venue quote,/u,
+    }),
+  ).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: /^Lab access approval,/u }),
+  ).toBeNull();
   // In progress and no-lead tasks are not on the board.
   for (const title of ["Move house", "Renew the car insurance"])
     expect(
@@ -226,7 +228,7 @@ it("hides Start now and Waiting while they have no cards", async () => {
   ).toBe("5");
 });
 
-it("puts Parked between Waiting and the stages, and shows it empty too", async () => {
+it("keeps Parked before the stages and shows it empty too", async () => {
   const { props } = await setup((data) => {
     data.plan.tasks.forEach((task) => {
       task.mustStart = false;
@@ -234,7 +236,6 @@ it("puts Parked between Waiting and the stages, and shows it empty too", async (
   });
   render(<PlanView {...props} />);
   expect(laneNames()).toEqual([
-    "Waiting",
     "Parked",
     "Quarter",
     "Month",
@@ -243,7 +244,7 @@ it("puts Parked between Waiting and the stages, and shows it empty too", async (
   ]);
   expect(
     document.querySelector(".review-lanes")!.getAttribute("data-lanes"),
-  ).toBe("6");
+  ).toBe("5");
   // A parked card says how long it has been untouched in place of its step counts.
   expect(cards("Parked")).toEqual([
     "Plan a small balcony garden, Personal, No priority, No change in 53 days",
@@ -294,7 +295,7 @@ it("shows every automatically surfaced card before the first three manual Parked
   );
 });
 
-it("surfaces ready staged tasks and date-rule candidates in Parked, keeping staged waiting cards in place", async () => {
+it("surfaces ready staged tasks and date-rule candidates in Parked while hiding staged waiting cards", async () => {
   const { props } = await setup((data) => {
     const template = data.plan.tasks[0]!;
     data.plan.tasks.push({
@@ -322,7 +323,6 @@ it("surfaces ready staged tasks and date-rule candidates in Parked, keeping stag
   );
   expect(cards("Committed")).toEqual([
     "Ship the small website refresh, Work, No priority",
-    "Organize the experiment notes, Work, No priority, No change in 7 days",
     "Make the home desk comfortable, Personal, No priority",
   ]);
   // The status takes the step counts' place; other cards keep their counts.
@@ -331,14 +331,10 @@ it("surfaces ready staged tasks and date-rule candidates in Parked, keeping stag
     [...committed.querySelectorAll(".planning-outcome-meta")].map(
       (meta) => meta.lastElementChild!.textContent,
     ),
-  ).toEqual([
-    "2 steps · 2 planned",
-    "No change in 7 days",
-    "1 step · 0 planned",
-  ]);
-  expect(cards("Waiting")).not.toContainEqual(
-    expect.stringMatching(/^Organize the experiment notes/u),
-  );
+  ).toEqual(["2 steps · 2 planned", "1 step · 0 planned"]);
+  expect(
+    screen.queryByRole("button", { name: /^Organize the experiment notes,/u }),
+  ).toBeNull();
 });
 
 it("marks a card in progress from its Start, in one confirmed write, and moves focus to the next Start", async () => {
@@ -499,7 +495,7 @@ it("shows Focus's quiet line only for due tasks with nothing planned, and opens 
   expect(document.querySelector(".plus-focus-runway")).toBeNull();
 });
 
-it("leaves a waiting task past its deadline out of Focus's line, as the board shows it in Waiting", async () => {
+it("keeps the existing Focus deadline-line behavior and hides the waiting task from Plan", async () => {
   const { data, props } = await setup((data) => {
     data.plan.tasks = data.plan.tasks.filter(
       (task) => !["claim", "visa"].includes(task.id),
@@ -528,11 +524,10 @@ it("leaves a waiting task past its deadline out of Focus's line, as the board sh
   expect(document.querySelector(".plus-focus-runway")).toBeNull();
   focus.unmount();
   render(<PlanView {...props} />);
-  expect(cards("Waiting")).toContainEqual(
-    expect.stringMatching(
-      /^Quarterly report draft, Work, No priority, .*2 days late/u,
-    ),
-  );
+  expect(screen.queryByRole("region", { name: "Waiting" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: /^Quarterly report draft,/u }),
+  ).toBeNull();
   expect(screen.queryByRole("region", { name: "Start now" })).toBeNull();
 });
 

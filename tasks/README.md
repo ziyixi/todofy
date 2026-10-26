@@ -32,7 +32,7 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 - GTD (`#/gtd`) reviews execution through Overview, Completion and Time: Task/Step completion, Routine separately,
   recorded time and current estimates. Week/Month and area filters are shared; a calendar day opens editable Focus
   records. See [GTD](docs/gtd.md) for metric definitions and historical limits.
-- Plan keeps the candidate columns above a full-width Committed row, with horizontal cards and completion controls for outcomes and Steps.
+- Plan keeps the candidate columns above a full-width Committed row, with horizontal cards and completion controls for outcomes and Steps. Waiting or dependency-blocked work stays outside Plan until ready; task data and Focus queues are retained.
 - Plan and Focus cards drag by their whole row, like the task list (6px, or a 250ms hold on touch); Week's
   commitments reorder like Review's Committed row, and Focus reorders today's steps.
 - Focus counts up by default: Start, work, then complete the step, which saves its time. Each step shows its logged

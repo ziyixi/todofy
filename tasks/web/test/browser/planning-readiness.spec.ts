@@ -35,6 +35,8 @@ test("completed prerequisites and deadline windows surface in Parked, and planni
     tasks: [
       ...manual,
       { id: "readiness-before", title: "Synthetic prerequisite" },
+      { id: "readiness-waiting", title: "Synthetic waiting outcome", stage: "committed", planning_flags: ["waiting"] },
+      { id: "readiness-waiting-step", title: "Synthetic waiting action", kind: "step", parent_id: "readiness-waiting", duration_minutes: 20 },
       {
         id: "readiness-after",
         title: "Synthetic unlocked outcome",
@@ -52,6 +54,7 @@ test("completed prerequisites and deadline windows surface in Parked, and planni
         lead_days: 3,
       },
     ],
+    queues: { [today]: ["readiness-waiting-step"] },
   });
   const queue = await readFocus(today, addDays(today, 6));
   await page.goto("/#/plan");
@@ -62,6 +65,11 @@ test("completed prerequisites and deadline windows surface in Parked, and planni
   await expect(
     parked.locator('[data-outcome-id="readiness-after"]'),
   ).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Waiting", exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-outcome-id="readiness-waiting"]')).toHaveCount(0);
+  await page.getByRole("tab", { name: "Week", exact: true }).click();
+  await expect(page.getByText("Synthetic waiting action", { exact: true })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Review", exact: true }).click();
   const before = await (
     await request.get("/api/tasks/v1/tasks/readiness-before")
   ).json();
@@ -107,6 +115,7 @@ test("completed prerequisites and deadline windows surface in Parked, and planni
   expect(saved.dependencies).toEqual(savedBefore.dependencies);
   expect(await readFocus(today, addDays(today, 6))).toEqual(queue);
   await page.goto("/#/focus");
+  await expect(page.getByText("Synthetic waiting action", { exact: true })).toBeVisible();
   const hint = page.getByRole("button", {
     name: "1 in its start window, not planned this week",
   });

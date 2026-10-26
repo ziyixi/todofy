@@ -121,7 +121,8 @@ edge was added. A set that keeps an edge keeps it as it is, done or not, so Plan
 prerequisite's next completion by removing it and adding it again.
 
 Completed prerequisites and open Deadline windows surface inactive tasks in Review's Parked area without
-changing their stored stages, dates or Focus queues. Start or dragging a surfaced task to a stage acknowledges
+changing their stored stages, dates or Focus queues. Plan hides Waiting/Blocked tasks and unfinished dependencies
+with their descendants in Review, Week, trays and calendar cards, without modifying Focus. Start or dragging a surfaced task to a stage acknowledges
 it with the existing active flag. Manual Parked remains a separate stored choice. Both task editors show
 read-only Dependents with clickable titles; only the dependent task's Depends on editor changes the edge.
 See [planning readiness](planning-readiness.md).

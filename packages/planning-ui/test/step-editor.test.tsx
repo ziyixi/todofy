@@ -53,7 +53,8 @@ async function open(
       onSettings={() => {}}
     />,
   );
-  return screen.findByRole("dialog");
+  // A deep link opens the native dialog before its first task read supplies the editor and name.
+  return screen.findByRole("dialog", { name: /\S/u });
 }
 const preset = (dialog: HTMLElement, minutes: number) =>
   within(dialog).getByRole<HTMLButtonElement>("button", {

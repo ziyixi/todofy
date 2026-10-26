@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { effectiveArea } from "./domain";
 import { committedOutcomes } from "./planning-outcomes";
 import { boardLanes } from "./review-lanes";
+import { planVisibility } from "./plan-visibility";
 import type { CompletePlanningTask } from "./CompleteTaskButton";
 import { ReviewBoard } from "./ReviewBoard";
 import { PlanningWeek } from "./PlanningWeek";
@@ -65,10 +66,6 @@ export interface PlanViewProps {
  */
 const JUMPS = {
   start: ['.review-lane[data-lane="parked"]'],
-  waiting: [
-    '.review-lane[data-lane="waiting"]',
-    '.review-draggable[data-state="waiting"] .planning-outcome-card',
-  ],
   addStep: [".planning-add-step-input"],
 };
 /** The remembered view as this week shows it: another week's review starts closed and empty. */
@@ -78,7 +75,24 @@ function seededView(stored: PlanViewState, week: string): PlanViewState {
     : { ...stored, review: { week, open: false, lines: [], kept: [] } };
 }
 export function PlanView(props: PlanViewProps) {
-  const { plan, language, editTask, onPlanView } = props;
+  const { language, editTask, onPlanView } = props;
+  const visible = planVisibility(props.plan);
+  const plan = useMemo(
+    () => ({ ...props.plan, tasks: visible.tasks }),
+    [props.plan, visible.tasks],
+  );
+  // Hide queued rows only in Plan's presentation. Moving a visible row still uses the ordinary queue action.
+  const days = useMemo(() => {
+    const shown = (id: string) =>
+      !visible.hidden.has(id) &&
+      !visible.hidden.has(props.focusTasks[id]?.parentId ?? "");
+    return props.days.map((day) => ({
+      ...day,
+      taskIds: day.taskIds.filter(shown),
+      completedTaskIds: day.completedTaskIds.filter(shown),
+    }));
+  }, [props.days, props.focusTasks, visible.hidden]);
+  const displayed = { ...props, plan, days };
   // Seeded once from the remembered view; the review link and the jumps below apply after it.
   const [seeded] = useState(() =>
     seededView(props.planView ?? DEFAULT_PLAN_VIEW, plan.week),
@@ -120,7 +134,7 @@ export function PlanView(props: PlanViewProps) {
     setAddingStep(undefined);
   }
   /** Review with every area shown, so the lane a jump looks for is on the board. */
-  function showLane(lane: "start" | "waiting") {
+  function showLane(lane: "start") {
     showMode("review");
     setArea("all");
     setJump(lane);
@@ -180,7 +194,7 @@ export function PlanView(props: PlanViewProps) {
     lastSent.current = view;
     if (Object.keys(patch).length) onPlanView?.(patch);
   }, [viewKey]);
-  const lanes = boardLanes(plan, props.currentDate);
+  const lanes = boardLanes(props.plan, props.currentDate);
   const areas: (Area | "all")[] = [
     "all",
     "work",
@@ -241,8 +255,8 @@ export function PlanView(props: PlanViewProps) {
           key={plan.week}
           progress={weekProgress}
           onProgress={(next) => setProgress({ week: plan.week, ...next })}
-          plan={plan}
-          days={props.days}
+          plan={props.plan}
+          days={days}
           today={props.currentDate}
           language={language}
           busy={props.busy}
@@ -254,7 +268,6 @@ export function PlanView(props: PlanViewProps) {
           completeReview={props.completeReview}
           onOpenMail={props.onOpenMail}
           onOpenGtd={props.onOpenGtd}
-          onShowWaiting={() => showLane("waiting")}
           onPlanSteps={planSteps}
           onClose={() => {
             setReviewing(false);
@@ -288,11 +301,11 @@ export function PlanView(props: PlanViewProps) {
               </button>
             ))}
           </div>
-          <ReviewBoard {...props} lanes={lanes} area={shownArea} />
+          <ReviewBoard {...displayed} lanes={lanes} area={shownArea} />
         </>
       ) : (
         <PlanningWeek
-          {...props}
+          {...displayed}
           selectedId={commitment}
           onSelect={selectCommitment}
           area={weekArea}

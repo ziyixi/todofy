@@ -16,6 +16,7 @@ import {
   planningOutcomes,
 } from "../src/planning-outcomes";
 import { boardLanes } from "../src/review-lanes";
+import { planVisibility } from "../src/plan-visibility";
 import {
   oldestUntouched,
   SOMEDAY_LABELS,
@@ -167,6 +168,20 @@ it("derives a 2,000-task plan in linear work and reuses its indexes on the next 
   reads.count = 0;
   planRender(list);
   expect(reads.count).toBeLessThan(first);
+});
+
+it("filters a 2,000-task Plan once per complete snapshot and reuses its visibility on rerender", () => {
+  const tasks = dataset(2_000);
+  tasks[0] = { ...tasks[0]!, planningFlags: ["waiting"] };
+  const { list, reads } = counted(tasks);
+  const plan = { tasks: list, dependencies: [], laneOrders };
+  const visible = planVisibility(plan);
+  expect(visible.hidden.has(tasks[0]!.id)).toBe(true);
+  expect(visible.hidden.has(tasks[1]!.id)).toBe(true);
+  expect(reads.count).toBeLessThan(4 * tasks.length);
+  reads.count = 0;
+  expect(planVisibility(plan)).toBe(visible);
+  expect(reads.count).toBe(0);
 });
 
 it("ticks a running timer without re-rendering the planning board", async () => {

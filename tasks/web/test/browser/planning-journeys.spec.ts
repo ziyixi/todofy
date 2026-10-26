@@ -184,11 +184,12 @@ test("a dependency is added in the details, and completing its prerequisite in F
     )
     .toEqual([["dependencies", { dependencies: [{ prerequisite_id: call }] }]]);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
-  // A committed task that waits keeps its lane and says so.
+  // Waiting work stays in Tasks, but is absent from Plan even when committed.
   const waiting = page.getByRole("button", {
     name: /^Synthetic launch,.*Waiting for “Synthetic venue call”/u,
   });
-  await expect(waiting).toBeVisible();
+  await expect(waiting).toHaveCount(0);
+  await expect(page.locator('[data-outcome-id="launch"]')).toHaveCount(0);
 
   await page.getByRole("link", { name: "Focus", exact: true }).click();
   const slot = page.locator(`.plus-focus-slot[data-task-id="${call}"]`);
@@ -202,7 +203,7 @@ test("a dependency is added in the details, and completing its prerequisite in F
   await page.getByRole("link", { name: "Plan", exact: true }).click();
   await expect(waiting).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: /^Synthetic launch,/u }).first(),
+    page.getByRole("region", { name: "Parked", exact: true }).getByRole("button", { name: /^Synthetic launch,/u }),
   ).toBeVisible();
   expect(state.requests).toEqual([]);
 });

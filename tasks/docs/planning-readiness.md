@@ -2,14 +2,17 @@
 
 Plan Review uses the existing Parked area for work ready to arrange. A task appears there when all of its
 prerequisites are complete, or its Deadline's start-ahead window has opened, including an overdue deadline.
-An empty dependency list is not a trigger. Unfinished prerequisites and explicit Waiting/Blocked still wait;
-Active tasks do not resurface. Existing recurrence completion semantics are unchanged.
+An empty dependency list is not a trigger. Plan hides explicit Waiting/Blocked tasks and tasks with unfinished
+prerequisites, including their descendants. They stay stored, with their stages and queues intact; there is no
+Waiting column. Active tasks do not resurface. Existing recurrence completion semantics are unchanged.
 
 This is derived from the same task read, without a scheduler, database migration or automatic task writes.
 An existing planning stage remains saved, although the card appears in Parked until picked up. Its dates,
 children, completion history and Focus queues are unchanged. A task satisfying both conditions has one card,
 with its deadline taking precedence as the reason. Automatic cards appear before the manual backlog and
-remain visible; only manual Parked cards fold after the first three.
+remain visible; only manual Parked cards fold after the first three. Waiting items are omitted from Review,
+Week commitments, step/Quick trays and calendar cards. This is only Plan visibility; Focus retains its original
+queues and records. A prerequisite completion makes the newly ready task visible in Parked on the next read.
 
 Start acknowledges a surfaced task with the existing Active flag. Dragging it to a planning stage writes
 that stage and Active together. The condition then stops surfacing it on reload. This uses the same

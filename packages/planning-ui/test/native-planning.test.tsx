@@ -81,7 +81,7 @@ it("puts native states in the existing lanes and keeps tags unchanged on a stage
     "2026-10-17",
   );
   expect(lanes.start).toEqual([]);
-  expect(lanes.waiting.map((row) => row.id)).toEqual([waiting.id]);
+  expect(lanes.waiting).toEqual([]);
   expect(lanes.parked.map((row) => row.id)).toEqual([task.id, parked.id]);
   expect(waits(waiting)).toBe(true);
   expect(quickTasks({ ...plan, tasks: [quick] }, "2026-10-17")).toEqual([
@@ -197,7 +197,6 @@ it("shows uncreated native Mail in weekly review and opens Mail and GTD without 
       editTask={vi.fn()}
       progress={{ lines: [], kept: [] }}
       onProgress={vi.fn()}
-      onShowWaiting={vi.fn()}
       onPlanSteps={vi.fn()}
       completeReview={vi.fn()}
       onOpenMail={openMail}

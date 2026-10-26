@@ -6,10 +6,10 @@ import { BetText } from "./BetText";
 import { BetGoal } from "./BetGoal";
 import { addDays, displayedTitle, hasPlanningFlag, taskIndex } from "./domain";
 import { deadlineStatus } from "./deadlines";
-import { waitingTasks } from "./dependencies";
+import { planVisibility } from "./plan-visibility";
 import { betWords, words } from "./i18n";
 import { pendingTask } from "./plan-updates";
-import { isParked, PARKED_LABEL } from "./planning-outcomes";
+import { PARKED_LABEL } from "./planning-outcomes";
 import { LeadSelect } from "./TaskEditor";
 import { weekLabel } from "./PlanningCalendar";
 import {
@@ -17,7 +17,6 @@ import {
   oldestUntouched,
   SOMEDAY_LABELS,
   unscheduledCommitments,
-  untouchedDays,
   untouchedText,
   weekChoices,
   withoutLead,
@@ -52,7 +51,6 @@ interface Props {
   /** This week's ticked lines and kept someday tasks, which PlanView remembers. */
   progress: ReviewProgress;
   onProgress: (progress: ReviewProgress) => void;
-  onShowWaiting: () => void;
   /** Week at this commitment, the first with nothing planned, with its Add steps input open. */
   onPlanSteps: (commitmentId: string) => void;
   completeReview: (task: PlanningTask) => Promise<boolean>;
@@ -64,12 +62,12 @@ interface Props {
 }
 
 /**
- * Five weekly review lines with counts and jump targets, and a sixth while deadlines lack a
+ * Four weekly review lines with counts and jump targets, and another while deadlines lack a
  * start-ahead choice. It only guides: every write is one of the owner's existing single-task
  * actions, made when clicked, or on Sunday next week's two Bets.
  */
 export function WeeklyReview({
-  plan,
+  plan: completePlan,
   days,
   today,
   language,
@@ -81,13 +79,13 @@ export function WeeklyReview({
   editTask,
   progress,
   onProgress,
-  onShowWaiting,
   onPlanSteps,
   completeReview,
   onOpenMail,
   onOpenGtd,
   onClose,
 }: Props) {
+  const plan = { ...completePlan, tasks: planVisibility(completePlan).tasks };
   const text = words(language);
   const zh = language === "zh";
   const [reviewDone, setReviewDone] = useState(false);
@@ -103,9 +101,6 @@ export function WeeklyReview({
   const waits = (task: PlanningTask) =>
     busy || (pending?.has(pendingTask(task.id)) ?? false);
 
-  // As Review's Waiting lane: a task set aside is in Parked.
-  const waiting = waitingTasks(plan).filter((task) => !isParked(task));
-  const oldestWait = waiting[0] && untouchedDays(waiting[0]);
   const noLead = withoutLead(plan.tasks);
   const unscheduled = unscheduledCommitments(plan, days);
   // Still to look at this week: neither kept nor already in this month.
@@ -246,25 +241,6 @@ export function WeeklyReview({
             <button className="weekly-review-jump" onClick={onOpenMail}>
               {zh ? "打开" : "Open"}
             </button>
-          </>,
-        )}
-        {line(
-          2,
-          text.waiting,
-          <>
-            <span className="weekly-review-count">{waiting.length}</span>
-            {oldestWait !== undefined && (
-              <span className="weekly-review-note">
-                {zh
-                  ? `最久 ${oldestWait} 天未变动`
-                  : `oldest untouched ${oldestWait} days`}
-              </span>
-            )}
-            {waiting.length > 0 && (
-              <button className="weekly-review-jump" onClick={onShowWaiting}>
-                {zh ? "查看" : "Show"}
-              </button>
-            )}
           </>,
         )}
         {/* Line 6, kept apart from the stored numbers 1-5: only while a deadline has no lead. */}

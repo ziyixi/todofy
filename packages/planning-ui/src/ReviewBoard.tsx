@@ -232,11 +232,11 @@ interface Props {
 const PARKED_SHOWN = 3;
 
 /**
- * Waiting, Parked and the four stage lanes. Ready tasks surface in Parked: a drag into a stage
+ * Parked and the four stage lanes. Ready tasks surface in Parked: a drag into a stage
  * also marks them in progress, as Start does. A manually parked task leaves its parked flag behind
  * when moved to a stage; a drop into Parked still sets it aside. Inside every lane a card
  * dropped on another card takes its place: Tasks keeps the lane's order, and the order of
- * the moved card's siblings follows (not for Waiting and Parked).
+ * the moved card's siblings follows (not for Parked).
  */
 export function ReviewBoard({
   plan,
@@ -292,26 +292,20 @@ export function ReviewBoard({
     lanes[id].filter(
       (task) => area === "all" || effectiveArea(task, plan.tasks) === area,
     );
-  // Stage and Parked lanes accept a planning change; Waiting is shown only with cards.
+  // Stage and Parked lanes accept a planning change.
   const columns: {
     id: LaneId;
     title: string;
     stage?: Exclude<Stage, "none">;
     label?: string;
   }[] = [
-    { id: "start" as const, title: text.startNow },
-    { id: "waiting" as const, title: text.waiting },
     { id: "parked" as const, title: text.parked, label: PARKED_LABEL },
     ...reviewLanes(language).map((lane) => ({
       id: lane.stage,
       title: lane.title,
       stage: lane.stage,
     })),
-  ].filter(
-    (column) =>
-      (column.id !== "start" && column.id !== "waiting") ||
-      shown(column.id).length,
-  );
+  ];
   // Once write controls are enabled again: the next card's Start, any Start, the started card
   // where it stays (in its stage lane) or the first card.
   useEffect(() => {

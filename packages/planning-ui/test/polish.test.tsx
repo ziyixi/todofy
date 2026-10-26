@@ -205,7 +205,7 @@ it("names a paused timer as a state, colours checkboxes by priority and keeps un
   );
 });
 
-it("names Parked and Waiting in both languages, in words only", async () => {
+it("names Parked in both languages and omits Waiting", async () => {
   // With one task in its start window.
   const props = async (language: Language) => {
     const result = await planProps(language);
@@ -222,14 +222,14 @@ it("names Parked and Waiting in both languages, in words only", async () => {
   };
   const { rerender } = render(<PlanView {...await props("en")} />);
   expect(screen.getByRole("region", { name: "Parked" })).toBeTruthy();
-  expect(screen.getByRole("region", { name: "Waiting" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Waiting" })).toBeNull();
   // No new icons: a card that should start says so in its status, without the old calendar clock.
   expect(
     document.querySelector(".review-board svg.lucide-calendar-clock"),
   ).toBe(null);
   rerender(<PlanView {...await props("zh")} />);
   expect(screen.getByRole("region", { name: "搁置" })).toBeTruthy();
-  expect(screen.getByRole("region", { name: "等待中" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "等待中" })).toBeNull();
   expect(
     screen.getByRole("button", {
       name: "Submit the expense claim, 工作, 未设优先级, 明天截止，10月14日周三",

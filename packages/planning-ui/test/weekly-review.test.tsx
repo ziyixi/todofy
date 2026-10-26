@@ -122,38 +122,24 @@ it("derives the review lines from loaded data only", async () => {
   ]);
 });
 
-it("draws waiting tasks as cards in the lane left of the stage lanes, oldest untouched first, and writes nothing", async () => {
+it("omits the Waiting lane and its tasks without writing any task", async () => {
   const data = await props();
+  const before = structuredClone(data.plan);
   render(<PlanView {...data} />);
-  const lanes = [...document.querySelectorAll(".review-lane")].map((lane) =>
-    lane.getAttribute("aria-label"),
-  );
-  expect(lanes.slice(lanes.indexOf("Waiting"))).toEqual([
-    "Waiting",
-    "Parked",
-    "Quarter",
-    "Month",
-    "Week",
-    "Committed",
-  ]);
-  const waiting = within(screen.getByRole("region", { name: "Waiting" }));
   expect(
-    waiting
-      .getAllByRole("button", { name: /, No priority/u })
-      .map((card) => card.getAttribute("aria-label")),
-  ).toEqual([
-    "Hear back about the venue quote, Work, No priority, No change in 11 days",
-    "Lab access approval, Work, No priority, No change in 3 days",
-  ]);
-  // A card opens the task's details; nothing was written: no label is removed and nobody is
-  // contacted.
-  fireEvent.click(
-    waiting.getByRole("button", { name: /^Lab access approval,/u }),
-  );
-  expect(data.editTask).toHaveBeenCalledWith(
-    expect.objectContaining({ id: "access" }),
-  );
+    [...document.querySelectorAll(".review-lane")].map((lane) =>
+      lane.getAttribute("aria-label"),
+    ),
+  ).toEqual(["Parked", "Quarter", "Month", "Week", "Committed"]);
+  for (const title of [
+    "Hear back about the venue quote",
+    "Lab access approval",
+  ])
+    expect(
+      screen.queryByRole("button", { name: new RegExp(`^${title},`, "u") }),
+    ).toBeNull();
   expect(data.run).not.toHaveBeenCalled();
+  expect(data.plan).toEqual(before);
 });
 
 it("keeps unclarified mail as the first line only, never as cards on the board", async () => {
@@ -271,7 +257,7 @@ it("lists deadlines without a start-ahead choice in one line, with the editor's 
   );
 });
 
-it("counts the five review lines and keeps ticks through Plan's view, for this account week only", async () => {
+it("counts the remaining review lines and keeps ticks through Plan's view, for this account week only", async () => {
   // Last week's ticks, as the extension stored them.
   let stored: PlanViewState = {
     ...DEFAULT_PLAN_VIEW,
@@ -304,9 +290,9 @@ it("counts the five review lines and keeps ticks through Plan's view, for this a
   expect(
     within(line(review, "Mail to clarify")).queryByRole("link"),
   ).toBeNull();
-  expect(line(review, "Waiting").textContent).toContain(
-    "2oldest untouched 11 days",
-  );
+  expect(
+    review.queryByRole("checkbox", { name: "Reviewed: Waiting" }),
+  ).toBeNull();
   expect(line(review, "Commitments not planned").textContent).toContain("2");
   expect(line(review, "Someday").textContent).toContain("2");
   // Before Sunday line 5 only says where the choice will be, with nothing to tick.
@@ -419,7 +405,7 @@ it("moves an on-hold task into this month with its stage alone", async () => {
   expect(update.mock.calls[0]![1]).toEqual({ stage: "monthly" });
 });
 
-it("counts neither a parked task as waiting nor a parked commitment as unplanned", async () => {
+it("omits waiting even when parked and keeps manual Parked commitments out of unplanned counts", async () => {
   const data = await props();
   const task = (id: string) => data.plan.tasks.find((item) => item.id === id)!;
   // A waiting task and a commitment set aside as well.
@@ -430,34 +416,26 @@ it("counts neither a parked task as waiting nor a parked commitment as unplanned
   task("notes").planningFlags = ["parked"];
   render(<PlanView {...data} />);
   const review = openReview();
-  expect([
-    line(review, "Waiting").textContent,
-    line(review, "Commitments not planned").textContent,
-  ]).toEqual([
-    "Waiting1oldest untouched 3 daysShow",
+  expect(
+    review.queryByRole("checkbox", { name: "Reviewed: Waiting" }),
+  ).toBeNull();
+  expect(line(review, "Commitments not planned").textContent).toBe(
     "Commitments not planned1Plan steps",
-  ]);
+  );
   expect(unscheduledCommitments(data.plan, data.days).map((t) => t.id)).toEqual(
     ["desk"],
   );
 });
 
-it("jumps to the Waiting lane, and to the Add steps input of Week's first unplanned commitment", async () => {
+it("jumps to the Add steps input of Week's first unplanned commitment without a Waiting action", async () => {
   const data = await props();
   render(<PlanView {...data} />);
   const review = openReview();
-  // From another area, the jump shows every area so that the lane is on the board.
   fireEvent.click(screen.getByRole("tab", { name: "Personal" }));
   expect(screen.queryByRole("region", { name: "Waiting" })).toBeNull();
-  fireEvent.click(
-    within(line(review, "Waiting")).getByRole("button", { name: "Show" }),
-  );
   expect(
-    screen.getByRole("tab", { name: "All" }).getAttribute("aria-selected"),
-  ).toBe("true");
-  expect(document.activeElement).toBe(
-    screen.getByRole("region", { name: "Waiting" }),
-  );
+    review.queryByRole("checkbox", { name: "Reviewed: Waiting" }),
+  ).toBeNull();
   fireEvent.click(
     within(line(review, "Commitments not planned")).getByRole("button", {
       name: "Plan steps",

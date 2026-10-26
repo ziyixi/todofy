@@ -237,7 +237,7 @@ it("writes the quiet texts in both languages", () => {
   );
 });
 
-it("puts a task that waits only for another task in Waiting, and one with a stage label in its lane with that status", () => {
+it("hides a task with unfinished prerequisites in every stage and surfaces it in Parked when ready", () => {
   const venue = task("venue", {
     title: "Book the venue",
     updatedAt: "2026-10-01T00:00:00Z",
@@ -265,7 +265,8 @@ it("puts a task that waits only for another task in Waiting, and one with a stag
     ids(boardLanes(plan([waitsFor("invite", "venue")]), TODAY)),
   ).toMatchObject({
     start: [],
-    waiting: ["invite"],
+    waiting: [],
+    parked: [],
   });
   expect(cardState(invite, TODAY, [venue])).toBe("waiting");
   expect(
@@ -273,7 +274,7 @@ it("puts a task that waits only for another task in Waiting, and one with a stag
       statusLine([part]),
     ),
   ).toEqual(["等「Book the venue」", "10月20日截止"]);
-  // An explicit stage keeps its lane, saying what it waits for.
+  // An explicit stage does not make an unfinished dependency appear in Plan.
   const committed = {
     ...invite,
     stage: "committed" as const,
@@ -283,7 +284,7 @@ it("puts a task that waits only for another task in Waiting, and one with a stag
     plan([waitsFor("invite", "venue")], [venue, committed]),
     TODAY,
   );
-  expect(ids(lanes)).toMatchObject({ waiting: [], committed: ["invite"] });
+  expect(ids(lanes)).toMatchObject({ waiting: [], committed: [], parked: [] });
   // Once the venue is done, the task surfaces in Parked with its deadline reason.
   expect(
     ids(
@@ -322,7 +323,7 @@ it("surfaces a task only after all of its prerequisites are done, including a re
     waitsFor("invite", "weekly"),
   ];
   expect(show(partial).parked).toEqual([]);
-  expect(show(partial).monthly).toEqual([invite]);
+  expect(show(partial).monthly).toEqual([]);
   const completed = partial.map((edge) => ({ ...edge, done: true }));
   const lanes = show(completed);
   expect(lanes.parked).toEqual([invite]);

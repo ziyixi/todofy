@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { addDays } from "../src/domain";
 import { committedOutcomes } from "../src/planning-outcomes";
 import { withStage } from "../src/plan-updates";
+import { planVisibility } from "../src/plan-visibility";
 import { quickTasks } from "../src/weekly-review";
 import {
   boardLanes,
@@ -51,7 +52,7 @@ function laneIds(
   ) as Record<LaneId, string[]>;
 }
 
-it("surfaces unstarted tasks in Parked once, keeping waiting and other stages in their lanes", () => {
+it("surfaces unstarted tasks in Parked once and hides waiting tasks from every lane", () => {
   const tasks = [
     task("staged-start", {
       stage: "committed",
@@ -106,10 +107,10 @@ it("surfaces unstarted tasks in Parked once, keeping waiting and other stages in
     start: [],
     parked: ["past", "dated-start", "step", "staged-start"],
     quarterly: [],
-    monthly: ["staged-wait"],
+    monthly: [],
     weekly: ["dated", "week"],
     committed: [],
-    waiting: ["dated-wait", "blocked", "past-wait", "step-wait"],
+    waiting: [],
   });
   // The automatic Parked card keeps its start status, including one with a saved stage.
   expect(
@@ -132,7 +133,7 @@ it("surfaces unstarted tasks in Parked once, keeping waiting and other stages in
   });
 });
 
-it("orders automatic Parked cards by deadline then priority, and Waiting by the longest untouched", () => {
+it("orders automatic Parked cards by deadline then priority and excludes waiting tasks", () => {
   const ids = laneIds([
     task("visa", { deadline: on(5), mustStart: true }),
     task("claim", { deadline: on(1), mustStart: true }),
@@ -150,11 +151,11 @@ it("orders automatic Parked cards by deadline then priority, and Waiting by the 
   ]);
   expect([ids.parked, ids.waiting]).toEqual([
     ["report", "claim-p1", "claim", "visa"],
-    ["contract", "quote", "unknown"],
+    [],
   ]);
 });
 
-it("keeps manually parked tasks in Parked regardless of their stages and waiting state", () => {
+it("keeps manually parked tasks in Parked while excluding a parked task that waits", () => {
   const tasks = [
     task("plain", {
       planningFlags: ["parked"],
@@ -186,7 +187,7 @@ it("keeps manually parked tasks in Parked regardless of their stages and waiting
   expect(laneIds(tasks)).toEqual({
     start: [],
     waiting: [],
-    parked: ["staged", "waits", "plain", "step"],
+    parked: ["staged", "plain", "step"],
     quarterly: [],
     monthly: [],
     weekly: ["quick"],
@@ -202,7 +203,12 @@ it("lists the commitments Review's Committed lane shows, none of them parked", (
     task("week", { stage: "weekly", explicitStage: "weekly" }),
   ];
   const plan = { tasks, dependencies: [], laneOrders: {} };
-  expect(committedOutcomes(plan)).toEqual(boardLanes(plan, TODAY).committed);
+  expect(
+    committedOutcomes({ ...plan, tasks: planVisibility(plan).tasks }),
+  ).toEqual(boardLanes(plan, TODAY).committed);
+  expect(boardLanes(plan, TODAY).committed.map((item) => item.id)).toEqual([
+    "kept",
+  ]);
   expect(
     committedOutcomes({ tasks, laneOrders: {} }).map((item) => item.id),
   ).toEqual(["kept", "waits"]);
@@ -244,7 +250,7 @@ it("puts newly ready tasks before arranged automatic cards and the manual Parked
     }),
   ).toMatchObject({
     committed: ["three", "one", "two"],
-    waiting: ["quote", "contract"],
+    waiting: [],
     parked: ["report", "visa", "claim", "idea", "plan"],
     start: [],
   });
@@ -369,15 +375,8 @@ it("says each card's one status: how long is left, or how long untouched with th
   );
 });
 
-/**
- * The client half of the filter consistency gate (Todofy's tests/unit/test_plus.py checks the
- * server half). From the API's fields alone, every task a replaced filter shows is on the board:
- * one with a `waiting` or `blocked` label in Waiting or in its own stage lane saying it waits; one
- * Tasks marks must start in Parked, including explicitly staged tasks; an active one may stay off
- * the board. A waiting step with its outcome's stage has no card in that stage lane, so it has one
- * in Waiting. Every manually parked task is in Parked and only there.
- */
-it("shows every task the API marks for a replaced deadline, waiting or parked filter on the board", () => {
+/** Ready tasks appear once, manual parking remains, and waiting hides every stage combination. */
+it("hides every waiting task and shows eligible ready or parked tasks at most once", () => {
   const marks = ["waiting", "blocked", "active", "parked"];
   const stages = [
     { stage: "none" as const },
@@ -423,17 +422,17 @@ it("shows every task the API marks for a replaced deadline, waiting or parked fi
               ).length;
               const name = JSON.stringify(item);
               expect(shown, name).toBeLessThanOrEqual(1);
+              if (labels.includes("waiting") || labels.includes("blocked")) {
+                expect(shown, name).toBe(0);
+                continue;
+              }
               if (labels.includes("parked")) {
                 expect(lanes.parked, name).toContain(item);
                 continue;
               }
-              const waits =
-                labels.includes("waiting") || labels.includes("blocked");
-              if (waits || mustStart) {
-                expect(shown, name).toBe(1);
-                expect(cardState(item, TODAY), name).toBe(
-                  waits ? "waiting" : "start",
-                );
+              if (mustStart) {
+                expect(lanes.parked, name).toContain(item);
+                expect(cardState(item, TODAY), name).toBe("start");
               }
             }
 });

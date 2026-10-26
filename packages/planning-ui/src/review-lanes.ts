@@ -4,11 +4,7 @@ import {
   startStatus,
   type StatusText,
 } from "./deadlines";
-import {
-  dependencyIndex,
-  waitingForStatus,
-  waitingTasks,
-} from "./dependencies";
+import { dependencyIndex, waitingForStatus } from "./dependencies";
 import {
   inLaneOrder,
   isDateCandidate,
@@ -16,6 +12,7 @@ import {
   planningOutcomes,
 } from "./planning-outcomes";
 import { byUntouched, untouchedText, waits } from "./weekly-review";
+import { planVisibility } from "./plan-visibility";
 import type { LaneId, Language, PlanState, PlanningTask, Stage } from "./model";
 
 export type { LaneId } from "./model";
@@ -43,8 +40,8 @@ export function cardState(
 /**
  * One card per task. Ready tasks surface in Parked before the manually parked backlog, without
  * rewriting their stages. Picking one up uses the existing active flag. Remaining tasks keep
- * their stage, Waiting or date-candidate lane. The old start key remains readable in lane orders;
- * the board no longer displays a separate Start now lane.
+ * their stage or date-candidate lane. Waiting tasks and their descendants are hidden. The old start
+ * key remains readable in lane orders; the board no longer displays a separate Start now lane.
  */
 export function boardLanes(
   plan: Pick<PlanState, "tasks" | "dependencies" | "laneOrders">,
@@ -59,6 +56,7 @@ export function boardLanes(
     weekly: [],
     committed: [],
   };
+  const tasks = planVisibility(plan).tasks;
   const parked = (task: PlanningTask) => isParked(task);
   const index = dependencyIndex(plan);
   const state = (task: PlanningTask) =>
@@ -68,7 +66,7 @@ export function boardLanes(
       index.waitingFor.get(task.id),
       index.done.has(task.id),
     );
-  const ready = plan.tasks
+  const ready = tasks
     .filter((task) => {
       const ready = state(task);
       return ready === "start" || ready === "ready";
@@ -83,11 +81,11 @@ export function boardLanes(
     ...inLaneOrder("start", ready, plan.laneOrders.parked),
     ...inLaneOrder(
       "parked",
-      byUntouched(plan.tasks.filter(parked)),
+      byUntouched(tasks.filter(parked)),
       plan.laneOrders.parked,
     ),
   ];
-  const outcomes = planningOutcomes(plan.tasks).filter(
+  const outcomes = planningOutcomes(tasks).filter(
     (task) => !parked(task) && !readyIds.has(task.id),
   );
   const staged = new Set(
@@ -96,8 +94,6 @@ export function boardLanes(
   for (const task of outcomes)
     if (staged.has(task.id) || !state(task))
       lanes[task.stage as Exclude<Stage, "none">].push(task);
-  for (const task of waitingTasks(plan))
-    if (!staged.has(task.id) && !parked(task)) lanes.waiting.push(task);
   for (const lane of Object.keys(lanes) as LaneId[])
     if (lane !== "parked")
       lanes[lane] = inLaneOrder(lane, lanes[lane], plan.laneOrders[lane]);
