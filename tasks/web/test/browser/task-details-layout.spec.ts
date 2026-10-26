@@ -137,7 +137,12 @@ test("reopening a task shows its dependencies with the dialog, with no check pen
   });
   const open = () => page.getByText(title, { exact: true }).click();
   const geometry = async () => ({
-    heading: await dependencies.locator("h3").boundingBox(),
+    heading: await dependencies
+      .getByRole("heading", { name: /^Depends on/u })
+      .boundingBox(),
+    reverseHeading: await dependencies
+      .getByRole("heading", { name: "Dependents", exact: true })
+      .boundingBox(),
     section: await dependencies.boundingBox(),
   });
   await open();
@@ -452,8 +457,7 @@ test("narrow task details keep grouped controls and floating labels within the v
   expect(toggle.width).toBeGreaterThanOrEqual(32);
   expect(toggle.height).toBeGreaterThanOrEqual(18);
   let previous:
-    | { x: number; y: number; width: number; height: number }
-    | undefined;
+    { x: number; y: number; width: number; height: number } | undefined;
   for (const name of ["Steps", "Standalone", "Quick"]) {
     const option = execution.getByRole("radio", { name, exact: true });
     const box = (await option.locator("..").boundingBox())!;

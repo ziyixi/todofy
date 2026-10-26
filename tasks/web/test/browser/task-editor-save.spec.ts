@@ -333,6 +333,7 @@ test("a delayed child Save cannot replace the task opened after closing its edit
   await page.goto(`/?task=${parent.id}#/inbox`);
   const dialog = page.getByRole("dialog", { name: "Task details", exact: true });
   await dialog.getByRole("button", { name: child.title, exact: true }).click();
+  await expect(dialog.getByRole("textbox", { name: "Task name", exact: true })).toHaveValue(child.title);
   let release!: () => void;
   let started!: () => void;
   const held = new Promise<void>((resolve) => {

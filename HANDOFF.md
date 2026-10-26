@@ -24,8 +24,10 @@ Start now column is shown. Native GetTask adds output-only Task.dependents (tag 
 reverse index; ListTasks omits it. Plan uses its loaded graph. Duplicate responses clear both edge directions.
 Explicit Save navigates back through task IDs with a fresh parent read; description Done stays inline.
 Local checks currently passed planning UI 329 tests, Tasks web 115, Worker 72 unit/29 selected real D1 tests,
-the existing fullest-planning CPU case, relevant lint/types/build and proto API lint/breaking. Final browser
-integration and branch/main release checks are pending; no production tasks were changed for this work.
+the existing fullest-planning CPU case, relevant lint/types/build and proto API lint/breaking. The 146-case
+Chromium run passed 143 before three obsolete assertions/waits were corrected; all 18 cases in those files
+then passed, including the delayed-Save navigation guard. Native readiness and reverse-link journeys passed
+in the full run. Branch/main release checks remain pending; no production tasks were changed for this work.
 Behavior: [planning readiness](tasks/docs/planning-readiness.md).
 
 ### Configuration drift audit false positive (`codex/fix-config-drift`)

@@ -156,13 +156,13 @@ test.describe("Plan's cards", () => {
       const board = (await page.locator(".review-lanes").boundingBox())!;
       const bounds = (await committed.boundingBox())!;
       if (width === 1440) {
-        // Start now, Waiting, Parked, Quarter, Month and Week keep one row of columns.
+        // Waiting, Parked, Quarter, Month and Week keep one row of columns.
         const columns = await page
           .locator('.review-lane:not([data-lane="committed"])')
           .evaluateAll((nodes) =>
             nodes.map((node) => node.getBoundingClientRect().toJSON()),
           );
-        expect(columns).toHaveLength(6);
+        expect(columns).toHaveLength(5);
         for (const [index, column] of columns.entries()) {
           expect(column.y).toBeCloseTo(columns[0]!.y, 0);
           expect(column.width).toBeCloseTo(columns[0]!.width, 0);
