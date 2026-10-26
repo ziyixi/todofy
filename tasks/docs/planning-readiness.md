@@ -50,3 +50,8 @@ submit the underlying task form or close its editor. Pointer deletion keeps the 
 This behavior is deployed from `f3a689fa519977f824b3045b4649fff6d9c5cc94`. The complete branch gate,
 same-source production release and matching configuration reconcile passed. Dated evidence is in
 [refinement verification](refinement-verification.md#2026-10-26-planning-and-task-details).
+
+Tasks was subsequently republished with the same behavior in monorepo source `42897d14`. The
+[main release](https://github.com/ziyixi/todofy/actions/runs/40259875945) and
+[matching reconcile](https://github.com/ziyixi/todofy/actions/runs/40260037384) passed; verified Worker version
+is `f9b85a6d-6e94-4e1f-a3ce-beca97913e3d`.

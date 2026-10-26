@@ -12,25 +12,27 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-### Mailsort automatic classification interval (`codex/mailsort-interval`)
+### Mailsort automatic classification interval (released)
 
-The owner requested a 15-minute classification interval and an editable dashboard setting. This branch uses the
-existing Mailsort settings row and Alarm: choices 5/15/30/60 minutes, default 15, shared by Claude and Codex.
-Gmail maintenance remains five minutes. A normal future wait adjusts on save; retries, deferred work and provider
-quota holds retain their deadlines. Missing legacy settings adopt 15 once. Settings and Overview distinguish the
-classification interval/next batch from the next Gmail maintenance check. Mode, provider, prompts, cache policy,
-write caps, history and mail eligibility retain their existing behavior. No mailbox or production changes were made.
-Local checks passed Worker 236 unit/119 real workerd SQLite cases, web 111 tests, relevant lint/typechecks, UI
-build/budget and the existing Wrangler smoke with synthetic Gmail/Claude/Codex. The delayed Codex request
-regression confirms that a pass begun at 15 minutes schedules its next batch at the saved 60-minute interval.
-Proto format/lint, 75-file API lint, breaking checks against f3a689fa and generated-schema checks passed.
-The local Worker bundle is 148.7 KiB gzip within the existing 150 KiB budget; Linux CI remains authoritative.
-Root review is complete; branch CI and release remain pending.
+Source `42897d14ef61d1cdd2f7592a2b89a4b29075fa2e` passed the full
+[branch CI 40258762062](https://github.com/ziyixi/todofy/actions/runs/40258762062),
+[same-SHA main 40259875945](https://github.com/ziyixi/todofy/actions/runs/40259875945) and
+[post-release reconcile 40260037384](https://github.com/ziyixi/todofy/actions/runs/40260037384).
+Verified Mailsort deployment 7322823236 has Worker version `13bb8f8a-6677-4052-a709-9fe56e5b04e5`.
 
-The first full CI attempt's unchanged report-Alarm fixture timed out; its local module passed 4/4 and all runtime
-shards passed on the same-SHA rerun. The initial tick cause is unconfirmed. The collector then read an older
-failed JUnit artifact alongside the new same-name artifact. The existing uploader now uses its native overwrite
-option so reruns replace that shard's report; no Todofy application or timeout was changed for this issue.
+Settings now offers 5/15/30/60-minute normal classification intervals, default 15, persisted in the existing row.
+Gmail maintenance stays five minutes. Legacy adoption runs once; retries/deferred work and provider quota holds
+keep their deadlines. An active batch uses its frozen provider/prompt, then reads the latest interval for its
+next normal batch. No new job, database or service was added. Acceptance used synthetic mail and configuration metadata;
+no manual real-mail read or unread reclassification was invoked.
+Real Chrome confirmed 15 selected, live mode and `gpt-6.1-sol` medium retained, and the normal next batch moved from
+20:35 to 19:50 PDT after the existing Alarm adopted the setting. Prompts and previous choices were not changed.
+Local checks passed 236 Worker units, 119 real runtime cases, 111 UI cases, relevant types/lint/build, Wrangler
+smoke and proto checks. The Worker bundle remains 148.7 KiB within the unchanged 150 KiB budget.
+The initial unchanged Todofy report-Alarm fixture timed out; local 4/4 and same-source runtime rerun passed.
+Its initial cause remains unconfirmed. A separate collector defect mixed old/new same-name JUnit artifacts;
+the existing uploader now replaces that shard's report on rerun. No Todofy business logic/timeout was altered.
+Full final CI passed, including Newsletter/image checks. Evidence: [interval verification](mailsort/docs/classification-interval-verification.md).
 
 ### Tasks planning and detail update (released)
 
@@ -41,6 +43,8 @@ and [same-SHA main 40255033152](https://github.com/ziyixi/todofy/actions/runs/40
 Worker comparison, account registration, VPS and resolved-infrastructure gate.
 GitHub Tasks deployment 7322171388 records verified success at 2026-10-26 01:38:17 UTC;
 Worker version is `34954a3f-6fd1-43b7-b02d-e483d00e801a`. Personal MCP released the same source as required.
+The subsequent verified monorepo release above republished Tasks with the same behavior at source `42897d14`:
+deployment 7322826331, Worker version `f9b85a6d-6e94-4e1f-a3ce-beca97913e3d`. Its matching reconcile also passed.
 
 Completed prerequisites and open Deadline windows surface inactive work in Parked, without changing stored
 stages or queues. Plan hides waiting tasks and their descendants across Review, Week, Quick and calendar;
