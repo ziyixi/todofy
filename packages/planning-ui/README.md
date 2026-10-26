@@ -70,8 +70,8 @@ steps run, complete and reorder by their whole row. A header checkbox shows the 
 The View statistics link opens [Tasks GTD](../../tasks/docs/gtd.md), which owns the weekly bars, monthly
 calendar and time-by-task report. Selecting a statistics day opens it in Focus for record editing. Plan and Focus both count from Tasks' today (`PlanState.today`, `FocusState.date`). A task's estimate is its Tasks
 duration: the host supplies `updateEstimate`, which writes Tasks and answers the saved duration
-and the task's new etag (`{ estimate, etag }`). A Step opens a panel for its time and direct deletion
-with confirmation (`StepEditor`); tasks open the full planning panel. Deletion uses Tasks' existing
+and the task's new etag (`{ estimate, etag }`). Steps, Standalone and Quick actions share the panel for
+optional estimates and direct deletion with confirmation (`StepEditor`); other tasks open the full planning panel. Deletion uses Tasks' existing
 DeleteTask under Plan's etag and a stable request ID, then reads the authoritative task and Focus state.
 
 Review keeps candidate columns together and gives Committed a separate full-width row of horizontal cards.
@@ -81,7 +81,7 @@ Plan's outcome, Step, Quick and calendar checkboxes complete like Focus, in one 
 day: calendar cards pass their own day, the rest Focus's. A retry resends the first request ID and day. A completed calendar
 Step stays in its day after the open ones, in Focus's done style, outside the day's total; its title opens Tasks' own
 dialog, where it can be reopened. Quick actions always qualify as standalone, even when an older
-response contains only the Quick flag. Quick has no Estimate editor. Calendar cards preserve the task's
+response contains only the Quick flag. Every executable kind also offers an optional estimate in native task details. Calendar cards preserve the task's
 configured clock time and timezone; an untimed Quick shows Quick, not an unknown estimate. Quick does not
 contribute to unknown-estimate counters. Existing stored estimates and time records are retained.
 Ordinary labels do not imply planning properties.

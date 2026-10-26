@@ -277,7 +277,6 @@ export function TaskDialog({
           finish={finish}
           onOpen={onOpen}
           executable={executable}
-          quick={planning.draft.quick}
           leadDays={planning.draft.leadDays}
           onLeadChange={(value) => planning.patch("leadDays", value)}
         >

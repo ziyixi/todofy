@@ -318,7 +318,7 @@ it("shows a scheduled Quick's configured clock in its task zone, with account fa
   expect(data).toEqual(before);
 });
 
-it("hides Quick's Estimate editor and preserves a stored estimate when changing back to Standalone", async () => {
+it("keeps Quick's Estimate editor and its stored estimate when changing back to Standalone", async () => {
   const actions = createPrototype();
   const quick = task("quick", {
     kind: "task",
@@ -340,8 +340,8 @@ it("hides Quick's Estimate editor and preserves a stored estimate when changing 
   };
   const { rerender } = render(<TaskEditor {...props} />);
   expect(
-    screen.queryByRole("combobox", { name: "Estimate: Synthetic quick" }),
-  ).toBeNull();
+    screen.getByRole("combobox", { name: "Estimate: Synthetic quick" }),
+  ).toHaveProperty("value", "25");
   const standalone = { ...quick, planningFlags: ["task"] };
   rerender(<TaskEditor {...props} task={standalone} tasks={[standalone]} />);
   expect(

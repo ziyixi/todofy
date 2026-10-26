@@ -12,7 +12,18 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-### Mail Hero backup quota simplification (`codex/mailhero-backup-simplify`)
+### Tasks executable estimate parity (`codex/tasks-next-step-estimate`)
+
+Steps, Standalone and Quick use the same estimate panel in Plan and Focus; native task details expose the
+optional estimate for all three. Presets and custom whole minutes save through the existing duration-only
+write. Kind, parent, execution flags, queues and configured Quick calendar time remain unchanged. Outcomes
+with child Steps retain their full planning editor. No schema change, default duration or task migration is added.
+Local checks passed 341 shared planning tests, 120 Tasks web tests and five focused real-D1 Chromium
+cases (all three executable kinds, Quick calendar dragging and outcome write etags); lint/types/build pass. Publication is gated by same-SHA branch/main CI and matching Personal cloud reconcile;
+actual release identity is recorded by GitHub production Deployments; no production tasks were read or edited.
+
+
+### Mail Hero backup quota simplification (released)
 
 Owner authorized implementation, same-SHA CI publication and bounded live acceptance. Keep daily 04:17 UTC
 backups, the existing v2 restore format and all current mail/verified backups. Move transient source/file
@@ -23,8 +34,14 @@ Implementation and restore roundtrip are complete. New DO writes first/repeat ar
 186/153 for 1,000 (97.6% lower on the 1,000 repeat). Existing Python restore tests 11/11 pass.
 The 2,500-object fixture still takes 33 Alarm ticks, with no increase in scheduling bounds.
 Local/CI/publication evidence: [backup write verification](mail-hero/docs/backup-write-verification.md).
-Publication uses same-SHA branch/main CI and matching Personal cloud reconcile; actual build/verified release
-identity belongs to GitHub production Deployments. Shared owner/Claude checkout remains untouched.
+Source `d1a6e526c7e5de5138ef750a13decd8b439db9c6` passed [branch CI40283095333](https://github.com/ziyixi/todofy/actions/runs/40283095333),
+[same-SHA main40283588911](https://github.com/ziyixi/todofy/actions/runs/40283588911) and
+[reconcile40283801879](https://github.com/ziyixi/todofy/actions/runs/40283801879), including VPS/resource registration
+and resolved-infrastructure gate. Mail Hero deployment7326047450 records Worker version
+`ce420e14-42d2-4716-a9ea-f92cc1b74326`; provider BUILD_SHA matches. Daily04:17 UTC remains enabled,
+5GiB limit/operating switches unchanged. No extra production backup was triggered, to avoid invoking normal
+rotation of existing backups. The next natural production backup and its mixed daily usage are not yet observed.
+Shared owner/Claude checkout remains untouched.
 
 
 ### Mailsort recent read Inbox classification (`codex/mailsort-recent-read-mail`)

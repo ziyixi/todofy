@@ -419,7 +419,7 @@ it("maps each Execution choice atomically while Routine and hidden saved flags s
     ).toHaveLength(1);
     expect(
       Boolean(screen.queryByRole("spinbutton", { name: "Duration (minutes)" })),
-    ).toBe(mode === "Standalone");
+    ).toBe(mode !== "Steps");
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(index + 1));
     const flags = save.mock.calls[index]?.[3]?.values.planningFlags || [];
@@ -516,6 +516,59 @@ it("leaves an actual Step executable without offering an Execution mode", () => 
     screen.getByRole("spinbutton", { name: "Duration (minutes)" }),
   ).toBeTruthy();
 });
+
+it.each(["step", "standalone", "quick"] as const)(
+  "saves and reopens a %s estimate in native details without changing its execution or clock",
+  async (execution) => {
+    const task = create(TaskSchema, {
+      ...original,
+      kind: execution === "step" ? "step" : "task",
+      planningFlags:
+        execution === "step"
+          ? []
+          : execution === "quick"
+            ? ["quick"]
+            : ["task"],
+      dueDate: "2026-10-26",
+      dueDatetime: "2026-10-26T04:25:00Z",
+      dueTimezone: "Asia/Tokyo",
+    });
+    const save = vi
+      .fn<SaveTask>()
+      .mockImplementation(async (draft, current) =>
+        create(TaskSchema, { ...current!, ...draft, etag: "2" }),
+      );
+    const view = editor(save, task);
+    const duration = screen.getByRole<HTMLInputElement>("spinbutton", {
+      name: "Duration (minutes)",
+    });
+    fireEvent.change(duration, { target: { value: "47" } });
+    expect(duration.checkValidity()).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(save.mock.calls[0]?.[3]?.paths).toEqual([]);
+    const saved = await save.mock.results[0]!.value;
+    expect(saved.durationMinutes).toBe(47);
+    for (const field of [
+      "kind",
+      "parentId",
+      "planningFlags",
+      "dueDate",
+      "dueDatetime",
+      "dueTimezone",
+    ] as const)
+      expect(saved[field]).toEqual(task[field]);
+    view.unmount();
+    editor(save, saved);
+    expect(
+      (
+        screen.getByRole("spinbutton", {
+          name: "Duration (minutes)",
+        }) as HTMLInputElement
+      ).value,
+    ).toBe("47");
+  },
+);
 
 it("keeps the direct goal on description, planning and date edits without loading the catalog", async () => {
   const catalogRead = vi.spyOn(api, "getGoalCatalog");

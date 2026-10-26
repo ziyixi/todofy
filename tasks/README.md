@@ -64,9 +64,9 @@ restore into a new database and the one-time copy of what Todofy kept for Tasks.
 
 A Task or Subtask describes an outcome. Execution selects Steps, Standalone or Quick in both task editors:
 Steps arranges the actions beneath the task, Standalone schedules the task itself, and Quick makes it a short
-standalone action. Routine is independent of that choice. Executable Steps and Standalone actions expose a
-clock time and estimate. Quick keeps clock-time editing but does not ask for an estimate; calendar cards show
-its configured time, or Quick when no time is set, without an unknown-estimate marker. A Quick action
+standalone action. Routine is independent of that choice. Steps, Standalone and Quick share the same estimate
+panel in Plan and Focus, and all expose optional clock time and estimate fields in task details. Quick's
+calendar cards show its configured time, or Quick when no time is set, without an unknown-estimate marker. A Quick action
 with a Deadline stays out of the Quick tray until its start-ahead window opens, unless already active; zero lead opens
 on the Deadline day.
 Task editors no longer offer manual In progress, Waiting, On hold or Parked controls. Their saved flags still

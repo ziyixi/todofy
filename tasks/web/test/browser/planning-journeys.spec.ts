@@ -208,14 +208,12 @@ test("a dependency is added in the details, and completing its prerequisite in F
   expect(state.requests).toEqual([]);
 });
 
-test("Plan's task writes read nothing first: an estimate, the planning save after it and a dependency each go under the etag the last one gave", async ({
+test("Plan's task writes read nothing first: a planning save and a dependency use successive etags", async ({
   page,
 }) => {
   const state = await stubPlanning(page, {
     tasks: [
-      outcome("estimated", "Synthetic estimated action", {
-        planning_flags: ["task"],
-      }),
+      outcome("estimated", "Synthetic estimated action"),
       outcome("awaited", "Synthetic awaited outcome"),
     ],
   });
@@ -228,9 +226,6 @@ test("Plan's task writes read nothing first: an estimate, the planning save afte
   await openPlan(page, state);
   const dialog = await details(page, "Synthetic estimated action");
   const before = state.tasksRequests.length;
-  const estimate = dialog.getByLabel("Estimate: Synthetic estimated action");
-  await estimate.selectOption("60");
-  await expect.poll(() => answers).toEqual([200]);
   const area = dialog.getByLabel("Work / Personal");
   await expect(area).toBeEnabled();
   await area.selectOption("personal");
@@ -238,7 +233,7 @@ test("Plan's task writes read nothing first: an estimate, the planning save afte
     .locator(".plus-editor-planning")
     .getByRole("button", { name: "Save", exact: true })
     .click();
-  await expect.poll(() => answers).toEqual([200, 200]);
+  await expect.poll(() => answers).toEqual([200]);
   const section = dialog.locator(".plus-dependencies");
   await section.getByRole("button", { name: "Add a dependency" }).click();
   await section
@@ -247,7 +242,7 @@ test("Plan's task writes read nothing first: an estimate, the planning save afte
   await section
     .getByRole("combobox", { name: "Search tasks or parents" })
     .press("Enter");
-  await expect.poll(() => answers).toEqual([200, 200, 200]);
+  await expect.poll(() => answers).toEqual([200, 200]);
   // One UpdateTask each, and no read of the task: every answer carries the etag the next one needs.
   expect(
     state.tasksRequests
@@ -258,7 +253,6 @@ test("Plan's task writes read nothing first: an estimate, the planning save afte
         query(request, "update_mask"),
       ]),
   ).toEqual([
-    ["PATCH", "/api/tasks/v1/tasks/estimated", "duration_minutes"],
     ["PATCH", "/api/tasks/v1/tasks/estimated", "area"],
     ["PATCH", "/api/tasks/v1/tasks/estimated", "dependencies"],
   ]);

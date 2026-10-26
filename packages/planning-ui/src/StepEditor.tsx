@@ -31,11 +31,10 @@ export interface StepEditorProps {
 }
 
 /**
- * A Step's planning panel. A step takes its stage and area from its outcome, so its only planning
- * fact is how long it takes: four presets and a typed number of minutes. It can also be deleted
- * here after confirmation. Other fields are in the task's own dialog (Open task). A choice shows
- * at once and the step's cards wait until Tasks saves it; the presets are only aria-disabled
- * meanwhile, so focus stays on the one pressed.
+ * The execution panel for Steps, Standalone and Quick actions: four estimate presets and a typed
+ * number of minutes, with deletion after confirmation. Other fields are in the task's own dialog
+ * (Open task). A choice shows at once and its cards wait until Tasks saves it; the presets are
+ * only aria-disabled meanwhile, so focus stays on the one pressed.
  */
 export function StepEditor({
   task,
@@ -51,6 +50,7 @@ export function StepEditor({
 }: StepEditorProps) {
   const text = words(language);
   const title = displayedTitle(task.title);
+  const deleteLabel = task.kind === "task" ? text.deleteTask : text.deleteStep;
   const saved = task.estimatedMinutes;
   const preset = STEP_MINUTES.some((value) => value === saved);
   // Only typed minutes have a draft; otherwise the field shows a saved value no preset has.
@@ -173,7 +173,7 @@ export function StepEditor({
           <div
             className="plus-step-delete-confirm"
             role="group"
-            aria-label={text.deleteStep}
+            aria-label={deleteLabel}
             onKeyDown={(event) => {
               if (event.key !== "Escape") return;
               event.preventDefault();
@@ -208,7 +208,7 @@ export function StepEditor({
               setConfirmDelete(true);
             }}
           >
-            {text.deleteStep}
+            {deleteLabel}
           </button>
         )}
       </div>

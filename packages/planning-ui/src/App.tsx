@@ -19,7 +19,7 @@ import {
   RefreshCw,
   Square,
 } from "lucide-react";
-import { displayedTitle, elapsed } from "./domain";
+import { displayedTitle, elapsed, isSchedulable } from "./domain";
 import { words } from "./i18n";
 import { readableDate, weekLabel } from "./PlanningCalendar";
 import {
@@ -652,6 +652,7 @@ export function App({
     });
   }
   const selected = data?.plan.tasks.find((task) => task.id === selectedId);
+  const selectedExecutable = selected?.kind && isSchedulable(selected);
   // A task whose stage drag waits still carries its old etag, so its editor waits too.
   const selectedPending = Boolean(
     selected && pendingCards.has(pendingTask(selected.id)),
@@ -980,7 +981,7 @@ export function App({
               }
             }}
           >
-            {selected && data && selected.kind === "step" && (
+            {selected && data && selectedExecutable && (
               <StepEditor
                 // Not keyed by its pending estimate: a save keeps the panel and its focus.
                 key={selected.id}
@@ -999,7 +1000,7 @@ export function App({
                 }}
               />
             )}
-            {selected && data && selected.kind !== "step" && (
+            {selected && data && !selectedExecutable && (
               <TaskEditor
                 // Once the drag settles, the fields show what the server kept.
                 key={`${selected.id}:${selectedPending}`}

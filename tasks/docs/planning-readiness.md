@@ -38,7 +38,9 @@ one-card deduplication, acknowledgement after reload, unchanged dates/queues, re
 Save return navigation. Tests live in the shared planning suite, Tasks' real D1 planning/copy/read-budget
 tests and `tasks/web/test/browser/planning-readiness.spec.ts` plus `task-editor-save.spec.ts`.
 
-Quick does not ask for an estimate in either task editor. Its configured date/time remains editable; calendar
+Steps, Standalone and Quick share the estimate panel in Plan and Focus. Each also exposes its optional
+estimate in task details; a save keeps the same execution kind, parent, flags and calendar clock.
+Quick's configured date/time remains editable; calendar
 cards show the configured wall-clock time in the task's timezone (otherwise the account timezone). An untimed
 Quick shows Quick instead of an unknown duration, and missing Quick estimates do not count as unknown.
 No default duration is invented, and stored estimates, queue dates and recorded time remain intact.

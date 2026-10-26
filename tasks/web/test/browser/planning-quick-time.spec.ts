@@ -22,7 +22,7 @@ async function dragToDay(page: Page, source: Locator, target: Locator) {
   await page.mouse.up();
 }
 
-test("Quick keeps its configured clock when dragged to a calendar day and needs no estimate", async ({
+test("Quick keeps its configured clock when dragged to a calendar day and offers an optional estimate", async ({
   page,
   request,
 }, testInfo) => {
@@ -58,7 +58,7 @@ test("Quick keeps its configured clock when dragged to a calendar day and needs 
   ).toBeChecked();
   await expect(
     native.getByRole("spinbutton", { name: "Duration (minutes)", exact: true }),
-  ).toHaveCount(0);
+  ).toBeVisible();
   await native.getByRole("button", { name: "Date", exact: true }).click();
   await native
     .getByRole("button", { name: "Time options", exact: true })
@@ -79,8 +79,8 @@ test("Quick keeps its configured clock when dragged to a calendar day and needs 
   const planning = page.getByRole("dialog", { name: title, exact: true });
   await expect(planning).toBeVisible();
   await expect(
-    planning.getByRole("combobox", { name: `Estimate: ${title}`, exact: true }),
-  ).toHaveCount(0);
+    planning.getByRole("spinbutton", { name: "Estimate", exact: true }),
+  ).toBeVisible();
   await page.keyboard.press("Escape");
   const day = page.locator(`.planning-calendar-day[data-date="${today}"]`);
   await dragToDay(

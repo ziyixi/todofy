@@ -34,8 +34,10 @@ Each list's header opens its own compact Add step or Add subtask input; Escape c
 It reads a task's children only when its GetTask reply counts some (`child_count`).
 Native task details and Plan's task editor share an Execution choice: Steps clears `task` and `quick`, Standalone
 sets `task` and clears `quick`, and Quick sets both. The choice does not change `kind`. Routine has its own switch. Existing
-Quick state is projected as standalone without a database backfill. Quick keeps clock-time editing but
-hides Estimate; calendar cards carry its existing configured time and timezone, or the Quick label if untimed.
+Quick state is projected as standalone without a database backfill. Steps, Standalone and Quick share the
+same execution panel in Plan and Focus, with estimate presets and custom whole minutes. Task details expose
+the optional estimate for all three. Quick keeps clock-time editing; calendar cards carry its existing
+configured time and timezone, or the Quick label if untimed.
 Missing Quick estimates do not count as unknown, while stored estimates and time records remain intact. Task editors omit manual In progress,
 Waiting, On hold and Parked controls; saved flags retain their planning behavior and survive unrelated edits.
 Choosing a planning stage still clears Parked, and Plan's existing Start and drag actions remain available.

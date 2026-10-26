@@ -49,7 +49,15 @@ MAILHERO_BACKUP_QUOTA_AUDIT=1 node --test \
 
 ## 发布核对
 
-应用发布只走同一 green SHA 的分支 CI 与 main Actions；实际版本以 GitHub `deploy:mail-hero`
-Deployment 和对应 main 运行记录为准，交付前还须完成同一 main SHA 的 Personal cloud reconcile。
+本次源码 `d1a6e526c7e5de5138ef750a13decd8b439db9c6` 已通过
+[分支 CI40283095333](https://github.com/ziyixi/todofy/actions/runs/40283095333)、
+[同 SHA main40283588911](https://github.com/ziyixi/todofy/actions/runs/40283588911) 和
+[对账40283801879](https://github.com/ziyixi/todofy/actions/runs/40283801879)。
+Mail Hero Deployment7326047450 在 2026-10-26 07:06:50 UTC 验证成功，Worker 版本
+`ce420e14-42d2-4716-a9ea-f92cc1b74326`，实际 BUILD_SHA 与源码一致。
+每日04:17 UTC开关、5GiB上限、维护和投递开关均保持原值。
+
+本次未额外触发生产备份，避免手动副本触发原有轮转；已有备份和邮件未清理。
+新版后的下一次自然备份及其生产用量尚待发生。
 线上验收只读取构建、备份时间、运行阶段和对象计数，不下载真实邮件或备份内容。
 本表是合成存储实测，不将整个账户的混合用量当作单次生产备份的精确统计。

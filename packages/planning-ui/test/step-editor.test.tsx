@@ -104,6 +104,88 @@ it("shows a step's heading, parents, time choices and direct deletion", async ()
   expect(panel.queryByText("Over 2 hours", { exact: false })).toBeNull();
 });
 
+it.each(["step", "standalone", "quick"] as const)(
+  "edits and reopens a %s estimate through the same Focus panel",
+  async (execution) => {
+    const actions = native();
+    const load = actions.load.bind(actions);
+    actions.load = async (week) => {
+      const data = await load(week);
+      data.plan.tasks = data.plan.tasks.map((task) =>
+        task.id === "copy"
+          ? {
+              ...task,
+              kind: execution === "step" ? "step" : "task",
+              planningFlags:
+                execution === "step"
+                  ? []
+                  : execution === "quick"
+                    ? ["quick"]
+                    : ["task"],
+              due: "2026-10-13",
+              dueDatetime: "2026-10-13T04:25:00Z",
+              dueTimezone: "Asia/Tokyo",
+            }
+          : task,
+      );
+      return data;
+    };
+    const before = (await actions.load()).plan.tasks.find(
+      (task) => task.id === "copy",
+    )!;
+    const update = vi.spyOn(actions, "updateEstimate");
+    const mount = () =>
+      render(
+        <App
+          actions={actions}
+          view="focus"
+          language="en"
+          onOpenTask={vi.fn()}
+          onSettings={vi.fn()}
+        />,
+      );
+    const app = mount();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Write the introduction" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Write the introduction",
+    });
+    expect(within(dialog).queryAllByRole("combobox")).toEqual([]);
+    expect(dialog.querySelector(".plus-task-breadcrumb")?.textContent).toBe(
+      "Ship the small website refresh",
+    );
+    fireEvent.click(preset(dialog, 60));
+    await waitFor(() => expect(update).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(preset(dialog, 60).hasAttribute("aria-disabled")).toBe(false),
+    );
+    expect(update).toHaveBeenCalledWith(before, 60);
+    const saved = (await actions.load()).plan.tasks.find(
+      (task) => task.id === "copy",
+    )!;
+    expect(saved).toEqual({
+      ...before,
+      estimatedMinutes: 60,
+      etag: expect.any(String),
+    });
+    app.unmount();
+    mount();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Write the introduction" }),
+    );
+    const reopened = await screen.findByRole("dialog", {
+      name: "Write the introduction",
+    });
+    expect(pressed(reopened)).toEqual(["60 min"]);
+    expect(
+      screen.getByRole("button", {
+        name: "Complete task: Write the introduction",
+      }),
+    ).toBeTruthy();
+  },
+);
+
 /** The step as Plan holds it, whose etag the estimate write goes under. */
 const copy = expect.objectContaining({ id: "copy", etag: expect.any(String) });
 
