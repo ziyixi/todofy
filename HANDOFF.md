@@ -12,6 +12,21 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+### Mail Hero backup quota simplification (`codex/mailhero-backup-simplify`)
+
+Owner authorized implementation, same-SHA CI publication and bounded live acceptance. Keep daily 04:17 UTC
+backups, the existing v2 restore format and all current mail/verified backups. Move transient source/file
+inventories from per-object SQLite rows into private R2 work checkpoints; DO keeps one small batch cursor.
+Baseline at `459bf7da`: 100 objects first/repeat 717/776 DO writes; 1,000 objects 5,457/6,434
+(SQL rowsWritten including indexes plus setAlarm). Fixtures contain synthetic R2 objects only.
+Implementation and restore roundtrip are complete. New DO writes first/repeat are 123/81 for 100 objects,
+186/153 for 1,000 (97.6% lower on the 1,000 repeat). Existing Python restore tests 11/11 pass.
+The 2,500-object fixture still takes 33 Alarm ticks, with no increase in scheduling bounds.
+Local/CI/publication evidence: [backup write verification](mail-hero/docs/backup-write-verification.md).
+Publication uses same-SHA branch/main CI and matching Personal cloud reconcile; actual build/verified release
+identity belongs to GitHub production Deployments. Shared owner/Claude checkout remains untouched.
+
+
 ### Mailsort recent read Inbox classification (`codex/mailsort-recent-read-mail`)
 
 Owner confirmed the automatic scope as the last 48 hours of Inbox without P1-P4, including read mail.

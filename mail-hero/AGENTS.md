@@ -120,6 +120,7 @@ D1 Time Travel Free7天只恢复D1，不恢复R2、DO或secrets。完整备份�
 - 备份使用最长30分钟DO租约，暂停解析、交付、清理与API写入；新邮件继续进入DO/R2并归入下一次快照。它不是MAINTENANCE_MODE。
 - 私有 BACKUP_STORE 保存普通 v2 数据副本、manifest、最小 verified marker 和删除清单。用户明确不需要新增备份加密；不添加PGP、恢复公钥、密文分块或相关secret。旧v1密文与GPG恢复保持兼容。
 - 复用 DO Alarm，有界导出 D1/DO 并流式复制原 R2 文件；最长30分钟一致性租约，过期释放业务暂停。完整大小/hash/引用检查后才登记成功与轮转7每日+4每周，失败只清理自己的未验证prefix。
+- 新备份的临时对象/文件清单放在 `BACKUP_STORE` 的 `native-work/<id>/`，每批更新一次 DO 小游标；不再逐对象写入 SQLite。工作文件在终态清理，不属于 v2 恢复格式。最终快照及旧 v1/v2 下载恢复合同保持兼容。
 - 复制完成先做租约有效的内部 durable commit，再写完成marker、同步D1 freshness；中断续同ID。旧v1 HMAC finish不开放内部bypass，新旧执行器不能抢占同一个快照。
 - 快照不导出Worker secrets。恢复原应用密钥与机器凭据按原独立秘密清单处理；不为备份再造密钥管理流程。接口/操作见[每日备份](docs/native-backup.md)。
 - 恢复需独立归档校验值及最新删除清单。隔离恢复强制暂停并保留event ID/payload；新Cloudflare资源导入、DO重建和未知交付对账需单独验收。

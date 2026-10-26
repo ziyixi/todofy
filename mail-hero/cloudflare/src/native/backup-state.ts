@@ -1,7 +1,7 @@
 import type { Env } from './types.ts';
 import { canonicalJSON, verifyBackupReceipt, type BackupReceipt } from './backup.ts';
 import { sha256 } from './security.ts';
-import type { NativeBackupMarker } from './native-backup-format.ts';
+import type { NativeBackupMarker, NativeBackupObject } from './native-backup-format.ts';
 
 type Row = Record<string, any>;
 interface Lease {
@@ -100,10 +100,14 @@ export class BackupState {
     const lease = this.requireReady(marker.backup_id);
     if (!lease || lease.executor !== 'native' || marker.proof !== 'native_readback_verified' ||
       !/^[0-9a-f]{64}$/.test(marker.manifest_sha256) || !/^[0-9a-f]{64}$/.test(marker.sha256)) throw new Error('native_backup_not_ready');
-    const exported = await this.fetch(new Request(`https://coordinator/backup/manifest?backup_id=${lease.id}`));
-    if (!exported?.ok) throw new Error('native_backup_incomplete');
-    const manifest = await exported.json() as Row;
-    if (manifest.manifest_sha256 !== sourceManifestHash || !this.nativeReady(lease.id)) throw new Error('native_backup_manifest_changed');
+    let preparedHash = lease.source_manifest_sha256;
+    if (!preparedHash) {
+      // Finish a snapshot prepared before inventories moved from SQLite to R2.
+      const exported = await this.fetch(new Request(`https://coordinator/backup/manifest?backup_id=${lease.id}`));
+      if (!exported?.ok) throw new Error('native_backup_incomplete');
+      preparedHash = (await exported.json() as Row).manifest_sha256;
+    }
+    if (preparedHash !== sourceManifestHash || !this.nativeReady(lease.id)) throw new Error('native_backup_manifest_changed');
     lease.state = 'remote_verified'; lease.manifest_sha256 = marker.manifest_sha256;
     lease.source_manifest_sha256 = sourceManifestHash; lease.remote_locator = marker.key;
     lease.verified_at = marker.verified_at; lease.verification = marker.proof;
@@ -193,12 +197,41 @@ export class BackupState {
     const blocks = this.storage.sql.exec<{ n: number; bytes: number }>('SELECT count(*) n,COALESCE(sum(length(CAST(value AS BLOB))),0) bytes FROM backup_blocks WHERE backup_id=?', lease.id).one();
     return objects.n + blocks.n <= EXPORT_MAX_ROWS && objects.bytes + blocks.bytes + 1024 <= EXPORT_MAX_BYTES;
   }
-  private async manifest(lease: Lease): Promise<{ value: Row; hash: string }> {
+  private async manifest(lease: Lease, sourceObjects?: NativeBackupObject[]): Promise<{ value: Row; hash: string }> {
     const blocks = this.storage.sql.exec<{ value: string }>('SELECT value FROM backup_blocks WHERE backup_id=? ORDER BY name', lease.id).toArray().map(row => JSON.parse(row.value));
-    const objects = this.storage.sql.exec<{ metadata: string }>('SELECT metadata FROM backup_objects WHERE backup_id=? ORDER BY key', lease.id).toArray().map(row => JSON.parse(row.metadata));
+    const objects = sourceObjects ?? this.storage.sql.exec<{ metadata: string }>('SELECT metadata FROM backup_objects WHERE backup_id=? ORDER BY key', lease.id).toArray().map(row => JSON.parse(row.metadata));
     const value = { version: 1, backup_id: lease.id, created_at: lease.created_at, cut_at: lease.cut_at,
       cut_seq: lease.cut_seq, blocks, objects, credential_key_included: false };
     return { value, hash: await sha256(canonicalJSON(value)) };
+  }
+  private objectPage(lease: Lease, page: R2Objects): Row {
+    const objects = page.objects.filter(object => !object.key.startsWith('raw/') ||
+      !object.customMetadata?.ingest_seq || Number(object.customMetadata.ingest_seq) <= lease.cut_seq!).map(object => ({
+        key: object.key, size: object.size, etag: object.etag, uploaded: object.uploaded.toISOString(),
+        customMetadata: object.customMetadata ?? {}, httpMetadata: object.httpMetadata ?? {},
+      }));
+    return { objects, next_cursor: page.truncated ? page.cursor : null, complete: !page.truncated };
+  }
+  /** Native-only: inventory bytes live in the runner's R2 checkpoint, never per-object SQL rows. */
+  async prepareNativeManifest(objects: NativeBackupObject[]): Promise<{ manifest: Row; manifest_sha256: string }> {
+    const lease = this.current();
+    if (!lease || !this.nativeReady(lease.id)) throw new Error('native_backup_not_ready');
+    if (!this.exportsComplete(lease)) throw new Error('native_backup_incomplete');
+    const manifest = await this.manifest(lease, objects);
+    if (objects.length > EXPORT_MAX_ROWS || new TextEncoder().encode(canonicalJSON(manifest.value)).byteLength > EXPORT_MAX_BYTES) {
+      throw new Error('native_backup_manifest_limit');
+    }
+    if (!this.nativeReady(lease.id)) throw new Error('native_backup_lease_expired');
+    lease.source_manifest_sha256 = manifest.hash; this.save(lease);
+    return { manifest: manifest.value, manifest_sha256: manifest.hash };
+  }
+  private exportsComplete(lease: Lease): boolean {
+    if (!lease.tables || !this.blockValue(lease, 'control.json') || !this.blockValue(lease, 'database-schema.json')) return false;
+    for (const table of lease.tables) {
+      const blocks = this.storage.sql.exec<{ value: string }>('SELECT value FROM backup_blocks WHERE backup_id=? AND name LIKE ?', lease.id, `database/${table}/%`).toArray();
+      if (!blocks.some(block => JSON.parse(block.value).complete)) return false;
+    }
+    return true;
   }
   async fetch(request: Request, executor: 'native' | 'external' = 'external'): Promise<Response | null> {
     const url = new URL(request.url), path = url.pathname;
@@ -318,16 +351,17 @@ export class BackupState {
     }
     if (path === '/backup/objects' && request.method === 'GET') {
       const cursor = url.searchParams.get('cursor') || null;
+      if (executor === 'native') {
+        const page = await this.env.MAIL_STORE.list({ cursor: cursor ?? undefined, limit: PAGE_SIZE, include: ['customMetadata', 'httpMetadata'] });
+        if (!this.requireReady(lease.id)) return responseError(409, 'backup_lease_expired');
+        return Response.json(this.objectPage(lease, page));
+      }
       const cached = this.storage.sql.exec<{ value: string }>('SELECT value FROM backup_object_pages WHERE backup_id=? AND cursor=?',lease.id,cursor ?? '').toArray()[0];
       if (cached) return new Response(cached.value, { headers: { 'Content-Type': 'application/json' } });
       if (cursor !== lease.object_cursor || lease.objects_done) return responseError(409, 'object_pages_out_of_order');
       const page = await this.env.MAIL_STORE.list({ cursor: cursor ?? undefined, limit: PAGE_SIZE, include: ['customMetadata', 'httpMetadata'] });
       if (!this.requireReady(lease.id)) return responseError(409, 'backup_lease_expired');
-      const objects = page.objects.filter(object => !object.key.startsWith('raw/') ||
-        !object.customMetadata?.ingest_seq || Number(object.customMetadata.ingest_seq) <= lease.cut_seq!).map(object => ({
-          key: object.key, size: object.size, etag: object.etag, uploaded: object.uploaded.toISOString(),
-          customMetadata: object.customMetadata ?? {}, httpMetadata: object.httpMetadata ?? {},
-        }));
+      const { objects } = this.objectPage(lease, page);
       for (const object of objects) this.storage.sql.exec('INSERT OR REPLACE INTO backup_objects VALUES(?,?,?)', lease.id, object.key, canonicalJSON(object));
       lease.object_cursor = page.truncated ? page.cursor : null; lease.objects_done = !page.truncated; this.save(lease);
       const value = canonicalJSON({ objects, next_cursor: lease.object_cursor, complete: lease.objects_done });
@@ -344,11 +378,7 @@ export class BackupState {
     }
     if ((path === '/backup/manifest' || path === '/backup/finish') && !this.manifestFits(lease)) return responseError(413, 'backup_manifest_export_limit');
     if (path === '/backup/manifest' && request.method === 'GET') {
-      if (!lease.objects_done || !lease.tables || !this.blockValue(lease, 'control.json') || !this.blockValue(lease, 'database-schema.json')) return responseError(409, 'snapshot_export_incomplete');
-      for (const table of lease.tables) {
-        const blocks = this.storage.sql.exec<{ value: string }>('SELECT value FROM backup_blocks WHERE backup_id=? AND name LIKE ?', lease.id, `database/${table}/%`).toArray();
-        if (!blocks.some(block => JSON.parse(block.value).complete)) return responseError(409, 'snapshot_export_incomplete');
-      }
+      if (!lease.objects_done || !this.exportsComplete(lease)) return responseError(409, 'snapshot_export_incomplete');
       const manifest = await this.manifest(lease);
       return Response.json({ manifest: manifest.value, manifest_sha256: manifest.hash });
     }

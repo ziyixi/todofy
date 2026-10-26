@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -66,6 +67,7 @@ async function harness(extra = {}, { platformAlarms = false } = {}) {
           };
           if(name==='get')return async(key,...args)=>{
             metrics.r2_calls++;
+            if(faults.value==='journal:'+key) {faults.value=null;throw new Error('synthetic_journal_unavailable')}
             const value=await target.get(key,...args);
             if(faults.value==='readback' && key.startsWith('snapshots-v2/')) {faults.value=null;return null}
             if(faults.value==='corrupt_readback' && value && key.startsWith('snapshots-v2/')) {
@@ -271,6 +273,65 @@ test('native DO Alarm snapshot: writer drain, post-cut intake, restart, whole fi
   } finally { await h.close(); }
 });
 
+test('actual native snapshot restores through the Python bridge with frozen bytes and paused recovery', { timeout: 120000 }, async () => {
+  const h = await harness(), temporary = await mkdtemp(join(tmpdir(), 'mailhero-native-restore-'));
+  try {
+    const source = await seed(h);
+    await h.db.prepare("UPDATE deliveries SET state='sending',claim_token='synthetic-claim',lease_until=? WHERE event_id=?")
+      .bind(new Date(Date.now() + 60_000).toISOString(), source.eventID).run();
+    const state = await advance(h, value => value.native.phase === 'complete');
+    const bucket = await h.bucket('BACKUP_STORE');
+    const marker = await (await bucket.get(`verified-v2/${state.backup_id}.json`)).json();
+    const prefix = marker.key.slice(0, -'manifest.json'.length), bundle = join(temporary, 'download'), entries = [];
+    await mkdir(bundle, { mode: 0o700 });
+    let cursor;
+    do {
+      const page = await bucket.list({ prefix, cursor, include: ['customMetadata'] });
+      for (const object of page.objects) {
+        const bytes = Buffer.from(await (await bucket.get(object.key)).arrayBuffer());
+        const path = 'snapshot/' + object.key.slice(prefix.length), destination = join(bundle, path);
+        assert.equal(hash(bytes), object.customMetadata.sha256);
+        await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+        await writeFile(destination, bytes, { mode: 0o600 });
+        entries.push({ key: object.key, path, bytes: bytes.length, sha256: hash(bytes) });
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    const journal = Buffer.from(canonicalJSON({ version: 1, fetched_at: new Date().toISOString(), items: [] }));
+    const journalPath = join(bundle, 'latest-deletions.json');
+    await writeFile(journalPath, journal, { mode: 0o600 });
+    const receipt = Buffer.from(canonicalJSON({ version: 2, format: 'mailhero.native-download.v2', marker,
+      objects: entries.sort((a, b) => a.key.localeCompare(b.key)), latest_deletions: { bytes: journal.length, sha256: hash(journal) } }));
+    await writeFile(join(bundle, 'receipt.json'), receipt, { mode: 0o600 });
+    const destination = join(temporary, 'restored');
+    const recovered = JSON.parse(execFileSync('python3', [join(root, '../deploy/backup/native_backup.py'), 'restore',
+      '--bundle', bundle, '--receipt-sha256', hash(receipt), '--latest-deletions', journalPath, '--destination', destination], { encoding: 'utf8' }));
+    assert.equal(recovered.state, 'isolated_requires_reconciliation');
+    assert.equal(recovered.native_format_version, 2);
+    assert.equal(recovered.force_send_paused, true);
+    assert.equal(recovered.maintenance_mode, true);
+    assert.equal(recovered.activation_allowed, false);
+    assert.equal(recovered.do_alarm_restored, false);
+    const inventory = JSON.parse(await readFile(join(destination, 'r2-objects.json'), 'utf8')).objects;
+    const raw = inventory.find(item => item.key === source.rawKey), payload = inventory.find(item => item.key === source.payloadKey);
+    assert.deepEqual(await readFile(join(destination, raw.path)), source.raw);
+    assert.deepEqual(await readFile(join(destination, payload.path)), source.payload);
+    assert.equal(raw.customMetadata.mode, 'archive');
+    assert.equal(raw.httpMetadata.contentType, 'message/rfc822');
+    const restoredDB = JSON.parse(execFileSync('python3', ['-c', `
+import json, sqlite3, sys
+with sqlite3.connect(sys.argv[1]) as db:
+    print(json.dumps({
+        'send_paused': db.execute('SELECT send_paused FROM app_settings').fetchone()[0],
+        'endpoint_paused': db.execute('SELECT paused FROM webhook_endpoints').fetchone()[0],
+        'delivery': db.execute('SELECT event_id,message_id,payload_sha256,state,last_error,claim_token,lease_until FROM deliveries').fetchone()
+    }))
+`, join(destination, 'database.sqlite')], { encoding: 'utf8' }));
+    assert.deepEqual(restoredDB, { send_paused: 1, endpoint_paused: 1,
+      delivery: [source.eventID, source.id, hash(source.payload), 'failed', 'restore_reconciliation_required', null, null] });
+  } finally { await h.close(); await rm(temporary, { recursive: true, force: true }); }
+});
+
 test('quota audit: bounded SQLite rows and per-Alarm calls for ordinary snapshots', { timeout: 120000 }, async t => {
   for (const count of process.env.MAILHERO_BACKUP_QUOTA_AUDIT === '1' ? [100, 1000] : [100]) {
     const h = await harness();
@@ -284,7 +345,11 @@ test('quota audit: bounded SQLite rows and per-Alarm calls for ordinary snapshot
       const top_writes = Object.entries(metrics.queries).sort((a,b)=>b[1].writes-a[1].writes).slice(0,10);
       const {queries,...totals}=metrics;
       assert.ok(metrics.rows_read < (count === 100 ? 8000 : 50000));
-      assert.ok(metrics.rows_written + metrics.alarm_writes < (count === 100 ? 1500 : 9000));
+      for (const [sql, measured] of Object.entries(metrics.queries)) {
+        if (/^(INSERT|UPDATE|DELETE).*\b(backup_objects|native_backup_copies|native_backup_deletions)\b/.test(sql)) assert.equal(measured.writes, 0, sql);
+      }
+      assert.equal((await (await h.bucket('BACKUP_STORE')).list({ prefix: 'native-work/' })).objects.length, 0);
+      assert.ok(metrics.rows_written + metrics.alarm_writes < (count === 100 ? 200 : 400));
       // Workers Free: an invocation may make 1,000 subrequests to Cloudflare services (R2 calls and D1 queries), at most
       // 50 of them D1 queries. A backup tick spends at most 400 of them, and the Alarm a few of its own.
       assert.ok(metrics.max_alarm_d1_calls <= 50); assert.ok(metrics.max_alarm_r2_calls + metrics.max_alarm_d1_calls <= 450);
@@ -294,7 +359,7 @@ test('quota audit: bounded SQLite rows and per-Alarm calls for ordinary snapshot
       const repeated = await h.call('/test/metrics'), delta = {};
       for (const key of ['rows_read','rows_written','alarm_writes','d1_reads','d1_writes','d1_calls','r2_calls']) delta[key] = repeated[key] - metrics[key];
       assert.ok(delta.rows_read < (count === 100 ? 8000 : 50000));
-      assert.ok(delta.rows_written + delta.alarm_writes < (count === 100 ? 1500 : 9000));
+      assert.ok(delta.rows_written + delta.alarm_writes < (count === 100 ? 150 : 400));
       t.diagnostic(JSON.stringify({objects:count,run:2,...delta,max_alarm_d1_calls:repeated.max_alarm_d1_calls,max_alarm_r2_calls:repeated.max_alarm_r2_calls}));
     } finally { await h.close(); }
   }
@@ -342,13 +407,37 @@ test('a transient failure inside a copy group resumes the same snapshot without 
     await h.call('/test/fault', 'source:group/03');
     const failed = await advance(h, value => value.native.error === 'native_backup_stage_retry');
     assert.equal(failed.native.phase, 'copy');
-    const backup = await h.bucket('BACKUP_STORE'), copied = async key =>
+    let backup = await h.bucket('BACKUP_STORE');
+    const copied = async key =>
       (await backup.list({ prefix: `snapshots-v2/` })).objects.some(object => object.key.endsWith(`/objects/${hash(Buffer.from(key))}.bin`));
     assert.equal(await copied('group/05'), true); assert.equal(await copied('group/03'), false);
+    await h.restart();
+    backup = await h.bucket('BACKUP_STORE');
     const complete = await advance(h, value => value.native.phase === 'complete');
     assert.equal(complete.backup_id, failed.backup_id);
     const marker = await (await backup.get(`verified-v2/${complete.backup_id}.json`)).json(), manifest = await (await backup.get(marker.key)).json();
     assert.deepEqual(manifest.files.filter(file => file.kind === 'object').map(file => file.object_key).sort(), keys);
+  } finally { await h.close(); }
+});
+
+test('a partial journal page resumes without duplicate deletion records or leftover work files', { timeout: 90000 }, async () => {
+  const h = await harness();
+  try {
+    await seed(h);
+    const bucket = await h.bucket('BACKUP_STORE'), ids = [crypto.randomUUID(), crypto.randomUUID()].sort();
+    for (const id of ids) await bucket.put(`deletion-journal/${id}/raw.json`, JSON.stringify({ id, scope: 'raw', deleted_at: new Date().toISOString() }));
+    await h.call('/test/fault', `journal:deletion-journal/${ids[1]}/raw.json`);
+    const interrupted = await advance(h, value => value.native.error === 'native_backup_stage_retry');
+    assert.equal(interrupted.native.phase, 'journal');
+    await h.restart();
+    const complete = await advance(h, value => value.native.phase === 'complete');
+    assert.equal(complete.backup_id, interrupted.backup_id);
+    const saved = await (await h.bucket('BACKUP_STORE')).get(`verified-v2/${complete.backup_id}.json`);
+    const marker = await saved.json(), prefix = marker.key.slice(0, -'manifest.json'.length);
+    const deletions = await (await (await h.bucket('BACKUP_STORE')).get(`${prefix}snapshot-deletions.json`)).json();
+    assert.deepEqual(deletions.items.map(item => item.id).sort(), ids);
+    assert.equal((await (await h.bucket('BACKUP_STORE')).list({ prefix: 'native-work/' })).objects.length, 0);
+    assert.equal((await (await h.bucket('BACKUP_STORE')).list({ prefix: 'deletion-journal/' })).objects.length, 2);
   } finally { await h.close(); }
 });
 

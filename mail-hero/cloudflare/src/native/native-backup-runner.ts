@@ -37,9 +37,9 @@ interface Run {
   inventory_cursor?: string | null; object_cursor?: string; journal_cursor?: string | null; journal_done?: boolean;
   inventory_count?: number; inventory_bytes?: number; journal_count?: number;
   validation_table?: 'messages' | 'deliveries'; validation_cursor?: number;
-  files?: number; bytes?: number; source_hash?: string; marker?: NativeBackupMarker; prune_cursor?: unknown;
+  files?: number; bytes?: number; work?: number; source_hash?: string; marker?: NativeBackupMarker; prune_cursor?: unknown;
 }
-interface FileRow extends Row { path: string; kind: NativeBackupFile['kind']; bytes: number; sha256: string; object_key: string | null }
+interface Progress { objects: NativeBackupObject[]; files: NativeBackupFile[]; deletions: Row[] }
 const encode = (value: unknown): Uint8Array => new TextEncoder().encode(canonicalJSON(value));
 const fail = (code: string): never => { throw new Error(code); };
 
@@ -60,6 +60,10 @@ export class NativeBackupRunner {
   private readonly backup: BackupState;
   /** What the current tick has spent; steps that can repeat within a tick count their R2 calls and D1 queries. */
   private spent = { bytes: 0, subrequests: 0, queries: 0 };
+  private objects: NativeBackupObject[] = [];
+  private copiedFiles = new Map<string, NativeBackupFile>();
+  private deletions: Row[] = [];
+  private progressDirty = false;
   constructor(storage: DurableObjectStorage, env: Env, backup: BackupState) {
     this.storage = storage; this.env = env; this.backup = backup;
     storage.sql.exec('CREATE TABLE IF NOT EXISTS native_backup_control(id INTEGER PRIMARY KEY,value TEXT NOT NULL)');
@@ -120,12 +124,58 @@ export class NativeBackupRunner {
     const lease = this.backup.current()!;
     run.id = lease.id; run.date = lease.created_at.slice(0, 10); run.prefix = `snapshots-v2/${run.date}/${run.id}`; run.phase = 'waiting';
   }
-  private file(path: string): FileRow | undefined {
-    return this.storage.sql.exec<FileRow>('SELECT * FROM native_backup_copies WHERE path=?', path).toArray()[0];
+  private file(path: string): NativeBackupFile | undefined { return this.copiedFiles.get(path); }
+  private workKey(run: Run, slot: number): string { return `native-work/${run.id}/${slot % 2}.json`; }
+  private async loadProgress(run: Run): Promise<void> {
+    this.objects = []; this.copiedFiles = new Map(); this.deletions = []; this.progressDirty = false;
+    if (!run.id || ['commit', 'marker', 'prune', 'cleanup'].includes(run.phase)) return;
+    let progress: Progress = { objects: [], files: [], deletions: [] };
+    if (run.work !== undefined) {
+      this.spent.subrequests++;
+      const saved = await this.env.BACKUP_STORE!.get(this.workKey(run, run.work));
+      if (!saved) fail('native_backup_checkpoint_missing');
+      progress = JSON.parse(new TextDecoder().decode(await boundedBytes(saved!.body, SOURCE_LIMIT)));
+    } else if (run.id) {
+      // Finish a snapshot already running on the previous Worker without changing its identity or format.
+      progress.objects = this.storage.sql.exec<{ metadata: string }>('SELECT metadata FROM backup_objects WHERE backup_id=? ORDER BY key', run.id).toArray().map(row => JSON.parse(row.metadata));
+      progress.files = this.storage.sql.exec<Row>('SELECT * FROM native_backup_copies ORDER BY path').toArray().map(row => ({
+        path: row.path, kind: row.kind, bytes: row.bytes, sha256: row.sha256, ...(row.object_key ? { object_key: row.object_key } : {}),
+      }));
+      progress.deletions = this.storage.sql.exec<Row>('SELECT id,scope,deleted_at FROM native_backup_deletions ORDER BY id,scope').toArray();
+      if (run.phase === 'journal') {
+        // The old per-item SQL upserts could be ahead of its page cursor; re-read this small ledger once.
+        progress.deletions = []; run.journal_cursor = null; run.journal_done = false; run.journal_count = 0;
+      }
+      if (run.phase === 'inventory' && progress.objects.length) {
+        const lease = this.backup.current()!;
+        run.inventory_count = progress.objects.length;
+        run.inventory_bytes = progress.objects.reduce((sum, object) => sum + object.size, 0);
+        run.inventory_cursor = lease.object_cursor;
+        if (lease.objects_done) run.phase = 'copy';
+      }
+    }
+    this.objects = progress.objects; this.copiedFiles = new Map(progress.files.map(file => [file.path, file]));
+    this.deletions = progress.deletions;
+    this.progressDirty = run.work === undefined && !!(progress.objects.length || progress.files.length || progress.deletions.length);
+  }
+  private async checkpoint(run: Run): Promise<void> {
+    if (run.id && this.progressDirty) {
+      const work = (run.work ?? 0) + 1;
+      const body = encode({ objects: this.objects, files: [...this.copiedFiles.values()], deletions: this.deletions });
+      if (body.byteLength > SOURCE_LIMIT) fail('native_backup_checkpoint_limit');
+      // Two slots keep the current checkpoint intact until its replacement and DO cursor are durable.
+      this.spent.subrequests++;
+      await this.env.BACKUP_STORE!.put(this.workKey(run, work), body, { httpMetadata: { contentType: 'application/json' } });
+      run.work = work;
+    }
+    this.save(run); this.progressDirty = false;
+    if (run.id && ['complete', 'failed'].includes(run.phase)) {
+      await this.env.BACKUP_STORE!.delete([this.workKey(run, 0), this.workKey(run, 1)]);
+    }
   }
   private async exported(run: Run, path: string): Promise<{ bytes: Uint8Array; value: Row }> {
     this.ready(run);
-    const response = await this.backup.fetch(new Request(`https://coordinator/backup/${path}${path.includes('?') ? '&' : '?'}backup_id=${run.id}`));
+    const response = await this.backup.fetch(new Request(`https://coordinator/backup/${path}${path.includes('?') ? '&' : '?'}backup_id=${run.id}`), 'native');
     // An export makes at most one call: a D1 query for the database, an R2 list for the objects.
     this.spent.subrequests++; if (path.startsWith('database')) this.spent.queries++;
     if (!response?.ok) fail('native_backup_export_failed');
@@ -140,11 +190,8 @@ export class NativeBackupRunner {
   }
   private register(run: Run, file: NativeBackupFile): void {
     this.ready(run);
-    this.storage.transactionSync(() => {
-      this.storage.sql.exec('INSERT INTO native_backup_copies VALUES(?,?,?,?,?)', file.path, file.kind, file.bytes, file.sha256, file.object_key ?? null);
-      run.files = (run.files ?? 0) + 1; run.bytes = (run.bytes ?? 0) + file.bytes;
-      this.save(run);
-    });
+    this.copiedFiles.set(file.path, file); this.progressDirty = true;
+    run.files = (run.files ?? 0) + 1; run.bytes = (run.bytes ?? 0) + file.bytes;
   }
   private async readback(key: string, bytes: number, expected: string): Promise<void> {
     const object = await this.env.BACKUP_STORE!.get(key);
@@ -211,7 +258,7 @@ export class NativeBackupRunner {
     await this.readback(key, source.size, checksum.sha256);
     this.register(run, { path, kind: 'object', bytes: source.size, sha256: checksum.sha256, object_key: source.key });
   }
-  private async reference(key: unknown, kind: string): Promise<FileRow> {
+  private async reference(key: unknown, kind: string): Promise<NativeBackupFile> {
     if (typeof key !== 'string' || !key) return fail(`native_backup_${kind}_reference_missing`);
     const path = `objects/${await sha256Bytes(new TextEncoder().encode(key))}.bin`, file = this.file(path);
     if (!file || file.object_key !== key) return fail(`native_backup_${kind}_reference_missing`);
@@ -267,8 +314,7 @@ export class NativeBackupRunner {
   }
   private async writeManifest(run: Run): Promise<void> {
     this.ready(run); const lease = this.backup.current()!, files: NativeBackupFile[] = []; let budget = 0;
-    for (const row of this.storage.sql.exec<FileRow>('SELECT * FROM native_backup_copies ORDER BY path')) {
-      const file: NativeBackupFile = { path: row.path, kind: row.kind, bytes: row.bytes, sha256: row.sha256, ...(row.object_key ? { object_key: row.object_key } : {}) };
+    for (const file of [...this.copiedFiles.values()].sort((a, b) => a.path.localeCompare(b.path))) {
       budget += encode(file).byteLength; if (budget > MANIFEST_LIMIT - 4096) fail('native_backup_manifest_limit'); files.push(file);
     }
     if (files.length !== run.files || files.reduce((sum, file) => sum + file.bytes, 0) !== run.bytes) fail('native_backup_checkpoint_invalid');
@@ -282,7 +328,7 @@ export class NativeBackupRunner {
     await this.readback(key, bytes.byteLength, checksum); this.ready(run);
     run.marker = { version: 2, backup_id: run.id!, key, sha256: checksum, manifest_sha256: checksum, created_at: lease.created_at,
       verified_at: new Date().toISOString(), size_bytes: (run.bytes ?? 0) + bytes.byteLength, object_count: files.length + 1, proof: 'native_readback_verified' };
-    run.phase = 'commit'; this.save(run);
+    run.phase = 'commit';
   }
   private async step(run: Run): Promise<{ bytes: number; stop?: boolean }> {
     let bytes = 0;
@@ -291,7 +337,7 @@ export class NativeBackupRunner {
       nextNativeBackupAt(Date.now(), this.env.NATIVE_BACKUP_AT_UTC); run.max_bytes ??= this.limit(run);
       if (this.backup.paused()) {
         if (!run.id && this.backup.current()?.executor === 'native') this.adopt(run); else run.next_at = Date.now() + 60_000;
-        this.save(run); return { bytes, stop: true };
+        return { bytes, stop: true };
       }
       await this.backup.beginNative(); this.adopt(run);
     } else if (run.phase === 'waiting') {
@@ -299,7 +345,7 @@ export class NativeBackupRunner {
       if (this.backup.nativeReady(run.id!)) {
         await reserveNativeBackup(this.env, run.id!, run.date!, this.limit(run)); run.phase = 'export'; run.section = 'control';
       } else if (!this.backup.paused()) fail('native_backup_lease_expired');
-      this.save(run); return { bytes, stop: true };
+      return { bytes, stop: true };
     } else if (run.phase === 'export') {
       if (run.section === 'control') {
         const data = await this.exported(run, 'control'); bytes = await this.copyBytes(run, 'control.json', 'control', data.bytes); run.section = 'schema';
@@ -317,38 +363,40 @@ export class NativeBackupRunner {
       }
     } else if (run.phase === 'inventory') {
       const data = await this.exported(run, `objects${run.inventory_cursor ? `?cursor=${encodeURIComponent(run.inventory_cursor)}` : ''}`);
+      this.objects.push(...data.value.objects); this.progressDirty = true;
       run.inventory_cursor = data.value.next_cursor;
       run.inventory_count = (run.inventory_count ?? 0) + data.value.objects.length;
       run.inventory_bytes = (run.inventory_bytes ?? 0) + data.value.objects.reduce((sum: number, object: NativeBackupObject) => sum + object.size, 0);
       if (run.inventory_count! + (run.files ?? 0) + 3 > MAX_FILES || run.inventory_bytes! + (run.bytes ?? 0) + 2 * MANIFEST_LIMIT > this.limit(run)) fail('native_backup_snapshot_limit');
       if (data.value.complete) run.phase = 'copy';
     } else if (run.phase === 'copy') {
-      const rows = this.storage.sql.exec<{ metadata: string }>('SELECT metadata FROM backup_objects WHERE backup_id=? AND key>? ORDER BY key LIMIT ?',
-        run.id!, run.object_cursor ?? '', COPY_GROUP).toArray();
-      if (rows.length) bytes = await this.copyGroup(run, rows.map(row => JSON.parse(row.metadata)));
+      const sources = this.objects.filter(object => object.key > (run.object_cursor ?? '')).slice(0, COPY_GROUP);
+      if (sources.length) bytes = await this.copyGroup(run, sources);
       else {
-        const source = await this.exported(run, 'manifest'), body = encode(source.value.manifest);
-        if (await sha256Bytes(body) !== source.value.manifest_sha256) fail('native_backup_manifest_changed');
-        run.source_hash = source.value.manifest_sha256; bytes = await this.copyBytes(run, 'source-manifest.json', 'source_manifest', body); run.phase = 'journal';
+        const source = await this.backup.prepareNativeManifest(this.objects), body = encode(source.manifest);
+        if (await sha256Bytes(body) !== source.manifest_sha256) fail('native_backup_manifest_changed');
+        run.source_hash = source.manifest_sha256; bytes = await this.copyBytes(run, 'source-manifest.json', 'source_manifest', body); run.phase = 'journal';
       }
     } else if (run.phase === 'journal') {
       this.ready(run);
       if (!run.journal_done) {
         const page = await this.env.BACKUP_STORE!.list({ prefix: 'deletion-journal/', limit: 20, cursor: run.journal_cursor ?? undefined });
         this.spent.subrequests += 1 + page.objects.length;
+        const items: Row[] = [];
         for (const object of page.objects) {
           const value = await this.env.BACKUP_STORE!.get(object.key); if (!value || value.size > 4096) fail('native_backup_deletion_journal_invalid');
           const item = await value!.json<Row>();
           if (!UUID.test(item.id) || !['raw', 'content'].includes(item.scope) || !Number.isFinite(Date.parse(item.deleted_at)) ||
             object.key !== `deletion-journal/${item.id}/${item.scope}.json`) fail('native_backup_deletion_journal_invalid');
-          this.storage.sql.exec('INSERT INTO native_backup_deletions VALUES(?,?,?) ON CONFLICT(id,scope) DO UPDATE SET deleted_at=max(deleted_at,excluded.deleted_at)', item.id, item.scope, item.deleted_at);
+          items.push({ id: item.id, scope: item.scope, deleted_at: item.deleted_at });
         }
+        this.deletions.push(...items); this.progressDirty ||= items.length > 0;
         run.journal_count = (run.journal_count ?? 0) + page.objects.length;
         if (run.journal_count > MAX_JOURNAL_ENTRIES) fail('native_backup_deletion_journal_limit');
         run.journal_cursor = page.truncated ? page.cursor : null; run.journal_done = !page.truncated;
       } else {
         const body = encode({ version: 1, fetched_at: this.backup.current()!.cut_at,
-          items: this.storage.sql.exec<Row>('SELECT id,scope,deleted_at FROM native_backup_deletions ORDER BY id,scope').toArray() });
+          items: [...this.deletions].sort((a, b) => a.id.localeCompare(b.id) || a.scope.localeCompare(b.scope)) });
         if (body.byteLength > MANIFEST_LIMIT) fail('native_backup_deletion_journal_limit');
         bytes = await this.copyBytes(run, 'snapshot-deletions.json', 'deletions', body); run.phase = 'validate'; run.validation_table = 'messages'; run.validation_cursor = 0;
       }
@@ -360,12 +408,12 @@ export class NativeBackupRunner {
     } else if (run.phase === 'prune') {
       const result = await pruneNativeBackupsStep(this.env, run.id!, run.prune_cursor); run.prune_cursor = result.cursor;
       if (result.done) { this.clearCopies(); run.phase = 'complete'; run.error = null; run.next_at = this.nextDaily(); }
-      this.save(run); return { bytes, stop: true };
+      return { bytes, stop: true };
     } else if (run.phase === 'cleanup') {
       if (!run.id || await abandonNativeBackupStep(this.env, run.id, run.date!)) { this.clearCopies(); run.phase = 'failed'; run.next_at = this.nextDaily(); }
-      this.save(run); return { bytes, stop: true };
+      return { bytes, stop: true };
     }
-    this.save(run); return { bytes };
+    return { bytes };
   }
   async tick(now = Date.now()): Promise<boolean> {
     let run = this.read();
@@ -374,13 +422,13 @@ export class NativeBackupRunner {
     try {
       if (!this.active(run)) { this.clearCopies(); run = { phase: 'begin', next_at: now, error: null, files: 0, bytes: 0 }; this.save(run); }
       await this.storage.setAlarm(Date.now() + 60_000);
-      this.spent = { bytes: 0, subrequests: 0, queries: 0 }; const started = Date.now();
+      this.spent = { bytes: 0, subrequests: 0, queries: 0 };
+      await this.loadProgress(run); const started = Date.now();
       while (this.spent.bytes < TICK_BYTES && this.spent.subrequests + STEP_SUBREQUESTS <= TICK_SUBREQUESTS &&
         this.spent.queries < TICK_QUERIES && Date.now() - started < TICK_MS) {
         run.next_at = Date.now() + 1000; const result = await this.step(run); this.spent.bytes += result.bytes;
         if (result.stop || !this.active(run) || run.next_at > Date.now() + 1000) break;
       }
-      this.save(run);
     } catch (error) {
       const known = error instanceof Error && /^native_backup_[a-z_]{1,64}$/.test(error.message), code = known ? error.message : 'native_backup_failed';
       const lease = this.backup.current();
@@ -394,8 +442,8 @@ export class NativeBackupRunner {
         run.error = code; run.phase = run.id ? 'cleanup' : 'failed'; run.manual_required ||= known && code !== 'native_backup_lease_expired';
         run.next_at = run.id ? Date.now() + 60_000 : this.nextDaily();
       }
-      this.save(run);
     }
+    await this.checkpoint(run);
     return true;
   }
 }
