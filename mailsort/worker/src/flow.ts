@@ -25,10 +25,11 @@ export type FlowOutcome =
   | 'not_inbox'
   | 'thread_sorted'
   | 'before_install'
+  | 'outside_recent_window'
   | 'unreadable'
   | 'deferred';
 
-const SKIP_OUTCOMES: ReadonlySet<string> = new Set(['not_inbox', 'thread_sorted', 'before_install', 'unreadable']);
+const SKIP_OUTCOMES: ReadonlySet<string> = new Set(['not_inbox', 'thread_sorted', 'before_install', 'outside_recent_window', 'unreadable']);
 
 /** A decision's decider as its stage: a model (or a stage of the decisions before 2026-10-10); else no model answer. */
 export function stageOf(decider: string): FlowStage {

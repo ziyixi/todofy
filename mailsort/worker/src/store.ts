@@ -910,8 +910,8 @@ export class Store {
     this.run(`INSERT OR IGNORE INTO pending (message_id, added_at) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM decisions WHERE message_id = ?)`, messageId, now, messageId);
   }
 
-  due(now: number, limit: number): { message_id: string; attempts: number }[] {
-    return this.all<{ message_id: string; attempts: number }>(`SELECT message_id, attempts FROM pending WHERE not_before <= ? ORDER BY not_before, added_at LIMIT ?`, now, limit);
+  due(now: number, limit: number): { message_id: string; attempts: number; added_at: number }[] {
+    return this.all<{ message_id: string; attempts: number; added_at: number }>(`SELECT message_id, attempts, added_at FROM pending WHERE not_before <= ? ORDER BY not_before, added_at LIMIT ?`, now, limit);
   }
 
   /** IDs a new label may not take: the labels' own and those of deleted labels (retired_labels). */

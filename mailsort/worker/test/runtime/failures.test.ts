@@ -214,7 +214,7 @@ describe('read and model recovery', () => {
     expect(await h.sql(`SELECT id FROM review`)).toEqual([]);
   });
 
-  it('keeps the resync cursor-first order and skips pre-cutover mail', async () => {
+  it('keeps the resync cursor-first order and includes recent pre-cutover mail', async () => {
     await setup();
     deliver(h, { ...MAILS.bankEn, id: 'abc0000000000117' }, T0 - MINUTE);
     deliver(h, { ...MAILS.bankEn, id: 'abc0000000000118' }, now + MINUTE);
@@ -230,7 +230,7 @@ describe('read and model recovery', () => {
     h.up.gmail.oldestHistoryId = 0;
     await step();
     expect(injected).toBe(true);
-    expect(await decision(h, 'abc0000000000117')).toMatchObject({ outcome: 'skipped', unsure_reason: 'before_install' });
+    expect(await decision(h, 'abc0000000000117')).toMatchObject({ outcome: 'applied', label_id: 'p2' });
     expect(await decision(h, 'abc0000000000118')).toMatchObject({ label_id: 'p2' });
     await h.step(now + HOUR);
     expect(await decision(h, 'abc0000000000119')).toMatchObject({ label_id: 'p2' });

@@ -12,6 +12,26 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+### Mailsort recent read Inbox classification (`codex/mailsort-recent-read-mail`)
+
+Owner confirmed the automatic scope as the last 48 hours of Inbox without P1-P4, including read mail.
+History and normal preparation no longer require UNREAD. Each due normal batch makes a bounded recent-ID
+catch-up query that excludes existing P labels before the 100-result cap. The normal receipt guard anchors
+to existing pending.added_at so accepted work survives provider/quota holds; old installation cutoffs are
+replaced by this 48-hour scope. Unknown receipt dates are skipped, and old non-model eligibility skips may
+be recovered with their prior flow count retracted. Valid decisions stay frozen. Manual unread/recheck
+batches keep their original scope and are not automatically started. No database table, setting or service
+is added; the existing 15-minute configuration, model/prompt and Gmail write rules remain.
+Implementation and local acceptance are complete: 238 Worker units, 125 real workerd/SQLite cases, 112 UI
+cases, 26 deployment-tool cases, lint/types/build, fixed Gmail guard/oracle and HTTP smoke (52 synthetic Google
+operations) passed. Worker 149.2 KiB gzip stays within 150 KiB. Proto format/API lint/breaking/schema checks pass.
+No production mailbox content was read and no manual classification was invoked.
+Rollout is gated by the existing same-SHA branch/main workflow and matching reconcile; actual publication
+identity is recorded by GitHub production Deployments (`deploy:mailsort`). The acceptance below is synthetic,
+so the owner mailbox is not used as a test fixture. Source/rollout checks are available in
+[the branch runs](https://github.com/ziyixi/todofy/actions/workflows/ci.yml?query=branch%3Acodex%2Fmailsort-recent-read-mail).
+
+
 ### Mailsort automatic classification interval (released)
 
 Source `42897d14ef61d1cdd2f7592a2b89a4b29075fa2e` passed the full

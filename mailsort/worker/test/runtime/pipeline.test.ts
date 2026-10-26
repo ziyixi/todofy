@@ -56,18 +56,18 @@ describe('Claude priority pipeline', () => {
     expect(status.claudeBudget).toMatchObject({ model: 'claude-opus-5-5', effort: 'medium', month: '2026-10', limitUsd: 20, spentUsd: 0.0288, inputTokens: 4800, outputTokens: 480, thinkingTokens: 160 });
   });
 
-  it('reads only ordinary new unread mail without a priority and leaves historical/read mail unchanged', async () => {
+  it('classifies recent Inbox mail regardless of read state and leaves historical/graded mail unchanged', async () => {
     await initialize();
     const graded = h.up.gmail.labelIdByName('P3') ?? '';
     deliver(h, mail(1, { labels: ['INBOX'] }), T0 + MINUTE);
     deliver(h, mail(2, { labels: ['INBOX', 'UNREAD', graded] }), T0 + MINUTE);
-    deliver(h, mail(3), T0 - MINUTE);
+    deliver(h, mail(3), T0 - 3 * DAY);
     deliver(h, mail(4), T0 + MINUTE);
     await h.step(T0 + 2 * MINUTE);
-    expect(h.up.claude.calls.flat().map(item => item.id)).toEqual([mail(4).id]);
-    expect(await decision(h, mail(1).id)).toBeUndefined();
+    expect(h.up.claude.calls.flat().map(item => item.id)).toEqual([mail(1).id, mail(4).id]);
+    expect(await decision(h, mail(1).id)).toMatchObject({ outcome: 'applied', label_id: 'p2' });
     expect(await decision(h, mail(2).id)).toBeUndefined();
-    expect(await decision(h, mail(3).id)).toMatchObject({ outcome: 'skipped', unsure_reason: 'before_install' });
+    expect(await decision(h, mail(3).id)).toMatchObject({ outcome: 'skipped', unsure_reason: 'outside_recent_window' });
   });
 
   it('sends masked text up to 12000 characters and records no raw addresses or paths in the request', async () => {

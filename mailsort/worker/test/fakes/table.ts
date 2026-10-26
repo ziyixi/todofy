@@ -79,7 +79,7 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
       return only('labelIds', 'maxResults', 'pageToken') && url.searchParams.getAll('labelIds').length === 1 && url.searchParams.getAll('maxResults').length === 1 && url.searchParams.getAll('pageToken').length <= 1 && url.searchParams.get('maxResults') === '100' && (token === null || /^[0-9A-Za-z_-]{1,256}$/.test(token)) && body === '' ? 'unread_list' : null;
     }
     if (url.searchParams.get('fields') === 'messages/id,nextPageToken,resultSizeEstimate') return only('labelIds', 'fields', 'maxResults', 'includeSpamTrash') && ctx.merge?.labels.has(url.searchParams.get('labelIds') ?? '') === true && url.searchParams.get('includeSpamTrash') === 'true' && Number(url.searchParams.get('maxResults')) <= 10 ? 'merge_list' : null;
-    return only('labelIds', 'q', 'maxResults', 'pageToken') && url.searchParams.get('labelIds') === 'INBOX' && url.searchParams.get('q') === 'newer_than:2d' ? 'messages_list' : null;
+    return only('labelIds', 'q', 'maxResults', 'pageToken') && url.searchParams.get('labelIds') === 'INBOX' && ['newer_than:2d', 'newer_than:2d -label:P1 -label:P2 -label:P3 -label:P4'].includes(url.searchParams.get('q') ?? '') ? 'messages_list' : null;
   }
   if (method === 'GET' && path[0] === 'messages' && path.length === 2) {
     if (url.searchParams.get('format') === 'minimal') return only('format', 'fields') && url.searchParams.get('fields') === 'id,labelIds,historyId' && ctx.merge?.messages.has(path[1] ?? '') === true ? 'merge_metadata' : null;

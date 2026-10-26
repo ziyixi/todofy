@@ -45,6 +45,9 @@ export const HISTORY_PAGE_SIZE = 100;
 /** After a lost history cursor (404): the inbox's mails of the last two days, at most this many. */
 export const RESYNC_MAX = 100;
 export const RESYNC_QUERY = 'newer_than:2d';
+/** Automatic catch-up stays in the same two-day Inbox window and excludes existing priorities. */
+export const RECENT_CLASSIFICATION_AGE_MS = 2 * DAY;
+export const RECENT_CLASSIFICATION_QUERY = `${RESYNC_QUERY} -label:P1 -label:P2 -label:P3 -label:P4`;
 /** Examples embedded per alarm (one batched call). */
 export const EMBED_BATCH = 8;
 

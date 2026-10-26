@@ -43,6 +43,16 @@ function server(): FakeServer {
 }
 
 describe('the flow diagram', () => {
+  it('explains the recent-window boundary separately from historical installation skips', () => {
+    const graph = flowGraph([
+      flowCount(MailFlow_Stage.SKIPPED, MailFlow_Outcome.OUTSIDE_RECENT_WINDOW, '', 2),
+      flowCount(MailFlow_Stage.SKIPPED, MailFlow_Outcome.BEFORE_INSTALL, '', 1),
+    ], [])
+    expect(graph.total).toBe(3)
+    expect(graph.nodes.find((node) => node.id === 'skipped')?.detail).toContain('超出自动分类的 48 小时范围 2')
+    expect(graph.nodes.find((node) => node.id === 'skipped')?.detail).toContain('安装前的历史邮件 1')
+  })
+
   it('builds the graph: every mail once (延后 holds only mail still waiting), no correction, priorities retain their order and individual colors', () => {
     const s = server()
     const graph = flowGraph(s.flow, s.labels)

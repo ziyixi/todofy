@@ -16,7 +16,9 @@ There are no reminders, automatic resurfacing or task creation.
 
 The existing Durable Object Alarm checks Gmail and maintenance every five minutes. Normal automatic classification
 defaults to a 15-minute interval, configurable in 设置 → 自动分类间隔 as 5, 15, 30 or 60 minutes. It classifies
-pending unread, unclassified mail in bounded batches of up to ten, with one model request per batch.
+recent Inbox mail without a P1-P4 classification, whether read or unread, in bounded batches of up to ten
+with one model request per batch. Automatic intake is limited to the past 48 hours; archived mail stays outside
+this automatic scope. Existing classifications and read/starred states are preserved.
 Choose either provider in **设置 → 分类引擎**:
 
 | Choice | Fixed model | Authentication |
@@ -32,8 +34,12 @@ There is no automatic provider or model fallback.
 
 The interval is persisted for both providers. Saving adjusts a future ordinary wait; retries, quota waits and
 accepted backlog keep their own schedules. Older settings adopt 15 minutes once without reclassifying old mail.
-Backlog continues over subsequent Alarm calls within existing request and write caps. Normal history sync
-retains its new-mail Inbox/receipt cutoff; the explicit unread action also covers older and archived mail.
+Backlog continues over subsequent Alarm calls within existing request and write caps. History sync includes
+mail opened before a batch; each normal due batch also lists at most 100 recent, unclassified Inbox IDs to
+recover missed items. Classification checks the receipt window against the first enqueue time, so already
+accepted work survives quota/retry holds. Unknown receipt dates are skipped. Old installation cutoffs no longer
+exclude otherwise eligible mail inside the 48-hour window. The explicit unread action still has its own scope
+and can cover older and archived unread mail; it is never automatically started by a deployment.
 
 Classification uses a [base prompt](prompts/priority-classification.txt) and [personal rules](prompts/personal-rules.txt).
 Edit either in **设置 → 分类提示词** and save; the existing database keeps the saved text through deployments.

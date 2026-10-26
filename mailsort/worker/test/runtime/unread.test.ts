@@ -60,7 +60,7 @@ it('includes archived unread and old skipped decisions, leaves read mail alone, 
   const read = mail(203, ['INBOX']);
   const spam = mail(204, ['UNREAD', 'SPAM']);
   const trash = mail(205, ['UNREAD', 'TRASH']);
-  for (const message of [archived, oldInbox, read, spam, trash]) deliver(h, message, T0 - DAY);
+  for (const message of [archived, oldInbox, read, spam, trash]) deliver(h, message, T0 - 3 * DAY);
   await h.step(T0 + MINUTE);
   expect(await h.sql(`SELECT outcome FROM decisions WHERE message_id = ?`, oldInbox.id)).toEqual([{ outcome: 'skipped' }]);
   const original = new Map([read, spam, trash].map(message => [message.id, gmailLabels(h, message.id)]));

@@ -110,7 +110,7 @@ export async function renderLabels(ctx: ViewContext): Promise<void> {
       el('div', { class: 'actions' }, start),
     )
     fill(body,
-      el('p', { class: 'hint lead' }, '按当前分类引擎和提示词分到 P1、P2、P3、P4。自动分类间隔可在设置中调整，分类保持原有未读状态。'),
+      el('p', { class: 'hint lead' }, '自动处理最近 48 小时的 Inbox 未分类邮件，已读也包括。按当前引擎分到 P1–P4，保持原有已读、未读状态。分类间隔可在设置中调整。'),
       setup,
       result,
       unread,

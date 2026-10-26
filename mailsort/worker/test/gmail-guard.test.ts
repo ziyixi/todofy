@@ -196,11 +196,23 @@ describe('the closed table refuses everything outside it', () => {
     expect(refused('GET', `${BASE}/history?startHistoryId=10&historyTypes=messageDeleted&maxResults=100`)).toBe('history_types');
     expect(refused('GET', `${BASE}/history?startHistoryId=10&historyTypes=messageAdded&maxResults=100&labelId=SENT`)).toBe('history_label');
     expect(refused('GET', `${BASE}/messages?labelIds=INBOX&q=newer_than%3A2d&maxResults=100`)).toBe('accepted');
+    expect(refused('GET', `${BASE}/messages?labelIds=INBOX&q=${encodeURIComponent('newer_than:2d -label:P1 -label:P2 -label:P3 -label:P4')}&maxResults=100`)).toBe('accepted');
     expect(refused('GET', `${BASE}/messages?labelIds=INBOX&q=from%3Abank&maxResults=100`)).toBe('list_query');
     expect(refused('GET', `${BASE}/messages?labelIds=SPAM&q=newer_than%3A2d&maxResults=100`)).toBe('list_query');
     expect(refused('GET', `${BASE}/messages/${MESSAGE}?format=full&fields=${encodeURIComponent(MESSAGE_FIELDS)}`)).toBe('accepted');
     expect(refused('GET', `${BASE}/messages/${MESSAGE}?format=full`)).toBe('message_fields');
     expect(refused('GET', `${BASE}/labels`)).toBe('accepted');
+  });
+
+  it('does not allow automatic catch-up to lose its Inbox, time window or result cap', () => {
+    const q = encodeURIComponent('newer_than:2d -label:P1 -label:P2 -label:P3 -label:P4');
+    for (const query of [
+      `q=${q}&maxResults=100`,
+      `labelIds=INBOX&q=${encodeURIComponent('-label:P1 -label:P2 -label:P3 -label:P4')}&maxResults=100`,
+      `labelIds=INBOX&q=${encodeURIComponent('newer_than:7d -label:P1 -label:P2 -label:P3 -label:P4')}&maxResults=100`,
+      `labelIds=INBOX&q=${q}&maxResults=101`,
+      `labelIds=INBOX&q=${q}&maxResults=100&includeSpamTrash=true`,
+    ]) expect(refused('GET', `${BASE}/messages?${query}`)).not.toBe('accepted');
   });
 
   it('allows only the bounded unread query without a search or Spam/Trash override', () => {

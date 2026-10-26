@@ -149,6 +149,7 @@ function intervalCard(settings: Settings, status: ServiceStatus | null, ctx: Vie
     ? status?.claudeBudget?.nextBatchTime : status?.classifier?.nextBatchTime
   return card(
     '自动分类间隔', '', choices,
+    el('p', { class: 'hint' }, '自动分类只补最近 48 小时的 Inbox 未分类邮件，已读也处理；已归档和更早的邮件不自动回扫。'),
     el('p', { class: 'hint' }, 'Gmail 维护检查仍每 5 分钟运行。积压批次、失败重试和额度等待沿用各自的时间。'),
     el('p', { class: 'hint' }, next === undefined ? '下批判断时间尚未提供' : `下批判断最早在 ${relative(next, ctx.host.now())}（${when(next)}）。`),
   )

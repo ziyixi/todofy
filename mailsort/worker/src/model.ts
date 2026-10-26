@@ -95,6 +95,7 @@ const FLOW_OUTCOMES: Readonly<Record<FlowOutcome, MailFlow_Outcome>> = {
   not_inbox: MailFlow_Outcome.NOT_INBOX,
   thread_sorted: MailFlow_Outcome.THREAD_SORTED,
   before_install: MailFlow_Outcome.BEFORE_INSTALL,
+  outside_recent_window: MailFlow_Outcome.OUTSIDE_RECENT_WINDOW,
   unreadable: MailFlow_Outcome.UNREADABLE,
   deferred: MailFlow_Outcome.DEFERRED,
 };

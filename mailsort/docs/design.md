@@ -105,8 +105,9 @@ P1-P4 labels are checked before a reached write cap can defer it, so skip-only w
 Gmail write. Eligible mail waits through the normal queue; a routine cap is not a breaker fault.
 
 History registers messages independently by Gmail message ID. Normal processing retains its Inbox and receipt
-cutoffs and now skips read or already-classified mail. Each unread new reply can be judged independently of other
-messages in its thread. The explicit unread action includes older/archived mail, retaining its existing scan and
+scope: Inbox mail received within 48 hours of first enqueue, with a known receipt date and no P1-P4 label.
+Read and unread mail are both eligible. Valid prior decisions remain frozen. Each recent new reply can be judged independently of other
+messages in its thread. The explicit unread action retains its separate unread requirement and includes older/archived mail, retaining its existing scan and
 progress table. Older recheck options remain explicit owner operations and never start on deployment.
 
 `claude.ts` sends a standard Messages API request to `claude-opus-5-5` with adaptive thinking, medium effort and
@@ -217,3 +218,25 @@ Pass the full branch CI gate; deploy the same SHA through main Actions and recor
 The gateway has its own image/workload release. Process `/healthz` reports the image's baked source identity and
 release request ID. Code deployment, native provider configuration, a real synthetic model call and actual Gmail classification are
 separate evidence. No existing mail is automatically reclassified by this rollout.
+
+## Recent read Inbox intake
+
+Automatic classification adds only Inbox messages received within the 48 hours before their first enqueue.
+Reading a message before history sync or before the model pass no longer excludes it. P1-P4 labels, prior
+valid decisions, Sent/Draft/Spam/Trash and unknown receipt dates remain exclusion conditions. This replaces
+the old installation-time receipt boundary for automatic intake. Pending rows keep their original added_at,
+attempts and not_before, so accepted work remains eligible through quota/retry waits.
+
+At a normal batch's due time, reuse the bounded Gmail messages.list operation with INBOX, newer_than:2d,
+P1-P4 exclusions and maxResults 100. This returns IDs only and never follows an all-mailbox/backfill path.
+The ordinary message preparation independently checks the same receipt boundary because history arrivals
+do not come through that list query. Active manual unread/recheck batches keep their fixed scope; automatic
+reconciliation waits until their pending work finishes.
+
+Only old non-model skip records for not_inbox or before_install can be recovered in this bounded scope.
+Their old skipped flow count is withdrawn transactionally before enqueue; valid model decisions, write
+ledger, history and unrelated labels are preserved. No new table, scheduler or retention policy is added.
+The flow UI has a separate outside_recent_window outcome, rather than calling it an installation failure.
+
+Gmail query semantics: [message search](https://developers.google.com/workspace/gmail/api/guides/filtering)
+and [supported operators](https://support.google.com/mail/answer/7190?hl=en).

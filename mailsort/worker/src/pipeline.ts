@@ -23,10 +23,10 @@ import {
   HOUR,
   HISTORY_PAGE_SIZE,
   HISTORY_PAGES_MAX,
-  INSTALL_GRACE_MS,
   MINUTE,
   MAIL_ATTEMPTS_MAX,
   MAIL_SUBREQUESTS,
+  RECENT_CLASSIFICATION_AGE_MS,
   RESYNC_MAX,
   RETRY_BASE_MS,
   RETRY_MAX_MS,
@@ -93,12 +93,12 @@ function deferModel(store: Store, until: number, now: number, transact: PassDeps
 async function sync(store: Store, gmail: GmailClient, budget: Budget, now: () => number, transact: <T>(fn: () => T) => T): Promise<{ queued: number; more: boolean }> {
   const cursor = store.getMeta('history_cursor');
   if (cursor === null) {
-    // The install-time cursor: mail from now on, none of the history before.
+    // Start incremental history here; the bounded recent listing covers mail already present.
     const id = await gmail.currentHistoryId();
     transact(() => {
       store.setMeta('history_cursor', id);
       store.setMeta('last_sync_at', String(now()));
-      // What "before the install" means for a later resync (decideMail skips such mail).
+      // Retained legacy install metadata; automatic intake uses the recent-mail window.
       store.setMeta('installed_at', String(now()));
     });
     return { queued: 0, more: false };
@@ -124,7 +124,7 @@ async function sync(store: Store, gmail: GmailClient, budget: Budget, now: () =>
         for (const added of record.messagesAdded ?? []) {
           const labels = added.message.labelIds ?? [];
           // An ID the guard would refuse can never be read: never queued (it would wait at the head forever).
-          if (isMessageId(added.message.id) && labels.includes('INBOX') && labels.includes('UNREAD') && !labels.some((label) => SKIP_LABELS.has(label))) {
+          if (isMessageId(added.message.id) && labels.includes('INBOX') && !labels.some((label) => SKIP_LABELS.has(label))) {
             store.enqueue(added.message.id, now());
             queued++;
           }
@@ -157,6 +157,18 @@ async function sync(store: Store, gmail: GmailClient, budget: Budget, now: () =>
   return { queued, more: true };
 }
 
+/** A recent Inbox listing recovers old non-model eligibility skips; valid decisions remain frozen. Transactional. */
+function enqueueRecent(store: Store, ids: readonly string[], now: number): void {
+  for (const id of ids) {
+    const prior = store.decision(id);
+    if (prior?.outcome === 'skipped' && prior.decider === 'skip' && ['not_inbox', 'before_install'].includes(prior.unsure_reason) && prior.label_id === null) {
+      countFlow(store, prior.decided_at, 'skipped', skipOutcome(prior.unsure_reason), null, -1);
+      store.run(`DELETE FROM decisions WHERE message_id = ?`, id);
+    }
+    store.enqueue(id, now);
+  }
+}
+
 /**
  * After a lost cursor: a fresh cursor, then the inbox's mails of the last two days (deduplicated). The cursor is read
  * first, so a mail that arrives between the two reads is in the list, after the cursor, or both (the pending key and
@@ -166,7 +178,7 @@ async function resync(store: Store, gmail: GmailClient, now: () => number, trans
   const id = await gmail.currentHistoryId();
   const ids = await gmail.recentInbox(RESYNC_MAX);
   transact(() => {
-    for (const message of ids) store.enqueue(message, now());
+    enqueueRecent(store, ids, now());
     store.setMeta('history_cursor', id);
     store.setMeta('last_sync_at', String(now()));
     store.pushError('history_resync');
@@ -292,7 +304,7 @@ function retryDelay(attempts: number): number {
 
 interface PreparedMail { readonly read: ReadMessage; readonly gathered: Awaited<ReturnType<typeof gather>>; readonly priorPriority: string | null; readonly recheck: boolean; readonly unread: boolean; readonly attempts: number; }
 
-async function prepareMail(ctx: MailContext, messageId: string, attempts: number): Promise<PreparedMail | MailOutcome> {
+async function prepareMail(ctx: MailContext, messageId: string, attempts: number, addedAt: number): Promise<PreparedMail | MailOutcome> {
   const { store, gmail } = ctx;
   const unread = isUnreadPending(store, messageId);
   const recheckFallback = unread && unreadRechecksFallback(store);
@@ -314,7 +326,7 @@ async function prepareMail(ctx: MailContext, messageId: string, attempts: number
     ctx.transact(() => { recordSkip(store, messageId, messageId, 0, now, 'unreadable'); });
     return 'skipped';
   }
-  if ((!recheckInitial100 && (!read.labelIds.includes('UNREAD') || (!unread && !read.labelIds.includes('INBOX')))) || read.labelIds.some((label) => SKIP_LABELS.has(label))) {
+  if ((!recheckInitial100 && (unread ? !read.labelIds.includes('UNREAD') : !read.labelIds.includes('INBOX'))) || read.labelIds.some((label) => SKIP_LABELS.has(label))) {
     ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'not_inbox'); });
     return 'skipped';
   }
@@ -333,14 +345,13 @@ async function prepareMail(ctx: MailContext, messageId: string, attempts: number
     ctx.transact(() => { finishPending(store, messageId); });
     return 'skipped';
   }
-  // No backfill: a lost cursor's resync lists the inbox of the last two days, which may reach back before the install.
-  const installedAt = Number(store.getMeta('installed_at') ?? '0');
-  if (!unread && read.receivedAt > 0 && read.receivedAt < priorityStartedAt(store)) {
-    ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'before_install'); });
+  // Normal intake stays recent. Its frozen enqueue time lets accepted mail survive provider/quota waits.
+  if (!unread && (!Number.isFinite(read.receivedAt) || read.receivedAt <= 0)) {
+    ctx.transact(() => { recordSkip(store, read.id, read.threadId, 0, now, 'unreadable'); });
     return 'skipped';
   }
-  if (!unread && installedAt > 0 && read.receivedAt > 0 && read.receivedAt < installedAt - INSTALL_GRACE_MS) {
-    ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'before_install'); });
+  if (!unread && read.receivedAt < addedAt - RECENT_CLASSIFICATION_AGE_MS) {
+    ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'outside_recent_window'); });
     return 'skipped';
   }
   // Ineligible mail can leave the batch even when the Gmail write allowance is exhausted.
@@ -504,10 +515,16 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
       deferred = deferModel(store, nextUtcMonth(deps.now()), deps.now(), transact);
       code = 'claude_spend_limit';
     } else if (deps.now() >= nextModelAt) {
+      const manualBatchPending = store.one(`SELECT 1 AS x FROM unread_batch b LEFT JOIN ledger l ON l.id = b.ledger_id
+        WHERE b.state = 'pending' AND (b.ledger_id IS NULL OR l.state = 'intended') LIMIT 1`) !== undefined;
+      if (!manualBatchPending && budget.has(MAIL_SUBREQUESTS + 2)) {
+        const recent = await gmail.recentUnclassifiedInbox(RESYNC_MAX);
+        transact(() => { enqueueRecent(store, recent, deps.now()); });
+      }
       const prepared: PreparedMail[] = [];
       for (const item of store.due(deps.now(), DRAIN_MAX)) {
         if (!budget.has(MAIL_SUBREQUESTS + 1)) break;
-        const result = await prepareMail(ctx, item.message_id, item.attempts);
+        const result = await prepareMail(ctx, item.message_id, item.attempts, item.added_at);
         if (typeof result !== 'string') prepared.push(result);
       }
       if (prepared.length > 0) {

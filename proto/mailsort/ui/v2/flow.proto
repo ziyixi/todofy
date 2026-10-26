@@ -30,7 +30,7 @@ message MailFlow {
     // Never written.
     STAGE_UNSPECIFIED = 0;
     // Not decided: not incoming inbox mail (sent, draft, spam), a conversation already sorted, mail from before
-    // the install, or unreadable. The outcome says which.
+    // the install (historical policy), outside the automatic recent window, or unreadable. The outcome says which.
     STAGE_SKIPPED = 1;
     // The decision model Clef (27B).
     STAGE_CLEF = 2;
@@ -79,6 +79,8 @@ message MailFlow {
     OUTCOME_UNREADABLE = 11;
     // Deferred for model budget, still waiting.
     OUTCOME_DEFERRED = 12;
+    // Skipped: older than the automatic 48-hour intake window when first queued.
+    OUTCOME_OUTSIDE_RECENT_WINDOW = 13;
   }
 
   // One counter.

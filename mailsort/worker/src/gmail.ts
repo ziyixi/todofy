@@ -7,7 +7,8 @@
  *   token          POST  oauth2.googleapis.com/token                        refresh_token grant only
  *   profile        GET   /gmail/v1/users/me/profile?fields=historyId        the install-time cursor (no address read)
  *   history        GET   /gmail/v1/users/me/history                         messageAdded, labelAdded, labelRemoved
- *   messages_list  GET   /gmail/v1/users/me/messages?labelIds=INBOX&q=newer_than:2d   the resync after a lost cursor
+ *   messages_list  GET   /gmail/v1/users/me/messages?labelIds=INBOX&q=newer_than:2d   bounded resync/catch-up
+ *                         catch-up also excludes P1-P4, without filtering read/unread state
  *   unread_list    GET   /gmail/v1/users/me/messages?labelIds=UNREAD&maxResults=100  current unread, Spam/Trash excluded
  *   message_get    GET   /gmail/v1/users/me/messages/{id}                   format=full or metadata, fixed fields
  *   labels_list    GET   /gmail/v1/users/me/labels
@@ -35,7 +36,7 @@
  * Nothing here logs. Answers are read with a byte cap and parsed as JSON; their content is untrusted mail data.
  */
 import { ownerPath } from './paths.ts';
-import { GOOGLE_TIMEOUT_MS, MESSAGE_MAX_BYTES, RESPONSE_MAX_BYTES, RESYNC_QUERY } from './limits.ts';
+import { GOOGLE_TIMEOUT_MS, MESSAGE_MAX_BYTES, RESPONSE_MAX_BYTES, RECENT_CLASSIFICATION_QUERY, RESYNC_QUERY } from './limits.ts';
 
 export const GMAIL_HOST = 'gmail.googleapis.com';
 export const TOKEN_HOST = 'oauth2.googleapis.com';
@@ -301,7 +302,8 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
       return 'merge_list';
     }
     const params = query(url, ['labelIds', 'q', 'maxResults', 'pageToken']);
-    if (single(params, 'labelIds') !== 'INBOX' || single(params, 'q') !== RESYNC_QUERY) refuse('list_query');
+    const q = single(params, 'q');
+    if (single(params, 'labelIds') !== 'INBOX' || (q !== RESYNC_QUERY && q !== RECENT_CLASSIFICATION_QUERY)) refuse('list_query');
     const max = Number(single(params, 'maxResults') ?? '');
     if (!Number.isInteger(max) || max < 1 || max > 100) refuse('list_max');
     const token = single(params, 'pageToken');
@@ -600,7 +602,16 @@ export class GmailClient {
 
   /** The inbox's message IDs of the last two days (the resync after a lost cursor). */
   async recentInbox(max: number): Promise<string[]> {
-    const params = new URLSearchParams({ labelIds: 'INBOX', q: RESYNC_QUERY, maxResults: String(max) });
+    return this.recentInboxIds(RESYNC_QUERY, max);
+  }
+
+  /** Recent Inbox candidates, including read mail, without an existing P1-P4 label. */
+  async recentUnclassifiedInbox(max: number): Promise<string[]> {
+    return this.recentInboxIds(RECENT_CLASSIFICATION_QUERY, max);
+  }
+
+  private async recentInboxIds(q: string, max: number): Promise<string[]> {
+    const params = new URLSearchParams({ labelIds: 'INBOX', q, maxResults: String(max) });
     const value = assertObject(await this.getJson('messages_list', `${GMAIL_BASE}/messages?${params.toString()}`));
     const messages = Array.isArray(value['messages']) ? (value['messages'] as unknown[]) : [];
     return messages.flatMap((item) => {

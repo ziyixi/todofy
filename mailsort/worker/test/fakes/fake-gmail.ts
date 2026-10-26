@@ -199,7 +199,9 @@ export class FakeGmail {
       const label = url.searchParams.get('labelIds') ?? 'INBOX';
       const migration = url.searchParams.has('fields');
       const includeSpamTrash = url.searchParams.get('includeSpamTrash') === 'true';
-      const ids = [...this.messages.values()].filter((m) => m.labelIds.has(label) && (migration || label === 'UNREAD' || m.internalDate >= since) && (includeSpamTrash || (!m.labelIds.has('SPAM') && !m.labelIds.has('TRASH')))).map((m) => ({ id: m.id, ...(migration ? {} : { threadId: m.threadId }) }));
+      const excluded = new Set(url.searchParams.get('q')?.includes('-label:P1')
+        ? [...this.labels.values()].filter((value) => /^P[1-4]$/.test(value.name)).map((value) => value.id) : []);
+      const ids = [...this.messages.values()].filter((m) => m.labelIds.has(label) && (migration || label === 'UNREAD' || m.internalDate >= since) && ![...m.labelIds].some((id) => excluded.has(id)) && (includeSpamTrash || (!m.labelIds.has('SPAM') && !m.labelIds.has('TRASH')))).map((m) => ({ id: m.id, ...(migration ? {} : { threadId: m.threadId }) }));
       const offset = Number(url.searchParams.get('pageToken') ?? '0');
       const max = Number(url.searchParams.get('maxResults') ?? '100');
       return json({ messages: ids.slice(offset, offset + max), resultSizeEstimate: ids.length, ...(offset + max < ids.length ? { nextPageToken: String(offset + max) } : {}) });

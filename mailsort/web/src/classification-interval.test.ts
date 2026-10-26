@@ -35,6 +35,7 @@ describe('automatic classification interval', () => {
     expect([...interval(root).querySelectorAll('button')].map(node => node.textContent)).toEqual(['5 分钟', '15 分钟', '30 分钟', '60 分钟'])
     expect(choice(root, 15).getAttribute('aria-pressed')).toBe('true')
     expect(interval(root).textContent).toContain('Gmail 维护检查仍每 5 分钟')
+    expect(interval(root).textContent).toContain('最近 48 小时的 Inbox 未分类邮件，已读也处理')
     choice(root, 15).click()
     await settle()
     expect(server.calls.filter(call => call.method !== 'GET')).toEqual([])

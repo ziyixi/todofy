@@ -113,7 +113,7 @@ describe('Codex priority pipeline', () => {
     expect(h.up.claude.calls).toEqual([]);
   });
 
-  it('uses editable prompt snapshots and masked input while leaving existing labelled and read mail unchanged', async () => {
+  it('uses editable prompt snapshots and masked input for read and unread mail while leaving labelled mail unchanged', async () => {
     await initialize();
     await select(ClassificationProvider.CODEX);
     await savePrompt('Saved synthetic classification base.', 'Synthetic owner rules: personal reports are P3.');
@@ -123,19 +123,19 @@ describe('Codex priority pipeline', () => {
     deliver(h, mail(12, { labels: ['INBOX'] }), T0 + MINUTE);
     deliver(h, mail(13, { text: 'Synthetic account owner@example.com uses https://example.com/private?secret=1 for 12345678.' }), T0 + MINUTE);
     await h.step(T0 + 2 * MINUTE);
-    expect(h.up.codex.calls[0]?.map(email => email.id)).toEqual([mail(13).id]);
+    expect(h.up.codex.calls[0]?.map(email => email.id)).toEqual([mail(12).id, mail(13).id]);
     expect(h.up.codex.requests[0]?.instructions).toBe('Saved synthetic classification base.\n\nSynthetic owner rules: personal reports are P3.');
     expect(JSON.stringify(h.up.codex.calls)).not.toContain('owner@example.com');
     expect(JSON.stringify(h.up.codex.calls)).not.toContain('/private?secret');
     expect(await decision(h, mail(11).id)).toBeUndefined();
-    expect(await decision(h, mail(12).id)).toBeUndefined();
+    expect(await decision(h, mail(12).id)).toMatchObject({ outcome: 'applied', label_id: 'p3' });
     expect(gmailLabels(h, mail(11).id)).toEqual(['INBOX', 'UNREAD', oldPriority].sort());
     await savePrompt('Updated synthetic base.', 'Updated synthetic rules.');
     deliver(h, mail(14), T0 + HOUR + MINUTE);
     await h.step(T0 + HOUR + 2 * MINUTE);
     expect(h.up.codex.requests[1]?.instructions).toBe('Updated synthetic base.\n\nUpdated synthetic rules.');
-    expect(h.up.codex.calls.flat().map(email => email.id)).toEqual([mail(13).id, mail(14).id]);
-    expect(modifies(h)).toHaveLength(2);
+    expect(h.up.codex.calls.flat().map(email => email.id)).toEqual([mail(12).id, mail(13).id, mail(14).id]);
+    expect(modifies(h)).toHaveLength(3);
   });
 
   it('escapes a Claude monthly hold with Codex without charging it and retains the hold when switching back', async () => {

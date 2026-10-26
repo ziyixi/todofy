@@ -52,6 +52,7 @@ const SKIP_REASONS: Readonly<Record<number, string>> = {
   [MailFlow_Outcome.NOT_INBOX]: '已发送、草稿或垃圾邮件',
   [MailFlow_Outcome.THREAD_SORTED]: '对话已分拣',
   [MailFlow_Outcome.BEFORE_INSTALL]: '安装前的历史邮件',
+  [MailFlow_Outcome.OUTSIDE_RECENT_WINDOW]: '超出自动分类的 48 小时范围',
   [MailFlow_Outcome.UNREADABLE]: '无法读取',
 }
 
