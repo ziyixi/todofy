@@ -64,6 +64,12 @@ cleanup is removing the retired optional secret declarations (regenerate with `t
   Recall's mobile page install from the root pnpm lock instead of `npm ci`.
 - Edits outside this branch's paths: inbound links in `mailsort/docs/priority-rollout.md`, `personal-mcp/README.md`
   and `personal-mcp/docs/connection.md`, and the appended section in `todofy/docs/verification.md`.
+- For the merge: if `claude/wave-telemetry` drops Home's `CODEX_GATEWAY` binding, drop it from the architecture Home
+  paragraph too; if another branch moves `docs/tasks-*`, `docs/work-memory-verification.md` or
+  `docs/watch-evidence-verification.md`, repoint the links in HANDOFF and the October 27 archive. Markdown under an
+  app directory selects that app's checks and release in `ci_changes.py`.
+- Local checks: `.github/scripts` unit tests (461, one existing skip), service-catalog and cloud-config checks,
+  website Prettier and a relative-link and heading-anchor check over every changed Markdown file.
 
 ## Latest verified release
 
