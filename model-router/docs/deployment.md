@@ -49,7 +49,9 @@ Owner request history and usage use the separate console API in `console.proto`.
 Owner UI, request history, usage and session endpoints stay behind owner Access. A narrow Bypass application
 covers only ModelService's catalog, generation, embedding and context paths. The Worker authenticates each call
 with the owner Access assertion or exact Newsletter token. Owner JSON mutations require exact Origin,
-`X-CSRF-Token: 1` and `application/json` before body parsing.
+`X-CSRF-Token: 1` and `application/json` before body parsing. The Newsletter token reaches only Codex models:
+other providers and embeddings answer `PERMISSION_DENIED` with `MODEL_NOT_ALLOWED` before a request is recorded,
+so synthetic Claude, Gemini and embedding checks use the owner's Access identity.
 
 Cloudflare callers use the `Inference` binding with immutable `props.app` naming `mailsort`, `todofy` or `brief`.
 Home binds the content-free `Ops` entrypoint. Application request fields cannot choose either identity.

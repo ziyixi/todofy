@@ -79,6 +79,20 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     expect((await harness.caller('todofy', '/api/model/v1/requests')).status).toBe(403)
   })
 
+  it('limits the external Newsletter token to Codex models before registering a request', async () => {
+    for (const refused of [
+      harness.newsletter.generate({ model: gemini, input: 'Synthetic API-billed attempt' }),
+      harness.newsletter.embed({ model: '@cf/baai/bge-m3', inputs: ['Synthetic embedding attempt'] }),
+    ]) await expect(refused).rejects.toMatchObject({ status: { status: 'PERMISSION_DENIED', reason: 'MODEL_NOT_ALLOWED' } })
+    expect(harness.calls).toHaveLength(0)
+    expect(await harness.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(0)
+    const answer = await harness.newsletter.generate({ model: sol, input: 'Synthetic Codex input' })
+    expect(answer.error).toBeUndefined()
+    expect((await harness.owner.getRequest({ name: answer.name })).app).toBe('newsletter')
+    // In-account bindings and the owner keep their model choices.
+    expect((await harness.forCaller('mailsort').generate({ model: gemini, input: 'Synthetic binding input' })).error).toBeUndefined()
+  })
+
   it('keeps failed structured output and consumed tokens visible without returning invalid JSON as success', async () => {
     harness.geminiOutputs.push('{"wrong":true}')
     const answer = await harness.models.generate({ model: gemini, input: 'Synthetic schema input', outputSchemaJson: schema })

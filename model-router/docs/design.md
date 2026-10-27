@@ -1,6 +1,7 @@
 # 统一调用
 
-Mailsort、Todofy、Brief 通过同账户 service binding 调用 Router；Newsletter 使用一个外部调用口令。
+Mailsort、Todofy、Brief 通过同账户 service binding 调用 Router；Newsletter 使用一个外部调用口令，
+只能调用 Codex 模型，其他供应商和向量在登记请求前返回 `MODEL_NOT_ALLOWED`。
 Router 选择供应商、调用模型、归一用量，把结果一次返回。应用继续负责提示词、预算、业务重试和工作流。
 模型 key 只在 Router；VPS 保留原 Codex 订阅登录。
 

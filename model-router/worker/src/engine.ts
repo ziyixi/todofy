@@ -42,6 +42,11 @@ interface Context {
   expireMs: number;
 }
 const knownApps = new Set(['console', 'mailsort', 'todofy', 'brief', 'newsletter']);
+/** The external Newsletter token reaches only subscription Codex models; in-account bindings stay unrestricted. */
+function allowModel(app: string, provider: string): void {
+  if (app === 'newsletter' && provider !== 'codex')
+    throw new RpcError(Code.PERMISSION_DENIED, 'MODEL_NOT_ALLOWED', 'This caller may use only Codex models.');
+}
 const modelApi = new HttpTranscoder(ModelService, {
   listModels: (_req, ctx: ApiContext) =>
     Promise.resolve(create(ListModelsResponseSchema, { models: modelCatalog(ctx.engine.environment) })),
@@ -119,6 +124,7 @@ export class RouterEngine extends DurableObject<Env> {
     validateConfig(effective);
     const providerRequest = { ...effective, outputSchemaJson: providerOutputSchema(effective.outputSchemaJson) };
     const route = routeFor(effective.model);
+    allowModel(app, route.provider);
     const started = Date.now();
     const duration = Math.min(budget(req.timeoutMs), context ? context.expireMs - started : 840000);
     const timer = setTimeout(() => controller.abort(), duration);
@@ -252,6 +258,7 @@ export class RouterEngine extends DurableObject<Env> {
   }
   async embed(req: EmbedRequest, app: string) {
     const route = routeFor(req.model);
+    allowModel(app, route.provider);
     if (
       route.provider !== 'workers_ai' || req.inputs.length < 1 || req.inputs.length > 50 ||
       req.inputs.some((text) => !text || new TextEncoder().encode(text).length > 32768)

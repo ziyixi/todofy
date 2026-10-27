@@ -179,6 +179,12 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
   }
   const owner = createHttpClient(ConsoleService, send)
   const models = createHttpClient(ModelService, send)
+  const newsletter = createHttpClient(ModelService, async (call) =>
+    mf.dispatchFetch(origin + call.url, {
+      method: call.httpMethod,
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${machineToken}` },
+      ...(call.body === undefined ? {} : { body: call.body }),
+    }) as unknown as Promise<Response>)
   const forCaller = (app: string) =>
     createHttpClient(ModelService, async (call) => {
       const worker = await mf.getWorker(`caller-${app}`)
@@ -210,6 +216,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
     backups,
     owner,
     models,
+    newsletter,
     forCaller,
     calls,
     geminiOutputs,
