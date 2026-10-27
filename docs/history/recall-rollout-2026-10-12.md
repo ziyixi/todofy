@@ -2,7 +2,7 @@
 
 This preserves the superseded Recall handoff entries before the 337 release.
 Old pending items and phone instructions describe their dates; current acceptance is in
-[HANDOFF](../../HANDOFF.md) and [the diagnostic record](../recall-diagnostic-verification.md).
+[HANDOFF](../../HANDOFF.md) and [the diagnostic record](https://github.com/ziyixi/todofy/blob/4ed5091969021e9a7d53b7c97498d88e9d95898c/docs/recall-diagnostic-verification.md).
 
 `codex/recall-orion-probe-fix` fixes two reproduced mobile capture delays and a reviewed privacy race. Established
 capture uses the installed listener instead of repeating five-second injection waits. New snapshots and closed
@@ -33,7 +33,7 @@ No production credential or connection was changed; six empty test connections a
 The synthetic empty-delete native confirmation blocked IAB tab 9; the owner is away, so do not require immediate
 desktop help. Its preview process is stopped. The phone's recurring page_probe_invalid_result and screenshot/auto-upload
 acceptance remain open; this release does not fix capture. `codex/recall-settings-verification` records release
-and UI evidence in root docs only, with no further app deployment. See [verification](../../docs/recall-settings-verification.md).
+and UI evidence in root docs only, with no further app deployment. See [verification](https://github.com/ziyixi/todofy/blob/4ed5091969021e9a7d53b7c97498d88e9d95898c/docs/recall-settings-verification.md).
 
 Recall's injection-completion correction is released at `bafbac85` (`2026.1013.45`). The actual 1736 phone receipt
 had eight tab events/two alarms, returned query+lookup and pending injection, without capture/store/screenshot.
@@ -57,7 +57,7 @@ screenshot element. The latest 45 device queue subsequently reports zero. This e
 visit ingestion/display after manual flush, not screenshot capture or unattended minute uploads. Direct bounded
 metadata navigation was client-blocked, so no exact device-UUID/document join or byte count is claimed. Do not ask
 for another reinstall or infer image support/failure from this run. See the dated phone receipt in
-[verification](../../docs/recall-diagnostic-verification.md). The settings cleanup above is released; capture acceptance remains separate.
+[verification](https://github.com/ziyixi/todofy/blob/4ed5091969021e9a7d53b7c97498d88e9d95898c/docs/recall-diagnostic-verification.md). The settings cleanup above is released; capture acceptance remains separate.
 
 Recall's mobile deadlock correction is released at `1c1e0b5` (`2026.1012.1736`). Known event tab IDs and the current
 span precede enumeration, with fresh active/visible/privacy checks; unanswered mobile callbacks release after five
@@ -73,7 +73,7 @@ Deployment `7021502888` verifies Worker `90d14ea6-052a-42eb-8045-defeb6bd05da`; 
 Test extensions are removed, the exact consumer stopped and port closed. Owner Chrome remains untouched.
 Phone iOS acceptance remains open: disable the old instance, load the new ZIP from file, Start, keep the public page foreground about
 one minute, then Send. Do not infer phone success from Mac, heartbeat or an empty outbox. See
-[verification](../../docs/recall-diagnostic-verification.md). The permission-button and startup-tracker experiments stay unmerged.
+[verification](https://github.com/ziyixi/todofy/blob/4ed5091969021e9a7d53b7c97498d88e9d95898c/docs/recall-diagnostic-verification.md). The permission-button and startup-tracker experiments stay unmerged.
 The settings cleanup above supersedes the earlier connection-list and token-name follow-up.
 
 The earlier `codex/recall-permission-api-verification` records the native permission investigation; its proposed
@@ -123,7 +123,7 @@ capture deduplicated. All files of both downloaded release ZIPs match the tested
 [Orion ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.812/recall-orion-v2026.1012.812.zip).
 The temporary Orion extension is uninstalled, the consumer stopped and its port closed. Chrome remains untouched.
 `codex/recall-diagnostic-verification` records these receipts in root docs only, without another application release.
-[Diagnostic evidence](../../docs/recall-diagnostic-verification.md) separates synthetic/native Mac checks from the phone
+[Diagnostic evidence](https://github.com/ziyixi/todofy/blob/4ed5091969021e9a7d53b7c97498d88e9d95898c/docs/recall-diagnostic-verification.md) separates synthetic/native Mac checks from the phone
 receipt already received; the follow-up above supersedes the earlier phone test instructions. Do not repeat them or
 claim iOS capture is fixed.
 
@@ -135,7 +135,7 @@ file injection returns a valid page probe while the subsequent content-message c
 Both fixes now have regressions that failed before correction; all 128 extension tests, typecheck and lint pass.
 The fresh build was visibly imported as `2026.1012.601`. Real native Alarm/message/IndexedDB/image/gzip checks
 received one text/JPEG document at 06:03:50.109Z, omitted the next unchanged snapshot, and received the ended
-visit at 06:05:39.509Z. [Native evidence](../../docs/recall-mobile-verification.md) distinguishes this from the old fake bridge.
+visit at 06:05:39.509Z. [Native evidence](https://github.com/ziyixi/todofy/blob/4ed5091969021e9a7d53b7c97498d88e9d95898c/docs/recall-mobile-verification.md) distinguishes this from the old fake bridge.
 No phone capture success is claimed. Native Mac checks cannot establish iOS lifecycle behavior.
 [Branch CI](https://github.com/ziyixi/todofy/actions/runs/38211057207) and the
 [same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38211415292) passed. Deployment `7007714439`
@@ -160,7 +160,7 @@ The API bridge is synthetic, so phone capture/upload acceptance remains open. Do
 [same-SHA release](https://github.com/ziyixi/todofy/actions/runs/38204085384) passed. Deployment `7006529755`
 verified Worker `e97a57e4-815e-4b9b-bd61-4424bc9298f2`; the live UI displayed `e397f51`.
 Mac installation files were updated preserving settings; its running version was not independently read.
-[Evidence and minimal phone check](../../docs/recall-mobile-verification.md),
+[Evidence and minimal phone check](https://github.com/ziyixi/todofy/blob/4ed5091969021e9a7d53b7c97498d88e9d95898c/docs/recall-mobile-verification.md),
 [phone ZIP](https://github.com/ziyixi/todofy/releases/download/recall-extension-v2026.1012.429/recall-orion-v2026.1012.429.zip).
 `codex/recall-orion-page-messages-verification` records receipts only; no further application change or release.
 No new dependency, service, retries, token or budget change.
@@ -257,6 +257,6 @@ and its displayed SHA was checked. On October 12 UTC, authorized temporary idle 
 verified capture/upload/display, equal rendered reader text with changed scrolling screenshots, and no repeated snapshots:
 three snapshots, newest at 01:08 UTC, despite a later eligible attempt at 01:10:21.453 UTC. Both stored and actual
 idle were restored to `idle`, with no open visit; no formal privacy setting or application code changed.
-[Verification and its simulation boundary](../../docs/recall-snapshot-verification.md). No owner-input step remains
+[Verification and its simulation boundary](https://github.com/ziyixi/todofy/blob/4ed5091969021e9a7d53b7c97498d88e9d95898c/docs/recall-snapshot-verification.md). No owner-input step remains
 pending. No new service, dependency or budget change.
 

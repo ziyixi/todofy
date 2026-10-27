@@ -28,7 +28,7 @@ ZIP 文件名包含版本号，正式包内的扩展显示名仍是 recall。
 ## 当前手机验收
 
 `2026.1013.337` 已在真实手机确认：不点“立即上传”，正文、JPEG 截图和结束访问仍会自动上传。
-本次固定测试页只新增一份快照，旧记录保留，见[手机实测记录](../../docs/recall-diagnostic-verification.md#october-12-ios-follow-up-automatic-text-image-and-visit-receipt)。
+本次固定测试页只新增一份快照，旧记录保留，见[手机实测记录](verification.md#phone-evidence)。
 日常使用无需开启诊断；诊断只在排查问题时手动运行。
 2026-10-14 再次收到 337 采集停滞报告；之前的短时成功不代表持续浏览已稳定。当前修复与待验边界见上述记录。
 
@@ -47,7 +47,7 @@ ZIP 文件名包含版本号，正式包内的扩展显示名仍是 recall。
 
 Recall 网站“设置”会出现最近一份“采集诊断”回执，供 agent 查看；收到回执不代表采集已成功。
 没有新的服务、口令、数据库表或持续日志。桌面扩展不显示此卡片，也不运行这项诊断。
-验证记录见[一次性诊断验收](../../docs/recall-diagnostic-verification.md)。
+验证记录见[一次性诊断验收](verification.md#orion-capture)。
 
 ## 正常采集验收
 
@@ -85,10 +85,10 @@ Agent 先运行现有扩展测试，再用本机真实 WebKit 打开实际构建
 同一页面的下一次采样不能多存快照；页面离开必须结束访问，消费者最终只收到一份正文和一条访问。
 测试故意丢弃文件注入的完成值，仍须经实际脚本的消息监听器取得正文；不手动发出 Alarm，
 不用手写 probe 或正文返回值代替注入脚本。桌面 Chrome 继续使用原来的文件执行结果。
-复用现有 Playwright WebKit 用例，开发依赖固定在扩展自己的 lockfile。以下命令在 `recall/extension/` 执行：
+复用现有 Playwright WebKit 用例，开发依赖由根目录的 `pnpm-lock.yaml` 锁定。以下命令在 `recall/extension/` 执行：
 
 ```sh
-npm ci
+pnpm --dir ../.. install --frozen-lockfile
 npx --no-install playwright install webkit
 npm run build
 npm run test:browser
@@ -107,7 +107,7 @@ Orion 使用文件注入安装顶层监听器，再由 `tabs.sendMessage` 请求
 
 上述消费者请求由本地测试截获，不访问生产 Recall。扩展 API 桥接与 `chrome.storage.local` 是 fixture；
 DOM、脚本执行、IndexedDB、图片压缩与 gzip 是真实 WebKit。它不能证明 Orion 自己的 API 实现或 iOS 前后台挂起行为。
-原生 Mac 与手机的分阶段验证见[验收记录](../../docs/recall-diagnostic-verification.md)。
+原生 Mac 与手机的分阶段验证见[验收记录](verification.md)。
 临时观察包没有进入正式源码；当前回归使用已有 WebKit 检查，不需要安装测试扩展到日常浏览器。
 
 设置里的“当前记录”描述当前前台页面；设置页本身不采集。“活动检查”能确认后台是否检查过页面，
@@ -118,4 +118,4 @@ DOM、脚本执行、IndexedDB、图片压缩与 gzip 是真实 WebKit。它不�
 
 `337` 的前台正文、截图及自动上传已经手机实测。WebKit 检查覆盖正常采集、空正文后继续、内容去重、
 页面跳转、保存与上传隔离及既有回调差异。手机后台挂起不保证运行；扩展仍只记录浏览器前台活动。
-历史发布和各阶段证据见[验证记录](../../docs/recall-mobile-verification.md)与[诊断验证记录](../../docs/recall-diagnostic-verification.md)。
+历史发布和各阶段证据见[验证记录](verification.md)。

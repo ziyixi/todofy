@@ -107,4 +107,4 @@ in `plugin/`; account updates preserve the existing App identity and sharing.
 
 Pass the complete branch CI, then publish the same SHA through main Actions. Deploy private source entrypoints
 before the MCP release binds them. See
-[connection and setup](docs/connection.md) and the separate [live verification](../docs/personal-mcp-verification.md).
+[connection and setup](docs/connection.md) and the separate [live verification](docs/verification.md).

@@ -251,3 +251,15 @@ First-day samples, not the one-week usage check.
   reporting `canary_consumer` in production, a live Mail Hero canary ending `ok` with no Todoist task, and
   the first real reminder with an ops section.
 - The GTD ledger and the morning-brief carryover (local only so far, see above).
+
+## Gemini email model order (2026-10-04/05; superseded by Model Router on 2026-10-27)
+
+Release `26c9662c` gave individual email and the email canary Flash-Lite first and the daily report, Top 5 and
+Top 10 Flash first. Fake-service checks covered first-call success, ordered fallback, all models failing, network
+errors and deadlines; completed and pre-summarized events stayed frozen, and the canary created no task or summary
+row. In production, synthetic canary `canary-manual-20261005T004417Z` completed with Flash-Lite, and the October 5
+daily summary and Top 10 were computed by Flash with nonempty input. The report ledger does not record what
+triggered a computation, so Alarm provenance was not established; the owner stopped that observation on
+2026-10-17. Model choice now lives in Todofy's settings through Model Router ([model selection](../README.md#model-selection)).
+Evidence: [main release](https://github.com/ziyixi/todofy/actions/runs/37248342156). The run-by-run record is in the
+repository history at `4ed50919` (`docs/email-model-verification.md`).
