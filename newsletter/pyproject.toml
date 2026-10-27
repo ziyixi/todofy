@@ -9,14 +9,10 @@ description = "One private service for research intake, editorial work, and revi
 requires-python = ">=3.14"
 dependencies = [
   "fastapi", "uvicorn", "httpx",
-  "protobuf", "jinja2", "pillow", "pyyaml", "packaging",
+  "protobuf", "jinja2", "pillow", "pyyaml",
   "ziyixi-protos",
   "ziyixi-proto", "ziyixi-model-router-client",
 ]
-
-[project.optional-dependencies]
-# Keep the former deployment extra accepted while images move to the router.
-codex = []
 
 [dependency-groups]
 dev = [

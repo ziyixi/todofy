@@ -20,13 +20,11 @@ import logging
 import pathlib
 import re
 import sqlite3
-import sys
 import tempfile
 from typing import TYPE_CHECKING
 
 import httpx
 import model_router_client as models
-import packaging.requirements as packaging_requirements
 import ziyixi_protos.newsletter.editorial_pb2 as editorial_pb2
 
 import newsletter.adapters as adapters
@@ -136,20 +134,6 @@ def check_proto_dependency() -> None:
 
 
 def _check_resources() -> None:
-    if sys.version_info[:2] != (3, 14):
-        raise PreflightError("PYTHON_VERSION_UNSUPPORTED")
-    # The root workspace lock pins installations. Check the installed package's
-    # declared requirements here; optional Codex is checked when enabled.
-    declared = importlib_metadata.distribution("personal-newsletter").requires
-    if not declared:
-        raise PreflightError("PACKAGE_METADATA_UNAVAILABLE")
-    for requirement in declared:
-        parsed = packaging_requirements.Requirement(requirement)
-        if parsed.marker and not parsed.marker.evaluate({"extra": ""}):
-            continue
-        installed_version = importlib_metadata.version(parsed.name)
-        if not parsed.specifier.contains(installed_version, prereleases=True):
-            raise PreflightError("DEPENDENCY_VERSION_MISMATCH")
     check_proto_dependency()
     package = resources.files("newsletter")
     for filename in ("story-editorial.md", "reader-profile.md"):
@@ -187,9 +171,7 @@ async def _check_model_router(
     async with asyncio.timeout(MODEL_TIMEOUT):
         catalog = await client.list_models()
     if not any(
-        item.configured
-        and item.kind == "text"
-        and item.id == newsletter_settings.native_model(settings.model)
+        item.configured and item.kind == "text" and item.id == settings.model
         for item in catalog.models
     ):
         raise PreflightError("MODEL_UNAVAILABLE")

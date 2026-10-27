@@ -17,13 +17,13 @@ COPY todofy/pyproject.toml ./todofy/pyproject.toml
 COPY proto/python/pyproject.toml ./proto/python/pyproject.toml
 COPY packages/model-router-client/python/pyproject.toml ./packages/model-router-client/python/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --package personal-newsletter --no-dev --extra codex --no-install-workspace
+    uv sync --locked --package personal-newsletter --no-dev --no-install-workspace
 COPY proto ./proto
 COPY packages/model-router-client/python/src ./packages/model-router-client/python/src
 COPY newsletter/MANIFEST.in ./newsletter/MANIFEST.in
 COPY newsletter/src ./newsletter/src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --package personal-newsletter --no-dev --extra codex --no-editable
+    uv sync --locked --package personal-newsletter --no-dev --no-editable
 
 FROM base AS runtime
 ARG BUILD_SHA=""

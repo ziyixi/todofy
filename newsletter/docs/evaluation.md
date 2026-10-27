@@ -41,13 +41,13 @@
 工具仍是 [scripts/evaluate_prompts.py](../scripts/evaluate_prompts.py)。它读取你提供的测试集，不扫描某个提示词目录，也不修改生产配置。可先查看参数，这一步不调用模型：
 
 ```sh
-uv run --locked --extra codex python scripts/evaluate_prompts.py --help
+uv run --locked python scripts/evaluate_prompts.py --help
 ```
 
 实际对比会使用模型额度，必须另行批准。测试集和输出放在仓库、云同步目录及登录目录之外的私有位置；输出目录必须尚不存在，但其父目录应已创建。通过环境配置 `NEWSLETTER_MODEL_ROUTER_URL` 和 `NEWSLETTER_MODEL_ROUTER_TOKEN`；提供方登录由 Router 执行层维护：
 
 ```sh
-uv run --locked --extra codex python scripts/evaluate_prompts.py \
+uv run --locked python scripts/evaluate_prompts.py \
   --suite /private/path/suite.json \
   --output /private/path/new-comparison \
   --allow-model-calls

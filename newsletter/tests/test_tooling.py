@@ -29,12 +29,10 @@ def test_uv_is_the_only_lock_and_direct_pins_match_resolution():
     lock = read_config("uv.lock", WORKSPACE)
     assert not (ROOT / "uv.lock").exists()
     assert not (ROOT / "requirements.lock").exists()
-    assert "dev" not in project["project"].get("optional-dependencies", {})
-    assert "codex" in project["project"]["optional-dependencies"]
+    assert "optional-dependencies" not in project["project"]
 
     declared = [
         *project["project"]["dependencies"],
-        *project["project"]["optional-dependencies"]["codex"],
         *project["dependency-groups"]["dev"],
     ]
     resolved = {
@@ -145,9 +143,7 @@ def test_make_has_one_locked_install_and_shared_quality_gate():
     makefile = (ROOT / "Makefile").read_text()
     setup = re.search(r"(?m)^setup:[^\n]*\n((?:\t[^\n]*\n)+)", makefile)
     assert setup is not None
-    assert all(
-        option in setup[1] for option in ("sync", "--locked", "--extra codex")
-    )
+    assert all(option in setup[1] for option in ("sync", "--locked"))
     assert "requirements.lock" not in makefile
     assert "pip install" not in makefile
     gate = re.search(r"(?m)^check:([^\n]*)", makefile)
@@ -224,10 +220,7 @@ def test_docker_installs_locked_production_environment_and_starts_directly():
     ]
     assert install_lines
     for line in install_lines:
-        assert all(
-            option in line
-            for option in ("--locked", "--no-dev", "--extra codex")
-        )
+        assert all(option in line for option in ("--locked", "--no-dev"))
         # A dependency-cache stage may deliberately omit the project entirely.
         assert "--no-install-workspace" in line or "--no-editable" in line
         assert "--package personal-newsletter" in line

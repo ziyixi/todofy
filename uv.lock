@@ -22,7 +22,6 @@ constraints = [
     { name = "kubernetes", specifier = "==36.0.3" },
     { name = "mypy", specifier = "==2.3.1" },
     { name = "openai-codex", specifier = "==0.163.0" },
-    { name = "packaging", specifier = "==26.3" },
     { name = "pillow", specifier = "==12.3.0" },
     { name = "protobuf", specifier = "==7.36.1" },
     { name = "pyjwt", specifier = "==2.15.1" },
@@ -887,7 +886,6 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jinja2" },
-    { name = "packaging" },
     { name = "pillow" },
     { name = "protobuf" },
     { name = "pyyaml" },
@@ -912,7 +910,6 @@ requires-dist = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jinja2" },
-    { name = "packaging" },
     { name = "pillow" },
     { name = "protobuf" },
     { name = "pyyaml" },
@@ -921,7 +918,6 @@ requires-dist = [
     { name = "ziyixi-proto", directory = "proto/python" },
     { name = "ziyixi-protos", url = "https://github.com/ziyixi/protos/releases/download/python-v0.1.0.dev7/ziyixi_protos-0.1.0.dev7-py3-none-any.whl" },
 ]
-provides-extras = ["codex"]
 
 [package.metadata.requires-dev]
 dev = [

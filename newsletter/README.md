@@ -75,7 +75,7 @@ newsletter-trigger --wait --timeout 7200
 newsletter-trigger --send --timeout 7200
 ```
 
-调用端需要 `NEWSLETTER_SERVICE_URL`、`NEWSLETTER_EDITOR_TOKEN`；发送时还需 `NEWSLETTER_SEND_TOKEN`。这些值从进程环境读取，不要写入命令参数。`make setup` 后，本地可用 `uv run --locked --extra codex newsletter-trigger` 代替上面的命令名。
+调用端需要 `NEWSLETTER_SERVICE_URL`、`NEWSLETTER_EDITOR_TOKEN`；发送时还需 `NEWSLETTER_SEND_TOKEN`。这些值从进程环境读取，不要写入命令参数。`make setup` 后，本地可用 `uv run --locked newsletter-trigger` 代替上面的命令名。
 
 也可以通过 HTTP 接入。采编和发送是两个独立操作，`POST /v1/runs` 本身不会发信。完整请求示例及权限见 [接口说明](docs/collection-service.md)。
 
@@ -99,7 +99,7 @@ newsletter-trigger --send --timeout 7200
 ## 开发与维护
 
 项目采用 Python、FastAPI 和 SQLite，使用 uv 管理依赖。SQLite 保存完整运行记录和发送账本，Notion 是便于阅读的副本，不会把手工修改同步回服务。
-Newsletter 只使用共享的 `modelrouter.inference.v1` Python 客户端，不安装模型 SDK，也不挂载登录目录。默认模型是 `models/sol-6-1`；未指定 effort 时保留模型默认值。一次采编调用可在同一短会话内补查一轮，使用 Router 返回的实际网页观察和逐次用量。历史运行、业务开关、提示词和发送账本保持原样。
+Newsletter 只使用共享的 `modelrouter.inference.v1` Python 客户端，不安装模型 SDK，也不挂载登录目录。默认模型是 `gpt-6.1-sol`（`settings.DEFAULT_MODEL`）；未指定 effort 时保留模型默认值。一次采编调用可在同一短会话内补查一轮，使用 Router 返回的实际网页观察和逐次用量。历史运行、业务开关、提示词和发送账本保持原样。
 
 ```sh
 make check    # Ruff、mypy、结构检查和离线测试；与 CI 相同

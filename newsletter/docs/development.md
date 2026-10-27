@@ -39,7 +39,7 @@ make check
 make proto-check
 make build
 make smoke
-uv run --locked --extra codex python scripts/smoke_wheel.py
+uv run --locked python scripts/smoke_wheel.py
 ```
 
 `make format` 运行 Ruff formatter，不修业务逻辑或关闭规则。`make check` 依次执行

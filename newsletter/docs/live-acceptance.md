@@ -34,7 +34,7 @@ newsletter 不直接调用 Gemini。Todofy 自己负责其服务器上的 `GEMIN
 
 ## Model Router 连接
 
-设置 `NEWSLETTER_MODEL_ROUTER_URL` 和 Newsletter 专用的 `NEWSLETTER_MODEL_ROUTER_TOKEN`，通过正规密钥配置流程保存 token。Newsletter 不需要本机模型登录目录、SDK 或提供方 API key；账号由 Router 的执行层维护。默认公共模型名为 `models/sol-6-1`，历史冻结运行的模型值由 Router 兼容解析，不改写历史。
+设置 `NEWSLETTER_MODEL_ROUTER_URL` 和 Newsletter 专用的 `NEWSLETTER_MODEL_ROUTER_TOKEN`，通过正规密钥配置流程保存 token。Newsletter 不需要本机模型登录目录、SDK 或提供方 API key；账号由 Router 的执行层维护。默认模型为 `gpt-6.1-sol`；冻结运行使用其快照里的模型值，不改写历史。
 
 启动预检只读取配置模型目录，确认生成、短会话和网页研究能力；不会执行模型。`make smoke-codex` 保留原发布命令名，当前只用假 HTTP transport 检查共享客户端，既不启动 SDK 也不访问真实账号。真实搜索、来源打开和完整采编仍需另行授权验收。
 

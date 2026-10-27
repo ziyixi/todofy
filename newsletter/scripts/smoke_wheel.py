@@ -110,8 +110,6 @@ def main() -> None:
             "--package",
             "personal-newsletter",
             "--no-dev",
-            "--extra",
-            "codex",
             "--no-emit-project",
             "--no-emit-package",
             "ziyixi-proto",

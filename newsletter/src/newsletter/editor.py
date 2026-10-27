@@ -347,14 +347,14 @@ class ModelEditor:
     def __init__(
         self,
         client: models.ModelClient,
-        model: str = "gpt-6.1-sol",
+        model: str = newsletter_settings.DEFAULT_MODEL,
         *,
         timeout_seconds: float = 840,
     ) -> None:
         if not model.strip() or timeout_seconds <= 0:
             raise errors.EditorError("configuration")
         self.client = client
-        self.model = newsletter_settings.native_model(model)
+        self.model = model
         self.timeout_seconds = timeout_seconds
 
     async def execute(

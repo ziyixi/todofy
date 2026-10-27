@@ -83,9 +83,9 @@ max_research_candidates: 10
 ## 本地离线检查
 
 ```sh
-uv run --locked --extra codex python -m newsletter.config_cli build \
+uv run --locked python -m newsletter.config_cli build \
   --source content-config --revision "$(git rev-parse HEAD)" --output /tmp/newsletter-bundle.json
-uv run --locked --extra codex python -m newsletter.config_cli validate \
+uv run --locked python -m newsletter.config_cli validate \
   --bundle /tmp/newsletter-bundle.json
 ```
 

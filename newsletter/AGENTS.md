@@ -20,6 +20,6 @@
 不得把 secret、个人生成内容或生产路径放日志/报告。依赖、源码和运行状态不混用。
 
 从本目录运行 `make check`、`make smoke`、`make smoke-codex`、`make build`，
-再执行 `uv run --locked --extra codex python scripts/smoke_wheel.py`。
+再执行 `uv run --locked python scripts/smoke_wheel.py`。
 容器验收用 `scripts/smoke_image.py`，不手工在 VPS 构建。来源记录见
 [import-source.md](docs/import-source.md)。
