@@ -572,17 +572,13 @@ export function createPrototype(
       };
       return { timerEtag: focus.timerEtag, timer: focus.timer };
     },
-    async readFocus(start, end) {
-      const range: DayPlan[] = [];
-      for (let date = start; date <= end; date = addDays(date, 1)) {
-        let day = days.find((item) => item.date === date);
-        if (!day) {
-          day = { date, taskIds: [], completedTaskIds: [], entries: [] };
-          days = [...days, day];
-        }
-        range.push(day);
+    async readFocus(date) {
+      let day = days.find((item) => item.date === date);
+      if (!day) {
+        day = { date, taskIds: [], completedTaskIds: [], entries: [] };
+        days = [...days, day];
       }
-      return named(range);
+      return named([day]);
     },
     async addEntry(entry) {
       const saved: FocusEntry = {

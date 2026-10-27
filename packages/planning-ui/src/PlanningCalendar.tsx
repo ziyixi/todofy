@@ -574,7 +574,6 @@ const dateStyles = {
   },
   monthDay: { month: "short", day: "numeric" },
   monthDayYear: { year: "numeric", month: "short", day: "numeric" },
-  month: { year: "numeric", month: "long" },
 } satisfies Record<string, Intl.DateTimeFormatOptions>;
 const dateFormats = new Map<string, Intl.DateTimeFormat>();
 /** Formatters are costly to construct, so each language and style is built once. */
@@ -615,10 +614,6 @@ export function weekLabel(weekStart: string, language: Language): string {
   return language === "zh"
     ? `第 ${week} 周 · ${from}起`
     : `Week ${week} · from ${from}`;
-}
-/** "October 2026" or "2026年10月": the month of a date. */
-export function monthLabel(date: string, language: Language): string {
-  return dateFormat(language, "month").format(dayDate(date));
 }
 /** A task's shown title, or that it is unavailable. */
 export function taskTitle(

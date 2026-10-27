@@ -182,9 +182,9 @@ function TimeMonth({
   )
     cells.push(date);
   return (
-    <div className="plus-focus-month">
+    <div className="gtd-time-month">
       {cells.slice(0, 7).map((date) => (
-        <span key={date} className="plus-focus-weekday" aria-hidden="true">
+        <span key={date} className="gtd-time-weekday" aria-hidden="true">
           {shortDay(date, "en")}
         </span>
       ))}
@@ -196,7 +196,7 @@ function TimeMonth({
           return (
             <span
               key={date}
-              className={`plus-focus-month-day ${outside ? "is-outside" : "is-future"}`}
+              className={`gtd-time-month-day ${outside ? "is-outside" : "is-future"}`}
               aria-hidden="true"
             >
               <span>{Number(date.slice(8))}</span>
@@ -214,7 +214,7 @@ function TimeMonth({
           <button
             key={date}
             type="button"
-            className={`plus-focus-month-day ${date === report.today ? "is-today" : ""}`}
+            className={`gtd-time-month-day ${date === report.today ? "is-today" : ""}`}
             data-level={level}
             aria-label={
               day ? dayName(day) : `${readableDate(date, "en")}: 0m recorded`
@@ -239,7 +239,7 @@ function TimeWeek({
 }) {
   const busiest = Math.max(0, ...report.days.map((day) => day.recordedSeconds));
   return (
-    <div className="plus-focus-bars">
+    <div className="gtd-time-bars">
       {report.days.map((day) => (
         <button
           key={day.day}
@@ -249,14 +249,14 @@ function TimeWeek({
           aria-label={dayName(day)}
           onClick={() => onOpenDay(day.day)}
         >
-          <span className="plus-focus-bar-track" aria-hidden="true">
+          <span className="gtd-time-bar-track" aria-hidden="true">
             {day.recordedSeconds > 0 && (
-              <span className="plus-focus-bar-value">
+              <span className="gtd-time-bar-value">
                 {recordedTime(day.recordedSeconds)}
               </span>
             )}
             <span
-              className="plus-focus-bar"
+              className="gtd-time-bar"
               style={
                 {
                   "--share": busiest ? day.recordedSeconds / busiest : 0,
@@ -275,7 +275,7 @@ function TimeWeek({
               })}
             </span>
           </span>
-          <span className="plus-focus-bar-day" aria-hidden="true">
+          <span className="gtd-time-bar-day" aria-hidden="true">
             <span>{shortDay(day.day, "en")}</span>
             <span>{Number(day.day.slice(8))}</span>
           </span>

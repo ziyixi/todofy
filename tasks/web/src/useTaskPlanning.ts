@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { planningDraft, type PlanningDraft } from "./task-planning";
 import type { Task } from "./api";
-import type { ExecutionMode } from "@ziyixi/planning-ui/ExecutionFields";
+import {
+  executionFlags,
+  type ExecutionMode,
+} from "@ziyixi/planning-ui/ExecutionFields";
 
 /** The dialog's planning draft, from the task as GetTask answered it; it is saved with the task. */
 export function useTaskPlanning(task?: Task) {
@@ -24,11 +27,7 @@ export function useTaskPlanning(task?: Task) {
     }));
   }
   function setExecution(mode: ExecutionMode) {
-    setDraft((current) => ({
-      ...current,
-      singleAction: mode !== "steps",
-      quick: mode === "quick",
-    }));
+    setDraft((current) => ({ ...current, ...executionFlags(mode) }));
   }
   return { draft, setDraft, patch, setExecution };
 }

@@ -63,8 +63,8 @@ export const MAX_LANE_TASKS = 100;
 
 /**
  * A lane's tasks in the owner's order: the ones in the stored order first, as stored (IDs no
- * longer in the lane are skipped), then the rest in the lane's own order. In Start now the rest
- * come first instead: a task that has just become due is its newest news.
+ * longer in the lane are skipped), then the rest in the lane's own order. For "start", Parked's
+ * ready cards, the rest come first instead: a task that has just become ready is its newest news.
  */
 export function inLaneOrder(
   lane: LaneId,

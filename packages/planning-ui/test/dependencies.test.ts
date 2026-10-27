@@ -8,7 +8,6 @@ import {
   holds,
   waitersText,
   waitingForStatus,
-  waitingTasks,
   waitsThrough,
 } from "../src/dependencies";
 import { applyConfirmed, rereadsAfter } from "../src/plan-updates";
@@ -108,23 +107,6 @@ it("indexes what each active task waits for, what is done and who waits", () => 
   );
   // Built once per pair of lists.
   expect(dependencyIndex({ tasks, dependencies })).toBe(index);
-});
-
-it("lists label and dependency waits together, the longest untouched first", () => {
-  const tasks = [
-    task("label", {
-      planningFlags: ["waiting"],
-      updatedAt: "2026-10-10T00:00:00Z",
-    }),
-    task("dependent", { updatedAt: "2026-10-01T00:00:00Z" }),
-    task("venue", { updatedAt: "2026-09-01T00:00:00Z" }),
-    task("unknown", { planningFlags: ["blocked"] }),
-  ];
-  expect(
-    waitingTasks({ tasks, dependencies: [waitsFor("dependent", "venue")] }).map(
-      (item) => item.id,
-    ),
-  ).toEqual(["dependent", "label", "unknown"]);
 });
 
 it("detects a cycle through other tasks as Tasks does", () => {

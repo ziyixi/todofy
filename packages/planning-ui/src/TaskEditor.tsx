@@ -11,7 +11,11 @@ import {
 } from "./domain";
 import { detailStatus } from "./deadlines";
 import { TaskDependencies } from "./TaskDependencies";
-import { ExecutionFields, type ExecutionMode } from "./ExecutionFields";
+import {
+  ExecutionFields,
+  executionFlags,
+  type ExecutionMode,
+} from "./ExecutionFields";
 import { words } from "./i18n";
 import { PARKED_LABEL } from "./planning-outcomes";
 import { PendingMark } from "./StatusMarks";
@@ -402,12 +406,7 @@ export function TaskEditor({
           disabled={busy}
           onModeChange={(mode) => {
             if (mode === execution) return;
-            void run(() =>
-              actions.updateTask(task, {
-                singleAction: mode !== "steps",
-                quick: mode === "quick",
-              }),
-            );
+            void run(() => actions.updateTask(task, executionFlags(mode)));
           }}
           onRoutineChange={(routine) => {
             void run(() => actions.updateTask(task, { routine }));

@@ -74,7 +74,7 @@ interface Props {
   focus: FocusState;
   /** The queues the quiet deadline line looks in: this week's, or only today's. */
   days?: readonly DayPlan[];
-  /** Opens Plan › Review with Start now focused. */
+  /** Opens Plan › Review with Parked focused. */
   onShowStart?: () => void;
   /** The day the view is around; today unless another is chosen. */
   date?: string;
@@ -211,7 +211,7 @@ function useFocusDay(
   useEffect(() => {
     if (skip || fresh) return;
     let current = true;
-    actions.readFocus(date, date).then(
+    actions.readFocus(date).then(
       (range) => {
         if (!current) return;
         cache.current.set(date, { range, written });

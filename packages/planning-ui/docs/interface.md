@@ -195,7 +195,7 @@ Focus 显示 Tasks 的今天（`ListFocusDaysResponse.today`，即账户时区�
 
 **周和月统计**：[Tasks GTD](../../../tasks/docs/gtd.md) 提供周柱状图、月日历、已记录时间和按任务分组的报告，代码在宿主的 `tasks/web/src/gtd/`。统计按服务端报告读取，不在本包重复计算；点击过去或今天的日期打开 Focus，编辑当天的记录。未来日期和月历里不属于当前月的格子不能打开。
 
-**读取**：今天使用页面自己的 Focus 数据，其他日期通过 `readFocus(date, date)` 读取，Focus 打开期间按日期缓存在组件里。每次写入确认后（App 的写入计数加一），重新读取当前显示的日期；记录写入还会立即合并进所有缓存日期。读取下一天时，上一天的内容留在原处，变淡（0.6）、不可操作并带 `aria-busy`；首次读取时显示一行 muted 的加载文字。失败时显示内联错误和“刷新”按钮。
+**读取**：今天使用页面自己的 Focus 数据，其他日期通过 `readFocus(date)` 读取，Focus 打开期间按日期缓存在组件里。每次写入确认后（App 的写入计数加一），重新读取当前显示的日期；记录写入还会立即合并进所有缓存日期。读取下一天时，上一天的内容留在原处，变淡（0.6）、不可操作并带 `aria-busy`；首次读取时显示一行 muted 的加载文字。失败时显示内联错误和“刷新”按钮。
 
 旧日期的活动计时不冒充今天同名 ID 的活动计时，也不允许今天另启一段覆盖它。全局计时条在 Plan／Focus 切换时保留，不新增浏览器本地计时存储。
 
@@ -270,7 +270,7 @@ Plan、规划事实、依赖、Focus 的队列、计时和用时记录都是 Tas
 | 切周                 | ListFocusDays（七天，一次）                                                                      | 那周的队列与记录、它们提到的任务（并入 `FocusState.tasks`） |
 | 同日队列、跨日移动、Focus 排序 | MoveFocusStep：源日、目标日和插在它之前的步骤                                          | 改变的日期的队列，直接合并（记录保留）                |
 | 移出日期／加入今天   | MoveFocusStep：只有源日，或只有目标日                                                            | 该日的队列，直接合并                                  |
-| Focus 的其他日期     | `readFocus(date, date)`：ListFocusDays，只读一天；写入确认后重读显示的日期                 | 当天的队列与记录、它们提到的任务、Tasks 的今天        |
+| Focus 的其他日期     | `readFocus(date)`：ListFocusDays，只读一天；写入确认后重读显示的日期                 | 当天的队列与记录、它们提到的任务、Tasks 的今天        |
 | 用时记录             | CreateFocusEntry、UpdateFocusEntry（只改 `seconds`，带 etag）、DeleteFocusEntry                  | 保存或删除的记录，直接合并                            |
 | 估时                 | 宿主的 `updateEstimate`：Tasks UpdateTask 的 `duration_minutes`，带 Plan 持有的 etag             | 保存的时长和新的 etag（`{ estimate, etag }`），直接合并；零表示清空 |
 | 计时                 | CommandFocusTimer，etag 与稳定 request ID；Start 带番茄钟时长和领域；离开时暂停的 PAUSE／RESUME 带 `effective_time`（Tasks 把它限制在本段开始或 `pause_time` 到现在之间） | FocusTimer 映射为 TimerSnapshot（`pause_time` 映射为精确到毫秒的 `pausedAt`），保存的记录一并合并；idle 清除显示状态 |

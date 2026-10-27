@@ -275,17 +275,12 @@ it("reads only the selected week's seven queues, in one call, with the tasks the
     },
   });
 });
-it("reads a month as ListFocusDays calls of at most seven days, together", async () => {
+it("reads one Focus day in one ListFocusDays call, with its records and the tasks they name", async () => {
   const ranges: string[] = [];
-  let pending = 0;
-  let most = 0;
   const api = fakeActions(
     vi.fn<typeof fetch>(async (input) => {
       const url = new URL(String(input));
       ranges.push(url.search);
-      most = Math.max(most, ++pending);
-      await Promise.resolve();
-      pending--;
       const start = url.searchParams.get("start_day")!;
       return json({
         days: focusDays(url),
@@ -304,14 +299,10 @@ it("reads a month as ListFocusDays calls of at most seven days, together", async
       });
     }),
   );
-  const month = await api.readFocus("2026-09-28", "2026-11-08");
-  expect(ranges).toHaveLength(6);
-  expect(most).toBe(6);
-  expect(ranges.at(-1)).toBe("?start_day=2026-11-02&end_day=2026-11-08");
-  expect(month.days).toHaveLength(42);
-  expect(month.days[0]!.date).toBe("2026-09-28");
-  expect(month.days.at(-1)!.date).toBe("2026-11-08");
-  expect(month.days[7]!.entries).toEqual([
+  const day = await api.readFocus("2026-10-05");
+  expect(ranges).toEqual(["?start_day=2026-10-05&end_day=2026-10-05"]);
+  expect(day.days.map((item) => item.date)).toEqual(["2026-10-05"]);
+  expect(day.days[0]!.entries).toEqual([
     {
       id: "2026-10-05",
       taskId: "step",
@@ -322,15 +313,8 @@ it("reads a month as ListFocusDays calls of at most seven days, together", async
       etag: "1",
     },
   ]);
-  expect(Object.keys(month.tasks)).toHaveLength(6);
-  expect(month.today).toBe("2026-10-19");
-  // A range that ends mid-week reads only its days.
-  ranges.length = 0;
-  await api.readFocus("2026-10-12", "2026-10-20");
-  expect(ranges).toEqual([
-    "?start_day=2026-10-12&end_day=2026-10-18",
-    "?start_day=2026-10-19&end_day=2026-10-20",
-  ]);
+  expect(Object.keys(day.tasks)).toEqual(["task-2026-10-05"]);
+  expect(day.today).toBe("2026-10-19");
 });
 it("returns a stopped timer and the record it saved without reloading the task lists", async () => {
   const fetcher = vi.fn<typeof fetch>(async (input, init) => {

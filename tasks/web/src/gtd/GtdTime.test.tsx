@@ -104,7 +104,7 @@ it("shows month totals from saved areas and opens only this month's elapsed days
     name: `${readableDate("2026-10-12", "en")}: 3h recorded, Work 1h, Personal 1h, Unassigned 1h`,
   });
   expect(within(chart).getAllByRole("button")).toHaveLength(25);
-  expect(chart.querySelectorAll(".plus-focus-month-day")).toHaveLength(35);
+  expect(chart.querySelectorAll(".gtd-time-month-day")).toHaveLength(35);
   expect(
     [...chart.querySelectorAll(".is-outside")].map((cell) => cell.textContent),
   ).toEqual(["27", "28", "29", "30"]);
