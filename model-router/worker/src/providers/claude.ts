@@ -3,8 +3,8 @@ import Anthropic, { APIConnectionError, APIConnectionTimeoutError, APIError, API
 import type { BetaMessage, MessageCreateParamsBase } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import type { GenerateRequest } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import type { ProviderContext, ProviderResult } from '../types.ts';
-import { apiKey, deadlineSignal, httpError, parseSchema, providerStatus } from './common.ts';
-import { claudeUsage, record, unknownUsage } from './usage.ts';
+import { apiKey, deadlineSignal, httpError, parseSchema, providerStatus, refusedBeforeGeneration, timedOut } from './common.ts';
+import { claudeUsage, record, unknownUsage, zeroUsage } from './usage.ts';
 
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 const HEADER_TIMEOUT_MS = 120_000;
@@ -119,17 +119,18 @@ export async function generateClaude(request: GenerateRequest, context: Provider
     const partial = claudeUsage(partialUsage, context.route.upstreamModel, base.reportedModel);
     base.usage = { ...partial, available: false };
     delete base.usage.estimatedCostMicrousd;
-    if (context.signal.aborted) return fail(1, 'claude_cancelled');
+    if (context.signal.aborted) return timedOut(context.signal) ? fail(4, 'claude_deadline') : fail(1, 'claude_cancelled');
     if (deadline.signal.aborted) return fail(4, 'claude_deadline');
     if (stalled) return fail(4, 'claude_stream_stalled');
     if (error instanceof APIUserAbortError) return fail(1, 'claude_cancelled');
     if (error instanceof APIConnectionTimeoutError) return fail(4, 'claude_headers_timeout');
     if (isApiError(error) && error.status !== undefined && partialUsage === null) {
+      if (refusedBeforeGeneration(error.status)) base.usage = zeroUsage();
       const body = record(error.error);
       const detail = record(body?.['error']) ?? body;
       const message = detail?.['message'];
       const spendLimit = record(detail?.['details'])?.['error_code'] === 'enforced_spend_limit_reached'
-        || (typeof message === 'string' && /^You have reached your specified (?:workspace )?API usage limits\b/.test(message));
+        || (typeof message === 'string' && /^(?:You have reached your specified (?:workspace )?API usage limits|Your credit balance is too low)\b/.test(message));
       if ((error.status === 400 || error.status === 429) && spendLimit) return { ...base, error: providerStatus(8, 'claude_spend_limit', 'MODEL_SPEND_LIMIT') };
       return { ...base, error: httpError('claude', error.status, error.headers) };
     }

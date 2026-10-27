@@ -1,8 +1,8 @@
 /** Gemini generateContent with an one actual native model per invocation. */
 import type { GenerateRequest } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import type { ProviderContext, ProviderResult } from '../types.ts';
-import { apiKey, deadlineSignal, httpError, parseSchema, providerStatus, readJson } from './common.ts';
-import { geminiUsage, record, unknownUsage } from './usage.ts';
+import { apiKey, deadlineSignal, httpError, parseSchema, providerStatus, readJson, refusedBeforeGeneration, timedOut } from './common.ts';
+import { geminiUsage, record, unknownUsage, zeroUsage } from './usage.ts';
 
 const MODEL_TIMEOUT_MS = 60_000;
 const MIN_ATTEMPT_MS = 1000;
@@ -26,7 +26,7 @@ export async function generateGemini(request: GenerateRequest, context: Provider
   if (key === null) return fail(9, 'gemini_not_configured');
   let schema: Record<string, unknown> | null;
   try { schema = parseSchema(request.outputSchemaJson); } catch { return fail(3, 'output_schema_invalid'); }
-  if (context.signal.aborted) return fail(1, 'gemini_cancelled');
+  if (context.signal.aborted) return timedOut(context.signal) ? fail(4, 'gemini_deadline') : fail(1, 'gemini_cancelled');
   if (context.deadlineMs - Date.now() < MIN_ATTEMPT_MS) return fail(4, 'gemini_deadline');
   const deadline = deadlineSignal(context, MODEL_TIMEOUT_MS);
   const body = JSON.stringify({
@@ -44,6 +44,7 @@ export async function generateGemini(request: GenerateRequest, context: Provider
     });
     if (!response.ok) {
       await response.body?.cancel();
+      if (refusedBeforeGeneration(response.status)) base.usage = zeroUsage();
       return { ...base, error: httpError('gemini', response.status, response.headers) };
     }
     const value = record(await readJson(response));
@@ -58,7 +59,7 @@ export async function generateGemini(request: GenerateRequest, context: Provider
     if (candidate.finish !== 'STOP' || candidate.text.trim() === '') return fail(13, 'gemini_incomplete');
     return { ...base, output: candidate.text, contributingModels: base.reportedModel ? [base.reportedModel] : [] };
   } catch (error) {
-    if (context.signal.aborted) return fail(1, 'gemini_cancelled');
+    if (context.signal.aborted) return timedOut(context.signal) ? fail(4, 'gemini_timeout') : fail(1, 'gemini_cancelled');
     const invalid = error instanceof SyntaxError || (error instanceof Error && ['provider_empty_response', 'provider_response_too_large'].includes(error.message));
     return fail(deadline.signal.aborted ? 4 : invalid ? 13 : 14, deadline.signal.aborted ? 'gemini_timeout' : invalid ? 'gemini_invalid_response' : 'gemini_connection');
   } finally {

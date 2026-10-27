@@ -15,6 +15,11 @@ export function unknownUsage(billingKind = 'api'): TokenUsage {
   return { available: false, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, billingKind };
 }
 
+/** A request the provider refused before generating: reported zero, priced at zero. */
+export function zeroUsage(): TokenUsage {
+  return { ...unknownUsage(), available: true, estimatedCostMicrousd: 0 };
+}
+
 /** The retained text estimate: roughly one token per CJK character, others per 3.5 code units. */
 export function estimateTokens(text: string): number {
   let cjk = 0;

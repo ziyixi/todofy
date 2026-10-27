@@ -102,6 +102,13 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     expect((await harness.owner.getRequest({ name: answer.name })).state).toBe('failed')
   })
 
+  it('reports the Router deadline as MODEL_TIMEOUT, not a cancellation', async () => {
+    harness.delayNextGemini(4000)
+    const answer = await harness.models.generate({ model: gemini, input: 'Synthetic slow input', timeoutMs: 1500 })
+    expect(answer.error).toMatchObject({ code: 4, reason: 'MODEL_TIMEOUT' })
+    expect((await harness.owner.getRequest({ name: answer.name })).state).toBe('failed')
+  })
+
   it('preserves two Codex turns and observed web actions, then acknowledges cleanup', async () => {
     const name = `conversations/${crypto.randomUUID()}`
     expect(await harness.models.createConversation({ name, model: sol, instructions: [{ text: 'Synthetic instructions', cache: true }], webResearch: true, outputSchemaJson: schema })).toEqual({ $typeName: 'google.protobuf.Empty' })

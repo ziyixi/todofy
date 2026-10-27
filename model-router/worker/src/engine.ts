@@ -27,6 +27,7 @@ import { generateClaude } from './providers/claude.ts';
 import { generateGemini } from './providers/gemini.ts';
 import { embedWorkersAI } from './providers/workers-ai.ts';
 import { estimateCostMicrousd } from './providers/pricing.ts';
+import { timedOut } from './providers/common.ts';
 import { backupStep, newBackup, type BackupCursor } from './backup.ts';
 import { Code, RpcError, invalid, precondition, resourceId } from './errors.ts';
 import type { Env, ProviderResult } from './types.ts';
@@ -127,7 +128,7 @@ export class RouterEngine extends DurableObject<Env> {
     allowModel(app, route.provider);
     const started = Date.now();
     const duration = Math.min(budget(req.timeoutMs), context ? context.expireMs - started : 840000);
-    const timer = setTimeout(() => controller.abort(), duration);
+    const timer = setTimeout(() => controller.abort(new DOMException('The model exceeded its time budget.', 'TimeoutError')), duration);
     let value = create(GenerationSchema, {
       name: `requests/${crypto.randomUUID()}`,
       model: route.upstreamModel,
@@ -194,10 +195,14 @@ export class RouterEngine extends DurableObject<Env> {
       let code: Code = Code.INTERNAL;
       let reason = 'MODEL_INTERNAL';
       let message = 'The model execution did not complete.';
-      if (controller.signal.aborted) {
+      if (controller.signal.aborted && timedOut(controller.signal)) {
         code = Code.DEADLINE_EXCEEDED;
         reason = 'MODEL_TIMEOUT';
         message = 'The model exceeded its time budget.';
+      } else if (controller.signal.aborted) {
+        code = Code.CANCELLED;
+        reason = 'MODEL_CANCELLED';
+        message = 'The context was closed during this turn.';
       } else if (error instanceof RpcError) {
         code = error.code;
         reason = error.reason;

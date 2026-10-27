@@ -55,6 +55,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
   const conversations = new Map<string, string>()
   let closeFailures = 0
   let generationFailureReason = ''
+  let geminiDelayMs = 0
   async function outbound(request: Request): Promise<Response> {
     const url = new URL(request.url)
     if (url.href === `${issuer}/cdn-cgi/access/certs`) return Response.json((await signingKeys).jwks)
@@ -69,7 +70,10 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
       bearer: request.headers.get('authorization'),
       userAgent: request.headers.get('user-agent'),
     })
-    if (url.hostname === 'generativelanguage.googleapis.com')
+    if (url.hostname === 'generativelanguage.googleapis.com') {
+      const delay = geminiDelayMs
+      geminiDelayMs = 0
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
       return Response.json({
         modelVersion: 'gemini-3.5-flash-lite',
         candidates: [
@@ -77,6 +81,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
         ],
         usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 4, totalTokenCount: 16 },
       })
+    }
     if (url.hostname !== 'executor.example.test')
       return new Response('Synthetic external request denied', { status: 599 })
     if (url.pathname.endsWith('generations:generate')) {
@@ -223,6 +228,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
     executorOutputs,
     failNextClose() { closeFailures += 1 },
     failNextGeneration(reason: string) { generationFailureReason = reason },
+    delayNextGemini(ms: number) { geminiDelayMs = ms },
     caller,
     async dispose() {
       await mf.dispose()
