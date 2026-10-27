@@ -93,7 +93,6 @@ function withApiErrors<C extends object>(client: C): C {
 /** MailHeroUiService: `api.getMessage({ name: messageName(id) })` resolves to a Message. */
 export const api = withApiErrors(createHttpClient(MailHeroUiService, send))
 
-
 // ---- names, times, filters ---------------------------------------------------------------------------------------
 
 /** AIP-155: a request_id, made once per user action, so a repeated request is answered with the first result. */
