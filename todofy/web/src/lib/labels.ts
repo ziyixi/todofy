@@ -94,7 +94,7 @@ export const EVENT_ERRORS: Record<EventErrorName, CodeLabel> = {
 export const API_ERROR_HINTS: Record<Reason | ClientCode, string> = {
   BAD_REQUEST: '请求参数无效；刷新页面后重试',
   UNAUTHORIZED: 'Cloudflare Access 登录已失效；刷新页面重新登录',
-  CSRF_FAILED: '页面安全令牌已失效；再试一次会自动取得新令牌',
+  CSRF_FAILED: '页面安全校验未通过；刷新页面后重试',
   NOT_FOUND: '找不到该资源；它可能已被清理，或链接有误',
   METHOD_NOT_ALLOWED: '页面版本与服务不一致；刷新页面后重试',
   ETAG_MISMATCH: '事件在你查看后已被更新；刷新后确认新状态再操作',

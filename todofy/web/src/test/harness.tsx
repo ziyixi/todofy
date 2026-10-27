@@ -44,13 +44,12 @@ function isReply(value: unknown): value is { status: number; body?: unknown } {
 
 /**
  * Stubs fetch with handlers keyed by "METHOD /api/v1/path" (the decoded path: `mailEvents/<id>:reconcile`). Unmatched
- * requests fail the test loudly. GET /api/csrf, /api/v1/serviceStatus and /api/v1/metricDays have defaults so every
- * page can render.
+ * requests fail the test loudly. GET /api/v1/serviceStatus, /api/v1/modelSettings and /api/v1/metricDays have
+ * defaults so every page can render.
  */
 export function mockApi(handlers: Record<string, Handler>) {
   const calls: Call[] = []
   const table: Record<string, Handler> = {
-    'GET /api/csrf': { token: 'csrf-token-1' },
     'GET /api/v1/serviceStatus': overview(),
     'GET /api/v1/modelSettings': {
       settings: { name: 'modelSettings', email_model: 'gemini-3.5-flash-lite', report_model: 'gemini-3.8-flash', etag: '0' },

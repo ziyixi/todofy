@@ -336,7 +336,7 @@ def setup(env: Any) -> dict[str, Any]:
     """The core's facts for the setup page (the gateway adds its own): whether each secret is set, never its value."""
     return {
         "mail_source_id": source_id(env),
-        "configured": {"gemini_api_key": False, "model_router": getattr(env, "MODEL_ROUTER", None) is not None},
+        "configured": {"model_router": getattr(env, "MODEL_ROUTER", None) is not None},
     }
 
 

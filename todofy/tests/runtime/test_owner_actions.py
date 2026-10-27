@@ -21,8 +21,8 @@ from tests.runtime.owner_support import (
     assert_message,
     assert_private,
     assert_status,
+    csrf_headers,
     event_row,
-    issue_csrf,
     seed,
 )
 
@@ -80,7 +80,7 @@ def actions_worker(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Worker]
 
 
 def _post(worker: Worker, path: str, body: dict[str, object]) -> httpx.Response:
-    headers = issue_csrf(worker.owner) | {"content-type": "application/json"}
+    headers = csrf_headers() | {"content-type": "application/json"}
     return worker.owner.post(path, headers=headers, content=json.dumps(body).encode())
 
 

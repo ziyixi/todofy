@@ -20,14 +20,13 @@ function withMetrics(env: Env, fail = false): { env: Env; points: AnalyticsEngin
 
 describe('route labels', () => {
   it.each([
-    ['owner', '/api/csrf', '/api/csrf'],
     ['owner', '/api/v1/mailEvents', '/api/v1/mailEvents'],
     ['owner', `/api/v1/mailEvents/${EVENT_ID}`, '/api/v1/mailEvents/{id}'],
     ['owner', `/api/v1/mailEvents/${EVENT_ID}:reconcile`, '/api/v1/mailEvents/{id}:reconcile'],
     ['owner', '/api/v1/legacyTexts/legacy%3Aabc', '/api/v1/legacyTexts/{id}'],
     ['owner', '/api/v1/latestReports:recompute', '/api/v1/latestReports:recompute'],
     ['owner', '/api/v1/metricDays', '/api/v1/metricDays'],
-    // The owner API before todofy.ui.v1 (410 for one release).
+    // The owner API before todofy.ui.v1 (410 until 2026-11-02).
     ['owner', '/api/v1/events', '/api/v1/events'],
     ['owner', `/api/v1/events/${EVENT_ID}/reconcile`, '/api/v1/events/{id}/reconcile'],
     ['owner', '/api/v1/legacy_text/legacy:abc', '/api/v1/legacy_text/{id}'],

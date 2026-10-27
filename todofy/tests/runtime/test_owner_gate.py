@@ -17,7 +17,7 @@ from tests.runtime.owner_support import (
     assert_message,
     assert_private,
     assert_status,
-    issue_csrf,
+    csrf_headers,
 )
 
 RECONCILE = "/api/v1/mailEvents/f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001:reconcile"
@@ -37,7 +37,7 @@ def keyless_worker(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Worker]
 
 
 def test_maintenance_blocks_writes_after_the_csrf_check(maintenance_worker: Worker) -> None:
-    headers = issue_csrf(maintenance_worker.owner) | {"content-type": "application/json"}
+    headers = csrf_headers() | {"content-type": "application/json"}
     for path in (RECONCILE, "/api/v1/latestReports:recompute"):
         response = maintenance_worker.owner.post(path, headers=headers)
         assert response.status_code == 503, path
@@ -55,7 +55,7 @@ def test_maintenance_blocks_writes_after_the_csrf_check(maintenance_worker: Work
 
 
 def test_maintenance_keeps_reads(maintenance_worker: Worker) -> None:
-    for path in ("/api/v1/integration", "/api/v1/mailEvents", "/api/csrf", "/api/v1/serviceStatus"):
+    for path in ("/api/v1/integration", "/api/v1/mailEvents", "/api/v1/serviceStatus"):
         assert maintenance_worker.owner.get(path).status_code == 200, path
 
 
@@ -76,12 +76,6 @@ def test_model_catalog_authorization_failure_reports_not_configured(
 
 
 def test_owner_writes_work_without_a_signing_key(keyless_worker: Worker) -> None:
-    issued = keyless_worker.owner.get("/api/csrf")
-    assert issued.status_code == 200
-    assert issued.json() == {"token": "1"}
-    assert "set-cookie" not in issued.headers
-    assert_private(issued)
-
     write = keyless_worker.owner.post(
         "/api/v1/latestReports:recompute",
         headers={"origin": ORIGIN, "x-csrf-token": "1"},

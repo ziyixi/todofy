@@ -70,14 +70,10 @@ def test_the_owner_api_before_todofy_ui_v1_asks_to_reload(worker: Worker) -> Non
 
 @pytest.mark.reaches("METHOD_NOT_ALLOWED")
 def test_another_method_on_a_known_owner_path_is_405_with_allow(worker: Worker) -> None:
-    for method, path, allow in (
-        ("DELETE", "/api/v1/serviceStatus", "GET, HEAD, OPTIONS"),
-        ("PUT", "/api/csrf", "GET"),
-    ):
-        response = worker.owner.request(method, path, headers=worker.csrf_headers())
-        assert response.status_code == 405, (method, path)
-        assert response.headers["allow"] == allow
-        assert response.json()["error"]["status"] == "UNIMPLEMENTED"
+    response = worker.owner.request("DELETE", "/api/v1/serviceStatus", headers=worker.csrf_headers())
+    assert response.status_code == 405
+    assert response.headers["allow"] == "GET, HEAD, OPTIONS"
+    assert response.json()["error"]["status"] == "UNIMPLEMENTED"
 
 
 def test_owner_api_is_not_reachable_through_the_hooks_host(worker: Worker) -> None:

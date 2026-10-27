@@ -7,11 +7,7 @@ checked against api/machine-api-v1.openapi.yaml: the schema for a status is look
 a test cannot pick a looser schema than the document promises.
 """
 
-import base64
-import hashlib
-import hmac
 import json
-import time
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +19,7 @@ import yaml
 from ziyixi_proto.wire_json import from_wire
 
 from tests.mail_contract import api_schemas
-from tests.runtime.harness import OWNER, PUBLIC_HOST, Worker, reason
+from tests.runtime.harness import PUBLIC_HOST, Worker, reason
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = "https://todofy.local/api/"
@@ -99,35 +95,9 @@ def assert_private(response: httpx.Response) -> None:
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
 
 
-def _b64(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-
-def mint_csrf(key: str = CSRF_KEY, **overrides: Any) -> str:
-    """A token in the Worker's format, for cases the Worker itself would never issue."""
-    claims = {"kind": "csrf", "owner": OWNER, "nonce": "test", "exp": int(time.time()) + 600} | overrides
-    payload = _b64(json.dumps(claims).encode())
-    signature = _b64(hmac.new(bytes.fromhex(key), payload.encode(), hashlib.sha256).digest())
-    return f"{payload}.{signature}"
-
-
-def token_claims(token: str) -> dict[str, Any]:
-    payload = token.split(".")[0]
-    return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
-
-
-def csrf_headers(token: str, origin: str = ORIGIN) -> dict[str, str]:
-    return {"origin": origin, "x-csrf-token": token, "cookie": f"todofy_csrf={token}"}
-
-
-def issue_csrf(client: httpx.Client, headers: dict[str, str] | None = None) -> dict[str, str]:
-    """GET /api/csrf and return the headers a same-origin browser POST would carry."""
-    response = client.get("/api/csrf", headers=headers or {})
-    assert response.status_code == 200, response.text
-    # Tests send the cookie explicitly; the client's jar would add it behind their back.
-    client.cookies.clear()
-    token = response.json()["token"]
-    return csrf_headers(token) | (headers or {})
+def csrf_headers(origin: str = ORIGIN) -> dict[str, str]:
+    """The headers a same-origin browser POST carries."""
+    return {"origin": origin, "x-csrf-token": "1"}
 
 
 def sql_literal(value: Any) -> str:
