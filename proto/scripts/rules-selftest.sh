@@ -143,6 +143,12 @@ case_ "delete a whole file (watch_ui_service.proto)" breaking fail DELETE "$WATC
 case_ "delete a whole file that retired.json lists" breaking pass DELETE "$WATCH" "$RETIRE_WATCH_SERVICE"
 case_ "list a file as retired but keep it" breaking fail 's/(\/\/ Input of GetWatch\.)/$1 Kept./' "$WATCH" "$RETIRE_WATCH_SERVICE"
 case_ "list a file that a kept file imports (change.proto)" breaking fail 's/(\/\/ A change of a watch)/$1, kept/' watch/ui/v1/change.proto '{"files": [{"path": "watch/ui/v1/change.proto"}]}'
+# A field (fields): it leaves its message with its number and name reserved, like an enum value.
+RETIRE_SUBTASK_DESCRIPTION='{"fields": [{"field": "tasks.inbox.v1.InboxSubtask.description", "number": 2}]}'
+DROP_DESCRIPTION='s/  \/\/ At most 16,000 UTF-16 code units.\n  string description = 2 \[\(google.api.field_behavior\) = OPTIONAL\];\n/'
+case_ "remove a listed field (InboxSubtask.description) and reserve its number and name" breaking pass "${DROP_DESCRIPTION}  reserved 2;\n  reserved \"description\";\n/" "$INBOX" "$RETIRE_SUBTASK_DESCRIPTION"
+case_ "remove a listed field without reserving it" breaking fail "${DROP_DESCRIPTION}/" "$INBOX" "$RETIRE_SUBTASK_DESCRIPTION"
+case_ "list a field as retired but keep it" breaking fail 's/(At most 16,000 UTF-16 code units)/$1, kept/' "$INBOX" "$RETIRE_SUBTASK_DESCRIPTION"
 case_ "zero value without _UNSPECIFIED (ERROR_CODE_UNSPECIFIED -> ERROR_CODE_NONE)" lint fail 's/ERROR_CODE_UNSPECIFIED = 0/ERROR_CODE_NONE = 0/'
 case_ "enum value without its prefix (ERROR_CODE_DAILY_LIMIT -> DAILY_LIMIT)" lint fail 's/ERROR_CODE_DAILY_LIMIT = 2/DAILY_LIMIT = 2/'
 case_ "lowerCamelCase field (request_id -> requestId)" lint fail 's/string request_id = 1 \[/string requestId = 1 [/'

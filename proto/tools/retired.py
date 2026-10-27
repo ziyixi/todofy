@@ -1,5 +1,6 @@
 """Retired IDL elements (proto/README.md, "Retiring an element"): the one reviewed way to delete a published
-package, file, enum value, allowed value, method or message without weakening the breaking gate for anything else.
+package, file, enum value, allowed value, method, message or field without weakening the breaking gate for anything
+else.
 
 Usage (scripts/breaking.sh and scripts/rules-selftest.sh run it)::
 
@@ -17,15 +18,18 @@ full name, with the date and the reason:
   ``(common.wire.v1.field).allowed`` list.
 - ``methods``: ``{"service": "a.v1.Service", "name": "DoThing"}``: the rpc left the service.
 - ``messages``: ``{"message": "a.v1.DoThingRequest"}``: the top-level message is gone.
+- ``fields``: ``{"field": "a.v1.Message.name", "number": 13}``: the field left its message and both its number and
+  its name are reserved there, so neither can be reused.
 
 First the head must keep every promise: no file under a retired path or of a retired package, no retired file, no
-retired enum value, its number and name reserved, no retired allowed value, method or message. Then OUT_IMAGE is the
-base without the listed elements, which ``buf breaking`` and tools/profile_breaking.py compare the head with: a
-listed deletion is the base's state, every other change is checked exactly as before. An element the base no longer
-has (the base is after the retirement) is left alone, so an entry does nothing once every base CI compares with is
-newer; it may then be removed. A kept base file that still imports a file of a retired package, or a retired file,
-is an error, and so is a kept field or method of the base that uses a retired message: a message is retired with
-everything that uses it. The files go first, so an entry for a method or message of a retired file does nothing.
+retired enum value or field, their numbers and names reserved, no retired allowed value, method or message. Then
+OUT_IMAGE is the base without the listed elements, which ``buf breaking`` and tools/profile_breaking.py compare the
+head with: a listed deletion is the base's state, every other change is checked exactly as before. An element the base
+no longer has (the base is after the retirement) is left alone, so an entry does nothing once every base CI compares
+with is newer; it may then be removed. A kept base file that still imports a file of a retired package, or a retired
+file, is an error unless it used that file only for retired fields (the base then drops the import), and so is a kept
+field or method of the base that uses a retired message: a message is retired with everything that uses it. The files
+go first, so an entry for a method or message of a retired file does nothing.
 Output names elements only. Exit status 0 when every promise holds, 1 otherwise, 2 on bad usage.
 """
 
@@ -58,19 +62,40 @@ def enums(image: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
             yield from walk(package, message)
 
 
-def fields(image: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
-    """(full name, descriptor) of every message field in the image, nested messages included."""
+def message_types(image: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """(full name, descriptor) of every message in the image, nested ones included."""
 
     def walk(prefix: str, message: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
         name = f"{prefix}.{message['name']}"
-        for field in message.get("field", []):
-            yield f"{name}.{field['name']}", field
+        yield name, message
         for nested in message.get("nestedType", []):
             yield from walk(name, nested)
 
     for file in image.get("file", []):
         for message in file.get("messageType", []):
             yield from walk(file.get("package", ""), message)
+
+
+def fields(image: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """(full name, descriptor) of every message field in the image, nested messages included."""
+    for name, message in message_types(image):
+        for field in message.get("field", []):
+            yield f"{name}.{field['name']}", field
+
+
+def defined(file: dict[str, Any]) -> list[str]:
+    """The full names of the top-level messages and enums a file defines."""
+    package = file.get("package", "")
+    return [f"{package}.{item['name']}" for item in (*file.get("messageType", []), *file.get("enumType", []))]
+
+
+def references(file: dict[str, Any]) -> set[str]:
+    """The type names a file's fields (nested messages included) and methods use."""
+    names = {field.get("typeName", "") for _, field in fields({"file": [file]})}
+    for service in file.get("service", []):
+        for method in service.get("method", []):
+            names |= {method.get("inputType", ""), method.get("outputType", "")}
+    return {name.lstrip(".") for name in names if name}
 
 
 def services(image: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
@@ -98,6 +123,24 @@ def reserves(enum: dict[str, Any], name: str, number: int) -> bool:
     ranges = enum.get("reservedRange", [])
     by_number = any(r.get("start", 0) <= number <= r.get("end", 0) for r in ranges)
     return by_number and name in enum.get("reservedName", [])
+
+
+def reserves_field(message: dict[str, Any], name: str, number: int) -> bool:
+    """Whether the message reserves both the number (a message's ranges end exclusively) and the name."""
+    ranges = message.get("reservedRange", [])
+    by_number = any(r.get("start", 0) <= number < r.get("end", 0) for r in ranges)
+    return by_number and name in message.get("reservedName", [])
+
+
+def drop_field(message: dict[str, Any], field: dict[str, Any]) -> None:
+    """Remove a field, with the synthetic oneof of a proto3 `optional` field."""
+    message["field"] = [item for item in message.get("field", []) if item is not field]
+    if field.get("proto3Optional") and "oneofIndex" in field:
+        index = field["oneofIndex"]
+        del message["oneofDecl"][index]
+        for item in message["field"]:
+            if item.get("oneofIndex", -1) > index:
+                item["oneofIndex"] -= 1
 
 
 def allowed(field: dict[str, Any]) -> list[str]:
@@ -140,6 +183,18 @@ def head_problems(retired: dict[str, Any], head: dict[str, Any]) -> list[str]:
     for entry in retired.get("messages", []):
         if entry["message"] in head_messages:
             problems.append(f"RETIRED_MESSAGE_BACK {entry['message']} is in the head")
+    head_types = dict(message_types(head))
+    for entry in retired.get("fields", []):
+        where = f"{entry['field']} ({entry['number']})"
+        owner, name = entry["field"].rsplit(".", 1)
+        message = head_types.get(owner)
+        if message is None:
+            continue  # the message itself is gone: buf's MESSAGE_NO_DELETE decides
+        for field in message.get("field", []):
+            if field["name"] == name or field.get("number", 0) == entry["number"]:
+                problems.append(f"RETIRED_FIELD_BACK {where}: the head has {field['name']} = {field.get('number', 0)}")
+        if not reserves_field(message, name, entry["number"]):
+            problems.append(f"RETIRED_FIELD_NOT_RESERVED {where}: reserve both its number and its name")
     return problems
 
 
@@ -160,13 +215,41 @@ def without_retired(retired: dict[str, Any], base: dict[str, Any]) -> tuple[dict
     removed += [f"file {name}" for name in sorted(gone_files - gone_packages)]
     gone = gone_packages | gone_files
     kept = [file for file in files if file["name"] not in gone]
-    for file in kept:
-        for dependency in file.get("dependency", []):
-            if dependency in gone_packages:
-                problems.append(f"RETIRED_PACKAGE_IMPORTED {file['name']} imports the retired {dependency}")
-            elif dependency in gone_files:
-                problems.append(f"RETIRED_FILE_IMPORTED {file['name']} imports the retired {dependency}")
     image = {**base, "file": kept}
+    gone_types = {file["name"]: defined(file) for file in files if file["name"] in gone}
+
+    def imports_used(file: dict[str, Any]) -> set[str]:
+        """The retired files whose types the kept file still uses."""
+        names = references(file)
+        return {path for path, types in gone_types.items() if any(uses(name, set(types)) for name in names)}
+
+    used_before = {file["name"]: imports_used(file) for file in kept}
+    base_types = dict(message_types(image))
+    for entry in retired.get("fields", []):
+        owner, name = entry["field"].rsplit(".", 1)
+        message = base_types.get(owner, {})
+        values = message.get("field", [])
+        match = [f for f in values if f["name"] == name and f.get("number", 0) == entry["number"]]
+        clash = [f for f in values if (f["name"] == name) != (f.get("number", 0) == entry["number"])]
+        if clash:
+            problems.append(
+                f"RETIRED_FIELD_MISMATCH {entry['field']}: the base has another "
+                f"name or number ({clash[0]['name']} = {clash[0].get('number', 0)})"
+            )
+        elif match:
+            drop_field(message, match[0])
+            removed.append(f"field {entry['field']}")
+    for file in kept:
+        still = imports_used(file)
+        for dependency in [name for name in file.get("dependency", []) if name in gone]:
+            if dependency in used_before[file["name"]] - still:
+                # Only retired fields used it: the base drops the import with them.
+                file["dependency"] = [name for name in file["dependency"] if name != dependency]
+                removed.append(f"import {dependency} of {file['name']}")
+            elif dependency in gone_packages:
+                problems.append(f"RETIRED_PACKAGE_IMPORTED {file['name']} imports the retired {dependency}")
+            else:
+                problems.append(f"RETIRED_FILE_IMPORTED {file['name']} imports the retired {dependency}")
     base_enums = dict(enums(image))
     for entry in retired.get("enum_values", []):
         enum = base_enums.get(entry["enum"])
