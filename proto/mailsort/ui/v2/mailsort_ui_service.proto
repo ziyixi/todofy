@@ -425,13 +425,13 @@ message StartUnreadClassificationRequest {
     (google.api.field_behavior) = OPTIONAL,
     (google.api.field_info).format = UUID4
   ];
-  // Retired one-time recheck of fallback-P1 decisions: true answers RELOAD_REQUIRED.
+  // Deprecated: the one-time recheck of fallback-P1 decisions is retired; true answers RELOAD_REQUIRED.
   // Already graded messages are always skipped.
   bool recheck_fallback = 3 [
     deprecated = true,
     (google.api.field_behavior) = OPTIONAL
   ];
-  // Retired one-time recheck of the first 100 graded messages: true answers RELOAD_REQUIRED.
+  // Deprecated: the one-time recheck of the first 100 graded messages is retired; true answers RELOAD_REQUIRED.
   bool recheck_initial100 = 4 [
     deprecated = true,
     (google.api.field_behavior) = OPTIONAL

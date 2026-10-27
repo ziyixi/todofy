@@ -449,6 +449,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
   async startUnreadClassification(request, ctx) {
     if (request.name !== 'unreadClassification') notFound();
     // The one-time recheck options are retired; an older page still offering them must reload.
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- refusing the retired fields is their only use
     if (request.recheckFallback || request.recheckInitial100) throw sortError('RELOAD_REQUIRED');
     const answer = once(ctx, request.requestId, 'StartUnreadClassification', request.name, UnreadClassificationSchema, () => {
       if (priorityStartedAt(ctx.store) === 0) bad('请先完成 P1–P4 分级设置。');

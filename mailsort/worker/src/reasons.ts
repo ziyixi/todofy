@@ -42,7 +42,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   CONSOLIDATION_ACTIVE: { code: Code.FAILED_PRECONDITION, message: 'a restored, unfinished label consolidation holds these writes', zh: '恢复的数据中有未完成的旧标签整理，除设置外的修改已暂停' },
   CONSOLIDATION_NOT_BLOCKED: { code: Code.FAILED_PRECONDITION, message: 'only a blocked consolidation can resume', zh: '这次标签整理没有暂停，无需恢复' },
   REPLAY_ACTIVE: { code: Code.FAILED_PRECONDITION, message: 'a replay evaluation is already running', zh: '回放评估正在运行，请等待它完成' },
-  CONSOLIDATION_PENDING_WRITES: { code: Code.FAILED_PRECONDITION, message: 'existing mail processing and Gmail writes must finish before consolidation', zh: '当前邮件处理或 Gmail 写入还未结束，请稍后重新开始整理' },
+  CONSOLIDATION_PENDING_WRITES: { code: Code.FAILED_PRECONDITION, message: 'existing mail processing and Gmail writes must finish first', zh: '当前邮件处理或 Gmail 写入还未结束，请稍后重新开始整理' },
 };
 
 export function isReason(value: string): value is Reason {

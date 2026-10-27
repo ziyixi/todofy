@@ -1,6 +1,6 @@
 /**
  * Label names (../../docs/design.md §3.1). New names are flat English text. Legacy path helpers remain for existing
- * records and their stable model keys until the owner finishes consolidating labels; they do not validate new input.
+ * records and their stable keys; they do not validate new input.
  *
  * The same path gives a label its stable, meaningful identifiers: the ID CreateLabel and the import derive when none
  * is given, and the option key the retired Clef model saw; a random key (`lxy260f75g`, what an import from Gmail used
