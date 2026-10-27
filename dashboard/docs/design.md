@@ -611,7 +611,7 @@ The production config is the committed `dashboard/wrangler.toml` (top level = pr
 no `keep_vars`): account, route and `PUBLIC_HOST`, Access issuer and AUD, `ACCOUNT_ID`, `CANARY_UTC_HOUR`,
 entry `worker/src/index.ts`, assets `web/dist`, the Durable Object, its migration, the service bindings and
 the cron. `deploy/test/wrangler-config.test.mjs` reads it with the pinned wrangler's own
-`experimental_readRawConfig` (from `worker/node_modules`, so `npm ci` in `worker/` comes first) and checks
+`experimental_readRawConfig` (from `worker/node_modules`, so the root `pnpm install` comes first) and checks
 the known keys, formats and bounds; `.github/scripts/test_wrangler_configs.py` checks that its host differs
 from the registered apps' hosts and that the registry's app links match them. What is never committed is added at
 deploy by `deploy/deploy-vars.mjs` (Mail Hero's style; messages name settings, never print values):
@@ -646,8 +646,8 @@ Action SHAs and job names must be read from the current workflow.
   and stays the default). A dashboard change also runs `Contracts`, which gained a host-only step in
   `dashboard/worker` (`test/ops-client.test.ts`, `guard`, `canary`, `digest`): the caller side of ops-v1
   next to both apps' sides.
-- **Dashboard checks** (`needs: changes`, `if: dashboard_check`, working directory `dashboard`): `npm ci`
-  in `worker` and `web`; `node --test deploy/test/*.test.mjs`; worker `lint`, `typecheck`, `test`,
+- **Dashboard checks** (`needs: changes`, `if: dashboard_check`, working directory `dashboard`): the root
+  workspace install of `worker` and `web`; `node --test deploy/test/*.test.mjs`; worker `lint`, `typecheck`, `test`,
   `test:runtime`; web `lint`, `typecheck`, `test`, `build`; a guard that no file under `worker/src` or
   `web/src` imports from `mail-hero/` or `todofy/`; from `worker/`, `deploy-vars.mjs secrets` with
   placeholder values, then `deploy-vars.mjs exec -- wrangler deploy --dry-run --config ../wrangler.toml
