@@ -7,6 +7,7 @@ from api import ReleaseError
 SHA = re.compile(r"[0-9a-f]{40}")
 APPS = {
     "codex-gateway",
+    "model-router",
     "todofy",
     "mail-hero",
     "dashboard",

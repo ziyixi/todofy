@@ -14,59 +14,38 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ### Unified Model Router (`codex/model-router`)
 
-Owner approved Cloudflare Router/API/console + D1 metadata + private R2 bodies and a VPS official Codex
-executor. All clients use root `modelrouter.inference.v1`; no vendor payload, SDK or raw-proxy path in apps.
-Generate returns a final result; optional short conversations preserve Newsletter's two rounds and web
-observations. Content retention7 days, request metadata90 days. Preserve business modes/budgets/history;
-Todofy switches to Sol6.1 after synthetic acceptance. Implement contract/executor/provider adapters first,
-then console and consumer migrations Mailsort->Todofy->Brief->Newsletter, using same-green-SHA publication
-and final resolved-infrastructure reconciliation. No real content used as fixtures or printed in public logs.
-Shared owner/Claude checkout is untouched; work is isolated in the temporary checkout.
+Cloudflare Router owns the root `modelrouter.inference.v1` API, D1 metadata (90 days), private R2 bodies
+(7 days) and private console. Existing VPS `codex-gateway` runs the official pinned SDK; short conversations
+preserve Newsletter's follow-up and web observations. Apps retain their prompts, budgets, history and modes.
+Todofy switches future mail/reports to Sol6.1 after synthetic acceptance. The shared owner/Claude checkout is untouched.
 
-Implementation checkpoint: common proto, TS/Python clients, Cloudflare engine/console, official SDK executor and
-Mailsort/Brief/Newsletter migrations are implemented. Todofy model selection is persisted in D1 and included in
-backups; existing results stay frozen. Router uses one `router-v1` DO with concurrent independent requests and
-per-conversation turns. Input/output seven days, metadata90 days. No public token streaming or vendor escape hatch.
-Local evidence so far: Mailsort188 units+123 workerd+smoke; Brief109 units+41 workerd; providers27;
-Newsletter2263 tests+wheel+mypy; TS client11 and Python client4; Router45 tests including18 real runtime/SSE/Ops cases; private console17
-and synthetic desktop/mobile checks. Final combined checks and Linux image/parent-death checks remain CI gates.
-Additive IaC was applied through extend bootstrap: six creates,42 no-op, no existing resource writes. Actual IDs
-are in config/resources.toml. No application deployment or production model switch has happened yet. First
-namespace capture and matching main reconcile remain required. Latest owner decisions supersede the earlier per-app key plan: one ANTHROPIC_API_KEY in Router uses the existing
-$80 Claude workspace for all callers; one GEMINI_API_KEY in Router. No model keys in GitHub, app services, the VPS
-Codex runtime or local persistent files. The unused Mailsort-specific key is disabled; its local temporary
-copy has been removed. Production callers are not switched. Owner authorized the revised implementation and
-credential setup. Owner authorized an equivalent shared-key replacement in the existing workspace; create it only when Router can receive it directly through the browser, without local/GitHub persistence. The workspace $80/month provider limit is saved and verified; old production keys remain until cutover.
-Non-model simplification: same-account bindings have no tokens; pure same-origin JSON owner writes use exact
-Origin+custom-header+content-type checks, without CSRF signing keys. VPS inference verifies Access JWTs before
-body reads, then drops its redundant Bearer. Privileged deployment identity and official VPS Codex login remain
-separate and unchanged. Newsletter keeps one inference-only Router token. Preserve its paused/archive state.
-Current key-reduction acceptance: edge-auth188, all ten browser suites and owner adapter type/lint checks pass;
-Router46, gateway57(56 plus local Linux-only skip), Brief41 workerd and the dedicated real-JWT owner journeys
-pass. Deployment/bootstrap tests retain exact retired-key rejection boundaries. Final combined CI/container
-verification and production remain pending. Provider keys have no local temporary copies; the $80 shared
-Claude workspace limit is configured, and the replacement key will be generated only after Router is ready.
-The prior Newsletter URL/token patch remains the single initial VPS Secret step; inference policy public
-issuer/audience are baked into the image, so no additional sudo is required for JWT configuration.
-Full branch CI40440454131 exposed seven integration failures. The next commit fixes clean-checkout proto/image
-preparation, the Platform test dependency/context, owner smoke transports and one missing configuration-error enum.
-The monitor retains its frozen effort field and adds persisted requested_effort; proto breaking/API checks pass.
-Focused reruns pass: gateway59, Platform257, Newsletter tooling10, owner-gate/coverage53 and Recall smoke.
-The Goals cold CPU test now takes five independent samples with the original limits; its measured median is8.356ms.
-The combined branch gate and all production acceptance remain pending. Gemini's existing project requires owner
-access in AI Studio; do not create a replacement project or retrieve credentials through another channel.
-The final credential audit removed retired model/executor ownership from Todofy, Brief and Mailsort manifests;
-new bootstrap input rejects those caller credentials. Existing encrypted maps drop only exact retired fields.
-Gateway's legacy calls keep their existing monitor shape; only common-API calls add requested_effort. The new
-Platform observer reads that downstream output leniently and retains valid counters across future additive fields.
+One `ANTHROPIC_API_KEY` and one `GEMINI_API_KEY` belong only to Router, outside GitHub, clients, VPS and
+persistent local files. Owner approved an equivalent shared Claude key in the existing Brief workspace;
+the provider's $80/month workspace cap is saved and verified. Owner explicitly approved no expiry. Its creation
+form is prepared, but create only after Router can receive it directly through browser memory. Original production
+keys remain until verified cutover. Gemini's original agent tab failed; the owner-opened key list works and owner
+explicitly authorized its direct browser-to-Router transfer. No provider key has been copied to a local file.
 
+Same-account callers use bindings without tokens. Owner JSON writes use exact Origin, a custom header and
+JSON content type without signing keys. VPS inference verifies real Access JWTs, using public baked issuer/AUD;
+privileged deployment identity and Codex subscription login remain separate. Newsletter keeps one inference-only
+Router token. Its two-field runtime Secret patch and the necessary k3s restart were confirmed by owner;
+all four running Pods now match current host addresses and are ready. Modes remain unchanged.
 
-Full branch CI40444321295 passed Router, Linux gateway, Platform, Newsletter and the Tasks runtime/CPU cases.
-Its remaining failures exposed stale keyless-auth browser/runtime fixtures, the fifteen-Worker drift fixture,
-three proto fixture lists and one test formatting error. Focused reruns pass; the next complete gate is pending.
-The pre-release live baseline found all four VPS Deployments ready but stale Pod host addresses and unavailable
-in-cluster API observation. Owner was given one sudo restart plus the existing Newsletter two-field Secret patch;
-the command is not yet confirmed. No production application or model setting has been changed for this rollout.
+Complete [branch CI40445648510](https://github.com/ziyixi/todofy/actions/runs/40445648510) passed for source
+`feba85f088327b49dc4ad5c863f5c85fa01d49ff`, including actual Linux gateway/image checks and full browser suites.
+[Main40446623395](https://github.com/ziyixi/todofy/actions/runs/40446623395) promoted that exact SHA; Gateway
+and the independent keyless consumers deployed. Router stopped before upload because its name was missing
+from the release identity allowlist. The one-line correction and first-release regression pass48 release tests.
+A real content-free Gateway catalog request verifies the existing Access identity. Default urllib UA triggers
+Cloudflare1010; a descriptive application UA returns200. Router now sends that explicit UA too.
+
+Next: gate/publish the release correction, install Router's five owner-machine connection secrets, then rerun the
+same SHA to unlock paired VPS/Newsletter and migrated Mailsort/Todofy/Brief/Home. Capture the actual RouterEngine
+namespace in resources and remove FIRST_DEPLOY_PENDING. Verify synthetic calls, then switch future Todofy choices;
+retire old app/provider/CSRF credentials only after successful cutover. Matching main reconcile, resolved drift and
+Home/Fleet readback remain required. Additive bootstrap created six resources with42 no-ops; registered D1/R2/Access
+identities are already current. No real mail, reports, Tasks or Newsletter work was recomputed for acceptance.
 
 ### Tasks Sunday planning week (`codex/tasks-next-step-estimate`)
 

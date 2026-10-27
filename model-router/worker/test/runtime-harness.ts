@@ -16,6 +16,7 @@ export interface UpstreamCall {
   body: Record<string, unknown>
   caller: string | null
   bearer: string | null
+  userAgent: string | null
 }
 
 const issuer = 'https://synthetic.cloudflareaccess.com'
@@ -62,6 +63,7 @@ export async function startHarness({ ownerBypass = true }: { ownerBypass?: boole
       body: data,
       caller: request.headers.get('x-inference-caller'),
       bearer: request.headers.get('authorization'),
+      userAgent: request.headers.get('user-agent'),
     })
     if (url.hostname === 'generativelanguage.googleapis.com')
       return Response.json({

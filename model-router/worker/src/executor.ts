@@ -56,6 +56,7 @@ export function executorClient(env: Env, app: string, signal?: AbortSignal, fetc
       redirect: 'manual',
       signal: signal ?? null,
       headers: {
+        'user-agent': 'todofy-model-router/1.0',
         'content-type': 'application/json',
         accept: 'text/event-stream',
         'x-inference-caller': app,

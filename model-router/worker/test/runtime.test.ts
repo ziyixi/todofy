@@ -116,7 +116,7 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
     expect(persisted.output).toBe(first.output)
     expect(persisted.observations?.openedUrls).toEqual(['https://example.test/synthetic-research-evidence'])
     expect(harness.calls).toHaveLength(1)
-    expect(harness.calls[0]).toMatchObject({ caller: 'console', bearer: null })
+    expect(harness.calls[0]).toMatchObject({ caller: 'console', bearer: null, userAgent: 'todofy-model-router/1.0' })
     const row = await harness.db
       .prepare('SELECT generation_json,body_key FROM requests WHERE id = ?')
       .bind(request.requestId)

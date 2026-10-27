@@ -14,7 +14,7 @@ from cloudflare import (
     routes_differences,
     verify_resources,
 )
-from control import prepare
+from control import WORKERS, prepare
 from deployments import last_good, record_success
 
 SHA = "a" * 40
@@ -154,6 +154,26 @@ class ReleaseTests(unittest.TestCase):
                 )
             with self.assertRaisesRegex(ReleaseError, "RELEASE_SOURCE_UNCHECKED"):
                 prepare("fleet", SHA, False, FakeApi([]))
+
+    def test_every_declared_worker_can_prepare_its_first_checked_release(self):
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "example/cloud", "GITHUB_SHA": SHA}):
+            for app in WORKERS:
+                with self.subTest(app=app):
+                    api = FakeApi([])
+                    self.assertEqual(prepare(app, SHA, False, api), SHA)
+                    self.assertEqual(api.requests, [])
+            for app in ("model_router", "model-router-extra", "unknown"):
+                with self.subTest(app=app), self.assertRaisesRegex(ReleaseError, "DEPLOYMENT_IDENTITY_INVALID"):
+                    prepare(app, SHA, False, FakeApi([]))
+
+    def test_router_verification_records_the_same_release_identity(self):
+        api = FakeApi([{"id": 1, "sha": SHA}, {}])
+        self.assertEqual(record_success(api, "example/cloud", "model-router", SHA,
+                                      {"workers": []}, "https://github.com/example/cloud/actions/runs/1"), 1)
+        body = api.requests[0][1]["body"]
+        self.assertEqual(body["task"], "deploy:model-router")
+        self.assertEqual(body["ref"], SHA)
+        self.assertEqual(api.requests[1][1]["body"]["state"], "success")
 
     def test_provider_proof_is_attached_to_exact_sha_without_auto_merge(self):
         api = FakeApi([{"id": 1, "sha": SHA}, {}])
