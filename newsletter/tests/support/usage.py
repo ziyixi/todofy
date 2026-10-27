@@ -17,14 +17,11 @@ def notification(
     """Build one provider-neutral final usage receipt."""
     return models.Generation(
         name="requests/" + str(uuid.uuid4()),
-        state="succeeded",
         usage=models.Usage(
             available=True,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_input_tokens=cached,
-            reasoning_output_tokens=reasoning,
-            total_tokens=input_tokens + output_tokens,
         ),
     )
 
@@ -39,6 +36,6 @@ def record_one(
         newsletter_usage.model_usage("fixture-model") as usage,
     ):
         usage.start_turn()
-        usage.bind_turn("conversations/fixture", "request-test")
+        usage.bind_turn("conversations/fixture")
         usage.observe_generation(payload or notification())
     return records

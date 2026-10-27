@@ -9,6 +9,11 @@ import uuid
 import zoneinfo
 
 
+def native_model(model: str) -> str:
+    """Normalize the one former Router ID in saved Newsletter settings."""
+    return "gpt-6.1-sol" if model == "models/sol-6-1" else model
+
+
 def _number_env[Number: (int, float)](
     name: str, default: str, parse: Callable[[str], Number]
 ) -> Number:
@@ -59,7 +64,7 @@ class Settings:
     from_email: str = ""
     model_router_url: str = ""
     model_router_token: str = dataclasses.field(default="", repr=False)
-    model: str = "models/sol-6-1"
+    model: str = "gpt-6.1-sol"
     todofy_backend: str = "disabled"
     todofy_base_url: str = "https://daily.ziyixi.science"
     todofy_user: str = dataclasses.field(default="", repr=False)
@@ -116,7 +121,7 @@ class Settings:
             from_email=os.getenv("NEWSLETTER_FROM_EMAIL", ""),
             model_router_url=os.getenv("NEWSLETTER_MODEL_ROUTER_URL", ""),
             model_router_token=os.getenv("NEWSLETTER_MODEL_ROUTER_TOKEN", ""),
-            model=os.getenv("NEWSLETTER_MODEL", "models/sol-6-1"),
+            model=native_model(os.getenv("NEWSLETTER_MODEL", "gpt-6.1-sol")),
             todofy_backend=os.getenv("NEWSLETTER_TODOFY", "disabled"),
             todofy_base_url=os.getenv(
                 "TODO_API_BASE", "https://daily.ziyixi.science"

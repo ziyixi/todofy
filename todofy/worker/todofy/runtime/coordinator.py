@@ -668,13 +668,15 @@ class TodofyCore(DurableObject):
             if running is None:
                 return
             used, started = reserved, now_ms()
+            selected = (await model_settings.get(self.env)).email_model
             result = await model.generate(
                 self.env,
                 system=prompts.SUMMARY_EMAIL,
                 user=content,
                 preface=preface,
                 deadline_ms=started + GEMINI_STEP_BUDGET * 1000,
-                model=(await model_settings.get(self.env)).email_model,
+                model=selected,
+                fallback_models=model_settings.fallback_models(selected),
             )
             used = result.tokens if result.usage_available else reserved
         finally:

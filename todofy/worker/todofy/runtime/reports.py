@@ -309,12 +309,14 @@ async def _generate(
     used = reserved  # if the call dies midway, keep the whole reservation counted
     started = now_ms()
     try:
+        selected = (await model_settings.get(env)).report_model
         result = await model.generate(
             env,
             system=system,
             user=user,
             deadline_ms=started + budget_ms,
-            model=(await model_settings.get(env)).report_model,
+            model=selected,
+            fallback_models=model_settings.fallback_models(selected, report=True),
             response_schema=None if kind == SUMMARY else recommendation_response_schema(top_n),
         )
         used = result.tokens if result.usage_available else reserved

@@ -7,23 +7,19 @@ Gmail remains the mailbox. The app never sends mail, marks it read, deletes it o
 
 One TypeScript Worker serves private, framework-free UI assets, verifies Access/Origin/CSRF and forwards the generated owner
 API to SQLite DO `MailsortState`, stable object `mailsort-v1`. Its Alarm handles Gmail history, pending messages,
-model requests, the existing write ledger and daily retention. The independent VPS Codex gateway only executes
-the selected synchronous inference call; it has no Gmail credentials, saved jobs or autonomous scheduler.
+model requests, the existing write ledger and daily retention. Model Router selects and executes the configured
+native model; its VPS Codex executor has no Gmail credentials, saved jobs or autonomous scheduler.
 
 `state.ts` owns API dispatch and Alarm lifecycle. `pipeline.ts` owns a bounded pass. `gmail.ts` owns Google access;
-`claude.ts` owns the Anthropic Messages API and `codex.ts` calls the independent gateway through the root
-`codex.inference.v1` contract. Defaults are bundled from `prompts/priority-classification.txt` and
+`classification-model.ts` calls Model Router through the shared `modelrouter.inference.v1` client. Provider
+protocols and credentials stay in Router and its executor. Defaults are bundled from `prompts/priority-classification.txt` and
 `prompts/personal-rules.txt`. A saved override lives in existing DO metadata, not another database. The UI imports
 only generated wire types, never Worker implementation.
 
-The [gateway](../../codex-gateway/README.md) uses the official
-[Codex Python SDK](https://learn.chatgpt.com/docs/codex-sdk), pinned to `openai-codex==0.163.0` and its runtime.
-Each request creates a temporary workspace and an ephemeral thread, fixes `gpt-6.1-sol` at medium effort, and
-requires the mounted ChatGPT subscription account. It has no API-key fallback. Only the existing authentication
-PVC is shared with Newsletter; there is no Newsletter source import, workflow call or shared business state.
-Operational tools, web access, plugins, MCP and skills are disabled; the gateway verifies disabled skills before
-starting the model and rejects any returned tool item. It stores no inference job or mail-content log.
-The production read-only model catalog confirmed this model and effort; a successful inference turn is a separate acceptance check.
+For `gpt-6.1-sol`, Router uses the existing [gateway](../../codex-gateway/README.md), pinned to the official
+`openai-codex==0.163.0` SDK and matching CLI. Mailsort supplies its classification effort and uses a standalone
+request with no web context. The executor uses the subscription login, temporary workspace and ephemeral thread.
+It stores no inference job or mail-content log. Model catalog availability and successful inference remain separate checks.
 
 ## 2. Gmail boundary and privacy
 
@@ -35,9 +31,8 @@ The historical one-time initializer may delete only old user-label IDs already f
 The model receives one array of message IDs, masked sender/subject/body, receipt time, evaluation time and timezone.
 Subject is capped at 200 characters and body at 12,000; body truncation is explicit. Addresses and long numbers are
 masked and links reduced to domains. Attachments are not sent. Model input is untrusted data with no tool access.
-With Claude selected, calls go directly to Anthropic. With Codex selected, the owner's VPS gateway forwards the
-masked input to OpenAI. Neither application path logs request or response content. The gateway receives no Gmail
-authorization and cannot read or modify the mailbox.
+Router forwards the masked input to the selected provider, using its VPS executor for Codex. The application logs
+no request or response content. The Router and gateway receive no Gmail authorization and cannot read or modify the mailbox.
 
 | Stored data | Retention |
 | --- | --- |

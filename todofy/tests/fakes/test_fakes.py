@@ -17,8 +17,8 @@ from tests.fakes.server import (
 )
 
 MODEL_BODY = {
-    "request_id": "00000000-0000-4000-8000-000000000000",
-    "config": {"model": "models/gemini-email", "instructions": [{"text": "system prompt"}]},
+    "model": "gemini-3.5-flash-lite",
+    "instructions": [{"text": "system prompt"}],
     "input": "mail body",
 }
 
@@ -138,10 +138,10 @@ def test_admin_endpoints_control_the_fake_over_http(fake: FakeServer) -> None:
 
 def test_model_router_records_common_wire_and_normalized_usage(gemini: ModelRouterFake) -> None:
     response = httpx.post(gemini.url + GENERATE_PATH, json=MODEL_BODY).json()
-    assert response["state"] == "succeeded"
-    assert response["usage"]["available"] and response["usage"]["total_tokens"] > 0
+    assert "error" not in response and response["output"]
+    assert response["usage"]["available"] and response["usage"]["input_tokens"] + response["usage"]["output_tokens"] > 0
     call = gemini.calls()[0]
-    assert (call.requested_model, call.system, call.user) == ("models/gemini-email", "system prompt", "mail body")
+    assert (call.requested_model, call.system, call.user) == ("gemini-3.5-flash-lite", "system prompt", "mail body")
 
 
 def test_model_router_queues_normalized_errors_before_default(gemini: ModelRouterFake) -> None:
@@ -149,7 +149,7 @@ def test_model_router_queues_normalized_errors_before_default(gemini: ModelRoute
     response = httpx.post(gemini.url + GENERATE_PATH, json=MODEL_BODY).json()
     assert response["error"]["reason"] == "MODEL_QUOTA"
     assert response["error"]["retry_after_seconds"] == 5
-    assert httpx.post(gemini.url + GENERATE_PATH, json=MODEL_BODY).json()["state"] == "succeeded"
+    assert "error" not in httpx.post(gemini.url + GENERATE_PATH, json=MODEL_BODY).json()
 
 
 def test_applied_reply_runs_the_route_but_answers_differently(counter: Counter) -> None:

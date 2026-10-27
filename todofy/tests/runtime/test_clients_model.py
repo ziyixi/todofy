@@ -45,17 +45,19 @@ def test_common_wire_preserves_prompt_framing_and_usage(probe: Worker, fake: Mod
     assert result["usage_available"]
     [sent] = fake.received("POST", GENERATE_PATH)
     body = sent.json()
-    assert body["config"]["model"] == "models/gemini-email"
-    assert body["config"]["instructions"] == [{"text": SUMMARY_EMAIL, "cache": True}]
+    assert body["model"] == "gemini-3.5-flash-lite"
+    assert body["instructions"] == [{"text": SUMMARY_EMAIL, "cache": True}]
     assert body["input"] == user_turn("合成邮件正文", "正文不完整")
     assert "x-goog-api-key" not in sent.headers and not sent.query
 
 
-def test_router_fallback_is_one_call_with_aggregate_attempt_metadata(probe: Worker, fake: ModelRouterFake):
-    fake.queue_generate(text_reply("Final", tokens=73, model="reported-fallback", attempts=3))
-    result = generate(probe)
-    assert (result["ok"], result["model"], result["tokens"], result["attempts"]) == (True, "reported-fallback", 73, 3)
-    assert len(fake.calls()) == 1
+def test_local_fallback_calls_actual_models_and_aggregates_usage(probe: Worker, fake: ModelRouterFake):
+    fake.queue_generate(error_reply(500))
+    fake.queue_generate(text_reply("Final", tokens=73, model="reported-fallback"))
+    result = generate(probe, fallback_models=["gemini-3.8-flash"])
+    assert (result["ok"], result["model"], result["tokens"], result["attempts"]) == (True, "reported-fallback", 73, 2)
+    assert [call.requested_model for call in fake.calls()] == ["gemini-3.5-flash-lite", "gemini-3.8-flash"]
+    assert not result["usage_available"]
 
 
 @pytest.mark.parametrize(
@@ -78,9 +80,7 @@ def test_normalized_errors_keep_business_classification(probe: Worker, fake: Mod
 
 
 def test_unknown_usage_is_explicit_and_not_a_known_zero(probe: Worker, fake: ModelRouterFake):
-    fake.queue_generate(
-        Reply(200, {"state": "succeeded", "output": "synthetic", "usage": {"available": False}, "attempt_count": 1})
-    )
+    fake.queue_generate(Reply(200, {"output": "synthetic", "usage": {"available": False}}))
     result = generate(probe)
     assert result["ok"] and not result["usage_available"]
 
@@ -97,8 +97,8 @@ def test_standard_json_schema_remains_provider_neutral(probe: Worker, fake: Mode
 
 def test_explicit_public_model_is_sent_without_local_fallback_policy(probe: Worker, fake: ModelRouterFake):
     fake.queue_generate(text_reply("synthetic"))
-    generate(probe, model="models/sol-6-1")
-    assert [call.requested_model for call in fake.calls()] == ["models/sol-6-1"]
+    generate(probe, model="gpt-6.1-sol")
+    assert [call.requested_model for call in fake.calls()] == ["gpt-6.1-sol"]
 
 
 def test_no_time_left_does_not_invoke_the_router(probe: Worker, fake: ModelRouterFake):

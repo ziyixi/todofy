@@ -12,7 +12,7 @@ def test_alarm_uses_private_model_binding(worker: Worker, fresh_gemini: ModelRou
 
     worker.wait_event(event_id, {"complete"})
     [call] = fresh_gemini.calls_mentioning(event_id)
-    assert call.requested_model == "models/gemini-email"
+    assert call.requested_model == "gemini-3.5-flash-lite"
 
 
 def test_timeout_really_closes_a_hanging_upstream_connection(worker: Worker, fresh_gemini: ModelRouterFake) -> None:

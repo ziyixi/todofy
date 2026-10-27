@@ -10,15 +10,40 @@ from todofy.core.owner_ui import Reason, UiError
 from todofy.runtime import ledger, model
 from todofy.runtime.interop import now_s
 
+# Normalize old saved route names locally; new requests and catalog entries use native models.
+_LEGACY_MODELS = {
+    "models/sol-6-1": "gpt-6.1-sol",
+    "models/claude-opus-5-5": "claude-opus-5-5",
+    "models/claude-haiku-5-5": "claude-haiku-5-5",
+    "models/gemini-email": "gemini-3.5-flash-lite",
+    "models/gemini-report": "gemini-3.8-flash",
+    "models/gemini-3-5-flash-lite": "gemini-3.5-flash-lite",
+    "models/gemini-3-8-flash": "gemini-3.8-flash",
+    "models/gemini-3-7-flash": "gemini-3.8-flash",
+    "gemini-3.7-flash": "gemini-3.8-flash",
+}
+
+
+def native_model(value: str) -> str:
+    return _LEGACY_MODELS.get(value, value)
+
+
+def fallback_models(selected: str, *, report: bool = False) -> tuple[str, ...]:
+    order = ("gemini-3.8-flash", "gemini-3.5-flash-lite") if report else ("gemini-3.5-flash-lite", "gemini-3.8-flash")
+    return tuple(item for item in order if item != selected) if selected in order else ()
+
 
 async def get(env: Any) -> pb.ModelSettings:
     row = await env.DB.prepare("SELECT email_model,report_model,version FROM model_settings WHERE id = 1").first()
     if row is None:
         return pb.ModelSettings(
-            name="modelSettings", email_model="models/gemini-email", report_model="models/gemini-report", etag="0"
+            name="modelSettings", email_model="gemini-3.5-flash-lite", report_model="gemini-3.8-flash", etag="0"
         )
     return pb.ModelSettings(
-        name="modelSettings", email_model=row["email_model"], report_model=row["report_model"], etag=str(row["version"])
+        name="modelSettings",
+        email_model=native_model(row["email_model"]),
+        report_model=native_model(row["report_model"]),
+        etag=str(row["version"]),
     )
 
 
@@ -46,7 +71,7 @@ async def update(env: Any, owner: str, request: pb.UpdateModelSettingsRequest) -
     if request.etag != current.etag:
         raise UiError(Reason.ETAG_MISMATCH)
     available = {
-        item.name for item in (await model.client(env).list_models()).models if item.configured and item.generation
+        item.id for item in (await model.client(env).list_models()).models if item.configured and item.kind == "text"
     }
     email = desired.email_model if "email_model" in mask else current.email_model
     report = desired.report_model if "report_model" in mask else current.report_model

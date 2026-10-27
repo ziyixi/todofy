@@ -53,11 +53,11 @@ export function mockApi(handlers: Record<string, Handler>) {
     'GET /api/csrf': { token: 'csrf-token-1' },
     'GET /api/v1/serviceStatus': overview(),
     'GET /api/v1/modelSettings': {
-      settings: { name: 'modelSettings', email_model: 'models/gemini-email', report_model: 'models/gemini-report', etag: '0' },
+      settings: { name: 'modelSettings', email_model: 'gemini-3.5-flash-lite', report_model: 'gemini-3.8-flash', etag: '0' },
       models: [
-        { name: 'models/gemini-email', display_name: 'Email chain', configured: true, generation: true },
-        { name: 'models/gemini-report', display_name: 'Report chain', configured: true, generation: true },
-        { name: 'models/sol-6-1', display_name: 'Sol 6.1', configured: true, generation: true },
+        { id: 'gemini-3.5-flash-lite', display_name: 'Gemini 3.5 Flash-Lite', provider: 'google', configured: true, kind: 'text' },
+        { id: 'gemini-3.8-flash', display_name: 'Gemini 3.8 Flash', provider: 'google', configured: true, kind: 'text' },
+        { id: 'gpt-6.1-sol', display_name: 'Sol 6.1', provider: 'openai', configured: true, kind: 'text' },
       ],
     },
     'GET /api/v1/metricDays': dailyMetrics(),

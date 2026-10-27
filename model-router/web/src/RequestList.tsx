@@ -1,7 +1,7 @@
 import { ArrowDownLeft, ChevronRight, Inbox } from 'lucide-react'
-import type { Generation } from '@ziyixi/proto/modelrouter/inference/v1/inference_wire'
+import type { RequestRecord } from '@ziyixi/proto/modelrouter/inference/v1/console_wire'
 import { Status } from './components'
-import { cost, duration, modelName, requestId, time, totalTokens } from './format'
+import { cost, duration, modelName, providerLabel, requestId, time, totalTokens } from './format'
 
 export function RequestList({
   requests,
@@ -9,9 +9,9 @@ export function RequestList({
   onSelect,
   compact = false,
 }: {
-  requests: readonly Generation[]
+  requests: readonly RequestRecord[]
   selected?: string
-  onSelect: (request: Generation) => void
+  onSelect: (request: RequestRecord) => void
   compact?: boolean
 }) {
   if (!requests.length)
@@ -33,10 +33,10 @@ export function RequestList({
       {requests.map((request) => (
         <button
           type="button"
-          key={request.name}
-          className={`request-row ${selected === request.name ? 'selected' : ''}`}
+          key={request.generation?.name}
+          className={`request-row ${selected === request.generation?.name ? 'selected' : ''}`}
           onClick={() => onSelect(request)}
-          aria-pressed={selected === request.name}
+          aria-pressed={selected === request.generation?.name}
         >
           <span className="request-icon" aria-hidden="true">
             <ArrowDownLeft size={17} />
@@ -46,18 +46,18 @@ export function RequestList({
               <strong>{request.app || '来源未提供'}</strong>
               <Status state={request.state} />
             </span>
-            <span className="small request-model">{modelName(request.model)}</span>
+            <span className="small request-model">{`${providerLabel(request.provider)} · ${modelName(request.generation?.model)}`}</span>
             <span className="small muted">
               <time dateTime={request.started_at}>{time(request.started_at)}</time>
-              <span className="request-short-id"> · {requestId(request.name).slice(0, 8)}</span>
+              <span className="request-short-id"> · {requestId(request.generation?.name).slice(0, 8)}</span>
             </span>
           </span>
           <span className="request-metrics">
             <span>
-              {totalTokens(request)} <span className="muted small">token</span>
+              {totalTokens(request.generation)} <span className="muted small">token</span>
             </span>
             <span className="small muted">{duration(request.duration_ms)}</span>
-            {!compact && <span className="small muted">{cost(request.usage)}</span>}
+            {!compact && <span className="small muted">{cost(request.generation?.usage)}</span>}
           </span>
           <ChevronRight size={15} className="muted" aria-hidden="true" />
         </button>

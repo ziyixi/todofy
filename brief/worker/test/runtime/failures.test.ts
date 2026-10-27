@@ -127,13 +127,13 @@ describe('Router model failures', () => {
     expect(resumed.keyState).toBe(ServiceStatus_KeyState.OK);
   });
 
-  it('retries an unstarted unavailable model with backoff, without using an attempt', async () => {
+  it('retries a rate-limited model with backoff, without using an attempt', async () => {
     const { h, at } = await toMondayRun();
     let failures = 0;
     h.claude.script = (_body, step) => {
       if (step === 'write' && failures < 2) {
         failures++;
-        return modelError('MODEL_UNAVAILABLE', 14);
+        return modelError('MODEL_RATE_LIMIT', 8);
       }
       return null;
     };
@@ -169,13 +169,13 @@ describe('Router model failures', () => {
     expect(issue?.item_count).toBe(sizes[0]);
   });
 
-  it('ends a day whose write keeps failing for a moment at its send cutoff, and the next day runs', async () => {
+  it('ends a day whose writer stays rate limited at its send cutoff, and the next day runs', async () => {
     const { h, at } = await toMondayRun();
     const tried: number[] = [];
     h.claude.script = (_body, step) => {
       if (step !== 'write') return null;
       tried.push(h.now());
-      return modelError('MODEL_UNAVAILABLE', 14);
+      return modelError('MODEL_RATE_LIMIT', 8);
     };
     await h.runUntil(at, la('2026-10-12', '13:00'));
     expect(tried.length).toBeGreaterThan(5);
@@ -272,7 +272,7 @@ describe('the read and the gate', () => {
   it('leaves candidates pending when a gate call fails mid-stream: only a refusal marks them refused', async () => {
     const harness = await startHarness();
     h = harness;
-    harness.claude.script = (_body, step) => (step === 'gate' ? modelError('MODEL_UNAVAILABLE', 14, true) : null);
+    harness.claude.script = (_body, step) => (step === 'gate' ? modelError('MODEL_UNAVAILABLE', 14) : null);
     await harness.runUntil(la('2026-10-11', '12:30'), la('2026-10-11', '13:00'));
     expect(await harness.sql(`SELECT rowid FROM items WHERE gate = 'refused'`)).toEqual([]);
     const [pending] = await harness.sql<{ n: number }>(`SELECT count(*) AS n FROM items WHERE gate = 'pending'`);

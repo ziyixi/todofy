@@ -14,19 +14,19 @@ describe('embedding quota metadata', () => {
     const calls: string[] = [];
     const rate = await embeddingQuotaRate({ fetch(request) {
       calls.push(request.url);
-      return Promise.resolve(Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [{ name: 'models/bge-m3', configured: true, embeddings: true, reservationQuotaUnitsPerToken: 0.003 }] }))));
+      return Promise.resolve(Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [{ id: '@cf/baai/bge-m3', configured: true, kind: 'embedding', reservationQuotaUnitsPerToken: 0.003 }] }))));
     } });
     expect(rate).toBe(0.003);
     expect(calls).toEqual(['https://model-router.internal/api/model/v1/models']);
   });
 
   it('settles the existing ledger value from returned estimated quota units without inventing tokens', async () => {
-    const result = await embed({ fetch: () => Promise.resolve(Response.json(toWire(EmbeddingSchema, create(EmbeddingSchema, { dimensions: 1024, vectors: [{ values: Array<number>(1024).fill(1) }], usage: { available: false, billingKind: 'platform_quota', estimatedQuotaUnits: 4.25 } })))) }, ['synthetic']);
+    const result = await embed({ fetch: () => Promise.resolve(Response.json(toWire(EmbeddingSchema, create(EmbeddingSchema, { vectors: [{ values: Array<number>(1024).fill(1) }], usage: { available: false, billingKind: 'platform_quota', estimatedQuotaUnits: 4.25 } })))) }, ['synthetic']);
     expect(result.neurons).toBe(4.25);
     expect(result.vectors[0]?.length).toBe(1024);
   });
 
   it('rejects a missing quota estimate instead of charging zero', async () => {
-    await expect(embed({ fetch: () => Promise.resolve(Response.json(toWire(EmbeddingSchema, create(EmbeddingSchema, { dimensions: 1024, vectors: [{ values: Array<number>(1024).fill(1) }], usage: { available: false, billingKind: 'platform_quota' } })))) }, ['synthetic'])).rejects.toMatchObject({ code: 'embedding_bad_answer' });
+    await expect(embed({ fetch: () => Promise.resolve(Response.json(toWire(EmbeddingSchema, create(EmbeddingSchema, { vectors: [{ values: Array<number>(1024).fill(1) }], usage: { available: false, billingKind: 'platform_quota' } })))) }, ['synthetic'])).rejects.toMatchObject({ code: 'embedding_bad_answer' });
   });
 });

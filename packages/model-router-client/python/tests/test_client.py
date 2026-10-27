@@ -14,61 +14,53 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             calls.append(call)
             return models.HttpResult(
                 200,
-                b'{"name":"requests/test","state":"succeeded","usage":{"available":false}}',
+                b'{"name":"requests/test","usage":{"available":false}}',
             )
 
         answer = await models.ModelClient(transport).generate(
             models.GenerateRequest(
-                request_id="c920f6e6-5d4c-4404-95a7-c3a9776f7114",
                 input="synthetic",
-                config=models.GenerationConfig(model="models/sol-6-1"),
+                model="gpt-6.1-sol",
                 timeout_ms=840000,
             )
         )
         self.assertFalse(answer.usage.available)
         self.assertEqual(calls[0].path, "/api/model/v1/generations:generate")
         self.assertEqual(calls[0].timeout_seconds, 855)
-        self.assertEqual(json.loads(calls[0].body)["config"]["model"], "models/sol-6-1")
+        self.assertEqual(json.loads(calls[0].body)["model"], "gpt-6.1-sol")
 
-    async def test_conversation_named_body_and_request_id_query_match_root_binding(
-        self,
-    ):
+    async def test_conversation_flat_body_and_empty_cleanup_acknowledgement(self):
         calls = []
 
         async def transport(call):
             calls.append(call)
-            return models.HttpResult(
-                200,
-                b'{"name":"conversations/fixture","config":{"model":"models/sol-6-1"},"state":"open"}',
-            )
+            return models.HttpResult(200, b"{}")
 
         client = models.ModelClient(transport)
         await client.create_conversation(
             models.CreateConversationRequest(
-                request_id="c920f6e6-5d4c-4404-95a7-c3a9776f7114",
-                conversation=models.Conversation(
-                    name="conversations/fixture",
-                    config=models.GenerationConfig(model="models/sol-6-1"),
-                ),
+                name="conversations/fixture", model="gpt-6.1-sol"
             )
         )
+        self.assertEqual(calls[0].path, "/api/model/v1/conversations")
         self.assertEqual(
-            calls[0].path,
-            "/api/model/v1/conversations?request_id=c920f6e6-5d4c-4404-95a7-c3a9776f7114",
+            json.loads(calls[0].body),
+            {"name": "conversations/fixture", "model": "gpt-6.1-sol"},
         )
-        self.assertEqual(json.loads(calls[0].body)["name"], "conversations/fixture")
-        self.assertNotIn("conversation", json.loads(calls[0].body))
-        await client.get_conversation("conversations/fixture")
-        self.assertEqual(calls[1].path, "/api/model/v1/conversations/fixture")
-        self.assertIsNone(calls[1].body)
         await client.close_conversation(
-            models.CloseConversationRequest(
-                name="conversations/fixture",
-                request_id="c920f6e6-5d4c-4404-95a7-c3a9776f7114",
-            )
+            models.CloseConversationRequest(name="conversations/fixture")
         )
-        self.assertEqual(calls[2].path, "/api/model/v1/conversations/fixture:close")
-        self.assertNotIn("name", json.loads(calls[2].body))
+        self.assertEqual(calls[1].path, "/api/model/v1/conversations/fixture:close")
+        self.assertEqual(json.loads(calls[1].body), {})
+
+    async def test_cleanup_rejects_a_nonempty_success_response(self):
+        async def transport(call):
+            return models.HttpResult(200, b'{"state":"open"}')
+
+        with self.assertRaises(models.ModelRouterError):
+            await models.ModelClient(transport).close_conversation(
+                models.CloseConversationRequest(name="conversations/fixture")
+            )
 
     async def test_rpc_failures_drop_response_text(self):
         async def transport(call):

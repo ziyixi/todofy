@@ -42,15 +42,15 @@ export async function embeddingQuotaRate(ai: ModelBinding): Promise<number> {
   let models;
   try { ({ models } = await createModelClient(ai).listModels({})); }
   catch { throw new AiError('embedding_unavailable'); }
-  const model = models.find(model => model.name === EMBEDDING_MODEL);
-  if (!model?.configured || !model.embeddings || !Number.isFinite(model.reservationQuotaUnitsPerToken) || model.reservationQuotaUnitsPerToken < 0) throw new AiError('embedding_unavailable');
+  const model = models.find(model => model.id === EMBEDDING_MODEL);
+  if (!model?.configured || model.kind !== 'embedding' || !Number.isFinite(model.reservationQuotaUnitsPerToken) || model.reservationQuotaUnitsPerToken < 0) throw new AiError('embedding_unavailable');
   return model.reservationQuotaUnitsPerToken;
 }
 
 /** Unit vectors of `texts` (one batched bge-m3 call) and the estimated neurons. */
 export async function embed(ai: ModelBinding, texts: readonly string[]): Promise<{ vectors: Float32Array[]; neurons: number }> {
   let answer;
-  try { answer = await createModelClient(ai).embed({ requestId: crypto.randomUUID(), model: EMBEDDING_MODEL, inputs: [...texts] }); }
+  try { answer = await createModelClient(ai).embed({ model: EMBEDDING_MODEL, inputs: [...texts] }); }
   catch { throw new AiError('embedding_unavailable'); }
   if (answer.error?.reason === 'MODEL_QUOTA') throw new AiQuotaError();
   if (answer.error) throw new AiError('embedding_unavailable');

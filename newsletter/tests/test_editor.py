@@ -289,8 +289,8 @@ async def test_generic_config_preserves_unspecified_effort(
     )
     assert json.loads(text)["review"]["passed"] and opened and searched
     assert fake_router.closed
-    assert fake_router.config.model == "models/sol-6-1"
-    assert fake_router.config.parameters is None
+    assert fake_router.config.model == "gpt-6.1-sol"
+    assert fake_router.config.effort == ""
     assert fake_router.config.web_research
     assert (
         fake_router.config.instructions[0].text == "Synthetic fixture policy."

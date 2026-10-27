@@ -49,6 +49,8 @@ breaking:
   # (tools/profile_breaking.py).
   use:
     - FILE
-  # Test fixtures of the runtimes (prototest/v1/prototest.proto): no consumer, free to change.
+  # Test fixtures have no consumer. Model Router's internal invocation and owner APIs are upgraded
+  # together with every monorepo caller; the owner explicitly permits direct field deletion there.
   ignore:
     - prototest
+    - modelrouter

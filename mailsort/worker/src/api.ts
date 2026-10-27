@@ -407,7 +407,7 @@ async function configuredModels(env: ApiContext['env']): Promise<ReadonlySet<str
   if (!binding) return new Set();
   try {
     const { models } = await createModelClient(binding).listModels({});
-    return new Set(models.filter(model => model.configured).map(model => model.name));
+    return new Set(models.filter(model => model.configured).map(model => model.id));
   } catch { return new Set(); }
 }
 

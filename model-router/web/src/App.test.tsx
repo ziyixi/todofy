@@ -2,28 +2,32 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import { App } from './App'
-import { generation, mockApi } from './test/fixtures'
+import { mockApi, summary } from './test/fixtures'
 import { renderApp } from './test/harness'
 
-test('overview separates reported tokens, unknown usage, subscription counts and unavailable API estimates', async () => {
+test('overview separates reported tokens, incomplete subscription estimates and API usage estimates', async () => {
   renderApp(<App api={mockApi()} />)
-  expect(await screen.findByText('1 次提供用量 · 1 次未提供')).toBeInTheDocument()
-  expect(screen.getByText('订阅用量不换算为 API USD')).toBeInTheDocument()
-  expect(screen.getByText('API 费用估算').closest('article')).toHaveTextContent('未提供')
+  expect(await screen.findByText('1 次提供用量 · 1 次未完整提供')).toBeInTheDocument()
+  expect(screen.getByText('订阅 API 等价估算').closest('article')).toHaveTextContent('未完整提供')
+  expect(screen.getAllByText('API 费用估算')[0]?.closest('article')).toHaveTextContent('US$0.000220')
   expect(screen.getByRole('heading', { name: '模型与连接' })).toBeInTheDocument()
-  expect(screen.getByText('显示本控制台的连接配置，不代表实时可用性。')).toBeInTheDocument()
+  expect(screen.getByText('连接已配置不代表模型实时可用。')).toBeInTheDocument()
   expect(screen.getAllByText('已配置')).toHaveLength(3)
 })
 
 test('request pagination and filters use bounded API calls and reset to the first page', async () => {
   const user = userEvent.setup()
-  const listRequests = vi.fn().mockResolvedValue({ requests: [generation], next_page_token: 'next-synthetic-token' })
+  const listRequests = vi
+    .fn()
+    .mockResolvedValue({ requests: [summary], next_page_token: 'next-synthetic-token' })
   const api = mockApi({ listRequests })
   window.history.replaceState(null, '', '/#/requests')
   renderApp(<App api={api} />)
   await screen.findByRole('button', { name: /synthetic-app/ })
   await user.click(screen.getByRole('button', { name: '下一页' }))
-  await waitFor(() => expect(listRequests).toHaveBeenLastCalledWith(expect.any(Object), 'next-synthetic-token'))
+  await waitFor(() =>
+    expect(listRequests).toHaveBeenLastCalledWith(expect.any(Object), 'next-synthetic-token'),
+  )
   expect(screen.getByText('第 2 页')).toBeInTheDocument()
   await user.type(screen.getByLabelText('应用'), 'other-synthetic-app')
   await user.selectOptions(screen.getByLabelText('状态'), 'failed')

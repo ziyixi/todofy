@@ -22,15 +22,15 @@ function Choices({ data }: { data: GetModelSettingsResponse }) {
       void cache.invalidateQueries({ queryKey: ['overview'] });
     },
   });
-  const options = data.models.filter((model) => model.configured && model.generation);
+  const options = data.models.filter((model) => model.configured && model.kind === 'text');
   return (
     <div className="stack">
       <label>
         逐封邮件摘要
         <select value={email} onChange={(event) => setEmail(event.target.value)}>
           {options.map((model) => (
-            <option key={model.name} value={model.name}>
-              {model.displayName}
+            <option key={model.id} value={model.id}>
+              {model.displayName || model.id}{model.provider ? ` · ${model.provider}` : ''}
             </option>
           ))}
         </select>
@@ -39,14 +39,14 @@ function Choices({ data }: { data: GetModelSettingsResponse }) {
         日报与推荐
         <select value={report} onChange={(event) => setReport(event.target.value)}>
           {options.map((model) => (
-            <option key={model.name} value={model.name}>
-              {model.displayName}
+            <option key={model.id} value={model.id}>
+              {model.displayName || model.id}{model.provider ? ` · ${model.provider}` : ''}
             </option>
           ))}
         </select>
       </label>
       <p className="muted small">
-        只影响之后的新计算；已完成的邮件和日报保留。各模型的回退和计费由 Model Router 管理。
+        只影响之后的新计算；已完成的邮件和日报保留。用量计入现有的每日 token 预算。
       </p>
       {save.isError && <ErrorPanel error={save.error} />}
       <Button

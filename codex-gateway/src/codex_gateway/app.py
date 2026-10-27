@@ -6,23 +6,15 @@ import os
 import pathlib
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from ziyixi_proto.codex.inference.v1.inference_pb import (
-    HTTP_BINDINGS,
-    CheckInferenceRequest,
-    CheckInferenceResponse,
-    RunInferenceRequest,
-    RunInferenceResponse,
-)
-from ziyixi_proto.http_routes import decode_request
 from ziyixi_proto.rpc_status import RpcError, status_body
-from ziyixi_proto.wire_json import WireJsonError, to_wire
+from ziyixi_proto.wire_json import to_wire
 
 from codex_gateway.access import (
     AccessKeysUnavailable,
@@ -30,13 +22,10 @@ from codex_gateway.access import (
     InvalidAccessToken,
 )
 from codex_gateway.monitoring import InferenceMonitor, utc_now
-from codex_gateway.runtime import check_runtime, infer
 
-MAX_BODY_BYTES = 768 * 1024
+MAX_BODY_BYTES = 3 * 1024 * 1024
 BUILD_INFO_FILE = pathlib.Path(__file__).with_name("build-info.json")
 PRIVATE_HEADERS = {"cache-control": "no-store", "x-content-type-options": "nosniff"}
-Runner = Callable[[RunInferenceRequest, pathlib.Path], Awaitable[RunInferenceResponse]]
-Checker = Callable[[pathlib.Path], Awaitable[CheckInferenceResponse]]
 
 
 def _object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -137,8 +126,6 @@ async def request_bytes(
 def create_app(
     *,
     monitor_db: pathlib.Path,
-    runner: Runner = infer,
-    checker: Checker = check_runtime,
     clock: Callable[[], datetime] = utc_now,
     monotonic: Callable[[], float] = time.monotonic,
     model_executor: Any = None,
@@ -147,7 +134,7 @@ def create_app(
     from codex_gateway.model_api import install_model_routes
     from codex_gateway.modelrouter import ModelExecutor
 
-    executor = model_executor or ModelExecutor(monitor_db)
+    executor = model_executor or ModelExecutor()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -158,7 +145,6 @@ def create_app(
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.access_verifier = access_verifier
-    bindings = {item.path_template: item for item in HTTP_BINDINGS}
     source_sha = _baked_source_sha()
     monitor = InferenceMonitor(monitor_db, clock=clock, monotonic=monotonic)
 
@@ -181,37 +167,5 @@ def create_app(
             headers=PRIVATE_HEADERS,
         )
 
-    async def run(request: Request) -> JSONResponse:
-        binding = bindings[request.url.path]
-        home = await authorized_home(request)
-        try:
-            decoded = _json(
-                await request_bytes(request, reason="INVALID_INFERENCE_REQUEST")
-            )
-            message = decode_request(
-                binding, request.url.path, request.query_params.multi_items(), decoded
-            )
-            if isinstance(message, RunInferenceRequest):
-                if not message.instructions.strip():
-                    raise ValueError("invalid inference request")
-                _json(message.input_json)
-                if not isinstance(_json(message.output_schema_json), dict):
-                    raise ValueError("schema must be an object")
-            elif not isinstance(message, CheckInferenceRequest):
-                raise ValueError("invalid inference request")
-        except (UnicodeError, ValueError, WireJsonError, RecursionError):
-            raise RpcError(
-                "INVALID_ARGUMENT",
-                "INVALID_INFERENCE_REQUEST",
-                "Invalid inference request",
-            ) from None
-        if isinstance(message, RunInferenceRequest):
-            answer = await monitor.run(message, home, runner)
-        else:
-            answer = await checker(home)
-        return JSONResponse(to_wire(answer), headers=PRIVATE_HEADERS)
-
-    for binding in HTTP_BINDINGS:
-        app.add_api_route(binding.path_template, run, methods=[binding.method])
     install_model_routes(app, executor, monitor)
     return app

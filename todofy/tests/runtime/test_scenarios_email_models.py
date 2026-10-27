@@ -4,14 +4,14 @@ import uuid
 
 import pytest
 
-from tests.fakes.model_router_fake import ModelRouterFake, text_reply
+from tests.fakes.model_router_fake import ModelRouterFake, error_reply, text_reply
 from tests.runtime.conftest import Launch
 from tests.runtime.harness import Worker, mail_event
 from todofy.core.prompts import SUMMARY_RANGE
 
-EMAIL_ROUTE = "models/gemini-email"
-REPORT_ROUTE = "models/gemini-report"
-SOL_ROUTE = "models/sol-6-1"
+EMAIL_ROUTE = "gemini-3.5-flash-lite"
+REPORT_ROUTE = "gemini-3.8-flash"
+SOL_ROUTE = "gpt-6.1-sol"
 
 
 def arrive(worker: Worker) -> str:
@@ -49,12 +49,13 @@ def test_initial_routes_are_independent_saved_settings(worker: Worker, fresh_gem
     assert budget["reserved_tokens"] == 0 and budget["used_tokens"] > 0
 
 
-def test_router_fallback_receipt_is_kept_without_an_app_side_chain(worker: Worker, fresh_gemini: ModelRouterFake):
-    fresh_gemini.queue_generate(text_reply("Final summary", model="reported-fallback", attempts=3))
+def test_local_fallback_records_the_actual_serving_model(worker: Worker, fresh_gemini: ModelRouterFake):
+    fresh_gemini.queue_generate(error_reply(500))
+    fresh_gemini.queue_generate(text_reply("Final summary", model="reported-fallback"))
     identifier = arrive(worker)
     event = worker.wait_event(identifier, {"complete"})
     assert event["summary_model"] == "reported-fallback"
-    assert len(fresh_gemini.calls_mentioning(identifier)) == 1
+    assert [call.requested_model for call in fresh_gemini.calls_mentioning(identifier)] == [EMAIL_ROUTE, REPORT_ROUTE]
 
 
 @pytest.mark.parametrize("kind,top_n", [("summary", None), ("recommendation", 5), ("recommendation", 10)])

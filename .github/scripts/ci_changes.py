@@ -282,7 +282,6 @@ PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
 # reaches every user (fail safe; test_proto.py fails until it is listed).
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/modelrouter/inference/": ("model-router", "mailsort", "todofy", "brief", "newsletter", "codex-gateway"),
-    "proto/codex/inference/": ("codex-gateway",),
     "proto/codex/monitor/": ("codex-gateway", "mailsort", "mail-hero", "todofy", "dashboard", "watch", "website", "recall", "brief", "tasks", "personal-mcp", "fleet", "platform", "model-router"),
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),

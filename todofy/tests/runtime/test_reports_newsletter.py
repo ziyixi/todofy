@@ -219,10 +219,11 @@ def test_old_row_is_not_served_when_on_demand_fails(probe):
     seed_summaries(probe, "续签护照")
     seed_report(probe, "summary", 0, stored_summary(), age=27 * HOUR)
     probe.gemini.queue_generate(error_reply(500))
+    probe.gemini.queue_generate(error_reply(500))
     response = get(probe, "/api/summary")
     assert (response.status_code, response.json()["error"]["code"]) == (503, "unavailable")
     assert_contract(response, "/api/summary")
-    assert len(probe.gemini.calls()) == 1
+    assert len(probe.gemini.calls()) == 2
 
 
 def test_row_from_since_the_latest_precompute_is_served_without_the_model(probe):
@@ -244,6 +245,7 @@ def test_row_from_before_the_latest_precompute_is_recomputed(probe):
 
 def test_no_row_and_failed_on_demand_is_503(probe):
     seed_summaries(probe, "续签护照")
+    probe.gemini.queue_generate(error_reply(503))
     probe.gemini.queue_generate(error_reply(503))
     response = get(probe, "/api/summary")
     assert response.status_code == 503

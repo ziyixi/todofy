@@ -94,7 +94,7 @@ describe('Codex priority pipeline', () => {
       expect(await decision(h, input.id)).toMatchObject({ outcome: 'applied', label_id: bucket.toLowerCase(), decider: 'codex', model: 'gpt-6.1-sol', confidence: null, probabilities: '{}', probabilities2: '{}' });
     }
     expect(h.up.codex.calls).toHaveLength(4);
-    expect(h.up.codex.requests.every(request => request.config?.model === 'models/sol-6-1')).toBe(true);
+    expect(h.up.codex.requests.every(request => request.model === 'gpt-6.1-sol')).toBe(true);
     expect(h.up.claude.calls).toEqual([]);
     expect(h.up.ai.calls).toEqual([]);
     expect(await h.sql(`SELECT requests FROM claude_usage`)).toEqual([]);
@@ -102,7 +102,7 @@ describe('Codex priority pipeline', () => {
     expect(flow.counts.filter(row => row.stage === MailFlow_Stage.CODEX).reduce((sum, row) => sum + row.mailCount, 0)).toBe(4);
     expect(flow.counts.some(row => row.stage === MailFlow_Stage.CLAUDE)).toBe(false);
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
-    expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CODEX, model: 'models/sol-6-1', effort: 'medium', configured: true, lastErrorCode: '', lastSuccessTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
+    expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: true, lastErrorCode: '', lastSuccessTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
     expect(status.codexUsage).toMatchObject({ month: '2026-10', requestCount: 4, successCount: 4, failureCount: 0, usageReportedCount: 4, inputTokens: 4800, outputTokens: 480, lastRequestTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
     await h.clock(T0 + 3 * HOUR + 3 * MINUTE);
     await h.api.startUnreadClassification({ name: 'unreadClassification', recheckInitial100: true, requestId: op() });
@@ -124,7 +124,7 @@ describe('Codex priority pipeline', () => {
     deliver(h, mail(13, { text: 'Synthetic account owner@example.com uses https://example.com/private?secret=1 for 12345678.' }), T0 + MINUTE);
     await h.step(T0 + 2 * MINUTE);
     expect(h.up.codex.calls[0]?.map(email => email.id)).toEqual([mail(12).id, mail(13).id]);
-    expect(h.up.codex.requests[0]?.config?.instructions.map(block => block.text).join('\n\n')).toBe('Saved synthetic classification base.\n\nSynthetic owner rules: personal reports are P3.');
+    expect(h.up.codex.requests[0]?.instructions.map(block => block.text).join('\n\n')).toBe('Saved synthetic classification base.\n\nSynthetic owner rules: personal reports are P3.');
     expect(JSON.stringify(h.up.codex.calls)).not.toContain('owner@example.com');
     expect(JSON.stringify(h.up.codex.calls)).not.toContain('/private?secret');
     expect(await decision(h, mail(11).id)).toBeUndefined();
@@ -133,7 +133,7 @@ describe('Codex priority pipeline', () => {
     await savePrompt('Updated synthetic base.', 'Updated synthetic rules.');
     deliver(h, mail(14), T0 + HOUR + MINUTE);
     await h.step(T0 + HOUR + 2 * MINUTE);
-    expect(h.up.codex.requests[1]?.config?.instructions.map(block => block.text).join('\n\n')).toBe('Updated synthetic base.\n\nUpdated synthetic rules.');
+    expect(h.up.codex.requests[1]?.instructions.map(block => block.text).join('\n\n')).toBe('Updated synthetic base.\n\nUpdated synthetic rules.');
     expect(h.up.codex.calls.flat().map(email => email.id)).toEqual([mail(12).id, mail(13).id, mail(14).id]);
     expect(modifies(h)).toHaveLength(3);
   });

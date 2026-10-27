@@ -1,20 +1,17 @@
 """Model Router transport; business prompts and summary failure handling stay in Todofy."""
 
 import asyncio
-import uuid
 from dataclasses import dataclass
 from typing import Any
 
 import js
 from model_router_client import (
     GenerateRequest,
-    GenerationConfig,
     HttpCall,
     HttpResult,
     Instruction,
     ModelClient,
     ModelRouterError,
-    Parameters,
 )
 
 from todofy.core import model_input
@@ -83,6 +80,7 @@ async def generate(
     model: str,
     response_schema: dict | None = None,
     preface: str = "",
+    fallback_models: tuple[str, ...] = (),
 ) -> ModelResult:
     import json
 
@@ -90,52 +88,65 @@ async def generate(
         return ModelResult(ModelVerdict(False, Code.SUMMARY_FAILED), "", model, 0, usage_available=True)
 
     deadline_ms = min(deadline_ms, now_ms() + integer(env, "MODEL_TIMEOUT_MS", 180000))
-    request = GenerateRequest(
-        request_id=str(uuid.uuid4()),
-        config=GenerationConfig(
-            model=model,
+    tokens, prompt_tokens, attempts = 0, 0, 0
+    available = True
+    retry_after = 0.0
+    result = ModelResult(ModelVerdict(False, Code.SUMMARY_FAILED), "", model, 0)
+    for selected in dict.fromkeys((model, *fallback_models)):
+        if deadline_ms <= now_ms():
+            break
+        request = GenerateRequest(
+            model=selected,
             instructions=(Instruction(text=system, cache=True),),
-            parameters=Parameters(allow_fallback=True),
             output_schema_json="" if response_schema is None else json.dumps(response_schema),
-        ),
-        input=model_input.user_turn(user, preface),
-        timeout_ms=max(1000, min(840000, deadline_ms - now_ms())),
-    )
-    try:
-        answer = await client(env, deadline_ms).generate(request)
-    except ModelRouterError as error:
-        rejected = error.code in {"INVALID_ARGUMENT", "UNAUTHENTICATED", "PERMISSION_DENIED", "FAILED_PRECONDITION"}
+            input=model_input.user_turn(user, preface),
+            timeout_ms=max(1000, min(840000, deadline_ms - now_ms())),
+        )
+        attempts += 1
+        try:
+            answer = await client(env, deadline_ms).generate(request)
+        except ModelRouterError as error:
+            rejected = error.code in {"INVALID_ARGUMENT", "UNAUTHENTICATED", "PERMISSION_DENIED", "FAILED_PRECONDITION"}
+            available &= rejected
+            code = (
+                Code.LLM_REQUEST_REJECTED
+                if rejected
+                else Code.LLM_QUOTA
+                if error.code == "RESOURCE_EXHAUSTED"
+                else Code.SUMMARY_FAILED
+            )
+            result = ModelResult(
+                ModelVerdict(False, code, retry_after), "", selected, tokens, prompt_tokens, attempts, available
+            )
+            if rejected:
+                break
+            continue
+        error, usage = answer.error, answer.usage
+        if usage is not None:
+            tokens += usage.input_tokens + usage.output_tokens
+            prompt_tokens += usage.input_tokens
+        available &= usage is not None and usage.available
+        retry_after = max(retry_after, 0 if error is None else error.retry_after_seconds)
         code = (
-            Code.LLM_REQUEST_REJECTED
-            if rejected
-            else Code.LLM_QUOTA
-            if error.code == "RESOURCE_EXHAUSTED"
-            else Code.SUMMARY_FAILED
+            None
+            if error is None
+            else (
+                Code.LLM_QUOTA
+                if error.reason in {"MODEL_QUOTA", "MODEL_RATE_LIMIT", "MODEL_SPEND_LIMIT"}
+                else Code.LLM_REQUEST_REJECTED
+                if error.reason in {"MODEL_AUTH", "MODEL_NOT_CONFIGURED"}
+                else Code.SUMMARY_FAILED
+            )
         )
-        return ModelResult(ModelVerdict(False, code), "", model, 0, usage_available=rejected)
-    error = answer.error
-    code = (
-        None
-        if error is None
-        else (
-            Code.LLM_QUOTA
-            if error.reason in {"MODEL_QUOTA", "MODEL_RATE_LIMIT", "MODEL_SPEND_LIMIT"}
-            else Code.LLM_REQUEST_REJECTED
-            if error.reason in {"MODEL_AUTH", "MODEL_NOT_CONFIGURED"}
-            else Code.SUMMARY_FAILED
+        result = ModelResult(
+            ModelVerdict(error is None, code, retry_after),
+            answer.output,
+            answer.model or selected,
+            tokens,
+            prompt_tokens,
+            attempts,
+            available,
         )
-    )
-    usage = answer.usage
-    return ModelResult(
-        ModelVerdict(
-            error is None and answer.state == "succeeded",
-            code,
-            retry_after=0 if error is None else error.retry_after_seconds,
-        ),
-        answer.output,
-        answer.reported_model or answer.model,
-        0 if usage is None else usage.total_tokens,
-        0 if usage is None else usage.input_tokens,
-        answer.attempt_count,
-        usage is not None and usage.available,
-    )
+        if error is None or code == Code.LLM_REQUEST_REJECTED:
+            break
+    return result

@@ -61,9 +61,9 @@ describe('the dry run of a shadow weekday', () => {
       for (const key of ['thinking', 'temperature', 'top_p', 'top_k']) expect(body).not.toHaveProperty(key);
       expect(JSON.parse(String(body['outputSchemaJson']))).toMatchObject({ type: 'object' });
       const opus = request.step !== 'gate' && request.step !== 'entail';
-      expect(body['model']).toBe(opus ? 'models/claude-opus-5-5' : 'models/claude-haiku-5-5');
-      expect((body['parameters'] as { allowFallback: boolean }).allowFallback).toBe(opus);
-      expect((body['parameters'] as { effort: string }).effort).toBe({ gate: 'low', entail: 'low', pick: 'medium' }[request.step as string] ?? 'high');
+      expect(body['model']).toBe(opus ? 'claude-opus-5-5' : 'claude-haiku-5-5');
+      expect(body['allowFallback']).toBe(opus);
+      expect(body['effort']).toBe({ gate: 'low', entail: 'low', pick: 'medium' }[request.step as string] ?? 'high');
     }
     // The writer's frozen prefix, policy.md then profile.md, ends in the one breakpoint; its own rules follow uncached.
     for (const step of ['write', 'repair']) {

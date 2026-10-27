@@ -1,4 +1,4 @@
-// Provider-neutral model invocation and short-lived conversation contracts.
+// Internal model invocation API. All callers are released from this monorepo.
 syntax = "proto3";
 
 package modelrouter.inference.v1;
@@ -6,563 +6,281 @@ package modelrouter.inference.v1;
 import "google/api/annotations.proto";
 import "google/api/client.proto";
 import "google/api/field_behavior.proto";
-import "google/api/field_info.proto";
-import "google/api/resource.proto";
-import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "InferenceProto";
 option java_package = "science.ziyixi.modelrouter.inference.v1";
 
-// One API for all configured models. Vendor formats remain inside the router.
-// (-- api-linter: core::0121::resource-must-support-get=disabled
-//     aip.dev/not-precedent: Model entries are read through the complete bounded ListModels catalog, without a separate lookup endpoint. --)
-// (-- api-linter: core::0121::resource-must-support-list=disabled
-//     aip.dev/not-precedent: Temporary conversations are addressed only by their creating caller; the service exposes no enumeration endpoint. --)
+// Final-result inference; provider protocols stay inside the Router.
 service ModelService {
   option (google.api.default_host) = "models.ziyixi.science";
 
-  // Lists configured models and their actual supported capabilities.
+  // Returns the small configured catalog.
   rpc ListModels(ListModelsRequest) returns (ListModelsResponse) {
     option (google.api.http) = {get: "/api/model/v1/models"};
     option (google.api.method_signature) = "";
   }
-  // Waits for one final text or schema-constrained result.
+  // Waits for the completed text or JSON result.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // (-- api-linter: core::0136::verb-noun=disabled
-  //     aip.dev/not-precedent: Generate is the public bounded inference verb; it creates no application job. --)
-  // (-- api-linter: core::0136::http-uri-suffix=disabled
-  //     aip.dev/not-precedent: Generate addresses its inference collection and returns a final invocation result. --)
   // (-- api-linter: core::0136::response-message-name=disabled
-  //     aip.dev/not-precedent: The common API returns its typed final result directly, including failures and usage. --)
+  //     aip.dev/not-precedent: This inference operation returns its small typed result or cleanup acknowledgement. --)
+  // (-- api-linter: core::0136::verb-noun=disabled
+  //     aip.dev/not-precedent: Generate and Embed are the existing inference verbs. --)
   rpc Generate(GenerateRequest) returns (Generation) {
     option (google.api.http) = {
       post: "/api/model/v1/generations:generate"
       body: "*"
     };
-    option (google.api.method_signature) = "request_id,input,config";
+    option (google.api.method_signature) = "model,input";
   }
-  // Generates vectors in input order.
+  // Returns vectors in input order.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // (-- api-linter: core::0136::verb-noun=disabled
-  //     aip.dev/not-precedent: Embed is the public bounded inference verb; it creates no application job. --)
-  // (-- api-linter: core::0136::http-uri-suffix=disabled
-  //     aip.dev/not-precedent: Embed addresses its inference collection and returns a final invocation result. --)
   // (-- api-linter: core::0136::response-message-name=disabled
-  //     aip.dev/not-precedent: The common API returns its typed final result directly, including failures and usage. --)
+  //     aip.dev/not-precedent: This inference operation returns its small typed result or cleanup acknowledgement. --)
+  // (-- api-linter: core::0136::verb-noun=disabled
+  //     aip.dev/not-precedent: Generate and Embed are the existing inference verbs. --)
   rpc Embed(EmbedRequest) returns (Embedding) {
     option (google.api.http) = {
       post: "/api/model/v1/embeddings:embed"
       body: "*"
     };
-    option (google.api.method_signature) = "request_id,model,inputs";
+    option (google.api.method_signature) = "model,inputs";
   }
-  // Creates a bounded, temporary model context, never an application workflow.
+  // Opens the bounded Codex context used by Newsletter.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  // (-- api-linter: core::0133::method-signature=disabled
-  //     aip.dev/not-precedent: Creation also requires its idempotency UUID so a lost response cannot allocate a second context. --)
-  rpc CreateConversation(CreateConversationRequest) returns (Conversation) {
+  // (-- api-linter: core::0133::response-message-name=disabled
+  //     aip.dev/not-precedent: The caller already knows the context name; creation returns an acknowledgement. --)
+  rpc CreateConversation(CreateConversationRequest) returns (google.protobuf.Empty) {
+    // (-- api-linter: core::0133::http-body=disabled
+    //     aip.dev/not-precedent: The context open operation sends flat settings. --)
     option (google.api.http) = {
       post: "/api/model/v1/conversations"
-      body: "conversation"
+      body: "*"
     };
-    option (google.api.method_signature) = "conversation,request_id";
+    option (google.api.method_signature) = "name,model";
   }
-  // Reads context liveness, not provider credentials or SDK state.
+  // Acknowledges only after the execution context has been cleaned up.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  rpc GetConversation(GetConversationRequest) returns (Conversation) {
-    option (google.api.http) = {get: "/api/model/v1/{name=conversations/*}"};
-    option (google.api.method_signature) = "name";
-  }
-  // Cancels an active turn and acknowledges only after execution cleanup.
-  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  rpc CloseConversation(CloseConversationRequest) returns (Conversation) {
+  // (-- api-linter: core::0136::response-message-name=disabled
+  //     aip.dev/not-precedent: This inference operation returns its small typed result or cleanup acknowledgement. --)
+  rpc CloseConversation(CloseConversationRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {
       post: "/api/model/v1/{name=conversations/*}:close"
       body: "*"
     };
-    option (google.api.method_signature) = "name,request_id";
-  }
-}
-
-// Owner-only request browsing and usage; machine callers cannot query other applications.
-// (-- api-linter: core::0121::resource-must-support-get=disabled
-//     aip.dev/not-precedent: GetRequest reads the Generation resource through its RequestRecord projection with expiring private bodies. --)
-service ConsoleService {
-  option (google.api.default_host) = "models.ziyixi.science";
-
-  // Lists bounded content-free request metadata.
-  rpc ListRequests(ListRequestsRequest) returns (ListRequestsResponse) {
-    option (google.api.http) = {get: "/api/model/v1/requests"};
-    option (google.api.method_signature) = "";
-  }
-  // Reads a private request and its still-retained bodies.
-  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // (-- api-linter: core::0131::response-message-name=disabled
-  //     aip.dev/not-precedent: RequestRecord wraps the invocation resource with separately expiring private bodies. --)
-  rpc GetRequest(GetRequestRequest) returns (RequestRecord) {
-    option (google.api.http) = {get: "/api/model/v1/{name=requests/*}"};
     option (google.api.method_signature) = "name";
   }
-  // Reads current caller/model aggregates for a bounded number of days.
-  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // (-- api-linter: core::0131::response-message-name=disabled
-  //     aip.dev/not-precedent: This bounded owner aggregate is a query result, without a persisted singleton identity. --)
-  // (-- api-linter: core::0131::method-signature=disabled
-  //     aip.dev/not-precedent: This bounded owner aggregate is a query result, without a persisted singleton identity. --)
-  // (-- api-linter: core::0131::http-uri-name=disabled
-  //     aip.dev/not-precedent: This bounded owner aggregate is a query result, without a persisted singleton identity. --)
-  rpc GetUsage(GetUsageRequest) returns (UsageSummary) {
-    option (google.api.http) = {get: "/api/model/v1/usage"};
-    option (google.api.method_signature) = "";
-  }
 }
 
-// Stable public model identifier and available behavior, not an entitlement guarantee.
+// One actual provider model, never an application policy or fallback-chain alias.
 message Model {
-  option (google.api.resource) = {
-    type: "models.ziyixi.science/Model"
-    pattern: "models/{model}"
-    singular: "model"
-    plural: "models"
-  };
-
-  // Resource name models/{id}.
-  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
-  // Human-readable name.
+  // Native provider model ID.
+  string id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Display name.
   string display_name = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Provider label for observability only; callers never branch on it.
+  // openai, anthropic, google or cloudflare.
   string provider = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Provider model identifier; never a credential.
-  string upstream_model = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether the Router's shared provider connection is configured.
+  // text or embedding.
+  string kind = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether its shared connection is configured.
   bool configured = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether the model produces text or JSON.
-  bool generation = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether it produces vectors.
-  bool embeddings = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether short conversations are supported by the adapter.
-  bool conversations = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether actual web research observations can be returned.
-  bool web_research = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Supported generic effort values.
-  repeated string efforts = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether temperature can be supplied.
-  bool temperature = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether a model-side output token cap can be supplied.
-  bool max_output_tokens = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Embedding dimensions, zero for generation models.
-  int32 dimensions = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Worst configured input rate for a caller's pre-call budget reservation, in micro-USD/token.
-  double reservation_input_microusd_per_token = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Worst configured output rate for a caller's pre-call budget reservation, in micro-USD/token.
-  double reservation_output_microusd_per_token = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Opaque connection revision, useful for clearing a rejected-connection hold after replacement.
-  string connection_revision = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Configured platform quota units per estimated input token, for an application's reservation.
-  double reservation_quota_units_per_token = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Supported thinking effort values.
+  repeated string efforts = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Conservative input reservation rate used by Brief, in micro-USD per token.
+  double reservation_input_microusd_per_token = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Conservative output reservation rate used by Brief, in micro-USD per token.
+  double reservation_output_microusd_per_token = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Workers AI quota reservation rate used by Brief.
+  double reservation_quota_units_per_token = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// Generic parameters. Unsupported explicit values are rejected before a model call.
-message Parameters {
-  // Empty preserves the model's configured default; otherwise low, medium, high, xhigh or max.
-  string effort = 1 [(google.api.field_behavior) = OPTIONAL];
-  // Absent preserves the model default.
-  optional double temperature = 2 [(google.api.field_behavior) = OPTIONAL];
-  // Absent preserves the adapter default. Not every backend supports a token cap.
-  optional int32 max_output_tokens = 3 [(google.api.field_behavior) = OPTIONAL];
-  // Permit the adapter's explicitly configured model fallback policy.
-  bool allow_fallback = 4 [(google.api.field_behavior) = OPTIONAL];
-}
-
-// Stable instructions can be cached without placing request metadata in the prompt.
+// Stable prompt block, with an optional provider cache hint.
 message Instruction {
-  // Instruction text, never dynamic request metadata.
+  // Trusted instruction text.
   string text = 1 [(google.api.field_behavior) = REQUIRED];
-  // This block is stable across calls; the adapter may apply provider prompt caching.
+  // Hint that this block is stable between calls.
   bool cache = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
-// Configuration shared by one-shot calls and conversations.
-message GenerationConfig {
-  // Configured models/{id} name.
-  string model = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.resource_reference).type = "models.ziyixi.science/Model"
-  ];
-  // Ordered trusted instruction blocks.
-  repeated Instruction instructions = 2 [(google.api.field_behavior) = OPTIONAL];
-  // Generic generation controls.
-  Parameters parameters = 3 [(google.api.field_behavior) = OPTIONAL];
-  // Standard JSON Schema encoded as JSON; empty requests ordinary text.
-  string output_schema_json = 4 [(google.api.field_behavior) = OPTIONAL];
-  // Require actual web search/open observations, not URLs claimed by model text.
-  bool web_research = 5 [(google.api.field_behavior) = OPTIONAL];
-}
-
-// One bounded invocation. Exactly one of config or conversation must be supplied.
+// One invocation. A conversation turn supplies conversation instead of model/options.
 message GenerateRequest {
-  // UUID identifying this model invocation and its trace.
-  string request_id = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.field_info).format = UUID4
-  ];
-  // One-shot generation configuration, mutually exclusive with conversation.
-  GenerationConfig config = 2 [(google.api.field_behavior) = OPTIONAL];
-  // Existing conversations/{id}, mutually exclusive with config.
-  string conversation = 3 [(google.api.field_behavior) = OPTIONAL];
-  // Untrusted model input as text; JSON inputs are serialized by the caller.
-  string input = 4 [(google.api.field_behavior) = REQUIRED];
-  // Operation budget in milliseconds, at most 840000; zero selects 110000.
+  // Native provider model ID; omitted for an existing context.
+  string model = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Untrusted input text or caller-serialized JSON.
+  string input = 2 [(google.api.field_behavior) = REQUIRED];
+  // Ordered trusted prompt blocks.
+  repeated Instruction instructions = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Thinking effort; empty uses the model default.
+  string effort = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Output cap; zero uses the adapter default.
+  int32 max_output_tokens = 5 [(google.api.field_behavior) = OPTIONAL];
+  // JSON Schema as JSON text; empty requests ordinary text.
+  string output_schema_json = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Enables the adapter's existing native provider fallback.
+  bool allow_fallback = 7 [(google.api.field_behavior) = OPTIONAL];
+  // Existing conversations/{UUID}; used only by Newsletter.
+  string conversation = 8 [(google.api.field_behavior) = OPTIONAL];
+  // Bounded operation deadline in milliseconds; zero uses 110000, maximum 840000.
   // (-- api-linter: core::0142::time-field-type=disabled
-  //     aip.dev/not-precedent: This field is a bounded relative duration with an explicit unit, never an absolute timestamp. --)
-  int32 timeout_ms = 5 [(google.api.field_behavior) = OPTIONAL];
-  // Safe operation/correlation tags. Authentication, not this map, identifies the app.
-  map<string, string> metadata = 6 [(google.api.field_behavior) = OPTIONAL];
+  //     aip.dev/not-precedent: This numeric field is a bounded relative duration with an explicit unit. --)
+  int32 timeout_ms = 9 [(google.api.field_behavior) = OPTIONAL];
 }
 
-// Provider-normalized counts. Cached input and reasoning output are subsets of their totals.
+// Counts include cache reads/writes in input and any thinking in output.
 message Usage {
-  // False means unknown consumption, never zero consumption.
+  // False means consumption is unknown.
   bool available = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Input includes cached input.
+  // Total input tokens.
   int32 input_tokens = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Output includes reasoning output.
+  // Total output tokens.
   int32 output_tokens = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Cached input subset, when reported.
+  // Cache-read subset of input.
   int32 cached_input_tokens = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Prompt-cache creation count, when reported.
+  // Cache-write subset of input.
   int32 cache_write_tokens = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Reasoning subset of output, when reported.
-  int32 reasoning_output_tokens = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // API cost estimate in millionths of a USD; unavailable for subscription usage.
-  optional int32 estimated_cost_microusd = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // api, subscription or platform_quota.
-  string billing_kind = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Provider total for this call, excluding duplicate cached/reasoning subsets.
-  int32 total_tokens = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Estimated platform quota units when the model has a configured rate; separate from reported tokens.
-  optional double estimated_quota_units = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // API estimate or subscription API-equivalent value, in millionths of USD.
+  optional int32 estimated_cost_microusd = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // api, subscription or platform_quota; subscription estimates are never bills.
+  string billing_kind = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Estimated Workers AI quota units, independent of reported tokens.
+  optional double estimated_quota_units = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// Facts observed by the execution backend, never inferred from generated text.
+// Web actions observed by the executor, not assertions in model text.
 message Observations {
-  // At least one actual web search completed.
+  // At least one search completed.
   bool searched = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Exact URL inputs of observed openPage actions.
+  // Exact URL inputs of completed open actions.
   repeated string opened_urls = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// Final result and persisted trace metadata.
+// Final inference result. Trace metadata is available only in the owner console.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: Final inference results are values; only the owner history has a persisted trace. --)
 message Generation {
-  option (google.api.resource) = {
-    type: "models.ziyixi.science/Generation"
-    pattern: "requests/{generation}"
-    singular: "generation"
-    plural: "requests"
-  };
-
-  // requests/{id}.
-  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
-  // Authenticated calling application.
-  string app = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Requested public model.
-  string model = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Provider-reported model, empty when not reported. Never copied from model.
-  string reported_model = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // running, succeeded, failed, cancelled or interrupted.
-  string state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Final ordinary text or schema-valid JSON text. Empty on failure.
-  string output = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Usage of this call, never a cumulative conversation snapshot.
-  Usage usage = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Actual execution observations.
-  Observations observations = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Model execution failure; request/auth errors use HTTP google.rpc.Status.
-  ModelError error = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Conversation used by this generation, empty for one-shot calls.
-  string conversation = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Effective generic parameters.
-  Parameters parameters = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Invocation accepted at.
-  // (-- api-linter: core::0140::prepositions=disabled
-  //     aip.dev/not-precedent: The established query and telemetry key expresses an explicit time boundary. --)
-  // (-- api-linter: core::0142::time-field-names=disabled
-  //     aip.dev/not-precedent: The approved telemetry keys started_at and completed_at are shared by every caller. --)
-  google.protobuf.Timestamp started_at = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Invocation finished at, absent while running.
-  // (-- api-linter: core::0140::prepositions=disabled
-  //     aip.dev/not-precedent: The established query and telemetry key expresses an explicit time boundary. --)
-  // (-- api-linter: core::0142::time-field-names=disabled
-  //     aip.dev/not-precedent: The approved telemetry keys started_at and completed_at are shared by every caller. --)
-  google.protobuf.Timestamp completed_at = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Wall-clock duration in milliseconds.
-  // (-- api-linter: core::0142::time-field-type=disabled
-  //     aip.dev/not-precedent: This field is a bounded relative duration with an explicit unit, never an absolute timestamp. --)
-  int32 duration_ms = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Operation/correlation tags supplied by the caller.
-  map<string, string> metadata = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Content expiry time; metadata remains after this time.
-  google.protobuf.Timestamp content_expire_time = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether input/output bodies have expired or could not be stored.
-  bool content_unavailable = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether the upstream accepted or began processing the invocation.
-  bool upstream_started = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Number of upstream model attempts, including configured fallback attempts.
-  int32 attempt_count = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // complete, refused, output_limit or interrupted.
-  string finish_reason = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Models observed contributing text, including partial writers before a fallback.
-  repeated string contributing_models = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Server-generated requests/{UUID} trace.
+  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Actual selected provider model ID, using the reported model when available.
+  string model = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Completed text or schema-valid JSON; empty on failure.
+  string output = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Consumption including any native provider fallback.
+  Usage usage = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Actual web actions, when requested by a context.
+  Observations observations = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Safe execution failure; request/auth failures use HTTP google.rpc.Status.
+  ModelError error = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Observed text writers when native fallback uses more than one model.
+  repeated string contributing_models = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// A finite, optional model context. It carries no application workflow state.
-message Conversation {
-  option (google.api.resource) = {
-    type: "models.ziyixi.science/Conversation"
-    pattern: "conversations/{conversation}"
-    singular: "conversation"
-    plural: "conversations"
-  };
-
-  // conversations/{id}.
-  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
-  // Immutable model configuration.
-  GenerationConfig config = 2 [(google.api.field_behavior) = OPTIONAL];
-  // Lifetime in milliseconds, at most 840000; default 840000.
+// Fixed-lifetime Codex context; its name is saved by Newsletter before creation.
+// (-- api-linter: core::0133::request-id-field=disabled
+//     aip.dev/not-precedent: Newsletter persists a complete context name before opening it; no second identifier is needed. --)
+// (-- api-linter: core::0133::request-parent-required=disabled
+//     aip.dev/not-precedent: Temporary inference contexts have no parent resource. --)
+// (-- api-linter: core::0133::request-resource-field=disabled
+//     aip.dev/not-precedent: This internal open operation takes flat context settings and returns an acknowledgement. --)
+message CreateConversationRequest {
+  // conversations/{UUID} supplied by the caller.
+  // (-- api-linter: core::0133::request-required-fields=disabled
+  //     aip.dev/not-precedent: The caller supplies the context name and actual model. --)
+  // (-- api-linter: core::0133::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These are the flat settings actually used by Newsletter. --)
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  // Native provider model ID.
+  // (-- api-linter: core::0133::request-required-fields=disabled
+  //     aip.dev/not-precedent: The caller supplies the context name and actual model. --)
+  // (-- api-linter: core::0133::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These are the flat settings actually used by Newsletter. --)
+  string model = 2 [(google.api.field_behavior) = REQUIRED];
+  // Trusted instructions shared by its turns.
+  // (-- api-linter: core::0133::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These are the flat settings actually used by Newsletter. --)
+  repeated Instruction instructions = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Thinking effort; empty uses the default.
+  // (-- api-linter: core::0133::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These are the flat settings actually used by Newsletter. --)
+  string effort = 4 [(google.api.field_behavior) = OPTIONAL];
+  // JSON Schema shared by its turns.
+  // (-- api-linter: core::0133::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These are the flat settings actually used by Newsletter. --)
+  string output_schema_json = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Enable actual web research and observations.
+  // (-- api-linter: core::0133::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These are the flat settings actually used by Newsletter. --)
+  bool web_research = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Total lifetime in milliseconds, at most 840000; zero selects 840000.
+  // (-- api-linter: core::0133::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These are the flat settings actually used by Newsletter. --)
   // (-- api-linter: core::0142::time-field-type=disabled
-  //     aip.dev/not-precedent: This field is a bounded relative duration with an explicit unit, never an absolute timestamp. --)
-  int32 timeout_ms = 3 [(google.api.field_behavior) = OPTIONAL];
-  // open, closed, expired or lost.
-  string state = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Fixed total expiry; turns never extend it.
-  google.protobuf.Timestamp expire_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Authenticated owner app.
-  string app = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  //     aip.dev/not-precedent: This numeric field is a bounded relative duration with an explicit unit. --)
+  int32 timeout_ms = 7 [(google.api.field_behavior) = OPTIONAL];
 }
 
-// Model catalog read.
+// Safe repeated close of a context; no separate operation identity is needed.
+message CloseConversationRequest {
+  // conversations/{UUID} to close.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Complete bounded catalog read.
 // (-- api-linter: core::0158::request-page-size-field=disabled
-//     aip.dev/not-precedent: The complete deployment catalog is a fixed, bounded collection returned atomically; it has no further pages. --)
+//     aip.dev/not-precedent: The six-entry deployment catalog is returned completely. --)
 // (-- api-linter: core::0158::request-page-token-field=disabled
-//     aip.dev/not-precedent: The complete deployment catalog is a fixed, bounded collection returned atomically; it has no further pages. --)
+//     aip.dev/not-precedent: The six-entry deployment catalog is returned completely. --)
 message ListModelsRequest {}
-// Finite configured model catalog.
+// Models configured by this deployment.
 // (-- api-linter: core::0158::response-next-page-token-field=disabled
-//     aip.dev/not-precedent: The complete deployment catalog is a fixed, bounded collection returned atomically; it has no further pages. --)
+//     aip.dev/not-precedent: The six-entry deployment catalog is returned completely. --)
 message ListModelsResponse {
-  // Configured public models and capabilities.
+  // Native models and their providers.
   repeated Model models = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
-// Temporary context creation.
-// (-- api-linter: core::0133::request-id-field=disabled
-//     aip.dev/not-precedent: The service generates conversation UUIDs; request_id deduplicates creation after a lost response. --)
-message CreateConversationRequest {
-  // Context settings.
-  Conversation conversation = 1 [(google.api.field_behavior) = REQUIRED];
-  // UUID of the create operation.
-  // (-- api-linter: core::0133::request-required-fields=disabled
-  //     aip.dev/not-precedent: Creation must have a stable idempotency key so retries never allocate another context. --)
-  string request_id = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.field_info).format = UUID4
-  ];
-}
-// Context lookup.
-message GetConversationRequest {
-  // Resource name to read or close.
-  string name = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.resource_reference).type = "models.ziyixi.science/Conversation"
-  ];
-}
-// Idempotent context close.
-message CloseConversationRequest {
-  // Context resource name.
-  // Resource name to read or close.
-  string name = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.resource_reference).type = "models.ziyixi.science/Conversation"
-  ];
-  // UUID of the close operation.
-  string request_id = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.field_info).format = UUID4
-  ];
-}
-// Ordered text embedding inputs.
+
+// Text embedding inputs, at most fifty.
 message EmbedRequest {
-  // UUID identifying this inference and trace.
-  string request_id = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.field_info).format = UUID4
-  ];
-  // Configured embedding model.
-  string model = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.resource_reference).type = "models.ziyixi.science/Model"
-  ];
-  // Texts in their original order, at most 50.
-  repeated string inputs = 3 [(google.api.field_behavior) = REQUIRED];
-  // Safe correlation labels.
-  map<string, string> metadata = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Native embedding model ID.
+  string model = 1 [(google.api.field_behavior) = REQUIRED];
+  // Texts in input order.
+  repeated string inputs = 2 [(google.api.field_behavior) = REQUIRED];
 }
-// One vector, kept in input order.
+// One embedding vector.
 message Vector {
-  // Finite components of one embedding.
+  // Finite vector components.
   repeated double values = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
-// Complete embedding result.
+// Final ordered vectors or a model failure.
+// (-- api-linter: core::0123::resource-annotation=disabled
+//     aip.dev/not-precedent: Final inference results are values; only the owner history has a persisted trace. --)
 message Embedding {
-  option (google.api.resource) = {
-    type: "models.ziyixi.science/Embedding"
-    pattern: "requests/{embedding}"
-    singular: "embedding"
-    plural: "requests"
-  };
-
-  // requests/{id}.
-  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
-  // Configured model.
+  // Server-generated requests/{UUID} trace.
+  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Native model ID.
   string model = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Result vectors.
+  // Vectors in input order.
   repeated Vector vectors = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Expected dimensions of every vector.
-  int32 dimensions = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Provider usage, when reported.
-  Usage usage = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Safe model error; empty on success.
-  ModelError error = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Consumption, when available.
+  Usage usage = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Safe execution failure.
+  ModelError error = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// Private body and metadata, with explicit content expiry.
-message RequestRecord {
-  // Model result or active metadata.
-  Generation generation = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Original vendor-neutral configuration, absent after content expiry.
-  GenerationConfig config = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Original model input, never HTTP auth headers.
-  string input = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether private input/output is still retained.
-  bool content_available = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-// Bounded request filters.
-// (-- api-linter: core::0132::request-unknown-fields=disabled
-//     aip.dev/not-precedent: Typed app, model, state and time bounds select the finite indexed request queries; no free-form filter parser is exposed. --)
-message ListRequestsRequest {
-  // Defaults to twenty, at most one hundred.
-  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  // Cursor returned by the preceding list.
-  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
-  // Calling app filter.
-  string app = 3 [(google.api.field_behavior) = OPTIONAL];
-  // Public model filter.
-  string model = 4 [(google.api.field_behavior) = OPTIONAL];
-  // Request state filter.
-  string state = 5 [(google.api.field_behavior) = OPTIONAL];
-  // Inclusive lower start time.
-  // (-- api-linter: core::0140::prepositions=disabled
-  //     aip.dev/not-precedent: The established query and telemetry key expresses an explicit time boundary. --)
-  google.protobuf.Timestamp from_time = 6 [(google.api.field_behavior) = OPTIONAL];
-  // Exclusive upper start time.
-  // (-- api-linter: core::0140::prepositions=disabled
-  //     aip.dev/not-precedent: The established query and telemetry key expresses an explicit time boundary. --)
-  google.protobuf.Timestamp to_time = 7 [(google.api.field_behavior) = OPTIONAL];
-}
-// Content-free request list.
-message ListRequestsResponse {
-  // Requests newest first; output and instruction bodies are omitted.
-  repeated Generation requests = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Empty at the end of the list.
-  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-// Request lookup.
-message GetRequestRequest {
-  // Resource name to read or close.
-  string name = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (google.api.resource_reference).type = "models.ziyixi.science/Generation"
-  ];
-}
-// Bounded UTC-day statistics.
-// (-- api-linter: core::0131::request-name-required=disabled
-//     aip.dev/not-precedent: A bounded UTC-day aggregate has typed query filters and no persisted resource name. --)
-// (-- api-linter: core::0131::request-unknown-fields=disabled
-//     aip.dev/not-precedent: A bounded UTC-day aggregate has typed query filters and no persisted resource name. --)
-message GetUsageRequest {
-  // Number of days, one to ninety; zero selects seven.
-  int32 days = 1 [(google.api.field_behavior) = OPTIONAL];
-  // Calling app filter.
-  string app = 2 [(google.api.field_behavior) = OPTIONAL];
-  // Public model filter.
-  string model = 3 [(google.api.field_behavior) = OPTIONAL];
-}
-// One UTC day of request statistics.
-message UsageDay {
-  // UTC YYYY-MM-DD.
-  string day = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Accepted requests.
-  int32 request_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Successfully completed requests.
-  int32 success_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Failed/cancelled/interrupted requests.
-  int32 failure_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Known input tokens, including cached input.
-  int32 input_tokens = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Known output tokens, including reasoning.
-  int32 output_tokens = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Reported cache reads.
-  int32 cached_input_tokens = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Reported cache writes.
-  int32 cache_write_tokens = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Sum of available API cost estimates.
-  int32 estimated_cost_microusd = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Requests charged to subscription rather than API USD.
-  int32 subscription_request_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-// Bounded aggregate; missing usage remains distinguishable from zero usage.
-message UsageSummary {
-  // UTC daily records.
-  repeated UsageDay days = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Accepted requests.
-  int32 request_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Succeeded requests.
-  int32 success_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Failed requests.
-  int32 failure_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Known input tokens.
-  int32 input_tokens = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Known output tokens.
-  int32 output_tokens = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Known cache reads.
-  int32 cached_input_tokens = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Known cache writes.
-  int32 cache_write_tokens = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Estimated API USD in millionths.
-  int32 estimated_cost_microusd = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether any metered API cost was available.
-  bool api_cost_available = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Subscription requests, never converted to API USD.
-  int32 subscription_request_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Requests with reported token usage.
-  int32 usage_available_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-
-// Provider-neutral model failure; HTTP request errors retain google.rpc.Status.
+// Provider-neutral failure used by current application retry and budget logic.
 message ModelError {
   // Canonical google.rpc.Code value.
   int32 code = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Safe human-readable explanation without request content or secrets.
+  // Safe explanation without request content or credentials.
   string message = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Fixed, actionable model failure reason.
+  // Actionable failure reason.
   string reason = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Provider's bounded retry delay when available.
-  // (-- api-linter: core::0142::time-field-type=disabled
-  //     aip.dev/not-precedent: This field is a bounded relative duration with an explicit unit, never an absolute timestamp. --)
+  // Provider retry delay in seconds, when supplied.
   // (-- api-linter: core::0140::prepositions=disabled
-  //     aip.dev/not-precedent: The established Retry-After duration is normalized to a bounded number of seconds. --)
+  //     aip.dev/not-precedent: These telemetry and Retry-After names match the existing owner interface. --)
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: This numeric field is a bounded relative duration with an explicit unit. --)
   int32 retry_after_seconds = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

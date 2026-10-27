@@ -1,108 +1,100 @@
 # Model Router deployment
 
-The private console is `https://models.<zone>/`. The sole production config is
-[`../wrangler.toml`](../wrangler.toml); its domain, account, Access audience and D1 UUID come from the
-normal public cloud profile and resource export. `workers.dev` and preview URLs stay disabled.
+The private console uses the configured Models host. The production config is
+[`../wrangler.toml`](../wrangler.toml); account, domain, Access audience, D1 and namespace identities come from
+`config/cloud.toml` and `config/resources.toml`. `workers.dev` and preview URLs remain disabled.
 
-The Worker owns D1 request metadata, the private `model-router-request-bodies` R2 bucket, one SQLite
-`RouterEngine`, the Workers AI binding and its static console. The daily `04:47 UTC` trigger performs
-bounded cleanup. Request bodies expire after seven days; metadata expires after ninety days. The new
-bucket also has an independent seven-day object lifecycle, including orphaned bodies. Existing mail,
-archive, backup and infrastructure-state buckets retain their own retention rules.
+The Worker owns the request-history D1 database, private `REQUEST_BODIES` and `BACKUPS` buckets, one SQLite
+`RouterEngine`, Workers AI and the console assets. Metadata is retained for ninety days and live request bodies
+for seven days. The existing daily `04:47 UTC` trigger starts bounded cleanup and backup work; the engine Alarm
+copies completed history and retained bodies into one dated snapshot. Daily snapshots have seven-day retention
+in the backup bucket, so copied bodies can remain for roughly fourteen days from their original creation.
+Provider credentials, SDK state and live contexts are excluded. See [backup and restore](backup.md).
 
-## Provisioning
+## Resources
 
-Use the existing additive bootstrap documented in
-[`tools/cloud-bootstrap/README.md`](../../tools/cloud-bootstrap/README.md#向现有账户新增应用), reusing the
-existing protected private input, original encrypted-state passphrase and exact owner policy values.
-Its `create_addresses` must name only:
+Provision resources through the existing [additive bootstrap](../../tools/cloud-bootstrap/README.md#向现有账户新增应用),
+using the protected private input, original encrypted-state passphrase and existing owner policy values.
+The Router's original resources and namespace are registered. Adding its backup storage needs only these
+create addresses:
 
 ```json
 [
-  "cloudflare_d1_database.app[\"model-router\"]",
-  "cloudflare_r2_bucket.app[\"model-router-request-bodies\"]",
-  "cloudflare_r2_bucket_lifecycle.model_router_request_bodies",
-  "cloudflare_zero_trust_access_application.owner[\"model-router\"]",
-  "cloudflare_zero_trust_access_policy.model_router_inference",
-  "cloudflare_zero_trust_access_application.model_router_inference"
+  "cloudflare_r2_bucket.app[\"model-router-backups\"]",
+  "cloudflare_r2_bucket_lifecycle.model_router_backups"
 ]
 ```
 
-Run from the repository root:
+From the repository root:
 
 ```sh
 python3 tools/cloud-bootstrap/bootstrap.py plan --mode extend --private-file <protected-private-file>
 python3 tools/cloud-bootstrap/bootstrap.py cloud --mode extend --private-file <same-private-file>
 ```
 
-Review the create-only plan before the second command. The existing gate rejects updates, replacements
-or deletions of any existing resource, and the driver backs up the encrypted remote state before writes.
-The exporter records actual D1/Access identities and regenerates the public configuration. Empty
-bootstrap identity slots cannot pass the real release wrapper. No generated fake UUID or audience is
-used for deployment.
+Review the create-only plan before the second command. The existing bootstrap gate rejects updates,
+replacements and deletions of existing resources, and backs up the encrypted remote state before writing.
+The exporter records public resource identities and regenerates configuration. The backup bucket and live body
+bucket each expire their own objects after seven days; existing mail, archive, backup and infrastructure-state
+buckets retain their policies.
 
-After identities and the owner secret map are ready, remove `model-router` from the classifier's
-`CHECK_ONLY` set. The existing one-target Codex gateway release precedes Router. Router then precedes the paired VPS/Newsletter
-release, the migrated Mailsort, Todofy and Brief Workers, and Home. This ordering keeps both executor
-and Router available before the migrated callers start.
-After its first verified deployment, record the actual `RouterEngine` namespace as
-`model-router-engine` in `config/resources.toml`, remove the `FIRST_DEPLOY_PENDING` exception in the same change. The ready Router already participates
-in the normal reconcile matrix; its first main publication completes before that revision is reconciled.
+## Invocation and credentials
 
-## Authentication and credentials
+All applications use the root `modelrouter.inference.v1` types and shared clients. Model IDs are native provider
+IDs. Generate has flat invocation options and returns one final result; it exposes no public token stream,
+provider payload or caller-chosen execution identity. Newsletter alone uses the bounded Codex context:
+Create, up to two Generate calls on the same SDK thread, then Close with an empty cleanup acknowledgement.
+Owner request history and usage use the separate console API in `console.proto`.
 
-Owner UI, request history, usage and session endpoints stay behind owner Access. A separate Bypass
-application covers only ModelService's model catalog, generation, embedding and short-conversation
-paths. The Worker still authenticates every call: an owner Access assertion or the exact Newsletter
-Bearer token. The Bypass application grants no request-history or owner-console access.
+Owner UI, request history, usage and session endpoints stay behind owner Access. A narrow Bypass application
+covers only ModelService's catalog, generation, embedding and context paths. The Worker authenticates each call
+with the owner Access assertion or exact Newsletter token. Owner JSON mutations require exact Origin,
+`X-CSRF-Token: 1` and `application/json` before body parsing.
 
-Cloudflare callers bind the named `Inference` entrypoint with immutable `props.app` identifying
-`mailsort`, `todofy` or `brief`. Request fields cannot choose the calling app. Home binds the separate
-`Ops` entrypoint, which reports content-free status and has no guard capability.
+Cloudflare callers use the `Inference` binding with immutable `props.app` naming `mailsort`, `todofy` or `brief`.
+Home binds the content-free `Ops` entrypoint. Application request fields cannot choose either identity.
 
-`MODEL_ROUTER_WORKER_SECRETS` in the protected GitHub production environment contains only
-`ACCESS_OWNER` and optional `ACCESS_OWNER_ALIASES`. Owner JSON mutations require the exact console Origin,
-`X-CSRF-Token: 1` and `application/json` before body parsing. `/api/session` temporarily returns static `1` for
-cached clients, without a cookie or signing key.
+`MODEL_ROUTER_WORKER_SECRETS` in GitHub's protected production environment contains only `ACCESS_OWNER` and
+optional `ACCESS_OWNER_ALIASES`. The following owner-machine connections are installed directly in Router
+secrets and preserved by normal publication:
 
-Migrated callers no longer declare provider or executor credentials. New bootstrap input rejects those retired
-caller keys. Older Todofy Core GitHub maps may retain `GEMINI_API_KEY`; deploy parsers drop that exact field before
-validation and never upload it. Release preflight separately tolerates the old live bindings until the owner
-removes them after verified cutover. Gmail grants and Brief's Resend key remain with their applications.
+- `ANTHROPIC_API_KEY`: one shared key in the existing Claude workspace, including Playground use, under the
+  owner's configured US$80/month workspace cap. Application budgets and history remain in their applications.
+- `GEMINI_API_KEY`: the shared Gemini key.
+- `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET`: the existing dedicated Access identity for the VPS
+  executor. The backend verifies Access JWTs. Its public issuer/audience are baked into the gateway image.
+- `MODEL_ROUTER_NEWSLETTER_TOKEN`: Newsletter's inference-only credential. Its VPS configuration uses the same
+  value as `NEWSLETTER_MODEL_ROUTER_TOKEN`, with `NEWSLETTER_MODEL_ROUTER_URL` naming the Models origin.
 
-Provider credentials are owner-machine secrets, excluded from GitHub maps and preserved by deployment:
+Provider keys stay only in Router secrets. Backups do not export any credentials. The gateway keeps its existing
+subscription login/PVC; privileged Platform deployment authentication remains separate. Gmail grants and Brief's
+Resend connection stay with their applications. Playground calls record source `console` and perform no application
+business action.
 
-- `ANTHROPIC_API_KEY` is the existing Brief workspace key, shared by every Claude caller and the
-  Playground. All Claude calls together use that workspace's existing $80/month provider cap. Mailsort,
-  Todofy and Brief keep their current business budgets and usage history; there are no per-app keys or
-  workspace selectors.
-- `GEMINI_API_KEY` is the one shared Gemini key. Both provider keys live only in Router secrets, never
-  GitHub, client applications or the VPS.
-- `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET` supply the existing Cloudflare Access machine
-  identity for the VPS executor. The executor verifies its Access JWT; no additional executor Bearer
-  token is configured. Its public origin derives from the cloud profile. There is no new VPS service.
-- `MODEL_ROUTER_NEWSLETTER_TOKEN` is the Router's independent external caller credential; Newsletter uses
-  the corresponding `NEWSLETTER_MODEL_ROUTER_TOKEN` and `NEWSLETTER_MODEL_ROUTER_URL` in its own protected
-  runtime configuration.
+## Checks and coordinated release
 
-The Playground uses the same shared provider connections. Its recorded source is always `console`;
-running inference does not invoke an application's business actions. Request and usage filters still
-separate authenticated sources, independently of the shared provider billing account.
+`Model Router checks` runs deployment-boundary checks, Worker lint/types/synthetic tests, backup/restore tests,
+console tests/build and a production-config dry run. Gateway checks use synthetic JWTs, a fake SDK and offline
+process tests; Linux CI also verifies image imports and parent-death cleanup. These checks do not read provider
+keys or private request bodies. Lifecycle ages use seconds with the pinned provider's
+[lifecycle schema](https://github.com/cloudflare/terraform-provider-cloudflare/blob/v5.25.0/docs/resources/r2_bucket_lifecycle.md).
 
-## Checks and release
+`BUILD_SHA` and `MAINTENANCE_MODE` are injected by the normal release wrapper. Set the explicit GitHub production
+variable `MODEL_ROUTER_MAINTENANCE_MODE` to `true` or `false`; publication rejects a missing value. Use the normal
+Actions path so the deployed maintenance value is preserved.
 
-The `Model Router checks` job runs deployment-boundary tests, Worker lint/types/synthetic tests, console
-lint/types/tests/build and a production-config dry run. No check reads credentials or private bodies.
-The pinned provider schema validates the lifecycle; its `max_age` is expressed in seconds. See
-[provider 5.25.0 lifecycle schema](https://github.com/cloudflare/terraform-provider-cloudflare/blob/v5.25.0/docs/resources/r2_bucket_lifecycle.md).
+For a coordinated invocation-schema change, stop callers and allow active contexts to settle before enabling
+maintenance. While enabled, inference/context routes return `MODEL_MAINTENANCE`; owner history and backup work
+remain available. Keep maintenance enabled while the executor, Router and callers move to the same checked
+contract. This does not change application pause/archive modes or release their queued business work.
 
-After the complete same-SHA gate passes, the reusable Worker release builds the checked console,
-validates the bundle, runs the existing hostname guard, applies compatible D1 migrations and publishes
-the Worker. Provider identity, pending migrations and anonymous owner-Access probes are verified before
-recording success. The matching `Personal cloud reconcile` must also pass. Deployment, synthetic model
-acceptance and each application's business acceptance remain separate checks.
+The existing release order is gateway, Router, then migrated Workers and the paired VPS/Newsletter release.
+After the complete same-SHA gate passes, the reusable Worker release builds the checked console, validates the
+bundle and hostname, applies the D1 migrations and publishes. Its connection-name gate also runs when preflight
+selects no upload; it checks names, and does not prove that credentials or inference work. A fresh installation
+can upload Router first, install its declared connections through the owner flow, then rerun the same SHA.
 
-On the first publication, Router uploads before its owner-machine connection secrets can be installed.
-The release then fails its connection-name gate and leaves migrated callers skipped. After the owner
-installs every declared connection secret, rerun the same SHA. The gate also runs when preflight selects
-no upload. It reads secret names only; provider access and model execution require separate acceptance.
+After all callers use the new contract, publish the explicit maintenance-off value and perform the authorized
+synthetic model and application checks. Verify provider identity, pending migrations and anonymous Access
+probes, then require the matching main `Personal cloud reconcile` with resolved infrastructure drift.
+Deployment, backup completion, model inference, application business success and cloud restore remain separate evidence.

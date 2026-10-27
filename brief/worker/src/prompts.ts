@@ -15,7 +15,7 @@
  * sampling parameters, no prefill.
  */
 import { instructions } from '@ziyixi/model-router-client';
-import type { Instruction, Parameters } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
+import type { Instruction } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import { type Claim, type Paragraph, type WrittenItem } from './ground.ts';
 import {
   DEEP_CHARS_MAX,
@@ -44,7 +44,7 @@ import { POLICY_TEXT, PROFILE_TEXT, type FormatName, type ReviewName, type Secti
 export interface Params {
   instructions: Instruction[];
   input: string;
-  parameters: Omit<Parameters, '$typeName'>;
+  parameters: { effort: string; maxOutputTokens: number; allowFallback: boolean };
   outputSchemaJson: string;
 }
 

@@ -1,9 +1,7 @@
 /** Brief's call ledger and budget gates over the shared Model Router contract. */
 import { createModelClient, modelRequest, type Model, type ModelBinding } from '@ziyixi/model-router-client';
-import { create } from '@ziyixi/proto/protobuf';
-import { GenerationConfigSchema, ParametersSchema } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import { buildSha, type Env, type ModeName } from './env.ts';
-import { MODEL_DEADLINE_MARGIN_MS, MODEL_DEADLINE_MS, OPUS_MODEL } from './limits.ts';
+import { MODEL_DEADLINE_MARGIN_MS, MODEL_DEADLINE_MS } from './limits.ts';
 import type { Params } from './prompts.ts';
 import { localDate, monthOf } from './schedule.ts';
 import { isPaused } from './settings.ts';
@@ -36,17 +34,14 @@ export type ModelOutcome =
   | { readonly kind: 'rejected'; readonly status: number; readonly errorType: string }
   | { readonly kind: 'blocked'; readonly reason: BlockedReason };
 export type BlockedReason = 'paused' | 'mode_off' | 'not_configured' | 'rejected' | 'budget' | 'cutoff';
-export interface RejectedState { readonly status: number; readonly type: string; readonly key: string; readonly build: string; readonly ms: number; }
+export interface RejectedState { readonly status: number; readonly type: string; readonly build: string; readonly ms: number; }
 const REJECTED_KEY = 'anthropic_rejected';
 export function rejectedState(store: Store): RejectedState | null { return store.getJson<RejectedState | null>(REJECTED_KEY, null); }
 export function resumeCalls(store: Store): void { store.deleteMeta(REJECTED_KEY); }
-export async function callsStopped(store: Store, env: Pick<Env, 'MODEL_ROUTER' | 'BUILD_SHA'>, connection?: Model): Promise<boolean> {
+export function callsStopped(store: Store, env: Pick<Env, 'MODEL_ROUTER' | 'BUILD_SHA'>): boolean {
   const state = rejectedState(store);
   if (state === null) return false;
   if (state.build !== buildSha(env)) { resumeCalls(store); return false; }
-  if (!env.MODEL_ROUTER) return true;
-  const current = connection ?? (await createModelClient(env.MODEL_ROUTER).listModels({})).models.find(model => model.name === OPUS_MODEL);
-  if (current && current.connectionRevision !== state.key) { resumeCalls(store); return false; }
   return true;
 }
 
@@ -100,11 +95,11 @@ export async function callModel(ctx: CallContext, request: ModelRequest): Promis
   if (!binding) return { kind: 'blocked', reason: 'not_configured' };
   const client = createModelClient(binding);
   let connection: Model | undefined;
-  try { connection = (await client.listModels({})).models.find(model => model.name === request.model); }
+  try { connection = (await client.listModels({})).models.find(model => model.id === request.model); }
   catch { return { kind: 'transient', code: 'model_unavailable', retryAfterMs: null }; }
   ctx.store.setMeta('model_configured', connection?.configured ? '1' : '0');
   if (!connection?.configured) return { kind: 'blocked', reason: 'not_configured' };
-  if (await callsStopped(ctx.store, ctx.env, connection)) return { kind: 'blocked', reason: 'rejected' };
+  if (callsStopped(ctx.store, ctx.env)) return { kind: 'blocked', reason: 'rejected' };
   const inputRate = connection.reservationInputMicrousdPerToken;
   const outputRate = connection.reservationOutputMicrousdPerToken;
   if (!Number.isFinite(inputRate) || !Number.isFinite(outputRate) || inputRate <= 0 || outputRate <= 0) return { kind: 'blocked', reason: 'not_configured' };
@@ -112,7 +107,7 @@ export async function callModel(ctx: CallContext, request: ModelRequest): Promis
   const startedAt = ctx.now();
   const day = localDate(startedAt);
   const month = monthOf(day);
-  const reserved = (request.estimatedInputTokens * inputRate + (request.params.parameters.maxOutputTokens ?? 0) * outputRate) / 1_000_000;
+  const reserved = (request.estimatedInputTokens * inputRate + request.params.parameters.maxOutputTokens * outputRate) / 1_000_000;
   const callId = ctx.transact(() => {
     const { spent, reserved: inFlight } = monthSpend(ctx.store, month);
     if (spent + inFlight + reserved > ctx.budgetUsd) return null;
@@ -126,37 +121,36 @@ export async function callModel(ctx: CallContext, request: ModelRequest): Promis
     return { kind: 'failed', callId, code };
   };
   const timeout = Math.max(1000, Math.min(request.deadlineMs ?? MODEL_DEADLINE_MS, ctx.timeLeft() - MODEL_DEADLINE_MARGIN_MS, 840_000));
-  const config = create(GenerationConfigSchema, { model: request.model, instructions: request.params.instructions,
-    parameters: create(ParametersSchema, request.params.parameters), outputSchemaJson: request.params.outputSchemaJson });
+  const options = { model: request.model, instructions: request.params.instructions, ...request.params.parameters, outputSchemaJson: request.params.outputSchemaJson };
   let result;
-  try { result = await client.generate(modelRequest(request.params.input, config, timeout)); }
+  try { result = await client.generate(modelRequest(request.params.input, options, timeout)); }
   catch { return fail('model_connection_interrupted'); }
   const usage = result.usage;
-  const cost = usage?.available && usage.estimatedCostMicrousd !== undefined ? usage.estimatedCostMicrousd / 1_000_000 : reserved;
+  const cost = usage?.available && usage.billingKind === 'api' && usage.estimatedCostMicrousd !== undefined ? usage.estimatedCostMicrousd / 1_000_000 : reserved;
   const writers = result.contributingModels;
   ctx.store.run(`UPDATE calls SET served = ?, input = ?, output = ?, cache_write = ?, cache_read = ?, request_id = ?, writers = ? WHERE id = ?`,
-    result.reportedModel, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0, usage?.cacheWriteTokens ?? 0, usage?.cachedInputTokens ?? 0, result.name.split('/')[1] ?? '', JSON.stringify(writers), callId);
-  if (result.error && result.finishReason !== 'refused' && result.finishReason !== 'output_limit') {
+    result.model, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0, usage?.cacheWriteTokens ?? 0, usage?.cachedInputTokens ?? 0, result.name.split('/')[1] ?? '', JSON.stringify(writers), callId);
+  if (result.error && result.error.reason !== 'MODEL_REFUSED' && result.error.reason !== 'MODEL_OUTPUT_LIMIT') {
     const error = result.error;
-    if (!result.upstreamStarted && [8, 14].includes(error.code)) {
+    if (['MODEL_RATE_LIMIT', 'MODEL_QUOTA', 'MODEL_SPEND_LIMIT'].includes(error.reason)) {
       ctx.store.run(`UPDATE calls SET state = 'released', cost = 0, error = ?, finished_ms = ? WHERE id = ?`, error.reason, ctx.now(), callId);
       return { kind: 'transient', code: error.reason, retryAfterMs: error.retryAfterSeconds > 0 ? error.retryAfterSeconds * 1000 : null };
     }
-    if (!result.upstreamStarted && [3, 7, 9].includes(error.code)) {
+    if ([3, 7, 9, 16].includes(error.code)) {
       ctx.transact(() => {
         ctx.store.run(`UPDATE calls SET state = 'released', cost = 0, error = ?, finished_ms = ? WHERE id = ?`, error.reason, ctx.now(), callId);
-        ctx.store.setJson(REJECTED_KEY, { status: error.code, type: error.reason, key: connection.connectionRevision, build, ms: ctx.now() } satisfies RejectedState);
+        ctx.store.setJson(REJECTED_KEY, { status: error.code, type: error.reason, build, ms: ctx.now() } satisfies RejectedState);
         ctx.store.pushError('anthropic_rejected');
       });
       return { kind: 'rejected', status: error.code, errorType: error.reason };
     }
     return fail(error.reason, cost);
   }
-  const stop = result.finishReason === 'refused' ? 'refusal' : result.finishReason === 'output_limit' ? 'max_tokens' : result.state === 'succeeded' ? 'end_turn' : 'interrupted';
-  const answer = stop === 'end_turn' ? readAnswer(callId, result.output, result.reportedModel, writers) : null;
+  const stop = result.error?.reason === 'MODEL_REFUSED' ? 'refusal' : result.error?.reason === 'MODEL_OUTPUT_LIMIT' ? 'max_tokens' : !result.error ? 'end_turn' : 'interrupted';
+  const answer = stop === 'end_turn' ? readAnswer(callId, result.output, result.model, writers) : null;
   ctx.store.run(`UPDATE calls SET state = 'done', cost = ?, stop = ?, refusal = ?, answer = ?, finished_ms = ? WHERE id = ?`,
     cost, stop, stop === 'refusal' ? 'MODEL_REFUSED' : '', answer?.kind === 'answer' ? result.output : '', ctx.now(), callId);
-  if (stop === 'refusal') return { kind: 'refusal', callId, category: null, served: result.reportedModel };
+  if (stop === 'refusal') return { kind: 'refusal', callId, category: null, served: result.model };
   if (stop === 'max_tokens') return { kind: 'invalid', callId, code: 'max_tokens' };
   return answer ?? { kind: 'invalid', callId, code: `stop_${stop}` };
 }

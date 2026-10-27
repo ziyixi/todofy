@@ -2,7 +2,7 @@ import { Filter, RotateCcw } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import type { Model } from '@ziyixi/proto/modelrouter/inference/v1/inference_wire'
 import type { RequestFilters, TimeRange } from './api'
-import { modelName, stateLabel } from './format'
+import { modelLabel, stateLabel } from './format'
 
 export function defaultFilters(): RequestFilters {
   return { days: 7, app: '', model: '', state: '', toTime: new Date().toISOString() }
@@ -38,6 +38,7 @@ export function Filters({
       <label>
         时间
         <select
+          aria-label="时间"
           value={draft.days}
           onChange={(event) => setDraft({ ...draft, days: Number(event.target.value) as TimeRange })}
         >
@@ -57,11 +58,15 @@ export function Filters({
       </label>
       <label>
         模型
-        <select value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })}>
+        <select
+          aria-label="模型"
+          value={draft.model}
+          onChange={(event) => setDraft({ ...draft, model: event.target.value })}
+        >
           <option value="">全部模型</option>
           {models.map((model) => (
-            <option key={model.name} value={model.name}>
-              {model.display_name || modelName(model.name)}
+            <option key={model.id} value={model.id}>
+              {modelLabel(model)}
             </option>
           ))}
         </select>
@@ -69,7 +74,11 @@ export function Filters({
       {showState && (
         <label>
           状态
-          <select value={draft.state} onChange={(event) => setDraft({ ...draft, state: event.target.value })}>
+          <select
+            aria-label="状态"
+            value={draft.state}
+            onChange={(event) => setDraft({ ...draft, state: event.target.value })}
+          >
             <option value="">全部状态</option>
             {['running', 'succeeded', 'failed', 'cancelled', 'interrupted'].map((value) => (
               <option key={value} value={value}>

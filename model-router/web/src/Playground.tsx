@@ -3,28 +3,25 @@ import { useMutation } from '@tanstack/react-query'
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type {
   GenerateRequest,
-  GenerationConfig,
   Instruction,
   Model,
-  Parameters,
 } from '@ziyixi/proto/modelrouter/inference/v1/inference_wire'
 import type { RouterApi } from './api'
 import { Failure, GenerationOutput, Status, UsageDetails } from './components'
-import { duration, modelName } from './format'
+import { modelLabel, modelName, providerLabel, requestId } from './format'
 
 export interface PlaygroundDraft {
-  config?: GenerationConfig
-  input?: string
+  request?: GenerateRequest
   sourceRequest?: string
 }
-
 function validateSchema(text: string): string | null {
   if (!text.trim()) return null
   try {
     const value: unknown = JSON.parse(text)
-    if (typeof value === 'boolean' || (value !== null && typeof value === 'object' && !Array.isArray(value)))
-      return null
-    return 'JSON Schema 需为对象或布尔值。'
+    return typeof value === 'boolean' ||
+      (value !== null && typeof value === 'object' && !Array.isArray(value))
+      ? null
+      : 'JSON Schema 需为对象或布尔值。'
   } catch {
     return 'JSON Schema 格式无效，请检查 JSON。'
   }
@@ -43,73 +40,64 @@ export function Playground({
 }) {
   const form = useRef<HTMLFormElement>(null)
   const formId = useId()
-  const [selectedName, setSelectedName] = useState(initial.config?.model ?? '')
-  const [instructions, setInstructions] = useState<Instruction[]>([
-    ...(initial.config?.instructions?.length ? initial.config.instructions : [{ text: '' }]),
-  ])
-  const [input, setInput] = useState(initial.input ?? '')
-  const [effort, setEffort] = useState(initial.config?.parameters?.effort ?? '')
-  const [temperature, setTemperature] = useState(initial.config?.parameters?.temperature?.toString() ?? '')
-  const [maxOutput, setMaxOutput] = useState(initial.config?.parameters?.max_output_tokens?.toString() ?? '')
-  const [schema, setSchema] = useState(initial.config?.output_schema_json ?? '')
-  const [webResearch, setWebResearch] = useState(initial.config?.web_research ?? false)
+  const original = initial.request
+  const [selectedId, setSelectedId] = useState(original?.model ?? '')
+  const [instructions, setInstructions] = useState<Instruction[]>(
+    original?.instructions?.length ? [...original.instructions] : [{ text: '' }],
+  )
+  const [input, setInput] = useState(original?.input ?? '')
+  const [effort, setEffort] = useState(original?.effort ?? '')
+  const [maxOutput, setMaxOutput] = useState(original?.max_output_tokens?.toString() ?? '')
+  const [allowFallback, setAllowFallback] = useState(original?.allow_fallback ?? false)
+  const [schema, setSchema] = useState(original?.output_schema_json ?? '')
   const [validation, setValidation] = useState<string | null>(null)
-  const generationModels = models.filter((model) => model.generation)
+  const textModels = models.filter((model) => model.kind === 'text')
   const selected =
-    generationModels.find((model) => model.name === selectedName) ?? (!selectedName ? generationModels[0] : undefined)
+    textModels.find((model) => model.id === selectedId) ?? (!selectedId ? textModels[0] : undefined)
   const generate = useMutation({
     mutationFn: (request: GenerateRequest) => api.generate(request),
     retry: false,
     onSuccess: onGenerated,
   })
-
-  function changeModel(name: string) {
-    setSelectedName(name)
+  const resultProvider = models.find((model) => model.id === generate.variables?.model)?.provider
+  function changeModel(id: string) {
+    setSelectedId(id)
     setEffort('')
-    setTemperature('')
     setMaxOutput('')
-    setWebResearch(false)
+    setAllowFallback(false)
     setValidation(null)
   }
-
   function updateInstruction(index: number, update: Partial<Instruction>) {
     setInstructions((current) =>
       current.map((block, position) => (position === index ? { ...block, ...update } : block)),
     )
   }
-
   function submit(event: FormEvent) {
     event.preventDefault()
-    if (generate.isPending || !selected?.configured || !selected.name || !input.trim()) return
+    if (generate.isPending || !selected?.configured || !selected.id || !input.trim()) return
     const schemaError = validateSchema(schema)
     if (schemaError) {
       setValidation(schemaError)
       return
     }
-    const parameters: Parameters = {
-      ...(selected.efforts?.includes(effort) ? { effort } : {}),
-      ...(selected.temperature && temperature !== '' ? { temperature: Number(temperature) } : {}),
-      ...(selected.max_output_tokens && maxOutput !== '' ? { max_output_tokens: Number(maxOutput) } : {}),
-      ...(initial.config?.parameters?.allow_fallback ? { allow_fallback: true } : {}),
-    }
-    const config: GenerationConfig = {
-      model: selected.name,
-      instructions: instructions.filter((block) => block.text?.trim()),
-      parameters,
-      ...(schema.trim() ? { output_schema_json: schema.trim() } : {}),
-      ...(selected.web_research && webResearch ? { web_research: true } : {}),
-    }
     setValidation(null)
-    generate.mutate({ request_id: crypto.randomUUID(), config, input })
+    generate.mutate({
+      model: selected.id,
+      input,
+      instructions: instructions.filter((block) => block.text?.trim()),
+      ...(selected.efforts?.includes(effort) ? { effort } : {}),
+      ...(maxOutput ? { max_output_tokens: Number(maxOutput) } : {}),
+      ...(schema.trim() ? { output_schema_json: schema.trim() } : {}),
+      ...(allowFallback ? { allow_fallback: true } : {}),
+      ...(original?.timeout_ms ? { timeout_ms: original.timeout_ms } : {}),
+    })
   }
-
   function shortcut(event: KeyboardEvent<HTMLFormElement>) {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault()
       form.current?.requestSubmit()
     }
   }
-
   return (
     <div className="playground-layout">
       <section className="panel playground-form">
@@ -121,27 +109,34 @@ export function Playground({
           <span className="tag">仅运行推理</span>
         </div>
         {initial.sourceRequest && (
-          <p className="notice subtle small">已复制请求 {initial.sourceRequest} 的输入。运行后会产生新的推理请求。</p>
+          <p className="notice subtle small">
+            已复制请求 {initial.sourceRequest}。运行后会创建新的单次推理
+            {original?.conversation ? '，不会继承原会话上下文' : ''}。
+          </p>
         )}
         <form ref={form} onSubmit={submit} onKeyDown={shortcut}>
           <p className="small muted">
-            Claude API 共用现有 US$80/月工作区额度。请求来源为控制台，各应用的业务预算和历史保持不变。
+            Claude 共用原 Brief 工作区的 US$80/月支出上限。此处只运行推理，不执行应用业务操作。
           </p>
           <label>
             模型
             <select
-              value={selectedName || selected?.name || ''}
+              aria-label="模型"
+              value={selectedId || selected?.id || ''}
               onChange={(event) => changeModel(event.target.value)}
               disabled={generate.isPending}
               required
             >
-              {!generationModels.length && <option value="">暂无生成模型</option>}
-              {selectedName && !selected && (
-                <option value={selectedName}>{modelName(selectedName)}（当前目录不可用）</option>
+              {!textModels.length && <option value="">暂无文本模型</option>}
+              {selectedId && !selected && (
+                <option value={selectedId}>
+                  {providerLabel(models.find((model) => model.id === selectedId)?.provider)} ·{' '}
+                  {modelName(selectedId)}（此处不可运行）
+                </option>
               )}
-              {generationModels.map((model) => (
-                <option key={model.name} value={model.name}>
-                  {model.display_name || modelName(model.name)}
+              {textModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {modelLabel(model)}
                   {!model.configured ? '（未配置）' : ''}
                 </option>
               ))}
@@ -149,23 +144,20 @@ export function Playground({
           </label>
           {selected && (
             <div className="model-hint small muted">
-              <span>{selected.provider}</span>
-              <code>{selected.upstream_model}</code>
+              <span>{providerLabel(selected.provider)}</span>
+              <code>{selected.id}</code>
               {!selected.configured && <span className="danger-text">连接未配置，暂不可运行。</span>}
             </div>
           )}
-          <fieldset className="parameters" disabled={generate.isPending}>
-            <legend>
-              参数 <span className="muted">留空使用模型默认值</span>
-            </legend>
+          {Boolean(selected?.efforts?.length) && (
             <label>
               推理强度
               <select
                 value={selected?.efforts?.includes(effort) ? effort : ''}
-                disabled={!selected?.efforts?.length}
                 onChange={(event) => setEffort(event.target.value)}
+                disabled={generate.isPending}
               >
-                <option value="">{selected?.efforts?.length ? '默认' : '不支持'}</option>
+                <option value="">默认</option>
                 {selected?.efforts?.map((value) => (
                   <option key={value} value={value}>
                     {value}
@@ -173,31 +165,7 @@ export function Playground({
                 ))}
               </select>
             </label>
-            <label>
-              Temperature
-              <input
-                type="number"
-                step="any"
-                value={selected?.temperature ? temperature : ''}
-                placeholder={selected?.temperature ? '默认' : '不支持'}
-                disabled={!selected?.temperature}
-                onChange={(event) => setTemperature(event.target.value)}
-              />
-            </label>
-            <label>
-              最大输出 token
-              <input
-                type="number"
-                min="1"
-                max="2147483647"
-                step="1"
-                value={selected?.max_output_tokens ? maxOutput : ''}
-                placeholder={selected?.max_output_tokens ? '默认' : '不支持'}
-                disabled={!selected?.max_output_tokens}
-                onChange={(event) => setMaxOutput(event.target.value)}
-              />
-            </label>
-          </fieldset>
+          )}
           <fieldset className="instruction-fieldset" disabled={generate.isPending}>
             <legend>
               Instructions <span className="muted">可选</span>
@@ -228,7 +196,9 @@ export function Playground({
                       type="button"
                       className="icon-button"
                       aria-label={`删除 Instructions ${index + 1}`}
-                      onClick={() => setInstructions((current) => current.filter((_, position) => position !== index))}
+                      onClick={() =>
+                        setInstructions((current) => current.filter((_, position) => position !== index))
+                      }
                     >
                       <Trash2 size={14} />
                     </button>
@@ -257,7 +227,7 @@ export function Playground({
               placeholder="输入文本，或序列化的 JSON"
             />
           </div>
-          <details className="schema-editor" open={Boolean(initial.config?.output_schema_json)}>
+          <details className="schema-editor" open={Boolean(original?.output_schema_json)}>
             <summary>
               JSON Schema <span className="muted small">可选，留空返回文本</span>
             </summary>
@@ -277,18 +247,33 @@ export function Playground({
               placeholder={'{ "type": "object", "properties": { … } }'}
             />
           </details>
-          {selected?.web_research && (
+          <details
+            className="advanced-options"
+            open={Boolean(original?.max_output_tokens || original?.allow_fallback)}
+          >
+            <summary>其他选项</summary>
+            <label>
+              最大输出 token
+              <input
+                type="number"
+                min="1"
+                step="1"
+                placeholder="默认"
+                value={maxOutput}
+                onChange={(event) => setMaxOutput(event.target.value)}
+                disabled={generate.isPending}
+              />
+            </label>
             <label className="checkbox-label">
               <input
                 type="checkbox"
-                checked={webResearch}
+                checked={allowFallback}
+                onChange={(event) => setAllowFallback(event.target.checked)}
                 disabled={generate.isPending}
-                onChange={(event) => setWebResearch(event.target.checked)}
               />
-              要求实际网页检索观测
+              允许供应商原生回退
             </label>
-          )}
-          {initial.config?.parameters?.allow_fallback && <p className="small muted">沿用原请求允许的模型回退策略。</p>}
+          </details>
           {validation && (
             <p role="alert" className="danger-text small">
               {validation}
@@ -310,7 +295,7 @@ export function Playground({
       <section className="panel playground-result" aria-label="推理结果" aria-busy={generate.isPending}>
         <div className="section-heading">
           <h2>结果</h2>
-          {generate.data && <Status state={generate.data.state} />}
+          {generate.data && <Status state={generate.data.error ? 'failed' : 'succeeded'} />}
         </div>
         {generate.isPending && (
           <p className="notice subtle" role="status">
@@ -322,20 +307,23 @@ export function Playground({
           <div className="empty-state">
             <Play size={25} aria-hidden="true" />
             <h3>运行后在这里查看结果</h3>
-            <p>输入、输出保留 7 天，请求记录保留 90 天。</p>
-            <p>应用业务操作不会在此运行。</p>
+            <p>输入、输出保留 7 天，请求元数据保留 90 天。</p>
           </div>
         )}
         {generate.data && (
           <div className="result-content">
             <GenerationOutput generation={generate.data} />
             <dl className="facts compact">
-              <dt>请求模型</dt>
-              <dd>{modelName(generate.data.model)}</dd>
-              <dt>服务报告模型</dt>
-              <dd>{generate.data.reported_model || '未提供'}</dd>
-              <dt>耗时</dt>
-              <dd>{duration(generate.data.duration_ms)}</dd>
+              <dt>执行模型</dt>
+              <dd>
+                {providerLabel(resultProvider)} · {modelName(generate.data.model)}
+              </dd>
+              <dt>请求记录</dt>
+              <dd>
+                <a className="record-link" href={`#/${generate.data.name}`}>
+                  {requestId(generate.data.name)}
+                </a>
+              </dd>
             </dl>
             <UsageDetails usage={generate.data.usage} />
           </div>

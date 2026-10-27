@@ -10,21 +10,17 @@ from urllib.parse import quote, urlencode
 from ziyixi_proto.modelrouter.inference.v1.inference_pb import (
     HTTP_BINDINGS,
     CloseConversationRequest,
-    Conversation,
     CreateConversationRequest,
     Embedding,
     EmbedRequest,
     GenerateRequest,
     Generation,
-    GenerationConfig,
-    GetConversationRequest,
     Instruction,
     ListModelsRequest,
     ListModelsResponse,
     Model,
     ModelError,
     Observations,
-    Parameters,
     Usage,
 )
 from ziyixi_proto.rpc_status import CODE
@@ -32,14 +28,11 @@ from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
 
 __all__ = [
     "CloseConversationRequest",
-    "Conversation",
     "CreateConversationRequest",
     "EmbedRequest",
     "Embedding",
     "GenerateRequest",
     "Generation",
-    "GenerationConfig",
-    "GetConversationRequest",
     "HttpCall",
     "HttpResult",
     "Instruction",
@@ -50,7 +43,6 @@ __all__ = [
     "ModelError",
     "ModelRouterError",
     "Observations",
-    "Parameters",
     "Transport",
     "Usage",
 ]
@@ -113,7 +105,7 @@ class ModelClient:
         self.transport = transport
 
     async def _call(
-        self, rpc: str, request: object, response: type[Response], timeout: float
+        self, rpc: str, request: object, response: type[Response] | None, timeout: float
     ) -> Response:
         binding = _BINDINGS[rpc]
         values = to_wire(request)
@@ -151,6 +143,10 @@ class ModelClient:
                     raise ValueError("invalid RPC error")
                 code = error.get("status", "UNKNOWN")
                 raise ModelRouterError(code)
+            if response is None:
+                if value != {}:
+                    raise ValueError("invalid empty acknowledgement")
+                return cast(Response, None)
             return cast(Response, from_wire(response, value, strict=True).message)
         except (ValueError, UnicodeError, WireJsonError, RecursionError):
             raise ModelRouterError(
@@ -173,20 +169,10 @@ class ModelClient:
         """Generate vectors in input order."""
         return await self._call("Embed", request, Embedding, 125)
 
-    async def create_conversation(
-        self, request: CreateConversationRequest
-    ) -> Conversation:
+    async def create_conversation(self, request: CreateConversationRequest) -> None:
         """Create a finite context with a caller-assigned durable identity."""
-        return await self._call("CreateConversation", request, Conversation, 125)
+        await self._call("CreateConversation", request, None, 125)
 
-    async def get_conversation(self, name: str) -> Conversation:
-        """Read context liveness and confirmed cleanup state."""
-        return await self._call(
-            "GetConversation", GetConversationRequest(name=name), Conversation, 30
-        )
-
-    async def close_conversation(
-        self, request: CloseConversationRequest
-    ) -> Conversation:
+    async def close_conversation(self, request: CloseConversationRequest) -> None:
         """Wait for remote SDK/process/workspace cleanup acknowledgement."""
-        return await self._call("CloseConversation", request, Conversation, 30)
+        await self._call("CloseConversation", request, None, 30)

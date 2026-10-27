@@ -1,6 +1,6 @@
 import { afterEach, vi } from 'vitest'
 import { api, ApiError } from './api'
-import { generation } from './test/fixtures'
+import { generation, summary } from './test/fixtures'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -9,21 +9,34 @@ afterEach(() => {
 test('generation sends one same-origin JSON request with a static custom header', async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(generation))
   vi.stubGlobal('fetch', fetcher)
-  const result = await api.generate({ request_id: '00000000-0000-4000-8000-000000000002', config: { model: 'models/structured' }, input: 'Synthetic input' })
+  const result = await api.generate({ model: 'claude-opus-5-5', input: 'Synthetic input' })
   expect(result.name).toBe(generation.name)
   expect(fetcher).toHaveBeenCalledOnce()
-  expect(fetcher).toHaveBeenCalledWith('/api/model/v1/generations:generate', expect.objectContaining({ method: 'POST', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': '1' } }))
+  expect(JSON.parse(fetcher.mock.calls[0]?.[1]?.body as string)).toEqual({
+    model: 'claude-opus-5-5',
+    input: 'Synthetic input',
+  })
+  expect(fetcher).toHaveBeenCalledWith(
+    '/api/model/v1/generations:generate',
+    expect.objectContaining({
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      redirect: 'error',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': '1' },
+    }),
+  )
 })
 
 test('pagination keeps a fixed time window and uses descriptor-generated query parameters', async () => {
   const fetcher = vi
     .fn<typeof fetch>()
-    .mockImplementation(() => Promise.resolve(Response.json({ requests: [generation] })))
+    .mockImplementation(() => Promise.resolve(Response.json({ requests: [summary] })))
   vi.stubGlobal('fetch', fetcher)
   const filters = {
     days: 7 as const,
     app: 'synthetic app',
-    model: 'models/structured',
+    model: 'claude-opus-5-5',
     state: 'failed',
     toTime: '2026-10-26T10:00:00.000Z',
   }

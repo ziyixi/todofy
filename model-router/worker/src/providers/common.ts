@@ -6,9 +6,9 @@ export function apiKey(context: ProviderContext, provider: 'ANTHROPIC' | 'GEMINI
   return secretFor(context.env, provider === 'ANTHROPIC' ? 'anthropic' : 'gemini') || null;
 }
 
-export function providerStatus(code: number, message: string, reason?: string, retryAfterSeconds = 0): { code: number; message: string; reason: string; retryAfterSeconds: number; details: [] } {
+export function providerStatus(code: number, message: string, reason?: string, retryAfterSeconds = 0): { code: number; message: string; reason: string; retryAfterSeconds: number } {
   const reasons: Record<number, string> = { 1: 'MODEL_CANCELLED', 3: 'MODEL_INVALID_ANSWER', 4: 'MODEL_TIMEOUT', 7: 'MODEL_AUTH', 8: 'MODEL_QUOTA', 9: 'MODEL_NOT_CONFIGURED', 13: 'MODEL_INVALID_ANSWER', 14: 'MODEL_UNAVAILABLE' };
-  return { code, message, reason: reason ?? reasons[code] ?? 'MODEL_UNAVAILABLE', retryAfterSeconds, details: [] };
+  return { code, message, reason: reason ?? reasons[code] ?? 'MODEL_UNAVAILABLE', retryAfterSeconds };
 }
 
 /** Delta seconds or HTTP-date, with the caller's existing one-day backoff ceiling. */

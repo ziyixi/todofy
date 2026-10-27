@@ -97,7 +97,6 @@ class FakeTurn:
             await asyncio.Event().wait()
         return models.Generation(
             name=name,
-            state="failed" if self.failure else "succeeded",
             output=self.bundle
             if isinstance(self.bundle, str)
             else json.dumps(self.bundle),
@@ -132,24 +131,19 @@ class FakeRouterState:
         default_factory=list
     )
     schema: newsletter_types.Payload | None = None
-    config: models.GenerationConfig | None = None
-    conversation: models.Conversation | None = None
+    config: models.CreateConversationRequest | None = None
+    conversation: models.CreateConversationRequest | None = None
     active: FakeTurn | None = None
 
     async def create_conversation(
         self, request: models.CreateConversationRequest
-    ) -> models.Conversation:
+    ) -> None:
         """Capture immutable generic model configuration."""
-        assert request.conversation is not None
         self.started = True
         self.thread_starts += 1
-        self.config = request.conversation.config
-        assert self.config is not None
-        self.schema = json.loads(self.config.output_schema_json)
-        self.conversation = dataclasses.replace(
-            request.conversation, state="open"
-        )
-        return self.conversation
+        self.config = request
+        self.schema = json.loads(request.output_schema_json)
+        self.conversation = request
 
     async def generate(
         self, request: models.GenerateRequest
@@ -160,11 +154,13 @@ class FakeRouterState:
         self.prompt = json.loads(request.input)
         self.prompts.append(self.prompt)
         self.active = self.turns.pop(0) if self.turns else self.turn
-        return await self.active.result("requests/" + request.request_id)
+        return await self.active.result(
+            "requests/synthetic-" + str(len(self.prompts))
+        )
 
     async def close_conversation(
         self, request: models.CloseConversationRequest
-    ) -> models.Conversation:
+    ) -> None:
         """Confirm cleanup, or deliberately leave it uncertain."""
         if self.close_error:
             raise self.close_error
@@ -173,7 +169,6 @@ class FakeRouterState:
         if self.active:
             self.active.interrupted = True
         self.closed = True
-        return models.Conversation(name=request.name, state="closed")
 
 
 @pytest.fixture
@@ -193,7 +188,7 @@ def fake_router(
 def live_editor(
     tmp_path: pathlib.Path,
     *,
-    model: str = "models/sol-6-1",
+    model: str = "gpt-6.1-sol",
     timeout_seconds: float = 840,
 ) -> editor.ModelEditor:
     """Build the production editor with an injected remote model client."""

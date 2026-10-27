@@ -2,41 +2,30 @@
 
 import asyncio
 import pathlib
-import re
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from importlib import metadata
 
-from ziyixi_proto.codex.inference.v1.inference_pb import (
-    RunInferenceRequest,
-    RunInferenceResponse,
-)
 from ziyixi_proto.codex.monitor.v1.monitor_pb import (
     InferenceRequestSample,
     InferenceStatus,
 )
+from ziyixi_proto.modelrouter.inference.v1.inference_pb import Generation
 
 from codex_gateway.monitor_store import MonitorStore
-from codex_gateway.runtime import EFFORT, MODEL
+from codex_gateway.runtime import MODEL
 
-Runner = Callable[[RunInferenceRequest, pathlib.Path], Awaitable[RunInferenceResponse]]
-MODEL_ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
-ERROR_CODES = frozenset(
-    {
-        "",
-        "codex_auth",
-        "codex_quota",
-        "codex_timeout",
-        "codex_unavailable",
-        "codex_bad_answer",
-        "codex_configuration",
-        "codex_startup",
-        "codex_account",
-        "codex_skills",
-        "codex_cancelled",
-    }
-)
+Runner = Callable[[], Awaitable[Generation]]
+# The Home monitor contract retains its original field; requested_effort is the actual choice.
+HOME_EFFORT = "medium"
+ERROR_CODES = {
+    1: "codex_cancelled",
+    4: "codex_timeout",
+    8: "codex_quota",
+    13: "codex_bad_answer",
+    16: "codex_auth",
+}
 
 
 def utc_now() -> datetime:
@@ -67,26 +56,22 @@ class InferenceMonitor:
 
     async def run(
         self,
-        request: RunInferenceRequest,
-        home: pathlib.Path,
         runner: Runner,
         *,
-        effort: str | None = None,
-    ) -> RunInferenceResponse:
+        effort: str = "",
+    ) -> Generation:
         self.request_count += 1
         sequence = self.request_count
         self.active_count += 1
         started = self.monotonic()
-        model = request.model or MODEL
-        model = model if MODEL_ID.fullmatch(model) else "unknown"
         answer = None
         error_code = "codex_unavailable"
         try:
-            answer = await runner(request, home)
+            answer = await runner()
             error_code = (
-                answer.error_code
-                if answer.error_code in ERROR_CODES
-                else "codex_unavailable"
+                ERROR_CODES.get(answer.error.code, "codex_unavailable")
+                if answer.error
+                else ""
             )
             return answer
         except asyncio.CancelledError:
@@ -98,20 +83,19 @@ class InferenceMonitor:
             self.failure_count += bool(error_code)
             self.success_count += not error_code
             self.total_duration_ms += duration_ms
-            usage_available = answer is not None and answer.usage_available
-            input_tokens = answer.input_tokens if usage_available else 0
-            output_tokens = answer.output_tokens if usage_available else 0
+            usage = answer.usage if answer else None
+            usage_available = usage is not None and usage.available
+            input_tokens = usage.input_tokens if usage_available else 0
+            output_tokens = usage.output_tokens if usage_available else 0
             self.input_tokens += input_tokens
             self.output_tokens += output_tokens
             self.usage_reported_count += usage_available
             sample = InferenceRequestSample(
                 sequence=sequence,
                 completed_at=timestamp(self.clock()),
-                model=model,
-                effort=EFFORT,
-                requested_effort=effort
-                if effort in {"default", "low", "medium", "high", "xhigh", "max"}
-                else None,
+                model=MODEL,
+                effort=HOME_EFFORT,
+                requested_effort=effort or "default",
                 duration_ms=duration_ms,
                 error_code=error_code,
                 input_tokens=input_tokens,
@@ -128,7 +112,7 @@ class InferenceMonitor:
         return InferenceStatus(
             started_at=self.started_at,
             model=MODEL,
-            effort=EFFORT,
+            effort=HOME_EFFORT,
             sdk_version=self.sdk_version,
             request_count=self.request_count,
             success_count=self.success_count,

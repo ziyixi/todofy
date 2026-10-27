@@ -14,11 +14,11 @@ async def test_correction_reuses_context_and_adds_per_call_usage(
     value = {"packets": [packet["content"]]}
     first = editor.FakeTurn(value, research=False)
     first.usage = models.Usage(
-        available=True, input_tokens=100, output_tokens=20, total_tokens=120
+        available=True, input_tokens=100, output_tokens=20
     )
     second = editor.FakeTurn(value)
     second.usage = models.Usage(
-        available=True, input_tokens=150, output_tokens=50, total_tokens=200
+        available=True, input_tokens=150, output_tokens=50
     )
     fake_router.turns = [first, second]
     records = []
@@ -34,7 +34,7 @@ async def test_correction_reuses_context_and_adds_per_call_usage(
 async def test_bad_output_retains_known_usage(tmp_path, fake_router):
     fake_router.turn.bundle = "not JSON"
     fake_router.turn.usage = models.Usage(
-        available=True, input_tokens=100, output_tokens=20, total_tokens=120
+        available=True, input_tokens=100, output_tokens=20
     )
     records = []
     with (

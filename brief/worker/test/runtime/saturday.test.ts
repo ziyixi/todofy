@@ -29,7 +29,7 @@ describe('a Saturday', () => {
     expect(deepMail?.body.html).toContain('接下来看什么');
     expect(h.claude.steps()).toEqual(expect.arrayContaining(['deep_pick', 'deep_read']));
     const deepRead = h.claude.requests.find((request) => request.step === 'deep_read')?.body ?? {};
-    expect(deepRead['parameters']).toMatchObject({ effort: 'high' });
+    expect(deepRead).toMatchObject({ effort: 'high' });
     const [item] = await h.sql<{ id: string; section: string; citations: string }>(`SELECT * FROM issue_items WHERE issue = '2026-10-17'`);
     expect(item).toMatchObject({ id: 'deep', section: 'deep_read' });
   });

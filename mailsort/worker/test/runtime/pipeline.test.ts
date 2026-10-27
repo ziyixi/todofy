@@ -53,7 +53,7 @@ describe('Claude priority pipeline', () => {
     await h.step(T0 + 19 * MINUTE);
     expect(h.up.claude.calls).toHaveLength(4);
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
-    expect(status.claudeBudget).toMatchObject({ model: 'models/claude-opus-5-5', effort: 'medium', month: '2026-10', limitUsd: 20, spentUsd: 0.0288, inputTokens: 4800, outputTokens: 480, thinkingTokens: 160 });
+    expect(status.claudeBudget).toMatchObject({ model: 'claude-opus-5-5', effort: 'medium', month: '2026-10', limitUsd: 20, spentUsd: 0.0288, inputTokens: 4800, outputTokens: 480 });
   });
 
   it('classifies recent Inbox mail regardless of read state and leaves historical/graded mail unchanged', async () => {

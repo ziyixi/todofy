@@ -1,155 +1,52 @@
-"""Synthetic HTTP and SDK checks; no login or model request is made."""
+"""Synthetic slim HTTP transport and pinned runtime configuration checks."""
 
-import contextlib
-import io
+import asyncio
 import json
 import os
 import pathlib
 import subprocess
 import tempfile
 import unittest
-from types import SimpleNamespace
+import uuid
 from unittest.mock import patch
 
 import codex_cli_bin
 import httpx
 from auth_fixtures import AUDIENCE, ISSUER, access_headers, local_jwks, verifier
-from openai_codex.generated.v2_all import ThreadItem
-from ziyixi_proto.codex.inference.v1.inference_pb import (
-    CheckInferenceResponse,
-    InferenceModel,
-    RunInferenceRequest,
-    RunInferenceResponse,
-)
+from model_fixtures import FakeSdk, FakeTurn, StubExecutor
+from ziyixi_proto.modelrouter.inference.v1.inference_pb import Generation
+from ziyixi_proto.rpc_status import RpcError
 from ziyixi_proto.wire_json import from_wire
 
 from codex_gateway._launch import runtime_environment
 from codex_gateway.app import MAX_BODY_BYTES, create_app
-from codex_gateway.runtime import MODEL, infer, runtime_config, runtime_overrides
+from codex_gateway.model_api import result_events
+from codex_gateway.modelrouter import ModelExecutor
+from codex_gateway.runtime import MODEL, runtime_config, runtime_overrides
 
-PATH = "/api/codex/v1/inference:run"
+PATH = "/api/codex/v1/model/generations:generate"
 BODY = {
-    "instructions": "Classify the synthetic JSON input.",
-    "input_json": '{"emails":[{"id":"synthetic1","body":"Private synthetic content"}]}',
-    "output_schema_json": '{"type":"object","properties":{"items":{"type":"array"}},"required":["items"],"additionalProperties":false}',
+    "model": MODEL,
+    "input": "Synthetic JSON input",
+    "output_schema_json": '{"type":"object"}',
 }
-
-
-class FakeTurn:
-    def __init__(self, error=None, *, text='{"items": []}', tool=False):
-        self.error = error
-        self.interrupted = False
-        self.result = SimpleNamespace(
-            status=SimpleNamespace(value="completed"),
-            final_response=text,
-            items=[
-                ThreadItem.model_validate(
-                    {
-                        "type": "userMessage",
-                        "id": "synthetic-input",
-                        "content": [{"type": "text", "text": BODY["input_json"]}],
-                    }
-                ),
-                SimpleNamespace(type="commandExecution" if tool else "agentMessage"),
-            ],
-            usage=SimpleNamespace(
-                total=SimpleNamespace(input_tokens=101, output_tokens=23)
-            ),
-        )
-
-    async def run(self):
-        if self.error:
-            raise self.error
-        return self.result
-
-    async def interrupt(self):
-        self.interrupted = True
-
-
-class FakeSdk:
-    Sandbox = SimpleNamespace(read_only="read-only")
-    ApprovalMode = SimpleNamespace(deny_all="deny-all")
-    CodexConfig = SimpleNamespace
-
-    def __init__(self, turn=None, *, account_type="chatgpt", enabled_skill=False):
-        self.turn = turn or FakeTurn()
-        self.account_type = account_type
-        self.enabled_skill = enabled_skill
-        self.closed = False
-        self.config = self.thread_args = self.turn_args = None
-        self._client = self
-
-    def AsyncCodex(self, config):
-        self.config = config
-        return self
-
-    async def __aenter__(self):
-        return self
-
-    async def close(self):
-        self.closed = True
-
-    async def account(self, *, refresh_token):
-        assert refresh_token is False
-        return SimpleNamespace(
-            account=SimpleNamespace(root=SimpleNamespace(type=self.account_type))
-        )
-
-    async def request(self, method, data, *, response_model):
-        assert method == "skills/list"
-        assert data["forceReload"] is True
-        return SimpleNamespace(
-            data=[
-                SimpleNamespace(
-                    cwd=data["cwds"][0],
-                    errors=[],
-                    skills=[SimpleNamespace(enabled=self.enabled_skill)],
-                )
-            ]
-        )
-
-    async def thread_start(self, **kwargs):
-        self.thread_args = kwargs
-        return SimpleNamespace(turn=self.start_turn)
-
-    async def start_turn(self, text, **kwargs):
-        self.turn_args = {"input": text, **kwargs}
-        return self.turn
 
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="codex-gateway-test-")
+        self.temp = tempfile.TemporaryDirectory(prefix="gateway-http-test-")
         self.home = pathlib.Path(self.temp.name)
         self.environment = patch.dict(
-            os.environ,
-            {
-                "CODEX_HOME": str(self.home),
-                "ACCESS_ISSUER": ISSUER,
-                "ACCESS_AUDIENCE": AUDIENCE,
-            },
-            clear=True,
+            os.environ, {"CODEX_HOME": str(self.home)}, clear=True
         )
         self.environment.start()
-        self.jwks_mock = local_jwks()
-        self.jwks_mock.start()
-        self.calls = []
-
-        async def runner(request, home):
-            self.calls.append((request, home))
-            return RunInferenceResponse(
-                model=MODEL,
-                effort="medium",
-                output_json='{"items": []}',
-                input_tokens=101,
-                output_tokens=23,
-                usage_available=True,
-            )
-
+        self.jwks = local_jwks()
+        self.jwks.start()
+        self.executor = StubExecutor()
         self.app = create_app(
-            access_verifier=verifier(),
             monitor_db=self.home / "monitor.sqlite3",
-            runner=runner,
+            model_executor=self.executor,
+            access_verifier=verifier(),
         )
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app), base_url="http://test"
@@ -157,304 +54,211 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.client.aclose()
+        self.jwks.stop()
         self.environment.stop()
-        self.jwks_mock.stop()
         self.temp.cleanup()
 
-    async def test_authentication_precedes_body_read(self):
-        async def body():
-            raise AssertionError("Unauthorized body was read")
-            yield b""
+    async def test_slim_json_and_private_alias_use_the_generated_contract(self):
+        first = await self.client.post(PATH, json=BODY, headers=access_headers())
+        second = await self.client.post(
+            "/api/model/v1/generations:generate", json=BODY, headers=access_headers()
+        )
+        self.assertEqual(first.status_code, 200)
+        answer = from_wire(Generation, first.json(), strict=True).message
+        self.assertEqual(answer.model, MODEL)
+        self.assertEqual(answer.output, '{"items":[]}')
+        self.assertNotEqual(answer.name, second.json()["name"])
+        self.assertEqual(len(self.executor.calls), 2)
+        self.assertEqual(self.executor.calls[0][0].input, BODY["input"])
+        self.assertEqual(first.headers["cache-control"], "no-store")
+        self.assertNotIn("state", first.json())
+        self.assertNotIn("reported_model", first.json())
 
-        for headers in ({}, {"authorization": "Bearer wrong-synthetic-token"}):
-            response = await self.client.post(PATH, content=body(), headers=headers)
-            self.assertEqual(response.status_code, 401)
-            self.assertEqual(response.json()["error"]["status"], "UNAUTHENTICATED")
-        self.assertEqual(self.calls, [])
+    async def test_removed_legacy_and_context_read_routes_are_absent(self):
+        for path in ("/api/codex/v1/inference:run", "/api/codex/v1/inference:check"):
+            self.assertEqual(
+                (
+                    await self.client.post(path, json={}, headers=access_headers())
+                ).status_code,
+                404,
+            )
+        self.assertEqual(
+            (
+                await self.client.get(
+                    "/api/codex/v1/model/conversations/synthetic",
+                    headers=access_headers(),
+                )
+            ).status_code,
+            404,
+        )
 
-    async def test_valid_request_uses_generated_wire_types(self):
-        response = await self.client.post(
-            PATH,
-            json=BODY,
-            headers=access_headers(),
+    async def test_metadata_catalog_has_only_the_actual_native_model(self):
+        response = await self.client.get(
+            "/api/codex/v1/model/models", headers=access_headers()
         )
         self.assertEqual(response.status_code, 200)
-        typed = from_wire(RunInferenceResponse, response.json(), strict=True).message
-        self.assertEqual(
-            (typed.model, typed.effort, typed.input_tokens, typed.output_tokens),
-            (MODEL, "medium", 101, 23),
-        )
-        self.assertEqual(self.calls[0], (RunInferenceRequest(**BODY), self.home))
-        self.assertEqual(response.headers["cache-control"], "no-store")
-        health = (await self.client.get("/healthz")).json()
-        self.assertEqual(
-            {key: value for key, value in health.items() if key != "inference_status"},
-            {
-                "service": "codex-gateway",
-                "status": "ok",
-                "source_sha": None,
-                "release_request_id": "",
-            },
-        )
+        self.assertEqual([item["id"] for item in response.json()["models"]], [MODEL])
+        self.assertEqual(self.executor.calls, [])
 
-    async def test_readonly_preflight_uses_the_same_auth_and_generated_contract(self):
-        calls = []
-
-        async def checker(home):
-            calls.append(home)
-            return CheckInferenceResponse(
-                model=MODEL,
-                effort="medium",
-                authenticated=True,
-                models=[
-                    InferenceModel(id=MODEL, model=MODEL, supported_efforts=["medium"])
-                ],
+    async def test_invalid_fields_and_json_are_rejected_before_execution(self):
+        bodies = [
+            {**BODY, "request_id": "obsolete"},
+            {**BODY, "config": {}},
+            {**BODY, "input": 1},
+            {**BODY, "model": "gpt-6-astra"},
+            {**BODY, "max_output_tokens": 1},
+            {**BODY, "timeout_ms": 840001},
+            {**BODY, "output_schema_json": "invalid json"},
+        ]
+        for body in bodies:
+            with self.subTest(body=body):
+                self.assertEqual(
+                    (
+                        await self.client.post(
+                            PATH, json=body, headers=access_headers()
+                        )
+                    ).status_code,
+                    400,
+                )
+        for raw in (
+            '{"model":"gpt-6.1-sol","input":"a","input":"b"}',
+            '{"timeout_ms":NaN}',
+        ):
+            response = await self.client.post(
+                PATH,
+                content=raw,
+                headers={**access_headers(), "content-type": "application/json"},
             )
+            self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.executor.calls, [])
 
-        app = create_app(
-            access_verifier=verifier(),
-            monitor_db=self.home / "monitor.sqlite3",
-            checker=checker,
-        )
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            path = "/api/codex/v1/inference:check"
-            denied = await client.post(path, json={})
-            self.assertEqual(denied.status_code, 401)
-            self.assertEqual(calls, [])
-            headers = access_headers()
-            response = await client.post(path, json={}, headers=headers)
-            self.assertEqual(response.status_code, 200)
-            typed = from_wire(
-                CheckInferenceResponse, response.json(), strict=True
-            ).message
-            self.assertTrue(typed.authenticated)
-            self.assertEqual(typed.models[0].supported_efforts, ("medium",))
-            self.assertEqual(calls, [self.home])
-            invalid = await client.post(
-                path, json={"instructions": "not a preflight field"}, headers=headers
+    async def test_media_type_and_utf8_wire_size_are_bounded(self):
+        for content_type in ("text/plain", ""):
+            response = await self.client.post(
+                PATH,
+                content=b"{}",
+                headers={**access_headers(), "content-type": content_type},
             )
-            self.assertEqual(invalid.status_code, 400)
-            self.assertEqual(calls, [self.home])
-            self.assertEqual(self.calls, [])
+            self.assertEqual(response.status_code, 400)
+        response = await self.client.post(
+            PATH,
+            content=b"x" * (MAX_BODY_BYTES + 1),
+            headers={**access_headers(), "content-type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.executor.calls, [])
 
-    async def test_health_uses_baked_source_identity_and_release_request_id(self):
-        baked = self.home / "build-info.json"
-        baked.write_text(json.dumps({"source_sha": "a" * 40}))
-        request_id = "cd4e06d0-741c-4a36-9bfc-810cb887a54b"
+    async def test_health_keeps_home_shape_and_baked_release_identity(self):
+        response = await self.client.get("/healthz")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["service"], "codex-gateway")
+        self.assertIn("inference_status", response.json())
+        info = self.home / "build-info.json"
+        info.write_text(json.dumps({"source_sha": "a" * 40}))
         with (
-            patch("codex_gateway.app.BUILD_INFO_FILE", baked),
+            patch("codex_gateway.app.BUILD_INFO_FILE", info),
             patch.dict(
-                os.environ,
-                {
-                    "BUILD_SHA": "b" * 40,
-                    "SOURCE_SHA": "c" * 40,
-                    "CODEX_GATEWAY_RELEASE_REQUEST_ID": request_id,
-                },
+                os.environ, {"CODEX_GATEWAY_RELEASE_REQUEST_ID": "synthetic-release"}
             ),
         ):
             app = create_app(
-                access_verifier=verifier(), monitor_db=self.home / "monitor.sqlite3"
+                monitor_db=self.home / "monitor.sqlite3",
+                model_executor=StubExecutor(),
+                access_verifier=verifier(),
             )
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
             ) as client:
-                response = await client.get("/healthz")
-            self.assertEqual(response.json()["source_sha"], "a" * 40)
-            self.assertEqual(response.json()["release_request_id"], request_id)
-            self.assertNotIn("b" * 40, response.text)
-            self.assertNotIn("c" * 40, response.text)
+                health = (await client.get("/healthz")).json()
+        self.assertEqual(health["source_sha"], "a" * 40)
+        self.assertEqual(health["release_request_id"], "synthetic-release")
 
-    async def test_terminal_model_failure_keeps_typed_http_200_response(self):
-        async def runner(request, home):
-            return await infer(
-                request,
-                home,
-                sdk=FakeSdk(
-                    FakeTurn(RuntimeError("usage_limit Private synthetic content"))
-                ),
-            )
-
-        app = create_app(
-            access_verifier=verifier(),
-            monitor_db=self.home / "monitor.sqlite3",
-            runner=runner,
+    async def test_sse_is_private_final_result_transport(self):
+        response = await self.client.post(
+            PATH, json=BODY, headers={**access_headers(), "accept": "text/event-stream"}
         )
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            response = await client.post(
-                PATH,
-                json=BODY,
-                headers=access_headers(),
-            )
         self.assertEqual(response.status_code, 200)
-        typed = from_wire(RunInferenceResponse, response.json(), strict=True).message
-        self.assertEqual(typed.error_code, "codex_quota")
-        self.assertEqual(typed.output_json, "")
-        self.assertNotIn("Private synthetic content", response.text)
+        self.assertIn("text/event-stream", response.headers["content-type"])
+        self.assertIn("event: ready", response.text)
+        self.assertIn("event: result", response.text)
+        self.assertNotIn("delta", response.text)
+        self.assertIn(MODEL, response.text)
 
-    async def test_invalid_and_oversized_bodies_do_not_invoke_sdk(self):
-        for raw in (
-            b'{"instructions":"x","instructions":"y"}',
-            b"{}",
-            b"x" * (MAX_BODY_BYTES + 1),
-        ):
-            with self.subTest(size=len(raw)):
-                response = await self.client.post(
-                    PATH,
-                    content=raw,
-                    headers={
-                        **access_headers(),
-                        "content-type": "application/json",
-                    },
+    async def test_context_create_two_turns_and_close_use_empty_acknowledgements(self):
+        sdk = FakeSdk(FakeTurn(1), FakeTurn(2))
+        executor = ModelExecutor(sdk=sdk)
+        name = f"conversations/{uuid.uuid4()}"
+        app = create_app(
+            monitor_db=self.home / "contexts.sqlite3",
+            model_executor=executor,
+            access_verifier=verifier(),
+        )
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                created = await client.post(
+                    "/api/codex/v1/model/conversations",
+                    json={"name": name, "model": MODEL, "web_research": True},
+                    headers={**access_headers(), "accept": "text/event-stream"},
                 )
-                self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.calls, [])
-
-    async def test_fixed_model_effort_and_isolated_runtime_policy(self):
-        sdk = FakeSdk()
-        answer = await infer(RunInferenceRequest(**BODY), self.home, sdk=sdk)
-        self.assertEqual(
-            (answer.error_code, answer.input_tokens, answer.output_tokens),
-            ("", 101, 23),
-        )
-        self.assertTrue(answer.usage_available)
-        self.assertTrue(sdk.closed)
-        self.assertEqual(sdk.thread_args["model"], MODEL)
-        self.assertEqual(sdk.thread_args["model_provider"], "openai")
-        self.assertEqual(sdk.thread_args["sandbox"], "read-only")
-        self.assertEqual(sdk.thread_args["approval_mode"], "deny-all")
-        self.assertTrue(sdk.thread_args["ephemeral"])
-        self.assertEqual(
-            sdk.thread_args["developer_instructions"], BODY["instructions"]
-        )
-        self.assertEqual(sdk.turn_args["effort"].value, "medium")
-        self.assertEqual(
-            sdk.turn_args["output_schema"], json.loads(BODY["output_schema_json"])
-        )
-        self.assertFalse(pathlib.Path(sdk.config.cwd).exists())
-        overrides = set(sdk.config.config_overrides)
-        for override in (
-            'forced_login_method="chatgpt"',
-            'web_search="disabled"',
-            "mcp_servers={}",
-            "features.shell_tool=false",
-            "features.apps=false",
-            "features.plugins=false",
-            "features.browser_use=false",
-            "features.computer_use=false",
-            "features.multi_agent=false",
-            "features.code_mode_host=false",
-            "features.image_generation=false",
-            "features.skill_search=false",
-        ):
-            self.assertIn(override, overrides)
-            self.assertIn(override, sdk.config.launch_args_override)
-        self.assertIn("skills.config=[", " ".join(overrides))
-
-    async def test_sdk_user_message_is_input_and_preserves_the_valid_answer(self):
-        sdk = FakeSdk()
-        self.assertEqual(sdk.turn.result.items[0].root.type, "userMessage")
-        answer = await infer(RunInferenceRequest(**BODY), self.home, sdk=sdk)
-        self.assertEqual(answer.error_code, "")
-        self.assertEqual(answer.output_json, '{"items": []}')
-
-    async def test_usage_availability_survives_bad_answers_and_distinguishes_missing_usage(
-        self,
-    ):
-        sdk = FakeSdk(FakeTurn(text="invalid JSON"))
-        answer = await infer(RunInferenceRequest(**BODY), self.home, sdk=sdk)
-        self.assertEqual(answer.error_code, "codex_bad_answer")
-        self.assertTrue(answer.usage_available)
-        self.assertEqual((answer.input_tokens, answer.output_tokens), (101, 23))
-        sdk.turn.result.usage = None
-        answer = await infer(RunInferenceRequest(**BODY), self.home, sdk=sdk)
-        self.assertFalse(answer.usage_available)
-        self.assertEqual((answer.input_tokens, answer.output_tokens), (0, 0))
-
-    async def test_explicit_model_is_used_without_changing_the_default(self):
-        sdk = FakeSdk()
-        answer = await infer(
-            RunInferenceRequest(**BODY, model="gpt-6-sol"), self.home, sdk=sdk
-        )
-        self.assertEqual(sdk.thread_args["model"], "gpt-6-sol")
-        self.assertEqual(answer.model, "gpt-6-sol")
-        self.assertEqual(answer.error_code, "")
-        self.assertEqual(MODEL, "gpt-6.1-sol")
-
-    async def test_model_failures_are_safe_typed_results_without_content_in_logs(self):
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-            for error, code in (
-                (RuntimeError("unauthorized Private synthetic content"), "codex_auth"),
-                (RuntimeError("usage_limit Private synthetic content"), "codex_quota"),
-                (TimeoutError("Private synthetic content"), "codex_timeout"),
-                (RuntimeError("Private synthetic content"), "codex_unavailable"),
-            ):
-                with self.subTest(code=code):
-                    sdk = FakeSdk(FakeTurn(error))
-                    answer = await infer(
-                        RunInferenceRequest(**BODY), self.home, sdk=sdk
+                self.assertEqual(created.status_code, 200)
+                self.assertIn("event: result\ndata: {}", created.text)
+                workspace = pathlib.Path(executor.contexts[name].directory.name)
+                for text in ("first", "correction"):
+                    result = await client.post(
+                        PATH,
+                        json={"conversation": name, "input": text},
+                        headers=access_headers(),
                     )
-                    self.assertEqual(answer.error_code, code)
-                    self.assertEqual(answer.output_json, "")
-                    self.assertTrue(sdk.closed)
-                    if code == "codex_timeout":
-                        self.assertTrue(sdk.turn.interrupted)
-        self.assertEqual(output.getvalue(), "")
+                    self.assertEqual(result.status_code, 200)
+                    self.assertEqual(result.json()["usage"]["input_tokens"], 101)
+                for _ in range(2):
+                    closed = await client.post(
+                        f"/api/codex/v1/model/{name}:close",
+                        json={},
+                        headers=access_headers(),
+                    )
+                    self.assertEqual(closed.status_code, 200)
+                    self.assertEqual(closed.json(), {})
+                self.assertTrue(sdk.closed)
+                self.assertFalse(workspace.exists())
+                snapshot = (await client.get("/healthz")).json()["inference_status"]
+                self.assertEqual(snapshot["request_count"], 2)
+                self.assertEqual(snapshot["input_tokens"], 202)
+        finally:
+            await executor.shutdown()
 
-    async def test_rejected_login_directory_returns_only_configuration_code(self):
-        marker = "Private synthetic configuration content"
-        (self.home / "config.toml").write_text(marker)
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-            answer = await infer(RunInferenceRequest(**BODY), self.home, sdk=FakeSdk())
-        self.assertEqual(answer.error_code, "codex_configuration")
-        self.assertEqual(answer.output_json, "")
-        self.assertNotIn(marker, repr(answer))
-        self.assertNotIn(str(self.home), repr(answer))
-        self.assertEqual(output.getvalue(), "")
+    async def test_heartbeat_error_and_disconnect_wait_for_operation_cleanup(self):
+        async def slow():
+            await asyncio.sleep(0.005)
+            return None
 
-    async def test_pre_model_failures_report_safe_stage_and_keep_auth_quota_priority(
-        self,
-    ):
-        marker = "Private synthetic diagnostic /synthetic/login/path"
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-            for method, error, code in (
-                ("__aenter__", RuntimeError(marker), "codex_startup"),
-                ("account", RuntimeError(marker), "codex_account"),
-                ("request", ValueError(marker), "codex_skills"),
-                ("__aenter__", RuntimeError("unauthorized " + marker), "codex_auth"),
-                ("request", RuntimeError("usage_limit " + marker), "codex_quota"),
-                ("request", TimeoutError(marker), "codex_timeout"),
-            ):
-                with self.subTest(method=method, code=code):
-                    sdk = FakeSdk()
-                    with patch.object(sdk, method, side_effect=error):
-                        answer = await infer(
-                            RunInferenceRequest(**BODY), self.home, sdk=sdk
-                        )
-                    self.assertEqual(answer.error_code, code)
-                    self.assertEqual(answer.output_json, "")
-                    self.assertNotIn(marker, repr(answer))
-                    self.assertNotIn(str(self.home), repr(answer))
-                    self.assertTrue(sdk.closed)
-        self.assertEqual(output.getvalue(), "")
+        with patch("codex_gateway.model_api.HEARTBEAT_SECONDS", 0.001):
+            frames = [frame async for frame in result_events(slow())]
+        self.assertTrue(any("event: heartbeat" in frame for frame in frames))
+        self.assertEqual(frames[-1], "event: result\ndata: {}\n\n")
 
-    async def test_non_subscription_auth_enabled_skills_or_tools_cannot_succeed(self):
-        for sdk, code in (
-            (FakeSdk(account_type="apikey"), "codex_auth"),
-            (FakeSdk(enabled_skill=True), "codex_skills"),
-            (FakeSdk(FakeTurn(text="invalid JSON")), "codex_bad_answer"),
-            (FakeSdk(FakeTurn(text='{"invalid": NaN}')), "codex_bad_answer"),
-            (FakeSdk(FakeTurn(tool=True)), "codex_bad_answer"),
-        ):
-            with self.subTest(code=code):
-                answer = await infer(RunInferenceRequest(**BODY), self.home, sdk=sdk)
-                self.assertEqual(answer.error_code, code)
+        async def error():
+            raise RpcError("UNAVAILABLE", "MODEL_UNAVAILABLE", "Safe failure")
+
+        frames = [frame async for frame in result_events(error())]
+        self.assertIn("event: error", frames[-1])
+        cleaned = asyncio.Event()
+        started = asyncio.Event()
+
+        async def blocked():
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaned.set()
+
+        stream = result_events(blocked())
+        await anext(stream)
+        await started.wait()
+        await stream.aclose()
+        self.assertTrue(cleaned.is_set())
 
 
 class EnvironmentTests(unittest.TestCase):
@@ -502,7 +306,3 @@ class EnvironmentTests(unittest.TestCase):
             FakeSdk(), pathlib.Path("/login"), pathlib.Path("/tmp/workspace")
         )
         self.assertEqual(config.env, {"CODEX_HOME": "/login"})
-
-
-if __name__ == "__main__":
-    unittest.main()

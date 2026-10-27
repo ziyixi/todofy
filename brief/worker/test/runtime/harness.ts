@@ -172,13 +172,13 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       MODEL_ROUTER: async (request: Request) => {
         const path = new URL(request.url).pathname;
         if (path === '/api/model/v1/models') return Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [
-          { name: 'models/claude-opus-5-5', configured: options.modelConfigured !== false, connectionRevision: 'synthetic-connection', reservationInputMicrousdPerToken: 5, reservationOutputMicrousdPerToken: 25 },
-          { name: 'models/claude-haiku-5-5', configured: options.modelConfigured !== false, connectionRevision: 'synthetic-connection', reservationInputMicrousdPerToken: 0.5, reservationOutputMicrousdPerToken: 2.5 },
-          { name: 'models/bge-m3', configured: true, embeddings: true, dimensions: 1024, reservationQuotaUnitsPerToken: QUOTA_RATE },
+          { id: 'claude-opus-5-5', configured: options.modelConfigured !== false, reservationInputMicrousdPerToken: 5, reservationOutputMicrousdPerToken: 25 },
+          { id: 'claude-haiku-5-5', configured: options.modelConfigured !== false, reservationInputMicrousdPerToken: 0.5, reservationOutputMicrousdPerToken: 2.5 },
+          { id: '@cf/baai/bge-m3', configured: true, kind: 'embedding', reservationQuotaUnitsPerToken: QUOTA_RATE },
         ] })));
         if (path === '/api/model/v1/embeddings:embed') {
-          const input = await request.json<{ request_id: string; inputs: string[] }>();
-          return Response.json(toWire(EmbeddingSchema, create(EmbeddingSchema, { name: `requests/${input.request_id}`, model: 'models/bge-m3', dimensions: 1024,
+          const input = await request.json<{ inputs: string[] }>();
+          return Response.json(toWire(EmbeddingSchema, create(EmbeddingSchema, { name: `requests/${crypto.randomUUID()}`, model: '@cf/baai/bge-m3',
             usage: { available: false, billingKind: 'platform_quota', estimatedQuotaUnits: input.inputs.reduce((sum, text) => sum + estimateTokens(text), 0) * QUOTA_RATE },
             ...(quota ? { error: { code: 8, reason: 'MODEL_QUOTA', message: 'Synthetic quota.' } } : { vectors: input.inputs.map(text => ({ values: fakeVector(text) })) }) })));
         }

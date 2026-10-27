@@ -1,0 +1,180 @@
+// Owner-only history and chart projections, separate from application inference.
+syntax = "proto3";
+
+package modelrouter.inference.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "modelrouter/inference/v1/inference.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "ConsoleProto";
+option java_package = "science.ziyixi.modelrouter.inference.v1";
+
+// Owner reads; model callers cannot browse other applications.
+service ConsoleService {
+  option (google.api.default_host) = "models.ziyixi.science";
+
+  // Lists content-free traces, newest first.
+  rpc ListRequests(ListRequestsRequest) returns (ListRequestsResponse) {
+    option (google.api.http) = {get: "/api/model/v1/requests"};
+    option (google.api.method_signature) = "";
+  }
+  // Reads one trace and its retained request/result bodies.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // (-- api-linter: core::0131::response-message-name=disabled
+  //     aip.dev/not-precedent: This owner read returns a history or aggregate projection. --)
+  rpc GetRequest(GetRequestRequest) returns (RequestRecord) {
+    option (google.api.http) = {get: "/api/model/v1/{name=requests/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Returns hourly buckets for one day and daily buckets for longer ranges.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // (-- api-linter: core::0131::response-message-name=disabled
+  //     aip.dev/not-precedent: This owner read returns a history or aggregate projection. --)
+  rpc GetUsage(GetUsageRequest) returns (UsageSummary) {
+    // (-- api-linter: core::0131::http-uri-name=disabled
+    //     aip.dev/not-precedent: This owner query selects a bounded time range, without a singleton resource. --)
+    option (google.api.http) = {get: "/api/model/v1/usage"};
+    // (-- api-linter: core::0131::method-signature=disabled
+    //     aip.dev/not-precedent: This owner query selects a bounded time range, without a singleton resource. --)
+    option (google.api.method_signature) = "";
+  }
+}
+
+// Private trace metadata; input/output appear only on an explicit detail read.
+message RequestRecord {
+  // Invocation result; output omitted from lists.
+  Generation generation = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Authenticated caller.
+  string app = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // openai, anthropic, google or cloudflare.
+  string provider = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Exact upstream-reported identity; empty if the provider does not report it.
+  string reported_model = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // running, succeeded, failed, cancelled or interrupted.
+  string state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Acceptance time.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: These telemetry and Retry-After names match the existing owner interface. --)
+  // (-- api-linter: core::0142::time-field-names=disabled
+  //     aip.dev/not-precedent: These owner telemetry keys retain their established names. --)
+  google.protobuf.Timestamp started_at = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Completion time, absent while running.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: These telemetry and Retry-After names match the existing owner interface. --)
+  // (-- api-linter: core::0142::time-field-names=disabled
+  //     aip.dev/not-precedent: These owner telemetry keys retain their established names. --)
+  google.protobuf.Timestamp completed_at = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Wall-clock milliseconds.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: This numeric field is a bounded relative duration with an explicit unit. --)
+  int32 duration_ms = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Retained original inference request; absent on lists or after expiry.
+  GenerateRequest request = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether request/result bodies could be read on this detail request.
+  bool content_available = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Original body expiry time.
+  google.protobuf.Timestamp content_expire_time = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Indexed bounded history query.
+message ListRequestsRequest {
+  // Default twenty, maximum one hundred.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Previous response cursor.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Caller filter.
+  // (-- api-linter: core::0132::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These typed filters select indexed owner history queries. --)
+  string app = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Native model filter.
+  // (-- api-linter: core::0132::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These typed filters select indexed owner history queries. --)
+  string model = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Execution-state filter.
+  // (-- api-linter: core::0132::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These typed filters select indexed owner history queries. --)
+  string state = 5 [(google.api.field_behavior) = OPTIONAL];
+  // Inclusive start-time lower bound.
+  // (-- api-linter: core::0132::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These typed filters select indexed owner history queries. --)
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: These telemetry and Retry-After names match the existing owner interface. --)
+  google.protobuf.Timestamp from_time = 6 [(google.api.field_behavior) = OPTIONAL];
+  // Exclusive start-time upper bound.
+  // (-- api-linter: core::0132::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These typed filters select indexed owner history queries. --)
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: These telemetry and Retry-After names match the existing owner interface. --)
+  google.protobuf.Timestamp to_time = 7 [(google.api.field_behavior) = OPTIONAL];
+}
+// One page of metadata.
+message ListRequestsResponse {
+  // Private trace bodies are omitted.
+  repeated RequestRecord requests = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Empty at the end.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// One private trace lookup.
+message GetRequestRequest {
+  // requests/{UUID}.
+  // (-- api-linter: core::0131::request-name-reference=disabled
+  //     aip.dev/not-precedent: The request name addresses a private trace projection, not a public inference resource. --)
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+}
+// Bounded time-series query.
+// (-- api-linter: core::0131::request-name-required=disabled
+//     aip.dev/not-precedent: This owner query selects a bounded time range, without a singleton resource. --)
+message GetUsageRequest {
+  // One to ninety days; zero selects seven.
+  // (-- api-linter: core::0131::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These typed filters select a bounded owner time-series query. --)
+  int32 days = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Caller filter.
+  // (-- api-linter: core::0131::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These typed filters select a bounded owner time-series query. --)
+  string app = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Native model filter.
+  // (-- api-linter: core::0131::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: These typed filters select a bounded owner time-series query. --)
+  string model = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+// One time/model bucket; unavailable estimates stay absent.
+message UsageBucket {
+  // UTC hour/day start, selected from the requested range.
+  // (-- api-linter: core::0142::time-field-names=disabled
+  //     aip.dev/not-precedent: These owner telemetry keys retain their established names. --)
+  google.protobuf.Timestamp time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Actual selected model.
+  string model = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Model provider.
+  string provider = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // api, subscription or platform_quota.
+  string billing_kind = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Accepted requests.
+  int32 request_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Successful requests.
+  int32 success_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Failed, cancelled or interrupted requests.
+  int32 failure_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Known input tokens.
+  int32 input_tokens = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Known output tokens.
+  int32 output_tokens = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Known cache reads.
+  int32 cached_input_tokens = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Known cache writes.
+  int32 cache_write_tokens = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Sum only when all estimates in this bucket are known.
+  optional int32 estimated_cost_microusd = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Requests with complete token usage.
+  int32 usage_available_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// Time-series points; the UI derives totals from this one result.
+message UsageSummary {
+  // Ordered UTC buckets grouped by native model.
+  repeated UsageBucket buckets = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

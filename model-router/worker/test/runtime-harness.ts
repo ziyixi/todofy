@@ -6,7 +6,8 @@ import { build } from 'esbuild'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
 import { createHttpClient, type HttpCall } from '@ziyixi/proto/http-client'
-import { ConsoleService, ModelService } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb'
+import { ModelService } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb'
+import { ConsoleService } from '@ziyixi/proto/modelrouter/inference/v1/console_pb'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const origin = 'http://127.0.0.1'
@@ -51,6 +52,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
   const calls: UpstreamCall[] = []
   const geminiOutputs: string[] = []
   const conversations = new Map<string, string>()
+  let closeFailures = 0
   async function outbound(request: Request): Promise<Response> {
     const url = new URL(request.url)
     if (url.href === `${issuer}/cdn-cgi/access/certs`) return Response.json((await signingKeys).jwks)
@@ -67,7 +69,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
     })
     if (url.hostname === 'generativelanguage.googleapis.com')
       return Response.json({
-        modelVersion: 'synthetic-gemini-reported',
+        modelVersion: 'gemini-3.5-flash-lite',
         candidates: [
           { finishReason: 'STOP', content: { parts: [{ text: geminiOutputs.shift() ?? '{"answer":"synthetic"}' }] } },
         ],
@@ -77,19 +79,11 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
       return new Response('Synthetic external request denied', { status: 599 })
     if (url.pathname.endsWith('generations:generate')) {
       const output = {
-        name: `requests/${String(data.request_id)}`,
-        app: 'synthetic-executor',
-        model: 'models/sol-6-1',
-        state: 'succeeded',
+        name: `requests/${crypto.randomUUID()}`,
+        model: 'gpt-6.1-sol',
         output: '{"answer":"synthetic executor result"}',
-        usage: { available: true, input_tokens: 14, output_tokens: 5, total_tokens: 19, billing_kind: 'subscription' },
-        reported_model: 'synthetic-sol-reported',
-        upstream_started: true,
-        attempt_count: 1,
-        finish_reason: 'complete',
-        ...((data.config as { web_research?: boolean } | undefined)?.web_research === true
-          ? { observations: { searched: true, opened_urls: ['https://example.test/synthetic-research-evidence'] } }
-          : {}),
+        usage: { available: true, input_tokens: 14, output_tokens: 5, billing_kind: 'subscription' },
+        ...(data.conversation ? { observations: { searched: true, opened_urls: ['https://example.test/synthetic-research-evidence'] } } : {}),
       }
       return new Response(
         `event: ready\ndata: {}\n\nevent: heartbeat\ndata: {}\n\nevent: result\ndata: ${JSON.stringify(output)}\n\n`,
@@ -100,11 +94,15 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
       const conversation = data
       const name = String(conversation.name)
       conversations.set(name, 'open')
-      return Response.json({ ...conversation, state: 'open', app: 'synthetic-executor' })
+      return Response.json({})
     }
     const name = url.pathname.replace('/api/codex/v1/model/', '').replace(/:close$/, '')
+    if (url.pathname.endsWith(':close') && closeFailures > 0) {
+      closeFailures -= 1
+      return Response.json({ error: { code: 503, status: 'UNAVAILABLE', message: 'Synthetic executor unavailable' } }, { status: 503 })
+    }
     if (url.pathname.endsWith(':close')) conversations.set(name, 'closed')
-    return Response.json({ name, state: conversations.get(name) ?? 'lost', config: { model: 'models/sol-6-1' } })
+    return Response.json({})
   }
   const mf = new Miniflare(
     convertV4MiniflareOptions({
@@ -118,7 +116,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
           modules: true,
           compatibilityDate: '2026-09-08',
           d1Databases: { DB: 'model-router-synthetic' },
-          r2Buckets: { REQUEST_BODIES: 'router-synthetic-bodies' },
+          r2Buckets: { REQUEST_BODIES: 'router-synthetic-bodies', BACKUPS: 'router-synthetic-backups' },
           durableObjects: { ENGINE: { className: 'RouterEngine', useSQLite: true } },
           bindings: {
             DEV_AUTH_BYPASS: ownerBypass ? 'true' : 'false',
@@ -156,6 +154,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
   await mf.ready
   const db = await mf.getD1Database('DB', 'model-router')
   const bucket = await mf.getR2Bucket('REQUEST_BODIES', 'model-router')
+  const backups = await mf.getR2Bucket('BACKUPS', 'model-router')
   for (const filename of (await readdir(join(root, '../migrations'))).filter((file) => file.endsWith('.sql')).sort()) {
     const sql = await readFile(join(root, '../migrations', filename), 'utf8')
     for (const statement of sql
@@ -201,11 +200,13 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
     mf,
     db,
     bucket,
+    backups,
     owner,
     models,
     forCaller,
     calls,
     geminiOutputs,
+    failNextClose() { closeFailures += 1 },
     caller,
     async dispose() {
       await mf.dispose()

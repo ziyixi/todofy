@@ -1,7 +1,8 @@
 import { ChevronLeft, ChevronRight, Inbox } from 'lucide-react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import type { Generation, Model } from '@ziyixi/proto/modelrouter/inference/v1/inference_wire'
+import type { Model } from '@ziyixi/proto/modelrouter/inference/v1/inference_wire'
+import type { RequestRecord } from '@ziyixi/proto/modelrouter/inference/v1/console_wire'
 import type { RequestFilters, RouterApi } from './api'
 import type { PlaygroundDraft } from './Playground'
 import { Filters } from './Filters'
@@ -34,15 +35,15 @@ export function Requests({
     placeholderData: keepPreviousData,
   })
   const requests = query.data?.requests ?? []
-  const [selectedSummary, setSelectedSummary] = useState<Generation>()
+  const [selectedSummary, setSelectedSummary] = useState<RequestRecord>()
   function filter(value: RequestFilters) {
     setPageTokens([''])
     setPage(0)
     onFilter(value)
   }
-  function select(request: Generation) {
+  function select(request: RequestRecord) {
     setSelectedSummary(request)
-    onSelect(request.name)
+    onSelect(request.generation?.name)
   }
   function next() {
     const token = query.data?.next_page_token
@@ -104,9 +105,9 @@ export function Requests({
             key={selectedName}
             name={selectedName}
             summary={
-              selectedSummary?.name === selectedName
+              selectedSummary?.generation?.name === selectedName
                 ? selectedSummary
-                : requests.find((request) => request.name === selectedName)
+                : requests.find((request) => request.generation?.name === selectedName)
             }
             api={api}
             onClose={() => onSelect()}
@@ -116,7 +117,7 @@ export function Requests({
           <aside className="panel detail-placeholder">
             <Inbox size={28} aria-hidden="true" />
             <h2>选择一条请求</h2>
-            <p>查看输入、输出、实际参数和用量。</p>
+            <p>查看输入、输出、原请求选项和用量。</p>
             <p className="small">请求内容仅在此私有页面加载。</p>
           </aside>
         )}

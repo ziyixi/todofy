@@ -72,12 +72,12 @@ describe('classification provider settings and status', () => {
     h.up.codex.configured = false;
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
     expect(status).toMatchObject({
-      decisionModel: 'models/sol-6-1',
+      decisionModel: 'gpt-6.1-sol',
       classifier: {
-        provider: ClassificationProvider.CODEX, model: 'models/sol-6-1', effort: 'medium', configured: false,
+        provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: false,
         nextBatchTime: timestampFromMs(T0 + HOUR), lastSuccessTime: timestampFromMs(T0 - HOUR),
       },
-      claudeBudget: { model: 'models/claude-opus-5-5', spentUsd: 20, providerLimitReached: true, lastErrorCode: 'claude_spend_limit' },
+      claudeBudget: { model: 'claude-opus-5-5', spentUsd: 20, providerLimitReached: true, lastErrorCode: 'claude_spend_limit' },
     });
     expect(status.classifier?.lastErrorCode).not.toBe('claude_spend_limit');
     expect(status.claudeBudget?.nextBatchTime).toBeUndefined();
@@ -88,7 +88,7 @@ describe('classification provider settings and status', () => {
   it('does not interpret a historical request timestamp as a successful answer', async () => {
     await h.sql(`INSERT INTO meta (key, value) VALUES ('claude_last_request_at', ?), ('claude_error', 'claude_invalid')`, String(T0));
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
-    expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CLAUDE, model: 'models/claude-opus-5-5', effort: 'medium', configured: true, lastErrorCode: 'claude_invalid' });
+    expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CLAUDE, model: 'claude-opus-5-5', effort: 'medium', configured: true, lastErrorCode: 'claude_invalid' });
     expect(status.classifier?.lastSuccessTime).toBeUndefined();
     expect(status.claudeBudget?.lastRequestTime).toEqual(timestampFromMs(T0));
   });

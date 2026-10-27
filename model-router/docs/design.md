@@ -1,39 +1,57 @@
 # 统一调用
 
-```mermaid
-flowchart LR
-  Apps[Mailsort / Todofy / Brief] -->|private service binding| Router[Cloudflare Model Router]
-  Newsletter[VPS Newsletter] -->|root proto + dedicated token| Router
-  Owner[Private console] -->|Access + same-origin JSON| Router
-  Router --> Engine[RouterEngine: router-v1]
-  Engine --> APIs[Claude / Gemini / Workers AI]
-  Engine -->|same proto, private transport| Executor[VPS official Codex SDK]
-  Engine --> D1[(metadata: 90 days)]
-  Engine --> R2[(private bodies: 7 days)]
+Mailsort、Todofy、Brief 通过同账户 service binding 调用 Router；Newsletter 使用一个外部调用口令。
+Router 选择供应商、调用模型、归一用量，把结果一次返回。应用继续负责提示词、预算、业务重试和工作流。
+模型 key 只在 Router；VPS 保留原 Codex 订阅登录。
+
+## 最小接口
+
+普通生成只需要两个字段：
+
+```json
+{"model":"gpt-6.1-sol","input":"Summarize this synthetic example."}
 ```
 
-`Generate` accepts a public `models/{id}`, trusted instruction blocks, untrusted input, optional standard JSON Schema and generic parameters. Unsupported controls fail before a model call. `ListModels` reports configured capabilities; it does not prove a subscription's current entitlement.
+目前业务需要的可选项只有 `instructions`（含稳定块缓存提示）、`effort`、`max_output_tokens`、
+`output_schema_json`、`allow_fallback` 和 `timeout_ms`。Newsletter 的后续 turn 传 `conversation + input`。
+没有 temperature、metadata、客户端 request ID、通用消息历史或参数回显。每次普通调用都是一次新调用；
+Router 生成日志 ID，不维护客户端请求去重账本。结果返回 `name`、实际选用的 `model`、`output`、`usage`、
+必要的 `error`，以及业务需要的 web observations 和 native fallback writers。
 
-`request_id` identifies one invocation. Router registers it before execution and saves the final receipt. A repeated identical call returns the retained result; conflicting input is refused. It does not retry an interrupted execution on behalf of its caller. Applications retain their existing persistent retry decisions.
+`Embed` 只接收实际模型和一组输入文本，返回有序向量、用量和错误。目录里的模型是供应商原生 ID；
+每个条目注明 provider。`gemini-email`、`gemini-report` 属于旧的调用策略，不是可选模型。
+Todofy 自己维护邮件与日报的 Gemini fallback 顺序。Gemini 3.7 已自动转到 3.8，当前目录不再重复列它。
 
-Provider differences stay in Router: Claude's stable-block cache and server fallback, Gemini's model chains and usage, and Workers AI vector order. VPS transport uses the existing `/api/codex/v1/model/*` Tunnel path with the same model proto bodies. Private ready/heartbeat/result SSE keeps that connection alive; applications receive final JSON.
+应用接口在 `proto/modelrouter/inference/v1/inference.proto`；owner 查询在同包 `console.proto`。
+后者负责调用来源、时间、状态、正文保留期和统计。它们不进入普通推理响应。
+所有调用方都在 monorepo 内，同次发布可以直接删除不用的字段，不保留空壳和 reserved 字段。
 
-## Short conversations
+## Newsletter 短会话
 
-A caller may create a bounded context, send sequential turns and close it. Lifetime is fixed and at most 14 minutes; a new turn does not extend it. Codex uses one actual SDK thread. Other generation adapters receive the preceding validated messages. Newsletter still performs its own source validation and may send one correction within that same context.
+只有 Codex 需要保留上下文。Newsletter 先登记一个随机 context name，再发送平铺的创建参数；创建与关闭
+只返回确认。一次最多 14 分钟，turn 不续期。同一个 context 顺序执行，仍能在原 SDK thread 内补问一次，
+并取得实际 search/open observations。没有查询会话、供应商通用聊天历史或跨重启恢复。
 
-Newsletter persists the context ID before creation. Closing an unknown ID leaves a closed receipt so a delayed create cannot reopen it. Closed, expired and lost contexts do not resume after a process restart. Close acknowledges execution cleanup; an unavailable close remains uncertain in the application's drain state.
+关闭会等待执行清理。失败时 Newsletter 继续保留自己已有的排空记录。Router 的短期归属与截止时间放在
+现有 DO storage，SDK context 留在 VPS。私有 SSE heartbeat 仅用于保持 Tunnel 请求存活，应用收到最终 JSON。
 
-## Records and budgets
+## 记录、图表和费用
 
-Request lists and Home contain metadata only. Private request details load the R2 body separately. R2 expiration also cleans an orphan created before a failed D1 insert. Metadata is removed in bounded daily batches after 90 days.
+D1 保存内容之外的请求记录 90 天，私有 R2 保存输入/输出 7 天。owner 列表不带正文；点击详情才读 R2。
+已过期的内容不因查看旧记录而恢复。旧记录及其原请求保持可读，目录和历史索引用真实模型身份。
+未报告的服务端模型身份继续显示未知，不把配置值冒充供应商回报。
 
-Counts use one normalized per-call snapshot, including separate cached input and reasoning output. Conversation totals are converted to deltas in the Codex adapter. Missing usage remains distinct from zero. API cost estimates use Router's rate cards; subscription and platform-quota usage have no invented API price.
+一天视图按小时聚合，较长范围按 UTC 日聚合；图表分模型展示请求、成功/失败、输入/输出和缓存 token。
+API 估价与订阅的假设 API 价值分开显示。后者不会进入 Mailsort/Brief 的 API 消费账本。
+未知用量或缺失价格保持未知；金额是 token 参考估价，不包含工具、存储、税费或服务档位附加费。
+Claude 的 native fallback 按实际 writer 和缓存 TTL 逐段估价。
 
-Brief and Mailsort keep their own budget ledgers and historical columns. Generic catalog reservation rates allow Brief to reserve before a call; actual normalized usage settles that reservation. Transport interruption preserves the application's conservative reservation. Todofy's existing daily token budget stays in effect for all selected models. Its model timeout is 180 seconds and summary watchdog is 7 minutes to accommodate the VPS round trip.
+费率集中在 `worker/src/providers/pricing.ts`，注明官方来源和核对日期。Google Flash 3.8 当前优惠价到
+2026-12-31，届时更新这份小表；不增加自动计价服务。
 
-## Connections and release
+## 备份
 
-Router owns one `ANTHROPIC_API_KEY` and one `GEMINI_API_KEY`, shared by all callers and the owner Playground. Claude reuses the existing Brief workspace and its aggregate $80/month provider cap. The authenticated app remains on every request and usage record; request metadata cannot select credentials. Applications keep their existing business budgets and historical ledgers. Provider keys are Router secrets only, never GitHub values, client credentials or VPS configuration.
-
-Publish using the existing green-SHA Actions flow and inspect the matching Personal cloud reconcile. The first deployment's DO namespace must be exported into the resource registry before acceptance. No app's paused/archive mode or historical result is changed as part of connection setup.
+首次 Home/Ops 观测会启动第一份备份，以后每天 04:47 UTC 运行。一个 DO cursor 推进少量分页和正文复制，
+不暂停推理。D1 完成记录及其仍保留的正文进入独立私有 `BACKUPS` 桶，完成标记最后写入；不复制密钥、
+SDK 状态或会话，不重放请求。R2 保留七天，因此备份中的正文最多可能存在约十四天。详见
+[备份与恢复](backup.md)。

@@ -8,24 +8,29 @@ import {
 
 import { fromWire, toWire } from '@ziyixi/proto/wire-json'
 import {
-  ConsoleService,
   GenerationSchema,
   GenerateRequestSchema,
   ListModelsResponseSchema,
-  ListRequestsRequestSchema,
-  ListRequestsResponseSchema,
   ModelService,
-  RequestRecordSchema,
-  UsageSummarySchema,
 } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb'
 import type {
   GenerateRequest,
   Generation,
-  ListRequestsResponse,
   Model,
+} from '@ziyixi/proto/modelrouter/inference/v1/inference_wire'
+
+import {
+  ConsoleService,
+  ListRequestsRequestSchema,
+  ListRequestsResponseSchema,
+  RequestRecordSchema,
+  UsageSummarySchema,
+} from '@ziyixi/proto/modelrouter/inference/v1/console_pb'
+import type {
+  ListRequestsResponse,
   RequestRecord,
   UsageSummary,
-} from '@ziyixi/proto/modelrouter/inference/v1/inference_wire'
+} from '@ziyixi/proto/modelrouter/inference/v1/console_wire'
 
 export type TimeRange = 1 | 7 | 30 | 90
 export interface RequestFilters {
@@ -68,7 +73,6 @@ function apiError(error: unknown): ApiError {
   return new ApiError('无法连接 ModelRouter，或登录已过期。请刷新页面后重试。', 'NETWORK_ERROR', 0)
 }
 
-
 async function sameOrigin(url: string, init: RequestInit = {}): Promise<Response> {
   try {
     return await fetch(url, { ...init, credentials: 'same-origin', cache: 'no-store', redirect: 'error' })
@@ -77,13 +81,16 @@ async function sameOrigin(url: string, init: RequestInit = {}): Promise<Response
   }
 }
 
-
 export async function send(call: HttpCall): Promise<Response> {
   const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(call.httpMethod)
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (mutation || call.body !== undefined) headers['Content-Type'] = 'application/json'
   if (mutation) headers['X-CSRF-Token'] = '1'
-  return sameOrigin(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) })
+  return sameOrigin(call.url, {
+    method: call.httpMethod,
+    headers,
+    ...(call.body === undefined ? {} : { body: call.body }),
+  })
 }
 
 const model = createHttpClient(ModelService, send)
@@ -98,7 +105,8 @@ async function request<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 export const api: RouterApi = {
-  listModels: () => request(async () => toWire(ListModelsResponseSchema, await model.listModels({})).models ?? []),
+  listModels: () =>
+    request(async () => toWire(ListModelsResponseSchema, await model.listModels({})).models ?? []),
   listRequests: (filters, pageToken = '') =>
     request(async () => {
       const toTime = new Date(filters.toTime)
@@ -118,5 +126,7 @@ export const api: RouterApi = {
   getUsage: (days, app = '', modelName = '') =>
     request(async () => toWire(UsageSummarySchema, await owner.getUsage({ days, app, model: modelName }))),
   generate: (input) =>
-    request(async () => toWire(GenerationSchema, await model.generate(fromWire(GenerateRequestSchema, input).message))),
+    request(async () =>
+      toWire(GenerationSchema, await model.generate(fromWire(GenerateRequestSchema, input).message)),
+    ),
 }

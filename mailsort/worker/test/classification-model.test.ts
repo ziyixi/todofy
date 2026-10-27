@@ -12,9 +12,8 @@ function binding(overrides: Partial<Omit<Generation, '$typeName' | '$unknown'>> 
   return { fetch: vi.fn(async (request: Request) => {
     const input = fromWire(GenerateRequestSchema, await request.clone().json()).message;
     return Response.json(toWire(GenerationSchema, create(GenerationSchema, {
-      name: `requests/${input.requestId}`, model: input.config?.model ?? '', reportedModel: 'synthetic-reported-model', state: 'succeeded',
-      output: JSON.stringify({ items: ITEMS }), parameters: input.config?.parameters, attemptCount: 1, upstreamStarted: true, finishReason: 'complete',
-      usage: { available: true, inputTokens: 150, outputTokens: 50, totalTokens: 200, cachedInputTokens: 30, cacheWriteTokens: 20, reasoningOutputTokens: 12, estimatedCostMicrousd: 1506, billingKind: 'api' }, ...overrides,
+      name: `requests/${crypto.randomUUID()}`, model: input.model, output: JSON.stringify({ items: ITEMS }),
+      usage: { available: true, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 20, estimatedCostMicrousd: 1506, billingKind: 'api' }, ...overrides,
     })));
   }) };
 }
@@ -27,15 +26,15 @@ describe('Mailsort Model Router calls', () => {
     expect(request?.url).toBe('https://model-router.internal/api/model/v1/generations:generate');
     expect(request?.headers.get('authorization')).toBeNull();
     const sent = fromWire(GenerateRequestSchema, await request?.clone().json()).message;
-    expect(sent.config?.model).toBe(CLASSIFIER_MODELS[provider]);
-    expect(sent.config?.instructions.map(block => ({ text: block.text, cache: block.cache }))).toEqual([
+    expect(sent.model).toBe(CLASSIFIER_MODELS[provider]);
+    expect(sent.instructions.map(block => ({ text: block.text, cache: block.cache }))).toEqual([
       { text: PROMPT.basePrompt, cache: true }, { text: PROMPT.personalRules, cache: true },
     ]);
-    expect(sent.config?.parameters).toMatchObject({ effort: 'medium', allowFallback: false });
-    expect(sent.config?.parameters?.maxOutputTokens).toBeUndefined();
+    expect(sent).toMatchObject({ effort: 'medium', allowFallback: false });
+    expect(sent.maxOutputTokens).toBe(0);
     expect(JSON.parse(sent.input)).toEqual({ emails: EMAILS });
-    expect(JSON.parse(sent.config?.outputSchemaJson ?? '{}')).toMatchObject({ properties: { items: { items: { required: ['id', 'bucket', 'reason'] } } } });
-    expect(result).toMatchObject({ items: [{ id: 'synthetic-a', bucket: 'P3' }], costMicros: 1506, inputTokens: 150, cacheWriteTokens: 20, cacheReadTokens: 30, thinkingTokens: 12 });
+    expect(JSON.parse(sent.outputSchemaJson)).toMatchObject({ properties: { items: { items: { required: ['id', 'bucket', 'reason'] } } } });
+    expect(result).toMatchObject({ items: [{ id: 'synthetic-a', bucket: 'P3' }], costMicros: 1506, inputTokens: 150, cacheWriteTokens: 20, cacheReadTokens: 30, thinkingTokens: null });
   });
 
   it('keeps normal single batches uncached', async () => {
@@ -43,15 +42,15 @@ describe('Mailsort Model Router calls', () => {
     await classifyEmails(router, 'claude', EMAILS, PROMPT);
     const request = router.fetch.mock.calls[0]?.[0];
     const sent = fromWire(GenerateRequestSchema, await request?.clone().json()).message;
-    expect(sent.config?.instructions.every(block => !block.cache)).toBe(true);
+    expect(sent.instructions.every(block => !block.cache)).toBe(true);
   });
 
   it.each(['MODEL_SPEND_LIMIT', 'MODEL_AUTH', 'MODEL_NOT_CONFIGURED', 'MODEL_QUOTA', 'MODEL_INVALID_ANSWER', 'MODEL_REFUSED', 'MODEL_OUTPUT_LIMIT'])('maps common reason %s without interpreting vendor payloads', async reason => {
     const code = reason === 'MODEL_AUTH' ? 7 : reason === 'MODEL_NOT_CONFIGURED' || reason === 'MODEL_REFUSED' ? 9 : reason === 'MODEL_INVALID_ANSWER' ? 13 : 8;
-    const router = binding({ state: 'failed', output: '', error: { $typeName: 'modelrouter.inference.v1.ModelError', code, reason, message: 'Safe synthetic failure.', retryAfterSeconds: 0 } });
+    const router = binding({ output: '', error: { $typeName: 'modelrouter.inference.v1.ModelError', code, reason, message: 'Safe synthetic failure.', retryAfterSeconds: 0 } });
     const error = await classifyEmails(router, 'claude', EMAILS, PROMPT).catch((value: unknown) => value);
     expect(error).toBeInstanceOf(ClassificationError);
-    expect(error).toMatchObject({ attempted: true, spendLimited: reason === 'MODEL_SPEND_LIMIT', configuration: reason === 'MODEL_AUTH' || reason === 'MODEL_NOT_CONFIGURED', usage: { inputTokens: 150, costMicros: 1506 } });
+    expect(error).toMatchObject({ attempted: reason !== 'MODEL_NOT_CONFIGURED', spendLimited: reason === 'MODEL_SPEND_LIMIT', configuration: reason === 'MODEL_AUTH' || reason === 'MODEL_NOT_CONFIGURED', usage: { inputTokens: 150, costMicros: 1506 } });
   });
 
   it('retains usage when the app rejects missing or foreign message IDs', async () => {
@@ -60,17 +59,22 @@ describe('Mailsort Model Router calls', () => {
   });
 
   it('does not claim subscription token usage when it is unavailable', async () => {
-    const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: false, inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, reasoningOutputTokens: 0, billingKind: 'subscription' } });
+    const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: false, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, billingKind: 'subscription' } });
     expect((await classifyEmails(router, 'codex', EMAILS, PROMPT)).usageAvailable).toBe(false);
   });
 
   it.each(['claude', 'codex'] as const)('requires an API cost from common billing metadata under the saved %s choice', async provider => {
-    const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, totalTokens: 200, cachedInputTokens: 30, cacheWriteTokens: 20, reasoningOutputTokens: 12, billingKind: 'api' } });
+    const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 20, billingKind: 'api' } });
     await expect(classifyEmails(router, provider, EMAILS, PROMPT)).rejects.toMatchObject({ code: `${provider}_bad_answer` });
   });
 
   it.each(['claude', 'codex'] as const)('accepts subscription usage without an API price under the saved %s choice', async provider => {
-    const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, totalTokens: 200, cachedInputTokens: 30, cacheWriteTokens: 0, reasoningOutputTokens: 12, billingKind: 'subscription' } });
+    const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 0, billingKind: 'subscription' } });
+    expect(await classifyEmails(router, provider, EMAILS, PROMPT)).toMatchObject({ usageAvailable: true, inputTokens: 150, outputTokens: 50, costMicros: 0 });
+  });
+
+  it.each(['claude', 'codex'] as const)('keeps subscription reference value out of API spend under the saved %s choice', async provider => {
+    const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 0, estimatedCostMicrousd: 999, billingKind: 'subscription' } });
     expect(await classifyEmails(router, provider, EMAILS, PROMPT)).toMatchObject({ usageAvailable: true, inputTokens: 150, outputTokens: 50, costMicros: 0 });
   });
 

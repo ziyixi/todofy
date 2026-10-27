@@ -21,6 +21,7 @@ import newsletter.drain as drain
 import newsletter.errors as errors
 import newsletter.model_io as model_io
 import newsletter.schema_compat as schema_compat
+import newsletter.settings as newsletter_settings
 import newsletter.types as types
 import newsletter.usage as newsletter_usage
 
@@ -346,14 +347,14 @@ class ModelEditor:
     def __init__(
         self,
         client: models.ModelClient,
-        model: str = "models/sol-6-1",
+        model: str = "gpt-6.1-sol",
         *,
         timeout_seconds: float = 840,
     ) -> None:
         if not model.strip() or timeout_seconds <= 0:
             raise errors.EditorError("configuration")
         self.client = client
-        self.model = model
+        self.model = newsletter_settings.native_model(model)
         self.timeout_seconds = timeout_seconds
 
     async def execute(
@@ -385,31 +386,23 @@ class ModelEditor:
         approval_sources: ApprovalSources | None = None,
     ) -> tuple[str, set[str], bool]:
         name = f"conversations/{uuid.uuid4()}"
-        close_request_id = drain.register_model_context(name)
+        drain.register_model_context(name)
         try:
-            config = models.GenerationConfig(
-                model=self.model,
-                instructions=(
-                    models.Instruction(text=instructions, cache=True),
-                ),
-                output_schema_json=_json(schema),
-                web_research=True,
-            )
             async with asyncio.timeout(self.timeout_seconds):
-                conversation = await self.client.create_conversation(
+                await self.client.create_conversation(
                     models.CreateConversationRequest(
-                        request_id=str(uuid.uuid4()),
-                        conversation=models.Conversation(
-                            name=name,
-                            config=config,
-                            timeout_ms=min(
-                                840000, max(1, int(self.timeout_seconds * 1000))
-                            ),
+                        name=name,
+                        model=self.model,
+                        instructions=(
+                            models.Instruction(text=instructions, cache=True),
+                        ),
+                        output_schema_json=_json(schema),
+                        web_research=True,
+                        timeout_ms=min(
+                            840000, max(1, int(self.timeout_seconds * 1000))
                         ),
                     )
                 )
-                if conversation.name != name or conversation.state != "open":
-                    raise errors.EditorError("unavailable")
                 text, opened, searched = await self._turn(name, prompt, usage)
                 missing = sorted(
                     set(_unopened_sources(text, opened))
@@ -485,16 +478,9 @@ class ModelEditor:
         finally:
             try:
                 async with asyncio.timeout(30):
-                    receipt = await self.client.close_conversation(
-                        models.CloseConversationRequest(
-                            name=name, request_id=close_request_id
-                        )
+                    await self.client.close_conversation(
+                        models.CloseConversationRequest(name=name)
                     )
-                if receipt.name != name or receipt.state not in {
-                    "closed",
-                    "expired",
-                }:
-                    raise errors.EditorError("unavailable")
                 drain.confirm_model_context_closed(name)
             except asyncio.CancelledError:
                 drain.mark_uncertain()
@@ -510,12 +496,10 @@ class ModelEditor:
     async def _turn(
         self, name: str, prompt: str, usage: newsletter_usage.ModelUsage
     ) -> tuple[str, set[str], bool]:
-        request_id = str(uuid.uuid4())
         usage.start_turn()
-        usage.bind_turn(name, request_id)
+        usage.bind_turn(name)
         result = await self.client.generate(
             models.GenerateRequest(
-                request_id=request_id,
                 conversation=name,
                 input=prompt,
                 timeout_ms=min(
@@ -524,12 +508,7 @@ class ModelEditor:
             )
         )
         usage.observe_generation(result)
-        if (
-            result.error is not None
-            or result.state != "succeeded"
-            or result.finish_reason
-            in {"refused", "output_limit", "interrupted"}
-        ):
+        if result.error is not None:
             code = result.error.code if result.error else 14
             raise errors.EditorError(
                 _error_category(

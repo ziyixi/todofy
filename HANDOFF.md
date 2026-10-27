@@ -43,14 +43,32 @@ The final copy and credential-retirement release is `b875e4a353b9a3eafd34120bbec
 main40462978874 and matching reconcile40463377396 passed, including resolved infrastructure drift.
 The unused Kubernetes Secret can wait for ordinary privileged maintenance; it is no longer referenced.
 
-Owner now requests a smaller invocation contract, actual native model names, provider labels, time-series
+Owner requests a smaller invocation contract, actual native model names, provider labels, time-series
 usage and separate API estimates/subscription-equivalent values, plus daily seven-copy backups including
-retained request bodies. Delete unused fields and their supporting machinery directly; do not reserve fields.
-The first preparatory change adds a deploy-controlled Router maintenance mode without changing the wire API.
-`MODEL_ROUTER_MAINTENANCE_MODE=false` is configured in production. Publish this unpaused preparation first;
-only pause immediately before the checked breaking rollout, then upgrade Router and all consumers and resume.
-Owner history and Ops remain accessible during that short transition. New simplification/backup acceptance
-is still pending; no provider key or business content is part of these changes or backups.
+retained request bodies. Unused fields are deleted directly, without reserved tags. The unchanged-wire
+maintenance preparation `904b018b1b7c2a27e84d198de5d358955686e66d` passed full branch40471880589,
+main40473499431 and matching reconcile40473867682. Production maintenance remains false.
+
+The new source now has a flat model/input call, a seven-field final result, native model catalog and
+separate owner-history proto. Four consumers are updated; their application budgets, stored business
+history and modes remain intact. The new console has hourly/daily SVG charts, providers and separate
+subscription reference values. Router/Gateway replay hashes, public GetConversation, generic provider
+histories, temperature and unused controls are gone. Completed old request bodies remain readable.
+
+Local checks: Worker77; console22 plus synthetic desktop/mobile browser checks and real Chrome preview;
+providers52; TS/Python clients6/5; Mailsort190 unit/123 runtime; Brief109 unit/41 runtime;
+Newsletter2265; Gateway42 plus Linux-only skip and offline image probe; Todofy UI85, full runtime361
+then39 affected corrected fixture tests. All affected types/lint/format checks passed. API lint77 files,
+scoped breaking checks, catalog/config generation and Infra tests48+102 passed. These are local checks;
+the new API has not yet been published. Full branch CI remains required.
+
+Backup copies completed D1 request rows and retained bodies in bounded steps. Seven-day lifecycle uses
+one new private bucket, with initial backup armed through Ops and daily04:47UTC trigger. Synthetic tests
+include native workerd D1/R2 copy and exact SQLite/body restore. Read-only bootstrap plan confirms exactly
+2creates (`model-router-backups` and its lifecycle),48existing no-ops; resource apply is not yet done.
+After green branch CI, use the existing create-only bootstrap, pause the checked current Router only
+for the coordinated rollout, release all consumers and resume. Verify native calls, backup completion,
+actual UI and matching-main resolved drift before recording delivery. No provider keys are in backups.
 
 ### Tasks Sunday planning week (`codex/tasks-next-step-estimate`)
 

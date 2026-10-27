@@ -188,12 +188,8 @@ async def _check_model_router(
         catalog = await client.list_models()
     if not any(
         item.configured
-        and item.generation
-        and item.conversations
-        and item.web_research
-        and (
-            item.name == settings.model or item.upstream_model == settings.model
-        )
+        and item.kind == "text"
+        and item.id == newsletter_settings.native_model(settings.model)
         for item in catalog.models
     ):
         raise PreflightError("MODEL_UNAVAILABLE")

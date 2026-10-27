@@ -105,7 +105,7 @@ def harness(tmp_path):
             print("private-diagnostic-sentinel")
             with newsletter_usage.model_usage(self.model) as usage:
                 usage.start_turn()
-                usage.bind_turn("thread-test", "turn-test")
+                usage.bind_turn("thread-test")
                 usage.observe_generation(
                     tests_support_usage.notification(150, 30, cached=90)
                 )
@@ -212,7 +212,7 @@ async def test_case_inputs_outputs_latest_usage_and_private_modes_are_durable(
     assert len(harness.calls) == 2
     assert len({call[-1] for call in harness.calls}) == 2
     assert all(
-        home == harness.client and model == "models/sol-6-1" and timeout == 300
+        home == harness.client and model == "gpt-6.1-sol" and timeout == 300
         for home, model, timeout in harness.constructors
     )
     # Cumulative 120 -> 180 snapshots replace one another, never sum to 300.
@@ -405,12 +405,9 @@ async def test_existing_production_correction_recorded_not_hidden_as_one_turn(
 
         async def execute(self, *args):
             with newsletter_usage.model_usage("fixture-model") as usage:
-                for index, (input_tokens, output_tokens) in enumerate(
-                    [(100, 20), (150, 30)], 1
-                ):
-                    turn_id = f"turn-{index}"
+                for input_tokens, output_tokens in [(100, 20), (150, 30)]:
                     usage.start_turn()
-                    usage.bind_turn("thread-test", turn_id)
+                    usage.bind_turn("thread-test")
                     event = tests_support_usage.notification(
                         input_tokens, output_tokens
                     )
@@ -498,6 +495,5 @@ def test_cli_uses_only_explicit_configuration_not_environment_or_dotenv(
     )
     assert "client" not in received[0]
     assert (
-        received[0]["model"] == "models/sol-6-1"
-        and received[0]["timeout"] == 300
+        received[0]["model"] == "gpt-6.1-sol" and received[0]["timeout"] == 300
     )

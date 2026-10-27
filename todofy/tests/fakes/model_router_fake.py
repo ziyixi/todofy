@@ -5,30 +5,26 @@ import email.utils
 import json
 import math
 import time
+import uuid
 from typing import Any
 
 from tests.fakes.server import FakeServer, Recorded, Reply
 
 GENERATE_PATH = "/api/model/v1/generations:generate"
-PUBLIC_MODELS = ("models/gemini-email", "models/gemini-report", "models/sol-6-1")
-REPORTED = {"models/gemini-email": "model-a", "models/gemini-report": "gemini-probe"}
+PUBLIC_MODELS = ("gemini-3.5-flash-lite", "gemini-3.8-flash", "gpt-6.1-sol")
+REPORTED = {"gemini-3.5-flash-lite": "model-a", "gemini-3.8-flash": "gemini-probe"}
 
 
-def text_reply(text: str, *, tokens: int = 100, model: str = "fake", attempts: int = 1) -> Reply:
+def text_reply(text: str, *, tokens: int = 100, model: str = "fake") -> Reply:
     return Reply(
         200,
         {
-            "state": "succeeded",
             "output": text,
-            "reported_model": model,
-            "attempt_count": attempts,
-            "upstream_started": True,
-            "finish_reason": "complete",
+            "model": model,
             "usage": {
                 "available": True,
                 "input_tokens": tokens // 2,
                 "output_tokens": tokens - tokens // 2,
-                "total_tokens": tokens,
             },
         },
     )
@@ -44,10 +40,6 @@ def error_reply(status: int, headers: dict[str, str] | None = None) -> Reply:
     return Reply(
         200,
         {
-            "state": "failed",
-            "attempt_count": 1,
-            "upstream_started": True,
-            "finish_reason": "interrupted",
             "usage": {"available": False},
             "error": {
                 "code": 8 if status == 429 else 16 if status in {400, 401, 403} else 14,
@@ -79,13 +71,12 @@ class ModelCall:
     @classmethod
     def of(cls, request: Recorded) -> "ModelCall":
         body = request.json()
-        config = body.get("config", {})
-        public = config.get("model", "")
-        schema = config.get("output_schema_json", "")
+        public = body.get("model", "")
+        schema = body.get("output_schema_json", "")
         return cls(
             REPORTED.get(public, public),
             public,
-            "\n\n".join(item["text"] for item in config.get("instructions", [])),
+            "\n\n".join(item["text"] for item in body.get("instructions", [])),
             body.get("input", ""),
             json.loads(schema) if schema else None,
             request.at,
@@ -116,19 +107,29 @@ class ModelRouterFake(FakeServer):
 
     def _next_reply(self, request: Recorded) -> Reply:
         reply = super()._next_reply(request)
-        if request.path == GENERATE_PATH and isinstance(reply.body, dict) and "state" in reply.body:
+        if request.path == GENERATE_PATH and isinstance(reply.body, dict):
             body = dict(reply.body)
-            sent = request.json()
-            public = sent["config"]["model"]
-            body.update(name="requests/" + sent["request_id"], model=public)
-            if body.get("reported_model") == "fake":
-                body["reported_model"] = REPORTED.get(public, public)
+            selected = request.json()["model"]
+            body["name"] = "requests/" + str(uuid.uuid4())
+            if body.get("model", "fake") == "fake":
+                body["model"] = REPORTED.get(selected, selected)
             return dataclasses.replace(reply, body=body)
         return reply
 
     def _catalog(self, _request: Recorded, _match: Any) -> Reply:
         return Reply(
-            200, {"models": [{"name": model, "configured": True, "generation": True} for model in PUBLIC_MODELS]}
+            200,
+            {
+                "models": [
+                    {
+                        "id": model,
+                        "configured": True,
+                        "kind": "text",
+                        "provider": "openai" if model.startswith("gpt-") else "google",
+                    }
+                    for model in PUBLIC_MODELS
+                ]
+            },
         )
 
     def _answer(self, request: Recorded, _match: Any) -> Reply:

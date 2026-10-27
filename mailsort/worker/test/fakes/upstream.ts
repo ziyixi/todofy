@@ -88,16 +88,16 @@ export class FakeUpstream {
     const body = request.method === 'GET' || request.method === 'HEAD' ? '' : await request.text();
     if (url.pathname === '/api/model/v1/models') {
       return Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [
-        { name: 'models/claude-opus-5-5', configured: this.claude.configured }, { name: 'models/sol-6-1', configured: this.codex.configured },
+        { id: 'claude-opus-5-5', configured: this.claude.configured }, { id: 'gpt-6.1-sol', configured: this.codex.configured },
       ] })));
     }
     if (request.method === 'POST' && url.pathname === '/api/model/v1/generations:generate') {
       const input = fromWire(GenerateRequestSchema, JSON.parse(body)).message;
       const emails = (JSON.parse(input.input) as { emails: ClaudeEmail[] }).emails;
-      const isClaude = input.config?.model === 'models/claude-opus-5-5';
+      const isClaude = input.model === 'claude-opus-5-5';
       const engine = isClaude ? this.claude : this.codex;
       if (engine.configured) engine.calls.push(emails);
-      if (isClaude) this.claude.systems.push(input.config?.instructions ?? []);
+      if (isClaude) this.claude.systems.push(input.instructions);
       else this.codex.requests.push(input);
       const reason = !engine.configured ? 'MODEL_NOT_CONFIGURED' : isClaude && this.claude.spendLimit ? 'MODEL_SPEND_LIMIT' : engine.errorReason;
       const code = !engine.configured ? 9 : isClaude && this.claude.spendLimit ? 8 : engine.errorCode;
@@ -107,13 +107,11 @@ export class FakeUpstream {
       const inputTokens = engine.inputTokens + cacheWrite + cacheRead;
       const cost = Math.ceil(engine.inputTokens * 4 + cacheWrite * 5 + cacheRead * 0.2 + engine.outputTokens * 20);
       return Response.json(toWire(GenerationSchema, create(GenerationSchema, {
-        name: `requests/${input.requestId}`, model: input.config?.model ?? '', reportedModel: isClaude ? 'claude-opus-5-5' : 'gpt-6.1-sol',
-        state: reason ? 'failed' : 'succeeded', output: reason ? '' : JSON.stringify({ items }), parameters: input.config?.parameters,
-        upstreamStarted: !reason, attemptCount: engine.configured ? 1 : 0, finishReason: reason ? '' : 'complete',
+        name: `requests/${crypto.randomUUID()}`, model: isClaude ? 'claude-opus-5-5' : 'gpt-6.1-sol', output: reason ? '' : JSON.stringify({ items }),
         ...(reason ? { error: { code, reason, message: 'Synthetic model failure.' } } : {}),
         usage: { available: !reason && (isClaude || this.codex.usageAvailable), billingKind: isClaude ? 'api' : 'subscription', inputTokens: reason ? 0 : inputTokens, outputTokens: reason ? 0 : engine.outputTokens,
-          totalTokens: reason ? 0 : inputTokens + engine.outputTokens, cacheWriteTokens: cacheWrite, cachedInputTokens: cacheRead,
-          reasoningOutputTokens: isClaude ? this.claude.thinkingTokens ?? 0 : 0, ...(isClaude ? { estimatedCostMicrousd: cost } : {}) },
+          cacheWriteTokens: cacheWrite, cachedInputTokens: cacheRead,
+          ...(isClaude ? { estimatedCostMicrousd: cost } : {}) },
       })));
     }
     if (request.method === 'POST' && url.pathname.startsWith('/ai/run/')) {

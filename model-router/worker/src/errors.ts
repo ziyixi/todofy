@@ -16,6 +16,3 @@ export function resourceId(name: string, prefix: string): string {
   if (!match) invalid('INVALID_RESOURCE', `Use ${prefix}/{UUID}.`);
   return match[1]!;
 }
-export function requestId(value: string): string {
-  return resourceId(`requests/${value}`, 'requests');
-}

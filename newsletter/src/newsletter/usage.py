@@ -117,7 +117,6 @@ class ModelUsage:
             usage_events=0,
             partial=True,
         )
-        self.turn_id: str | None = None
         self._gap = False
         self._seen: set[str] = set()
 
@@ -138,14 +137,12 @@ class ModelUsage:
 
     def start_turn(self) -> None:
         """Persist a new turn attempt before the provider is invoked."""
-        self.turn_id = None
         self.record["turns_started"] += 1
         self.record["partial"] = True
         self._save()
 
-    def bind_turn(self, thread_id: str | None, turn_id: str | None) -> None:
-        """Bind provider identities used to reject unrelated usage events."""
-        self.turn_id = turn_id
+    def bind_turn(self, thread_id: str | None) -> None:
+        """Keep the context identity in the existing invocation history."""
         if thread_id is not None:
             self.record["thread_id"] = thread_id
 
@@ -163,8 +160,9 @@ class ModelUsage:
                 input_tokens=reported.input_tokens,
                 cached_input_tokens=reported.cached_input_tokens,
                 output_tokens=reported.output_tokens,
-                reasoning_output_tokens=reported.reasoning_output_tokens,
-                total_tokens=reported.total_tokens,
+                # Legacy field; thinking remains included in output.
+                reasoning_output_tokens=0,
+                total_tokens=reported.input_tokens + reported.output_tokens,
             )
             previous = self.record["usage"]
             self.record["usage"] = cast(

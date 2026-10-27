@@ -11,7 +11,7 @@ import type { Env } from './types.ts';
 
 const verifier = createAccessVerifier();
 const machinePath =
-  /^\/api\/model\/v1\/(models|generations:generate|embeddings:embed|conversations(?:\/[0-9a-f-]+(?::close)?)?)$/;
+  /^\/api\/model\/v1\/(models|generations:generate|embeddings:embed|conversations|conversations\/[0-9a-f-]+:close)$/;
 export function errorResponse(error: RpcError): Response {
   return Response.json(statusBody(error, { domain: 'modelrouter.inference.v1' }), { status: error.httpStatus });
 }

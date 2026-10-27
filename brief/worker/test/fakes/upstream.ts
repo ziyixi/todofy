@@ -199,7 +199,7 @@ function writtenItem(packet: Packet, deep: boolean): Record<string, unknown> {
 export function defaultClaude(body: Record<string, unknown>): FakeMessage {
   const step = stepOf(body);
   const model = String(body['model']);
-  const json = (value: unknown): FakeMessage => jsonAnswer(value, model, { inputTokens: 6000, outputTokens: 3000, totalTokens: 9000, cachedInputTokens: step === 'gate' ? 2000 : 0 });
+  const json = (value: unknown): FakeMessage => jsonAnswer(value, model, { inputTokens: 6000, outputTokens: 3000, cachedInputTokens: step === 'gate' ? 2000 : 0 });
   if (step === 'gate') {
     const candidates = userJson(body, '候选：\n') as { id: string; section: string; title: string }[];
     return json({
@@ -260,12 +260,12 @@ export class FakeClaude {
   script: ClaudeScript | null = null;
 
   answer(request: GenerateRequest): Response {
-    const body: Record<string, unknown> = { ...request.config, input: request.input };
+    const body: Record<string, unknown> = { ...request };
     const step = stepOf(body);
     this.requests.push({ step, body });
     const scripted = this.script?.(body, step) ?? null;
     if (scripted instanceof Response) return scripted;
-    if (scripted === 'stall') return modelResponse(request, modelError('MODEL_TIMEOUT', 4, true));
+    if (scripted === 'stall') return modelResponse(request, modelError('MODEL_TIMEOUT', 4));
     return modelResponse(request, scripted ?? defaultClaude(body));
   }
 

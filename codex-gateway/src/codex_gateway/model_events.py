@@ -11,8 +11,6 @@ COUNTERS = {
     "output_tokens": "outputTokens",
     "cached_input_tokens": "cachedInputTokens",
     "cache_write_tokens": "cacheWriteInputTokens",
-    "reasoning_output_tokens": "reasoningOutputTokens",
-    "total_tokens": "totalTokens",
 }
 
 
@@ -44,7 +42,6 @@ class TurnEvents:
     usage_invalid: bool = False
     searched: bool = False
     opened_urls: set[str] = field(default_factory=set)
-    reported_model: str = ""
     completed: bool = False
 
     def usage(self) -> Usage:
@@ -93,7 +90,6 @@ class TurnEvents:
                 raise ValueError("unexpected_tool")
         elif method == "model/rerouted":
             if isinstance(payload.get("toModel"), str):
-                self.reported_model = payload["toModel"]
                 # Fallback is never implicitly authorized by a research turn.
                 raise ValueError("unexpected_model_fallback")
         elif method == "turn/completed":

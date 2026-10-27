@@ -1,7 +1,5 @@
 /** Model Router invocation and Mailsort's strict classification result reader. */
-import { createModelClient, generationConfig, instructions, modelRequest, type ModelBinding, type Usage } from '@ziyixi/model-router-client';
-import { create } from '@ziyixi/proto/protobuf';
-import { ParametersSchema } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
+import { createModelClient, instructions, modelRequest, type ModelBinding, type Usage } from '@ziyixi/model-router-client';
 import { classificationItems, CLASSIFICATION_OUTPUT_SCHEMA, type ClassificationEmail, type ClassificationItem } from './classification-result.ts';
 import { CLASSIFICATION_EFFORT, CLASSIFIER_MODELS } from './classifier-config.ts';
 import type { ClassificationProviderName } from './settings.ts';
@@ -44,7 +42,7 @@ export class ClassificationError extends Error {
 
 function usageOf(usage: Usage | undefined): ClassificationUsage | undefined {
   if (!usage?.available || (usage.billingKind === 'api' && usage.estimatedCostMicrousd === undefined)) return undefined;
-  return { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheWriteTokens: usage.cacheWriteTokens, cacheReadTokens: usage.cachedInputTokens, thinkingTokens: usage.reasoningOutputTokens, costMicros: usage.estimatedCostMicrousd ?? 0 };
+  return { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheWriteTokens: usage.cacheWriteTokens, cacheReadTokens: usage.cachedInputTokens, thinkingTokens: null, costMicros: usage.billingKind === 'api' ? usage.estimatedCostMicrousd ?? 0 : 0 };
 }
 
 export async function classifyEmails(
@@ -56,23 +54,22 @@ export async function classifyEmails(
   if (binding === undefined) throw new ClassificationError(provider, 'MODEL_NOT_CONFIGURED');
   const ids = new Set(emails.map(email => email.id));
   if (!emails.length || emails.length > DRAIN_MAX || ids.size !== emails.length || ids.has('') || !prompt.basePrompt.trim()) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', { configuration: true });
-  const config = generationConfig(CLASSIFIER_MODELS[provider], prompt.basePrompt, CLASSIFICATION_OUTPUT_SCHEMA);
-  config.instructions = instructions(...[prompt.basePrompt, prompt.personalRules].filter(text => text.trim()).map(text => ({ text, cache: prompt.cachePrompt === true })));
-  config.parameters = create(ParametersSchema, { effort: CLASSIFICATION_EFFORT });
+  const options = { model: CLASSIFIER_MODELS[provider], effort: CLASSIFICATION_EFFORT, outputSchemaJson: JSON.stringify(CLASSIFICATION_OUTPUT_SCHEMA),
+    instructions: instructions(...[prompt.basePrompt, prompt.personalRules].filter(text => text.trim()).map(text => ({ text, cache: prompt.cachePrompt === true }))) };
   let result;
   try {
-    result = await createModelClient(binding).generate(modelRequest(JSON.stringify({ emails }), config, 120_000));
+    result = await createModelClient(binding).generate(modelRequest(JSON.stringify({ emails }), options, 120_000));
   } catch {
     throw new ClassificationError(provider, 'MODEL_UNAVAILABLE', { attempted: true });
   }
   const usage = usageOf(result.usage);
-  const options = { attempted: result.attemptCount > 0, ...(usage === undefined ? {} : { usage }) };
-  if (result.error) throw new ClassificationError(provider, result.error.reason, { ...options, configuration: result.error.reason !== 'MODEL_REFUSED' && [3, 7, 9, 16].includes(result.error.code) });
-  if (result.state !== 'succeeded' || result.parameters?.effort !== CLASSIFICATION_EFFORT || (result.usage?.billingKind === 'api' && usage === undefined)) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', options);
+  const outcome = { attempted: result.error?.reason !== 'MODEL_NOT_CONFIGURED', ...(usage === undefined ? {} : { usage }) };
+  if (result.error) throw new ClassificationError(provider, result.error.reason, { ...outcome, configuration: result.error.reason !== 'MODEL_REFUSED' && [3, 7, 9, 16].includes(result.error.code) });
+  if (result.usage?.billingKind === 'api' && usage === undefined) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', outcome);
   let output: unknown;
-  try { output = JSON.parse(result.output); } catch { throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', options); }
+  try { output = JSON.parse(result.output); } catch { throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', outcome); }
   const items = classificationItems(output, ids);
-  if (items === null) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', options);
-  return { model: result.reportedModel || result.model, items, usageAvailable: usage !== undefined,
+  if (items === null) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', outcome);
+  return { model: result.model, items, usageAvailable: usage !== undefined,
     inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0, cacheWriteTokens: usage?.cacheWriteTokens ?? 0, cacheReadTokens: usage?.cacheReadTokens ?? 0, thinkingTokens: usage?.thinkingTokens ?? null, costMicros: usage?.costMicros ?? 0 };
 }

@@ -12,16 +12,17 @@ from unittest.mock import patch
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
-from ziyixi_proto.codex.inference.v1.inference_pb import RunInferenceResponse
+from ziyixi_proto.modelrouter.inference.v1.inference_pb import Generation
 
 from codex_gateway.app import create_app
+from codex_gateway.modelrouter import ModelExecutor
 
 
 async def request(app, token: str | None):
     raw = json.dumps(
         {
-            "instructions": "Synthetic image check",
-            "input_json": "{}",
+            "model": "gpt-6.1-sol",
+            "input": "{}",
             "output_schema_json": "{}",
         }
     ).encode()
@@ -34,8 +35,8 @@ async def request(app, token: str | None):
         "http_version": "1.1",
         "method": "POST",
         "scheme": "http",
-        "path": "/api/codex/v1/inference:run",
-        "raw_path": b"/api/codex/v1/inference:run",
+        "path": "/api/codex/v1/model/generations:generate",
+        "raw_path": b"/api/codex/v1/model/generations:generate",
         "query_string": b"",
         "root_path": "",
         "headers": headers,
@@ -90,11 +91,10 @@ async def main():
     )
     calls = []
 
-    async def runner(_message, _home):
-        calls.append(True)
-        return RunInferenceResponse(
-            model="synthetic", effort="medium", output_json="{}"
-        )
+    class Executor(ModelExecutor):
+        async def generate(self, _message, _home):
+            calls.append(True)
+            return Generation(model="gpt-6.1-sol", output="{}")
 
     def jwks(_request, **_kwargs):
         assert _request.full_url == info["access_issuer"] + "/cdn-cgi/access/certs"
@@ -108,7 +108,8 @@ async def main():
             ),
         ):
             app = create_app(
-                monitor_db=pathlib.Path(temporary) / "monitor.sqlite3", runner=runner
+                monitor_db=pathlib.Path(temporary) / "monitor.sqlite3",
+                model_executor=Executor(),
             )
             assert await request(app, None) == (401, False)
             assert await request(app, token) == (200, True)

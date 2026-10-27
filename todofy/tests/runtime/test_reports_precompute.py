@@ -73,6 +73,7 @@ def test_a_row_from_before_today_s_run_is_recomputed(probe):
 def test_a_failed_run_is_retried_in_ten_minutes_and_stores_nothing(probe):
     seed_summaries(probe, 1)
     probe.gemini.queue_generate(error_reply(500))
+    probe.gemini.queue_generate(error_reply(500))
     result = probe.call("/reports/tick", now=NOW)
     assert result["next"] == NOW + 600
     assert result["budget"][-1] == ["failure", "summary", 0, "2026-09-28"]

@@ -9,25 +9,22 @@ export interface FakeMessage {
   readonly finishReason?: string;
   readonly usage?: Partial<Omit<Usage, '$typeName'>>;
   readonly error?: { code: number; reason: string; message?: string; retryAfterSeconds?: number };
-  readonly upstreamStarted?: boolean;
-  readonly contributingModels?: string[];
+    readonly contributingModels?: string[];
 }
 export function jsonAnswer(value: unknown, model = 'synthetic-reported-model', usage: FakeMessage['usage'] = {}): FakeMessage {
   return { model, output: JSON.stringify(value), usage };
 }
-export function modelError(reason: string, code: number, upstreamStarted = false): FakeMessage {
-  return { error: { code, reason }, upstreamStarted, finishReason: upstreamStarted ? 'interrupted' : '', usage: { available: false } };
+export function modelError(reason: string, code: number): FakeMessage {
+  return { error: { code, reason }, usage: { available: false } };
 }
 export function modelResponse(request: GenerateRequest, message: FakeMessage): Response {
   const finish = message.finishReason ?? 'complete';
   const error = message.error ?? (finish === 'refused' ? { code: 9, reason: 'MODEL_REFUSED' } : finish === 'output_limit' ? { code: 8, reason: 'MODEL_OUTPUT_LIMIT' } : undefined);
-  const model = message.model ?? request.config?.model ?? '';
+  const model = message.model ?? request.model;
   return Response.json(toWire(GenerationSchema, create(GenerationSchema, {
-    name: `requests/${request.requestId}`, app: 'brief', model: request.config?.model ?? '', reportedModel: model,
-    state: error ? 'failed' : 'succeeded', output: error ? '' : message.output ?? '{}', parameters: request.config?.parameters,
-    finishReason: finish, upstreamStarted: message.upstreamStarted ?? true, attemptCount: 1,
+    name: `requests/${crypto.randomUUID()}`, model, output: error ? '' : message.output ?? '{}',
     contributingModels: message.contributingModels ?? [model],
-    usage: { available: true, inputTokens: 4000, outputTokens: 3000, totalTokens: 7000, estimatedCostMicrousd: 20_000, ...message.usage },
+    usage: { available: true, billingKind: 'api', inputTokens: 4000, outputTokens: 3000, estimatedCostMicrousd: 20_000, ...message.usage },
     ...(error ? { error: { ...error, message: error.message ?? 'Safe synthetic model failure.' } } : {}),
   })));
 }

@@ -13,9 +13,9 @@ from ziyixi_proto.wire_json import from_wire, to_wire
 from tests.unit.host_support import D1, stubbed_pyodide
 from todofy.core.owner_ui import UiError
 
-EMAIL = "models/gemini-email"
-REPORT = "models/gemini-report"
-SOL = "models/sol-6-1"
+EMAIL = "gemini-3.5-flash-lite"
+REPORT = "gemini-3.8-flash"
+SOL = "gpt-6.1-sol"
 
 
 @pytest.fixture
@@ -26,9 +26,7 @@ def settings_api(monkeypatch):
         class Client:
             async def list_models(self):
                 return models.ListModelsResponse(
-                    models=tuple(
-                        models.Model(name=name, configured=True, generation=True) for name in (EMAIL, REPORT, SOL)
-                    )
+                    models=tuple(models.Model(id=name, configured=True, kind="text") for name in (EMAIL, REPORT, SOL))
                 )
 
         monkeypatch.setattr(model, "client", lambda *_args: Client())
@@ -47,7 +45,20 @@ def test_initial_route_choices_and_configured_catalog(settings_api):
     module, env = settings_api
     result = asyncio.run(module.catalog(env))
     assert (result.settings.email_model, result.settings.report_model, result.settings.etag) == (EMAIL, REPORT, "0")
-    assert [model.name for model in result.models] == [EMAIL, REPORT, SOL]
+    assert [model.id for model in result.models] == [EMAIL, REPORT, SOL]
+
+
+def test_old_saved_route_aliases_normalize_without_rewriting_storage(settings_api):
+    module, env = settings_api
+    env.DB.db.execute("INSERT INTO model_settings VALUES (1, 'models/sol-6-1', 'models/gemini-report', 7)")
+    selected = asyncio.run(module.get(env))
+    assert (selected.email_model, selected.report_model, selected.etag) == (SOL, REPORT, "7")
+    saved = env.DB.db.execute("SELECT email_model,report_model FROM model_settings").fetchone()
+    assert tuple(saved) == ("models/sol-6-1", "models/gemini-report")
+    assert module.native_model("gemini-3.7-flash") == REPORT
+    assert module.fallback_models(EMAIL) == (REPORT,)
+    assert module.fallback_models(REPORT, report=True) == (EMAIL,)
+    assert module.fallback_models(SOL) == ()
 
 
 def test_update_replays_identical_operation_and_rejects_reused_identity(settings_api):

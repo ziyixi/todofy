@@ -1,40 +1,33 @@
-"""Bounded model turns and ephemeral SDK conversations; no replay or saved jobs."""
+"""Finite Codex turns and one ephemeral SDK thread per Newsletter context."""
 
 import asyncio
 import contextlib
 import dataclasses
-import hashlib
 import json
 import os
 import pathlib
-import re
 import signal
+import tempfile
 import time
 import uuid
-from datetime import UTC, datetime, timedelta
 from importlib import metadata
 from typing import Any
 
 import jsonschema
 from openai_codex.types import ReasoningEffort
 from ziyixi_proto.modelrouter.inference.v1.inference_pb import (
-    Conversation,
     CreateConversationRequest,
     GenerateRequest,
     Generation,
-    GenerationConfig,
     ListModelsResponse,
     Model,
     ModelError,
-    Parameters,
 )
 from ziyixi_proto.rpc_status import RpcError
-from ziyixi_proto.wire_json import to_wire
 
-from codex_gateway.conversation_store import ConversationStore
 from codex_gateway.model_events import TurnEvents
-from codex_gateway.monitoring import timestamp
 from codex_gateway.runtime import (
+    MODEL,
     _assert_no_skills,
     _interrupt,
     _login_home,
@@ -45,28 +38,20 @@ from codex_gateway.runtime import (
 DEFAULT_TIMEOUT_MS = 110_000
 MAX_TIMEOUT_MS = 840_000
 MAX_GENERATION_OUTPUT_BYTES = 2 * 1024 * 1024
-MODEL_MAP = {
-    "models/sol-6-1": "gpt-6.1-sol",
-    "models/astra-6": "gpt-6-astra",
-    "models/sol-6": "gpt-6-sol",
-    "models/luna-6": "gpt-6-luna",
-    "models/sol-5-6": "gpt-5.6-sol",
-    "models/terra-5-6": "gpt-5.6-terra",
-    "models/luna-5-6": "gpt-5.6-luna",
-}
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-RESOURCE_NAME = re.compile(r"conversations/[a-zA-Z0-9_-]{1,128}")
 
 
 def invalid(message: str = "Invalid model request") -> RpcError:
     return RpcError("INVALID_ARGUMENT", "INVALID_MODEL_REQUEST", message)
 
 
-def validate_request_id(value: str) -> None:
+def validate_name(name: str) -> None:
     try:
-        uuid.UUID(value)
+        prefix, value = name.split("/", 1)
+        if prefix != "conversations" or str(uuid.UUID(value)) != value:
+            raise ValueError
     except (ValueError, AttributeError):
-        raise invalid("A UUID request_id is required") from None
+        raise invalid("A conversations/{UUID} name is required") from None
 
 
 def timeout_ms(value: int, default: int = DEFAULT_TIMEOUT_MS) -> int:
@@ -75,19 +60,18 @@ def timeout_ms(value: int, default: int = DEFAULT_TIMEOUT_MS) -> int:
     return value or default
 
 
-def validate_config(config: GenerationConfig) -> None:
-    if config.model not in MODEL_MAP:
-        raise invalid("Model is not configured on this executor")
-    params = config.parameters or Parameters()
-    if params.effort and params.effort not in EFFORTS:
+def validate_options(request: GenerateRequest | CreateConversationRequest) -> None:
+    if request.model != MODEL:
+        raise invalid("Only gpt-6.1-sol is configured on this executor")
+    if request.effort and request.effort not in EFFORTS:
         raise invalid("Unsupported model effort")
-    if params.temperature is not None or params.max_output_tokens is not None:
-        raise invalid("This model does not support the supplied parameter")
-    if any(not item.text.strip() for item in config.instructions):
+    if isinstance(request, GenerateRequest) and request.max_output_tokens:
+        raise invalid("This model does not support an output token cap")
+    if any(not instruction.text.strip() for instruction in request.instructions):
         raise invalid("Instruction text must not be empty")
-    if config.output_schema_json:
+    if request.output_schema_json:
         try:
-            schema = json.loads(config.output_schema_json)
+            schema = json.loads(request.output_schema_json)
             json.dumps(schema, allow_nan=False)
             jsonschema.Draft202012Validator.check_schema(schema)
             pending = [schema]
@@ -95,28 +79,16 @@ def validate_config(config: GenerationConfig) -> None:
                 value = pending.pop()
                 if isinstance(value, dict):
                     for key in ("$ref", "$dynamicRef"):
-                        if key in value and not value[key].startswith("#"):
-                            raise ValueError(
-                                "External schema references are unsupported"
-                            )
+                        if key in value and (
+                            not isinstance(value[key], str)
+                            or not value[key].startswith("#")
+                        ):
+                            raise ValueError
                     pending.extend(value.values())
                 elif isinstance(value, list):
                     pending.extend(value)
-        except (ValueError, jsonschema.SchemaError, RecursionError):
+        except (ValueError, TypeError, jsonschema.SchemaError, RecursionError):
             raise invalid("Invalid JSON Schema") from None
-
-
-def public_config(config: GenerationConfig) -> GenerationConfig:
-    return GenerationConfig(
-        model=config.model,
-        parameters=config.parameters,
-        web_research=config.web_research,
-    )
-
-
-def fingerprint(config: GenerationConfig) -> str:
-    value = json.dumps(to_wire(config), sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def process_of(client: Any) -> Any:
@@ -126,9 +98,7 @@ def process_of(client: Any) -> Any:
 
 @dataclasses.dataclass
 class ExecutionContext:
-    receipt: Conversation
-    config: GenerationConfig
-    config_hash: str
+    options: CreateConversationRequest
     deadline: float
     directory: Any = None
     client: Any = None
@@ -139,63 +109,62 @@ class ExecutionContext:
     totals: dict[str, int] | None = None
     turns: int = 0
     closing: bool = False
-    lock: asyncio.Lock = dataclasses.field(default_factory=asyncio.Lock)
+    closed: bool = False
     cleanup_lock: asyncio.Lock = dataclasses.field(default_factory=asyncio.Lock)
 
 
 class ModelExecutor:
-    def __init__(self, database: pathlib.Path, *, sdk: Any = None):
-        self.store = ConversationStore(database)
+    def __init__(self, *, sdk: Any = None):
         self.sdk = sdk
         self.contexts: dict[str, ExecutionContext] = {}
-        self.creating = asyncio.Lock()
 
     @staticmethod
     def validate_create(request: CreateConversationRequest) -> None:
-        validate_request_id(request.request_id)
-        if request.conversation is None or request.conversation.config is None:
-            raise invalid("Conversation configuration is required")
-        validate_config(request.conversation.config)
-        timeout_ms(request.conversation.timeout_ms, MAX_TIMEOUT_MS)
-        if request.conversation.name and not RESOURCE_NAME.fullmatch(
-            request.conversation.name
-        ):
-            raise invalid("Invalid conversation name")
+        validate_name(request.name)
+        validate_options(request)
+        timeout_ms(request.timeout_ms, MAX_TIMEOUT_MS)
 
     @staticmethod
     def validate_generate(request: GenerateRequest) -> None:
-        validate_request_id(request.request_id)
-        if (request.config is not None) == bool(request.conversation):
-            raise invalid("Supply exactly one config or conversation")
         if not request.input:
             raise invalid("Input text is required")
         timeout_ms(request.timeout_ms)
-        if request.config is not None:
-            validate_config(request.config)
-        elif not RESOURCE_NAME.fullmatch(request.conversation):
-            raise invalid("Invalid conversation name")
-
-    def catalog(self) -> ListModelsResponse:
-        return ListModelsResponse(
-            models=tuple(
-                Model(
-                    name=name,
-                    display_name=model,
-                    provider="openai",
-                    upstream_model=model,
-                    configured=True,
-                    generation=True,
-                    conversations=True,
-                    web_research=True,
-                    efforts=EFFORTS,
+        if request.conversation:
+            validate_name(request.conversation)
+            if any(
+                (
+                    request.model,
+                    request.instructions,
+                    request.effort,
+                    request.max_output_tokens,
+                    request.output_schema_json,
+                    request.allow_fallback,
                 )
-                for name, model in MODEL_MAP.items()
+            ):
+                raise invalid("A context turn cannot replace its model or options")
+        else:
+            validate_options(request)
+
+    @staticmethod
+    def catalog() -> ListModelsResponse:
+        return ListModelsResponse(
+            models=(
+                Model(
+                    id=MODEL,
+                    display_name="Sol 6.1",
+                    provider="openai",
+                    kind="text",
+                    configured=True,
+                    efforts=EFFORTS,
+                ),
             )
         )
 
-    async def _open(self, context: ExecutionContext, home: pathlib.Path) -> None:
-        import tempfile
+    def effort_for(self, request: GenerateRequest) -> str:
+        context = self.contexts.get(request.conversation)
+        return context.options.effort if context else request.effort
 
+    async def _open(self, context: ExecutionContext, home: pathlib.Path) -> None:
         sdk = self.sdk
         if sdk is None:
             import openai_codex as sdk
@@ -209,7 +178,10 @@ class ModelExecutor:
         workspace = pathlib.Path(context.directory.name)
         context.client = sdk.AsyncCodex(
             runtime_config(
-                sdk, home, workspace, web_research=context.config.web_research
+                sdk,
+                home,
+                workspace,
+                web_research=context.options.web_research,
             )
         )
         await context.client.__aenter__()
@@ -219,111 +191,73 @@ class ModelExecutor:
         await _assert_no_skills(context.client, workspace)
         context.thread = await context.client.thread_start(
             cwd=str(workspace),
-            model=MODEL_MAP[context.config.model],
+            model=MODEL,
             model_provider="openai",
             sandbox=sdk.Sandbox.read_only,
             approval_mode=sdk.ApprovalMode.deny_all,
             ephemeral=True,
             developer_instructions="\n\n".join(
-                item.text for item in context.config.instructions
+                item.text for item in context.options.instructions
             )
             or None,
         )
 
     async def create(
         self, request: CreateConversationRequest, home: pathlib.Path
-    ) -> Conversation:
+    ) -> None:
         self.validate_create(request)
-        config = request.conversation.config
-        budget = timeout_ms(request.conversation.timeout_ms, MAX_TIMEOUT_MS)
-        name = request.conversation.name or f"conversations/{uuid.uuid4()}"
-        if not RESOURCE_NAME.fullmatch(name):
-            raise invalid("Invalid conversation name")
-        async with self.creating:
-            existing = self.contexts.get(name)
-            if existing:
-                if existing.config_hash != fingerprint(config):
-                    raise RpcError(
-                        "ALREADY_EXISTS", "CONVERSATION_EXISTS", "Conversation exists"
-                    )
-                return existing.receipt
-            previous = self.store.get(name)
-            if previous:
-                if self.store.config_hash(name) == fingerprint(config):
-                    return previous
-                raise RpcError(
-                    "ALREADY_EXISTS", "CONVERSATION_EXISTS", "Conversation exists"
-                )
-            receipt = Conversation(
-                name=name,
-                config=public_config(config),
-                timeout_ms=budget,
-                state="open",
-                expire_time=timestamp(
-                    datetime.now(UTC) + timedelta(milliseconds=budget)
-                ),
+        if request.name in self.contexts:
+            raise RpcError(
+                "ALREADY_EXISTS", "CONVERSATION_EXISTS", "Context already exists"
             )
-            context = ExecutionContext(
-                receipt=receipt,
-                config=config,
-                config_hash=fingerprint(config),
-                deadline=time.monotonic() + budget / 1000,
-            )
-            try:
-                async with asyncio.timeout(min(DEFAULT_TIMEOUT_MS, budget) / 1000):
-                    await self._open(context, home)
-                self.store.put(receipt, context.directory.name, context.config_hash)
-                self.contexts[name] = context
-                context.expiry = asyncio.create_task(self._expire(context))
-                return receipt
-            except asyncio.CancelledError:
-                await self._cleanup(context)
-                raise
-            except Exception as exc:
-                await self._cleanup(context)
-                if isinstance(exc, TimeoutError):
-                    raise RpcError(
-                        "DEADLINE_EXCEEDED", "MODEL_TIMEOUT", "Model setup timed out"
-                    ) from None
-                code = failure_code(exc)
-                status = "UNAUTHENTICATED" if code == "codex_auth" else "UNAVAILABLE"
+        budget = timeout_ms(request.timeout_ms, MAX_TIMEOUT_MS)
+        context = ExecutionContext(
+            options=request,
+            deadline=time.monotonic() + budget / 1000,
+            task=asyncio.current_task(),
+        )
+        self.contexts[request.name] = context
+        try:
+            async with asyncio.timeout(min(DEFAULT_TIMEOUT_MS, budget) / 1000):
+                await self._open(context, home)
+            context.task = None
+            context.expiry = asyncio.create_task(self._expire(context))
+        except asyncio.CancelledError:
+            if not context.closing:
+                await self._close(context)
+            raise
+        except Exception as error:
+            if not context.closing:
+                await self._close(context)
+            if isinstance(error, TimeoutError):
                 raise RpcError(
-                    status, "MODEL_UNAVAILABLE", "Model setup unavailable"
+                    "DEADLINE_EXCEEDED", "MODEL_TIMEOUT", "Model setup timed out"
                 ) from None
+            code = (
+                "UNAUTHENTICATED"
+                if failure_code(error) == "codex_auth"
+                else "UNAVAILABLE"
+            )
+            raise RpcError(
+                code, "MODEL_UNAVAILABLE", "Model setup unavailable"
+            ) from None
 
     async def _expire(self, context: ExecutionContext) -> None:
         await asyncio.sleep(max(0, context.deadline - time.monotonic()))
-        await self._close(context, "expired")
+        await self._close(context)
 
-    async def get(self, name: str) -> Conversation:
-        if not RESOURCE_NAME.fullmatch(name):
-            raise invalid("Invalid conversation name")
+    async def close(self, name: str) -> None:
+        validate_name(name)
         context = self.contexts.get(name)
         if context:
-            if context.deadline <= time.monotonic():
-                await self._close(context, "expired")
-            else:
-                return context.receipt
-        receipt = self.store.get(name)
-        if receipt is None:
-            raise RpcError(
-                "NOT_FOUND", "CONVERSATION_NOT_FOUND", "Conversation not found"
-            )
-        return receipt
-
-    async def close(self, name: str, request_id: str) -> Conversation:
-        validate_request_id(request_id)
-        receipt = await self.get(name)
-        context = self.contexts.get(name)
-        if context:
-            await self._close(context, "closed")
-            return context.receipt
-        if receipt.state == "lost":
-            # The supervised launch process dies with its original parent, including
-            # its process group. A restarted service never resumes that SDK context.
-            receipt = dataclasses.replace(receipt, state="closed")
-            self.store.put(receipt)
-        return receipt
+            try:
+                await self._close(context)
+            except Exception:
+                raise RpcError(
+                    "UNAVAILABLE",
+                    "MODEL_CLEANUP_PENDING",
+                    "Execution cleanup is not yet confirmed",
+                ) from None
 
     async def _cleanup(self, context: ExecutionContext) -> None:
         process = process_of(context.client)
@@ -336,170 +270,135 @@ class ModelExecutor:
                 if process is None:
                     raise RuntimeError("SDK cleanup failed") from None
         if process is not None:
-            # The launch helper owns a process group containing hosted-tool helpers.
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
             await asyncio.to_thread(process.wait, timeout=5)
         if context.directory is not None:
             context.directory.cleanup()
 
-    async def _close(self, context: ExecutionContext, state: str) -> None:
+    async def _close(self, context: ExecutionContext) -> None:
         async with context.cleanup_lock:
-            if context.receipt.state != "open":
+            if context.closed:
                 return
             context.closing = True
             current = asyncio.current_task()
             if context.task and context.task is not current:
                 context.task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await context.task
+                await asyncio.gather(context.task, return_exceptions=True)
             await self._cleanup(context)
-            context.receipt = dataclasses.replace(context.receipt, state=state)
-            self.store.put(context.receipt)
-            self.contexts.pop(context.receipt.name, None)
+            context.closed = True
+            self.contexts.pop(context.options.name, None)
             if context.expiry and context.expiry is not current:
                 context.expiry.cancel()
 
     async def shutdown(self) -> None:
         for context in tuple(self.contexts.values()):
-            await self._close(context, "closed")
+            await self._close(context)
 
     async def generate(
         self, request: GenerateRequest, home: pathlib.Path
     ) -> Generation:
         self.validate_generate(request)
         budget = timeout_ms(request.timeout_ms)
-        standalone = request.config is not None
+        standalone = not request.conversation
         if standalone:
-            validate_config(request.config)
             context = ExecutionContext(
-                receipt=Conversation(),
-                config=request.config,
-                config_hash=fingerprint(request.config),
+                options=CreateConversationRequest(
+                    model=request.model,
+                    instructions=request.instructions,
+                    effort=request.effort,
+                    output_schema_json=request.output_schema_json,
+                ),
                 deadline=time.monotonic() + budget / 1000,
             )
         else:
-            receipt = await self.get(request.conversation)
             context = self.contexts.get(request.conversation)
-            if not context or receipt.state != "open" or context.closing:
+            if not context or context.closing:
                 raise RpcError(
-                    "FAILED_PRECONDITION",
-                    "CONVERSATION_CLOSED",
-                    "Conversation is closed",
+                    "FAILED_PRECONDITION", "CONVERSATION_CLOSED", "Context is closed"
                 )
-            if context.lock.locked():
+            if context.deadline <= time.monotonic():
+                await self._close(context)
                 raise RpcError(
-                    "ABORTED", "CONVERSATION_BUSY", "Conversation has an active turn"
+                    "FAILED_PRECONDITION", "CONVERSATION_CLOSED", "Context is closed"
                 )
-        async with context.lock:
-            return await self._generate(request, home, context, budget, standalone)
+            if context.task is not None:
+                raise RpcError(
+                    "ABORTED", "CONVERSATION_BUSY", "Context has an active operation"
+                )
+        return await self._generate(request, home, context, budget, standalone)
 
-    async def _generate(
-        self,
-        request: GenerateRequest,
-        home: pathlib.Path,
-        context: ExecutionContext,
-        budget: int,
-        standalone: bool,
-    ) -> Generation:
-        started = datetime.now(UTC)
-        tick = time.monotonic()
+    async def _generate(self, request, home, context, budget, standalone) -> Generation:
         context.task = asyncio.current_task()
-        config = context.config
-        params = config.parameters or Parameters()
-        events = TurnEvents(context.totals, context.turns == 0, config.web_research)
+        options = context.options
+        events = TurnEvents(context.totals, context.turns == 0, options.web_research)
         error = None
-        state = "succeeded"
         cancelled = False
-        upstream_started = False
-        attempted = False
         try:
             async with asyncio.timeout(
-                min(budget / 1000, max(0, context.deadline - tick))
+                min(budget / 1000, max(0, context.deadline - time.monotonic()))
             ):
                 if standalone:
                     await self._open(context, home)
-                options: dict[str, Any] = {}
-                if params.effort:
-                    options["effort"] = ReasoningEffort(params.effort)
-                if config.output_schema_json:
-                    options["output_schema"] = json.loads(config.output_schema_json)
-                attempted = True
-                context.turn = await context.thread.turn(request.input, **options)
-                upstream_started = True
+                turn_options = {}
+                if options.effort:
+                    turn_options["effort"] = ReasoningEffort(options.effort)
+                if options.output_schema_json:
+                    turn_options["output_schema"] = json.loads(
+                        options.output_schema_json
+                    )
+                context.turn = await context.thread.turn(request.input, **turn_options)
                 context.turns += 1
                 await events.collect(context.turn)
                 if len(events.output.encode()) > MAX_GENERATION_OUTPUT_BYTES:
                     raise ValueError("output_too_large")
-                if config.output_schema_json:
+                if options.output_schema_json:
                     decoded = json.loads(events.output)
                     json.dumps(decoded, allow_nan=False)
                     jsonschema.Draft202012Validator(
-                        json.loads(config.output_schema_json)
+                        json.loads(options.output_schema_json)
                     ).validate(decoded)
         except asyncio.CancelledError:
-            state, cancelled = "cancelled", True
-            error = {
-                "code": 1,
-                "message": "Model execution cancelled",
-                "reason": "MODEL_CANCELLED",
-            }
+            cancelled = True
+            error = ModelError(
+                code=1, message="Model execution cancelled", reason="MODEL_CANCELLED"
+            )
             if context.turn is not None:
                 await _interrupt(context.turn)
         except TimeoutError:
-            state = "failed"
-            error = {
-                "code": 4,
-                "message": "Model execution timed out",
-                "reason": "MODEL_TIMEOUT",
-            }
+            error = ModelError(
+                code=4, message="Model execution timed out", reason="MODEL_TIMEOUT"
+            )
             if context.turn is not None:
                 await _interrupt(context.turn)
         except (ValueError, TypeError, jsonschema.ValidationError):
-            state = "failed"
-            error = {
-                "code": 13,
-                "message": "Model returned an invalid answer",
-                "reason": "MODEL_INVALID_ANSWER",
-            }
+            error = ModelError(
+                code=13,
+                message="Model returned an invalid answer",
+                reason="MODEL_INVALID_ANSWER",
+            )
         except Exception as exc:
-            state = "failed"
             kind = failure_code(exc)
             code = 16 if kind == "codex_auth" else 8 if kind == "codex_quota" else 14
             reason = {16: "MODEL_AUTH", 8: "MODEL_QUOTA", 14: "MODEL_UNAVAILABLE"}[code]
-            error = {
-                "code": code,
-                "message": "Model execution unavailable",
-                "reason": reason,
-            }
+            error = ModelError(
+                code=code, message="Model execution unavailable", reason=reason
+            )
         finally:
-            # A missing turn snapshot breaks the next call's cumulative baseline.
             context.totals = None if events.usage_invalid else events.latest
             if standalone:
                 await self._cleanup(context)
             context.turn = None
             context.task = None
-        if not standalone and state != "succeeded" and not context.closing:
-            await self._close(context, "closed")
-        result = Generation(
-            name=f"requests/{request.request_id}",
-            model=config.model,
-            reported_model=events.reported_model,
-            state=state,
-            output=events.output if state == "succeeded" else "",
-            usage=events.usage(),
-            observations=events.observations(),
-            error=ModelError(**error) if error else None,
-            conversation=request.conversation,
-            parameters=params,
-            started_at=timestamp(started),
-            completed_at=timestamp(datetime.now(UTC)),
-            duration_ms=min(2**31 - 1, int((time.monotonic() - tick) * 1000)),
-            metadata=request.metadata,
-            upstream_started=upstream_started,
-            attempt_count=int(attempted),
-            finish_reason="complete" if state == "succeeded" else "interrupted",
-        )
+        if not standalone and error and not context.closing:
+            await self._close(context)
         if cancelled:
             raise asyncio.CancelledError
-        return result
+        return Generation(
+            name=f"requests/{uuid.uuid4()}",
+            model=MODEL,
+            output=events.output if error is None else "",
+            usage=events.usage(),
+            observations=events.observations(),
+            error=error,
+        )

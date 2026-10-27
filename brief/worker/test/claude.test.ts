@@ -17,7 +17,7 @@ function context(message: FakeMessage = jsonAnswer({ research: [], world: [] }),
   const calls: GenerateRequest[] = [];
   const connection = { configured: true, revision: 'synthetic-connection', inputRate: 5, outputRate: 25 };
   const binding = { async fetch(request: Request): Promise<Response> {
-    if (new URL(request.url).pathname.endsWith('/models')) return Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [{ name: OPUS_MODEL, configured: connection.configured, connectionRevision: connection.revision, reservationInputMicrousdPerToken: connection.inputRate, reservationOutputMicrousdPerToken: connection.outputRate }] })));
+    if (new URL(request.url).pathname.endsWith('/models')) return Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [{ id: OPUS_MODEL, configured: connection.configured, reservationInputMicrousdPerToken: connection.inputRate, reservationOutputMicrousdPerToken: connection.outputRate }] })));
     const input = fromWire(GenerateRequestSchema, await request.json()).message;
     calls.push(input);
     return modelResponse(input, message);
@@ -30,17 +30,17 @@ const opus = (overrides: Partial<ModelRequest> = {}): ModelRequest => ({ step: '
 
 describe('Brief Router ledger', () => {
   it('reserves catalog worst-case rates and settles the returned actual cost', async () => {
-    const { ctx, store, calls } = context(jsonAnswer({ research: [], world: [] }, 'synthetic-served', { inputTokens: 15_000, outputTokens: 6000, totalTokens: 21_000, estimatedCostMicrousd: 321_000 }));
+    const { ctx, store, calls } = context(jsonAnswer({ research: [], world: [] }, 'synthetic-served', { inputTokens: 15_000, outputTokens: 6000, estimatedCostMicrousd: 321_000 }));
     expect(await callModel(ctx, opus())).toMatchObject({ kind: 'answer', served: 'synthetic-served' });
     expect(store.one(`SELECT state, input, output, stop, cost, reserved FROM calls`)).toEqual({ state: 'done', input: 15_000, output: 6000, stop: 'end_turn', cost: 0.321, reserved: 0.875 });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.config).toMatchObject({ model: OPUS_MODEL, parameters: { effort: 'medium', maxOutputTokens: 32_000, allowFallback: true } });
-    expect(JSON.parse(calls[0]?.config?.outputSchemaJson ?? '{}')).toMatchObject({ type: 'object' });
+    expect(calls[0]).toMatchObject({ model: OPUS_MODEL, effort: 'medium', maxOutputTokens: 32_000, allowFallback: true });
+    expect(JSON.parse(calls[0]?.outputSchemaJson ?? '{}')).toMatchObject({ type: 'object' });
     expect(calls[0]?.timeoutMs).toBe(780_000);
   });
 
   it('preserves contributing models, cache subsets and a completed answer for crash recovery', async () => {
-    const { ctx, store } = context({ ...jsonAnswer({ research: [], world: [] }), contributingModels: ['synthetic-primary', 'synthetic-fallback'], usage: { inputTokens: 150, outputTokens: 50, totalTokens: 200, cachedInputTokens: 30, cacheWriteTokens: 20, estimatedCostMicrousd: 1506 } });
+    const { ctx, store } = context({ ...jsonAnswer({ research: [], world: [] }), contributingModels: ['synthetic-primary', 'synthetic-fallback'], usage: { inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 20, estimatedCostMicrousd: 1506 } });
     const outcome = await callModel(ctx, opus());
     expect(outcome).toMatchObject({ kind: 'answer', writers: ['synthetic-primary', 'synthetic-fallback'] });
     const row = unreadAnswer(store, '2026-10-12', 'pick', 0);
@@ -56,7 +56,7 @@ describe('Brief Router ledger', () => {
   });
 
   it('keeps a reservation and observed partial counts after an interrupted model', async () => {
-    const { ctx, store } = context({ ...modelError('MODEL_UNAVAILABLE', 14, true), usage: { available: false, inputTokens: 150, cachedInputTokens: 30, cacheWriteTokens: 20 } });
+    const { ctx, store } = context({ ...modelError('MODEL_UNAVAILABLE', 14), usage: { available: false, inputTokens: 150, cachedInputTokens: 30, cacheWriteTokens: 20 } });
     expect(await callModel(ctx, opus())).toMatchObject({ kind: 'failed', code: 'MODEL_UNAVAILABLE' });
     expect(store.one(`SELECT state, cost, input, cache_write, cache_read FROM calls`)).toEqual({ state: 'failed', cost: 0.875, input: 150, cache_write: 20, cache_read: 30 });
     expect(attemptsOf(store, '2026-10-12', 'pick')).toBe(1);
@@ -69,18 +69,15 @@ describe('Brief Router ledger', () => {
     expect(attemptsOf(store, '2026-10-12', 'pick')).toBe(0);
   });
 
-  it('stops rejected connections until their opaque revision or build changes, or owner resumes', async () => {
-    const { ctx, store, calls, connection } = context(modelError('MODEL_AUTH', 7));
+  it('stops rejected connections until the build changes or owner resumes', async () => {
+    const { ctx, store, calls } = context(modelError('MODEL_AUTH', 7));
     expect(await callModel(ctx, opus())).toEqual({ kind: 'rejected', status: 7, errorType: 'MODEL_AUTH' });
-    expect(rejectedState(store)).toMatchObject({ key: 'synthetic-connection', build: 'test' });
+    expect(rejectedState(store)).toMatchObject({ build: 'test' });
     expect(await callModel(ctx, opus())).toEqual({ kind: 'blocked', reason: 'rejected' });
     expect(calls).toHaveLength(1);
-    connection.revision = 'rotated-connection';
-    expect(await callsStopped(store, ctx.env)).toBe(false);
-    await callModel(ctx, opus());
-    expect(await callsStopped(store, { ...ctx.env, BUILD_SHA: 'test-2' })).toBe(false);
+    expect(callsStopped(store, { ...ctx.env, BUILD_SHA: 'test-2' })).toBe(false);
     await callModel(ctx, opus()); resumeCalls(store);
-    expect(await callsStopped(store, ctx.env)).toBe(false);
+    expect(callsStopped(store, ctx.env)).toBe(false);
   });
 
   it('preserves mode, pause, missing connection and budget gates', async () => {
@@ -95,7 +92,7 @@ describe('Brief Router ledger', () => {
     const { ctx, store } = context();
     if (!ctx.env.MODEL_ROUTER) throw new Error('missing synthetic binding');
     ctx.env.MODEL_ROUTER.fetch = request => {
-      if (new URL(request.url).pathname.endsWith('/models')) return Promise.resolve(Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [{ name: OPUS_MODEL, configured: true, connectionRevision: 'synthetic', reservationInputMicrousdPerToken: 5, reservationOutputMicrousdPerToken: 25 }] }))));
+      if (new URL(request.url).pathname.endsWith('/models')) return Promise.resolve(Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [{ id: OPUS_MODEL, configured: true, reservationInputMicrousdPerToken: 5, reservationOutputMicrousdPerToken: 25 }] }))));
       return Promise.reject(new Error('synthetic private transport failure'));
     };
     expect(await callModel(ctx, opus())).toMatchObject({ kind: 'failed', code: 'model_connection_interrupted' });

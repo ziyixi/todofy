@@ -22,6 +22,30 @@ locals {
     "tasks-backups"               = "tasks (BACKUPS)"
     "watch-evidence"              = "watch (EVIDENCE_STORE)"
     "model-router-request-bodies" = "model-router (REQUEST_BODIES)"
+    "model-router-backups"        = "model-router (BACKUPS)"
+  }
+}
+
+# Seven daily copies of history and retained request bodies, as requested by the owner.
+resource "cloudflare_r2_bucket_lifecycle" "model_router_backups" {
+  account_id  = var.account_id
+  bucket_name = cloudflare_r2_bucket.app["model-router-backups"].name
+  rules = [
+    {
+      id                                 = "Default Multipart Abort Rule"
+      enabled                            = true
+      conditions                         = { prefix = "" }
+      abort_multipart_uploads_transition = { condition = { type = "Age", max_age = 604800 } }
+    },
+    {
+      id                        = "Expire daily inference backups after seven days"
+      enabled                   = true
+      conditions                = { prefix = "" }
+      delete_objects_transition = { condition = { type = "Age", max_age = 604800 } }
+    },
+  ]
+  lifecycle {
+    prevent_destroy = true
   }
 }
 

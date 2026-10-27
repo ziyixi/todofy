@@ -48,7 +48,7 @@ async def test_uncertain_create_keeps_durable_identity_until_remote_close(
         assert not store.deployment.freeze("release")["busy"]
 
 
-async def test_open_cleanup_response_cannot_release_drain(
+async def test_pending_cleanup_cannot_release_drain(
     tmp_path, fake_router, monkeypatch
 ):
     with contextlib.closing(
@@ -60,10 +60,10 @@ async def test_open_cleanup_response_cannot_release_drain(
             drain.mark_uncertain()
 
         async def still_open(request):
-            return models.Conversation(name=request.name, state="open")
+            raise models.ModelRouterError("FAILED_PRECONDITION")
 
         monkeypatch.setattr(fake_router, "close_conversation", still_open)
-        with pytest.raises(drain.DrainError, match="model_cleanup_unconfirmed"):
+        with pytest.raises(models.ModelRouterError):
             await store.deployment.recover_model_contexts(fake_router)
         store.deployment.recover()
         store.deployment.begin("release")

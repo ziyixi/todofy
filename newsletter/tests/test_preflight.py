@@ -57,11 +57,9 @@ def router(monkeypatch, live):
             return models.ListModelsResponse(
                 models=(
                     models.Model(
-                        name=state.model,
+                        id=state.model,
                         configured=True,
-                        generation=True,
-                        conversations=True,
-                        web_research=True,
+                        kind="text",
                     ),
                 )
             )
@@ -71,6 +69,18 @@ def router(monkeypatch, live):
         model_client, "configured_client", lambda *args, **kwargs: client
     )
     return client, state
+
+
+async def test_legacy_saved_model_is_normalized_at_preflight(
+    live, router, monkeypatch
+):
+    client, state = router
+    await preflight._check_model_router(
+        dataclasses.replace(live, model="models/sol-6-1"), client
+    )
+    assert state.requests == ["models/list"]
+    monkeypatch.setenv("NEWSLETTER_MODEL", "models/sol-6-1")
+    assert newsletter_settings.Settings.from_env().model == "gpt-6.1-sol"
 
 
 async def test_mock_checks_real_resources_without_provider_calls(

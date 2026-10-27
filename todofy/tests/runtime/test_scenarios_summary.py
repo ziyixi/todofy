@@ -40,7 +40,7 @@ def test_summary_sends_the_go_prompt_and_fences_the_mail(worker: Worker, fresh_g
     [row] = worker.d1(f"SELECT summary, brief FROM summaries WHERE event_id = '{event_id}'")
     assert row["brief"] == brief_of(row["summary"]) and row["brief"].startswith("合成摘要（model-a）")
     usage = worker.overview()["gemini"]
-    assert usage["call_count"] >= 1 and usage["used_tokens"] > 0 and usage["models"] == ["models/gemini-report"]
+    assert usage["call_count"] >= 1 and usage["used_tokens"] > 0 and usage["models"] == ["gemini-3.8-flash"]
 
 
 def test_truncated_mail_is_disclosed_to_the_model(worker: Worker, fresh_gemini: ModelRouterFake) -> None:
@@ -91,7 +91,7 @@ def test_quota_errors_wait_for_retry_after(
     event = worker.wait_event(event_id, {"complete"})
 
     first, second, third = fresh_gemini.calls_mentioning(event_id)
-    assert [first.model, second.model, third.model] == ["model-a", "model-a", "model-a"]
+    assert [first.model, second.model, third.model] == ["model-a", "gemini-probe", "model-a"]
     assert third.at - second.at >= 1.8
     assert ("summarizing", "pending", "llm_quota", "worker") in transitions(event)
 
@@ -104,7 +104,7 @@ def test_server_errors_back_off_and_recover(worker: Worker, fresh_gemini: ModelR
 
     event = worker.wait_event(event_id, {"complete"})
 
-    assert [call.model for call in fresh_gemini.calls_mentioning(event_id)] == ["model-a", "model-a", "model-a"]
+    assert [call.model for call in fresh_gemini.calls_mentioning(event_id)] == ["model-a", "gemini-probe", "model-a"]
     assert "summary_failed" in _codes(event)
 
 
@@ -120,11 +120,14 @@ def test_a_rejected_request_is_not_retried_on_other_models(worker: Worker, fresh
     assert [call.model for call in fresh_gemini.calls_mentioning(event_id)] == ["model-a", "model-a"]
 
 
-def test_router_reports_fallback_without_a_local_model_chain(worker: Worker, fresh_gemini: ModelRouterFake) -> None:
-    fresh_gemini.queue_generate(text_reply("Fallback summary", model="reported-fallback", attempts=2))
+def test_local_model_chain_keeps_the_reported_serving_model(worker: Worker, fresh_gemini: ModelRouterFake) -> None:
+    fresh_gemini.queue_generate(error_reply(500))
+    fresh_gemini.queue_generate(text_reply("Fallback summary", model="reported-fallback"))
     event_id, _ = _arrive(worker)
     event = worker.wait_event(event_id, {"complete"})
-    [call] = fresh_gemini.calls_mentioning(event_id)
-    assert call.requested_model == "models/gemini-email"
+    assert [call.requested_model for call in fresh_gemini.calls_mentioning(event_id)] == [
+        "gemini-3.5-flash-lite",
+        "gemini-3.8-flash",
+    ]
     assert event["summary_model"] == "reported-fallback"
     assert [code for code in _codes(event) if code] == []

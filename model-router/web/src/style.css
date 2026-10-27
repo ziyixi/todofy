@@ -1215,3 +1215,132 @@ tbody tr:last-child td {
     flex-wrap: wrap;
   }
 }
+
+/* Small fixed time-series panels; detailed values are available by pointer, keyboard and table. */
+.usage-trends {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 20px 0;
+}
+.usage-trend {
+  min-width: 0;
+  margin: 0;
+}
+.usage-trend .section-heading {
+  margin-bottom: 12px;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 0;
+  margin: 0 0 12px;
+  list-style: none;
+  font-size: 0.72rem;
+}
+.chart-legend li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.chart-key {
+  width: 18px;
+  border-top: 2px solid currentColor;
+}
+.chart-key.chart-series-1 {
+  border-top-style: dashed;
+}
+.chart-series-0 {
+  color: var(--accent);
+  stroke: var(--accent);
+  fill: var(--accent);
+}
+.chart-series-1 {
+  color: var(--warn);
+  stroke: var(--warn);
+  fill: var(--warn);
+}
+.usage-chart {
+  width: 100%;
+  display: block;
+  overflow: visible;
+  border-radius: 4px;
+}
+.chart-line {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.chart-cursor {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+.chart-scale {
+  min-height: 20px;
+}
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-reading {
+  min-height: 74px;
+  padding: 10px 0 6px;
+  display: flex;
+  flex-direction: column;
+  font-variant-numeric: tabular-nums;
+}
+.chart-note {
+  min-height: 44px;
+  font-size: 0.7rem;
+}
+.chart-table {
+  margin-top: 12px;
+  font-size: 0.75rem;
+}
+.chart-table summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.chart-table .table-scroll {
+  margin-top: 8px;
+  max-height: 240px;
+}
+.model-breakdown {
+  margin-bottom: 20px;
+}
+.overview-columns .catalog-list {
+  grid-template-columns: 1fr;
+}
+.advanced-options {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.advanced-options summary {
+  cursor: pointer;
+  color: var(--muted);
+  margin-bottom: 12px;
+  font-size: 0.8rem;
+}
+.advanced-options > label {
+  margin-top: 10px;
+}
+@media (max-width: 1000px) {
+  .usage-trends {
+    grid-template-columns: 1fr;
+  }
+}
+
+.record-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}

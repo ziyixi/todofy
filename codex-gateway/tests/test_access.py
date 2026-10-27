@@ -13,12 +13,12 @@ import httpx
 import jwt
 from auth_fixtures import AUDIENCE, ISSUER, JWK, access_headers, assertion, local_jwks
 from cryptography.hazmat.primitives.asymmetric import rsa
-from ziyixi_proto.codex.inference.v1.inference_pb import RunInferenceResponse
+from model_fixtures import StubExecutor
 
 from codex_gateway.app import create_app
 
-BODY = {"instructions": "Synthetic", "input_json": "{}", "output_schema_json": "{}"}
-RUN = "/api/codex/v1/inference:run"
+BODY = {"model": "gpt-6.1-sol", "input": "{}", "output_schema_json": "{}"}
+RUN = "/api/codex/v1/model/generations:generate"
 
 
 class AccessRouteTests(unittest.IsolatedAsyncioTestCase):
@@ -45,13 +45,11 @@ class AccessRouteTests(unittest.IsolatedAsyncioTestCase):
         self.fetch = self.jwks_patch.start()
         self.calls = []
 
-        async def runner(request, home):
-            self.calls.append(request)
-            return RunInferenceResponse(
-                model="synthetic", effort="medium", output_json="{}"
-            )
-
-        self.app = create_app(monitor_db=self.root / "monitor.sqlite3", runner=runner)
+        executor = StubExecutor()
+        self.calls = executor.calls
+        self.app = create_app(
+            monitor_db=self.root / "monitor.sqlite3", model_executor=executor
+        )
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1"
         )
@@ -82,7 +80,6 @@ class AccessRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_or_legacy_bearer_auth_fails_before_body_on_localhost(self):
         paths = [
             RUN,
-            "/api/codex/v1/inference:check",
             "/api/model/v1/generations:generate",
             "/api/model/v1/embeddings:embed",
             "/api/model/v1/conversations",
@@ -107,9 +104,7 @@ class AccessRouteTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status_code, 401)
         for path in (
             "/api/model/v1/models",
-            "/api/model/v1/conversations/synthetic",
             "/api/codex/v1/model/models",
-            "/api/codex/v1/model/conversations/synthetic",
         ):
             self.assertEqual((await self.client.get(path)).status_code, 401)
         self.assertEqual(self.calls, [])

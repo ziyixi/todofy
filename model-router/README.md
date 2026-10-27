@@ -4,14 +4,14 @@
 
 - `worker/`：Access、机器鉴权、统一 API、Provider adapters，以及执行模型调用的 `RouterEngine`。
 - `web/`：用量、请求详情和 Playground。
-- `migrations/`：D1 请求元数据与短会话。
+- `migrations/`：D1 请求元数据。
 - VPS `codex-gateway/`：固定版本的官方 Codex SDK。Router 通过现有 Tunnel 调用它。
 
 ## 使用
 
 从 Home 打开 Model Router，或访问部署配置里的 `PUBLIC_HOST`。Playground 可选择模型、思考强度和 JSON Schema。所有应用和控制台共用 Router 的供应商连接，不再选择应用计费配置。Claude 使用现有 Brief 工作区的同一个 API key，所有 Claude 调用合计受该工作区 US$80/月上限约束；Gemini 使用一个共享 key。
 
-每次调用返回最终结果，不向应用提供 token 流。输入、指令和输出存入私有 R2，保留 7 天；D1 请求记录和统计保留 90 天。订阅请求展示 token，不折算成 API 美元；未报告的用量显示为未知。
+每次调用返回最终结果，不向应用提供 token 流。输入、指令和输出存入私有 R2，保留 7 天；D1 请求记录和统计保留 90 天。每日备份记录与保留中的正文，副本保存七天，见[恢复说明](docs/backup.md)。用量页按小时/天展示请求、token 和费用趋势；订阅按假设 API 价值单列，API 估价另列。未知用量保持未知。
 
 ## 开发和发布
 

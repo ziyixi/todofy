@@ -2,6 +2,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import { forward, handleRequest, errorResponse } from './http.ts';
 import { Store } from './store.ts';
 import { Code, RpcError } from './errors.ts';
+import type { RouterEngine } from './engine.ts';
 import type { Env } from './types.ts';
 export { RouterEngine } from './engine.ts';
 export { Ops } from './ops.ts';
@@ -21,5 +22,7 @@ export default {
   fetch: handleRequest,
   scheduled: async (_event, env) => {
     await new Store(env).cleanup();
+    const engine = env.ENGINE.get(env.ENGINE.idFromName('router-v1')) as DurableObjectStub<RouterEngine>;
+    await engine.startBackup();
   },
 } satisfies ExportedHandler<Env>;

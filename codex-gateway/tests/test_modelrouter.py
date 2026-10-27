@@ -1,143 +1,27 @@
-"""Synthetic short-context, hosted-web, usage and cleanup acceptance."""
+"""Actual two-turn, web evidence, usage deltas and cleanup using a fake SDK."""
 
 import asyncio
-import dataclasses
 import json
-import os
 import pathlib
 import tempfile
 import unittest
 import uuid
-from types import SimpleNamespace
 from unittest.mock import patch
 
-import httpx
-from auth_fixtures import access_headers, local_jwks, verifier
+from model_fixtures import FakeSdk, FakeTurn
 from ziyixi_proto.modelrouter.inference.v1.inference_pb import (
-    Conversation,
     CreateConversationRequest,
     GenerateRequest,
-    GenerationConfig,
     Instruction,
-    Parameters,
 )
 from ziyixi_proto.rpc_status import RpcError
-from ziyixi_proto.wire_json import to_wire
 
-from codex_gateway.app import create_app
-from codex_gateway.model_api import result_events
 from codex_gateway.modelrouter import ModelExecutor
+from codex_gateway.runtime import MODEL
 
 
-def identifier() -> str:
-    return str(uuid.uuid4())
-
-
-def config(**kwargs) -> GenerationConfig:
-    return GenerationConfig(
-        model="models/sol-6-1",
-        instructions=(Instruction(text="Synthetic instruction", cache=True),),
-        **kwargs,
-    )
-
-
-class FakeTurn:
-    def __init__(self, number, *, block=False, tools=(), usage=True, output="answer"):
-        self.id = f"turn-{number}"
-        self.thread_id = "synthetic-thread"
-        self.number = number
-        self.block = block
-        self.tools = tools
-        self.has_usage = usage
-        self.output = output
-        self.interrupted = False
-
-    async def interrupt(self):
-        self.interrupted = True
-
-    async def stream(self):
-        if self.block:
-            await asyncio.Event().wait()
-        if self.has_usage:
-            yield SimpleNamespace(
-                method="thread/tokenUsage/updated",
-                payload={
-                    "turnId": self.id,
-                    "threadId": self.thread_id,
-                    "tokenUsage": {
-                        "total": {
-                            "inputTokens": self.number * 101,
-                            "outputTokens": self.number * 21,
-                            "cachedInputTokens": self.number * 50,
-                            "cacheWriteInputTokens": 0,
-                            "reasoningOutputTokens": self.number * 11,
-                            "totalTokens": self.number * 122,
-                        }
-                    },
-                },
-            )
-        for tool in self.tools:
-            yield SimpleNamespace(method="item/completed", payload={"item": tool})
-        yield SimpleNamespace(
-            method="item/completed",
-            payload={
-                "item": {
-                    "type": "agentMessage",
-                    "phase": "final_answer",
-                    "text": self.output,
-                }
-            },
-        )
-        yield SimpleNamespace(
-            method="turn/completed", payload={"turn": {"status": "completed"}}
-        )
-
-
-class FakeSdk:
-    Sandbox = SimpleNamespace(read_only="read-only")
-    ApprovalMode = SimpleNamespace(deny_all="deny-all")
-    CodexConfig = SimpleNamespace
-
-    def __init__(self, *turns):
-        self.turns = list(turns)
-        self.calls = []
-        self.started = 0
-        self.closed = False
-        self.close_started = asyncio.Event()
-        self.allow_close = asyncio.Event()
-        self.allow_close.set()
-        self._client = self
-
-    def AsyncCodex(self, config):
-        self.config = config
-        return self
-
-    async def __aenter__(self):
-        return self
-
-    async def close(self):
-        self.close_started.set()
-        await self.allow_close.wait()
-        self.closed = True
-
-    async def account(self, *, refresh_token):
-        return SimpleNamespace(
-            account=SimpleNamespace(root=SimpleNamespace(type="chatgpt"))
-        )
-
-    async def request(self, method, data, *, response_model):
-        return SimpleNamespace(
-            data=[SimpleNamespace(cwd=data["cwds"][0], errors=[], skills=[])]
-        )
-
-    async def thread_start(self, **kwargs):
-        self.started += 1
-        self.thread_options = kwargs
-        return SimpleNamespace(turn=self.turn)
-
-    async def turn(self, text, **kwargs):
-        self.calls.append((text, kwargs))
-        return self.turns.pop(0)
+def context_name():
+    return f"conversations/{uuid.uuid4()}"
 
 
 class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
@@ -145,66 +29,65 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="executor-test-")
         self.home = pathlib.Path(self.temp.name)
         self.executors = []
-        self.jwks_mock = local_jwks()
-        self.jwks_mock.start()
 
     async def asyncTearDown(self):
         for executor in self.executors:
             await executor.shutdown()
         self.temp.cleanup()
-        self.jwks_mock.stop()
 
     def executor(self, sdk):
-        executor = ModelExecutor(self.home / "monitor.sqlite3", sdk=sdk)
+        executor = ModelExecutor(sdk=sdk)
         self.executors.append(executor)
         return executor
 
-    async def create(self, executor, settings=None, timeout_ms=0):
-        return await executor.create(
-            CreateConversationRequest(
-                request_id=identifier(),
-                conversation=Conversation(
-                    name=f"conversations/{identifier()}",
-                    config=settings or config(),
-                    timeout_ms=timeout_ms,
-                ),
-            ),
-            self.home,
-        )
+    async def create(self, executor, **options):
+        request = CreateConversationRequest(name=context_name(), model=MODEL, **options)
+        self.assertIsNone(await executor.create(request, self.home))
+        return request.name
 
-    async def test_two_turns_reuse_thread_and_normalize_snapshot_deltas(self):
+    async def test_two_turns_reuse_thread_and_report_per_call_totals(self):
         sdk = FakeSdk(FakeTurn(1), FakeTurn(2))
         executor = self.executor(sdk)
-        conversation = await self.create(executor)
-        outputs = []
-        for text in ("first synthetic turn", "second synthetic turn"):
-            outputs.append(
-                await executor.generate(
-                    GenerateRequest(
-                        request_id=identifier(),
-                        conversation=conversation.name,
-                        input=text,
-                    ),
-                    self.home,
-                )
-            )
-        self.assertEqual(sdk.started, 1)
-        self.assertFalse(sdk.closed)
-        self.assertEqual([value.usage.input_tokens for value in outputs], [101, 101])
-        self.assertEqual(outputs[1].usage.cached_input_tokens, 50)
-        self.assertEqual(outputs[1].usage.reasoning_output_tokens, 11)
-        self.assertTrue(all(value.usage.available for value in outputs))
-        self.assertEqual(outputs[0].reported_model, "")
-        self.assertTrue(outputs[0].upstream_started)
-        self.assertEqual(outputs[0].attempt_count, 1)
-        self.assertEqual(outputs[0].finish_reason, "complete")
-        self.assertNotIn("effort", sdk.calls[0][1])
-        self.assertEqual(
-            (await executor.get(conversation.name)).expire_time,
-            conversation.expire_time,
+        name = await self.create(
+            executor, instructions=(Instruction(text="Synthetic instructions"),)
         )
+        directory = pathlib.Path(executor.contexts[name].directory.name)
+        answers = [
+            await executor.generate(
+                GenerateRequest(conversation=name, input=text), self.home
+            )
+            for text in ("first synthetic turn", "second synthetic turn")
+        ]
+        self.assertEqual(sdk.started, 1)
+        self.assertEqual(
+            [call[0] for call in sdk.calls],
+            ["first synthetic turn", "second synthetic turn"],
+        )
+        self.assertTrue(all("effort" not in call[1] for call in sdk.calls))
+        self.assertEqual(sdk.thread_options["model"], MODEL)
+        self.assertTrue(sdk.thread_options["ephemeral"])
+        for answer in answers:
+            self.assertIsNone(answer.error)
+            self.assertEqual(answer.model, MODEL)
+            self.assertTrue(answer.usage.available)
+            self.assertEqual(
+                (
+                    answer.usage.input_tokens,
+                    answer.usage.output_tokens,
+                    answer.usage.cached_input_tokens,
+                ),
+                (101, 21, 50),
+            )
+            uuid.UUID(answer.name.split("/")[1])
+        self.assertNotEqual(answers[0].name, answers[1].name)
+        self.assertIsNone(await executor.close(name))
+        self.assertTrue(sdk.closed)
+        self.assertFalse(directory.exists())
+        self.assertEqual(executor.contexts, {})
+        self.assertIsNone(await executor.close(name))
 
-    async def test_actual_web_actions_are_observed_and_text_claims_are_ignored(self):
+    async def test_web_evidence_is_observed_per_turn_and_text_cannot_claim_it(self):
+        url = "https://synthetic.example/article"
         sdk = FakeSdk(
             FakeTurn(
                 1,
@@ -213,392 +96,292 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
                         "type": "webSearch",
                         "action": {"type": "search", "query": "synthetic"},
                     },
-                    {
-                        "type": "webSearch",
-                        "action": {
-                            "type": "openPage",
-                            "url": "https://example.test/a#part",
-                        },
-                    },
+                    {"type": "webSearch", "action": {"type": "openPage", "url": url}},
                 ),
-                output="I also opened https://example.test/not-observed",
-            )
+            ),
+            FakeTurn(2, output="I searched and opened another URL"),
         )
         executor = self.executor(sdk)
-        result = await executor.generate(
-            GenerateRequest(
-                request_id=identifier(),
-                config=config(
-                    web_research=True, parameters=Parameters(effort="medium")
-                ),
-                input="synthetic",
-            ),
-            self.home,
+        name = await self.create(executor, web_research=True, effort="medium")
+        first = await executor.generate(
+            GenerateRequest(conversation=name, input="research"), self.home
         )
-        self.assertEqual(result.state, "succeeded")
-        self.assertTrue(result.observations.searched)
-        self.assertEqual(
-            result.observations.opened_urls, ("https://example.test/a#part",)
+        second = await executor.generate(
+            GenerateRequest(conversation=name, input="correction"), self.home
         )
+        self.assertTrue(first.observations.searched)
+        self.assertEqual(first.observations.opened_urls, (url,))
+        self.assertFalse(second.observations.searched)
+        self.assertEqual(second.observations.opened_urls, ())
         self.assertEqual(sdk.calls[0][1]["effort"].value, "medium")
         self.assertIn('web_search="live"', sdk.config.config_overrides)
         self.assertIn("features.code_mode_host=true", sdk.config.config_overrides)
         self.assertIn("features.shell_tool=false", sdk.config.config_overrides)
-        self.assertTrue(sdk.closed)
-        self.assertFalse(pathlib.Path(sdk.config.cwd).exists())
 
-    async def test_unknown_usage_remains_unavailable_on_next_cumulative_snapshot(self):
-        sdk = FakeSdk(FakeTurn(1, usage=False), FakeTurn(2))
+    async def test_unknown_snapshot_does_not_turn_into_zero_or_cumulative_usage(self):
+        sdk = FakeSdk(FakeTurn(1, usage=False), FakeTurn(2), FakeTurn(3))
         executor = self.executor(sdk)
-        conversation = await self.create(executor)
-        for _ in range(2):
-            answer = await executor.generate(
-                GenerateRequest(
-                    request_id=identifier(),
-                    conversation=conversation.name,
-                    input="synthetic",
-                ),
-                self.home,
+        name = await self.create(executor)
+        answers = [
+            await executor.generate(
+                GenerateRequest(conversation=name, input="synthetic"), self.home
             )
-            self.assertFalse(answer.usage.available)
-
-    async def test_missing_middle_snapshot_is_not_charged_to_the_following_call(self):
-        executor = self.executor(
-            FakeSdk(FakeTurn(1), FakeTurn(2, usage=False), FakeTurn(3), FakeTurn(4))
+            for _ in range(3)
+        ]
+        self.assertEqual(
+            [answer.usage.available for answer in answers], [False, False, True]
         )
-        conversation = await self.create(executor)
-        answers = []
-        for _ in range(4):
-            answers.append(
+        self.assertEqual(answers[2].usage.input_tokens, 101)
+        self.assertEqual(answers[2].usage.output_tokens, 21)
+
+    async def test_decreasing_or_malformed_usage_remains_unknown(self):
+        for counters in (
+            {"inputTokens": -1},
+            {"inputTokens": True},
+            {
+                "inputTokens": 1,
+                "outputTokens": 1,
+                "cachedInputTokens": 1,
+                "cacheWriteInputTokens": 0,
+            },
+        ):
+            with self.subTest(counters=counters):
+                sdk = FakeSdk(FakeTurn(1), FakeTurn(2, counters=counters))
+                executor = self.executor(sdk)
+                name = await self.create(executor)
                 await executor.generate(
-                    GenerateRequest(
-                        request_id=identifier(),
-                        conversation=conversation.name,
-                        input="synthetic",
-                    ),
-                    self.home,
+                    GenerateRequest(conversation=name, input="first"), self.home
                 )
-            )
-        self.assertEqual(
-            [answer.usage.available for answer in answers], [True, False, False, True]
-        )
-        self.assertEqual(answers[3].usage.input_tokens, 101)
+                answer = await executor.generate(
+                    GenerateRequest(conversation=name, input="second"), self.home
+                )
+                self.assertFalse(answer.usage.available)
+                await executor.close(name)
 
-    async def test_close_waits_for_cleanup_then_receipt_survives_restart(self):
-        sdk = FakeSdk()
+    async def test_standalone_schema_and_explicit_effort_with_primary_only_policy(self):
+        sdk = FakeSdk(FakeTurn(output='{"ok":true}'))
         executor = self.executor(sdk)
-        conversation = await self.create(executor)
-        sdk.allow_close.clear()
-        task = asyncio.create_task(executor.close(conversation.name, identifier()))
-        await sdk.close_started.wait()
-        self.assertFalse(task.done())
-        self.assertEqual(executor.store.get(conversation.name).state, "open")
-        self.assertTrue(pathlib.Path(sdk.config.cwd).exists())
-        sdk.allow_close.set()
-        receipt = await task
-        self.assertEqual(receipt.state, "closed")
-        self.assertFalse(pathlib.Path(sdk.config.cwd).exists())
-        restarted = self.executor(FakeSdk())
-        self.assertEqual(
-            (await restarted.close(conversation.name, identifier())).state, "closed"
-        )
-        self.assertNotIn(
-            "Synthetic instruction",
-            (self.home / "monitor.sqlite3").read_bytes().decode(errors="ignore"),
-        )
-
-    async def test_timeout_interrupts_and_closes_context(self):
-        turn = FakeTurn(1, block=True)
-        sdk = FakeSdk(turn)
-        executor = self.executor(sdk)
-        conversation = await self.create(executor)
         answer = await executor.generate(
             GenerateRequest(
-                request_id=identifier(),
-                conversation=conversation.name,
-                input="synthetic",
-                timeout_ms=10,
+                model=MODEL,
+                input="Synthetic",
+                effort="high",
+                allow_fallback=True,
+                instructions=(
+                    Instruction(text="First"),
+                    Instruction(text="Second", cache=True),
+                ),
+                output_schema_json='{"type":"object","required":["ok"]}',
             ),
             self.home,
         )
-        self.assertEqual(answer.state, "failed")
-        self.assertTrue(turn.interrupted)
+        self.assertIsNone(answer.error)
+        self.assertEqual(json.loads(answer.output), {"ok": True})
+        self.assertEqual(
+            sdk.thread_options["developer_instructions"], "First\n\nSecond"
+        )
+        self.assertEqual(sdk.calls[0][1]["effort"].value, "high")
         self.assertTrue(sdk.closed)
-        self.assertEqual((await executor.get(conversation.name)).state, "closed")
+        self.assertFalse(pathlib.Path(sdk.thread_options["cwd"]).exists())
 
-    async def test_context_expiry_cleans_up_without_a_followup_request(self):
+    async def test_invalid_options_fail_before_opening_the_sdk(self):
         sdk = FakeSdk()
         executor = self.executor(sdk)
-        receipt = await self.create(executor, timeout_ms=20)
-        await asyncio.wait_for(sdk.close_started.wait(), timeout=1)
-        self.assertEqual((await executor.get(receipt.name)).state, "expired")
-        self.assertFalse(pathlib.Path(sdk.config.cwd).exists())
-
-    async def test_failed_cleanup_never_persists_a_closed_ack(self):
-        sdk = FakeSdk()
-        executor = self.executor(sdk)
-        receipt = await self.create(executor)
-        with patch.object(
-            sdk, "close", side_effect=RuntimeError("synthetic cleanup failure")
-        ):
-            with self.assertRaises(RuntimeError):
-                await executor.close(receipt.name, identifier())
-        self.assertEqual(executor.store.get(receipt.name).state, "open")
-        self.assertTrue(pathlib.Path(sdk.config.cwd).exists())
-        self.assertEqual(
-            (await executor.close(receipt.name, identifier())).state, "closed"
-        )
-
-    async def test_restart_reports_lost_context_then_confirms_closed(self):
-        executor = self.executor(FakeSdk())
-        receipt = await self.create(executor)
-        context = executor.contexts.pop(receipt.name)
-        context.expiry.cancel()
-        await executor._cleanup(context)
-        restarted = self.executor(FakeSdk())
-        self.assertEqual((await restarted.get(receipt.name)).state, "lost")
-        self.assertEqual(
-            (await restarted.close(receipt.name, identifier())).state, "closed"
-        )
-
-    async def test_schema_failure_and_local_tool_failures_have_no_output(self):
-        for turn in (
-            FakeTurn(1, output='{"ok":"wrong type"}'),
-            FakeTurn(1, tools=({"type": "commandExecution"},), output='{"ok":true}'),
-        ):
-            with self.subTest(turn=turn):
-                executor = self.executor(FakeSdk(turn))
-                answer = await executor.generate(
-                    GenerateRequest(
-                        request_id=identifier(),
-                        config=config(
-                            output_schema_json=json.dumps(
-                                {
-                                    "type": "object",
-                                    "properties": {"ok": {"type": "boolean"}},
-                                    "required": ["ok"],
-                                }
-                            )
-                        ),
-                        input="synthetic",
-                    ),
-                    self.home,
-                )
-                self.assertEqual(answer.state, "failed")
-                self.assertEqual(answer.output, "")
-                self.assertTrue(answer.usage.available)
-
-    async def test_create_is_idempotent_and_rejects_changed_config(self):
-        executor = self.executor(FakeSdk())
-        receipt = await self.create(executor)
-        same = CreateConversationRequest(
-            request_id=identifier(),
-            conversation=dataclasses.replace(receipt, config=config()),
-        )
-        self.assertEqual((await executor.create(same, self.home)).name, receipt.name)
-        with self.assertRaises(RpcError):
-            await executor.create(
-                dataclasses.replace(
-                    same,
-                    conversation=dataclasses.replace(
-                        same.conversation, config=config(web_research=True)
-                    ),
-                ),
-                self.home,
-            )
-
-    async def test_invalid_parameters_and_timeout_never_start_sdk(self):
-        sdk = FakeSdk()
-        executor = self.executor(sdk)
-        for request in (
+        requests = (
+            GenerateRequest(model="models/sol-6-1", input="x"),
+            GenerateRequest(model="gpt-6-astra", input="x"),
+            GenerateRequest(model=MODEL, input="x", effort="invalid"),
+            GenerateRequest(model=MODEL, input="x", max_output_tokens=100),
+            GenerateRequest(model=MODEL, input="x", timeout_ms=840001),
+            GenerateRequest(model=MODEL, input="x", timeout_ms=-1),
             GenerateRequest(
-                request_id=identifier(),
-                config=config(),
-                conversation="conversations/invalid",
-                input="synthetic",
+                model=MODEL,
+                input="x",
+                output_schema_json='{"$ref":"https://synthetic.invalid/schema"}',
             ),
             GenerateRequest(
-                request_id=identifier(),
-                config=config(parameters=Parameters(temperature=0.5)),
-                input="synthetic",
+                model=MODEL, input="x", instructions=(Instruction(text=" "),)
             ),
-            GenerateRequest(
-                request_id=identifier(),
-                config=config(),
-                input="synthetic",
-                timeout_ms=840001,
-            ),
-        ):
-            with self.assertRaises(RpcError):
-                await executor.generate(request, self.home)
+            GenerateRequest(model=MODEL, input=""),
+        )
+        for request in requests:
+            with self.subTest(request=request):
+                with self.assertRaises(RpcError):
+                    await executor.generate(request, self.home)
         self.assertEqual(sdk.started, 0)
 
-    async def test_close_cancels_active_turn_before_ack(self):
-        turn = FakeTurn(1, block=True)
-        sdk = FakeSdk(turn)
-        executor = self.executor(sdk)
-        receipt = await self.create(executor)
+    async def test_bad_output_tool_and_provider_errors_are_safe_and_cleaned_up(self):
+        cases = [
+            (FakeTurn(output="not json"), '{"type":"object"}', 13),
+            (FakeTurn(tools=({"type": "commandExecution"},)), "", 13),
+            (
+                FakeTurn(error=RuntimeError("401 synthetic private provider text")),
+                "",
+                16,
+            ),
+            (
+                FakeTurn(error=RuntimeError("429 synthetic private provider text")),
+                "",
+                8,
+            ),
+            (FakeTurn(error=RuntimeError("synthetic private provider text")), "", 14),
+        ]
+        for turn, schema, code in cases:
+            with self.subTest(code=code):
+                sdk = FakeSdk(turn)
+                answer = await self.executor(sdk).generate(
+                    GenerateRequest(model=MODEL, input="x", output_schema_json=schema),
+                    self.home,
+                )
+                self.assertEqual(answer.error.code, code)
+                self.assertEqual(answer.output, "")
+                self.assertNotIn("private provider", answer.error.message)
+                self.assertTrue(sdk.closed)
+                self.assertFalse(pathlib.Path(sdk.thread_options["cwd"]).exists())
+
+    async def test_context_rejects_option_overrides_and_concurrent_turns(self):
+        turn = FakeTurn(block=True)
+        executor = self.executor(FakeSdk(turn))
+        name = await self.create(executor)
+        with self.assertRaises(RpcError):
+            await executor.generate(
+                GenerateRequest(conversation=name, model=MODEL, input="x"), self.home
+            )
         task = asyncio.create_task(
             executor.generate(
-                GenerateRequest(
-                    request_id=identifier(),
-                    conversation=receipt.name,
-                    input="synthetic",
-                ),
-                self.home,
+                GenerateRequest(conversation=name, input="first"), self.home
             )
         )
-        while not sdk.calls:
-            await asyncio.sleep(0)
-        closed = await executor.close(receipt.name, identifier())
-        self.assertEqual(closed.state, "closed")
+        await turn.started.wait()
+        with self.assertRaises(RpcError) as busy:
+            await executor.generate(
+                GenerateRequest(conversation=name, input="second"), self.home
+            )
+        self.assertEqual(busy.exception.reason, "CONVERSATION_BUSY")
+        await executor.close(name)
         with self.assertRaises(asyncio.CancelledError):
             await task
         self.assertTrue(turn.interrupted)
-        self.assertTrue(sdk.closed)
 
-    async def test_http_uses_root_contract_for_json_and_private_sse(self):
-        sdk = FakeSdk(FakeTurn(1), FakeTurn(1), FakeTurn(1))
+    async def test_close_waits_for_cleanup_and_cancels_an_active_turn(self):
+        turn = FakeTurn(block=True)
+        sdk = FakeSdk(turn)
         executor = self.executor(sdk)
-        app = create_app(
-            access_verifier=verifier(),
-            monitor_db=self.home / "monitor.sqlite3",
-            model_executor=executor,
+        name = await self.create(executor)
+        path = pathlib.Path(executor.contexts[name].directory.name)
+        operation = asyncio.create_task(
+            executor.generate(GenerateRequest(conversation=name, input="x"), self.home)
         )
-        headers = access_headers()
-        with patch.dict(
-            os.environ,
-            {"CODEX_HOME": str(self.home)},
-        ):
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app), base_url="http://test"
-            ) as client:
-                denied = await client.post(
-                    "/api/model/v1/generations:generate", json={}
-                )
-                self.assertEqual(denied.status_code, 401)
+        await turn.started.wait()
+        sdk.allow_close.clear()
+        closing = asyncio.create_task(executor.close(name))
+        await sdk.close_started.wait()
+        self.assertFalse(closing.done())
+        self.assertTrue(path.exists())
+        sdk.allow_close.set()
+        self.assertIsNone(await closing)
+        with self.assertRaises(asyncio.CancelledError):
+            await operation
+        self.assertFalse(path.exists())
+
+    async def test_close_waits_for_a_pending_create_to_be_cancelled_and_cleaned(self):
+        sdk = FakeSdk()
+        sdk.allow_open.clear()
+        sdk.allow_close.clear()
+        executor = self.executor(sdk)
+        request = CreateConversationRequest(name=context_name(), model=MODEL)
+        opening = asyncio.create_task(executor.create(request, self.home))
+        await sdk.open_started.wait()
+        closing = asyncio.create_task(executor.close(request.name))
+        await sdk.close_started.wait()
+        self.assertFalse(closing.done())
+        sdk.allow_close.set()
+        self.assertIsNone(await closing)
+        with self.assertRaises(asyncio.CancelledError):
+            await opening
+        self.assertEqual(executor.contexts, {})
+
+    async def test_timeout_expiry_and_external_cancellation_cleanup(self):
+        for context in (False, True):
+            with self.subTest(context=context):
+                turn = FakeTurn(block=True)
+                sdk = FakeSdk(turn)
+                executor = self.executor(sdk)
+                name = await self.create(executor) if context else ""
                 request = GenerateRequest(
-                    request_id=identifier(), config=config(), input="synthetic"
+                    model="" if context else MODEL,
+                    conversation=name,
+                    input="x",
+                    timeout_ms=10,
                 )
-                response = await client.post(
-                    "/api/model/v1/generations:generate",
-                    json=to_wire(request),
-                    headers=headers,
-                )
-                self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.json()["usage"]["input_tokens"], 101)
-                streamed = await client.post(
-                    "/api/model/v1/generations:generate",
-                    json=to_wire(dataclasses.replace(request, request_id=identifier())),
-                    headers={**headers, "accept": "text/event-stream"},
-                )
-                self.assertEqual(streamed.status_code, 200)
-                self.assertIn("event: ready\ndata: {}\n\n", streamed.text)
-                self.assertIn("event: result\ndata: ", streamed.text)
-                self.assertIn('"state":"succeeded"', streamed.text)
-                aliased = await client.post(
-                    "/api/codex/v1/model/generations:generate",
-                    json=to_wire(dataclasses.replace(request, request_id=identifier())),
-                    headers=headers,
-                )
-                self.assertEqual(aliased.status_code, 200)
-                self.assertEqual(aliased.json()["state"], "succeeded")
-                self.assertEqual(
-                    (await client.get("/healthz")).json()["inference_status"][
-                        "request_count"
-                    ],
-                    3,
-                )
-                invalid = await client.post(
-                    "/api/model/v1/generations:generate",
-                    json=to_wire(dataclasses.replace(request, timeout_ms=840001)),
-                    headers={**headers, "accept": "text/event-stream"},
-                )
-                self.assertEqual(invalid.status_code, 400)
-
-    async def test_http_conversation_create_get_and_close_follow_generated_binding(
-        self,
-    ):
-        executor = self.executor(FakeSdk())
-        app = create_app(
-            access_verifier=verifier(),
-            monitor_db=self.home / "monitor.sqlite3",
-            model_executor=executor,
-        )
-        headers = access_headers()
-        context = Conversation(name=f"conversations/{identifier()}", config=config())
-        with patch.dict(
-            os.environ,
-            {"CODEX_HOME": str(self.home)},
-        ):
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app), base_url="http://test"
-            ) as client:
-                created = await client.post(
-                    "/api/model/v1/conversations",
-                    params={"request_id": identifier()},
-                    json=to_wire(context),
-                    headers=headers,
-                )
-                self.assertEqual(created.status_code, 200, created.text)
-                read = await client.get(
-                    "/api/model/v1/" + context.name, headers=headers
-                )
-                self.assertEqual(read.status_code, 200, read.text)
-                self.assertEqual(read.json()["state"], "open")
-                closed = await client.post(
-                    "/api/model/v1/" + context.name + ":close",
-                    json={"request_id": identifier()},
-                    headers=headers,
-                )
-                self.assertEqual(closed.status_code, 200, closed.text)
-                self.assertEqual(closed.json()["state"], "closed")
-
-    async def test_private_sse_heartbeats_and_disconnect_cancel_execution(self):
-        interrupted = asyncio.Event()
-
-        async def operation():
-            try:
-                await asyncio.Event().wait()
-            finally:
-                interrupted.set()
-
-        with patch("codex_gateway.model_api.HEARTBEAT_SECONDS", 0.001):
-            stream = result_events(operation())
-            self.assertIn("event: ready", await anext(stream))
-            self.assertIn("event: heartbeat", await anext(stream))
-            await stream.aclose()
-        self.assertTrue(interrupted.is_set())
-
-    async def test_model_api_preserves_newsletter_sized_inputs_and_outputs(self):
-        sdk = FakeSdk(FakeTurn(1, output="synthetic " * 10000))
+                answer = await executor.generate(request, self.home)
+                self.assertEqual(answer.error.reason, "MODEL_TIMEOUT")
+                self.assertTrue(turn.interrupted)
+                self.assertTrue(sdk.closed)
+        sdk = FakeSdk()
         executor = self.executor(sdk)
-        app = create_app(
-            access_verifier=verifier(),
-            monitor_db=self.home / "monitor.sqlite3",
-            model_executor=executor,
+        name = await self.create(executor, timeout_ms=10)
+        await asyncio.wait_for(sdk.close_started.wait(), 1)
+        await asyncio.sleep(0)
+        self.assertNotIn(name, executor.contexts)
+        turn = FakeTurn(block=True)
+        sdk = FakeSdk(turn)
+        executor = self.executor(sdk)
+        operation = asyncio.create_task(
+            executor.generate(GenerateRequest(model=MODEL, input="x"), self.home)
         )
-        request = GenerateRequest(
-            request_id=identifier(),
-            config=config(),
-            input="x" * 1048576,
-        )
-        with patch.dict(
-            os.environ,
-            {"CODEX_HOME": str(self.home)},
+        await turn.started.wait()
+        operation.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await operation
+        self.assertTrue(sdk.closed)
+        self.assertTrue(turn.interrupted)
+
+    async def test_account_and_skills_checks_reject_before_starting_a_turn(self):
+        for sdk in (FakeSdk(account_type="apikey"), FakeSdk(enabled_skill=True)):
+            answer = await self.executor(sdk).generate(
+                GenerateRequest(model=MODEL, input="x"), self.home
+            )
+            self.assertIsNotNone(answer.error)
+            self.assertEqual(sdk.started, 0)
+            self.assertTrue(sdk.closed)
+
+    async def test_repeated_create_and_unknown_close_need_no_persistent_ledger(self):
+        executor = self.executor(FakeSdk())
+        request = CreateConversationRequest(name=context_name(), model=MODEL)
+        await executor.create(request, self.home)
+        with self.assertRaises(RpcError):
+            await executor.create(request, self.home)
+        await executor.close(request.name)
+        self.assertIsNone(await self.executor(FakeSdk()).close(request.name))
+        self.assertEqual(list(self.home.glob("*.sqlite3")), [])
+
+    async def test_close_failure_never_acknowledges_or_discards_an_open_context(self):
+        sdk = FakeSdk()
+        executor = self.executor(sdk)
+        name = await self.create(executor)
+        workspace = pathlib.Path(executor.contexts[name].directory.name)
+        sdk.close_raises = True
+        try:
+            with self.assertRaises(RpcError) as failed:
+                await executor.close(name)
+        finally:
+            sdk.close_raises = False
+        self.assertEqual(failed.exception.reason, "MODEL_CLEANUP_PENDING")
+        self.assertNotIn("private", str(failed.exception))
+        self.assertIn(name, executor.contexts)
+        self.assertTrue(workspace.exists())
+        self.assertIsNone(await executor.close(name))
+        self.assertFalse(workspace.exists())
+
+    async def test_sdk_and_cli_version_mismatch_never_starts_a_model(self):
+        executor = self.executor(None)
+        with patch(
+            "codex_gateway.modelrouter.metadata.version",
+            side_effect=["0.163.0", "0.164.0"],
         ):
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app), base_url="http://test"
-            ) as client:
-                response = await client.post(
-                    "/api/codex/v1/model/generations:generate",
-                    json=to_wire(request),
-                    headers=access_headers(),
-                )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["state"], "succeeded")
-        self.assertEqual(len(response.json()["output"]), 100000)
-
-
-if __name__ == "__main__":
-    unittest.main()
+            answer = await executor.generate(
+                GenerateRequest(model=MODEL, input="x"), self.home
+            )
+        self.assertEqual(answer.error.reason, "MODEL_UNAVAILABLE")
+        self.assertFalse(answer.usage.available)

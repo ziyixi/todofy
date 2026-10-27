@@ -6,9 +6,9 @@ const DIMENSIONS = 1024;
 
 /** The binding returns vectors in the same order as the text batch. */
 export async function embedWorkersAI(inputs: readonly string[], context: ProviderContext): Promise<EmbeddingResult> {
-  const base: EmbeddingResult = { vectors: [], dimensions: DIMENSIONS, usage: unknownUsage('platform_quota') };
+  const base: EmbeddingResult = { vectors: [], usage: unknownUsage('platform_quota') };
   const fail = (code: number, message: string) => ({ ...base, error: providerStatus(code, message) });
-  if (context.route.upstreamModel !== '@cf/baai/bge-m3' || !context.route.embeddings || inputs.length < 1 || inputs.length > 50 || inputs.some(text => text.trim() === '')) return fail(3, 'embedding_invalid_input');
+  if (context.route.upstreamModel !== '@cf/baai/bge-m3' || inputs.length < 1 || inputs.length > 50 || inputs.some(text => text.trim() === '')) return fail(3, 'embedding_invalid_input');
   if (context.env.AI === undefined) return fail(9, 'embedding_not_configured');
   if (context.signal.aborted) return fail(1, 'embedding_cancelled');
   if (context.deadlineMs <= Date.now()) return fail(4, 'embedding_deadline');

@@ -832,3 +832,10 @@ DTOs. Profile tests pin generated routes, bounds/null behavior and both runtimes
 Production dependency checks follow `.proto` import closure as well as direct generated-module imports:
 embedding a shared descriptor compiles its dependencies into the bundle. Changing platform runtime can
 therefore reach Fleet even when its source imports only `HostReport` or `FleetStatus`.
+
+### Internal Model Router changes
+
+`modelrouter.inference.v1` is an internal monorepo API. Its callers and owner console are updated together.
+The owner explicitly permits deleting unused fields without reserved tags; the compatibility gate excludes only
+this package and runtime test fixtures. Other APIs and frozen payloads keep their normal compatibility rules.
+A breaking Router rollout uses its existing maintenance mode while the coordinated callers are published.

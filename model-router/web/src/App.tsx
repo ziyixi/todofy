@@ -44,8 +44,10 @@ export function App({ api = defaultApi }: { api?: RouterApi }) {
     window.location.hash = '#/playground'
   }
   function refresh() {
-    if (route.tab === 'requests') setRequestFilters((current) => ({ ...current, toTime: new Date().toISOString() }))
-    if (route.tab === 'overview') setOverviewFilters((current) => ({ ...current, toTime: new Date().toISOString() }))
+    if (route.tab === 'requests')
+      setRequestFilters((current) => ({ ...current, toTime: new Date().toISOString() }))
+    if (route.tab === 'overview')
+      setOverviewFilters((current) => ({ ...current, toTime: new Date().toISOString() }))
     void client.invalidateQueries({ queryKey: ['router-models'] })
     void client.invalidateQueries({ queryKey: ['router-usage'] })
     if (route.name) void client.invalidateQueries({ queryKey: ['router-request', route.name] })
@@ -140,7 +142,8 @@ export function App({ api = defaultApi }: { api?: RouterApi }) {
         )}
       </main>
       <footer className="app-footer">
-        输入与输出保留 7 天，请求元数据保留 90 天。<span>费用为可用 API 用量的 USD 估算。</span>
+        输入与输出保留 7 天，请求元数据保留 90 天。
+        <span>API 费用与订阅 API 等价费用均为估算，不代表账单。</span>
       </footer>
     </div>
   )

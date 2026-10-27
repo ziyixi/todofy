@@ -265,11 +265,11 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, codex_gateway_check=T))
 
-    def test_legacy_codex_inference_proto_reaches_only_the_executor(self):
+    def test_retired_codex_inference_proto_checks_without_publication(self):
         result = push(["proto/codex/inference/v1/inference.proto"])
         self.assertTrue(result["proto"])
         self.assertEqual({app for app in ci_changes.APPS if result[f"{ci_changes.PREFIX[app]}_check"]}, set(ci_changes.PROTO_USERS))
-        self.assertEqual({key for key, value in result.items() if value and key.endswith(("_deploy", "_publish"))}, {"codex_gateway_deploy"})
+        self.assertEqual({key for key, value in result.items() if value and key.endswith(("_deploy", "_publish"))}, set())
         self.assertEqual(ci_changes.dispatched("codex-gateway"), expect(F, F, T, F, F, packages=T, proto=T, **CODEX_GATEWAY))
 
     def test_platform_release_changes_publish_its_independent_tested_image(self):
@@ -647,8 +647,8 @@ class Classify(unittest.TestCase):
             "proto/website/sync/v1/sync.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"},
             # mailsort's owner API: its Worker serves it, its UI calls it.
             "proto/mailsort/ui/v2/mailsort_ui_service.proto": {"mailsort"},
-            # Only the gateway serves this inference API and Mailsort calls it.
-            "proto/codex/inference/v1/inference.proto": {"codex-gateway"},
+            # The unused inference package was retired after every caller moved to Model Router.
+            "proto/codex/inference/v1/inference.proto": set(),
             "proto/modelrouter/inference/v1/inference.proto": {"model-router", "mailsort", "todofy", "brief", "newsletter", "codex-gateway"},
             # recall's owner API, the extension's upload and the archive feed: its Worker serves all three.
             "proto/recall/ui/v1/recall_ui_service.proto": {"recall", "personal-mcp"},
@@ -769,7 +769,7 @@ class Classify(unittest.TestCase):
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/ui/v1/fleet_ui_service.proto"), {"fleet"})
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/telemetry/v1/host_report.proto"), {"fleet", "platform"})
         self.assertEqual(ci_changes.proto_deploys("proto/mailhero/ui/v2/message.proto"), {"mail-hero"})
-        self.assertEqual(ci_changes.proto_deploys("proto/codex/inference/v1/inference.proto"), {"codex-gateway"})
+        self.assertEqual(ci_changes.proto_deploys("proto/codex/inference/v1/inference.proto"), set())
 
     def test_deleting_a_retired_package_deploys_nothing(self):
         """A package proto/retired.json lists is gone with its importers' use of it: its deletion checks every user and

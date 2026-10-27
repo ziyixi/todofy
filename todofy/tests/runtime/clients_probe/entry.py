@@ -72,7 +72,8 @@ class Default(WorkerEntrypoint):
                     deadline_ms=started + args["budget_ms"],
                     response_schema=args.get("response_schema"),
                     preface=args.get("preface", ""),
-                    model=args.get("model", "models/gemini-email"),
+                    model=args.get("model", "gemini-3.5-flash-lite"),
+                    fallback_models=tuple(args.get("fallback_models", ())),
                 )
                 data = {
                     "ok": result.verdict.ok,

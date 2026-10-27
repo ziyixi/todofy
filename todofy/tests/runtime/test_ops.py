@@ -127,7 +127,7 @@ def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(
 
     assert result["state"] == "ok", result
     [call] = fresh_gemini.calls_mentioning(CANARY_TEXT)
-    assert call.system.strip() and call.requested_model == "models/gemini-email"
+    assert call.system.strip() and call.requested_model == "gemini-3.5-flash-lite"
     event = stack.event(CANARY_ID)
     assert (event["state"], event["canary"], event["allowed_actions"], event["summary"]) == ("complete", True, [], None)
     assert transitions(event) == [
@@ -161,7 +161,7 @@ def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(
 def test_a_canary_whose_summary_keeps_failing_ends_failed_after_three_attempts(
     stack: OpsStack, fresh_gemini: ModelRouterFake
 ) -> None:
-    for _ in range(3):  # three business steps; fallback attempts are inside the Router
+    for _ in range(6):  # Three business steps, each with two actual model attempts.
         fresh_gemini.queue_generate(error_reply(503))
     event_id, body = canary_event()
 
@@ -171,7 +171,7 @@ def test_a_canary_whose_summary_keeps_failing_ends_failed_after_three_attempts(
     assert (result["state"], result["error_code"]) == ("failed", "summary_failed")
     event = stack.event(event_id)
     assert (event["state"], event["attempt_count"], event["allowed_actions"]) == ("ignored", 3, [])
-    assert len(fresh_gemini.calls_mentioning(CANARY_TEXT)) == 3
+    assert len(fresh_gemini.calls_mentioning(CANARY_TEXT)) == 6
     assert stack.ok("status", definition="OpsStatus")["counters"]["attention_events"] == 0
 
 

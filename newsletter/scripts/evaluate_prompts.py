@@ -316,7 +316,7 @@ async def evaluate(
     output: pathlib.Path,
     client: models.ModelClient | None = None,
     allow_model_calls: bool,
-    model: str = "models/sol-6-1",
+    model: str = "gpt-6.1-sol",
     timeout: float = 300,
     editor_factory: Callable[
         ..., newsletter_editor.ModelEditor
@@ -494,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", required=True, type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
-    parser.add_argument("--model", default="models/sol-6-1")
+    parser.add_argument("--model", default="gpt-6.1-sol")
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--allow-model-calls", action="store_true")
     args = parser.parse_args(argv)

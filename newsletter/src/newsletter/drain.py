@@ -37,19 +37,18 @@ def mark_uncertain() -> None:
         )
 
 
-def register_model_context(name: str) -> str:
+def register_model_context(name: str) -> None:
     """Persist the chosen remote identity before sending context creation."""
     current = _CURRENT.get()
-    close_request_id = str(uuid.uuid4())
     if current is not None:
         gate, lease = current
         with gate.store.transaction():
+            # Existing journals require the old column; close now uses name.
             gate.store.db.execute(
                 "INSERT INTO deployment_model_contexts "
                 "VALUES (?, ?, ?, 'open')",
-                (name, lease, close_request_id),
+                (name, lease, ""),
             )
-    return close_request_id
 
 
 def confirm_model_context_closed(name: str) -> None:
@@ -106,20 +105,12 @@ class DeploymentDrain:
     async def recover_model_contexts(self, client: models.ModelClient) -> None:
         """Confirm remote cleanup under exclusive ownership, without replay."""
         rows = self.store.db.execute(
-            "SELECT name, close_request_id FROM deployment_model_contexts "
-            "WHERE state='open'"
+            "SELECT name FROM deployment_model_contexts WHERE state='open'"
         ).fetchall()
-        for name, request_id in rows:
-            receipt = await client.close_conversation(
-                models.CloseConversationRequest(
-                    name=name, request_id=request_id
-                )
+        for (name,) in rows:
+            await client.close_conversation(
+                models.CloseConversationRequest(name=name)
             )
-            if receipt.name != name or receipt.state not in {
-                "closed",
-                "expired",
-            }:
-                raise DrainError("model_cleanup_unconfirmed")
             with self.store.transaction():
                 self.store.db.execute(
                     "UPDATE deployment_model_contexts SET state='closed' "

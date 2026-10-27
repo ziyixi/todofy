@@ -34,6 +34,10 @@ migrations_dir = "migrations"
 binding = "REQUEST_BODIES"
 bucket_name = "model-router-request-bodies"
 
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "model-router-backups"
+
 [[durable_objects.bindings]]
 name = "ENGINE"
 class_name = "RouterEngine"
@@ -45,7 +49,7 @@ new_sqlite_classes = ["RouterEngine"]
 [ai]
 binding = "AI"
 
-# Bounded daily cleanup; R2's independent seven-day rule covers orphaned private bodies too.
+# Daily backup and bounded cleanup; both private buckets expire their objects after seven days.
 [triggers]
 crons = ["47 4 * * *"]
 
