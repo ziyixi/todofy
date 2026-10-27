@@ -57,21 +57,19 @@ Cloudflare callers use the `Inference` binding with immutable `props.app` naming
 Home binds the content-free `Ops` entrypoint. Application request fields cannot choose either identity.
 
 `MODEL_ROUTER_WORKER_SECRETS` in GitHub's protected production environment contains only `ACCESS_OWNER` and
-optional `ACCESS_OWNER_ALIASES`. The following owner-machine connections are installed directly in Router
-secrets and preserved by normal publication:
+optional `ACCESS_OWNER_ALIASES`. The connections named in [app.toml](../app.toml) are Router secrets that normal
+publication preserves:
 
-- `ANTHROPIC_API_KEY`: one shared key in the existing Claude workspace, including Playground use, under the
-  owner's configured US$80/month workspace cap. Application budgets and history remain in their applications.
-- `GEMINI_API_KEY`: the shared Gemini key.
-- `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET`: the existing dedicated Access identity for the VPS
-  executor. The backend verifies Access JWTs. Its public issuer/audience are baked into the gateway image.
-- `MODEL_ROUTER_NEWSLETTER_TOKEN`: Newsletter's inference-only credential. Its VPS configuration uses the same
-  value as `NEWSLETTER_MODEL_ROUTER_TOKEN`, with `NEWSLETTER_MODEL_ROUTER_URL` naming the Models origin.
+- `ANTHROPIC_API_KEY` and `GEMINI_API_KEY`: one shared key per provider for every caller, Playground included.
+  Provider keys are Router secrets; spending is capped at the provider. Application budgets and history remain
+  in their applications.
+- `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET`: the executor's Access service credential. The backend
+  verifies Access JWTs. Its public issuer/audience are baked into the gateway image.
+- `MODEL_ROUTER_NEWSLETTER_TOKEN`: Newsletter's inference-only credential, sent as `NEWSLETTER_MODEL_ROUTER_TOKEN`
+  with `NEWSLETTER_MODEL_ROUTER_URL` naming the Models origin.
 
-Provider keys stay only in Router secrets. Backups do not export any credentials. The gateway keeps its existing
-subscription login/PVC; privileged Platform deployment authentication remains separate. Gmail grants and Brief's
-Resend connection stay with their applications. Playground calls record source `console` and perform no application
-business action.
+Backups do not export any credentials. Gmail grants and Brief's Resend connection stay with their applications.
+Playground calls record source `console` and perform no application business action.
 
 ## Checks and coordinated release
 

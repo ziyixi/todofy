@@ -9,7 +9,7 @@
 
 ## 使用
 
-从 Home 打开 Model Router，或访问部署配置里的 `PUBLIC_HOST`。Playground 可选择模型、思考强度和 JSON Schema。所有应用和控制台共用 Router 的供应商连接，不再选择应用计费配置。Claude 使用现有 Brief 工作区的同一个 API key，所有 Claude 调用合计受该工作区 US$80/月上限约束；Gemini 使用一个共享 key。
+从 Home 打开 Model Router，或访问部署配置里的 `PUBLIC_HOST`。Playground 可选择模型、思考强度和 JSON Schema。所有应用和控制台共用 Router 的供应商连接，不再选择应用计费配置。供应商 key 是 Router secrets，消费上限设在供应商处。
 
 每次调用返回最终结果，不向应用提供 token 流。输入、指令和输出存入私有 R2，保留 7 天；D1 请求记录和统计保留 90 天。每日备份记录与保留中的正文，副本保存七天，见[恢复说明](docs/backup.md)。用量页按小时/天展示请求、token 和费用趋势；订阅按假设 API 价值单列，API 估价另列。未知用量保持未知。
 
