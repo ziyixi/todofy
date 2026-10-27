@@ -22,30 +22,12 @@ and deletion remain owner decisions. Retry an uncertain write with the same requ
 
 ## Work and follow-up
 
-Register a Work only for a responsibility that crosses turns, waits, continues in the background or delegates
-follow-up. Its four states are `active`, `waiting`, `done` and `cancelled`. Keep the goal, authorized scope,
-completion condition, continuation summary, next action and waiting/follow-up facts current. References link
-Tasks, Codex chats, Watches, Recall records, native schedules and artifacts. `owned` means dedicated to this Work.
-
-On resumption, read context, the selected Work and the relevant current sources. Checkpoint before an external
-action and record its receipt or observed result afterward. A checkpoint is silent; a report can notify. Completion
-needs observed evidence. Finish or cancellation must also stop real dedicated follow-up resources when they are
-no longer needed; a state change cannot stop them. Shared Watches and schedules keep their existing settings.
-
-Captured page evidence changes reach the linked Work independently of Watch's business triggers. The Dot reads
-the stored before/after snapshots and judges relevance against the Work goal, logging `relevant`, `irrelevant` or
-`uncertain`. Read Markdown or structure in bounded windows with `watch_read`; use `watch_view` for the actual
-stored screenshot when available. Incomplete or failed evidence cannot prove irrelevance. This judgment does
-not alter the Watch baseline or permanently ignore a line. Check current conditions before waiting for a later
-change. New dedicated Watches must link to a Work and default to `NONE`, so they do not create a separate Tasks
-item. Creation automatically adds the owned link. Preview requires a display name, HTTPS URI and an intent;
-HTTP is the default fetcher, with browser availability and quotas enforced by Watch. Pause/resume require the
-current Watch etag. Lifecycle controls expose pause, resume and check.
-
-`review_at` does not schedule a wakeup. Use Dots' native schedules for timed follow-up and save the ID only after
-successful creation. One hourly overall review can cover outstanding Works; reuse it and keep unchanged reviews
-quiet. Use Dots' native path to an existing local Codex chat. This MCP stores its reference and cannot directly
-wake local Codex. See [Work memory usage](docs/work-memory.md) for resumption, evidence and shutdown steps.
+Work records keep an authorized responsibility resumable across chats, waits and callbacks: goal, scope, completion
+condition, continuation summary, next action, waiting facts and refs to the real Tasks, Codex chats, Watches, Recall
+records, native schedules and artifacts. A checkpoint is silent; a report can notify. Captured Watch evidence changes
+reach linked Works as reports, and the Dot judges their relevance. The Dot-facing rules are the
+[skill](plugin/skills/personal-cloud/SKILL.md) and the tool descriptions; [Work memory](docs/work-memory.md) lists what
+the server guarantees.
 
 ## Events
 

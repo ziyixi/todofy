@@ -3,8 +3,8 @@
 ## Original connection gate (historical)
 
 The first gate exposed only `personal_cloud.test`, with no filters and a synthetic message plus the build SHA.
-That gate passed before business bindings were added. The current catalog is in [README](../README.md), with
-work continuation and source behavior in [work memory](work-memory.md).
+That gate passed before business bindings were added. The current catalog is in [README](../README.md); the Dot-facing
+rules are in [the skill](../plugin/skills/personal-cloud/SKILL.md) and the tool descriptions.
 
 Subscriptions live in the single `SubscriptionStore` SQLite DO. A subscription ID includes its owner, callback,
 event name and arguments. A signed challenge must succeed before it is saved. Repeated subscriptions renew the
@@ -108,8 +108,7 @@ authorized native hourly review can still refresh it through those read tools.
 cursor, the same poll takes a new baseline and gives each open Work with a Watch one `blocked` report about the gap;
 the Dot reads `watch_changes` to catch up. When no open Work has a Watch link, the next attachment starts fresh.
 
-`watch_read` reads stored Markdown or structure windows with source completeness, capture metadata and snapshot
-refs. `watch_view` returns a stored JPEG as an MCP image block, or an explicit missing/error result. Neither tool
-fetches a current page or calls a model. Browser selection uses Watch's existing availability and budget rules;
-exposing that setting does not enable a production browser binding. Refresh the existing App's tools after the
-authorized Worker release. Verify actual image delivery and Dots' relevance review separately from local tests.
+`watch_read` and `watch_view` read stored evidence only; they never fetch a page or call a model. Watch's own
+`BROWSER` binding renders browser-mode watches; MCP only exposes the `fetcher` setting, and Watch's availability, interval
+and budget rules still apply. Refresh the existing App's tools after the authorized Worker release. The Dot-facing rules
+are [the skill](../plugin/skills/personal-cloud/SKILL.md) and the tool descriptions.

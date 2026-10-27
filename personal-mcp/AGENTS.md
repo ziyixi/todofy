@@ -15,24 +15,19 @@ Read the root AGENTS, this app's README and docs/connection.md.
   callback/source failures; use its existing dismissal behavior, not permanent new warning state.
 - Use native receipts, etags and stable Step identities. Inbox/Step automation needs an explicit owner responsibility;
   dates, commitments, completion and deletion need owner instructions. Queue moves preserve dates and deadlines.
-- Work memory belongs in the existing SQLite DO. Register only work that crosses turns, waits, runs in the
-  background or has a later delegation. Keep its goal, authorized scope, completion condition, continuation
-  summary, next action and waiting/follow-up facts current. Use only `active`, `waiting`, `done`, `cancelled`.
-  Business facts still belong to their source; refs link Task, Codex, Watch, Recall, schedule and artifact identities.
-- On resumption read Work context, then the Work and relevant current sources. Checkpoint before external
-  effects and save the receipt or observed result afterward. A checkpoint is silent; only a report requests a
-  Work notification. Callback acceptance never proves completion. `review_at` is a review hint, not a scheduler.
-- `owned` marks only resources dedicated to that Work. Before closing or cancelling it, stop its real owned
-  Watch/schedule and confirm the result; keep shared resources running. Store a native schedule ID only after
-  creating it successfully. Reuse Dots' native schedules and existing Codex chats; MCP does not wake local Codex.
+- Dot-facing rules (when to register Work, resumption, checkpoints and reports, schedules, Watch reviews, cleanup)
+  have one source: `plugin/skills/personal-cloud/SKILL.md` plus the tool descriptions. Change them there; other
+  docs point to them.
+- Work memory belongs in the existing SQLite DO, with only `active`, `waiting`, `done`, `cancelled`. Business facts
+  stay in their source; refs link Task, Codex, Watch, Recall, schedule and artifact identities. A checkpoint is silent;
+  only a report requests a Work notification. `done` refuses unhandled reports, and a finished Work needs its owned
+  Watch, schedule and Codex links confirmed stopped or completed. `review_at` is a hint, not a scheduler, and MCP does
+  not wake local Codex.
 - MCP-created work Watches must link to a Work and default to `NONE`, without creating a Tasks item. Preserve
   an existing shared Watch's notification settings. Creation confirms the owned link; pause/resume require the
-  current Watch etag and a current source read confirms a stop, beyond a frozen mutation receipt. Watch evidence events
-  report captured changes independently of its ordinary rules; the Dot judges relevance
-  to the Work goal from saved text/images and checkpoints a `watch_review` entry with the real
-  `change_ref` (a change or snapshot reference), `verdict` (`relevant`, `irrelevant`, `uncertain`) and `reason`. Missing, truncated or failed
-  evidence cannot support `irrelevant`. A judgment does not alter a Watch baseline or create permanent ignore
-  rules. Check the initial state before waiting for another change.
+  current Watch etag and a current source read confirms a stop, beyond a frozen mutation receipt. Watch evidence and
+  health reach linked open Works as reports from the private feed; an expired cursor becomes one gap report per Work.
+  A Dot's judgment never alters a Watch baseline or creates permanent ignore rules.
 - Recall activity is a bounded timeline read. `recall_read` retains its text-only behavior; `recall_view` must
   return a real MCP image content block when an image is available. Do not treat a base64 string as a viewed image.
 - Tests use synthetic content and local receivers. Do not read real task, mail or browsing content to test a tool.
