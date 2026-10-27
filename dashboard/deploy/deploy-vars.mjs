@@ -98,8 +98,8 @@ export function generateSecrets(env) {
 }
 
 /** Whether the analytics token is the deploy token (CF_API_TOKEN, passed to the secrets step only for this
- * comparison): a broad token then sits in an internet-facing Worker. The owner allowed the reuse until a
- * read-only token is saved, so it is a warning, not a refusal. Values are never printed. */
+ * comparison): a broad token would then sit in an internet-facing Worker. The run gets a warning; values are
+ * never printed. */
 export function deployTokenReused(env) {
   const deploy = typeof env.CF_API_TOKEN === 'string' ? env.CF_API_TOKEN.trim() : ''
   const token = typeof env.DASHBOARD_CF_ANALYTICS_TOKEN === 'string' ? env.DASHBOARD_CF_ANALYTICS_TOKEN.trim() : ''

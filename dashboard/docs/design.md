@@ -76,7 +76,7 @@ route `home.ziyixi.science` with `custom_domain = true`. One cron
 | `CANARY_ENABLED` | var | `true` or `false` (§5.4 "Switch"); unset or empty → `true`; any other value → `false` (the switch exists to stop canaries, so an unreadable value never starts one; `deploy-vars.mjs` sends only `true`/`false`) |
 | `BUILD_SHA` | var | the deployed commit (`dev` locally) |
 | `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` | secret | printable-ASCII emails, ≤ 8 aliases, ≤ 2048 chars; empty aliases uploaded as `" "` |
-| `CF_ANALYTICS_TOKEN` | secret | API token used **only** as `Authorization: Bearer` on `POST https://api.cloudflare.com/client/v4/graphql` and on the drift check's read-only `GET`s under `https://api.cloudflare.com/client/v4` (design-v2.md §10; URLs are constants, not config). Never logged, stored, echoed or sent elsewhere. Today a broader token is reused; replace it with an "Account Analytics: Read" token (setup.md) |
+| `CF_ANALYTICS_TOKEN` | secret | API token used **only** as `Authorization: Bearer` on `POST https://api.cloudflare.com/client/v4/graphql` and on the drift check's read-only `GET`s under `https://api.cloudflare.com/client/v4` (design-v2.md §10; URLs are constants, not config). Never logged, stored, echoed or sent elsewhere. A read-only token (setup.md §4) |
 | `DEV_AUTH_BYPASS` | local only | `true` enables the loopback bypass; never in the production config (tests check it) |
 | `DEV_NOW` | local only | an RFC 3339 UTC instant that a request the loopback bypass signed in takes as now (views, refreshes, manual canary, guard override); unset or anything else → the object's clock. Requests Access verified and cron ticks never read it; never in the production config, the deploy's `--var`s or its secrets (tests check it) |
 

@@ -91,13 +91,8 @@ two read-only purposes (both URLs are constants, not configuration):
 It is never logged, stored, echoed to the page or sent anywhere else, and unit tests check that it
 appears only in the authorization header of those requests.
 
-**Today a broader token is reused.** A token for this secret becomes a Worker secret of an
-internet-facing Worker, so it must be able to do no more than read analytics: any future bug in the
-Worker would otherwise expose account write access. The owner allowed reusing the deploy token until a
-read-only token is saved (2026-09-30), so when `DASHBOARD_CF_ANALYTICS_TOKEN` equals the deploy token
-`CF_API_TOKEN` `deploy-vars.mjs` only adds a "Broad analytics token" warning to the run (by name, without a
-value); it cannot check the scope of any other token. Replace it with a token that can only read
-analytics:
+A token for this secret becomes a Worker secret of an internet-facing Worker, so it must be able to do no
+more than read: any bug in the Worker would otherwise expose account write access. Create it as follows:
 
 1. Cloudflare dashboard → My Profile → API Tokens → Create Token → Custom token.
 2. Permissions: **Account → Account Analytics → Read** (the permission the GraphQL API needs for
@@ -114,8 +109,7 @@ analytics:
    shows fresh data (no "用量数据获取失败" item). The next day after 02:00 UTC, check that 配置漂移 on
    the Cloudflare view shows a completed check (not 检查失败 with HTTP 403). Record the dates in
    `verification.md`.
-7. Only then stop using the broader token for this purpose. Do not revoke it if it is still used
-   elsewhere (for example as a deploy token).
+7. Only then revoke a token it replaces, unless something else still uses that token.
 
 If the token lacks a Workers permission, 配置漂移 shows 检查失败 and the digest reports
 `drift_unavailable` after two failed days; usage is unaffected. Without Account Settings Read only the
@@ -127,10 +121,10 @@ procedure with a new token.
 ## 5. Local development
 
 ```sh
-cd dashboard/worker && npm ci
-cd ../web && npm ci && npm run build            # web/dist, served by the Worker
-cp ../.dev.vars.example ../.dev.vars           # synthetic local values, gitignored
-cd ../worker && npm run dev                      # http://127.0.0.1:8787, local bindings only, never --remote
+pnpm install --frozen-lockfile                       # from the repository root, the shared lock
+pnpm --dir dashboard/web run build                   # web/dist, served by the Worker
+cp dashboard/.dev.vars.example dashboard/.dev.vars   # synthetic local values, gitignored
+pnpm --dir dashboard/worker run dev                  # http://127.0.0.1:8787, local bindings only, never --remote
 ```
 
 `dashboard/wrangler.toml` is production, so local work always uses local bindings, and the local values
@@ -138,7 +132,7 @@ come from the untracked `dashboard/.dev.vars` next to it (wrangler reads the `.d
 config), with synthetic values only: the local `PUBLIC_HOST`, `BUILD_SHA`, `CANARY_ENABLED`,
 `DEV_AUTH_BYPASS=true` and `ACCESS_OWNER=owner@example.com` ([`.dev.vars.example`](../.dev.vars.example)). The bypass works only for
 `http://localhost`, `127.0.0.1` or `[::1]` requests without `cf-ray`; anywhere else an enabled bypass
-answers 503. `npm run dev` (`worker/package.json`) pins the local origin with `--ip 127.0.0.1 --port 8787
+answers 503. The worker's `dev` script (`worker/package.json`) pins the local origin with `--ip 127.0.0.1 --port 8787
 --local-upstream 127.0.0.1:8787`: wrangler dev otherwise takes the config's first route as every local
 request's URL, so the Worker would see `https://home.ziyixi.science` and refuse the bypass (503
 `access_not_configured`). Change `--port` and `--local-upstream` together, and never run a bare
