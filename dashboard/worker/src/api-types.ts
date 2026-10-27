@@ -235,9 +235,10 @@ export type OpsApp = 'mail-hero' | 'todofy' | 'watch' | 'fleet' | 'newsletter' |
 // ---- transport outside the service --------------------------------------------------------------------------
 
 /**
- * GET /api/csrf -> 200, plus `Set-Cookie: home_csrf=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200;
- * Secure`. Mutations send the token as `X-CSRF-Token`. Transport, not part of DashboardUiService (as the watch
- * app's).
+ * GET /api/csrf -> 200 `{token: "1"}`, no cookie: a static compatibility answer for tabs still running a UI that
+ * fetched a token before each mutation, until 2026-11-02 with the retired routes below. The current UI sends
+ * `X-CSRF-Token: 1` directly; the Worker checks Origin, that nonempty header and the JSON media type. Transport,
+ * not part of DashboardUiService.
  */
 export interface CsrfResponse {
   readonly token: string;

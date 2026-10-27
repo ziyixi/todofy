@@ -408,7 +408,8 @@ The shapes are `worker/src/api-types.ts`. Details:
 - **Owner JSON mutations**: after Access authentication and before reading the body, `verifyCsrf` requires
   an exact origin from `['https://' + PUBLIC_HOST]` (plus the request origin only when bypassed), a nonempty
   `X-CSRF-Token` header and `application/json`. Failure is 403 `csrf_failed`. Clients send header `1`
-  directly. Compatibility `GET /api/csrf` returns static `1` without a cookie or signing key.
+  directly. Compatibility `GET /api/csrf` returns static `1` without a cookie or signing key, for tabs still
+  running a UI that fetched a token first, until 2026-11-02 (with the retired `/api/v2` paths).
 - **Headers**: every response through `withPrivateHeaders` with `STRICT_CSP` (no remote fonts, scripts
   or connections); API and errors `cache-control: no-store`; `/assets/*` 200 non-HTML may use
   `private, max-age=31536000, immutable` like Todofy. JSON is `application/json; charset=utf-8`.

@@ -2,9 +2,10 @@
  * The owner surface (docs/design.md §6, docs/design-v2.md §5): Access (edge-auth) on every path except /health, then
  *
  * - /api/v1/*: the owner API, DashboardUiService (proto/dashboard/ui/v1), served by the shared transcoder with the
- *   handlers of api.ts; every method but GET also needs the same-origin Origin and the custom CSRF header and JSON media type
- *   token (the transcoder's `authorize` hook runs before the body is read);
- * - GET /api/csrf: static compatibility token `1`, without a cookie (transport, not part of the service);
+ *   handlers of api.ts; every method but GET also needs the same-origin Origin, a nonempty X-CSRF-Token header and the
+ *   JSON media type (the transcoder's `authorize` hook runs before the body is read);
+ * - GET /api/csrf: static compatibility token `1`, without a cookie, for tabs still running a UI that fetched a token
+ *   first (transport, not part of the service; until 2026-11-02, with the routes below);
  * - the routes of the UI before dashboard.ui.v1 (/api/v2/home, ...): 410 with RELOAD_MESSAGE in their old error
  *   envelope, under the code `not_found` (LEGACY_RELOAD_CODE: the old UI shows a message only for the codes it knows,
  *   LEGACY_CODES), so a tab still running the old UI tells the owner to reload (until 2026-11-02, then NOT_FOUND like
@@ -133,7 +134,6 @@ async function authenticate(ctx: Context): Promise<OwnerContext> {
 
 // ---- CSRF -----------------------------------------------------------------------------------------
 
-
 function allowedOrigins(ctx: OwnerContext): string[] {
   const host = publicHost(ctx.env);
   const origins = host === null ? [] : [`https://${host}`];
@@ -218,13 +218,9 @@ async function route(base: Context): Promise<Routed> {
     return { response: legacyError(ctx, 410, LEGACY_RELOAD_CODE, RELOAD_MESSAGE), asset: false, reason: 'RELOAD_REQUIRED' };
   }
   if (url.pathname === '/api/csrf') {
-    // GET only, as before: a token and its cookie are issued to a page that asks for one.
+    // GET only, as before; the static token needs no key and sets no cookie.
     if (request.method !== 'GET') return fail(methodNotAllowed('GET'));
-    try {
-      return { response: csrfResponse(), asset: false };
-    } catch (error) {
-      return fail(error instanceof RpcError ? error : dashboardError('INTERNAL'));
-    }
+    return { response: csrfResponse(), asset: false };
   }
   if (url.pathname === '/api/v1' || url.pathname.startsWith(API_PREFIX)) {
     const result = await api.handle(request, ctx, ctx.requestId);
