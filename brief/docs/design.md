@@ -76,8 +76,8 @@ No D1, R2, KV, Queues, Workflows or cron trigger. Bindings: `BRIEF` (the object)
 GitHub: `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`, `FEEDBACK_SIGNING_KEY` (64 hex),
 `MAIL_FROM`, `MAIL_TO` (personal values). Brief's only owner-machine secret is `RESEND_API_KEY`, kept outside
 GitHub and preserved by deployment. Model Router alone holds the shared `ANTHROPIC_API_KEY` and `GEMINI_API_KEY`.
-Claude uses the original Brief workspace, with an aggregate $80/month provider cap across all callers; Brief keeps
-its own persisted business budget. Provider credentials and API adapters stay in Router; the official Codex SDK
+Provider keys are Router secrets, and spending is capped at the provider; Brief keeps its own persisted business
+budget. Provider credentials and API adapters stay in Router; the official Codex SDK
 and subscription login remain on the VPS. Current setup is in
 [Model Router deployment](../../model-router/docs/deployment.md).
 
