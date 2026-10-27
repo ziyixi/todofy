@@ -60,7 +60,7 @@ body or credentials. The website `/privacy/mailsort` must match these operations
 | p4 / P4 | Notifications and promotions kept for reference | Archive |
 
 Personal rules take precedence over the base guidance. Initial preferences: ordinary USPS Informed Delivery P2,
-same-day action P1; Daily Briefing P1; actual shopping receipts/order confirmations (including Weee/Yami) P2.
+same-day action P1; Daily Briefing P1; actual shopping receipts/order confirmations (any shopping platform) P2.
 Brand promotions do not become purchase receipts. These rules are editable text, with no sender-specific code
 branches, scam score, probability threshold or forced category balance. A provider error cannot become a priority.
 

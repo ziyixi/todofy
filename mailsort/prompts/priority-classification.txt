@@ -2,7 +2,7 @@
 
 先应用单独提供的“个人规则”。个人规则明确指定的队列或范围，优先于下面的一般分级指南；一般指南用于个人规则未覆盖的邮件。
 
-用户是一名软件与机器学习工程师，目前不主动求职，但愿意了解真人提供的职业机会。他的技术项目已有其他监控渠道，普通自动运行状态不需要通过邮件反复提醒。用户不希望因为曾经注册过一个产品，就被默认认为想读它的推广内容。用户主要想通过邮件处理与自己有关的事务、保持必要联系，通常不把泛资讯当成阅读任务。职业相关不等于阅读兴趣，不要替用户补充未提供的兴趣。
+用户是一名软件与机器学习工程师。他的技术项目已有其他监控渠道，普通自动运行状态不需要通过邮件反复提醒。用户不希望因为曾经注册过一个产品，就被默认认为想读它的推广内容。用户主要想通过邮件处理与自己有关的事务、保持必要联系，通常不把泛资讯当成阅读任务。职业相关不等于阅读兴趣，不要替用户补充未提供的兴趣。
 
 先理解这封邮件在传递什么、它与用户有什么实际关系，再判断阅读时效：
 1. 今天不读，是否会错过具体的安排、必要回复或产生有根据的实际影响？
@@ -35,7 +35,7 @@
 
 示例二：购买收据与同品牌促销
 输入：
-{"emails":[{"id":"example-receipt","subject":"Weee order receipt","sender":"Weee <shop.example>","received_at":"2026-10-22T14:00:00Z","evaluated_at":"2026-10-22T16:00:00Z","time_zone":"America/Los_Angeles","body":"你购买的商品已付款，订单已确认。这是本次购买的收据，无需操作。","body_truncated":false},{"id":"example-promotion","subject":"Weee: save on your next order today","sender":"Weee <shop.example>","received_at":"2026-10-22T14:00:00Z","evaluated_at":"2026-10-22T16:00:00Z","time_zone":"America/Los_Angeles","body":"今天下单可享优惠，来看看为你推荐的商品。这封邮件不对应已有订单。","body_truncated":false}]}
+{"emails":[{"id":"example-receipt","subject":"Example Market order receipt","sender":"Example Market <shop.example>","received_at":"2026-10-22T14:00:00Z","evaluated_at":"2026-10-22T16:00:00Z","time_zone":"America/Los_Angeles","body":"你购买的商品已付款，订单已确认。这是本次购买的收据，无需操作。","body_truncated":false},{"id":"example-promotion","subject":"Example Market: save on your next order today","sender":"Example Market <shop.example>","received_at":"2026-10-22T14:00:00Z","evaluated_at":"2026-10-22T16:00:00Z","time_zone":"America/Los_Angeles","body":"今天下单可享优惠，来看看为你推荐的商品。这封邮件不对应已有订单。","body_truncated":false}]}
 标准回复：
 {"items":[{"id":"example-receipt","bucket":"P2","reason":"这是已发生购买的真实收据，按个人规则两三天内核对。"},{"id":"example-promotion","bucket":"P4","reason":"这是引导再次购买的促销，优惠到期不构成必须阅读的事项。"}]}
 

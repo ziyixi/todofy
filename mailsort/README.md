@@ -45,7 +45,7 @@ Classification uses a [base prompt](prompts/priority-classification.txt) and [pe
 Edit either in **设置 → 分类提示词** and save; the existing database keeps the saved text through deployments.
 It applies to the next model batch and does not rerun classified mail. The initial personal rules put ordinary
 USPS Informed Delivery in P2 (P1 when timely action is needed), Daily Briefing in P1, and actual shopping receipts
-and order confirmations, including Weee and Yami, in P2. Promotions from the same brands keep the general policy.
+and order confirmations from any shopping platform in P2. Promotions from the same brands keep the general policy.
 The base includes three input/JSON-response demonstrations with seven synthetic messages covering all four queues;
 they illustrate the default preferences, while current personal rules take precedence.
 Inputs include masked sender,
