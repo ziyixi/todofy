@@ -45,8 +45,9 @@ tests and `tasks/web/test/browser/planning-readiness.spec.ts` plus `task-editor-
 Steps, Standalone and Quick share the estimate panel in Plan and Focus. Each also exposes its optional
 estimate in task details; a save keeps the same execution kind, parent, flags and calendar clock.
 Quick's configured date/time remains editable; calendar
-cards show the configured wall-clock time in the task's timezone (otherwise the account timezone). An untimed
-Quick shows Quick instead of an unknown duration, and missing Quick estimates do not count as unknown.
+cards show the configured wall-clock time in the task's timezone (otherwise the account timezone), else the
+estimate. An untimed Quick without an estimate shows Quick instead of an unknown duration, and missing Quick
+estimates do not count as unknown.
 No default duration is invented, and stored estimates, queue dates and recorded time remain intact.
 
 Task deletion confirmations focus their Delete action: Enter activates that button, Escape cancels the

@@ -510,7 +510,7 @@ it("keeps Focus daily, opens statistics separately, rereads a past day after wri
   expect(screen.getByRole("checkbox", { name: "Completed" })).toBeTruthy();
   expect(screen.queryByRole("tab")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "View statistics" }));
-  expect(onOpenGtd).toHaveBeenCalledOnce();
+  expect(onOpenGtd).toHaveBeenCalledExactlyOnceWith("time");
   const dayReads = () =>
     readFocus.mock.calls.filter(([day]) => day === "2026-10-12").length;
   expect(dayReads()).toBe(2);

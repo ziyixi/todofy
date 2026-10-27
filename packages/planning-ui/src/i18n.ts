@@ -47,6 +47,8 @@ const en = {
   deleteStep: "Delete step",
   deleteTask: "Delete task",
   confirmDeleteStep: (title: string) => `Delete “${title}”?`,
+  confirmDeleteChildren: (title: string) =>
+    `Delete “${title}” and its children?`,
   delete: "Delete",
   stepPlaceholder: "One small action per line",
   quickTasks: "Quick tasks",
@@ -200,6 +202,7 @@ const zh: typeof en = {
   deleteStep: "删除步骤",
   deleteTask: "删除任务",
   confirmDeleteStep: (title: string) => `删除「${title}」？`,
+  confirmDeleteChildren: (title: string) => `删除「${title}」及其子任务？`,
   delete: "删除",
   stepPlaceholder: "每行一个具体动作",
   quickTasks: "快速事项",

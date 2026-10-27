@@ -56,15 +56,15 @@ interface Props {
   completeReview: (task: PlanningTask) => Promise<boolean>;
   /** Opens the host's Mail page, which lists the mail of line 1. */
   onOpenMail?: () => void;
-  /** Opens the host's GTD page, the trend of the Inbox and the open tasks. */
-  onOpenGtd?: () => void;
+  /** Opens the host's GTD page at its default Overview tab. */
+  onOpenGtd?: (tab?: "overview" | "time") => void;
   onClose: () => void;
 }
 
 /**
  * Four weekly review lines with counts and jump targets, and another while deadlines lack a
  * start-ahead choice. It only guides: every write is one of the owner's existing single-task
- * actions, made when clicked, or on Saturday next week's two Bets.
+ * actions, made when clicked, or the two Bets: next week's on Saturday, this week's on Sunday.
  */
 export function WeeklyReview({
   plan: completePlan,
@@ -108,6 +108,8 @@ export function WeeklyReview({
     (task) => task.stage !== "monthly" && !progress.kept.includes(task.id),
   );
   const saturday = isLastDay(plan.week, today);
+  // The automatic review arrives on Sunday, after the rollover: the week just begun is this one.
+  const sunday = addDays(plan.week, -1) === today;
   const nextWeek = addDays(plan.week, 7);
   const chosen = new Set(plan.nextWeekTaskIds);
   const commitments = saturday ? weekChoices(plan) : [];
@@ -186,6 +188,44 @@ export function WeeklyReview({
       >
         {open ? (zh ? "收起" : "Hide") : label}
       </button>
+    );
+  }
+
+  /** A week's Work and Personal Bets, each with its goal. */
+  function bets(week: string, which: "this" | "next", label: string) {
+    return (
+      <ul
+        className="weekly-review-items weekly-review-bets"
+        aria-label={label}
+      >
+        {BET_AREAS.map((area) => (
+          <li key={area}>
+            <span className="weekly-review-bet-area">{text[area]}</span>
+            <BetText
+              bet={weeklyBet(plan.weeklyBets, week, area)}
+              // This week's offers last week's to keep, as Weekly goals does.
+              previous={
+                which === "this"
+                  ? weeklyBet(plan.weeklyBets, addDays(week, -7), area).text
+                  : undefined
+              }
+              copy={betWords(language, area, which)}
+              language={language}
+              disabled={busy}
+              save={(bet) => saveBet(run, actions, bet)}
+              announce={setAnnouncement}
+            />
+            <BetGoal
+              bet={weeklyBet(plan.weeklyBets, week, area)}
+              language={language}
+              disabled={busy}
+              renderGoalPicker={renderGoalPicker}
+              run={run}
+              actions={actions}
+            />
+          </li>
+        ))}
+      </ul>
     );
   }
 
@@ -430,33 +470,15 @@ export function WeeklyReview({
                 </ul>
               )}
               {/* Next week's Bets, written here only: Sunday's "Keep" is the one way to carry one on. */}
-              <ul
-                className="weekly-review-items weekly-review-bets"
-                aria-label={zh ? "下周目标" : "Next week's goals"}
-              >
-                {BET_AREAS.map((area) => (
-                  <li key={area}>
-                    <span className="weekly-review-bet-area">{text[area]}</span>
-                    <BetText
-                      bet={weeklyBet(plan.weeklyBets, nextWeek, area)}
-                      copy={betWords(language, area, "next")}
-                      language={language}
-                      disabled={busy}
-                      save={(bet) => saveBet(run, actions, bet)}
-                      announce={setAnnouncement}
-                    />
-                    <BetGoal
-                      bet={weeklyBet(plan.weeklyBets, nextWeek, area)}
-                      language={language}
-                      disabled={busy}
-                      renderGoalPicker={renderGoalPicker}
-                      run={run}
-                      actions={actions}
-                    />
-                  </li>
-                ))}
-              </ul>
+              {bets(nextWeek, "next", zh ? "下周目标" : "Next week's goals")}
             </>,
+          )
+        ) : sunday ? (
+          // After Sunday's rollover: this week's goals, which Saturday may have left unwritten.
+          line(
+            5,
+            zh ? "本周目标" : "This week's goals",
+            bets(plan.week, "this", zh ? "本周目标" : "This week's goals"),
           )
         ) : (
           // Nothing to tick before Saturday: only where the choice will be.
@@ -479,8 +501,8 @@ export function WeeklyReview({
       </p>
       <footer>
         {onOpenGtd && (
-          <button className="weekly-review-jump" onClick={onOpenGtd}>
-            {zh ? "GTD 趋势" : "GTD trends"}
+          <button className="weekly-review-jump" onClick={() => onOpenGtd()}>
+            {zh ? "GTD 概览" : "GTD overview"}
           </button>
         )}
         {reviewTask && !reviewDone ? (

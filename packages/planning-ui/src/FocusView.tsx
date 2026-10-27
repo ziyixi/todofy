@@ -81,8 +81,8 @@ interface Props {
   date?: string;
   /** Shows another day. */
   onNavigate?: (date: string) => void;
-  /** Opens the host's statistics page. */
-  onOpenGtd?: () => void;
+  /** Opens the host's statistics page, its GTD Time tab. */
+  onOpenGtd?: (tab?: "overview" | "time") => void;
   language: Language;
   busy: boolean;
   /** Day cards whose queue write is not yet confirmed. */
@@ -266,7 +266,7 @@ function FocusToolbar({
   today: string;
   language: Language;
   onNavigate: (date: string) => void;
-  onOpenGtd?: () => void;
+  onOpenGtd?: (tab?: "overview" | "time") => void;
 }) {
   const text = words(language);
   return (
@@ -296,7 +296,10 @@ function FocusToolbar({
         </button>
       </nav>
       {onOpenGtd && (
-        <button className="plus-focus-statistics" onClick={onOpenGtd}>
+        <button
+          className="plus-focus-statistics"
+          onClick={() => onOpenGtd("time")}
+        >
           {language === "zh" ? "查看统计" : "View statistics"}
         </button>
       )}

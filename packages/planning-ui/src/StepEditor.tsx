@@ -51,6 +51,8 @@ export function StepEditor({
   const text = words(language);
   const title = displayedTitle(task.title);
   const deleteLabel = task.kind === "task" ? text.deleteTask : text.deleteStep;
+  // Tasks deletes its descendants with it, as the native dialog says.
+  const hasChildren = tasks.some((item) => item.parentId === task.id);
   const saved = task.estimatedMinutes;
   const preset = STEP_MINUTES.some((value) => value === saved);
   // Only typed minutes have a draft; otherwise the field shows a saved value no preset has.
@@ -181,7 +183,11 @@ export function StepEditor({
               if (!busy) setConfirmDelete(false);
             }}
           >
-            <span>{text.confirmDeleteStep(title)}</span>
+            <span>
+              {hasChildren
+                ? text.confirmDeleteChildren(title)
+                : text.confirmDeleteStep(title)}
+            </span>
             <button
               ref={cancelButton}
               className="plus-button"

@@ -438,11 +438,11 @@ function CalendarStep({
         <span title={parent}>{parent}</span>
         <strong>
           {time ||
-            (quick
-              ? words(language).executionQuick
-              : minutes === undefined
-                ? "?"
-                : formattedMinutes(minutes))}
+            (minutes !== undefined
+              ? formattedMinutes(minutes)
+              : quick
+                ? words(language).executionQuick
+                : "?")}
         </strong>
       </div>
     </article>

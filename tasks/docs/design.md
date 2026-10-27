@@ -214,7 +214,7 @@ trends against a week before, what stands out, the mail awaiting a decision and 
 (`#/gtd`) now reviews Task/Step completion and recorded time through Overview, Completion and Time, using the
 bounded `GetGtdReport` rather than the legacy day counts. Its Time tab contains the former Focus Week/Month
 statistics; selecting a day opens editable Focus records. Plan's weekly review still reads GetWeeklyReview
-(the review task and mail count) and links to it. Legacy days/reviews keep their values
+(the review task and mail count) and links to GTD Overview. Legacy days/reviews keep their values
 ([backup](backup.md#one-time-todofy-import)); [GTD](gtd.md) defines rates, inherited areas and historical limits.
 Every Sunday at 10:00 UTC, and at once when the object has no backup state yet, it copies every table into the bucket
 `tasks-backups` (`backup-runner.ts`), one bounded step a second: the plan, then pages of each table into gzip parts,
