@@ -30,12 +30,16 @@ export function totals(buckets: readonly UsageBucket[]) {
       | 'usage_available_count'
       | 'input_tokens'
       | 'output_tokens',
-  ) => buckets.reduce((value, bucket) => value + (bucket[field] ?? 0), 0)
+    rows = buckets,
+  ) => rows.reduce((value, bucket) => value + (bucket[field] ?? 0), 0)
+  // Workers AI reports no tokens, so embeddings never make text usage incomplete.
+  const text = buckets.filter((bucket) => bucket.billing_kind !== 'platform_quota')
   return {
     requests: sum('request_count'),
     succeeded: sum('success_count'),
     failed: sum('failure_count'),
     known: sum('usage_available_count'),
+    unreported: sum('request_count', text) - sum('usage_available_count', text),
     tokens: sum('input_tokens') + sum('output_tokens'),
     api: estimate(buckets, 'api'),
     subscription: estimate(buckets, 'subscription'),
@@ -70,7 +74,7 @@ export function usagePoints(buckets: readonly UsageBucket[], days: TimeRange, un
   for (let stamp = start; stamp <= end; stamp += step) {
     const rows = groups.get(stamp) ?? []
     const total = totals(rows)
-    const complete = total.known === total.requests
+    const complete = total.unreported === 0
     const api = estimate(rows, 'api')
     const subscription = estimate(rows, 'subscription')
     const costAt = (value: Estimate) => (value.requests === 0 ? 0 : (value.value ?? null))

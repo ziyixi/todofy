@@ -45,6 +45,35 @@ test('overview keeps known API and subscription subtotals visible with request-l
   expect(subscriptionMetric).toHaveTextContent('已知估算 US$0.000500')
   expect(subscriptionMetric).toHaveTextContent('2 次有估算 · 2 次未计入')
   expect(apiMetric).not.toHaveTextContent('US$0.000720')
+  const rows = within(screen.getByRole('heading', { name: '按模型汇总' }).closest('section')!)
+  expect(rows.getByRole('rowheader', { name: /claude-opus-5-5/ }).closest('tr')).not.toHaveTextContent('次未计入')
+  expect(rows.getByRole('rowheader', { name: /gemini-3.8-flash/ }).closest('tr')).toHaveTextContent(
+    '0 次有估算 · 2 次未计入',
+  )
+})
+
+test('embeddings do not make the reported text usage incomplete', async () => {
+  const api = mockApi({
+    getUsage: vi.fn().mockResolvedValue({
+      buckets: [
+        usage.buckets![0]!,
+        {
+          time: '2026-10-26T00:00:00Z',
+          model: '@cf/baai/bge-m3',
+          provider: 'cloudflare',
+          billing_kind: 'platform_quota',
+          request_count: 3,
+          success_count: 3,
+          usage_available_count: 0,
+          cost_available_count: 0,
+        },
+      ],
+    }),
+  })
+  renderApp(<App api={api} />)
+  expect(await screen.findByText('1 次提供用量 · 0 次未完整提供')).toBeInTheDocument()
+  const rows = within(screen.getByRole('heading', { name: '按模型汇总' }).closest('section')!)
+  expect(rows.getByRole('rowheader', { name: /bge-m3/ }).closest('tr')).not.toHaveTextContent('次未计入')
 })
 
 test('request pagination and filters use bounded API calls and reset to the first page', async () => {

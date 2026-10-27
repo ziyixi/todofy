@@ -50,7 +50,7 @@ function Metrics({ buckets }: { buckets: readonly UsageBucket[] }) {
       <Metric
         label="报告的 token"
         value={total.known || !total.requests ? count(total.tokens) : '未提供'}
-        note={`${count(total.known)} 次提供用量 · ${count(total.requests - total.known)} 次未完整提供`}
+        note={`${count(total.known)} 次提供用量 · ${count(total.unreported)} 次未完整提供`}
         Icon={Cpu}
       />
       <Metric
@@ -150,10 +150,12 @@ function ModelBreakdown({ buckets }: { buckets: readonly UsageBucket[] }) {
                     </td>
                     <td>
                       {cost({ billing_kind: bucket.billing_kind, estimated_cost_microusd: amount.value })}
-                      <span className="small muted">
-                        {' '}
-                        · {count(amount.known)} 次有估算 · {count(amount.missing)} 次未计入
-                      </span>
+                      {amount.missing > 0 && bucket.billing_kind !== 'platform_quota' && (
+                        <span className="small muted">
+                          {' '}
+                          · {count(amount.known)} 次有估算 · {count(amount.missing)} 次未计入
+                        </span>
+                      )}
                     </td>
                   </tr>
                 )
