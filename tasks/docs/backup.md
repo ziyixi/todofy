@@ -102,8 +102,8 @@ afterwards.
    - From a clean checkout of that commit, deploy Tasks once by hand as `.github/actions/release-tasks` does,
      but without `--secrets-file`, so the Worker keeps its secrets:
      ```sh
-     for dir in packages/planning-ui packages/task-dates tasks/worker tasks/web; do npm ci --prefix "$dir"; done
-     npm run build --prefix tasks/web
+     pnpm install --frozen-lockfile
+     pnpm --dir tasks/web run build
      (cd tasks/worker && GITHUB_SHA=$(git rev-parse HEAD) node ../deploy/deploy-vars.mjs exec -- \
        npx --no-install wrangler deploy --config ../wrangler.toml)
      ```
