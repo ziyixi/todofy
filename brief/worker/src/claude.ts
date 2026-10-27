@@ -1,5 +1,7 @@
 /** Brief's call ledger and budget gates over the shared Model Router contract. */
 import { createModelClient, modelRequest, type ModelBinding } from '@ziyixi/model-router-client';
+import { RpcStatusError } from '@ziyixi/proto/http-client';
+import { Code } from '@ziyixi/proto/rpc-status';
 import { buildSha, type Env, type ModeName } from './env.ts';
 import { MODEL_DEADLINE_MARGIN_MS, MODEL_DEADLINE_MS, RESERVATION_RATES } from './limits.ts';
 import type { Params } from './prompts.ts';
@@ -87,6 +89,9 @@ export function unreadAnswer(store: Store, issue: string, step: CallStep, after:
   return store.one<CallRow>(`SELECT * FROM calls WHERE issue = ? AND step = ? AND state = 'done' AND stop = 'end_turn' AND answer != '' AND id > ? ORDER BY id DESC LIMIT 1`, issue, step, after) ?? null;
 }
 
+/** Configuration that repeats (a bad request, a refused caller, a missing connection, auth): every call stops. */
+const REJECTED_CODES: readonly number[] = [Code.INVALID_ARGUMENT, Code.PERMISSION_DENIED, Code.FAILED_PRECONDITION, Code.UNAUTHENTICATED];
+
 /** Reserves at the rates of limits.ts, calls the Router, and settles its outcome. */
 export async function callModel(ctx: CallContext, request: ModelRequest): Promise<ModelOutcome> {
   if (ctx.mode === 'off') return { kind: 'blocked', reason: 'mode_off' };
@@ -113,11 +118,31 @@ export async function callModel(ctx: CallContext, request: ModelRequest): Promis
     ctx.store.run(`UPDATE calls SET state = 'failed', cost = ?, error = ?, finished_ms = ? WHERE id = ?`, cost, code, ctx.now(), callId);
     return { kind: 'failed', callId, code };
   };
+  const release = (code: string, retryAfterSeconds = 0): ModelOutcome => {
+    ctx.store.run(`UPDATE calls SET state = 'released', cost = 0, error = ?, finished_ms = ? WHERE id = ?`, code, ctx.now(), callId);
+    return { kind: 'transient', code, retryAfterMs: retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : null };
+  };
+  const reject = (status: number, type: string): ModelOutcome => {
+    ctx.transact(() => {
+      release(type);
+      ctx.store.setJson(REJECTED_KEY, { status, type, build, ms: ctx.now() } satisfies RejectedState);
+      ctx.store.pushError('anthropic_rejected');
+    });
+    return { kind: 'rejected', status, errorType: type };
+  };
   const timeout = Math.max(1000, Math.min(request.deadlineMs ?? MODEL_DEADLINE_MS, ctx.timeLeft() - MODEL_DEADLINE_MARGIN_MS, 840_000));
   const options = { model: request.model, instructions: request.params.instructions, ...request.params.parameters, outputSchemaJson: request.params.outputSchemaJson };
   let result;
   try { result = await client.generate(modelRequest(request.params.input, options, timeout)); }
-  catch { return fail('model_connection_interrupted'); }
+  catch (error) {
+    // The Router's refusals before it registers a request: nothing reached a provider.
+    const status = error instanceof RpcStatusError ? error.status : undefined;
+    if (status?.reason === 'MODEL_MAINTENANCE' || status?.reason === 'MODEL_STORAGE_UNAVAILABLE') return release(status.reason);
+    if (status?.status !== undefined && REJECTED_CODES.includes(Code[status.status])) return reject(Code[status.status], status.reason ?? status.status);
+    // Anything else says nothing of what the provider billed: as a deploy-killed call, no attempt, the reservation kept.
+    ctx.store.run(`UPDATE calls SET state = 'killed', cost = reserved, error = 'model_connection_interrupted', finished_ms = ? WHERE id = ?`, ctx.now(), callId);
+    return { kind: 'transient', code: 'model_connection_interrupted', retryAfterMs: null };
+  }
   const usage = result.usage;
   const cost = usage?.available && usage.billingKind === 'api' && usage.estimatedCostMicrousd !== undefined ? usage.estimatedCostMicrousd / 1_000_000 : reserved;
   const writers = result.contributingModels;
@@ -125,18 +150,11 @@ export async function callModel(ctx: CallContext, request: ModelRequest): Promis
     result.model, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0, usage?.cacheWriteTokens ?? 0, usage?.cachedInputTokens ?? 0, result.name.split('/')[1] ?? '', JSON.stringify(writers), callId);
   if (result.error && result.error.reason !== 'MODEL_REFUSED' && result.error.reason !== 'MODEL_OUTPUT_LIMIT') {
     const error = result.error;
-    if (['MODEL_RATE_LIMIT', 'MODEL_QUOTA', 'MODEL_SPEND_LIMIT'].includes(error.reason)) {
-      ctx.store.run(`UPDATE calls SET state = 'released', cost = 0, error = ?, finished_ms = ? WHERE id = ?`, error.reason, ctx.now(), callId);
-      return { kind: 'transient', code: error.reason, retryAfterMs: error.retryAfterSeconds > 0 ? error.retryAfterSeconds * 1000 : null };
-    }
-    if ([3, 7, 9, 16].includes(error.code)) {
-      ctx.transact(() => {
-        ctx.store.run(`UPDATE calls SET state = 'released', cost = 0, error = ?, finished_ms = ? WHERE id = ?`, error.reason, ctx.now(), callId);
-        ctx.store.setJson(REJECTED_KEY, { status: error.code, type: error.reason, build, ms: ctx.now() } satisfies RejectedState);
-        ctx.store.pushError('anthropic_rejected');
-      });
-      return { kind: 'rejected', status: error.code, errorType: error.reason };
-    }
+    // Unavailable with nothing observed is a 5xx or 529 before the stream: nothing was generated.
+    const unstarted = error.code === Code.UNAVAILABLE && (usage?.inputTokens ?? 0) === 0 && (usage?.outputTokens ?? 0) === 0;
+    if (unstarted || ['MODEL_RATE_LIMIT', 'MODEL_QUOTA', 'MODEL_SPEND_LIMIT'].includes(error.reason)) return release(error.reason, error.retryAfterSeconds);
+    if (REJECTED_CODES.includes(error.code)) return reject(error.code, error.reason);
+    // The deadline, or a stream interrupted after it started: the reservation is kept and an attempt used.
     return fail(error.reason, cost);
   }
   const stop = result.error?.reason === 'MODEL_REFUSED' ? 'refusal' : result.error?.reason === 'MODEL_OUTPUT_LIMIT' ? 'max_tokens' : !result.error ? 'end_turn' : 'interrupted';

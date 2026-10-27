@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { fromWire } from '@ziyixi/proto/wire-json';
 import { GenerateRequestSchema, type GenerateRequest } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
+import { Code, RpcError, statusBody } from '@ziyixi/proto/rpc-status';
 import { attemptsOf, callModel, callsStopped, monthSpend, rejectedState, resumeCalls, settleOpenCalls, unreadAnswer, type CallContext, type ModelRequest } from '../src/claude.ts';
 import { OPUS_MODEL } from '../src/limits.ts';
 import { pickRequest } from '../src/prompts.ts';
@@ -21,6 +22,11 @@ function context(message: FakeMessage = jsonAnswer({ research: [], world: [] }),
   } };
   const ctx: CallContext = { store, env: { MODEL_ROUTER: binding, BUILD_SHA: 'test' }, now: () => NOW, transact: fn => fn(), timeLeft: () => 900_000, budgetUsd: 40, mode: 'live', ...overrides };
   return { ctx, store, calls };
+}
+/** A Router refusal before it registers a request, as its google.rpc.Status. */
+function refusal(code: Code, reason: string): Response {
+  const error = new RpcError(code, reason, 'Synthetic refusal.');
+  return Response.json(statusBody(error, { domain: 'modelrouter.inference.v1' }), { status: error.httpStatus });
 }
 const PICK = pickRequest('2026-10-12', [], [], {});
 const opus = (overrides: Partial<ModelRequest> = {}): ModelRequest => ({ step: 'pick', issue: '2026-10-12', model: OPUS_MODEL, params: PICK.params, estimatedInputTokens: 15_000, ...overrides });
@@ -66,10 +72,18 @@ describe('Brief Router ledger', () => {
     expect(attemptsOf(store, '2026-10-12', 'pick')).toBe(0);
   });
 
-  it('stops rejected connections until the build changes or owner resumes', async () => {
-    const { ctx, store, calls } = context(modelError('MODEL_AUTH', 7));
-    expect(await callModel(ctx, opus())).toEqual({ kind: 'rejected', status: 7, errorType: 'MODEL_AUTH' });
+  it('releases a 529 before the stream: unavailable with nothing observed', async () => {
+    const { ctx, store } = context({ error: { code: 14, reason: 'MODEL_UNAVAILABLE', retryAfterSeconds: 30 }, usage: { available: false, inputTokens: 0, outputTokens: 0 } });
+    expect(await callModel(ctx, opus())).toEqual({ kind: 'transient', code: 'MODEL_UNAVAILABLE', retryAfterMs: 30_000 });
+    expect(store.one(`SELECT state, cost FROM calls`)).toEqual({ state: 'released', cost: 0 });
+    expect(attemptsOf(store, '2026-10-12', 'pick')).toBe(0);
+  });
+
+  it.each([['MODEL_AUTH', 7], ['MODEL_NOT_CONFIGURED', 9], ['MODEL_INVALID_REQUEST', 3]] as const)('stops on %s until the build changes or owner resumes', async (reason, code) => {
+    const { ctx, store, calls } = context(modelError(reason, code));
+    expect(await callModel(ctx, opus())).toEqual({ kind: 'rejected', status: code, errorType: reason });
     expect(rejectedState(store)).toMatchObject({ build: 'test' });
+    expect(store.one(`SELECT state, cost FROM calls`)).toEqual({ state: 'released', cost: 0 });
     expect(await callModel(ctx, opus())).toEqual({ kind: 'blocked', reason: 'rejected' });
     expect(calls).toHaveLength(1);
     expect(callsStopped(store, { ...ctx.env, BUILD_SHA: 'test-2' })).toBe(false);
@@ -86,12 +100,26 @@ describe('Brief Router ledger', () => {
     expect(monthSpend(budget.store, '2026-10')).toEqual({ spent: 0, reserved: 0 });
   });
 
-  it('keeps the reservation when transport completion and cost are unknown', async () => {
+  it('releases a call the Router refused for maintenance, and stops on a caller it does not allow', async () => {
+    const maintenance = context();
+    if (!maintenance.ctx.env.MODEL_ROUTER) throw new Error('missing synthetic binding');
+    maintenance.ctx.env.MODEL_ROUTER.fetch = () => Promise.resolve(refusal(Code.UNAVAILABLE, 'MODEL_MAINTENANCE'));
+    expect(await callModel(maintenance.ctx, opus())).toEqual({ kind: 'transient', code: 'MODEL_MAINTENANCE', retryAfterMs: null });
+    expect(maintenance.store.one(`SELECT state, cost FROM calls`)).toEqual({ state: 'released', cost: 0 });
+    const denied = context();
+    if (!denied.ctx.env.MODEL_ROUTER) throw new Error('missing synthetic binding');
+    denied.ctx.env.MODEL_ROUTER.fetch = () => Promise.resolve(refusal(Code.PERMISSION_DENIED, 'MODEL_NOT_ALLOWED'));
+    expect(await callModel(denied.ctx, opus())).toEqual({ kind: 'rejected', status: 7, errorType: 'MODEL_NOT_ALLOWED' });
+    expect(denied.store.one(`SELECT state, cost FROM calls`)).toEqual({ state: 'released', cost: 0 });
+  });
+
+  it('records a call whose transport failed as killed: no attempt, the reservation kept', async () => {
     const { ctx, store } = context();
     if (!ctx.env.MODEL_ROUTER) throw new Error('missing synthetic binding');
     ctx.env.MODEL_ROUTER.fetch = () => Promise.reject(new Error('synthetic private transport failure'));
-    expect(await callModel(ctx, opus())).toMatchObject({ kind: 'failed', code: 'model_connection_interrupted' });
-    expect(store.one(`SELECT state, cost FROM calls`)).toEqual({ state: 'failed', cost: 0.95 });
+    expect(await callModel(ctx, opus())).toEqual({ kind: 'transient', code: 'model_connection_interrupted', retryAfterMs: null });
+    expect(store.one(`SELECT state, cost FROM calls`)).toEqual({ state: 'killed', cost: 0.95 });
+    expect(attemptsOf(store, '2026-10-12', 'pick')).toBe(0);
   });
 
   it('settles deploy-killed and crashed calls without erasing historical costs', () => {
