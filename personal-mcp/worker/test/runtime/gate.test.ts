@@ -300,7 +300,7 @@ it('connects Watch facts to filtered durable work notifications, with silent che
   const options: RuntimeOptions = { watch(request) {
     const url = new URL(request.url);
     expect([request.method, url.pathname]).toEqual(['GET', '/api/v1/watchEvents:poll']);
-    expect(url.searchParams.get('filter')).toBe('evidence');
+    expect(url.searchParams.has('filter')).toBe(false);
     const baseline = url.searchParams.get('baseline') === 'true';
     if (baseline) baselines++;
     else polls++;

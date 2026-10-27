@@ -98,19 +98,15 @@ OAuth audience is needed. `work.attention` accepts `{work_id}` or `{}` for all o
 the real callback private and emits only report identity and source refs. A later subscription also discovers
 already pending reports in its scope.
 
-Before creating or attaching a Watch, MCP establishes its source cursor. The evidence filter selects captured
-page evidence changes and broken/paused transitions; business-rule confirmation of the same evidence does not
-create another Work report. Ordinary Watch consumers keep the legacy confirmed-change feed by default.
-Source checking runs while a work subscription uses Watch links, or
-when `work_context`/`work_get` is read, at most once per minute. Stopping the subscription stops background
-polling; an authorized native hourly review can still refresh it through those read tools.
+Before creating or attaching a Watch, MCP establishes its source cursor. The Watch feed carries captured page
+evidence changes and broken/paused transitions only; rule confirmations stay in Watch's own Tasks outbox.
+Source checking runs while a work subscription uses Watch links, or when `work_context`/`work_get` is read, at most
+once per minute and one page of up to 100 events at a time. Stopping the subscription stops background polling; an
+authorized native hourly review can still refresh it through those read tools.
 
-`work_context` and `work_get` expose the latest Watch source check and error. `watch_cursor_expired` preserves
-the old position. Review the linked Watch changes and save the relevant facts first, then explicitly stop all
-`work.attention` subscriptions and recreate the intended subscription to establish a current baseline. This
-skips missing history; polling itself never performs that reset. When no open Work has a Watch link, the next
-attachment starts fresh. Native hourly review creation and actual Dots continuation
-must be recorded separately from the server deployment. See [work-memory verification](../../docs/work-memory-verification.md).
+`work_context` and `work_get` expose the latest Watch source check and error. If the feed's retention outran the
+cursor, the same poll takes a new baseline and gives each open Work with a Watch one `blocked` report about the gap;
+the Dot reads `watch_changes` to catch up. When no open Work has a Watch link, the next attachment starts fresh.
 
 `watch_read` reads stored Markdown or structure windows with source completeness, capture metadata and snapshot
 refs. `watch_view` returns a stored JPEG as an MCP image block, or an explicit missing/error result. Neither tool

@@ -18,7 +18,6 @@ function uuid(value: number) { return `00000000-0000-4000-8000-${String(value).p
 function advance() { vi.setSystemTime(Date.now() + WATCH_POLL_INTERVAL_MS); }
 function event(sequence: number, kind = 'evidence_changed', watch = WATCH) {
   return { sequence: String(sequence), kind, watch,
-    change: kind === 'change_confirmed' ? `${watch}/changes/synthetic-${String(sequence)}` : '',
     ...(kind === 'evidence_changed' ? { before_snapshot: `${watch}/snapshots/${String(sequence - 1).padStart(16, '0')}`,
       after_snapshot: `${watch}/snapshots/${String(sequence).padStart(16, '0')}` } : {}), create_time: AT };
 }
@@ -52,8 +51,8 @@ function fixture(read: (query: URLSearchParams) => Record<string, unknown> | Res
     const url = new URL(request.url);
     expect(request.method).toBe('GET');
     expect(url.pathname).toBe('/api/v1/watchEvents:poll');
-    expect(url.searchParams.get('page_size')).toBe('20');
-    expect(url.searchParams.get('filter')).toBe('evidence');
+    expect(url.searchParams.get('page_size')).toBe('100');
+    expect(url.searchParams.has('filter')).toBe(false);
     calls.push({ path: url.pathname, baseline: url.searchParams.get('baseline') === 'true', cursor: url.searchParams.get('cursor') ?? '' });
     const result = read(url.searchParams);
     return Promise.resolve(result instanceof Response ? result : Response.json(result));
@@ -90,9 +89,9 @@ it('skips history at the native baseline and polls only while open work has Watc
   expect(f.calls).toHaveLength(2);
 });
 
-it('routes captured evidence changes only to linked open work without repeating business confirmation', async () => {
+it('routes captured evidence changes only to linked open work and leaves a kind it does not know', async () => {
   const f = fixture(query => query.get('baseline') === 'true' ? { cursor: '40' }
-    : { cursor: '43', events: [event(41), event(42, 'evidence_changed', 'watches/unlinked'), event(43, 'change_confirmed')] });
+    : { cursor: '43', events: [event(41), event(42, 'evidence_changed', 'watches/unlinked'), event(43, 'synthetic_newer_kind')] });
   const active = f.create(10, { links: [{ type: 'watch', ref: WATCH, owned: true }] });
   const waiting = f.create(11, { state: 'waiting', waiting_for: 'A synthetic release', links: [{ type: 'watch', ref: WATCH }] });
   const done = f.create(12, { state: 'done', result: 'Already reviewed.' });
@@ -154,22 +153,36 @@ it('records broken and auto-paused Watch transitions as blocked reports without 
   expect(f.attention).toHaveLength(2);
 });
 
-it('keeps an expired cursor and exposes the source error instead of silently jumping to a new baseline', async () => {
-  const f = fixture(query => query.get('baseline') === 'true' ? { cursor: 'expired-40' } : expired());
-  const work = f.create(40);
+it('takes a new baseline after an expired cursor and tells each open Watch work about the gap', async () => {
+  let generation = 0;
+  let expire = true;
+  const f = fixture(query => query.get('baseline') === 'true' ? { cursor: `head-${String(++generation)}` }
+    : expire ? expired() : { cursor: query.get('cursor') ?? '' });
+  const active = f.create(40, { links: [{ type: 'watch', ref: WATCH }, { type: 'watch', ref: 'watches/zz-second' }] });
+  const waiting = f.create(41, { state: 'waiting', waiting_for: 'A synthetic release' });
+  const done = f.create(42, { state: 'done', result: 'Already reviewed.' });
   await f.source.refresh();
+  expect(f.cursor()?.state).toBe('head-1');
   advance();
   await f.source.refresh();
-  expect(f.source.status()).toMatchObject({ name: WATCH_SOURCE_NAME, error_code: 'watch_cursor_expired', checked_at: Date.now() });
-  expect(f.cursor()?.state).toBe('expired-40');
-  expect(f.store.get({ work_id: work.id }).pending_reports).toEqual([]);
-  await f.source.refresh();
-  expect(f.calls).toHaveLength(2);
+  expect(f.calls.map(call => call.baseline)).toEqual([true, false, true]);
+  expect(f.cursor()).toEqual({ state: 'head-2', error_code: null });
+  expect(f.source.status().error_code).toBeNull();
+  for (const work of [active, waiting]) {
+    const reports = f.store.get({ work_id: work.id }).pending_reports;
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ kind: 'blocked', source: { type: 'watch', ref: WATCH }, evidence_ref: '' });
+    expect(reports[0]?.report_id).toMatch(/^watch-gap:[0-9a-f]{32}$/);
+    expect(reports[0]?.summary).toContain('watch_changes');
+    expect(reports[0]?.report_id).toBe(f.store.get({ work_id: active.id }).pending_reports[0]?.report_id);
+  }
+  expect(f.store.get({ work_id: done.id }).pending_reports).toEqual([]);
+  expect(f.attention.map(item => item.work_id).sort()).toEqual([active.id, waiting.id].sort());
+  expire = false;
   advance();
   await f.source.refresh();
-  expect(f.calls.map(call => call.baseline)).toEqual([true, false, false]);
-  expect(f.calls.slice(1).map(call => call.cursor)).toEqual(['expired-40', 'expired-40']);
-  expect(f.attention).toEqual([]);
+  expect(f.calls.at(-1)).toMatchObject({ baseline: false, cursor: 'head-2' });
+  expect(f.attention).toHaveLength(2);
 });
 
 it('makes first-baseline failures visible and throttles retries before establishing a later baseline', async () => {
@@ -191,10 +204,10 @@ it('makes first-baseline failures visible and throttles retries before establish
   expect(f.store.get({ work_id: work.id }).pending_reports).toEqual([]);
 });
 
-it('rebases after old Watch work closes and requires explicit recovery while linked work remains open', async () => {
+it('rebases when new Watch work starts after the old work closed, and keeps the cursor while work is open', async () => {
   let generation = 0;
   const f = fixture(query => query.get('baseline') === 'true'
-    ? { cursor: `head-${String(++generation)}` } : expired());
+    ? { cursor: `head-${String(++generation)}` } : { cursor: query.get('cursor') ?? '' });
   const old = f.create(60);
   await f.source.initialize();
   expect(f.cursor()?.state).toBe('head-1');
@@ -204,16 +217,10 @@ it('rebases after old Watch work closes and requires explicit recovery while lin
   await f.source.initialize();
   expect(f.cursor()?.state).toBe('head-2');
   const current = f.create(62);
-  advance();
-  await f.source.refresh();
-  expect(f.source.status().error_code).toBe('watch_cursor_expired');
   await f.source.initialize();
   expect(f.cursor()?.state).toBe('head-2');
   expect(generation).toBe(2);
-  await f.source.initialize(true);
-  expect(f.cursor()?.state).toBe('head-3');
-  expect(f.source.status().error_code).toBeNull();
-  expect(f.calls.map(call => call.baseline)).toEqual([true, true, false, true]);
+  expect(f.calls.map(call => call.baseline)).toEqual([true, true]);
   expect(f.store.get({ work_id: current.id }).pending_reports).toEqual([]);
   expect(f.attention).toEqual([]);
 });
