@@ -205,6 +205,9 @@ class GitHub(unittest.TestCase):
         self.assertEqual(variables["TODOFY_PROCESSING_PAUSED"], "true")
         self.assertEqual(variables["MAIL_HERO_FORCE_SEND_PAUSED"], "true")
         self.assertEqual(variables["PERSONAL_CLOUD_AUTO_REPAIR"], "false")
+        # Their deploy wrappers refuse a missing value.
+        self.assertEqual(variables["MODEL_ROUTER_MAINTENANCE_MODE"], "false")
+        self.assertEqual(variables["BRIEF_MODE"], "off")
 
     def test_existing_protection_and_flags_are_never_overwritten(self):
         writes = []

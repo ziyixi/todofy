@@ -8,10 +8,12 @@ import subprocess
 from private_input import BootstrapError
 
 DEFAULT_VARIABLES = {
+    "BRIEF_MODE": "off",
     "DASHBOARD_CANARY_ENABLED": "false",
     "MAIL_HERO_FORCE_SEND_PAUSED": "true",
     "MAIL_HERO_MAINTENANCE_MODE": "false",
     "MAIL_HERO_NATIVE_BACKUP_ENABLED": "true",
+    "MODEL_ROUTER_MAINTENANCE_MODE": "false",
     "TODOFY_MAINTENANCE_MODE": "false",
     "TODOFY_PROCESSING_PAUSED": "true",
     "VPS_DEPLOY_ENABLED": "false",
