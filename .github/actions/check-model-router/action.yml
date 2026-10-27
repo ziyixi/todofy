@@ -32,6 +32,7 @@ runs:
     - name: Dry-run the committed production config
       working-directory: model-router/worker
       env:
+        MODEL_ROUTER_MAINTENANCE_MODE: 'false'
         MODEL_ROUTER_WORKER_SECRETS: '{"ACCESS_OWNER":"owner@example.test"}'
       shell: bash -e {0}
       run: |

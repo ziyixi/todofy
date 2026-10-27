@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { startHarness, machineToken, origin } from './runtime-harness.ts'
+import { parseStatus } from '@ziyixi/proto/rpc-status'
 
 const generatePath = '/api/model/v1/generations:generate'
 const sol = 'models/sol-6-1'
@@ -474,6 +475,48 @@ it('authenticates before parsing private bodies and never grants Newsletter owne
     expect(accepted.status).toBe(200)
     expect(await accepted.json()).toMatchObject({ app: 'console', state: 'succeeded' })
     expect(harness.calls).toHaveLength(1)
+  } finally {
+    await harness.dispose()
+  }
+}, 30_000)
+
+it('maintenance refuses every ModelService path before parsing while owner reads and Ops stay accessible', async () => {
+  const harness = await startHarness({ maintenance: true })
+  try {
+    const id = crypto.randomUUID()
+    const paths = [
+      ['GET', '/models'],
+      ['POST', '/generations:generate'],
+      ['POST', '/embeddings:embed'],
+      ['POST', '/conversations'],
+      ['GET', `/conversations/${id}`],
+      ['POST', `/conversations/${id}:close`],
+    ] as const
+    for (const [method, path] of paths) {
+      for (const caller of ['owner', 'newsletter', 'binding'] as const) {
+        const headers = { 'content-type': 'application/json', origin, 'x-csrf-token': '1',
+          ...(caller === 'newsletter' ? { authorization: `Bearer ${machineToken}` } : {}) }
+        const worker = caller === 'binding' ? await harness.mf.getWorker('caller-todofy') : null
+        const init = { method, headers, ...(method === 'POST' ? { body: '{malformed synthetic JSON' } : {}) }
+        const response = worker
+          ? await worker.fetch(`${origin}/api/model/v1${path}`, init)
+          : await harness.mf.dispatchFetch(`${origin}/api/model/v1${path}`, init)
+        expect(response.status, `${caller} ${method} ${path}`).toBe(503)
+        const body: unknown = await response.json()
+        expect(body).toMatchObject({ error: { code: 503, status: 'UNAVAILABLE' } })
+        expect(parseStatus(response.status, body)?.reason).toBe('MODEL_MAINTENANCE')
+      }
+    }
+    expect((await harness.owner.listRequests({})).requests).toEqual([])
+    expect((await harness.owner.getUsage({ days: 1 })).requestCount).toBe(0)
+    await expect(harness.owner.getRequest({ name: `requests/${id}` })).rejects.toMatchObject({ status: { httpStatus: 404 } })
+    expect((await harness.mf.dispatchFetch(`${origin}/health`)).status).toBe(200)
+    expect((await harness.mf.dispatchFetch(`${origin}/`)).status).toBe(200)
+    expect((await harness.mf.dispatchFetch(`${origin}/api/session`)).status).toBe(200)
+    const ops = await harness.mf.getWorker('router-ops-probe')
+    expect(await (await ops.fetch(origin)).json()).toMatchObject({ modes: { maintenance: true } })
+    expect(harness.calls).toHaveLength(0)
+    expect(await harness.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(0)
   } finally {
     await harness.dispose()
   }

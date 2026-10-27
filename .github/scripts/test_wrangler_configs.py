@@ -141,6 +141,7 @@ TOGGLES = {
     "MAIL_HERO_NATIVE_BACKUP_ENABLED",
     "TODOFY_MAINTENANCE_MODE",
     "TODOFY_PROCESSING_PAUSED",
+    "MODEL_ROUTER_MAINTENANCE_MODE",
     "DASHBOARD_CANARY_ENABLED",
     # mailsort's ceiling (live, shadow or off): the emergency switch of mailsort/docs/design.md section 10.
     "MAILSORT_MODE",

@@ -14,10 +14,19 @@ test('release requires its complete owner map and leaves owner-machine provider 
 })
 
 test('release identity uses the selected source SHA and refuses caller overrides', () => {
-  assert.deepEqual(injectedVars({ GITHUB_SHA: 'a'.repeat(40), BUILD_SOURCE_SHA: 'b'.repeat(40) }), { BUILD_SHA: 'b'.repeat(40) })
+  assert.deepEqual(injectedVars({ GITHUB_SHA: 'a'.repeat(40), BUILD_SOURCE_SHA: 'b'.repeat(40), MODEL_ROUTER_MAINTENANCE_MODE: 'false' }), { BUILD_SHA: 'b'.repeat(40), MAINTENANCE_MODE: 'false' })
   assert.match(refusal(['wrangler', 'deploy', '--env', 'other']), /--env/)
   assert.match(refusal(['wrangler', 'deploy', '--keep-vars']), /--keep-vars/)
   assert.match(refusal(['wrangler', 'deploy', '--var', 'BUILD_SHA:other']), /--var/)
+})
+
+test('every release requires an explicit maintenance true or false', () => {
+  for (const value of ['true', 'false']) {
+    assert.equal(injectedVars({ GITHUB_SHA: 'a'.repeat(40), MODEL_ROUTER_MAINTENANCE_MODE: value }).MAINTENANCE_MODE, value)
+  }
+  for (const value of [undefined, '', 'TRUE', '0']) {
+    assert.throws(() => injectedVars({ GITHUB_SHA: 'a'.repeat(40), MODEL_ROUTER_MAINTENANCE_MODE: value }), /MODEL_ROUTER_MAINTENANCE_MODE/)
+  }
 })
 
 test('actual resource identities are required before any real release', () => {

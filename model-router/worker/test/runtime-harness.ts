@@ -46,7 +46,7 @@ function script() {
   return bundle
 }
 
-export async function startHarness({ ownerBypass = true }: { ownerBypass?: boolean } = {}) {
+export async function startHarness({ ownerBypass = true, maintenance = false }: { ownerBypass?: boolean; maintenance?: boolean } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'model-router-runtime-'))
   const calls: UpstreamCall[] = []
   const geminiOutputs: string[] = []
@@ -122,6 +122,7 @@ export async function startHarness({ ownerBypass = true }: { ownerBypass?: boole
           durableObjects: { ENGINE: { className: 'RouterEngine', useSQLite: true } },
           bindings: {
             DEV_AUTH_BYPASS: ownerBypass ? 'true' : 'false',
+            MAINTENANCE_MODE: String(maintenance),
             ACCESS_OWNER: ownerEmail,
             ACCESS_ISSUER: issuer,
             ACCESS_AUDIENCE: audience,

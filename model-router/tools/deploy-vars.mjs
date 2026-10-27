@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// deploy-vars-inputs exec: GITHUB_SHA
+// deploy-vars-inputs exec: GITHUB_SHA MODEL_ROUTER_MAINTENANCE_MODE
 // deploy-vars-inputs secrets: MODEL_ROUTER_WORKER_SECRETS
 import { mergeWorkerSecrets } from '../../tools/cloud-config/worker-secrets.mjs'
 import { spawnSync } from 'node:child_process'
@@ -21,7 +21,10 @@ export class SettingError extends Error {
 }
 
 /** Worker var <- environment name. An absent or empty value is refused. */
-export const INJECTED = [{ name: 'BUILD_SHA', from: 'GITHUB_SHA', kind: 'build', pattern: /^[0-9a-f]{40}$/ }]
+export const INJECTED = [
+  { name: 'BUILD_SHA', from: 'GITHUB_SHA', kind: 'build', pattern: /^[0-9a-f]{40}$/ },
+  { name: 'MAINTENANCE_MODE', from: 'MODEL_ROUTER_MAINTENANCE_MODE', kind: 'toggle', pattern: /^(?:true|false)$/ },
+]
 
 function checked(env, name, pattern) {
   const value = env[name]

@@ -674,6 +674,11 @@
           "optional": true
         },
         {
+          "name": "MAINTENANCE_MODE",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
           "name": "MODEL_ROUTER_NEWSLETTER_TOKEN",
           "type": "secret_text",
           "source": "manual",

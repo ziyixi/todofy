@@ -8,6 +8,7 @@ export interface Env {
   ASSETS: Fetcher;
   AI?: { run(model: string, input: unknown): Promise<unknown> };
   BUILD_SHA?: string;
+  MAINTENANCE_MODE?: string;
   PUBLIC_HOST?: string;
   ACCESS_ISSUER?: string;
   ACCESS_AUDIENCE?: string;

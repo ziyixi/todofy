@@ -49,6 +49,7 @@ jobs:
       TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
       MAILSORT_MODE: ${{ (inputs.app == 'mailsort' || inputs.app == 'brief') && vars.MAILSORT_MODE || '' }}
       BRIEF_MODE: ${{ inputs.app == 'brief' && vars.BRIEF_MODE || '' }}
+      MODEL_ROUTER_MAINTENANCE_MODE: ${{ vars.MODEL_ROUTER_MAINTENANCE_MODE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -23,7 +23,7 @@ export class Ops extends WorkerEntrypoint<Env> implements wire.OpsService {
         uiUrl: `https://${this.env.PUBLIC_HOST}/`,
         health: row?.stale ? Health.DEGRADED : Health.OK,
         capabilities: [],
-        modes: { maintenance: false },
+        modes: { maintenance: this.env.MAINTENANCE_MODE === 'true' },
         guard: { level: GuardLevel.NORMAL },
         counters: {
           requests_today: row?.requests ?? 0,

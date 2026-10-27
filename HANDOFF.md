@@ -23,7 +23,7 @@ history and modes. The owner/Claude checkout is untouched. Architecture and acti
 Exactly one shared Claude API key uses the original Brief workspace's verified $80/month cap. Owner approved
 and created its no-expiry replacement. It and one existing Gemini key were moved directly through browser memory
 into Router secrets, then the temporary browser values were cleared. Neither current provider key entered a local
-file, GitHub or VPS. Original caller keys remain until final cutover. Same-account bindings have no tokens;
+file, GitHub or VPS. Original caller keys have been retired. Same-account bindings have no tokens;
 owner JSON writes use exact Origin, a custom header and JSON content type. VPS inference validates Access JWTs;
 privileged deployment identity and the subscription login stay separate. Newsletter keeps one inference token.
 
@@ -38,12 +38,19 @@ patch and k3s restart; four Pods then matched current host addresses and were re
 used the updated Platform renderer and removed its redundant bearer environment reference without sudo.
 
 Todofy now persists Sol6.1 for both future email summaries and reports/recommendations; full reload and budget
-readback verified it. Home canary `canary-manual-20261027T061058Z` is awaiting the normal controller observation.
-The final small UI batch replaces misleading Gemini wording on the shared model budget and canary confirmation;
-identifiers and behavior stay unchanged. Next: publish that checked copy, confirm the canary, retire old app/provider
-and CSRF credentials, then run existing reconcile repair/check. Secret deletions change Worker versions and need
-fresh publication proof. Final matching-main resolved drift and Home/Fleet readback remain required. The unused
-Kubernetes Secret itself can wait for ordinary privileged maintenance; no new sudo or Secret-deletion API is needed.
+readback verified it. Home canary `canary-manual-20261027T061058Z` passed through the normal controller.
+The final copy and credential-retirement release is `b875e4a353b9a3eafd34120bbec535f49c9b1d71`:
+main40462978874 and matching reconcile40463377396 passed, including resolved infrastructure drift.
+The unused Kubernetes Secret can wait for ordinary privileged maintenance; it is no longer referenced.
+
+Owner now requests a smaller invocation contract, actual native model names, provider labels, time-series
+usage and separate API estimates/subscription-equivalent values, plus daily seven-copy backups including
+retained request bodies. Delete unused fields and their supporting machinery directly; do not reserve fields.
+The first preparatory change adds a deploy-controlled Router maintenance mode without changing the wire API.
+`MODEL_ROUTER_MAINTENANCE_MODE=false` is configured in production. Publish this unpaused preparation first;
+only pause immediately before the checked breaking rollout, then upgrade Router and all consumers and resume.
+Owner history and Ops remain accessible during that short transition. New simplification/backup acceptance
+is still pending; no provider key or business content is part of these changes or backups.
 
 ### Tasks Sunday planning week (`codex/tasks-next-step-estimate`)
 

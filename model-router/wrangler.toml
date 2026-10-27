@@ -1,4 +1,6 @@
 # The sole production config. Real resource identities are exported by gated IaC before release.
+# BUILD_SHA and MAINTENANCE_MODE are injected by tools/deploy-vars.mjs; never use a plain deploy.
+# MAINTENANCE_MODE defaults off at runtime; every release requires the explicit GitHub true/false setting.
 name = "model-router"
 account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
 main = "worker/src/index.ts"

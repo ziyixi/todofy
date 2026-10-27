@@ -186,6 +186,7 @@ class CompositeActions(unittest.TestCase):
                 "MAIL_HERO_NATIVE_BACKUP_ENABLED",
             ),
             "brief": ("BRIEF_MODE",),
+            "model-router": ("MODEL_ROUTER_MAINTENANCE_MODE",),
         }
         for app, names in switches.items():
             call = next(
