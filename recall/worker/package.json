@@ -4,9 +4,6 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Worker \"recall\": the owner's browsing record (RecallState, one SQLite Durable Object, and the private R2 bucket recall-store): the extension's uploads, the archive change feed, and the owner API (recall.ui.v1) behind Access.",
-  "engines": {
-    "node": "26.x"
-  },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "pretypecheck": "node ../../proto/tools/ensure.mjs",

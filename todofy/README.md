@@ -156,7 +156,7 @@ of `Intents`, `Planning` and `MailApi` are gone.
 
 ## Local development
 
-Prerequisites: Node 26 (`.nvmrc`), uv 0.12.10; Python 3.14 is fetched by uv. No Cloudflare account or
+Prerequisites: Node 26 (root `package.json`), uv 0.12.10; Python 3.14 is fetched by uv. No Cloudflare account or
 credentials are needed. From the repository root, install the shared workspaces once, then run the app checks
 from `todofy/`.
 

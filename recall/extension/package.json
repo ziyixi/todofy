@@ -4,9 +4,6 @@
   "version": "0.1.0",
   "type": "module",
   "description": "recall's Chrome extension (Manifest V3, no runtime dependency): visits with their focus, page texts after ten seconds of focus, scrubbed and uploaded to the Worker \"recall\". Built into dist/ and a zip; installed into ~/recall-extension.",
-  "engines": {
-    "node": "26.x"
-  },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "pretypecheck": "node ../../proto/tools/ensure.mjs",

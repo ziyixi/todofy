@@ -8,8 +8,5 @@
   "devDependencies": {
     "workerd": "catalog:",
     "wrangler": "catalog:"
-  },
-  "engines": {
-    "node": "26.x"
   }
 }

@@ -106,7 +106,7 @@ class DependencyWorkspaces(unittest.TestCase):
         action = workflow_data(path)
         steps = action["runs"]["steps"]
         setup_node = next(step for step in steps if step.get("uses", "").startswith("actions/setup-node@"))
-        self.assertEqual(setup_node["with"]["node-version"], "26")
+        self.assertEqual(setup_node["with"], {"node-version-file": "${{ inputs.root }}/package.json"})
         setup_pnpm = next(step for step in steps if step.get("uses", "").startswith("pnpm/action-setup@"))
         self.assertEqual(setup_pnpm["with"]["package_json_file"], "${{ inputs.root }}/package.json")
         cache = next(step for step in steps if step.get("uses", "").startswith("actions/cache@"))

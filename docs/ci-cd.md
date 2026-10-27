@@ -8,7 +8,9 @@ explains the release guarantees rather than maintaining another application or d
 
 [Rebuild](rebuild.md) covers a new account/VPS. The reusable [Worker release](../.github/workflows/worker-release.yml)
 keeps each application's checks, migration order, probes and release lock. A selected source checkout and
-`BUILD_SOURCE_SHA` let repair publish the app's last verified revision. GitHub deployment success is recorded
+`BUILD_SOURCE_SHA` let repair publish the app's last verified revision. Release recipes install only from the root
+workspace lock and read Node's version from the root `package.json`, so the selected revision must come from the
+shared workspace (2026-10-25) or later. GitHub deployment success is recorded
 after the actual provider version/configuration or VPS running identities pass verification.
 The static website retains its independent content registry, release and rollback workflow.
 

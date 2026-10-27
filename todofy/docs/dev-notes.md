@@ -12,7 +12,7 @@ the git history at `6c46ed4`.
 
 ## 1. Run everything locally
 
-Prerequisites: Node 26 (`.nvmrc`), uv 0.12.10, Python 3.14 (`.python-version`; uv fetches it).
+Prerequisites: Node 26 (root `package.json`), uv 0.12.10, Python 3.14 (`.python-version`; uv fetches it).
 Run everything from `todofy/` in the monorepo.
 
 ```sh

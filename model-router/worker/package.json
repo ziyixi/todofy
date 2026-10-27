@@ -32,8 +32,5 @@
     "typescript": "catalog:",
     "vitest": "catalog:",
     "wrangler": "catalog:"
-  },
-  "engines": {
-    "node": "26.x"
   }
 }
