@@ -46,11 +46,13 @@ message GtdReport {
   int32 routine_completion_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Imported occurrences whose task is unavailable for classification.
   int32 unclassified_completion_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Every overlapping week began after commitment recording started. Older/initial partial periods have no Task rate.
+  // Every counted week began after commitment recording started. Older/initial partial periods have no Task rate.
   bool task_plan_history_complete = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Distinct non-Routine Tasks ever committed to an overlapping week; absent with incomplete commitment history.
+  // Distinct non-Routine Tasks ever committed to a counted week: a Sunday-to-Saturday week whose Sunday is in the
+  // dates. Absent with incomplete commitment history.
   optional int32 planned_task_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Planned Tasks with at least one occurrence in the requested dates; absent with incomplete commitment history.
+  // Planned Tasks with at least one occurrence from the first counted Sunday through the last counted Saturday;
+  // absent with incomplete commitment history.
   optional int32 completed_planned_task_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Distinct non-Routine literal Steps ever queued in the dates, including subsequently removed queue rows.
   int32 planned_step_count = 14 [(google.api.field_behavior) = OUTPUT_ONLY];

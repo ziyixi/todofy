@@ -34,7 +34,9 @@ const recordArea = `(?7='' OR f.area=?7)`;
 
 /**
  * All queries seek the requested dates/weeks. Removed daily rows and weekly commitments retain first membership;
- * each planned task counts once across the selected period. Completion occurrences establish achievement.
+ * each planned task counts once across the selected period. Completion occurrences establish achievement. A week
+ * belongs to the period its Sunday falls in, so a month's commitments are judged through its last week's Saturday
+ * and its first partial week belongs to the month before.
  */
 const planned = `planned AS (
   SELECT DISTINCT m.task_id FROM gtd_week_commitments m JOIN tasks t ON t.id=m.task_id
@@ -109,6 +111,9 @@ export async function getGtdReport(
     Date.parse(zonedInstant(`${day}T00:00:00`, zone));
   const startAt = midnight(start);
   const endAt = midnight(addDays(end, 1));
+  // The weeks whose Sunday is in the dates, by their Monday IDs; none when the dates hold no Sunday.
+  const firstWeek = planningWeekId(addDays(start, 6));
+  const lastWeek = planningWeekId(end);
   const boundaries = [startAt, ...days.slice(1).map(midnight), endAt];
   const ranges = days.map((day, index) => ({
     day,
@@ -120,8 +125,8 @@ export async function getGtdReport(
     endAt,
     start,
     end,
-    planningWeekId(start),
-    planningWeekId(end),
+    firstWeek,
+    lastWeek,
     area,
   ];
   const [marker, completionDays, timeDays, planCounts, progress] =
@@ -155,12 +160,16 @@ export async function getGtdReport(
             `WITH ${planned} SELECT
       coalesce(sum(t.kind='task'),0) AS task_count,coalesce(sum(t.kind='step'),0) AS step_count,
       coalesce(sum(t.kind='task' AND EXISTS(SELECT 1 FROM completions c INDEXED BY completions_task_time
-        WHERE c.task_id=p.task_id AND c.completed_at>=?1 AND c.completed_at<?2)),0) AS task_done,
+        WHERE c.task_id=p.task_id AND c.completed_at>=?8 AND c.completed_at<?9)),0) AS task_done,
       coalesce(sum(t.kind='step' AND EXISTS(SELECT 1 FROM completions c INDEXED BY completions_task_time
         WHERE c.task_id=p.task_id AND c.completed_at>=?1 AND c.completed_at<?2)),0) AS step_done
       FROM planned p JOIN tasks t ON t.id=p.task_id`,
           )
-          .bind(...values),
+          .bind(
+            ...values,
+            midnight(addDays(firstWeek, -1)),
+            midnight(addDays(lastWeek, 6)),
+          ),
         db
           .prepare(
             `WITH ${planned},${completed},${timed}, named AS (
@@ -207,8 +216,7 @@ export async function getGtdReport(
     ?.started_at;
   const completeHistory =
     startedAt !== undefined &&
-    planningWeekId(start) >=
-      addDays(planningWeekId(localDate(startedAt, zone)), 7);
+    firstWeek >= addDays(planningWeekId(localDate(startedAt, zone)), 7);
   const plan = planCounts?.results[0] as {
     task_count: number;
     step_count: number;

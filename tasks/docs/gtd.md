@@ -28,9 +28,10 @@ Actual browser evidence belongs in `tasks/design-qa.md`.
   are not changed. Routine occurrences are separate; its time is already included in overall recorded time.
 - Completions count occurrences inside account-local dates. Completing a parent also completes its open children,
   following existing Tasks behavior. Task and Step counts are never added into a score.
-- Task rate counts unique non-Routine Tasks committed to any week overlapping the selected dates, and how many
-  have a completion inside those dates. A Task committed in two weeks still counts once; a later release from
-  commitment does not erase the earlier plan.
+- Task rate counts unique non-Routine Tasks committed to a week whose Sunday falls in the selected dates, and how
+  many have a completion from that first Sunday through the last such week's Saturday. A month's last week is
+  judged through its Saturday, even in the next month, and its first partial week belongs to the month before.
+  A Task committed in two weeks still counts once; a later release from commitment does not erase the earlier plan.
 - Step rate counts unique non-Routine literal Steps ever placed in a day queue inside the selected dates, and
   how many have a completion inside those dates. Moving/removing a queued Step does not erase or duplicate it.
 - Child progress shows current direct Steps. Dates describe the selected period. A parent returned only as

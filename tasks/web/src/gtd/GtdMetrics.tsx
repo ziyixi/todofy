@@ -94,8 +94,8 @@ export function CompletionMetrics({
         )}
       </dl>
       <p className="gtd-note gtd-metric-note">
-        Task rates include weeks overlapping these dates. Steps use scheduled
-        dates; Routine is separate.
+        Task rates count each week starting in these dates, through its
+        Saturday. Steps use scheduled dates; Routine is separate.
       </p>
       {report.unclassifiedCompletionCount > 0 && (
         <p className="gtd-note">
