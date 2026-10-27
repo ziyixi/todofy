@@ -30,8 +30,9 @@ Evidence: [release of `eb3e21dc`](https://github.com/ziyixi/todofy/actions/runs/
 ## Claude provider
 
 2026-10-24/25. The existing Worker, SQLite DO, Alarm, Gmail grant and write ledger were reused; the old `AI`
-binding was removed after the release preflight refused it until the exact retirement list named it. One real
-request with five synthetic messages returned the expected priorities. Follow-ups, each released on its own:
+binding was removed after the release preflight refused it until the exact retirement list named it, and provider
+readback confirmed it absent. One real request with five synthetic messages returned the expected priorities.
+Follow-ups, each released on its own:
 
 - The manual unread card refreshes while visible, and eligibility is checked before daily write-cap waits.
   The owner's 113-message batch completed with 12 Gmail changes, 101 skips and no failures.

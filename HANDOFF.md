@@ -42,9 +42,8 @@ its own paths; resolve those at the merge. Run the complete branch gate, promote
 wait for the matching Personal cloud reconcile and a current Home check before delivery. When it lands, record
 each branch's result and the release here, then move this section to a dated archive.
 
-Next, in order: a backups wave, then the owner's secret cleanup (steps kept in private notes). The code side of that
-cleanup is removing the retired optional secret declarations (regenerate with `tools/cloud-config/generate.py` and
-`.github/scripts/drift_desired.py`) and emptying `RETIRED_VALUES` in `infra/scripts/infra_state.py`.
+Next, in order: a backups wave, then the owner's secret cleanup and its small code follow-up (both tracked in
+private notes).
 
 #### `claude/wave-docs`
 
@@ -112,6 +111,9 @@ Deployments.
 
 ## Code follow-ups
 
+- Mailsort's `AI` binding removal was confirmed by provider readback ([verification](mailsort/docs/verification.md#claude-provider)):
+  drop `AI` from Mailsort's `RETIRED_BINDINGS` entry in `tools/cloud-release/control.py` in a push that deploys
+  Mailsort anyway.
 - Boundary B ([archive](docs/history/handoff-2026-10-21.md#boundary-b-released-claudeboundary-b)): once Todofy's
   Sunday backup above is confirmed, in a push that deploys them anyway, drop the completed `TASKS` name from Todofy's
   `RETIRED_BINDINGS` entry in `tools/cloud-release/control.py` and reword `proto/buf.yaml`'s header comment, which
