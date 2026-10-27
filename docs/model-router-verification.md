@@ -66,8 +66,8 @@ including actual workerd D1/R2 copying. A fresh-account cloud restore was not pe
 
 Real Chrome inspection confirmed hourly/daily SVG charts, native model/provider labels, separate API/subscription
 values, the reduced Playground and private request rendering. Local synthetic desktop/mobile checks verified
-keyboard/hover chart interaction and no mobile overflow. Home backup/status refresh is checked separately from
-bucket completion. See [backup operation](../model-router/docs/backup.md).
+keyboard/hover chart interaction and no mobile overflow. Home was refreshed separately: its10:40UTC observation showed maintenance off,22 successful requests,
+zero failed/interrupted requests and the real10:27:51UTC backup time. See [backup operation](../model-router/docs/backup.md).
 
 ## Initial rollout calls on 2026-10-27 UTC
 
