@@ -35,7 +35,8 @@ Todofy 自己维护邮件与日报的 Gemini fallback 顺序。Gemini 3.7 已自
 并取得实际 search/open observations。没有查询会话、供应商通用聊天历史或跨重启恢复。
 
 关闭会等待执行清理。失败时 Newsletter 继续保留自己已有的排空记录。Router 的短期归属与截止时间放在
-现有 DO storage，SDK context 留在 VPS。私有 SSE heartbeat 仅用于保持 Tunnel 请求存活，应用收到最终 JSON。
+现有 DO storage，SDK context 留在 VPS。到期时网关按同一截止时间自行关闭 SDK context，Router 只删除自己的
+归属记录，不再调用 VPS。私有 SSE heartbeat 仅用于保持 Tunnel 请求存活，应用收到最终 JSON。
 
 ## 错误原因
 
@@ -58,6 +59,8 @@ google.rpc.Status，携带同样的原因名。完整清单和 code 在 `inferen
 
 D1 保存内容之外的请求记录 90 天，私有 R2 保存输入/输出 7 天。owner 列表不带正文；点击详情才读 R2。
 已过期的内容不因查看旧记录而恢复。旧记录及其原请求保持可读，目录和历史索引用真实模型身份。
+部署或重置截断的调用会停在 running；每日清理把开始超过 20 分钟的这类记录标为 interrupted，
+不重新执行。在此之前 Ops 的 `model_execution_unknown` 在两天窗口内持续可见。
 未报告的服务端模型身份继续显示未知，不把配置值冒充供应商回报。
 
 一天视图按小时聚合，较长范围按 UTC 日聚合；图表分模型展示请求、成功/失败、输入/输出和缓存 token。

@@ -53,7 +53,6 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
   const geminiOutputs: string[] = []
   const executorOutputs: string[] = []
   const conversations = new Map<string, string>()
-  let closeFailures = 0
   let generationFailureReason = ''
   let geminiDelayMs = 0
   async function outbound(request: Request): Promise<Response> {
@@ -109,10 +108,6 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
       return Response.json({})
     }
     const name = url.pathname.replace('/api/codex/v1/model/', '').replace(/:close$/, '')
-    if (url.pathname.endsWith(':close') && closeFailures > 0) {
-      closeFailures -= 1
-      return Response.json({ error: { code: 503, status: 'UNAVAILABLE', message: 'Synthetic executor unavailable' } }, { status: 503 })
-    }
     if (url.pathname.endsWith(':close')) conversations.set(name, 'closed')
     return Response.json({})
   }
@@ -226,7 +221,6 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
     calls,
     geminiOutputs,
     executorOutputs,
-    failNextClose() { closeFailures += 1 },
     failNextGeneration(reason: string) { generationFailureReason = reason },
     delayNextGemini(ms: number) { geminiDelayMs = ms },
     caller,

@@ -175,6 +175,33 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     expect((await harness.owner.getUsage({ days: 1 })).buckets[0]).toMatchObject({ costAvailableCount: 1, estimatedCostMicrousd: 0 })
   })
 
+  it('marks calls cut off before finish() interrupted in the daily sweep and keeps Ops aware until then', async () => {
+    const answers = []
+    for (let index = 0; index < 3; index++) answers.push(await harness.models.generate({ model: gemini, input: 'Synthetic cut-off call' }))
+    const ids = answers.map((answer) => answer.name.slice(9))
+    const yesterday = Date.now() - 86400000
+    for (const [id, started] of [[ids[0], yesterday], [ids[1], Date.now() - 5 * 60000]] as const) {
+      const row = await harness.db.prepare('SELECT generation_json FROM requests WHERE id = ?').bind(id).first<{ generation_json: string }>()
+      const record = JSON.parse(row!.generation_json) as Record<string, unknown>
+      delete record.completed_at
+      record.state = 'running'
+      await harness.db.prepare("UPDATE requests SET state = 'running', completed_ms = NULL, started_ms = ?, generation_json = ? WHERE id = ?").bind(started, JSON.stringify(record), id).run()
+    }
+    const ops = await harness.mf.getWorker('router-ops-probe')
+    const before = await (await ops.fetch(origin)).json() as { counters: Record<string, number>; signals: { code: string }[] }
+    expect(before.counters.interrupted).toBe(1)
+    expect(before.signals.map((signal) => signal.code)).toContain('model_execution_unknown')
+    await harness.mf.dispatchFetch(origin + '/__test/cleanup')
+    const states = Object.fromEntries((await harness.db.prepare('SELECT id, state FROM requests').all<{ id: string; state: string }>()).results.map((row) => [row.id, row.state]))
+    expect(states).toEqual({ [ids[0]!]: 'interrupted', [ids[1]!]: 'running', [ids[2]!]: 'succeeded' })
+    const detail = await harness.owner.getRequest({ name: answers[0]!.name })
+    expect(detail.state).toBe('interrupted')
+    expect(detail.completedAt).toBeDefined()
+    expect((await harness.owner.getUsage({ days: 7 })).buckets.reduce((sum, bucket) => sum + bucket.failureCount, 0)).toBe(1)
+    const after = await (await ops.fetch(origin)).json() as { counters: Record<string, number> }
+    expect(after.counters.interrupted).toBe(0)
+  })
+
   it('retains metadata after body expiry and bounds cleanup to old history', async () => {
     const answer = await harness.models.generate({ model: gemini, input: 'Synthetic expiry input' })
     await harness.db.prepare('UPDATE requests SET content_expire_ms = ? WHERE id = ?').bind(Date.now() - 1000, answer.name.slice(9)).run()
@@ -217,13 +244,12 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     expect(await copy!.text()).toContain('Synthetic backup input')
   })
 
-  it('continues native backup when expired VPS context cleanup is unavailable', async () => {
+  it('forgets expired contexts without calling the executor and continues native backup', async () => {
     const isolated = await startHarness()
     try {
       await isolated.models.generate({ model: gemini, input: 'Synthetic independent backup' })
       const name = `conversations/${crypto.randomUUID()}`
       await isolated.models.createConversation({ name, model: sol, timeoutMs: 1000 })
-      isolated.failNextClose()
       const ops = await isolated.mf.getWorker('router-ops-probe')
       await ops.fetch(origin)
       const prefix = newBackup(Date.now()).prefix
@@ -231,7 +257,9 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
         const marker = await isolated.backups.get(`${prefix}complete.json`)
         return marker ? await marker.json() : null
       }, { timeout: 10000, interval: 100 }).toMatchObject({ requests: 1, bodies: 1 })
-      expect(isolated.calls.some((call) => call.path.endsWith(':close'))).toBe(true)
+      // The gateway owns the SDK lifetime; a later close finds no record and needs no executor call.
+      await isolated.models.closeConversation({ name })
+      expect(isolated.calls.some((call) => call.path.endsWith(':close'))).toBe(false)
     } finally { await isolated.dispose() }
   }, 15000)
 

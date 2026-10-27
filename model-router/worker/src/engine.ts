@@ -328,17 +328,9 @@ export class RouterEngine extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     const contexts = await this.ctx.storage.list<Context>({ prefix: 'conversations/' });
     for (const [name, context] of contexts) {
-      if (context.expireMs > Date.now()) {
-        await this.wakeAt(context.expireMs);
-        continue;
-      }
-      try {
-        await this.closeConversation(name, context.app);
-      } catch {
-        // An unavailable VPS must not prevent the independent Cloudflare backup step.
-        await this.wakeAt(Date.now() + 60000);
-        console.warn('model_context_cleanup_unavailable');
-      }
+      // The gateway closes its SDK context at the same deadline; only the ownership record remains here.
+      if (context.expireMs <= Date.now()) await this.ctx.storage.delete(name);
+      else await this.wakeAt(context.expireMs);
     }
     const cursor = await this.ctx.storage.get<BackupCursor>('backup');
     if (!cursor) return;
