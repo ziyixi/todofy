@@ -67,13 +67,16 @@ export class WorkWatchSource {
 
   /**
    * The feed's retention outran the cursor: each open Work with a Watch gets one blocked report about the gap, then the
-   * cursor starts again from now. The report ID comes from the expired cursor, so a retry repeats the same reports.
+   * cursor starts again from now. The report ID comes from the expired cursor, and a Work that already has it is
+   * skipped, so a retry after a failed baseline neither repeats nor conflicts with a report (its links may have changed).
    */
   private async recoverGap(expired: string): Promise<void> {
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(expired)));
     const reportId = `watch-gap:${Array.from(digest.subarray(0, 16), byte => byte.toString(16).padStart(2, '0')).join('')}`;
     const linked = this.storage.sql.exec<{ work_id: string; ref: string }>(`SELECT l.work_id, min(l.ref) AS ref FROM work_links l
-      JOIN work w ON w.id=l.work_id WHERE l.type='watch' AND w.state IN ('active','waiting') GROUP BY l.work_id ORDER BY l.work_id`).toArray();
+      JOIN work w ON w.id=l.work_id WHERE l.type='watch' AND w.state IN ('active','waiting')
+      AND NOT EXISTS (SELECT 1 FROM work_entries e WHERE e.work_id=l.work_id AND e.report_id=?)
+      GROUP BY l.work_id ORDER BY l.work_id`, reportId).toArray();
     for (const { work_id, ref } of linked) this.work.report({ work_id, report_id: reportId, kind: 'blocked',
       source: { type: 'watch', ref }, summary: GAP_SUMMARY });
     await this.baseline(expired);

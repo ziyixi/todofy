@@ -185,6 +185,28 @@ it('takes a new baseline after an expired cursor and tells each open Watch work 
   expect(f.attention).toHaveLength(2);
 });
 
+it('retries a gap whose new baseline failed without repeating or conflicting with its reports', async () => {
+  let baselines = 0;
+  const f = fixture(query => query.get('baseline') !== 'true' ? expired() : ++baselines === 2
+    ? Response.json({ error: { code: 503, status: 'UNAVAILABLE', message: 'Synthetic source outage' } }, { status: 503 })
+    : { cursor: `head-${String(baselines)}` });
+  const work = f.create(45, { links: [{ type: 'watch', ref: WATCH }, { type: 'watch', ref: 'watches/zz-second' }] });
+  await f.source.refresh();
+  advance();
+  await f.source.refresh();
+  expect(f.source.status().error_code).toBe('watch_source_unavailable');
+  expect(f.cursor()?.state).toBe('head-1');
+  // The Work's links change before the retry, so the same report would now name another source.
+  const current = f.store.get({ work_id: work.id }).work;
+  f.store.checkpoint({ work_id: work.id, request_id: uuid(46), etag: current.etag,
+    changes: { links: [{ type: 'watch', ref: 'watches/zz-second' }] } });
+  advance();
+  await f.source.refresh();
+  expect(f.cursor()).toEqual({ state: 'head-3', error_code: null });
+  expect(f.store.get({ work_id: work.id }).pending_reports).toHaveLength(1);
+  expect(f.attention).toHaveLength(1);
+});
+
 it('makes first-baseline failures visible and throttles retries before establishing a later baseline', async () => {
   let fail = true;
   const f = fixture(() => fail ? Response.json({ error: { code: 503, status: 'UNAVAILABLE', message: 'Synthetic source outage' } }, { status: 503 })
