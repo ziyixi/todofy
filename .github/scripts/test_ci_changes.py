@@ -1423,12 +1423,6 @@ class DeployConditions(unittest.TestCase):
     SKIPPED_OK = {
         ("vps-deploy", "fleet-deploy"),
         ("codex-gateway-deploy", "fleet-deploy"),
-        ("model-router-deploy", "codex-gateway-deploy"),
-        ("vps-deploy", "model-router-deploy"),
-        ("dashboard-deploy", "model-router-deploy"),
-        ("mailsort-deploy", "model-router-deploy"),
-        ("todofy-deploy", "model-router-deploy"),
-        ("brief-deploy", "model-router-deploy"),
         ("dashboard-deploy", "todofy-deploy"),
         ("dashboard-deploy", "mail-hero-deploy"),
         ("dashboard-deploy", "watch-deploy"),
@@ -1446,6 +1440,14 @@ class DeployConditions(unittest.TestCase):
         ("personal-mcp-deploy", "todofy-deploy"),
         ("personal-mcp-deploy", "recall-deploy"),
         ("personal-mcp-deploy", "watch-deploy"),
+    }
+
+    # (job, need) pairs where the need may be skipped only when this run did not select it: a selected gateway or
+    # Router release that fails leaves the next job skipped, which must stop the jobs after it rather than let them ship.
+    SELECTED_ONLY = {
+        ("model-router-deploy", "codex-gateway-deploy"): "needs.changes.outputs.codex_gateway_deploy != 'true' || vars.VPS_DEPLOY_ENABLED != 'true'",
+        **{(job, "model-router-deploy"): "needs.changes.outputs.model_router_deploy != 'true'"
+           for job in ("vps-deploy", "dashboard-deploy", "mailsort-deploy", "todofy-deploy", "brief-deploy")},
     }
 
     # Check jobs a deploy may also find skipped, but only when this push to main reuses a green branch run of
@@ -1517,7 +1519,10 @@ class DeployConditions(unittest.TestCase):
             with self.subTest(job=name):
                 self.assertTrue(condition.startswith("${{ !cancelled()"), condition)
                 for need in self.needs(block):
-                    if (name, need) in self.SKIPPED_OK:
+                    if (name, need) in self.SELECTED_ONLY:
+                        self.assertIn(f"(needs.{need}.result == 'success' || {self.SELECTED_ONLY[name, need]})", condition)
+                        self.assertNotIn(f"needs.{need}.result == 'skipped'", condition)
+                    elif (name, need) in self.SKIPPED_OK:
                         self.assertIn(
                             f"(needs.{need}.result == 'success' || needs.{need}.result == 'skipped')", condition
                         )
